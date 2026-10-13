@@ -1,0 +1,91 @@
+/* Mobile-first. Tipografía con clamp(), áreas táctiles de 44 px, contraste AA (documento 13, §14.1). */
+:root {
+  --color-fondo: #f7f9fb;
+  --color-texto: #1b2733;
+  --color-marca: #1f5f8b;
+  --color-tarjeta: #ffffff;
+  --color-borde: #d5dde5;
+  --color-ok: #1d6b3a;
+  --color-error: #a12622;
+  --color-tenue: #4a5866;
+  --radio: 0.75rem;
+  --espacio: clamp(1rem, 0.8rem + 1vw, 1.5rem);
+  --tamano-base: clamp(1rem, 0.95rem + 0.25vw, 1.125rem);
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-fondo);
+  color: var(--color-texto);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--tamano-base);
+  line-height: 1.5;
+}
+
+.pagina {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--espacio);
+}
+
+.encabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.encabezado__icono {
+  flex: none;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(1.6rem, 1.3rem + 1.5vw, 2.4rem);
+  color: var(--color-marca);
+}
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.15rem, 1.05rem + 0.5vw, 1.4rem);
+}
+
+.bajada {
+  color: var(--color-tenue);
+}
+
+.tarjeta {
+  background: var(--color-tarjeta);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio);
+  padding: var(--espacio);
+}
+
+.estado {
+  margin: 0;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+
+.estado--ok {
+  color: var(--color-ok);
+}
+
+.estado--caido {
+  color: var(--color-error);
+}
+
+a {
+  color: var(--color-marca);
+  display: inline-block;
+  min-height: 44px;
+  padding: 0.6rem 0;
+}

@@ -1,0 +1,46 @@
+{
+  "name": "cem-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Aplicación web (PWA) de Consorcio en Mano",
+  "type": "module",
+  "packageManager": "pnpm@10.26.2",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "generar:tipos": "openapi-typescript ../contratos/openapi.json -o src/api/esquema.d.ts",
+    "dev": "pnpm generar:tipos && vite",
+    "typecheck": "pnpm generar:tipos && tsc -b",
+    "lint": "eslint . --max-warnings 0",
+    "test": "pnpm generar:tipos && vitest run",
+    "build": "pnpm typecheck && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "5.104.2",
+    "openapi-fetch": "0.17.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-router": "7.18.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "^20.19.43",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "globals": "17.13.0",
+    "jsdom": "25.0.1",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.4.5",
+    "typescript-eslint": "8.71.2",
+    "vite": "5.4.21",
+    "vitest": "2.1.9"
+  }
+}

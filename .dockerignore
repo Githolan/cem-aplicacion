@@ -4,3 +4,6 @@
 **/.hypothesis
 **/*.egg-info
 .git
+**/node_modules
+frontend/dist
+frontend/src/api/esquema.d.ts

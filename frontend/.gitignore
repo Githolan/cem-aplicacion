@@ -1,0 +1,4 @@
+node_modules/
+dist/
+# Se genera desde contratos/openapi.json en cada build, prueba o typecheck (AD-06).
+src/api/esquema.d.ts

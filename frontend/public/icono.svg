@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Consorcio en Mano">
+  <rect width="512" height="512" rx="96" fill="#1f5f8b"/>
+  <path d="M136 400V200l120-88 120 88v200z" fill="#f7f9fb"/>
+  <path d="M184 248h48v48h-48zm96 0h48v48h-48zm-96 80h48v72h-48zm96 0h48v48h-48z" fill="#1f5f8b"/>
+</svg>
