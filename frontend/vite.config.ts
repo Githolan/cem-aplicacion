@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
+import { manifiesto } from "./src/manifiesto";
+
 // Documento 13, §14: PWA instalable. El service worker solo precachea el shell; nunca
 // sirve /api ni /health desde caché (RN25: nada de dinero ni votos fuera de línea).
 export default defineConfig({
@@ -14,23 +16,7 @@ export default defineConfig({
       registerType: "prompt",
       injectRegister: false,
       includeAssets: ["icono.svg"],
-      manifest: {
-        name: "Consorcio en Mano",
-        short_name: "Consorcio",
-        description: "Expensas, documentos y avisos de tu consorcio.",
-        lang: "es-AR",
-        start_url: "/",
-        scope: "/",
-        display: "standalone",
-        background_color: "#ffffff",
-        theme_color: "#1d4e89",
-        icons: [
-          { src: "icono-192.png", sizes: "192x192", type: "image/png" },
-          { src: "icono-512.png", sizes: "512x512", type: "image/png" },
-          { src: "icono-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
-          { src: "icono.svg", sizes: "any", type: "image/svg+xml" },
-        ],
-      },
+      manifest: manifiesto,
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         navigateFallback: "/index.html",

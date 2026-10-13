@@ -1,0 +1,40 @@
+#!/bin/sh
+# Prueba la imagen de cem-frontend ya construida, sin backend: usuario, cabeceras, caché,
+# fallback de la SPA y el 404 de /assets/. Uso: scripts/probar-imagen.sh [imagen]
+# (desde la raíz: docker build -f frontend/Dockerfile -t cem-frontend .)
+set -eu
+IMAGEN="${1:-cem-frontend}"
+PUERTO=18080
+NOMBRE="cem-frontend-prueba-$$"
+falla() { echo "FALLA: $*" >&2; docker rm -f "$NOMBRE" >/dev/null 2>&1; exit 1; }
+
+# Sin CEM_BACKEND_DESTINO el contenedor no debe arrancar.
+if docker run --rm "$IMAGEN" >/dev/null 2>&1; then falla "arrancó sin CEM_BACKEND_DESTINO"; fi
+
+docker run -d --name "$NOMBRE" -p "$PUERTO:8080" -e CEM_BACKEND_DESTINO=sin-backend:8000 "$IMAGEN" >/dev/null
+trap 'docker rm -f "$NOMBRE" >/dev/null 2>&1' EXIT
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  curl -fs "http://127.0.0.1:$PUERTO/frontend-salud" >/dev/null && break
+  sleep 1
+done
+URL="http://127.0.0.1:$PUERTO"
+cabecera() { curl -sI "$URL$1" | tr -d '\r' | grep -i "^$2:" | cut -d' ' -f2- || true; }
+codigo() { curl -s -o /dev/null -w '%{http_code}' "$URL$1"; }
+
+[ "$(docker exec "$NOMBRE" id -u)" = "101" ] || falla "el contenedor no corre como uid 101"
+UIDS=$(docker top "$NOMBRE" -o pid,uid,args | awk '/nginx/ {print $2}' | sort -u)
+[ "$UIDS" = "101" ] || falla "procesos de nginx con uid '$UIDS' (se espera solo 101)"
+[ "$(codigo /)" = 200 ] || falla "/ no da 200"
+[ "$(cabecera / cache-control)" = "no-cache" ] || falla "index.html no lleva no-cache"
+cabecera / content-security-policy | grep -q "default-src 'self'" || falla "falta la CSP"
+[ "$(cabecera / x-frame-options)" = "DENY" ] || falla "falta X-Frame-Options"
+curl -s "$URL/una/ruta/de/la/spa" | grep -q '<div id="raiz">' || falla "la SPA no cae en index.html"
+ACTIVO=$(curl -s "$URL/" | grep -o '/assets/index-[^"]*\.js' | head -1)
+cabecera "$ACTIVO" cache-control | grep -q immutable || falla "el activo con hash no es inmutable"
+[ "$(codigo /assets/no-existe.js)" = 404 ] || falla "un activo inexistente no da 404"
+curl -s "$URL/assets/no-existe.js" | grep -q '<div id="raiz">' && falla "un activo inexistente devuelve index.html"
+cabecera /assets/no-existe.js cache-control | grep -q immutable && falla "un 404 de /assets/ quedó inmutable"
+[ "$(cabecera /manifest.webmanifest content-type)" = "application/manifest+json" ] || falla "tipo del manifiesto"
+[ "$(cabecera /sw.js cache-control)" = "no-cache" ] || falla "sw.js no lleva no-cache"
+[ "$(codigo /health)" = 502 ] || falla "/health sin backend debería dar 502 (prueba que se reenvía)"
+echo "OK: imagen $IMAGEN"

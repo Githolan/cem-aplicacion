@@ -11,11 +11,14 @@ Hoy es el esqueleto de H1: una página de inicio que muestra el estado del backe
 | `src/api/cliente.ts` | Cliente tipado (`openapi-fetch`) del mismo origen; sin URL de backend |
 | `src/api/tipos.ts` | **Generado** desde `../contratos/openapi.json` en cada `dev`, `test`, `tipos` y `build`; no se compromete ni se edita (AD-06) |
 | `src/EstadoServicio.tsx` | Consulta `/health` con TanStack Query y muestra versión, contrato y SHA |
+| `src/App.tsx` | Rutas (React Router 7): inicio y "No encontramos esa página" para cualquier otra |
+| `src/manifiesto.ts` | Manifiesto de la PWA; una prueba exige `standalone` e iconos 192, 512 y `maskable` |
 | `src/AvisoVersion.tsx` | Aviso "hay una versión nueva": el service worker nuevo se activa solo si la persona acepta (§14.4) |
 | `vite.config.ts` | Manifiesto y service worker (Workbox): precaché del shell; `/api/` y `/health` nunca salen de caché |
 | `nginx/cem-frontend.conf.template` | Proxy de `/api/` y `/health` al backend con `resolver` y variable (AD-05); caché de activos y cabeceras de seguridad |
 | `nginx/05-exigir-backend.sh` | El contenedor no arranca si falta `CEM_BACKEND_DESTINO` |
-| `Dockerfile` | Dos etapas: `node:22-alpine` (pnpm, tipos, `tsc`, `vite build`) y `nginx:1.27-alpine` |
+| `Dockerfile` | Dos etapas: `node:22-alpine` (pnpm, tipos, `tsc`, `vite build`) y `nginxinc/nginx-unprivileged:1.27-alpine` (uid 101, puerto 8080) |
+| `scripts/probar-imagen.sh` | Prueba la imagen construida sin backend: uid 101, cabeceras, caché, fallback de la SPA, 404 de `/assets/` y reenvío de `/health` |
 
 ## Desarrollo
 
@@ -36,8 +39,11 @@ Se construye desde la **raíz** del repositorio, igual que el backend:
 
 ```bash
 docker build -f frontend/Dockerfile -t cem-frontend .
-docker run -p 8080:80 -e CEM_BACKEND_DESTINO=cem-backend:8000 cem-frontend
+docker run -p 8080:8080 -e CEM_BACKEND_DESTINO=cem-backend:8000 cem-frontend
+frontend/scripts/probar-imagen.sh cem-frontend
 ```
+
+El contenedor escucha en **8080** (nginx sin privilegios): en Coolify, *Ports Exposes* = `8080`.
 
 | Variable | Qué es | Producción | Staging |
 |---|---|---|---|

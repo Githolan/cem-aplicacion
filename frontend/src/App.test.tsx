@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
 import axe from "axe-core";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import type { Salud } from "./api/cliente";
+import { manifiesto } from "./manifiesto";
 
 const SALUD: Salud = {
   estado: "ok",
@@ -14,11 +16,13 @@ const SALUD: Salud = {
   version_contrato: "0.1.0",
 };
 
-function montar() {
+function montar(ruta = "/") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={consultas}>
-      <App />
+      <MemoryRouter initialEntries={[ruta]}>
+        <App />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -58,5 +62,29 @@ describe("página de inicio", () => {
     // jsdom no calcula estilos: el contraste se mide en el navegador, no aquí.
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("rutas", () => {
+  it("una ruta desconocida muestra la página de no encontrada, sin consultar al backend", () => {
+    const pedido = vi.fn();
+    vi.stubGlobal("fetch", pedido);
+
+    montar("/no-existe");
+
+    expect(screen.getByRole("heading", { name: "No encontramos esa página" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Volver al inicio" }).getAttribute("href")).toBe("/");
+    expect(pedido).not.toHaveBeenCalled();
+  });
+});
+
+describe("manifiesto de la PWA", () => {
+  it("es instalable: standalone, inicio en / e iconos 192, 512 y maskable", () => {
+    expect(manifiesto.display).toBe("standalone");
+    expect(manifiesto.start_url).toBe("/");
+    const iconos = manifiesto.icons ?? [];
+    expect(iconos.some((i) => i.sizes === "192x192" && i.type === "image/png")).toBe(true);
+    expect(iconos.some((i) => i.sizes === "512x512" && !i.purpose)).toBe(true);
+    expect(iconos.some((i) => i.purpose === "maskable")).toBe(true);
   });
 });

@@ -9,9 +9,9 @@ map $http_x_forwarded_proto $esquema_original {
 }
 
 server {
-    # Solo IPv4, como uvicorn en cem-backend: Traefik llega por la IPv4 del contenedor y un
-    # listen [::] impide arrancar donde el contenedor no tiene IPv6.
-    listen 80;
+    # 8080 porque nginx corre sin privilegios (uid 101). Solo IPv4, como uvicorn en cem-backend:
+    # Traefik llega por la IPv4 del contenedor y un listen [::] impide arrancar donde no hay IPv6.
+    listen 8080;
     server_name _;
     server_tokens off;
     root /usr/share/nginx/html;
