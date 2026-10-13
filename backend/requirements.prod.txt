@@ -1,0 +1,8 @@
+# Producción: versiones exactas (documento 13, §5). Es el único archivo que instala la imagen.
+# cem-contracts se instala desde ../contratos del mismo monorrepo (AD-23); ver requirements.txt.
+fastapi==0.141.1
+uvicorn==0.52.4
+pydantic==2.13.4
+SQLAlchemy==2.0.54
+psycopg[binary]==3.3.6
+alembic==1.20.0

@@ -1,0 +1,7 @@
+# Desarrollo. El paquete de contratos vive en ../contratos (monorrepo, AD-23)
+-r requirements.prod.txt
+-e ../contratos
+pytest==9.1.1
+hypothesis==6.169.0
+httpx==0.28.1
+ruff==0.17.0
