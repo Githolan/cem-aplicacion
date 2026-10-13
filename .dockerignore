@@ -4,3 +4,6 @@
 **/.hypothesis
 **/*.egg-info
 .git
+**/node_modules
+**/dist
+frontend/src/api/tipos.ts

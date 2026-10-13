@@ -1,0 +1,70 @@
+# nginx de cem-frontend (documento 13, §14.5, AD-05). La imagen oficial de nginx reemplaza
+# ${CEM_BACKEND_DESTINO} al arrancar (envsubst sobre /etc/nginx/templates); el resto de las
+# variables con $ son de nginx y quedan intactas.
+
+# Detrás de Cloudflare y Traefik el esquema real llega en X-Forwarded-Proto.
+map $http_x_forwarded_proto $esquema_original {
+    default $http_x_forwarded_proto;
+    ""      $scheme;
+}
+
+server {
+    # Solo IPv4, como uvicorn en cem-backend: Traefik llega por la IPv4 del contenedor y un
+    # listen [::] impide arrancar donde el contenedor no tiene IPv6.
+    listen 80;
+    server_name _;
+    server_tokens off;
+    root /usr/share/nginx/html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json application/manifest+json image/svg+xml;
+
+    # AD-05: el nombre del backend va en una variable, así nginx lo vuelve a resolver con el
+    # DNS de Docker cada 10 s y un redespliegue del backend (IP nueva) no deja 502 persistentes.
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $backend "${CEM_BACKEND_DESTINO}";
+
+    include /etc/nginx/cem/cabeceras.conf;
+
+    location /api/ {
+        include /etc/nginx/cem/cabeceras.conf;
+        include /etc/nginx/cem/proxy.conf;
+    }
+
+    location = /health {
+        include /etc/nginx/cem/cabeceras.conf;
+        include /etc/nginx/cem/proxy.conf;
+    }
+
+    # Activos con hash en el nombre: inmutables un año (§14.4).
+    location /assets/ {
+        include /etc/nginx/cem/cabeceras.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    # El service worker y el manifiesto se revalidan siempre, si no la versión nueva no llega.
+    location ~ ^/(sw\.js|workbox-[^/]+\.js|manifest\.webmanifest)$ {
+        include /etc/nginx/cem/cabeceras.conf;
+        add_header Cache-Control "no-cache" always;
+        types {
+            application/javascript js;
+            application/manifest+json webmanifest;
+        }
+        try_files $uri =404;
+    }
+
+    # Comprobación de salud del propio contenedor: no depende del backend.
+    location = /frontend-salud {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Aplicación de una sola página: toda otra ruta devuelve index.html sin caché.
+    location / {
+        include /etc/nginx/cem/cabeceras.conf;
+        add_header Cache-Control "no-cache" always;
+        try_files $uri /index.html;
+    }
+}

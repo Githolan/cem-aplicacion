@@ -1,0 +1,120 @@
+/* Documento 13, §14.1: tipografía con clamp(), áreas táctiles de 44 px, contraste AA. */
+:root {
+  --azul: #1d4e89;
+  --texto: #1a1a1a;
+  --fondo: #ffffff;
+  --tarjeta: #f3f6fa;
+  --ok: #1b6b2f;
+  --error: #a4161a;
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  line-height: 1.5;
+  color: var(--texto);
+  background: var(--fondo);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.cabecera {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--azul);
+  color: #ffffff;
+}
+
+.marca {
+  font-weight: 600;
+  font-size: 1.125rem;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+h1 {
+  font-size: clamp(1.5rem, 1.2rem + 1.5vw, 2.25rem);
+  line-height: 1.2;
+  color: var(--azul);
+}
+
+.tarjeta {
+  margin-top: 2rem;
+  padding: 1rem 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--tarjeta);
+}
+
+.tarjeta h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.aviso-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.aviso-error {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.detalles {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.detalles dt {
+  font-weight: 600;
+}
+
+.detalles dd {
+  margin: 0;
+}
+
+button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 1.25rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--azul);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
+.aviso-version {
+  position: fixed;
+  inset: auto 1rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--texto);
+  color: #ffffff;
+}
