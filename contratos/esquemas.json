@@ -1,0 +1,191 @@
+{
+  "ConsorcioResumen": {
+    "$defs": {
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "Un consorcio donde la persona tiene vínculo vigente (selector de edificio).",
+    "properties": {
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "vinculos": {
+        "description": "Vínculos vigentes de la persona en él.",
+        "items": {
+          "$ref": "#/$defs/TipoVinculo"
+        },
+        "title": "Vinculos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "nombre",
+      "vinculos"
+    ],
+    "title": "ConsorcioResumen",
+    "type": "object"
+  },
+  "Error": {
+    "$defs": {
+      "CodigoError": {
+        "description": "Identificadores estables que el frontend traduce. Nunca cambian de significado.",
+        "enum": [
+          "no_autenticado",
+          "no_encontrado",
+          "peticion_invalida",
+          "error_interno"
+        ],
+        "title": "CodigoError",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "codigo": {
+        "$ref": "#/$defs/CodigoError"
+      },
+      "detalle": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Detalle"
+      },
+      "id_correlacion": {
+        "description": "Identificador para cruzar con los registros.",
+        "title": "Id Correlacion",
+        "type": "string"
+      },
+      "mensaje": {
+        "description": "Texto genérico para la persona usuaria; sin trazas.",
+        "title": "Mensaje",
+        "type": "string"
+      }
+    },
+    "required": [
+      "codigo",
+      "mensaje",
+      "id_correlacion"
+    ],
+    "title": "Error",
+    "type": "object"
+  },
+  "ListaUnidades": {
+    "$defs": {
+      "Unidad": {
+        "description": "Unidad funcional del padrón.",
+        "properties": {
+          "designacion": {
+            "examples": [
+              "3° B"
+            ],
+            "title": "Designacion",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "designacion"
+        ],
+        "title": "Unidad",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/Unidad"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaUnidades",
+    "type": "object"
+  },
+  "Salud": {
+    "properties": {
+      "estado": {
+        "const": "ok",
+        "title": "Estado",
+        "type": "string"
+      },
+      "sha_contratos": {
+        "title": "Sha Contratos",
+        "type": "string"
+      },
+      "sha_imagen": {
+        "title": "Sha Imagen",
+        "type": "string"
+      },
+      "version": {
+        "title": "Version",
+        "type": "string"
+      },
+      "version_contrato": {
+        "title": "Version Contrato",
+        "type": "string"
+      }
+    },
+    "required": [
+      "estado",
+      "version",
+      "sha_imagen",
+      "sha_contratos",
+      "version_contrato"
+    ],
+    "title": "Salud",
+    "type": "object"
+  },
+  "Unidad": {
+    "description": "Unidad funcional del padrón.",
+    "properties": {
+      "designacion": {
+        "examples": [
+          "3° B"
+        ],
+        "title": "Designacion",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "designacion"
+    ],
+    "title": "Unidad",
+    "type": "object"
+  }
+}

@@ -1,0 +1,4 @@
+# Desarrollo: pruebas y lint. Producción no instala este archivo.
+-e .
+pytest==9.1.1
+ruff==0.17.0
