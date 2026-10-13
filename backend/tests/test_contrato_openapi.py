@@ -1,15 +1,13 @@
 """El OpenAPI publicado contra la instantánea aprobada (documento 13, §11.2).
 
 Para aprobar un cambio intencional: `python -m scripts.exportar_openapi` y revisar la
-diferencia de `tests/snapshots/openapi.json` en el PR.
+diferencia de `contratos/openapi.json` en el PR.
 """
 
 import json
-from pathlib import Path
 
+from scripts.exportar_openapi import DESTINO as INSTANTANEA
 from scripts.exportar_openapi import openapi_texto
-
-INSTANTANEA = Path(__file__).resolve().parent / "snapshots" / "openapi.json"
 
 
 def test_openapi_coincide_con_la_instantanea():

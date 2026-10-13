@@ -9,6 +9,6 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/pytest && .venv/bin/ruff check .
 ```
 
-`esquemas.json` es la instantánea aprobada del esquema de cada modelo. Si un cambio es intencional, se regenera con `python -m cem_contracts.esquemas > esquemas.json` y la diferencia se revisa en el PR.
+`openapi.json` es el OpenAPI completo de la API, exportado desde el backend (`cd ../backend && python -m scripts.exportar_openapi`) y comprometido; de él se generan los tipos TypeScript del frontend. `esquemas.json` es la instantánea aprobada del esquema de cada modelo. Si un cambio es intencional, se regenera con `python -m cem_contracts.esquemas > esquemas.json` y la diferencia se revisa en el PR.
 
 El backend lo instala desde `../contratos` del mismo repositorio (monorrepo `cem-aplicacion`, AD-23).

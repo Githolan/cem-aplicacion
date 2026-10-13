@@ -1,4 +1,7 @@
-"""Exporta el OpenAPI de la API a tests/snapshots/openapi.json (instantánea aprobada)."""
+"""Exporta el OpenAPI de la API a contratos/openapi.json (instantánea aprobada, comprometida).
+
+De ese archivo el frontend genera sus tipos TypeScript (documento 13, §6.1 y §11.2).
+"""
 
 import json
 from pathlib import Path
@@ -6,7 +9,7 @@ from pathlib import Path
 from app.config import Config
 from app.main import crear_app
 
-DESTINO = Path(__file__).resolve().parent.parent / "tests" / "snapshots" / "openapi.json"
+DESTINO = Path(__file__).resolve().parents[2] / "contratos" / "openapi.json"
 
 
 def openapi_texto() -> str:
