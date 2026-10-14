@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "formatters": {
+    "json": {"()": "app.registros.FormateadorJson"}
+  },
+  "handlers": {
+    "salida": {
+      "class": "logging.StreamHandler",
+      "formatter": "json",
+      "stream": "ext://sys.stdout"
+    }
+  },
+  "root": {"level": "INFO", "handlers": ["salida"]}
+}

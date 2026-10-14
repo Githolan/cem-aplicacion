@@ -15,8 +15,11 @@ case "${CEM_PROCESO:-api}" in
     if [ -n "${CEM_DATABASE_URL_MIGRATE:-}" ]; then
       alembic upgrade head
     fi
+    # Registros JSON (documento 13, §16.1): la misma configuración que los otros dos procesos;
+    # el registro de acceso de uvicorn se apaga y lo reemplaza el de app/registros.py.
     exec uvicorn "app.main:crear_app" --factory --host 0.0.0.0 --port 8000 --workers 2 \
-      --proxy-headers --forwarded-allow-ips "$FORWARDED_ALLOW_IPS"
+      --proxy-headers --forwarded-allow-ips "$FORWARDED_ALLOW_IPS" \
+      --log-config app/registros.json --no-access-log
     ;;
   trabajos)
     exec python -m app.plataforma.trabajos

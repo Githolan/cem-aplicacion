@@ -34,7 +34,9 @@ export CEM_TEST_ADMIN_URL=postgresql+psycopg://postgres:postgres@localhost:5432/
 .venv/bin/ruff check . && .venv/bin/ruff format --check .
 ```
 
-La misma imagen corre los tres procesos; `CEM_PROCESO` elige cuál (`arranque.sh`): `api` (por defecto, migra y levanta la API), `trabajos` o `planificador`. El `HEALTHCHECK` (`python -m app.plataforma.latido`) comprueba la API por HTTP y los otros dos por la edad del archivo de latido.
+La misma imagen corre los tres procesos; `CEM_PROCESO` elige cuál (`arranque.sh`): `api` (por defecto, migra y levanta la API), `trabajos` o `planificador`. El `HEALTHCHECK` (`python -m app.plataforma.latido`) comprueba la API por HTTP y los otros dos por la edad del archivo de latido. `CEM_TRABAJOS_LOTE` (por defecto 1) dice cuántos trabajos reserva cada toma de `trabajos`.
+
+Los tres procesos escriben registros JSON a stdout, una línea por registro, con la configuración de `app/registros.json` (documento 13, §16.1): `momento`, `nivel`, `proceso`, `modulo`, `mensaje` y, cuando existen, `id_correlacion` (el mismo del cuerpo de un error; en un trabajo, su id), `consorcio_id`, `persona_id` y `duracion_ms`. Correos, tokens, claves (también dentro de una URL), teléfonos e importes salen redactados, y el error de un trabajo fallido se guarda redactado en `plataforma.jobs`. La API apaga el registro de acceso de uvicorn y escribe una línea por petición con ruta (sin la consulta), estado, tamaño y duración.
 
 Las pruebas `db` crean y borran la base `cem_prueba`, aplican la migración (ida, vuelta e ida) como `cem_migrate` y consultan como `cem_app`, que no tiene `BYPASSRLS`.
 

@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from redis import Redis
 
-from app import errores, limite
+from app import errores, limite, registros
 from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.router import router as consorcios
@@ -31,6 +31,8 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.state.access = crear_verificador(config.access_equipo, config.access_aud)
     errores.instalar(app)
     app.add_middleware(limite.LimiteDeTasa, almacen=config.redis_url, exentas=SIN_LIMITE_DE_TASA)
+    # El último agregado queda por fuera: registra también los 429 y 503 del límite de tasa.
+    app.add_middleware(registros.RegistroDePeticiones)
     app.include_router(plataforma)
     app.include_router(consorcios)
     app.include_router(soporte)

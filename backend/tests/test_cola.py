@@ -1,5 +1,6 @@
 """Cola, outbox y planificador contra PostgreSQL real (documento 13, §12; plan H1, semana 2)."""
 
+import json
 import multiprocessing
 import os
 import signal
@@ -17,12 +18,13 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.db import transaccion
 from app.plataforma import cola, latido, outbox
 from app.plataforma.planificador import Planificador, TareaPeriodica, programar
-from app.plataforma.trabajos import Trabajador
+from app.plataforma.trabajos import LOTE_POR_DEFECTO, Trabajador, lote_configurado
 from tests import tareas_prueba
 from tests.conftest import url_rol
 from tests.test_api import cliente
 
 SPAWN = multiprocessing.get_context("spawn")
+RAIZ = Path(__file__).resolve().parent.parent
 DIARIA = TareaPeriodica("prueba.registrar", timedelta(days=1), desfase=timedelta(hours=6))
 
 
@@ -156,7 +158,9 @@ def test_un_trabajo_que_falla_dos_veces_queda_muerto_y_alerta(motor_app, motor_m
 def test_un_error_definitivo_no_se_reintenta(motor_app, motor_migrate, cola_vacia):
     id_ = encolar_en(motor_app, cola_vacia.consorcio_a, "prueba.invalido")
     desconocido = encolar_en(motor_app, cola_vacia.consorcio_a, "prueba.no_existe")
-    Trabajador(motor_app).procesar_lote()
+    trabajador = Trabajador(motor_app)
+    while trabajador.procesar_lote():  # de a uno: el lote por defecto es 1
+        pass
     for i in (id_, desconocido):
         fila = trabajo(motor_migrate, i)
         assert (fila.estado, fila.intentos) == ("muerto", 1)
@@ -199,6 +203,132 @@ def test_retroceso_exponencial_con_tope():
         "x.y", lambda c, t: None, 5, timedelta(seconds=30), timedelta(minutes=3)
     )
     assert [tipo.retroceso(i).total_seconds() for i in range(1, 6)] == [30, 60, 120, 180, 180]
+
+
+# Resultado, redacción del error y lote ---------------------------------------------------
+
+
+@pytest.mark.db
+def test_un_resultado_que_no_es_json_deja_el_trabajo_muerto_sin_repetir_el_efecto(
+    motor_app, motor_migrate, cola_vacia, tmp_path
+):
+    """Proceso real: muere en el primer intento, el efecto externo ocurre una sola vez, lo que
+    escribió en la base se revierte y el proceso sigue con el trabajo siguiente."""
+    a = cola_vacia.consorcio_a
+    efectos = tmp_path / "efectos"
+    malo = encolar_en(motor_app, a, "prueba.no_json", carga={"archivo": str(efectos)})
+    bueno = encolar_en(motor_app, a, "prueba.registrar")
+    proceso = SPAWN.Process(target=tareas_prueba.vaciar_cola, args=(url_rol("app"),))
+    proceso.start()
+    proceso.join(timeout=60)
+    assert proceso.exitcode == 0
+    fila = trabajo(motor_migrate, malo)
+    assert (fila.estado, fila.intentos) == ("muerto", 1)
+    assert fila.error.startswith("ErrorDefinitivo: el resultado del trabajo no es JSON:")
+    assert "set is not JSON serializable" in fila.error
+    assert efectos.read_text().splitlines() == [str(malo)]
+    assert trabajo(motor_migrate, bueno).estado == "hecho"
+    assert uno(motor_migrate, "select count(*) from plataforma.prueba_efectos"
+               " where trabajo_id = :t", t=malo) == 0  # fmt: skip
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("resultado", [{"x": float("nan")}, {"x": object()}, {"x": {1, 2}}])
+def test_terminar_rechaza_lo_que_jsonb_no_guarda(motor_app, cola_vacia, resultado):
+    encolar_en(motor_app, cola_vacia.consorcio_a, "prueba.registrar")
+    with motor_app.begin() as c:
+        [t] = cola.tomar(c, "yo", 1, timedelta(minutes=1))
+        with pytest.raises(cola.ErrorDefinitivo, match="no es JSON"):
+            cola.terminar(c, t, "yo", resultado)
+
+
+MENSAJE_CON_DATOS = (
+    "no se pudo avisar a ana.perez@ejemplo.com por redis://default:S3cr3t0@cem-redis:6379/0"
+    " con token=tk_vivo_123 al +54 9 11 4567-8901 por $ 12.345,67"
+)
+SECRETOS = ("ana.perez", "S3cr3t0", "tk_vivo_123", "4567-8901", "12.345,67")
+
+
+@pytest.mark.db
+def test_el_error_de_un_trabajo_se_guarda_y_se_registra_redactado(
+    motor_app, motor_migrate, cola_vacia
+):
+    """Proceso real con los registros de `cem-trabajos` (§16.1)."""
+    a = cola_vacia.consorcio_a
+    id_ = encolar_en(motor_app, a, "prueba.filtrar", carga={"mensaje": MENSAJE_CON_DATOS})
+    orden = (
+        "from tests import tareas_prueba;"
+        f" tareas_prueba.vaciar_cola_con_registros({url_rol('app')!r})"
+    )
+    proceso = subprocess.run(
+        [sys.executable, "-c", orden], cwd=RAIZ, env=os.environ | {"CEM_PROCESO": "trabajos"},
+        capture_output=True, text=True, timeout=60,
+    )  # fmt: skip
+    assert proceso.returncode == 0, proceso.stderr
+    fila = trabajo(motor_migrate, id_)
+    assert fila.estado == "muerto"
+    # Igualdad exacta: tapa los datos y deja todo lo demás (control de que no se pasa de largo).
+    assert fila.error == (
+        "RuntimeError: no se pudo avisar a [correo] por redis://default:[redactado]@cem-redis"
+        ":6379/0 con token=[redactado] al [telefono] por [importe]"
+    )
+    lineas = [json.loads(linea) for linea in proceso.stdout.splitlines()]
+    [fallido] = [x for x in lineas if x["mensaje"].startswith("trabajo fallido (muerto)")]
+    assert (fallido["nivel"], fallido["proceso"], fallido["modulo"]) == (
+        "ERROR", "trabajos", "cem.trabajos",
+    )  # fmt: skip
+    assert (fallido["id_correlacion"], fallido["consorcio_id"]) == (str(id_), str(a))
+    assert fallido["duracion_ms"] >= 0
+    assert "RuntimeError: no se pudo avisar a [correo]" in fallido["excepcion"]
+    for secreto in SECRETOS:
+        assert secreto not in proceso.stdout
+        assert secreto not in fila.error
+
+
+@pytest.mark.db
+def test_con_el_lote_por_defecto_un_trabajo_lento_no_hace_morir_al_siguiente(
+    motor_app, motor_migrate, cola_vacia
+):
+    """Con un lote de 5, el segundo quedaba reservado detrás del lento, vencía su plazo y otro
+    proceso lo daba por muerto (era su último intento) sin haberlo ejecutado nunca."""
+    a = cola_vacia.consorcio_a
+    lento = encolar_en(motor_app, a, "prueba.dormir", carga={"segundos": 3})
+    siguiente = encolar_en(motor_app, a, "prueba.ultimo_intento")
+    primero = Trabajador(motor_app, plazo=timedelta(seconds=1))
+    hilo = threading.Thread(target=primero.procesar_lote)
+    hilo.start()
+    esperar(lambda: trabajo(motor_migrate, lento).estado == "en_curso")
+    time.sleep(1.5)  # vence el plazo de lo que tomó el primero
+    otro = Trabajador(motor_app, lote=10)
+    while otro.procesar_lote():
+        pass
+    hilo.join()
+    fila = trabajo(motor_migrate, siguiente)
+    assert (fila.estado, fila.intentos) == ("hecho", 1)
+
+
+def test_el_lote_se_configura_con_cem_trabajos_lote(monkeypatch):
+    monkeypatch.delenv("CEM_TRABAJOS_LOTE", raising=False)
+    assert lote_configurado() == LOTE_POR_DEFECTO == 1
+    monkeypatch.setenv("CEM_TRABAJOS_LOTE", "4")
+    assert lote_configurado() == 4
+    for invalido in ("0", "-1", "cinco", ""):
+        monkeypatch.setenv("CEM_TRABAJOS_LOTE", invalido)
+        with pytest.raises(ValueError, match="CEM_TRABAJOS_LOTE"):
+            lote_configurado()
+
+
+def test_cem_trabajos_no_arranca_con_un_lote_invalido():
+    entorno = os.environ | {
+        "CEM_PROCESO": "trabajos",
+        "CEM_TRABAJOS_LOTE": "cero",
+        "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
+    }
+    proceso = subprocess.run(
+        ["sh", "arranque.sh"], cwd=RAIZ, env=entorno, capture_output=True, text=True, timeout=30
+    )
+    assert proceso.returncode != 0
+    assert "CEM_TRABAJOS_LOTE debe ser un entero" in proceso.stderr
 
 
 # Seguridad por fila --------------------------------------------------------------------
@@ -355,19 +485,27 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
         "CEM_LATIDO": str(tmp_path / "l"),
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ['PATH']}",
     }
-    raiz = Path(__file__).resolve().parent.parent
+    salida = {"stdout": subprocess.PIPE, "text": True}
     planificador = subprocess.Popen(
-        ["sh", "arranque.sh"], cwd=raiz, env=entorno | {"CEM_PROCESO": "planificador"}
+        ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 1)
     trabajos = subprocess.Popen(
-        ["sh", "arranque.sh"], cwd=raiz, env=entorno | {"CEM_PROCESO": "trabajos"}
+        ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho'") == 1)  # fmt: skip
-    for proceso in (planificador, trabajos):
+    registros: dict[str, list[dict]] = {}
+    for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
-        assert proceso.wait(timeout=20) == 0
+        texto, _ = proceso.communicate(timeout=20)
+        assert proceso.returncode == 0
+        # Registros JSON (§16.1): cada línea es un objeto y dice qué proceso la escribió.
+        registros[nombre] = [json.loads(linea) for linea in texto.splitlines()]
+        assert {x["proceso"] for x in registros[nombre]} == {nombre}
+    assert "cem-planificador es el líder" in [x["mensaje"] for x in registros["planificador"]]
+    [hecho] = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
+    assert hecho["tipo_trabajo"] == "plataforma.purgar_cola" and hecho["consorcio_id"] is None
     with motor_migrate.connect() as c:
         assert c.execute(text("select tipo from plataforma.jobs")).scalar_one() == (
             "plataforma.purgar_cola"
