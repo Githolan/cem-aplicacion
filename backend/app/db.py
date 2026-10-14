@@ -12,9 +12,14 @@ from uuid import UUID
 
 from sqlalchemy import Connection, Engine, create_engine, text
 
+ESPERA_CONEXION_S = 3
+"""Tope para abrir una conexión: si PostgreSQL no responde, la petición falla en vez de colgarse."""
+
 
 def crear_motor(url: str) -> Engine:
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+        url, pool_pre_ping=True, connect_args={"connect_timeout": ESPERA_CONEXION_S}
+    )
 
 
 def fijar_ambito(

@@ -48,6 +48,7 @@
           "no_autenticado",
           "no_encontrado",
           "peticion_invalida",
+          "demasiadas_peticiones",
           "error_interno",
           "servicio_no_disponible"
         ],
@@ -173,6 +174,7 @@
     "type": "object"
   },
   "Salud": {
+    "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
     "properties": {
       "estado": {
         "const": "ok",
@@ -204,6 +206,37 @@
       "version_contrato"
     ],
     "title": "Salud",
+    "type": "object"
+  },
+  "SaludDependencias": {
+    "$defs": {
+      "EstadoDependencia": {
+        "enum": [
+          "ok",
+          "falla"
+        ],
+        "title": "EstadoDependencia",
+        "type": "string"
+      }
+    },
+    "description": "`GET /api/v1/health/deps`: 200 si todas responden; 503 si alguna falla.\n\nKuma busca la palabra clave `\"db\":\"ok\"`. El motivo de una falla va a los registros,\nnunca a la respuesta. El almacén de objetos y el antivirus se suman cuando existan.",
+    "properties": {
+      "db": {
+        "$ref": "#/$defs/EstadoDependencia"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoDependencia"
+      },
+      "redis": {
+        "$ref": "#/$defs/EstadoDependencia"
+      }
+    },
+    "required": [
+      "estado",
+      "db",
+      "redis"
+    ],
+    "title": "SaludDependencias",
     "type": "object"
   },
   "SesionSoporte": {

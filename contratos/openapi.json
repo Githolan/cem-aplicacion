@@ -70,6 +70,14 @@
         "title": "EstadoCola",
         "type": "object"
       },
+      "EstadoDependencia": {
+        "enum": [
+          "ok",
+          "falla"
+        ],
+        "title": "EstadoDependencia",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -100,6 +108,7 @@
         "type": "object"
       },
       "Salud": {
+        "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
         "properties": {
           "estado": {
             "const": "ok",
@@ -131,6 +140,27 @@
           "version_contrato"
         ],
         "title": "Salud",
+        "type": "object"
+      },
+      "SaludDependencias": {
+        "description": "`GET /api/v1/health/deps`: 200 si todas responden; 503 si alguna falla.\n\nKuma busca la palabra clave `\"db\":\"ok\"`. El motivo de una falla va a los registros,\nnunca a la respuesta. El almacén de objetos y el antivirus se suman cuando existan.",
+        "properties": {
+          "db": {
+            "$ref": "#/components/schemas/EstadoDependencia"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoDependencia"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/EstadoDependencia"
+          }
+        },
+        "required": [
+          "estado",
+          "db",
+          "redis"
+        ],
+        "title": "SaludDependencias",
         "type": "object"
       },
       "SesionSoporte": {
@@ -297,6 +327,38 @@
           }
         },
         "summary": "Salud Cola",
+        "tags": [
+          "plataforma"
+        ]
+      }
+    },
+    "/api/v1/health/deps": {
+      "get": {
+        "description": "PostgreSQL (`select 1` con `cem_app`) y Redis (`PING`).",
+        "operationId": "dependencias_api_v1_health_deps_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaludDependencias"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaludDependencias"
+                }
+              }
+            },
+            "description": "Alguna dependencia falla"
+          }
+        },
+        "summary": "Dependencias",
         "tags": [
           "plataforma"
         ]

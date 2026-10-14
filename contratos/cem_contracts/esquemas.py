@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
 from cem_contracts.errores import Error
-from cem_contracts.salud import EstadoCola, Salud
+from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.soporte import SesionSoporte
 
 MODELOS: tuple[type[BaseModel], ...] = (
@@ -20,6 +20,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     EstadoCola,
     ListaUnidades,
     Salud,
+    SaludDependencias,
     SesionSoporte,
     Unidad,
 )

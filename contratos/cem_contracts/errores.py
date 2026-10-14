@@ -12,9 +12,11 @@ class CodigoError(StrEnum):
     NO_ENCONTRADO = "no_encontrado"
     """También se usa para recursos de otro consorcio: 403 y 404 no se distinguen hacia afuera."""
     PETICION_INVALIDA = "peticion_invalida"
+    DEMASIADAS_PETICIONES = "demasiadas_peticiones"
+    """Límite de tasa superado (documento 13, §10.6); la respuesta lleva `Retry-After`."""
     ERROR_INTERNO = "error_interno"
     SERVICIO_NO_DISPONIBLE = "servicio_no_disponible"
-    """Falta una dependencia sin la cual no se atiende (p. ej. las claves de Access)."""
+    """Falta una dependencia sin la cual no se atiende (Redis del límite, claves de Access)."""
 
 
 class Error(BaseModel):

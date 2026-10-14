@@ -1,0 +1,45 @@
+# Pruebas del backend en Linux contra PostgreSQL 18 y Redis 7 reales (documento 14, §6.3),
+# las mismas imágenes que producción. Desde la raíz del repositorio:
+#
+#   docker compose -f backend/pruebas/compose.yml run --rm --build cem-backend-pruebas
+#   docker compose -f backend/pruebas/compose.yml down
+#
+# Sin argumentos corre pytest; con argumentos, el comando que se pase (p. ej. `ruff check ..`).
+# Las bases son descartables: viven en memoria y no publican puertos en la máquina.
+name: cem-pruebas
+
+services:
+  cem-postgres-pruebas:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 1s
+      retries: 30
+
+  cem-redis-pruebas:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      retries: 30
+
+  cem-backend-pruebas:
+    build:
+      context: ../..
+      dockerfile: backend/pruebas/Dockerfile
+    depends_on:
+      cem-postgres-pruebas:
+        condition: service_healthy
+      cem-redis-pruebas:
+        condition: service_healthy
+    environment:
+      CEM_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgres@cem-postgres-pruebas:5432/postgres
+      CEM_TEST_REDIS_URL: redis://cem-redis-pruebas:6379/0
+    volumes:
+      - ../..:/src
+    entrypoint: []
+    command: ["pytest"]

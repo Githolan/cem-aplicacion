@@ -62,7 +62,9 @@ def emisor() -> Iterator[Emisor]:
 
 
 def cliente(equipo: str = "", aud: str = "") -> TestClient:
-    config = Config("", "0.1.0", "s", "s", access_equipo=equipo, access_aud=aud)
+    config = Config(
+        "", "0.1.0", "s", "s", redis_url="memory://", access_equipo=equipo, access_aud=aud
+    )
     return TestClient(crear_app(config))
 
 

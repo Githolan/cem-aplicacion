@@ -14,6 +14,8 @@ class Config:
     version: str
     sha_imagen: str
     sha_contratos: str
+    redis_url: str
+    """Almacén del límite de tasa (§10.6): `redis://…` de `cem-redis`. Obligatoria."""
     access_equipo: str = ""
     """Equipo de Access que firma los JWT de soporte: `https://<equipo>.cloudflareaccess.com`."""
     access_aud: str = ""
@@ -26,6 +28,7 @@ def cargar() -> Config:
         version=os.environ.get("CEM_VERSION", "0.1.0"),
         sha_imagen=os.environ.get("CEM_SHA_IMAGEN", "desconocida"),
         sha_contratos=os.environ.get("CEM_SHA_CONTRATOS", "desconocida"),
+        redis_url=os.environ.get("CEM_REDIS_URL", ""),
         access_equipo=os.environ.get("CEM_ACCESS_EQUIPO", ""),
         access_aud=os.environ.get("CEM_ACCESS_AUD", ""),
     )
