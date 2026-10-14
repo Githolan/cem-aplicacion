@@ -1,4 +1,4 @@
-"""Identidad: enlace mágico y sesiones (documento 13, §10.3 y §10.4)."""
+"""Identidad: enlace mágico, código por correo y sesiones (documento 13, §10.3 y §10.4)."""
 
 from datetime import datetime
 from typing import Literal
@@ -94,3 +94,22 @@ class SesionesRevocadas(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     revocadas: int = Field(ge=0)
+
+
+FORMATO_CODIGO = r"^[0-9]{6}$"
+"""Código por correo: seis dígitos (§10.3)."""
+
+
+class CanjeCodigo(BaseModel):
+    """`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo
+    correo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.
+
+    Vale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace
+    del mismo pedido, y al revés."""
+
+    model_config = ConfigDict(frozen=True)
+
+    correo: str = Field(
+        max_length=LARGO_MAXIMO_CORREO, pattern=FORMATO_CORREO, examples=["ana@ejemplo.com"]
+    )
+    codigo: str = Field(pattern=FORMATO_CODIGO, examples=["042917"])

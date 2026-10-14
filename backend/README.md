@@ -11,7 +11,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/limite.py` | Límite de tasa por IP real con Redis (§10.6, cierra TB-8) |
 | `app/db.py` | `transaccion()`: abre la transacción y fija persona y consorcio para la RLS (§7.2) |
 | `app/contexto.py` | `obtener_identidad`: valida la cookie de sesión (y el `X-CSRF-Token` si la petición modifica estado); `require_scope`: vínculos vigentes de la persona en el consorcio de la ruta |
-| `app/identidad/` | Enlace mágico, sesiones y CSRF (§10.3, §10.4): `POST /api/v1/auth/enlace`, `POST /api/v1/auth/canje` (token en el cuerpo; el correo lleva `<origen>/entrar#token=…`), `GET /api/v1/auth/sesion`, `POST /api/v1/auth/salir`. Sesiones de la persona (RF04): `GET /api/v1/auth/sesiones`, `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`. Necesita `CEM_ORIGEN_PUBLICO` (`https://<dominio>`) para armar el enlace |
+| `app/identidad/` | Enlace mágico, código por correo, sesiones y CSRF (§10.3, §10.4): `POST /api/v1/auth/enlace` (el correo lleva el enlace `<origen>/entrar#token=…` y un código de seis dígitos), `POST /api/v1/auth/canje` (token en el cuerpo), `POST /api/v1/auth/codigo` (correo y código, desde cualquier dispositivo; 10 minutos, cinco intentos, 10 por hora y 20 por día por correo), `GET /api/v1/auth/sesion`, `POST /api/v1/auth/salir`. Sesiones de la persona (RF04): `GET /api/v1/auth/sesiones`, `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`. Necesita `CEM_ORIGEN_PUBLICO` (`https://<dominio>`) para armar el enlace y `CEM_CODIGO_CLAVE` (`secrets.token_urlsafe(32)`, distinta por entorno) para el HMAC de los códigos; sin ellas, pedir la entrada da 503 |
 | `app/consorcios/` | `GET /api/v1/me/consorcios` y `GET /api/v1/consorcios/{id}/unidades` |
 | `app/liquidacion/reparto.py` | Motor de reparto: función pura con `Decimal` y restos mayores (§7.3) |
 | `app/plataforma/cola.py` | Cola de trabajos en PostgreSQL: `encolar()` dentro de la transacción de negocio, tipos con reintentos y retroceso (§12.1) |
@@ -25,6 +25,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `migrations/versions/0003_*` | `plataforma.idempotencia` (respuestas de `Idempotency-Key`, §7.4) con RLS por persona y consorcio, y su purga |
 | `migrations/versions/0004_*` | `nucleo.sesion` y `nucleo.enlace_acceso` (solo hashes) con RLS por persona y funciones `security definer` para pedir, canjear y validar |
 | `migrations/versions/0005_*` | `nucleo.revocar_sesiones_de(persona)` (cierre por cambio de mandato, RN22) y `nucleo.purgar_identidad(retencion)`, que la purga diaria llama con 90 días (§15.6) |
+| `migrations/versions/0006_*` | `nucleo.codigo_acceso` (HMAC del código, intentos, vencimiento; uno por pedido, se borra con su enlace) con RLS y sin privilegios para `cem_app`, y las funciones `registrar_codigo` y `canjear_codigo` |
 | `scripts/crear_roles.sql` | Roles `cem_migrate`, `cem_app`, `cem_ro` y la base (una vez por servidor, con superusuario) |
 
 ## Desarrollo
@@ -49,4 +50,4 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Pendiente
 
-De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), 12 h para roles de dinero y la llamada a `nucleo.revocar_sesiones_de` desde el módulo de mandatos (H2 2b), código por correo, TOTP y passkeys. Además: partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
+De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), 12 h para roles de dinero y la llamada a `nucleo.revocar_sesiones_de` desde el módulo de mandatos (H2 2b), TOTP y passkeys; el código por WhatsApp (con opt-in) espera a la integración de WhatsApp. Además: partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.

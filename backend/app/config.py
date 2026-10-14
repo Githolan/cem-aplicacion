@@ -23,6 +23,11 @@ class Config:
     origen_publico: str = ""
     """Origen de la app para armar el enlace de acceso: `https://cem.holancloud.com`. Nunca se
     toma del encabezado `Host`, que el cliente puede inventar. Sin él, pedir un enlace da 503."""
+    codigo_clave: str = ""
+    """Clave del HMAC de los códigos por correo (§10.3): `secrets.token_urlsafe(32)`, distinta en
+    cada entorno, solo en `cem-backend`. Nunca en la base: con ella sola un código no se puede
+    probar. Mal escrita impide el arranque; sin ella, pedir la entrada y canjear un código dan
+    503."""
 
 
 def cargar() -> Config:
@@ -35,4 +40,5 @@ def cargar() -> Config:
         access_equipo=os.environ.get("CEM_ACCESS_EQUIPO", ""),
         access_aud=os.environ.get("CEM_ACCESS_AUD", ""),
         origen_publico=os.environ.get("CEM_ORIGEN_PUBLICO", ""),
+        codigo_clave=os.environ.get("CEM_CODIGO_CLAVE", ""),
     )

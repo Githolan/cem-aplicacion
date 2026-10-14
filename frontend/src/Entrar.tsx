@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "./api/cliente";
+import { EntrarConCodigo } from "./EntrarConCodigo";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
 // fragmento (#token=…), que el navegador nunca manda al servidor: no queda en el registro de
@@ -59,6 +60,7 @@ export function Entrar() {
           <p>Para entrar, abrí el enlace que te mandamos por correo.</p>
         )}
       </div>
+      {(estado === "sin_enlace" || estado === "rechazado") && <EntrarConCodigo />}
     </>
   );
 }

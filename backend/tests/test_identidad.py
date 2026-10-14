@@ -41,9 +41,21 @@ ANA = "ana@ejemplo.com"
 NADIE = "nadie@ejemplo.com"
 
 
-def app_identidad(origen: str = ORIGEN):
+CLAVE_CODIGO = secrets.token_urlsafe(32)
+"""`CEM_CODIGO_CLAVE` de las pruebas: generada en cada corrida, como se genera en cada entorno."""
+
+
+def app_identidad(origen: str = ORIGEN, clave_codigo: str = CLAVE_CODIGO):
     return crear_app(
-        Config(url_rol("app"), "0.1.0", "s", "s", redis_url=REDIS_URL, origen_publico=origen)
+        Config(
+            url_rol("app"),
+            "0.1.0",
+            "s",
+            "s",
+            redis_url=REDIS_URL,
+            origen_publico=origen,
+            codigo_clave=clave_codigo,
+        )
     )
 
 
@@ -55,12 +67,12 @@ class Navegadores:
     el suyo. Todas comparten la base (el motor de `cem_app`) y el Redis reales.
     """
 
-    def __init__(self, motor, origen: str = ORIGEN) -> None:
-        self.motor, self.origen, self.abiertos = motor, origen, []
+    def __init__(self, motor, origen: str = ORIGEN, clave_codigo: str = CLAVE_CODIGO) -> None:
+        self.motor, self.origen, self.clave_codigo, self.abiertos = motor, origen, clave_codigo, []
         self.ips = iter(range(1, 255))
 
     def abrir(self, ip: str | None = None, **kw) -> TestClient:
-        app = app_identidad(self.origen)
+        app = app_identidad(self.origen, self.clave_codigo)
         app.state.motor = self.motor
         c = TestClient(
             app,

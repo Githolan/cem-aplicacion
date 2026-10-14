@@ -1,6 +1,34 @@
 {
   "components": {
     "schemas": {
+      "CanjeCodigo": {
+        "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
+        "properties": {
+          "codigo": {
+            "examples": [
+              "042917"
+            ],
+            "pattern": "^[0-9]{6}$",
+            "title": "Codigo",
+            "type": "string"
+          },
+          "correo": {
+            "examples": [
+              "ana@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "codigo"
+        ],
+        "title": "CanjeCodigo",
+        "type": "object"
+      },
       "CanjeEnlace": {
         "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
         "properties": {
@@ -483,9 +511,54 @@
         ]
       }
     },
+    "/api/v1/auth/codigo": {
+      "post": {
+        "description": "Entra con el correo y el código de seis dígitos del último pedido, desde cualquier\ndispositivo. Crea la sesión como el canje del enlace y gasta el pedido entero (el enlace\ndeja de servir). Todo rechazo responde igual, 401 `codigo_invalido`, y en el mismo tiempo,\nexista o no la cuenta.\n\nVale 10 minutos y cinco intentos fallidos; al quinto queda agotado aunque después llegue el\ncorrecto. Además, cada correo tiene un cupo de intentos (10 por hora, 20 por día) que no\ndepende de la IP.\n\nNo pide el `nonce`: sirve justamente en otro navegador. Lo que lo reemplaza contra una\nfalsificación de inicio de sesión desde otro sitio: `Sec-Fetch-Site` debe ser `same-origin`\nsi el navegador lo declara, y el cuerpo debe ser `application/json` (FastAPI 0.141 no\ninterpreta otro tipo ni un cuerpo sin tipo: 422), que un formulario de otro sitio no puede\nmandar y que desde `fetch` obliga a una consulta previa CORS que la API no autoriza. Lo\ndemás lo cubre que el código solo llega al correo de la persona.",
+        "operationId": "canjear_codigo_api_v1_auth_codigo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanjeCodigo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionActual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "El código no sirve (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entrar con el código del correo",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
     "/api/v1/auth/enlace": {
       "post": {
-        "description": "Responde siempre 202 con el mismo cuerpo y en el mismo tiempo, exista o no la cuenta.\nDeja en el navegador la cookie `nonce` a la que queda ligado el enlace.",
+        "description": "Responde siempre 202 con el mismo cuerpo y en el mismo tiempo, exista o no la cuenta.\nDeja en el navegador la cookie `nonce` a la que queda ligado el enlace. El mismo correo\nlleva un código de seis dígitos para entrar desde otro dispositivo (`POST /codigo`).",
         "operationId": "pedir_enlace_api_v1_auth_enlace_post",
         "requestBody": {
           "content": {
@@ -519,7 +592,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pedir un enlace de acceso por correo",
+        "summary": "Pedir la entrada: enlace y código por correo",
         "tags": [
           "identidad"
         ]
