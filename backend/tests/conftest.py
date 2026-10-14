@@ -28,7 +28,12 @@ ADMIN_URL = os.environ.get(
 )
 REDIS_URL = os.environ.get("CEM_TEST_REDIS_URL", "redis://localhost:6379/0")
 BASE = "cem_prueba"
-CLAVES = {"migrate": "migrate_prueba", "app": "app_prueba", "ro": "ro_prueba"}
+CLAVES = {
+    "migrate": "migrate_prueba",
+    "app": "app_prueba",
+    "ro": "ro_prueba",
+    "backup": "backup_prueba",
+}
 
 
 def url_rol(rol: str) -> str:
@@ -60,6 +65,7 @@ def base_de_prueba() -> None:
             "-v", f"clave_migrate={CLAVES['migrate']}",
             "-v", f"clave_app={CLAVES['app']}",
             "-v", f"clave_ro={CLAVES['ro']}",
+            "-v", f"clave_backup={CLAVES['backup']}",
             "-f", str(RAIZ / "scripts" / "crear_roles.sql"),
         ],
         check=True,

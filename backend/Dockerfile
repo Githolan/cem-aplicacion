@@ -10,7 +10,18 @@ RUN python -m venv /venv \
  && /venv/bin/pip install -r backend/requirements.prod.txt ./contratos
 
 FROM python:3.12-slim
-ENV PATH=/venv/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# Copias (documento 13, §17): pg_dump de la misma versión mayor que cem-postgres (18), el
+# servidor para restaurar cada copia en una base efímera (§17.3) y age para cifrarla. Debian
+# trae PostgreSQL 17; el 18 sale del repositorio oficial de PostgreSQL (PGDG), cuya clave viene
+# en postgresql-common de Debian. Sin clúster por defecto: la base efímera la crea cada copia.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
+ && sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' \
+      /etc/postgresql-common/createcluster.conf \
+ && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
+ && apt-get install -y --no-install-recommends postgresql-18 age \
+ && rm -rf /var/lib/apt/lists/*
+ENV PATH=/venv/bin:/usr/lib/postgresql/18/bin:$PATH PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN useradd --system --uid 10001 --home /app cem
 COPY --from=dependencias /venv /venv
 WORKDIR /app
