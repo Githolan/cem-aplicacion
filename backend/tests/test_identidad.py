@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import secrets
+import statistics
 import time
 from collections.abc import Iterator
 from datetime import timedelta
@@ -141,24 +142,51 @@ def es_401(r, codigo: str) -> bool:
 # Pedido del enlace ------------------------------------------------------------------------
 
 
-def test_misma_respuesta_y_mismo_tiempo_exista_o_no_la_cuenta(app, motor_migrate):
+REPETICIONES_TIEMPO = 3
+"""Pedidos por rama, intercalados (con cuenta, sin cuenta, con cuenta…): la carga de la máquina
+pega por igual en las dos ramas. No más de 5 por correo: es el cupo por minuto."""
+
+
+def test_misma_respuesta_y_mismo_tiempo_exista_o_no_la_cuenta(
+    app,
+    motor_migrate,
+    salida_json,  # noqa: F811
+):
+    """El tiempo no delata la cuenta. Lo que importa, y lo que se comprueba:
+
+    1. Ninguna respuesta sale antes de `DURACION_MINIMA_PEDIDO`, en ninguna rama (sin la espera,
+       la rama sin cuenta responde en milisegundos).
+    2. Las dos ramas terminan su trabajo dentro de esa espera: el servidor registra una
+       advertencia si una la supera. Es una medición del propio servidor, sin la latencia del
+       cliente de pruebas, así que no depende de la carga de la máquina.
+    3. Las medianas de las dos ramas no difieren en más de la mitad de la espera mínima. Una
+       rama que se saltara la espera difiere en la espera entera; el ruido de la carga afecta a
+       las dos por igual y la mediana descarta el pico de una repetición suelta.
+    """
     antes = len(eventos_de(motor_migrate, ANA))
-    respuestas, duraciones = [], []
-    for direccion in (ANA, NADIE, ANA, NADIE):
+    respuestas, duraciones = [], {ANA: [], NADIE: []}
+    for direccion in (ANA, NADIE) * REPETICIONES_TIEMPO:
         inicio = time.monotonic()
         respuestas.append(pedir(navegador(app), direccion))
-        duraciones.append(time.monotonic() - inicio)
+        duraciones[direccion].append(time.monotonic() - inicio)
     assert {r.status_code for r in respuestas} == {202}
     assert len({r.content for r in respuestas}) == 1
     # Mismas cookies con los mismos atributos; solo cambian los valores aleatorios.
     assert len({json.dumps(set_cookies(r), sort_keys=True) for r in respuestas}) == 1
     assert len({tuple(sorted(r.headers.keys())) for r in respuestas}) == 1
     minimo = router.DURACION_MINIMA_PEDIDO.total_seconds()
-    assert min(duraciones) >= minimo
-    # Holgura para el planificador de hilos de la máquina de pruebas.
-    assert max(duraciones) - min(duraciones) < 0.15, duraciones
+    assert min(min(d) for d in duraciones.values()) >= minimo, duraciones
+    lineas = salida_json()
+    pedidos = [x for x in lineas if x["mensaje"] == "enlace de acceso pedido"]
+    # Control: el servidor registró los pedidos de las dos ramas.
+    assert sorted(x["cuenta_existe"] for x in pedidos) == sorted(
+        [True, False] * REPETICIONES_TIEMPO
+    )
+    assert not [x for x in lineas if "superó la duración mínima" in x["mensaje"]]
+    medianas = {d: statistics.median(t) for d, t in duraciones.items()}
+    assert abs(medianas[ANA] - medianas[NADIE]) < minimo / 2, duraciones
     # Solo la cuenta que existe recibe correo.
-    assert len(eventos_de(motor_migrate, ANA)) == antes + 2
+    assert len(eventos_de(motor_migrate, ANA)) == antes + REPETICIONES_TIEMPO
     assert eventos_de(motor_migrate, NADIE) == []
 
 
