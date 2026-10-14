@@ -27,6 +27,18 @@ services:
       interval: 1s
       retries: 30
 
+  # Almacén S3 compatible para probar la subida de las copias (documento 13, §17) de verdad.
+  # Versity S3 Gateway sobre un directorio en memoria, en la región de OCI.
+  cem-almacen-s3-pruebas:
+    image: versity/versitygw:v1.0.18
+    environment:
+      ROOT_ACCESS_KEY_ID: clave-id-pruebas
+      ROOT_SECRET_ACCESS_KEY: clave-secreta-pruebas
+      VGW_REGION: sa-santiago-1
+    command: ["--quiet", "posix", "/datos"]
+    tmpfs:
+      - /datos
+
   cem-backend-pruebas:
     build:
       context: ../..
@@ -36,9 +48,15 @@ services:
         condition: service_healthy
       cem-redis-pruebas:
         condition: service_healthy
+      cem-almacen-s3-pruebas:
+        condition: service_started
     environment:
       CEM_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgres@cem-postgres-pruebas:5432/postgres
       CEM_TEST_REDIS_URL: redis://cem-redis-pruebas:6379/0
+      CEM_TEST_S3_ENDPOINT: http://cem-almacen-s3-pruebas:7070
+      CEM_TEST_S3_REGION: sa-santiago-1
+      CEM_TEST_S3_CLAVE_ID: clave-id-pruebas
+      CEM_TEST_S3_CLAVE_SECRETA: clave-secreta-pruebas
     volumes:
       - ../..:/src
     entrypoint: []

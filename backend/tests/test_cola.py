@@ -489,12 +489,14 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 1)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 2)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
+    # Sin las variables de las copias, la copia falla y lo dice; no se saltea en silencio.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
-                        " where estado = 'hecho'") == 1)  # fmt: skip
+                        " where estado = 'hecho' and tipo = 'plataforma.purgar_cola'"
+                        " or error like '%faltan variables de las copias%'") == 2)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -507,11 +509,11 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     [hecho] = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
     assert hecho["tipo_trabajo"] == "plataforma.purgar_cola" and hecho["consorcio_id"] is None
     with motor_migrate.connect() as c:
-        assert c.execute(text("select tipo from plataforma.jobs")).scalar_one() == (
-            "plataforma.purgar_cola"
-        )
-        assert c.execute(text("select tipo from plataforma.ejecuciones_programadas")).all() == [
-            ("plataforma.purgar_cola",)
+        assert c.execute(
+            text("select tipo from plataforma.ejecuciones_programadas order by tipo")
+        ).all() == [
+            ("plataforma.copia_diaria",),
+            ("plataforma.purgar_cola",),
         ]
 
 

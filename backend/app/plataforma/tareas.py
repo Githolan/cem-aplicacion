@@ -4,11 +4,12 @@ Los procesos `cem-trabajos` y `cem-planificador` importan este módulo al arranc
 módulos de negocio agregarán aquí la importación de sus propias tareas a medida que existan.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import Connection, text
 
-from app.plataforma import cola
+from app.plataforma import cola, copias
 from app.plataforma.planificador import periodica
 
 CONSERVACION = timedelta(days=30)
@@ -25,3 +26,14 @@ def purgar_cola(conn: Connection, trabajo: cola.Trabajo) -> dict[str, int]:
 
 # Todos los días a las 06:00 UTC (03:00 en Buenos Aires).
 periodica("plataforma.purgar_cola", timedelta(days=1), desfase=timedelta(hours=6))
+
+
+@cola.REGISTRO.tipo("plataforma.copia_diaria")
+def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Copia de la base `cem` volcada, verificada, cifrada y subida (documento 13, §17)."""
+    ventana = datetime.fromisoformat(trabajo.carga["ventana"])
+    return copias.copia_diaria(copias.ConfigCopias.desde_entorno(), ventana)
+
+
+# Todos los días a las 03:30 UTC, después de la ventana de Coolify (§17.2).
+periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
