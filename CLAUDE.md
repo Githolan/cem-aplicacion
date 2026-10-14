@@ -8,4 +8,4 @@ Código de Consorcio en Mano. El diseño vive en el repositorio `Githolan/CEM` (
 - Toda tabla con `consorcio_id` lleva RLS habilitada y forzada, y una prueba contra PostgreSQL real que demuestre que otro consorcio no la ve.
 - Importes en `NUMERIC(18,2)` y `Decimal`; nunca `float`.
 - Requisitos de producción a versión exacta en `backend/requirements.prod.txt`.
-- Sin GitHub Actions: CI/CD con los scripts de `cem-despliegue`.
+- Sin GitHub Actions: CI/CD con los scripts de `despliegue/` (`ci.ps1`, `cd.ps1`), en la PC del propietario.
