@@ -5,4 +5,4 @@ El backend importa estos modelos; el frontend genera sus tipos desde el
 OpenAPI que publica el backend. Las formas no se escriben a mano en TypeScript.
 """
 
-VERSION_CONTRATO = "0.2.0"
+VERSION_CONTRATO = "0.3.0"

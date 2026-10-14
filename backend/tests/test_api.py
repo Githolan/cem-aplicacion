@@ -10,7 +10,9 @@ from tests.conftest import url_rol
 
 
 def cliente(database_url: str = "", persona=None) -> TestClient:
-    app = crear_app(Config(database_url, "0.1.0", "sha-imagen", "sha-contratos"))
+    app = crear_app(
+        Config(database_url, "0.1.0", "sha-imagen", "sha-contratos", redis_url="memory://")
+    )
     if persona is not None:
         app.dependency_overrides[obtener_identidad] = lambda: Identidad(persona)
     return TestClient(app)

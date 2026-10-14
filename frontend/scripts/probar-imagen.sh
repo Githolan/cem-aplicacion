@@ -37,4 +37,35 @@ cabecera /assets/no-existe.js cache-control | grep -q immutable && falla "un 404
 [ "$(cabecera /manifest.webmanifest content-type)" = "application/manifest+json" ] || falla "tipo del manifiesto"
 [ "$(cabecera /sw.js cache-control)" = "no-cache" ] || falla "sw.js no lleva no-cache"
 [ "$(codigo /health)" = 502 ] || falla "/health sin backend debería dar 502 (prueba que se reenvía)"
+
+# IP real hacia el backend (límite de tasa, TB-8): X-Forwarded-For sale de CF-Connecting-IP y
+# nunca del que mande el cliente; sin CF-Connecting-IP va la IP de quien llama. Un backend de eco
+# devuelve el X-Forwarded-For que recibe.
+RED="cem-frontend-prueba-red-$$"
+ECO="cem-backend-eco-$$"
+CON_ECO="$NOMBRE-eco"
+trap 'docker rm -f "$NOMBRE" "$ECO" "$CON_ECO" >/dev/null 2>&1; docker network rm "$RED" >/dev/null 2>&1' EXIT
+ECO_PY='import http.server as h
+class E(h.BaseHTTPRequestHandler):
+    def do_GET(self):
+        b = (self.headers.get("X-Forwarded-For") or "").encode()
+        self.send_response(200); self.send_header("Content-Length", str(len(b)))
+        self.end_headers(); self.wfile.write(b)
+h.HTTPServer(("0.0.0.0", 8000), E).serve_forever()'
+docker network create "$RED" >/dev/null
+docker run -d --name "$ECO" --network "$RED" --network-alias cem-backend-eco \
+  python:3.12-slim python -c "$ECO_PY" >/dev/null
+docker run -d --name "$CON_ECO" --network "$RED" -p "$((PUERTO + 1)):8080" \
+  -e CEM_BACKEND_DESTINO=cem-backend-eco:8000 "$IMAGEN" >/dev/null
+URL_ECO="http://127.0.0.1:$((PUERTO + 1))"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL_ECO/health")" = 200 ] && break
+  sleep 1
+done
+CON_CF=$(curl -s -H 'CF-Connecting-IP: 203.0.113.9' -H 'X-Forwarded-For: 198.51.100.66' "$URL_ECO/health")
+[ "$CON_CF" = "203.0.113.9" ] || falla "con CF-Connecting-IP el backend recibió '$CON_CF'"
+SIN_CF=$(curl -s -H 'X-Forwarded-For: 198.51.100.66' "$URL_ECO/api/v1/x")
+case "$SIN_CF" in
+  "" | *198.51.100.66*) falla "sin CF-Connecting-IP el backend recibió '$SIN_CF'" ;;
+esac
 echo "OK: imagen $IMAGEN"

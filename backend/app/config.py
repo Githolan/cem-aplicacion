@@ -14,6 +14,8 @@ class Config:
     version: str
     sha_imagen: str
     sha_contratos: str
+    redis_url: str
+    """Almacén del límite de tasa (§10.6): `redis://…` de `cem-redis`. Obligatoria."""
 
 
 def cargar() -> Config:
@@ -22,4 +24,5 @@ def cargar() -> Config:
         version=os.environ.get("CEM_VERSION", "0.1.0"),
         sha_imagen=os.environ.get("CEM_SHA_IMAGEN", "desconocida"),
         sha_contratos=os.environ.get("CEM_SHA_CONTRATOS", "desconocida"),
+        redis_url=os.environ.get("CEM_REDIS_URL", ""),
     )

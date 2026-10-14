@@ -20,7 +20,7 @@ class ErrorApi(Exception):
         self.estado, self.codigo, self.mensaje = estado, codigo, mensaje
 
 
-def _respuesta(estado: int, codigo: CodigoError, mensaje: str, detalle=None) -> JSONResponse:
+def respuesta_error(estado: int, codigo: CodigoError, mensaje: str, detalle=None) -> JSONResponse:
     cuerpo = Error(codigo=codigo, mensaje=mensaje, detalle=detalle, id_correlacion=uuid.uuid4().hex)
     return JSONResponse(cuerpo.model_dump(mode="json"), status_code=estado)
 
@@ -28,22 +28,22 @@ def _respuesta(estado: int, codigo: CodigoError, mensaje: str, detalle=None) -> 
 def instalar(app: FastAPI) -> None:
     @app.exception_handler(ErrorApi)
     async def _api(_: Request, e: ErrorApi) -> JSONResponse:
-        return _respuesta(e.estado, e.codigo, e.mensaje)
+        return respuesta_error(e.estado, e.codigo, e.mensaje)
 
     @app.exception_handler(RequestValidationError)
     async def _validacion(_: Request, e: RequestValidationError) -> JSONResponse:
         campos = [".".join(str(p) for p in err["loc"]) for err in e.errors()]
-        return _respuesta(
+        return respuesta_error(
             422, CodigoError.PETICION_INVALIDA, "Revisá los datos enviados.", {"campos": campos}
         )
 
     @app.exception_handler(StarletteHTTPException)
     async def _http(_: Request, e: StarletteHTTPException) -> JSONResponse:
         if e.status_code == 404:
-            return _respuesta(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
-        return _respuesta(e.status_code, CodigoError.PETICION_INVALIDA, "Petición no válida.")
+            return respuesta_error(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
+        return respuesta_error(e.status_code, CodigoError.PETICION_INVALIDA, "Petición no válida.")
 
     @app.exception_handler(Exception)
     async def _interno(_: Request, e: Exception) -> JSONResponse:
         log.exception("error no controlado")
-        return _respuesta(500, CodigoError.ERROR_INTERNO, "Ocurrió un error. Probá de nuevo.")
+        return respuesta_error(500, CodigoError.ERROR_INTERNO, "Ocurrió un error. Probá de nuevo.")

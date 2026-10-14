@@ -13,7 +13,7 @@ DESTINO = Path(__file__).resolve().parents[2] / "contratos" / "openapi.json"
 
 
 def openapi_texto() -> str:
-    app = crear_app(Config("", "0.1.0", "", ""))
+    app = crear_app(Config("", "0.1.0", "", "", redis_url="memory://"))
     return json.dumps(app.openapi(), indent=2, ensure_ascii=False, sort_keys=True) + "\n"
 
 

@@ -4,11 +4,13 @@ Las pruebas marcadas `db` crean una base descartable en el servidor de
 `CEM_TEST_ADMIN_URL` (un superusuario local), crean los roles con
 `scripts/crear_roles.sql`, aplican las migraciones como `cem_migrate` y consultan como
 `cem_app`. Si el servidor no responde, fallan: no se saltean en silencio.
-Para correr solo las pruebas sin base: `pytest -m "not db"`.
+Las marcadas `redis` usan el Redis de `CEM_TEST_REDIS_URL` y borran solo las claves `cem:rl:*`.
+Para correr solo las pruebas sin servicios: `pytest -m "not db and not redis"`.
 """
 
 import os
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
@@ -16,6 +18,7 @@ from uuid import UUID
 import pytest
 from alembic import command
 from alembic.config import Config as AlembicConfig
+from redis import Redis
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
 
@@ -23,6 +26,7 @@ RAIZ = Path(__file__).resolve().parent.parent
 ADMIN_URL = os.environ.get(
     "CEM_TEST_ADMIN_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/postgres"
 )
+REDIS_URL = os.environ.get("CEM_TEST_REDIS_URL", "redis://localhost:6379/0")
 BASE = "cem_prueba"
 CLAVES = {"migrate": "migrate_prueba", "app": "app_prueba", "ro": "ro_prueba"}
 
@@ -65,6 +69,21 @@ def base_de_prueba() -> None:
     command.upgrade(cfg, "head")
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
+
+
+@pytest.fixture
+def redis_limpio() -> Iterator[Redis]:
+    """Redis real sin claves del límite de tasa de pruebas anteriores."""
+    cliente = Redis.from_url(REDIS_URL)
+
+    def limpiar() -> None:
+        for clave in cliente.scan_iter("cem:rl:*"):
+            cliente.delete(clave)
+
+    limpiar()
+    yield cliente
+    limpiar()
+    cliente.close()
 
 
 @pytest.fixture(scope="session")
