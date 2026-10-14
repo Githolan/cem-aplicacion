@@ -17,6 +17,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/plataforma/outbox.py` | `publicar()` de eventos en la misma transacción y despachador que los convierte en trabajos (§12.2) |
 | `app/plataforma/trabajos.py` | Proceso `cem-trabajos`: toma trabajos con `SKIP LOCKED` y los ejecuta con el consorcio fijado |
 | `app/plataforma/planificador.py` | Proceso `cem-planificador`: líder único con `pg_advisory_lock`, despacho del outbox y tareas periódicas con `UNIQUE(tipo, ventana)` (§12.3) |
+| `app/plataforma/idempotencia.py` | `Idempotency-Key` (§7.4): `IdempotenciaDep` y `responder_una_vez()` guardan la respuesta en la misma transacción que el efecto; repetición → misma respuesta, otro cuerpo → 422, en curso → espera o 409 |
 | `app/plataforma/tareas.py` | Tipos de trabajo y tareas periódicas registradas (hoy: purga diaria de la cola y de las respuestas de `Idempotency-Key` vencidas) |
 | `migrations/versions/0001_*` | Esquemas, núcleo, auditoría encadenada, RLS y privilegios |
 | `migrations/versions/0002_*` | `plataforma.jobs`, `outbox`, `ejecuciones_programadas`, sus políticas y las funciones del trabajador |
@@ -45,4 +46,4 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Pendiente
 
-Autenticación y sesiones (`identidad`), tabla `plataforma.idempotencia`, rol `cem_backup`, partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
+Autenticación y sesiones (`identidad`), rol `cem_backup`, partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
