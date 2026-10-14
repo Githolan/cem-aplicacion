@@ -10,11 +10,12 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - `backend/`: FastAPI con `/health`, errores uniformes, `require_scope`, `GET /api/v1/me/consorcios`, `GET /api/v1/consorcios/{id}/unidades` y el motor de reparto.
 - `GET /api/v1/health/deps`: PostgreSQL (`select 1` con `cem_app`) y Redis (`PING`); 200 con `{"estado":"ok","db":"ok","redis":"ok"}` o 503 con la que falla, sin detalles (van a los registros). Kuma puede buscar `"db":"ok"`.
 - **Límite de tasa (cierra TB-8):** middleware propio `app/limite.py` sobre `limits` con Redis (`cem:rl:*`), 300 pedidos por minuto por IP para toda la API; `/health` y `/api/v1/health/deps` exentas. Sin Redis la API responde 503 (falla cerrada) y la app no arranca sin `CEM_REDIS_URL`. La IP real: el nginx del frontend escribe `X-Forwarded-For` con `CF-Connecting-IP` y `arranque.sh` exige `FORWARDED_ALLOW_IPS` (uvicorn solo acepta ese encabezado de esa red).
+- **JWT de Cloudflare Access (primer paso del cierre de TB-1):** `app/acceso.py` verifica `Cf-Access-Jwt-Assertion` (RS256 con las claves de `<equipo>/cdn-cgi/access/certs`, audiencia de la aplicación de Access, emisor, vencimiento) en toda ruta de `/api/v1/soporte/`; la primera es `GET /api/v1/soporte/sesion`, que devuelve quién es el operador. Un encabezado inventado no pasa aunque el pedido llegue sin Access. Sin `CEM_ACCESS_EQUIPO` y `CEM_ACCESS_AUD`, esas rutas rechazan todo y la app arranca igual.
 - `frontend/`: PWA (React 18, Vite 5, TypeScript) con página de inicio que lee `/health`; tipos generados desde `contratos/openapi.json`; imagen `nginxinc/nginx-unprivileged:1.27-alpine` (uid 101, puerto 8080) que reenvía `/api/` y `/health` al backend con `resolver` (AD-05). **Desplegado en staging y en producción** desde `main`, hoy en `38aca25`: `cem-frontend-staging` el 14-10-2026 a las 02:14 UTC y `cem-frontend` a las 02:16 UTC, después de validar staging. El frontend es dueño del dominio de cada entorno y el backend no tiene dominio propio: el frontend le llega por los alias de red `cem-backend-staging` y `cem-backend`. El detalle y las comprobaciones están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
 - Página `/instalar` y enlace "Instalá la aplicación en tu teléfono" en el inicio (pedido del propietario del 14-10-2026): botón propio donde el navegador ofrece `beforeinstallprompt` (Chrome y Edge), pasos de Safari → Compartir → Agregar a inicio en iPhone y iPad, y aviso de "ya está instalada" en modo `standalone`. Es el enlace para compartir por WhatsApp o en un QR de cartelera. En producción desde el 14-10-2026 (`38aca25`): `https://cem.holancloud.com/instalar` responde, y el JavaScript servido contiene la ruta. Ojo: un 200 no alcanza como prueba, porque la aplicación devuelve `index.html` para cualquier ruta.
 - Cola de trabajos, outbox y planificador (documento 13, §12; plan H1, semana 2), en revisión (PR #8; decisiones de diseño aprobadas por el propietario el 14-10-2026): migración `0002` con `plataforma.jobs`, `outbox` y `ejecuciones_programadas` con RLS forzada; funciones `security definer` para tomar, terminar y fallar trabajos; procesos `cem-trabajos` y `cem-planificador` en la misma imagen, elegidos con `CEM_PROCESO`; `GET /api/v1/health/cola` para Kuma (contrato 0.2.0). **No desplegado**: crear `cem-trabajos` y `cem-planificador` en Coolify necesita la aprobación escrita del propietario en el hilo de la plataforma H0.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- 87 pruebas (73 del backend, 3 de contratos, 11 del frontend con `axe`, rutas, manifiesto e instalación), incluidas las de RLS contra PostgreSQL real, y `frontend/scripts/probar-imagen.sh` para la imagen (con un backend de eco que comprueba el `X-Forwarded-For`).
+- 104 pruebas (90 del backend, 3 de contratos, 11 del frontend con `axe`, rutas, manifiesto e instalación), incluidas las de RLS contra PostgreSQL real y las de Access con un emisor de claves HTTP real, y `frontend/scripts/probar-imagen.sh` para la imagen (con un backend de eco que comprueba el `X-Forwarded-For`).
 
 ## Cómo probar
 
@@ -58,6 +59,14 @@ En `cem-backend-staging` y después en `cem-backend`, variables de ejecución (n
 - `FORWARDED_ALLOW_IPS=10.0.2.0/24` (red `coolify`, IPv4: nginx llega al backend por IPv4).
 
 Sin ellas el contenedor nuevo no arranca y Coolify conserva el anterior. Después del despliegue: `/api/v1/health/deps` → `{"estado":"ok","db":"ok","redis":"ok"}` desde dentro del contenedor; un pedido real por Cloudflare deja en `cem-redis-staging` una clave `cem:rl:*` con la IP pública de quien llamó, no `10.0.2.1` (`redis-cli --scan --pattern 'cem:rl:*'`); y el frontend redesplegado (cambió su nginx).
+
+## Antes de desplegar el JWT de Access (propietario, staging primero)
+
+En `cem-backend-staging` y después en `cem-backend`, variables de ejecución (no de construcción):
+
+- `CEM_ACCESS_EQUIPO=https://holancloud.cloudflareaccess.com` y `CEM_ACCESS_AUD` = la AUD de la aplicación de Access que cubre `/api/v1/soporte`: en staging, la de `cem-staging` (cubre todo el dominio); en producción hay que crear antes `cem-soporte` con los caminos `cem.holancloud.com/api/v1/soporte*` y `cem.holancloud.com/soporte*` (lista de correos de operadores). Estas dos son opcionales: sin ellas las rutas de soporte responden 401.
+
+`cryptography` (para RS256) trae ruedas ARM64; confirmarlo en la construcción de Coolify. Después del despliegue: `https://cem-staging.holancloud.com/api/v1/soporte/sesion` en el navegador ya autenticado devuelve el correo del propietario; control, desde la VM, `curl -H 'Cf-Access-Jwt-Assertion: inventado' http://cem-backend-staging:8000/api/v1/soporte/sesion` → 401.
 
 ## Próximo paso
 

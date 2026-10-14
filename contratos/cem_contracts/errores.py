@@ -16,7 +16,7 @@ class CodigoError(StrEnum):
     """Límite de tasa superado (documento 13, §10.6); la respuesta lleva `Retry-After`."""
     ERROR_INTERNO = "error_interno"
     SERVICIO_NO_DISPONIBLE = "servicio_no_disponible"
-    """Falta una dependencia sin la cual no se atiende (p. ej. Redis para el límite de tasa)."""
+    """Falta una dependencia sin la cual no se atiende (Redis del límite, claves de Access)."""
 
 
 class Error(BaseModel):

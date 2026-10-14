@@ -239,6 +239,29 @@
     "title": "SaludDependencias",
     "type": "object"
   },
+  "SesionSoporte": {
+    "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
+    "properties": {
+      "identidad": {
+        "title": "Identidad",
+        "type": "string"
+      },
+      "tipo": {
+        "enum": [
+          "persona",
+          "servicio"
+        ],
+        "title": "Tipo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "identidad",
+      "tipo"
+    ],
+    "title": "SesionSoporte",
+    "type": "object"
+  },
   "Unidad": {
     "description": "Unidad funcional del padrón.",
     "properties": {

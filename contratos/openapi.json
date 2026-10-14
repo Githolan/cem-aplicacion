@@ -163,6 +163,29 @@
         "title": "SaludDependencias",
         "type": "object"
       },
+      "SesionSoporte": {
+        "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
+        "properties": {
+          "identidad": {
+            "title": "Identidad",
+            "type": "string"
+          },
+          "tipo": {
+            "enum": [
+              "persona",
+              "servicio"
+            ],
+            "title": "Tipo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "identidad",
+          "tipo"
+        ],
+        "title": "SesionSoporte",
+        "type": "object"
+      },
       "TipoVinculo": {
         "description": "Relación de una persona con una unidad funcional.",
         "enum": [
@@ -364,6 +387,28 @@
         "summary": "Mis Consorcios",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/soporte/sesion": {
+      "get": {
+        "description": "Quién es el operador según Access: comprueba la cadena Access → nginx → backend.",
+        "operationId": "sesion_api_v1_soporte_sesion_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionSoporte"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sesion",
+        "tags": [
+          "soporte"
         ]
       }
     },
