@@ -1,9 +1,10 @@
-"""Identidad y ámbito por consorcio de cada petición (documento 13, §7.2).
+"""Identidad y ámbito por consorcio de cada petición (documento 13, §7.2 y §10.4).
 
-La autenticación (módulo `identidad`: sesiones, passkeys, Access) todavía no existe.
-`obtener_identidad` rechaza toda petición hasta entonces: no hay ningún atajo de
-desarrollo que permita entrar sin credenciales. Las pruebas la reemplazan con
-`app.dependency_overrides`.
+`obtener_identidad` lee la cookie de sesión (`app/identidad/sesiones.py`), la valida en la
+base (existe, no está revocada ni vencida, la persona sigue activa), corre el vencimiento
+deslizante y, si la petición modifica estado, exige el token CSRF. Sin sesión válida responde
+401: no hay ningún atajo de desarrollo que permita entrar sin credenciales. Las pruebas que no
+prueban la autenticación la reemplazan con `app.dependency_overrides`.
 """
 
 from dataclasses import dataclass
@@ -11,16 +12,19 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from sqlalchemy import Engine, text
 
 from app.db import transaccion
 from app.errores import ErrorApi
+from app.identidad import sesiones
 
 
 @dataclass(frozen=True)
 class Identidad:
     persona_id: UUID
+    sesion_id: UUID | None = None
+    """La sesión de la petición; None solo en las pruebas que reemplazan la identidad."""
 
 
 @dataclass(frozen=True)
@@ -30,16 +34,29 @@ class Contexto:
     vinculos: tuple[str, ...]
 
 
-def obtener_identidad() -> Identidad:
-    raise ErrorApi(401, CodigoError.NO_AUTENTICADO, "Iniciá sesión para continuar.")
-
-
 def obtener_motor(request: Request) -> Engine:
     return request.app.state.motor
 
 
-IdentidadDep = Annotated[Identidad, Depends(obtener_identidad)]
 MotorDep = Annotated[Engine, Depends(obtener_motor)]
+
+
+def obtener_identidad(request: Request, response: Response, motor: MotorDep) -> Identidad:
+    token = request.cookies.get(sesiones.COOKIE_SESION)
+    if not sesiones.token_valido(token):
+        raise ErrorApi(401, CodigoError.NO_AUTENTICADO, "Iniciá sesión para continuar.")
+    # Ninguna persona en el ámbito: la validación la hace una función `security definer`.
+    with transaccion(motor, persona_id=None) as conn:
+        sesion = sesiones.validar(conn, token)
+    if sesion is None:
+        raise ErrorApi(401, CodigoError.NO_AUTENTICADO, "Iniciá sesión para continuar.")
+    sesiones.exigir_csrf(request, token)
+    if sesion.renovada:
+        sesiones.fijar_sesion(response, token)
+    return Identidad(persona_id=sesion.persona_id, sesion_id=sesion.sesion_id)
+
+
+IdentidadDep = Annotated[Identidad, Depends(obtener_identidad)]
 
 
 def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) -> Contexto:

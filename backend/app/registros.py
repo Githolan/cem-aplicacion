@@ -45,11 +45,13 @@ _PATRONES: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\beyJ[\w-]*\.[\w-]*\.[\w-]*"), REDACTADO),
     (re.compile(r"(?i)\b(bearer|basic)\s+[\w~+/.=-]+"), rf"\1 {REDACTADO}"),
     # Pares nombre=valor o nombre: valor con nombre de secreto (token, clave, password,
-    # api_key, authorization, cookie...), también como parte de otro nombre: access_token=…
+    # api_key, authorization, cookie, y las cookies de identidad: sesion, csrf, nonce), también
+    # como parte de otro nombre: access_token=…, __Host-cem_sesion=…
     (
         re.compile(
             r"(?i)((?<![\w-])[\w-]*(?:token|clave|password|passwd|contrase[ñn]a|secret|secreto"
-            r"|api[_-]?key|authorization|cookie)[\"']?\s*[:=]\s*[\"']?)[^\s\"',;&]+"
+            r"|api[_-]?key|authorization|cookie|sesion|csrf|nonce)[\"']?\s*[:=]\s*[\"']?)"
+            r"[^\s\"',;&]+"
         ),
         rf"\1{REDACTADO}",
     ),

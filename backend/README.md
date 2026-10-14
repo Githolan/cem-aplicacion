@@ -10,7 +10,8 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/acceso.py`, `app/soporte/` | JWT de Cloudflare Access en las rutas de soporte (`TB-CEM-5`) |
 | `app/limite.py` | Límite de tasa por IP real con Redis (§10.6, cierra TB-8) |
 | `app/db.py` | `transaccion()`: abre la transacción y fija persona y consorcio para la RLS (§7.2) |
-| `app/contexto.py` | `require_scope`: vínculos vigentes de la persona en el consorcio de la ruta. La autenticación aún no existe y rechaza todo con 401 |
+| `app/contexto.py` | `obtener_identidad`: valida la cookie de sesión (y el `X-CSRF-Token` si la petición modifica estado); `require_scope`: vínculos vigentes de la persona en el consorcio de la ruta |
+| `app/identidad/` | Enlace mágico, sesiones y CSRF (§10.3, §10.4): `POST /api/v1/auth/enlace`, `GET /api/v1/auth/canje`, `GET /api/v1/auth/sesion`, `POST /api/v1/auth/salir`. Necesita `CEM_ORIGEN_PUBLICO` (`https://<dominio>`) para armar el enlace |
 | `app/consorcios/` | `GET /api/v1/me/consorcios` y `GET /api/v1/consorcios/{id}/unidades` |
 | `app/liquidacion/reparto.py` | Motor de reparto: función pura con `Decimal` y restos mayores (§7.3) |
 | `app/plataforma/cola.py` | Cola de trabajos en PostgreSQL: `encolar()` dentro de la transacción de negocio, tipos con reintentos y retroceso (§12.1) |
@@ -22,6 +23,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `migrations/versions/0001_*` | Esquemas, núcleo, auditoría encadenada, RLS y privilegios |
 | `migrations/versions/0002_*` | `plataforma.jobs`, `outbox`, `ejecuciones_programadas`, sus políticas y las funciones del trabajador |
 | `migrations/versions/0003_*` | `plataforma.idempotencia` (respuestas de `Idempotency-Key`, §7.4) con RLS por persona y consorcio, y su purga |
+| `migrations/versions/0004_*` | `nucleo.sesion` y `nucleo.enlace_acceso` (solo hashes) con RLS por persona y funciones `security definer` para pedir, canjear y validar |
 | `scripts/crear_roles.sql` | Roles `cem_migrate`, `cem_app`, `cem_ro` y la base (una vez por servidor, con superusuario) |
 
 ## Desarrollo
@@ -46,4 +48,4 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Pendiente
 
-Autenticación y sesiones (`identidad`), rol `cem_backup`, partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
+De `identidad`: revocaciones en Redis, 12 h para roles de dinero, purga de enlaces y sesiones vencidas, código por correo, TOTP y passkeys. Además: partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
