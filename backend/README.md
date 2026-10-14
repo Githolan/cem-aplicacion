@@ -19,11 +19,12 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/plataforma/trabajos.py` | Proceso `cem-trabajos`: toma trabajos con `SKIP LOCKED` y los ejecuta con el consorcio fijado |
 | `app/plataforma/planificador.py` | Proceso `cem-planificador`: líder único con `pg_advisory_lock`, despacho del outbox y tareas periódicas con `UNIQUE(tipo, ventana)` (§12.3) |
 | `app/plataforma/idempotencia.py` | `Idempotency-Key` (§7.4): `IdempotenciaDep` y `responder_una_vez()` guardan la respuesta en la misma transacción que el efecto; repetición → misma respuesta, otro cuerpo → 422, en curso → espera o 409 |
-| `app/plataforma/tareas.py` | Tipos de trabajo y tareas periódicas registradas (hoy: purga diaria de la cola y de las respuestas de `Idempotency-Key` vencidas) |
+| `app/plataforma/tareas.py` | Tipos de trabajo y tareas periódicas registradas (hoy: purga diaria de la cola, de las respuestas de `Idempotency-Key` vencidas y de las sesiones y enlaces que dejaron de servir hace más de 90 días) |
 | `migrations/versions/0001_*` | Esquemas, núcleo, auditoría encadenada, RLS y privilegios |
 | `migrations/versions/0002_*` | `plataforma.jobs`, `outbox`, `ejecuciones_programadas`, sus políticas y las funciones del trabajador |
 | `migrations/versions/0003_*` | `plataforma.idempotencia` (respuestas de `Idempotency-Key`, §7.4) con RLS por persona y consorcio, y su purga |
 | `migrations/versions/0004_*` | `nucleo.sesion` y `nucleo.enlace_acceso` (solo hashes) con RLS por persona y funciones `security definer` para pedir, canjear y validar |
+| `migrations/versions/0005_*` | `nucleo.revocar_sesiones_de(persona)` (cierre por cambio de mandato, RN22) y `nucleo.purgar_identidad(retencion)`, que la purga diaria llama con 90 días (§15.6) |
 | `scripts/crear_roles.sql` | Roles `cem_migrate`, `cem_app`, `cem_ro` y la base (una vez por servidor, con superusuario) |
 
 ## Desarrollo
@@ -48,4 +49,4 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Pendiente
 
-De `identidad`: revocaciones en Redis, 12 h para roles de dinero, purga de enlaces y sesiones vencidas, código por correo, TOTP y passkeys. Además: partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
+De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), 12 h para roles de dinero y la llamada a `nucleo.revocar_sesiones_de` desde el módulo de mandatos (H2 2b), código por correo, TOTP y passkeys. Además: partición mensual de auditoría por el planificador, imagen Docker. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
