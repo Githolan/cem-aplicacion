@@ -17,9 +17,10 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/plataforma/outbox.py` | `publicar()` de eventos en la misma transacción y despachador que los convierte en trabajos (§12.2) |
 | `app/plataforma/trabajos.py` | Proceso `cem-trabajos`: toma trabajos con `SKIP LOCKED` y los ejecuta con el consorcio fijado |
 | `app/plataforma/planificador.py` | Proceso `cem-planificador`: líder único con `pg_advisory_lock`, despacho del outbox y tareas periódicas con `UNIQUE(tipo, ventana)` (§12.3) |
-| `app/plataforma/tareas.py` | Tipos de trabajo y tareas periódicas registradas (hoy: purga diaria de la cola) |
+| `app/plataforma/tareas.py` | Tipos de trabajo y tareas periódicas registradas (hoy: purga diaria de la cola y de las respuestas de `Idempotency-Key` vencidas) |
 | `migrations/versions/0001_*` | Esquemas, núcleo, auditoría encadenada, RLS y privilegios |
 | `migrations/versions/0002_*` | `plataforma.jobs`, `outbox`, `ejecuciones_programadas`, sus políticas y las funciones del trabajador |
+| `migrations/versions/0003_*` | `plataforma.idempotencia` (respuestas de `Idempotency-Key`, §7.4) con RLS por persona y consorcio, y su purga |
 | `scripts/crear_roles.sql` | Roles `cem_migrate`, `cem_app`, `cem_ro` y la base (una vez por servidor, con superusuario) |
 
 ## Desarrollo
