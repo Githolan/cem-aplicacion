@@ -1,6 +1,21 @@
 {
   "components": {
     "schemas": {
+      "CanjeEnlace": {
+        "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
+        "properties": {
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "CanjeEnlace",
+        "type": "object"
+      },
       "ConsorcioResumen": {
         "description": "Un consorcio donde la persona tiene vínculo vigente (selector de edificio).",
         "properties": {
@@ -28,6 +43,27 @@
           "vinculos"
         ],
         "title": "ConsorcioResumen",
+        "type": "object"
+      },
+      "EnlacePedido": {
+        "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
+        "properties": {
+          "estado": {
+            "const": "pedido",
+            "title": "Estado",
+            "type": "string"
+          },
+          "mensaje": {
+            "description": "Texto genérico para la persona usuaria.",
+            "title": "Mensaje",
+            "type": "string"
+          }
+        },
+        "required": [
+          "estado",
+          "mensaje"
+        ],
+        "title": "EnlacePedido",
         "type": "object"
       },
       "EstadoCola": {
@@ -107,6 +143,25 @@
         "title": "ListaUnidades",
         "type": "object"
       },
+      "PedidoEnlace": {
+        "description": "`POST /api/v1/auth/enlace`: pide un enlace de acceso para ese correo.",
+        "properties": {
+          "correo": {
+            "examples": [
+              "ana@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo"
+        ],
+        "title": "PedidoEnlace",
+        "type": "object"
+      },
       "Salud": {
         "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
         "properties": {
@@ -161,6 +216,44 @@
           "redis"
         ],
         "title": "SaludDependencias",
+        "type": "object"
+      },
+      "SesionActual": {
+        "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
+        "properties": {
+          "correo": {
+            "title": "Correo",
+            "type": "string"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "persona_id": {
+            "format": "uuid",
+            "title": "Persona Id",
+            "type": "string"
+          },
+          "sesion_id": {
+            "format": "uuid",
+            "title": "Sesion Id",
+            "type": "string"
+          },
+          "vence_en": {
+            "description": "Vencimiento deslizante: cada uso de la sesión lo vuelve a correr.",
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "persona_id",
+          "nombre",
+          "correo",
+          "sesion_id",
+          "vence_en"
+        ],
+        "title": "SesionActual",
         "type": "object"
       },
       "SesionSoporte": {
@@ -267,6 +360,126 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/auth/canje": {
+      "post": {
+        "description": "Valida el token (existe, no venció, no se usó) y que el navegador tenga la cookie\n`nonce` con la que se pidió; crea la sesión y deja sus cookies. Todo rechazo responde\nigual: 401 `enlace_invalido`.\n\nSin token CSRF, porque todavía no hay sesión. La protección equivalente es el nonce: la\ncookie es `SameSite=Lax`, así que un `POST` desde otro sitio llega sin ella y se rechaza; y\naunque llegara, el token canjeado tendría que ser uno pedido desde este mismo navegador. Una\nfalsificación de inicio de sesión (meter a la víctima en la cuenta del atacante) necesita el\nnonce de la víctima ligado al token del atacante, y no lo tiene. Además, si el navegador\ndeclara `Sec-Fetch-Site` y no es `same-origin`, se rechaza.",
+        "operationId": "canjear_api_v1_auth_canje_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanjeEnlace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionActual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Canjear el enlace de acceso",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/enlace": {
+      "post": {
+        "description": "Responde siempre 202 con el mismo cuerpo y en el mismo tiempo, exista o no la cuenta.\nDeja en el navegador la cookie `nonce` a la que queda ligado el enlace.",
+        "operationId": "pedir_enlace_api_v1_auth_enlace_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoEnlace"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnlacePedido"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pedir un enlace de acceso por correo",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/salir": {
+      "post": {
+        "description": "Revoca la sesión actual y borra sus cookies. Pide `X-CSRF-Token`.",
+        "operationId": "salir_api_v1_auth_salir_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cerrar la sesión",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesion": {
+      "get": {
+        "operationId": "sesion_actual_api_v1_auth_sesion_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionActual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Quién soy",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/unidades": {
       "get": {
         "operationId": "unidades_api_v1_consorcios__consorcio_id__unidades_get",

@@ -21,6 +21,11 @@ class CodigoError(StrEnum):
     """La `Idempotency-Key` ya se usó en esta ruta con otro pedido (documento 13, §7.4)."""
     IDEMPOTENCIA_EN_CURSO = "idempotencia_en_curso"
     """Otro pedido con la misma `Idempotency-Key` sigue en curso; se reintenta más tarde."""
+    ENLACE_INVALIDO = "enlace_invalido"
+    """El enlace de acceso no existe, venció, ya se usó o se abrió en otro navegador (§10.3).
+    Las cuatro causas responden igual: la diferencia solo va a los registros."""
+    CSRF_INVALIDO = "csrf_invalido"
+    """Falta el encabezado `X-CSRF-Token` o no corresponde a la sesión (documento 13, §10.4)."""
 
 
 class Error(BaseModel):

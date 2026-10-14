@@ -18,8 +18,20 @@ log = logging.getLogger("cem")
 
 
 class ErrorApi(Exception):
-    def __init__(self, estado: int, codigo: CodigoError, mensaje: str) -> None:
+    def __init__(
+        self,
+        estado: int,
+        codigo: CodigoError,
+        mensaje: str,
+        encabezados: dict[str, str] | None = None,
+    ) -> None:
         self.estado, self.codigo, self.mensaje = estado, codigo, mensaje
+        self.encabezados = encabezados or {}
+
+    def respuesta(self) -> JSONResponse:
+        respuesta = respuesta_error(self.estado, self.codigo, self.mensaje)
+        respuesta.headers.update(self.encabezados)
+        return respuesta
 
 
 def respuesta_error(estado: int, codigo: CodigoError, mensaje: str, detalle=None) -> JSONResponse:
@@ -32,7 +44,7 @@ def respuesta_error(estado: int, codigo: CodigoError, mensaje: str, detalle=None
 def instalar(app: FastAPI) -> None:
     @app.exception_handler(ErrorApi)
     async def _api(_: Request, e: ErrorApi) -> JSONResponse:
-        return respuesta_error(e.estado, e.codigo, e.mensaje)
+        return e.respuesta()
 
     @app.exception_handler(RequestValidationError)
     async def _validacion(_: Request, e: RequestValidationError) -> JSONResponse:
