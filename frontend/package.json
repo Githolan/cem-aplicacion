@@ -8,11 +8,12 @@
   "scripts": {
     "generar": "openapi-typescript ../contratos/openapi.json -o src/api/tipos.ts",
     "dev": "pnpm generar && vite",
-    "tipos": "pnpm generar && tsc -b",
+    "tipos": "pnpm generar && tsc -b && tsc -p e2e",
     "lint": "eslint . --max-warnings 0",
     "test": "pnpm generar && vitest run",
     "build": "pnpm generar && tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e": "pnpm generar && sh scripts/probar-extremo-a-extremo.sh"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.2",
@@ -22,8 +23,11 @@
     "react-router": "7.18.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@eslint/js": "9.39.5",
+    "@playwright/test": "1.57.0",
     "@testing-library/react": "16.3.3",
+    "@types/node": "22.19.1",
     "@types/react": "18.3.31",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "4.7.0",
