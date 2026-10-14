@@ -8,6 +8,15 @@ map $http_x_forwarded_proto $esquema_original {
     ""      $scheme;
 }
 
+# IP real del cliente para el límite de tasa del backend (documento 13, §10.6; TB-8). Traefik no
+# confía en encabezados reenviados: en X-Forwarded-For deja la IP de cloudflared (10.0.2.1 para
+# todos, medido el 14-10-2026). La real llega en CF-Connecting-IP; sin ella (sondas internas que
+# no pasan por Cloudflare) va la IP de quien llama.
+map $http_cf_connecting_ip $ip_cliente {
+    default $http_cf_connecting_ip;
+    ""      $remote_addr;
+}
+
 server {
     # 8080 porque nginx corre sin privilegios (uid 101). Solo IPv4, como uvicorn en cem-backend:
     # Traefik llega por la IPv4 del contenedor y un listen [::] impide arrancar donde no hay IPv6.

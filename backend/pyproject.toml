@@ -6,7 +6,10 @@ requires-python = ">=3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["db: requiere PostgreSQL real con las políticas de seguridad por fila activas"]
+markers = [
+    "db: requiere PostgreSQL real con las políticas de seguridad por fila activas",
+    "redis: requiere Redis real (límite de tasa)",
+]
 
 [tool.ruff]
 line-length = 100

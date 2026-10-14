@@ -172,3 +172,10 @@ def test_uuid_v7_es_ordenable_por_tiempo(motor_migrate):
         ids = list(ids)
     assert all(u.version == 7 for u in ids)
     assert [u.bytes[:6] for u in ids] == sorted(u.bytes[:6] for u in ids)
+
+
+def test_la_suite_oficial_corre_en_postgresql_18(motor_app):
+    # Documento 14, §6.3: producción usa PostgreSQL 18; una corrida en otra versión no vale
+    # como evidencia de la cola, el outbox ni la seguridad por fila.
+    with motor_app.connect() as conn:
+        assert conn.execute(text("show server_version_num")).scalar_one() >= "180000"
