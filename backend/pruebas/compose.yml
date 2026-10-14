@@ -39,6 +39,23 @@ services:
     tmpfs:
       - /datos
 
+  # Servidor SMTP de pruebas para `notificar.correo` (documento 13, §12.4): STARTTLS obligatorio
+  # con un certificado autofirmado para su nombre (lo genera al arrancar), autenticación con un
+  # usuario de prueba y "chaos" para responder 4xx o 5xx a pedido. Su API HTTP (8025) lista lo
+  # que llegó. Nada sale de esta red.
+  cem-correo-pruebas:
+    image: axllent/mailpit:v1.31.4
+    environment:
+      MP_SMTP_TLS_CERT: sans:cem-correo-pruebas
+      MP_SMTP_TLS_KEY: sans:cem-correo-pruebas
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_SMTP_AUTH: usuario-pruebas:clave-pruebas
+      MP_ENABLE_CHAOS: "true"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 1s
+      retries: 30
+
   cem-backend-pruebas:
     build:
       context: ../..
@@ -50,6 +67,8 @@ services:
         condition: service_healthy
       cem-almacen-s3-pruebas:
         condition: service_started
+      cem-correo-pruebas:
+        condition: service_healthy
     environment:
       CEM_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgres@cem-postgres-pruebas:5432/postgres
       CEM_TEST_REDIS_URL: redis://cem-redis-pruebas:6379/0
@@ -57,6 +76,11 @@ services:
       CEM_TEST_S3_REGION: sa-santiago-1
       CEM_TEST_S3_CLAVE_ID: clave-id-pruebas
       CEM_TEST_S3_CLAVE_SECRETA: clave-secreta-pruebas
+      CEM_TEST_SMTP_SERVIDOR: cem-correo-pruebas
+      CEM_TEST_SMTP_PUERTO: "1025"
+      CEM_TEST_SMTP_USUARIO: usuario-pruebas
+      CEM_TEST_SMTP_CLAVE: clave-pruebas
+      CEM_TEST_CORREO_API: http://cem-correo-pruebas:8025
     volumes:
       - ../..:/src
     entrypoint: []
