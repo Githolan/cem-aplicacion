@@ -8,6 +8,12 @@
 #    Coolify aunque una compuerta fallara): producción sin -Confirmar, producción
 #    sin staging verificado, staging sin ci.ps1 en verde y staging sin -Autorizacion.
 #    Cada caso debe salir con código 1 y el motivo esperado.
+# 5. Revisiones de Alembic leídas de commits reales de este repositorio (0001;
+#    0001,0002; la raíz sin migraciones falla) y cadenas inválidas.
+# 6. Decisión de la copia previa: sin migración nueva, con migración nueva, sin
+#    cem-trabajos, con -SinCopiaPrevia, base en una revisión desconocida o vacía.
+# 7. Resumen de la copia (JSON válido e inválidos) y la fila del registro.
+# 8. cd.ps1 acepta -SinCopiaPrevia y con él las demás compuertas siguen valiendo.
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -90,6 +96,84 @@ $r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta)
 Comprobar 'staging sin -Autorizacion: se niega' ($r.Codigo -eq 1 -and $r.Salida -match 'falta -Autorizacion') $r.Salida
 $r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-Autorizacion', 'prueba')
 Comprobar 'control: con todo en regla llega a Coolify y falla por falta de credenciales' ($r.Codigo -ne 0 -and $r.Salida -match 'faltan variables de entorno') $r.Salida
+
+Write-Host "`n=== 5. Revisiones de Alembic de una SHA (git real, sin red) ===" -ForegroundColor Cyan
+$repoLocal = Split-Path -Parent $PSScriptRoot
+function ShaDe([string]$ref) { "$(git -C $repoLocal rev-parse --verify "$ref^{commit}")".Trim() }
+# Commits fijos de main: 5b51570 agrega 0001; 9a0b4ee agrega 0002; la raíz no tiene migraciones.
+$cad = Get-CemCadenaAlembicEnSha -Repo $repoLocal -Sha (ShaDe '5b51570')
+Comprobar '5b51570 (migración 0001) -> cadena 0001' (($cad -join ',') -eq '0001') ($cad -join ',')
+$cad = Get-CemCadenaAlembicEnSha -Repo $repoLocal -Sha (ShaDe '9a0b4ee')
+Comprobar '9a0b4ee (cola) -> cadena 0001,0002' (($cad -join ',') -eq '0001,0002') ($cad -join ',')
+$e = $null; try { Get-CemCadenaAlembicEnSha -Repo $repoLocal -Sha (ShaDe "$(git -C $repoLocal rev-list --max-parents=0 HEAD)") | Out-Null } catch { $e = $_ }
+Comprobar 'control: el commit raíz (sin migraciones) falla' ($null -ne $e -and "$e" -match 'no hay migraciones') "$e"
+
+function Rev([string]$r, $a) { [pscustomobject]@{ Revision = $r; Anterior = $a; Archivo = "$r.py" } }
+$e = $null; try { Get-CemCadenaAlembic -Revisiones @((Rev '0001' $null), (Rev '0002' '0001'), (Rev '0003' '0001')) | Out-Null } catch { $e = $_ }
+Comprobar 'dos cabezas (bifurcación) falla' ($null -ne $e -and "$e" -match 'bifurcan') "$e"
+$e = $null; try { Get-CemCadenaAlembic -Revisiones @((Rev '0001' $null), (Rev '0002' '0001'), (Rev '0002' '0001')) | Out-Null } catch { $e = $_ }
+Comprobar 'revisión repetida falla' ($null -ne $e -and "$e" -match 'repetida') "$e"
+$e = $null; try { Get-CemCadenaAlembic -Revisiones @((Rev '0001' $null), (Rev '0003' '0002')) | Out-Null } catch { $e = $_ }
+Comprobar 'revisión que no cuelga de la base falla' ($null -ne $e -and "$e" -match 'no cuelgan') "$e"
+$cad = Get-CemCadenaAlembic -Revisiones @((Rev '0003' '0002'), (Rev '0001' $null), (Rev '0002' '0001'))
+Comprobar 'el orden de los archivos no importa: 0001,0002,0003' (($cad -join ',') -eq '0001,0002,0003') ($cad -join ',')
+$textoTupla = "revision = ""0004""`ndown_revision = (""0002"", ""0003"")`n"
+$e = $null; try { ConvertFrom-CemMigracion -Texto $textoTupla -Archivo 'fusion.py' | Out-Null } catch { $e = $_ }
+Comprobar 'una migración de fusión (tupla) falla' ($null -ne $e -and "$e" -match 'down_revision') "$e"
+
+Write-Host "`n=== 6. Decisión de la copia previa ===" -ForegroundColor Cyan
+$c3 = @('0001', '0002', '0003')
+function Decidir([string]$version, [bool]$trabajos, [bool]$sin) { Get-CemDecisionCopiaPrevia -Cadena $c3 -VersionEntorno $version -HayTrabajos $trabajos -SinCopiaPrevia $sin }
+$d = Decidir '0003' $true $false
+Comprobar 'base en la cabeza -> sin-migracion' ($d.Accion -eq 'sin-migracion' -and $d.Pendientes.Count -eq 0) "$($d.Accion)"
+$d = Decidir '0003' $false $false
+Comprobar 'base en la cabeza y sin cem-trabajos -> sin-migracion (no hace falta copia)' ($d.Accion -eq 'sin-migracion') "$($d.Accion)"
+$d = Decidir '0002' $true $false
+Comprobar 'una migración nueva con cem-trabajos -> copiar 0003' ($d.Accion -eq 'copiar' -and ($d.Pendientes -join ',') -eq '0003') "$($d.Accion) $($d.Pendientes -join ',')"
+$d = Decidir '0001' $true $false
+Comprobar 'dos migraciones nuevas -> copiar 0002,0003' ($d.Accion -eq 'copiar' -and ($d.Pendientes -join ',') -eq '0002,0003') "$($d.Accion) $($d.Pendientes -join ',')"
+$d = Decidir '0002' $false $false
+Comprobar 'migración nueva sin cem-trabajos -> negar y nombra -SinCopiaPrevia' ($d.Accion -eq 'negar' -and $d.Motivo -match '-SinCopiaPrevia') "$($d.Accion) $($d.Motivo)"
+$d = Decidir '0002' $false $true
+Comprobar 'migración nueva sin cem-trabajos con -SinCopiaPrevia -> omitida' ($d.Accion -eq 'omitida' -and $d.Motivo -match 'no tiene cem-trabajos') "$($d.Accion) $($d.Motivo)"
+$d = Decidir '0002' $true $true
+Comprobar 'migración nueva con cem-trabajos y -SinCopiaPrevia -> omitida' ($d.Accion -eq 'omitida') "$($d.Accion)"
+$e = $null; try { Decidir '0009' $true $false | Out-Null } catch { $e = $_ }
+Comprobar 'base en una revisión que la SHA no conoce -> falla' ($null -ne $e -and "$e" -match "'0009'") "$e"
+$e = $null; try { Decidir '' $true $false | Out-Null } catch { $e = $_ }
+Comprobar 'alembic_version vacía -> falla' ($null -ne $e -and "$e" -match 'vacía') "$e"
+
+Write-Host "`n=== 7. Resultado de la copia y fila del registro ===" -ForegroundColor Cyan
+$suma = 'c' * 64
+$salidaBuena = "aviso en stderr`n{""objetos"": [""diarias/2026-10-14/cem-20261014T150000Z.dump.age""], ""bytes"": 48622, ""sha256"": ""$suma"", ""tablas"": 10, ""filas"": 7}`n"
+$copiaLeida = Read-CemResultadoCopia -Salida $salidaBuena
+Comprobar 'lee la última línea JSON de la copia' ($copiaLeida.Sha256 -eq $suma -and $copiaLeida.Bytes -eq 48622 -and $copiaLeida.Objetos.Count -eq 1) ($copiaLeida | ConvertTo-Json -Compress)
+foreach ($caso in @(
+        @('sin salida', ''),
+        @('salida que no es JSON', 'Traceback: ErrorCopia: la restauración no coincide'),
+        @('sin objetos', "{""objetos"": [], ""bytes"": 1, ""sha256"": ""$suma"", ""tablas"": 1, ""filas"": 0}"),
+        @('SHA-256 corto', "{""objetos"": [""x""], ""bytes"": 1, ""sha256"": ""abc"", ""tablas"": 1, ""filas"": 0}"),
+        @('0 tablas', "{""objetos"": [""x""], ""bytes"": 1, ""sha256"": ""$suma"", ""tablas"": 0, ""filas"": 0}"))) {
+    $e = $null; try { Read-CemResultadoCopia -Salida $caso[1] | Out-Null } catch { $e = $_ }
+    Comprobar "control: copia con $($caso[0]) -> falla" ($null -ne $e) 'aceptada'
+}
+$texto = Format-CemCopiaPrevia -Decision (Decidir '0002' $true $false) -Copia $copiaLeida -Bucket 'cem-copias-seguridad-staging'
+Comprobar 'registro con copia: objeto y SHA-256' ($texto -match [regex]::Escape('diarias/2026-10-14/cem-20261014T150000Z.dump.age') -and $texto -match $suma) $texto
+$texto = Format-CemCopiaPrevia -Decision (Decidir '0003' $true $false)
+Comprobar 'registro sin migración: lo dice' ($texto -match 'sin migraciones nuevas') $texto
+$texto = Format-CemCopiaPrevia -Decision (Decidir '0002' $false $true)
+Comprobar 'registro con -SinCopiaPrevia: NO HECHA' ($texto -match 'NO HECHA, por -SinCopiaPrevia') $texto
+$e = $null; try { Format-CemCopiaPrevia -Decision (Decidir '0002' $true $false) | Out-Null } catch { $e = $_ }
+Comprobar 'control: decisión copiar sin resultado de copia -> falla' ($null -ne $e) 'aceptada'
+$e = $null; try { Format-CemCopiaPrevia -Decision (Decidir '0002' $false $false) | Out-Null } catch { $e = $_ }
+Comprobar 'control: decisión negar no llega al registro' ($null -ne $e) 'aceptada'
+Comprobar 'el programa de la copia no lleva comillas (pasa por ssh y sh)' ($CemProgramaCopiaPrevia -notmatch "[`"']") $CemProgramaCopiaPrevia
+
+Write-Host "`n=== 8. cd.ps1: -SinCopiaPrevia es un parámetro ===" -ForegroundColor Cyan
+$parametros = (Get-Command $cd).Parameters
+Comprobar 'cd.ps1 acepta -SinCopiaPrevia (switch)' ($parametros.ContainsKey('SinCopiaPrevia') -and $parametros['SinCopiaPrevia'].SwitchParameter) ($parametros.Keys -join ',')
+$r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-Autorizacion', 'prueba', '-SinCopiaPrevia')
+Comprobar 'con -SinCopiaPrevia las demás compuertas siguen valiendo (llega a credenciales y falla)' ($r.Codigo -ne 0 -and $r.Salida -match 'faltan variables de entorno') $r.Salida
 
 Remove-Item Env:\CEM_DESPLIEGUE_ESTADO
 if ((Split-Path -Leaf $raiz) -like "$prefijo*" -and $raiz.StartsWith([IO.Path]::GetTempPath())) { Remove-Item -Recurse -Force $raiz }
