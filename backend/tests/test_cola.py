@@ -359,21 +359,23 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=raiz, env=entorno | {"CEM_PROCESO": "planificador"}
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 1)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 2)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=raiz, env=entorno | {"CEM_PROCESO": "trabajos"}
     )
+    # Sin las variables de las copias, la copia falla y lo dice; no se saltea en silencio.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
-                        " where estado = 'hecho'") == 1)  # fmt: skip
+                        " where estado = 'hecho' and tipo = 'plataforma.purgar_cola'"
+                        " or error like '%faltan variables de las copias%'") == 2)  # fmt: skip
     for proceso in (planificador, trabajos):
         proceso.send_signal(signal.SIGTERM)
         assert proceso.wait(timeout=20) == 0
     with motor_migrate.connect() as c:
-        assert c.execute(text("select tipo from plataforma.jobs")).scalar_one() == (
-            "plataforma.purgar_cola"
-        )
-        assert c.execute(text("select tipo from plataforma.ejecuciones_programadas")).all() == [
-            ("plataforma.purgar_cola",)
+        assert c.execute(
+            text("select tipo from plataforma.ejecuciones_programadas order by tipo")
+        ).all() == [
+            ("plataforma.copia_diaria",),
+            ("plataforma.purgar_cola",),
         ]
 
 
