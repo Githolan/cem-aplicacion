@@ -61,17 +61,17 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 - **Staging en `357775c` (14-10-2026, 14:03-14:08 UTC):** `cem-backend-staging`, `cem-trabajos-staging`, `cem-planificador-staging` y `cem-frontend-staging`, los cuatro `healthy`. `/health` con `version_contrato` 0.4.0, `/api/v1/health/deps` y `/api/v1/health/cola` en `ok`, registros JSON en los tres procesos. Variables (en Coolify, no aquí): en el backend `CEM_REDIS_URL`, `FORWARDED_ALLOW_IPS`, `CEM_ACCESS_EQUIPO` y `CEM_ACCESS_AUD`; en `cem-trabajos-staging`, `CEM_DATABASE_URL_BACKUP`, `CEM_COPIAS_CLAVE_PUBLICA`, `CEM_COPIAS_BUCKET=cem-copias-seguridad-staging` y las cuatro `CEM_OCI_S3_*` como referencia a las compartidas del entorno. Rol `cem_backup` creado en `cem-postgres-staging`.
 - **Primera copia real (staging):** al arrancar, el planificador encoló la ventana de las 03:30 del 14-10 y `cem-trabajos-staging` la dejó `hecho` al primer intento: `diarias/2026-10-14/cem-20261014T033000Z.dump.age`, 48.622 bytes, 10 tablas y 7 filas verificadas. Leído aparte con la clave S3 de staging: mismo tamaño y SHA-256 que informó el trabajo, cabecera `age-encryption.org/v1` y ningún texto en claro. **NO VERIFICADO:** el descifrado con la identidad real `cem-clave-copias-age` (ensayo trimestral, §17.4).
-- **Producción** sigue en `0849ee9` (contrato 0.1.0): sin límite de tasa, Access, cola, registros JSON ni copias.
+- **Producción en `357775c` (14-10-2026, 14:22-14:25 UTC), solo `cem-backend` y `cem-frontend`:** migración `0002` aplicada; `/health` con `version_contrato` 0.4.0, `/deps` y `/cola` en `ok`, registros JSON. Variables nuevas en `cem-backend`: `CEM_REDIS_URL` (referencia a `CEM_REDIS_CLAVE`, compartida) y `FORWARDED_ALLOW_IPS`. Rol `cem_backup` creado en `cem-postgres`. Límite de tasa con la IP real: dos pedidos desde la PC del propietario contaron bajo su IP pública; 301 pedidos desde una IP de prueba dieron 300 × 401 y un 429; otra IP sigue en 401; `/health` exenta. Soporte sin Access configurado: todo 401 (también un JWT inventado). **Falta:** `cem-trabajos` y `cem-planificador` de producción (sin ellos no corre la copia diaria) y la aplicación de Access `cem-soporte`.
 
-## Antes de llevarlo a producción (orden del propietario)
+## Para terminar producción
 
-- `cem-backend`: `CEM_REDIS_URL` (de `cem-redis`), `FORWARDED_ALLOW_IPS=10.0.2.0/24`; para soporte, crear antes la aplicación de Access `cem-soporte` (`cem.holancloud.com/api/v1/soporte*`) y cargar `CEM_ACCESS_EQUIPO` y su `CEM_ACCESS_AUD`.
-- Crear `cem-trabajos` y `cem-planificador` (misma imagen, `CEM_PROCESO`, sin dominio), con las variables de las copias apuntando a `cem-copias-seguridad`; rol `cem_backup` en `cem-postgres`. Redesplegar `cem-frontend` (cambió su nginx).
-- Desplegar con `cd.ps1`: primero staging (deja la constancia que exige producción) y después `-Entorno produccion -Confirmar`. **NO VERIFICADO:** un despliegue real con `cd.ps1`; el clasificador de permisos de la sesión de Claude lo bloqueó, y el despliegue de staging se hizo con un script propio por la misma API.
+- **`cem-trabajos` y `cem-planificador`:** el script `C:/tmp/cemapp/prod_5_procesos.ps1` (en la PC del propietario) los crea con el nombre canónico, sin dominio, con `CEM_DATABASE_URL` como referencia a `CEM_DB_CLAVE_APP`, y en `cem-trabajos` las variables de las copias (`CEM_DATABASE_URL_BACKUP` con `cem_backup`, y referencias a `CEM_COPIAS_CLAVE_PUBLICA`, `CEM_OCI_BUCKET_COPIAS` y las `CEM_OCI_S3_*`), los despliega y borra el archivo local con la clave de `cem_backup`. El clasificador de permisos de la sesión de Claude no lo dejó correr; lo corre el propietario: `pwsh C:/tmp/cemapp/prod_5_procesos.ps1`. Al arrancar, el planificador encola la copia de la ventana del día.
+- **Soporte:** crear la aplicación de Access `cem-soporte` (`cem.holancloud.com/api/v1/soporte*` y `/soporte*`, correos de operadores) y cargar `CEM_ACCESS_EQUIPO` y su `CEM_ACCESS_AUD` en `cem-backend`.
+- **Kuma:** monitores `cem-dependencias` (`/api/v1/health/deps`) y `cem-trabajos` (`/api/v1/health/cola`) de producción, iguales a los de staging con `Host: cem.holancloud.com`.
 
 ## Próximo paso
 
-1. Llevar H1 a producción (ver arriba) con orden del propietario.
+1. Terminar producción (ver "Para terminar producción").
 2. Pendientes de las copias: push a Kuma (una copia que nunca corrió hoy no alerta), copia antes de cada migración en `cd.ps1`, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
 3. `pnpm e2e` dentro de `ci.ps1`; probar `/instalar` en un iPhone y un Android reales.
 4. Hook `SessionStart` que instale PostgreSQL 18 y Redis 7 en las sesiones de Claude.
