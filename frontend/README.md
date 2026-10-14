@@ -12,10 +12,12 @@ Hoy es el esqueleto de H1: una página de inicio que muestra el estado del backe
 | `src/api/tipos.ts` | **Generado** desde `../contratos/openapi.json` en cada `dev`, `test`, `tipos` y `build`; no se compromete ni se edita (AD-06) |
 | `src/EstadoServicio.tsx` | Consulta `/health` con TanStack Query y muestra versión, contrato y SHA |
 | `src/App.tsx` | Rutas (React Router 7): inicio y "No encontramos esa página" para cualquier otra |
+| `src/Entrar.tsx` | Página `/entrar` que abre el enlace del correo: lee el token del fragmento (`#token=`, nunca llega al servidor), lo borra de la URL y lo canjea con `POST /api/v1/auth/canje`; muestra "Entraste." o un error genérico. Diseño provisorio hasta G3 |
 | `src/manifiesto.ts` | Manifiesto de la PWA; una prueba exige `standalone` e iconos 192, 512 y `maskable` |
 | `src/AvisoVersion.tsx` | Aviso "hay una versión nueva": el service worker nuevo se activa solo si la persona acepta (§14.4) |
 | `vite.config.ts` | Manifiesto y service worker (Workbox): precaché del shell; `/api/` y `/health` nunca salen de caché |
 | `nginx/cem-frontend.conf.template` | Proxy de `/api/` y `/health` al backend con `resolver` y variable (AD-05); caché de activos y cabeceras de seguridad |
+| (registro de acceso) | `log_format cem_sin_consulta`: ruta sin `?…` y sin `Referer`, así un token o un correo en la consulta no quedan en `docker logs`; lo prueba `scripts/probar-imagen.sh` |
 | `nginx/05-exigir-backend.sh` | El contenedor no arranca si falta `CEM_BACKEND_DESTINO` |
 | `Dockerfile` | Dos etapas: `node:22-alpine` (pnpm, tipos, `tsc`, `vite build`) y `nginxinc/nginx-unprivileged:1.27-alpine` (uid 101, puerto 8080) |
 | `scripts/probar-imagen.sh` | Prueba la imagen construida sin backend: uid 101, cabeceras, caché, fallback de la SPA, 404 de `/assets/` y reenvío de `/health` |

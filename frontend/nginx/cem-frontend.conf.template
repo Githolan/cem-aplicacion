@@ -17,7 +17,21 @@ map $http_cf_connecting_ip $ip_cliente {
     ""      $remote_addr;
 }
 
+# Registro de acceso sin la consulta (documento 13, §16.1): el `main` de la imagen escribe
+# "$request", que incluye `?…`, y ahí puede haber un token o un correo. Se registra solo la ruta
+# original (antes de cualquier try_files), sin `Referer`, que también puede traer una consulta.
+# El enlace de acceso lleva el token en el fragmento (`/entrar#token=…`), que nunca llega acá;
+# esto es la segunda barrera.
+map $request_uri $ruta_sin_consulta {
+    "~^(?<ruta>[^?]*)" $ruta;
+}
+log_format cem_sin_consulta '$remote_addr [$time_local] "$request_method $ruta_sin_consulta '
+                            '$server_protocol" $status $body_bytes_sent $request_time '
+                            '"$http_user_agent"';
+
 server {
+    access_log /var/log/nginx/access.log cem_sin_consulta;
+
     # 8080 porque nginx corre sin privilegios (uid 101). Solo IPv4, como uvicorn en cem-backend:
     # Traefik llega por la IPv4 del contenedor y un listen [::] impide arrancar donde no hay IPv6.
     listen 8080;

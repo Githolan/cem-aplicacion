@@ -68,4 +68,19 @@ SIN_CF=$(curl -s -H 'X-Forwarded-For: 198.51.100.66' "$URL_ECO/api/v1/x")
 case "$SIN_CF" in
   "" | *198.51.100.66*) falla "sin CF-Connecting-IP el backend recibió '$SIN_CF'" ;;
 esac
+# El registro de acceso no lleva la consulta (documento 13, §16.1): un token o un correo en `?…`
+# no puede quedar en `docker logs` (Dozzle). Se prueba con el backend de eco, para que nginx no
+# escriba errores de upstream: su registro de errores siempre trae la línea del pedido completa y
+# no tiene formato configurable (por eso el enlace lleva el token en el fragmento y el canje va
+# en el cuerpo). Control: los pedidos sí quedaron registrados, por su ruta.
+SECRETO="secreto-$$"
+curl -s -o /dev/null "$URL_ECO/entrar?token=$SECRETO&correo=ana@ejemplo.com"
+curl -s -o /dev/null "$URL_ECO/api/v1/x?token=$SECRETO"
+curl -s -o /dev/null -H "Referer: $URL_ECO/otra?token=$SECRETO" "$URL_ECO/"
+REGISTRO=$(docker logs "$CON_ECO" 2>&1)
+echo "$REGISTRO" | grep -q '"GET /entrar[ ?]' || falla "el pedido a /entrar no quedó en el registro de acceso"
+echo "$REGISTRO" | grep -q '"GET /api/v1/x[ ?]' || falla "el pedido a /api/ no quedó en el registro de acceso"
+if echo "$REGISTRO" | grep -q -e "$SECRETO" -e 'ana@ejemplo.com'; then
+  falla "la consulta quedó en el registro de acceso"
+fi
 echo "OK: imagen $IMAGEN"
