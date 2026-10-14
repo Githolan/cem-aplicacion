@@ -5,7 +5,10 @@ import { BrowserRouter } from "react-router";
 
 import { App } from "./App";
 import { AvisoVersion } from "./AvisoVersion";
+import { escucharInstalacion } from "./instalacion";
 import "./estilos.css";
+
+escucharInstalacion();
 
 const consultas = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
 

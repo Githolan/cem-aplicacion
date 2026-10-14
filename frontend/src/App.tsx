@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from "react-router";
 
 import { EstadoServicio } from "./EstadoServicio";
+import { EnlaceInstalar, Instalar } from "./Instalar";
 
 function Inicio() {
   return (
@@ -10,6 +11,7 @@ function Inicio() {
         Estamos construyendo la aplicación. Pronto vas a poder ver tus expensas, documentos y
         avisos desde acá.
       </p>
+      <EnlaceInstalar />
       <EstadoServicio />
     </>
   );
@@ -36,6 +38,7 @@ export function App() {
       <main id="contenido">
         <Routes>
           <Route path="/" element={<Inicio />} />
+          <Route path="/instalar" element={<Instalar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>

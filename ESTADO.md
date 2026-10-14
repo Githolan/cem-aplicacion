@@ -2,15 +2,16 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 13-10-2026.
+**Actualizado:** 14-10-2026.
 
 ## Qué existe
 
 - `contratos/`: modelos Pydantic (error uniforme, salud, consorcios, unidades), enumeraciones, `esquemas.json` y `openapi.json` comprometidos.
 - `backend/`: FastAPI con `/health`, errores uniformes, `require_scope`, `GET /api/v1/me/consorcios`, `GET /api/v1/consorcios/{id}/unidades` y el motor de reparto.
 - `frontend/`: PWA (React 18, Vite 5, TypeScript) con página de inicio que lee `/health`; tipos generados desde `contratos/openapi.json`; imagen `nginxinc/nginx-unprivileged:1.27-alpine` (uid 101, puerto 8080) que reenvía `/api/` y `/health` al backend con `resolver` (AD-05). **Desplegado en staging y en producción** desde `main` (`83d42a9`): `cem-frontend-staging` el 13-10-2026 a las 23:12 UTC y `cem-frontend` a las 23:14 UTC. El frontend es dueño del dominio de cada entorno y el backend no tiene dominio propio: el frontend le llega por los alias de red `cem-backend-staging` y `cem-backend`. El detalle y las comprobaciones están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
+- Página `/instalar` y enlace "Instalá la aplicación en tu teléfono" en el inicio (pedido del propietario del 14-10-2026): botón propio donde el navegador ofrece `beforeinstallprompt` (Chrome y Edge), pasos de Safari → Compartir → Agregar a inicio en iPhone y iPad, y aviso de "ya está instalada" en modo `standalone`. Es el enlace para compartir por WhatsApp o en un QR de cartelera. Todavía no desplegada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- 50 pruebas (42 del backend, 3 de contratos, 5 del frontend con `axe`, rutas y manifiesto) y `frontend/scripts/probar-imagen.sh` para la imagen, incluidas las de RLS contra PostgreSQL real.
+- 56 pruebas (42 del backend, 3 de contratos, 11 del frontend con `axe`, rutas, manifiesto e instalación) y `frontend/scripts/probar-imagen.sh` para la imagen, incluidas las de RLS contra PostgreSQL real.
 
 ## Cómo probar
 
