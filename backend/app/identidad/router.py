@@ -1,4 +1,5 @@
-"""Rutas de autenticación: enlace mágico, canje, sesión y salida (documento 13, §10.3 y §10.4).
+"""Rutas de autenticación: enlace mágico, canje, sesión, salida y sesiones de la persona
+(documento 13, §10.3 y §10.4; RF04).
 
 Todas viven bajo `/api/v1/auth/`, la familia de autenticación del límite de tasa (§10.6): 20
 pedidos por minuto por IP (middleware) y, al pedir un enlace, 5 por minuto por correo.
@@ -12,16 +13,24 @@ from datetime import timedelta
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
-from cem_contracts.identidad import CanjeEnlace, EnlacePedido, PedidoEnlace, SesionActual
+from cem_contracts.identidad import (
+    CanjeEnlace,
+    EnlacePedido,
+    ListaSesiones,
+    PedidoEnlace,
+    SesionActual,
+    SesionDispositivo,
+    SesionesRevocadas,
+)
 from fastapi import APIRouter, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Connection, Engine, text
 
 from app import limite
-from app.contexto import IdentidadDep, MotorDep
+from app.contexto import Identidad, IdentidadDep, MotorDep
 from app.db import fijar_ambito, transaccion
 from app.errores import ErrorApi
-from app.identidad import eventos, sesiones
+from app.identidad import dispositivos, eventos, sesiones
 
 router = APIRouter(prefix="/api/v1/auth", tags=["identidad"])
 log = logging.getLogger("cem.identidad")
@@ -217,4 +226,101 @@ def salir(identidad: IdentidadDep, motor: MotorDep) -> Response:
     log.info("sesión revocada", extra={"campos": {"persona_id": str(identidad.persona_id)}})
     respuesta = Response(status_code=204)
     sesiones.borrar_sesion(respuesta)
+    return respuesta
+
+
+# Sesiones de la persona (RF04) -------------------------------------------------------------
+# Las tres consultas corren como `cem_app` con la persona en el ámbito: la RLS de
+# `nucleo.sesion` (migración 0004) deja ver y revocar solo las propias. Una sesión ajena no se
+# distingue de una inexistente. Las dos que revocan son `POST` con sesión: `obtener_identidad`
+# exige el `X-CSRF-Token`. No llevan `Idempotency-Key`: no crean dinero, cargos ni expedientes
+# (§7.4) y repetirlas deja el mismo estado.
+
+
+def _sesion_actual(identidad: Identidad) -> UUID:
+    if identidad.sesion_id is None:
+        raise RuntimeError("las rutas de sesiones necesitan la sesión de la petición")
+    return identidad.sesion_id
+
+
+@router.get("/sesiones", response_model=ListaSesiones, summary="Mis sesiones vigentes")
+def listar_sesiones(identidad: IdentidadDep, motor: MotorDep, response: Response) -> ListaSesiones:
+    """Las sesiones vigentes (ni vencidas ni revocadas) de la persona, con la actual marcada.
+    El dispositivo es una descripción del navegador; ni el agente crudo ni la IP salen."""
+    response.headers.update(SIN_CACHE)
+    actual = _sesion_actual(identidad)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        filas = conn.execute(
+            text(
+                "select id, agente, creada_en, ultimo_uso_en, vence_en from nucleo.sesion"
+                " where revocada_en is null and vence_en > now()"
+                " order by ultimo_uso_en desc, id desc"
+            )
+        ).all()
+    return ListaSesiones(
+        elementos=[
+            SesionDispositivo(
+                id=f.id,
+                dispositivo=dispositivos.describir(f.agente),
+                creada_en=f.creada_en,
+                ultimo_uso_en=f.ultimo_uso_en,
+                vence_en=f.vence_en,
+                actual=f.id == actual,
+            )
+            for f in filas
+        ]
+    )
+
+
+@router.post(
+    "/sesiones/revocar-otras",
+    response_model=SesionesRevocadas,
+    summary="Cerrar las sesiones de los otros dispositivos",
+)
+def revocar_otras(
+    identidad: IdentidadDep, motor: MotorDep, response: Response
+) -> SesionesRevocadas:
+    """Revoca todas las sesiones vigentes de la persona menos la de esta petición."""
+    response.headers.update(SIN_CACHE)
+    actual = _sesion_actual(identidad)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        revocadas = conn.execute(
+            text(
+                "update nucleo.sesion set revocada_en = now()"
+                " where id <> :s and revocada_en is null and vence_en > now()"
+            ),
+            {"s": actual},
+        ).rowcount
+    log.info(
+        "otras sesiones revocadas",
+        extra={"campos": {"persona_id": str(identidad.persona_id), "revocadas": revocadas}},
+    )
+    return SesionesRevocadas(revocadas=revocadas)
+
+
+@router.post(
+    "/sesiones/{sesion_id}/revocar",
+    status_code=204,
+    response_class=Response,
+    summary="Cerrar una sesión",
+    responses={404: {"description": "La sesión no existe o no es de la persona."}},
+)
+def revocar_sesion(sesion_id: UUID, identidad: IdentidadDep, motor: MotorDep) -> Response:
+    """Revoca una sesión propia. Repetirlo responde lo mismo y conserva la fecha de la primera
+    revocación. Si es la actual, además borra sus cookies, como `salir`."""
+    actual = _sesion_actual(identidad)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        propia = conn.execute(
+            text(
+                "update nucleo.sesion set revocada_en = coalesce(revocada_en, now())"
+                " where id = :s returning id"
+            ),
+            {"s": sesion_id},
+        ).one_or_none()
+    if propia is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
+    log.info("sesión revocada", extra={"campos": {"persona_id": str(identidad.persona_id)}})
+    respuesta = Response(status_code=204, headers=SIN_CACHE)
+    if sesion_id == actual:
+        sesiones.borrar_sesion(respuesta)
     return respuesta
