@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from app.config import Config
 from app.limite import LIMITE_API, LimiteDeTasa
 from app.main import crear_app
+from app.registros import RegistroDePeticiones
 from tests.conftest import REDIS_URL
 
 RAIZ = Path(__file__).resolve().parent.parent
@@ -30,7 +31,7 @@ def app_con(redis_url: str):
 def test_el_limite_es_un_middleware_de_toda_la_app():
     # La ausencia del middleware es exactamente el defecto que se midió en AnalytikCapital.
     app = app_con("memory://")
-    assert [m.cls for m in app.user_middleware] == [LimiteDeTasa]
+    assert [m.cls for m in app.user_middleware] == [RegistroDePeticiones, LimiteDeTasa]
     assert str(LIMITE_API) == "300 per 1 minute"
 
 

@@ -16,6 +16,8 @@ from uuid import UUID
 
 from sqlalchemy import Connection, text
 
+from app.registros import redactar
+
 
 @dataclass(frozen=True)
 class Trabajo:
@@ -128,19 +130,31 @@ def tomar(conn: Connection, trabajador: str, cantidad: int, plazo: timedelta) ->
 
 
 def terminar(conn: Connection, trabajo: Trabajo, trabajador: str, resultado: Any) -> bool:
+    """Marca hecho el trabajo. Un resultado que no es JSON es un `ErrorDefinitivo`.
+
+    Repetir no lo arregla: el manejador devolvería lo mismo y volvería a producir sus efectos
+    externos en cada intento. `allow_nan=False` porque PostgreSQL rechaza `NaN` en jsonb.
+    """
+    try:
+        salida = json.dumps(resultado, allow_nan=False)
+    except (TypeError, ValueError) as e:
+        raise ErrorDefinitivo(f"el resultado del trabajo no es JSON: {e}") from e
     return conn.execute(
         text("select plataforma.terminar_trabajo(:id, :t, cast(:r as jsonb))"),
-        {"id": trabajo.id, "t": trabajador, "r": json.dumps(resultado)},
+        {"id": trabajo.id, "t": trabajador, "r": salida},
     ).scalar_one()
 
 
 def fallar(
     conn: Connection, trabajo: Trabajo, trabajador: str, error: str, reintentar_en: timedelta | None
 ) -> str | None:
-    """Devuelve el estado nuevo (`pendiente` o `muerto`), o None si perdió la reserva."""
+    """Devuelve el estado nuevo (`pendiente` o `muerto`), o None si perdió la reserva.
+
+    El error se guarda redactado (§16.1): `plataforma.jobs` la lee soporte.
+    """
     return conn.execute(
         text("select plataforma.fallar_trabajo(:id, :t, :e, :r)::text"),
-        {"id": trabajo.id, "t": trabajador, "e": error, "r": reintentar_en},
+        {"id": trabajo.id, "t": trabajador, "e": redactar(error), "r": reintentar_en},
     ).scalar_one()
 
 

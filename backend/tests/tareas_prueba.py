@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from sqlalchemy import Connection, text
 
+from app import registros
 from app.db import crear_motor
 from app.plataforma import cola
 from app.plataforma.trabajos import Trabajador
@@ -61,9 +62,35 @@ def correo(conn: Connection, trabajo: cola.Trabajo) -> None:
     )
 
 
+@cola.REGISTRO.tipo("prueba.no_json", maximo_intentos=3, retroceso_base=SIN_ESPERA)
+def no_json(conn: Connection, trabajo: cola.Trabajo) -> dict[str, object]:
+    """Efecto externo (una línea en un archivo) y un resultado que no se puede guardar."""
+    with open(trabajo.carga["archivo"], "a", encoding="utf-8") as f:
+        f.write(f"{trabajo.id}\n")
+    registrar(conn, trabajo)
+    return {"unidades": {"1° A", "1° B"}}
+
+
+@cola.REGISTRO.tipo("prueba.filtrar", maximo_intentos=1)
+def filtrar(conn: Connection, trabajo: cola.Trabajo) -> None:
+    """Falla con un mensaje que trae datos que no pueden quedar en la base ni en los registros."""
+    raise RuntimeError(trabajo.carga["mensaje"])
+
+
+@cola.REGISTRO.tipo("prueba.ultimo_intento", maximo_intentos=1)
+def ultimo_intento(conn: Connection, trabajo: cola.Trabajo) -> None:
+    registrar(conn, trabajo)
+
+
 def vaciar_cola(url: str, plazo_segundos: float = 300) -> None:
     """Proceso trabajador: procesa hasta que la cola queda vacía dos veces seguidas."""
     trabajador = Trabajador(crear_motor(url), lote=10, plazo=timedelta(seconds=plazo_segundos))
     vacias = 0
     while vacias < 2:
         vacias = vacias + 1 if trabajador.procesar_lote() == 0 else 0
+
+
+def vaciar_cola_con_registros(url: str) -> None:
+    """Como `vaciar_cola`, con los registros JSON del proceso `cem-trabajos` en la salida."""
+    registros.configurar()
+    vaciar_cola(url)
