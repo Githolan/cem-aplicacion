@@ -10,8 +10,9 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - `backend/`: FastAPI con `/health`, errores uniformes, `require_scope`, `GET /api/v1/me/consorcios`, `GET /api/v1/consorcios/{id}/unidades` y el motor de reparto.
 - `frontend/`: PWA (React 18, Vite 5, TypeScript) con página de inicio que lee `/health`; tipos generados desde `contratos/openapi.json`; imagen `nginxinc/nginx-unprivileged:1.27-alpine` (uid 101, puerto 8080) que reenvía `/api/` y `/health` al backend con `resolver` (AD-05). **Desplegado en staging y en producción** desde `main`, hoy en `38aca25`: `cem-frontend-staging` el 14-10-2026 a las 02:14 UTC y `cem-frontend` a las 02:16 UTC, después de validar staging. El frontend es dueño del dominio de cada entorno y el backend no tiene dominio propio: el frontend le llega por los alias de red `cem-backend-staging` y `cem-backend`. El detalle y las comprobaciones están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
 - Página `/instalar` y enlace "Instalá la aplicación en tu teléfono" en el inicio (pedido del propietario del 14-10-2026): botón propio donde el navegador ofrece `beforeinstallprompt` (Chrome y Edge), pasos de Safari → Compartir → Agregar a inicio en iPhone y iPad, y aviso de "ya está instalada" en modo `standalone`. Es el enlace para compartir por WhatsApp o en un QR de cartelera. En producción desde el 14-10-2026 (`38aca25`): `https://cem.holancloud.com/instalar` responde, y el JavaScript servido contiene la ruta. Ojo: un 200 no alcanza como prueba, porque la aplicación devuelve `index.html` para cualquier ruta.
+- Cola de trabajos, outbox y planificador (documento 13, §12; plan H1, semana 2), en revisión (PR #8; decisiones de diseño aprobadas por el propietario el 14-10-2026): migración `0002` con `plataforma.jobs`, `outbox` y `ejecuciones_programadas` con RLS forzada; funciones `security definer` para tomar, terminar y fallar trabajos; procesos `cem-trabajos` y `cem-planificador` en la misma imagen, elegidos con `CEM_PROCESO`; `GET /api/v1/health/cola` para Kuma (contrato 0.2.0). **No desplegado**: crear `cem-trabajos` y `cem-planificador` en Coolify necesita la aprobación escrita del propietario en el hilo de la plataforma H0.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- 56 pruebas (42 del backend, 3 de contratos, 11 del frontend con `axe`, rutas, manifiesto e instalación) y `frontend/scripts/probar-imagen.sh` para la imagen, incluidas las de RLS contra PostgreSQL real.
+- 75 pruebas (61 del backend, 3 de contratos, 11 del frontend con `axe`, rutas, manifiesto e instalación) y `frontend/scripts/probar-imagen.sh` para la imagen, incluidas las de RLS contra PostgreSQL real.
 
 ## Cómo probar
 
@@ -36,5 +37,6 @@ cd ../frontend && pnpm install && pnpm lint && pnpm test && pnpm build
 ## Próximo paso
 
 1. Hook `SessionStart` que instale PostgreSQL 18 y Redis 7 en las sesiones de Claude (hoy se probó con PostgreSQL 16 y Python 3.13, los del entorno).
-2. Tablas de `plataforma`: `jobs`, `outbox`, `idempotencia` (migración 0002).
-3. Módulo `identidad`: personas, sesiones, passkeys.
+2. Revisar y fusionar el PR de la cola; crear `cem-trabajos` y `cem-planificador` en staging y después en producción, y el monitor de Kuma sobre `/api/v1/health/cola`.
+3. Tabla `plataforma.idempotencia` (encabezado `Idempotency-Key`, §7.4).
+4. Módulo `identidad`: personas, sesiones, passkeys.
