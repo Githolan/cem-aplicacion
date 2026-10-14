@@ -48,7 +48,8 @@
           "no_autenticado",
           "no_encontrado",
           "peticion_invalida",
-          "error_interno"
+          "error_interno",
+          "servicio_no_disponible"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -203,6 +204,29 @@
       "version_contrato"
     ],
     "title": "Salud",
+    "type": "object"
+  },
+  "SesionSoporte": {
+    "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
+    "properties": {
+      "identidad": {
+        "title": "Identidad",
+        "type": "string"
+      },
+      "tipo": {
+        "enum": [
+          "persona",
+          "servicio"
+        ],
+        "title": "Tipo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "identidad",
+      "tipo"
+    ],
+    "title": "SesionSoporte",
     "type": "object"
   },
   "Unidad": {

@@ -13,6 +13,8 @@ class CodigoError(StrEnum):
     """También se usa para recursos de otro consorcio: 403 y 404 no se distinguen hacia afuera."""
     PETICION_INVALIDA = "peticion_invalida"
     ERROR_INTERNO = "error_interno"
+    SERVICIO_NO_DISPONIBLE = "servicio_no_disponible"
+    """Falta una dependencia sin la cual no se atiende (p. ej. las claves de Access)."""
 
 
 class Error(BaseModel):

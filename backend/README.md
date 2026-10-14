@@ -7,6 +7,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | Ruta | Qué hace |
 |---|---|
 | `app/main.py` | Arma la aplicación: salud, errores uniformes, rutas |
+| `app/acceso.py`, `app/soporte/` | JWT de Cloudflare Access en las rutas de soporte (`TB-CEM-5`) |
 | `app/db.py` | `transaccion()`: abre la transacción y fija persona y consorcio para la RLS (§7.2) |
 | `app/contexto.py` | `require_scope`: vínculos vigentes de la persona en el consorcio de la ruta. La autenticación aún no existe y rechaza todo con 401 |
 | `app/consorcios/` | `GET /api/v1/me/consorcios` y `GET /api/v1/consorcios/{id}/unidades` |
