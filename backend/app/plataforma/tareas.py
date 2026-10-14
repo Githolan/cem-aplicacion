@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
-from app.plataforma import cola, copias
+from app.plataforma import cola, copias, correo, outbox
 from app.plataforma.planificador import periodica
 
 CONSERVACION = timedelta(days=30)
@@ -39,3 +39,14 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 
 # Todos los días a las 03:30 UTC, después de la ventana de Coolify (§17.2).
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
+
+
+# Correo transaccional (§12.4): un módulo publica `correo.solicitado` con `correo.solicitar()`
+# y el despachador lo convierte en `notificar.correo`, que envía `cem-trabajos`.
+cola.REGISTRO.tipo(
+    correo.TIPO,
+    maximo_intentos=correo.MAXIMO_INTENTOS,
+    retroceso_base=correo.RETROCESO_BASE,
+    retroceso_tope=correo.RETROCESO_TOPE,
+)(correo.notificar_correo)
+outbox.ruta(correo.EVENTO, correo.TIPO)
