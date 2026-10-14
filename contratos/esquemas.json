@@ -1,4 +1,19 @@
 {
+  "CanjeEnlace": {
+    "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
+    "properties": {
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "CanjeEnlace",
+    "type": "object"
+  },
   "ConsorcioResumen": {
     "$defs": {
       "TipoVinculo": {
@@ -40,6 +55,27 @@
     "title": "ConsorcioResumen",
     "type": "object"
   },
+  "EnlacePedido": {
+    "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
+    "properties": {
+      "estado": {
+        "const": "pedido",
+        "title": "Estado",
+        "type": "string"
+      },
+      "mensaje": {
+        "description": "Texto genérico para la persona usuaria.",
+        "title": "Mensaje",
+        "type": "string"
+      }
+    },
+    "required": [
+      "estado",
+      "mensaje"
+    ],
+    "title": "EnlacePedido",
+    "type": "object"
+  },
   "Error": {
     "$defs": {
       "CodigoError": {
@@ -52,7 +88,9 @@
           "error_interno",
           "servicio_no_disponible",
           "idempotencia_reutilizada",
-          "idempotencia_en_curso"
+          "idempotencia_en_curso",
+          "enlace_invalido",
+          "csrf_invalido"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -175,6 +213,25 @@
     "title": "ListaUnidades",
     "type": "object"
   },
+  "PedidoEnlace": {
+    "description": "`POST /api/v1/auth/enlace`: pide un enlace de acceso para ese correo.",
+    "properties": {
+      "correo": {
+        "examples": [
+          "ana@ejemplo.com"
+        ],
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+        "title": "Correo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "correo"
+    ],
+    "title": "PedidoEnlace",
+    "type": "object"
+  },
   "Salud": {
     "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
     "properties": {
@@ -239,6 +296,44 @@
       "redis"
     ],
     "title": "SaludDependencias",
+    "type": "object"
+  },
+  "SesionActual": {
+    "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
+    "properties": {
+      "correo": {
+        "title": "Correo",
+        "type": "string"
+      },
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "persona_id": {
+        "format": "uuid",
+        "title": "Persona Id",
+        "type": "string"
+      },
+      "sesion_id": {
+        "format": "uuid",
+        "title": "Sesion Id",
+        "type": "string"
+      },
+      "vence_en": {
+        "description": "Vencimiento deslizante: cada uso de la sesión lo vuelve a correr.",
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "persona_id",
+      "nombre",
+      "correo",
+      "sesion_id",
+      "vence_en"
+    ],
+    "title": "SesionActual",
     "type": "object"
   },
   "SesionSoporte": {

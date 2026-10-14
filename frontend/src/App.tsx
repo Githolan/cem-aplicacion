@@ -1,5 +1,6 @@
 import { Link, Route, Routes } from "react-router";
 
+import { Entrar, RUTA_ENTRAR } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 
@@ -39,6 +40,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Inicio />} />
           <Route path="/instalar" element={<Instalar />} />
+          <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>

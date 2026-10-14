@@ -20,6 +20,9 @@ class Config:
     """Equipo de Access que firma los JWT de soporte: `https://<equipo>.cloudflareaccess.com`."""
     access_aud: str = ""
     """Audiencia (AUD) de la aplicación de Access que cubre las rutas de soporte."""
+    origen_publico: str = ""
+    """Origen de la app para armar el enlace de acceso: `https://cem.holancloud.com`. Nunca se
+    toma del encabezado `Host`, que el cliente puede inventar. Sin él, pedir un enlace da 503."""
 
 
 def cargar() -> Config:
@@ -31,4 +34,5 @@ def cargar() -> Config:
         redis_url=os.environ.get("CEM_REDIS_URL", ""),
         access_equipo=os.environ.get("CEM_ACCESS_EQUIPO", ""),
         access_aud=os.environ.get("CEM_ACCESS_AUD", ""),
+        origen_publico=os.environ.get("CEM_ORIGEN_PUBLICO", ""),
     )

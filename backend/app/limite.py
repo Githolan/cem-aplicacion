@@ -14,14 +14,20 @@ No se usa slowapi: su versión 0.1.10 busca el manejador solo entre las rutas de
 FastAPI 0.141 agrega las de `include_router` anidadas, así que eximía toda la API sin avisar
 (comprobado el 14-10-2026). El motor es el mismo, `limits`.
 
-Con la identidad propia (H2a) la clave pasa a ser la persona. Si Redis no responde, la API
-contesta 503: sin límite no se atiende (falla cerrada).
+Además del cupo general, cada familia de rutas puede tener el suyo (§10.6): autenticación, 20
+por minuto por IP en `/api/v1/auth/*` (lo aplica este middleware) y 5 por minuto por correo
+(lo aplica la ruta que pide el enlace con `consumir()`, porque el correo viene en el cuerpo).
+
+Pendiente (H2a): con sesión, la clave del cupo general pasa a ser la persona. Si Redis no
+responde, la API contesta 503: sin límite no se atiende (falla cerrada).
 """
 
+import hashlib
 import logging
 import math
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from cem_contracts.errores import CodigoError
 from limits import RateLimitItem, parse
@@ -30,10 +36,14 @@ from limits.errors import StorageError
 from limits.storage import storage_from_string
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.errores import respuesta_error
+from app.errores import ErrorApi
 
 LIMITE_API: RateLimitItem = parse("300/minute")
-"""Toda la API por cliente (§10.6). Autenticación, webhooks y descargas tendrán límites propios."""
+"""Toda la API por cliente (§10.6). Webhooks y descargas tendrán límites propios."""
+LIMITE_AUTENTICACION_IP: RateLimitItem = parse("20/minute")
+"""Familia autenticación (§10.6), por IP: se suma al cupo general."""
+LIMITE_AUTENTICACION_CORREO: RateLimitItem = parse("5/minute")
+"""Familia autenticación (§10.6), por correo pedido: lo consume `POST /api/v1/auth/enlace`."""
 PREFIJO = "cem:rl"
 ESPERA_REDIS_S = 1.0
 """Tope para conectar y para cada orden a Redis: una caída no deja colgada la petición."""
@@ -41,22 +51,76 @@ ESPERA_REDIS_S = 1.0
 log = logging.getLogger("cem.limite")
 
 
-class LimiteDeTasa:
-    """Middleware ASGI: un cupo por cliente para toda la app, salvo las rutas `exentas`."""
+@dataclass(frozen=True)
+class Familia:
+    """Cupo propio de las rutas que empiezan con `prefijo`, por IP, además del general."""
 
-    def __init__(self, app: ASGIApp, almacen: str, exentas: Iterable[str]) -> None:
-        self.app = app
-        self.exentas = frozenset(exentas)
-        self.limitador = FixedWindowRateLimiter(
-            storage_from_string(
-                f"async+{almacen}",
-                implementation="redispy",
-                key_prefix=PREFIJO,
-                wrap_exceptions=True,
-                socket_connect_timeout=ESPERA_REDIS_S,
-                socket_timeout=ESPERA_REDIS_S,
-            )
+    nombre: str
+    prefijo: str
+    limite: RateLimitItem
+
+
+FAMILIAS: tuple[Familia, ...] = (Familia("auth-ip", "/api/v1/auth/", LIMITE_AUTENTICACION_IP),)
+
+
+def crear_limitador(almacen: str) -> FixedWindowRateLimiter:
+    """Un limitador por app: lo comparten el middleware y las rutas (`app.state.limitador`)."""
+    return FixedWindowRateLimiter(
+        storage_from_string(
+            f"async+{almacen}",
+            implementation="redispy",
+            key_prefix=PREFIJO,
+            wrap_exceptions=True,
+            socket_connect_timeout=ESPERA_REDIS_S,
+            socket_timeout=ESPERA_REDIS_S,
         )
+    )
+
+
+def huella(valor: str) -> str:
+    """Clave de cupo para un dato personal (un correo): en Redis no queda el dato."""
+    return hashlib.sha256(valor.encode()).hexdigest()
+
+
+async def consumir(
+    limitador: FixedWindowRateLimiter, limite: RateLimitItem, nombre: str, clave: str
+) -> None:
+    """Gasta una unidad del cupo. Agotado: 429 con `Retry-After`; sin Redis: 503."""
+    try:
+        if await limitador.hit(limite, nombre, clave):
+            return
+        ventana = await limitador.get_window_stats(limite, nombre, clave)
+    except StorageError as e:
+        log.error("límite de tasa sin almacén: %s: %s", type(e.storage_error).__name__, e)
+        raise ErrorApi(
+            503,
+            CodigoError.SERVICIO_NO_DISPONIBLE,
+            "El servicio no está disponible. Probá en un rato.",
+        ) from e
+    espera = max(1, math.ceil(ventana.reset_time - time.time()))
+    raise ErrorApi(
+        429,
+        CodigoError.DEMASIADAS_PETICIONES,
+        "Hiciste demasiados pedidos seguidos. Esperá un momento y probá de nuevo.",
+        encabezados={"Retry-After": str(espera)},
+    )
+
+
+class LimiteDeTasa:
+    """Middleware ASGI: un cupo por cliente para toda la app, salvo las rutas `exentas`, más
+    el de la familia de la ruta, si tiene."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        limitador: FixedWindowRateLimiter,
+        exentas: Iterable[str],
+        familias: Iterable[Familia] = FAMILIAS,
+    ) -> None:
+        self.app = app
+        self.limitador = limitador
+        self.exentas = frozenset(exentas)
+        self.familias = tuple(familias)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope["path"] in self.exentas:
@@ -65,24 +129,13 @@ class LimiteDeTasa:
         if scope.get("client") is None:
             raise RuntimeError("petición sin dirección de cliente: no se puede aplicar el límite")
         ip = scope["client"][0]
+        cupos = [(LIMITE_API, "api")] + [
+            (f.limite, f.nombre) for f in self.familias if scope["path"].startswith(f.prefijo)
+        ]
         try:
-            if await self.limitador.hit(LIMITE_API, "api", ip):
-                await self.app(scope, receive, send)
-                return
-            ventana = await self.limitador.get_window_stats(LIMITE_API, "api", ip)
-        except StorageError as e:
-            log.error("límite de tasa sin almacén: %s: %s", type(e.storage_error).__name__, e)
-            respuesta = respuesta_error(
-                503,
-                CodigoError.SERVICIO_NO_DISPONIBLE,
-                "El servicio no está disponible. Probá en un rato.",
-            )
-        else:
-            respuesta = respuesta_error(
-                429,
-                CodigoError.DEMASIADAS_PETICIONES,
-                "Hiciste demasiados pedidos seguidos. Esperá un momento y probá de nuevo.",
-            )
-            espera = max(1, math.ceil(ventana.reset_time - time.time()))
-            respuesta.headers["Retry-After"] = str(espera)
-        await respuesta(scope, receive, send)
+            for limite, nombre in cupos:
+                await consumir(self.limitador, limite, nombre, ip)
+        except ErrorApi as e:
+            await e.respuesta()(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
