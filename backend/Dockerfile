@@ -19,6 +19,8 @@ COPY --chown=cem backend/migrations migrations
 COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
 USER cem
 EXPOSE 8000
+# La misma imagen corre cem-backend, cem-trabajos o cem-planificador según CEM_PROCESO
+# (api, trabajos o planificador; ver arranque.sh). La comprobación se adapta al proceso.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"
+  CMD ["python", "-m", "app.plataforma.latido"]
 CMD ["sh", "arranque.sh"]

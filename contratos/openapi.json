@@ -30,6 +30,46 @@
         "title": "ConsorcioResumen",
         "type": "object"
       },
+      "EstadoCola": {
+        "description": "Respuesta de `GET /api/v1/health/cola` (documento 13, §16.2 y §16.3).\n\nSolo totales: ningún dato de un consorcio. Kuma alerta cuando `estado` es `alerta`.",
+        "properties": {
+          "en_curso": {
+            "title": "En Curso",
+            "type": "integer"
+          },
+          "estado": {
+            "description": "`alerta` si hay trabajos muertos o el pendiente más viejo espera más de 15 minutos.",
+            "enum": [
+              "ok",
+              "alerta"
+            ],
+            "title": "Estado",
+            "type": "string"
+          },
+          "muertos": {
+            "title": "Muertos",
+            "type": "integer"
+          },
+          "pendientes": {
+            "title": "Pendientes",
+            "type": "integer"
+          },
+          "segundos_mas_viejo": {
+            "description": "Espera del pendiente listo más viejo.",
+            "title": "Segundos Mas Viejo",
+            "type": "number"
+          }
+        },
+        "required": [
+          "estado",
+          "pendientes",
+          "en_curso",
+          "muertos",
+          "segundos_mas_viejo"
+        ],
+        "title": "EstadoCola",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -214,6 +254,28 @@
         "summary": "Unidades",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/health/cola": {
+      "get": {
+        "description": "Totales de la cola de trabajos para Kuma; sin datos de ningún consorcio.",
+        "operationId": "salud_cola_api_v1_health_cola_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstadoCola"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Salud Cola",
+        "tags": [
+          "plataforma"
         ]
       }
     },

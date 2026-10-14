@@ -11,9 +11,16 @@ from pydantic import BaseModel
 
 from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
 from cem_contracts.errores import Error
-from cem_contracts.salud import Salud
+from cem_contracts.salud import EstadoCola, Salud
 
-MODELOS: tuple[type[BaseModel], ...] = (ConsorcioResumen, Error, ListaUnidades, Salud, Unidad)
+MODELOS: tuple[type[BaseModel], ...] = (
+    ConsorcioResumen,
+    Error,
+    EstadoCola,
+    ListaUnidades,
+    Salud,
+    Unidad,
+)
 
 
 def esquemas() -> dict[str, object]:
