@@ -17,6 +17,10 @@ class CodigoError(StrEnum):
     ERROR_INTERNO = "error_interno"
     SERVICIO_NO_DISPONIBLE = "servicio_no_disponible"
     """Falta una dependencia sin la cual no se atiende (Redis del límite, claves de Access)."""
+    IDEMPOTENCIA_REUTILIZADA = "idempotencia_reutilizada"
+    """La `Idempotency-Key` ya se usó en esta ruta con otro pedido (documento 13, §7.4)."""
+    IDEMPOTENCIA_EN_CURSO = "idempotencia_en_curso"
+    """Otro pedido con la misma `Idempotency-Key` sigue en curso; se reintenta más tarde."""
 
 
 class Error(BaseModel):

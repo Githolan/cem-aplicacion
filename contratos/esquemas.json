@@ -50,7 +50,9 @@
           "peticion_invalida",
           "demasiadas_peticiones",
           "error_interno",
-          "servicio_no_disponible"
+          "servicio_no_disponible",
+          "idempotencia_reutilizada",
+          "idempotencia_en_curso"
         ],
         "title": "CodigoError",
         "type": "string"
