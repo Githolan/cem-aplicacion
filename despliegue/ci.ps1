@@ -12,6 +12,10 @@
 #   3. contratos: pytest en /src/contratos, en el mismo contenedor
 #   4. frontend: pnpm install --frozen-lockfile, lint, test, build
 #   5. imagen del frontend: docker build + frontend/scripts/probar-imagen.sh
+#   6. extremo a extremo: pnpm e2e (frontend/scripts/probar-extremo-a-extremo.sh:
+#      Playwright contra las imágenes de cem-frontend y cem-backend con Redis, en
+#      una red de Docker propia); al final se borran sus contenedores y su red,
+#      aunque falle, y se comprueba que no quede ninguno
 #
 # Código de salida 0 = todo verde. Distinto de 0 = alguna etapa falló.
 # Deja el resultado en <estado>\ci\<sha>.json (ver compuertas.ps1), que cd.ps1
@@ -44,6 +48,8 @@ $PruebaImagen      = 'frontend/scripts/probar-imagen.sh'
 $PrefijoCopia      = 'cem-ci-'
 # Un .sh que se sabe que existe: si la búsqueda no lo encuentra, la búsqueda está mal.
 $ShConocido        = 'frontend/scripts/probar-imagen.sh'
+# Prefijo de los contenedores y la red de frontend/scripts/probar-extremo-a-extremo.sh.
+$PrefijoE2e        = 'cem-frontend-e2e'
 
 $repo = Split-Path -Parent $PSScriptRoot
 $shaCompleta = (git -C $repo rev-parse --verify "$Sha^{commit}" 2>$null)
@@ -102,6 +108,8 @@ $copia = Join-Path ([IO.Path]::GetTempPath()) "$PrefijoCopia$sha7-$([guid]::NewG
 $composeArgs = @('compose', '-p', $ProyectoCompose, '-f', (Join-Path $copia $ComposeRelativo))
 $ok = $false
 $composeUsado = $false
+$e2eUsado = $false
+$sufijoE2e = "ci-$sha7-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
 try {
     Escribir "CEM - integración local sobre $shaCompleta" 'White'
 
@@ -155,6 +163,29 @@ try {
         try { Correr 'frontend-imagen-prueba' { & $bash $PruebaImagen $ImagenFrontend } | Out-Null }
         finally { Pop-Location; Remove-Item Env:\MSYS_NO_PATHCONV }
     }
+
+    # --- 6. extremo a extremo (Playwright contra las imágenes reales) ---------
+    Etapa 'Extremo a extremo (pnpm e2e)'
+    if ($etapas['frontend-install'] -ne 'ok') {
+        $etapas['frontend-e2e'] = 'falla (sin pnpm install)'
+        Escribir '  frontend-e2e: FALLA (no hay dependencias instaladas)' 'Red'
+    } else {
+        $e2eUsado = $true
+        $rutaGit = Join-Path (Split-Path -Parent (Split-Path -Parent (Get-BashDeGit))) 'usr\bin'
+        if (-not (Test-Path (Join-Path $rutaGit 'sh.exe'))) { throw "no encontré sh.exe de Git for Windows en $rutaGit" }
+        $pathAnterior = $env:PATH
+        # `pnpm e2e` llama a `sh`: el de Git for Windows (el bash.exe de System32 es WSL).
+        $env:PATH = "$rutaGit;$pathAnterior"
+        $env:CEM_E2E_SUFIJO = $sufijoE2e
+        $env:CEM_E2E_SHA = $shaCompleta
+        Push-Location (Join-Path $copia 'frontend')
+        try { Correr 'frontend-e2e' { pnpm e2e } | Out-Null }
+        finally {
+            Pop-Location
+            $env:PATH = $pathAnterior
+            Remove-Item Env:\CEM_E2E_SUFIJO, Env:\CEM_E2E_SHA
+        }
+    }
 }
 catch {
     Escribir "ERROR: $($_.Exception.Message)" 'Red'
@@ -164,6 +195,17 @@ finally {
     # Solo si esta corrida levantó el proyecto: un `down` ajeno cortaría otra corrida.
     if ($composeUsado) {
         docker @composeArgs down --remove-orphans 2>&1 | Out-File -Append -Encoding utf8 $log
+    }
+    # El script de e2e borra lo suyo con un trap; si lo cortaron antes, se borra acá
+    # por el sufijo de esta corrida (nunca lo de otra) y se exige que no quede nada.
+    if ($e2eUsado) {
+        $restos = @(docker ps -aq --filter "name=$PrefijoE2e.*-$sufijoE2e`$")
+        if ($restos) { docker rm -f @restos 2>&1 | Out-File -Append -Encoding utf8 $log }
+        $redes = @(docker network ls -q --filter "name=$PrefijoE2e-red-$sufijoE2e`$")
+        if ($redes) { docker network rm @redes 2>&1 | Out-File -Append -Encoding utf8 $log }
+        $quedan = @(docker ps -aq --filter "name=$PrefijoE2e.*-$sufijoE2e`$") + @(docker network ls -q --filter "name=$PrefijoE2e-red-$sufijoE2e`$")
+        if ($quedan) { $etapas['limpieza-e2e'] = "falla (quedan $($quedan.Count) contenedores o redes)" }
+        else { $etapas['limpieza-e2e'] = 'ok'; Escribir "  limpieza-e2e: sin contenedores ni redes de la corrida $sufijoE2e ($($restos.Count) contenedores y $($redes.Count) redes borrados acá)" 'Green' }
     }
     $ok = Guardar-Resultado
     $tmp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

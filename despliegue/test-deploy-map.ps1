@@ -6,6 +6,7 @@
 # Para cada aplicación de deploy-map.ps1 lee GET /applications/<uuid> y exige:
 #   - nombre en Coolify == nombre canónico del mapa
 #   - repositorio == cem-aplicacion y rama == main
+# Y para la base de cada entorno, GET /databases/<uuid>: nombre == nombre canónico.
 # Controles (si un control falla, ningún verde vale):
 #   - un UUID inventado debe dar 404 (la API distingue lo que existe de lo que no)
 #   - un token de Coolify inventado debe dar 401 (responde la autenticación de
@@ -61,7 +62,16 @@ foreach ($entorno in @('staging', 'produccion')) {
         Comprobar "$($app.Nombre): rama $CemRamaDespliegue" ($leida.git_branch -eq $CemRamaDespliegue) $leida.git_branch
         Write-Host "        estado en Coolify: $($leida.status); commit fijado: $($leida.git_commit_sha)" -ForegroundColor DarkGray
     }
+    $base = Get-CemBaseDatos -Entorno $entorno
+    try {
+        $leida = Invoke-CemCoolify GET "/databases/$($base.Uuid)"
+        Comprobar "base $($base.Uuid) se llama '$($base.Nombre)' en Coolify" ($leida.name -ceq $base.Nombre) "se llama '$($leida.name)'"
+    } catch {
+        Comprobar "base $($base.Nombre) ($($base.Uuid)) existe en Coolify" $false $_.Exception.Message
+    }
 }
+$c = CodigoDe { Invoke-CemCoolify GET "/databases/$UuidInventado" }
+Comprobar "control: base con UUID inventado -> 404" ($c -eq 404) "respondió $c"
 
 Write-Host ""
 Write-Host "BIEN=$bien  MAL=$mal" -ForegroundColor $(if ($mal -eq 0) { 'Green' } else { 'Red' })

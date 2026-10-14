@@ -14,8 +14,9 @@ IMAGEN_FRONTEND=cem-frontend
 IMAGEN_BACKEND=cem-backend
 # La misma imagen de Redis que la suite oficial del backend (backend/pruebas/compose.yml).
 IMAGEN_REDIS=redis:7-alpine
-# Nombres propios de esta corrida (sufijo = PID), así dos corridas no se pisan.
-SUFIJO=$$
+# Nombres propios de esta corrida (sufijo = PID), así dos corridas no se pisan. Quien llama
+# puede fijarlo con CEM_E2E_SUFIJO para borrar después lo que quede (ci.ps1 lo hace siempre).
+SUFIJO=${CEM_E2E_SUFIJO:-$$}
 RED="cem-frontend-e2e-red-$SUFIJO"
 REDIS="cem-frontend-e2e-redis-$SUFIJO"
 BACKEND="cem-frontend-e2e-backend-$SUFIJO"
@@ -38,8 +39,9 @@ trap 'exit 130' INT TERM
 docker build -q -f "$RAIZ/frontend/Dockerfile" -t "$IMAGEN_FRONTEND" "$RAIZ" >/dev/null
 docker build -q -f "$RAIZ/backend/Dockerfile" -t "$IMAGEN_BACKEND" "$RAIZ" >/dev/null
 
-# La SHA que el backend informa en /health; la prueba exige verla en la página.
-SHA=$(git -C "$RAIZ" rev-parse HEAD)
+# La SHA que el backend informa en /health; la prueba exige verla en la página. Sin .git (la
+# copia de `git archive` que usa ci.ps1) la SHA llega en CEM_E2E_SHA.
+SHA=${CEM_E2E_SHA:-$(git -C "$RAIZ" rev-parse HEAD)}
 
 docker network create "$RED" >/dev/null
 SUBRED=$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$RED")

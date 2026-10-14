@@ -13,6 +13,18 @@
 #   - cada UUID del mapa se llama en Coolify como su nombre canónico, construye
 #     cem-aplicacion desde main y no tiene un commit fijado
 #
+# Copia previa a la migración (§18.3, regla 5). Se compara la última revisión de
+# Alembic de la SHA con plataforma.alembic_version de cem-postgres(-staging), leída
+# por ssh con psql dentro del contenedor de la base:
+#   - sin migraciones nuevas: no se copia y el registro lo dice
+#   - con migraciones nuevas: antes de desplegar, cem-trabajos(-staging) hace una
+#     copia verificada (la misma de §17: volcado, restauración y comparación,
+#     cifrado, subida y relectura) y se espera su resultado; si falla, no se despliega
+#   - con migraciones nuevas y sin cem-trabajos en el mapa del entorno: se niega,
+#     salvo con -SinCopiaPrevia, que queda anotado en el registro
+#   - si la base está en una revisión que la SHA no conoce: se niega
+# En -SoloVerificar solo se informa la decisión; nunca se copia.
+#
 # Despliegue: por cada aplicación del entorno en deploy-map.ps1, en orden
 # (backend; trabajos y planificador si existen; frontend): actualiza
 # CEM_SHA_IMAGEN donde corresponde, pide el despliegue y espera que termine con
@@ -36,6 +48,7 @@
 #   pwsh despliegue/cd.ps1 -Entorno staging -Sha <sha> -SoloVerificar
 #   pwsh despliegue/cd.ps1 -Entorno staging -Sha <sha> -Autorizacion "Horacio, chat 14-10 10:05"
 #   pwsh despliegue/cd.ps1 -Entorno produccion -Sha <sha> -Confirmar -Autorizacion "..."
+#   ... -SinCopiaPrevia   despliega migraciones nuevas sin copia previa (queda en el registro)
 # ==============================================================================
 
 param(
@@ -46,6 +59,9 @@ param(
     [switch]$Confirmar,
     # Solo lee y verifica: no cambia variables, no despliega, no escribe constancias.
     [switch]$SoloVerificar,
+    # Permite desplegar migraciones nuevas sin la copia previa de §18.3, regla 5.
+    # Solo por decisión explícita del propietario; queda escrito en el registro.
+    [switch]$SinCopiaPrevia,
     [int]$MinutosPorDespliegue = 15
 )
 
@@ -63,10 +79,16 @@ $HostInexistente    = 'cem-control-host-inexistente.holancloud.com'
 $RutasDeSalud       = @('/api/v1/health/deps', '/api/v1/health/cola')
 $Plantilla          = Join-Path $PSScriptRoot 'plantilla-registro-despliegue.md'
 $SegundosCurl       = 10
+# psql dentro de cem-postgres(-staging): superusuario local del contenedor y base de CEM.
+$CemUsuarioPsql     = 'postgres'
+$CemBaseCem         = 'cem'
+# Variable de cem-trabajos con el bucket de las copias (app/plataforma/copias.py); no es secreta.
+$CemVariableBucketCopias = 'CEM_COPIAS_BUCKET'
 
 $repo = Split-Path -Parent $PSScriptRoot
 $cfg = $CemEntornos[$Entorno]
 $aplicaciones = @(Get-CemAplicaciones -Entorno $Entorno)
+$baseDatos = Get-CemBaseDatos -Entorno $Entorno
 $horaInicio = (Get-Date).ToUniversalTime()
 
 function Negarse([string]$motivo) {
@@ -128,6 +150,42 @@ foreach ($app in $aplicaciones) {
         Negarse "$($app.Nombre) tiene fijado el commit '$($leida.git_commit_sha)' en Coolify; se espera HEAD"
     }
     Bien "$($app.Nombre) = $($app.Uuid) (Coolify: $($leida.status))"
+}
+$leidaBase = Invoke-CemCoolify GET "/databases/$($baseDatos.Uuid)"
+if ($leidaBase.name -cne $baseDatos.Nombre) { Negarse "$($baseDatos.Uuid) se llama '$($leidaBase.name)' en Coolify, no '$($baseDatos.Nombre)'" }
+Bien "$($baseDatos.Nombre) = $($baseDatos.Uuid) (Coolify: $($leidaBase.status))"
+
+# --- Copia previa a la migración (§18.3, regla 5) --------------------------------
+Info "`n== Migraciones y copia previa =="
+$cadena = Get-CemCadenaAlembicEnSha -Repo $repo -Sha $shaCompleta
+# Coolify llama al contenedor de una base por su UUID (registro de recursos, nota 1).
+$versionEntorno = Invoke-CemSsh "docker exec $($baseDatos.Uuid) psql -U $CemUsuarioPsql -d $CemBaseCem -Atc 'select version_num from plataforma.alembic_version'"
+$trabajos = $aplicaciones | Where-Object Funcion -eq 'trabajos'
+try {
+    $decision = Get-CemDecisionCopiaPrevia -Cadena $cadena -VersionEntorno $versionEntorno.Trim() `
+        -HayTrabajos ($null -ne $trabajos) -SinCopiaPrevia $SinCopiaPrevia.IsPresent
+} catch {
+    Negarse "no se puede decidir la copia previa: $($_.Exception.Message)"
+}
+Write-Host "  Alembic: $sha7 llega a $($decision.Cabeza); $($baseDatos.Nombre) está en $($decision.VersionEntorno)"
+Write-Host "  Copia previa: $($decision.Accion) - $($decision.Motivo)"
+$copia = $null
+$bucketCopia = $null
+if (-not $SoloVerificar) {
+    if ($decision.Accion -eq 'negar') { Negarse $decision.Motivo }
+    if ($decision.Accion -eq 'copiar') {
+        $enMarcha = @((Invoke-CemSsh "docker ps --filter 'name=^$($trabajos.Uuid)-' --format '{{.Names}}'") -split "`n" | Where-Object { $_ })
+        if ($enMarcha.Count -ne 1) { Negarse "$($trabajos.Nombre): $($enMarcha.Count) contenedores en marcha (se espera 1); no se puede hacer la copia previa" }
+        $bucketCopia = Invoke-CemSsh "docker exec $($enMarcha[0]) printenv $CemVariableBucketCopias"
+        Write-Host "  copia verificada en $($enMarcha[0]) (bucket $bucketCopia); espero el resultado"
+        try {
+            $salida = Invoke-CemSsh "docker exec $($enMarcha[0]) python -c '$CemProgramaCopiaPrevia'"
+            $copia = Read-CemResultadoCopia -Salida $salida
+        } catch {
+            Negarse "la copia previa falló, nada se desplegó: $($_.Exception.Message)"
+        }
+        Bien "copia previa: $($copia.Objetos -join ', ') SHA-256 $($copia.Sha256) ($($copia.Bytes) bytes, $($copia.Tablas) tablas, $($copia.Filas) filas)"
+    }
 }
 
 # --- Despliegue -----------------------------------------------------------------
@@ -229,7 +287,7 @@ if (-not $SoloVerificar) {
         ENTORNO = $Entorno; HOST = $cfg.Host; PROYECTO = $cfg.Proyecto
         HORA_INICIO = $horaInicio.ToString('HH:mm'); HORA_FIN = $horaFin.ToString('HH:mm')
         AUTORIZACION = $Autorizacion; REQUISITO_PREVIO = $requisitoPrevio
-        COPIA_PREVIA = 'NO HECHA: la copia verificada previa a la migración llega con H0b (§17); cd.ps1 todavía no la exige'
+        COPIA_PREVIA = Format-CemCopiaPrevia -Decision $decision -Copia $copia -Bucket $bucketCopia
         RESULTADO = if ($verificacionOk) { 'verde' } else { 'ROJO' }
         FILAS_APLICACIONES = ($filas -join "`n"); VERIFICACION = ($lineas -join "`n")
     }
