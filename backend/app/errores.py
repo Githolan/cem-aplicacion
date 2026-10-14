@@ -1,16 +1,18 @@
 """Errores con cuerpo uniforme (documento 13, §11.1).
 
-Forma: `{codigo, mensaje, detalle, id_correlacion}`.
+Forma: `{codigo, mensaje, detalle, id_correlacion}`. El id es el de la petición
+(`registros.RegistroDePeticiones`): el mismo que llevan sus líneas de registro.
 """
 
 import logging
-import uuid
 
 from cem_contracts.errores import CodigoError, Error
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.registros import id_correlacion_actual
 
 log = logging.getLogger("cem")
 
@@ -21,7 +23,9 @@ class ErrorApi(Exception):
 
 
 def respuesta_error(estado: int, codigo: CodigoError, mensaje: str, detalle=None) -> JSONResponse:
-    cuerpo = Error(codigo=codigo, mensaje=mensaje, detalle=detalle, id_correlacion=uuid.uuid4().hex)
+    cuerpo = Error(
+        codigo=codigo, mensaje=mensaje, detalle=detalle, id_correlacion=id_correlacion_actual()
+    )
     return JSONResponse(cuerpo.model_dump(mode="json"), status_code=estado)
 
 

@@ -3,3 +3,6 @@ dist/
 *.tsbuildinfo
 # Generado desde ../contratos/openapi.json en cada construcción (AD-06): nunca se escribe a mano.
 src/api/tipos.ts
+# Resultados de Playwright (pnpm e2e): trazas de las pruebas que fallan.
+test-results/
+playwright-report/

@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Connection, Engine, text
 
+from app import registros
 from app.config import cargar
 from app.db import crear_motor, transaccion
 from app.plataforma import cola, latido, outbox
@@ -131,7 +132,7 @@ class Planificador:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    registros.configurar()
     # Con `python -m` este archivo corre como __main__, que es otra copia del módulo: las
     # tareas que registra `tareas` quedan en `app.plataforma.planificador`, y de ahí se
     # toma la clase para que lea esa lista.
