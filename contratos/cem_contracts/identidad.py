@@ -22,6 +22,20 @@ class PedidoEnlace(BaseModel):
     )
 
 
+FORMATO_TOKEN = r"^[A-Za-z0-9_-]{43}$"
+"""Token del enlace: 256 bits en base64url sin relleno."""
+
+
+class CanjeEnlace(BaseModel):
+    """`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.
+
+    Va en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    token: str = Field(pattern=FORMATO_TOKEN)
+
+
 class EnlacePedido(BaseModel):
     """Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3)."""
 

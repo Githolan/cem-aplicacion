@@ -34,6 +34,7 @@ pytestmark = [pytest.mark.db, pytest.mark.redis]
 ORIGEN = "https://cem.ejemplo.test"
 ENLACE = "/api/v1/auth/enlace"
 CANJE = "/api/v1/auth/canje"
+ENTRAR = "/entrar"
 SESION = "/api/v1/auth/sesion"
 SALIR = "/api/v1/auth/salir"
 ANA = "ana@ejemplo.com"
@@ -106,7 +107,9 @@ def eventos_de(motor_migrate, direccion: str) -> list[dict]:
 
 def ultimo_token(motor_migrate, direccion: str) -> str:
     texto = eventos_de(motor_migrate, direccion)[-1]["texto"]
-    [token] = re.findall(rf"{re.escape(ORIGEN + CANJE)}\?token=([A-Za-z0-9_-]{{43}})", texto)
+    # El token va en el fragmento de la página /entrar: el navegador nunca lo manda al servidor.
+    [token] = re.findall(rf"{re.escape(ORIGEN + ENTRAR)}#token=([A-Za-z0-9_-]{{43}})", texto)
+    assert "?" not in texto
     return token
 
 
@@ -117,7 +120,7 @@ def h(valor: str) -> bytes:
 def entrar(app, motor_migrate, direccion: str = ANA) -> TestClient:
     c = navegador(app)
     assert pedir(c, direccion).status_code == 202
-    r = c.get(CANJE, params={"token": ultimo_token(motor_migrate, direccion)})
+    r = c.post(CANJE, json={"token": ultimo_token(motor_migrate, direccion)})
     assert r.status_code == 200, r.text
     return c
 
@@ -280,7 +283,7 @@ def test_un_origen_mal_escrito_impide_el_arranque(origen):
 def test_canje_feliz_crea_la_sesion_y_sus_cookies(app, motor_migrate, datos):
     c = navegador(app)
     pedir(c, ANA)
-    r = c.get(CANJE, params={"token": ultimo_token(motor_migrate, ANA)})
+    r = c.post(CANJE, json={"token": ultimo_token(motor_migrate, ANA)})
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-store"
     cuerpo = r.json()
@@ -315,10 +318,10 @@ def test_un_token_reusado_no_entra(app, motor_migrate):
     pedir(c, ANA)
     token = ultimo_token(motor_migrate, ANA)
     nonce = c.cookies[sesiones.COOKIE_NONCE]
-    assert c.get(CANJE, params={"token": token}).status_code == 200
+    assert c.post(CANJE, json={"token": token}).status_code == 200
     # Doble clic o reenvío: el mismo navegador, con el mismo nonce, vuelve a abrir el enlace.
     c.cookies.set(sesiones.COOKIE_NONCE, nonce, domain="testserver.local")
-    assert es_401(c.get(CANJE, params={"token": token}), "enlace_invalido")
+    assert es_401(c.post(CANJE, json={"token": token}), "enlace_invalido")
 
 
 def test_un_token_vencido_no_entra_y_no_se_consume(app, motor_migrate):
@@ -333,7 +336,7 @@ def test_un_token_vencido_no_entra_y_no_se_consume(app, motor_migrate):
             ),
             {"t": h(token)},
         )
-    assert es_401(c.get(CANJE, params={"token": token}), "enlace_invalido")
+    assert es_401(c.post(CANJE, json={"token": token}), "enlace_invalido")
     with motor_migrate.connect() as conn:
         usado = conn.execute(
             text("select usado_en from nucleo.enlace_acceso where token_hash = :t"),
@@ -347,22 +350,44 @@ def test_un_enlace_abierto_en_otro_navegador_no_entra_ni_se_gasta(app, motor_mig
     pedir(pide, ANA)
     token = ultimo_token(motor_migrate, ANA)
     # Sin cookie nonce (un escáner de correo, otro dispositivo).
-    assert es_401(otro.get(CANJE, params={"token": token}), "enlace_invalido")
+    assert es_401(otro.post(CANJE, json={"token": token}), "enlace_invalido")
     # Con un nonce propio, de otro pedido.
     pedir(otro, NADIE)
     assert sesiones.COOKIE_NONCE in otro.cookies
-    assert es_401(otro.get(CANJE, params={"token": token}), "enlace_invalido")
+    assert es_401(otro.post(CANJE, json={"token": token}), "enlace_invalido")
     # Control: el navegador que lo pidió todavía puede usarlo.
-    assert pide.get(CANJE, params={"token": token}).status_code == 200
+    assert pide.post(CANJE, json={"token": token}).status_code == 200
 
 
 def test_un_token_inventado_no_entra(app):
     c = navegador(app)
     pedir(c, ANA)
-    assert es_401(c.get(CANJE, params={"token": secrets.token_urlsafe(32)}), "enlace_invalido")
-    r = c.get(CANJE, params={"token": "corto"})
+    assert es_401(c.post(CANJE, json={"token": secrets.token_urlsafe(32)}), "enlace_invalido")
+    r = c.post(CANJE, json={"token": "corto"})
     assert r.status_code == 422
     assert "corto" not in r.text
+
+
+def test_el_canje_no_acepta_el_token_en_la_url(app, motor_migrate):
+    c = navegador(app)
+    pedir(c, ANA)
+    token = ultimo_token(motor_migrate, ANA)
+    assert c.get(CANJE, params={"token": token}).status_code == 405
+    assert c.post(CANJE, params={"token": token}).status_code == 422
+    assert c.post(CANJE, json={"token": token}).status_code == 200  # control: no se gastó
+
+
+def test_un_canje_desde_otro_sitio_se_rechaza_sin_gastar_el_enlace(app, motor_migrate):
+    """Defensa sumada al nonce `SameSite=Lax`: el navegador declara de dónde sale el pedido."""
+    c = navegador(app)
+    pedir(c, ANA)
+    token = ultimo_token(motor_migrate, ANA)
+    for sitio in ("cross-site", "same-site", "none"):
+        r = c.post(CANJE, json={"token": token}, headers={"Sec-Fetch-Site": sitio})
+        assert r.status_code == 403
+        assert r.json()["codigo"] == "csrf_invalido"
+    r = c.post(CANJE, json={"token": token}, headers={"Sec-Fetch-Site": "same-origin"})
+    assert r.status_code == 200  # control
 
 
 def test_dos_enlaces_pedidos_en_el_mismo_navegador_sirven_los_dos(app, motor_migrate):
@@ -371,9 +396,9 @@ def test_dos_enlaces_pedidos_en_el_mismo_navegador_sirven_los_dos(app, motor_mig
     primero = ultimo_token(motor_migrate, ANA)
     pedir(c, ANA)
     segundo = ultimo_token(motor_migrate, ANA)
-    assert c.get(CANJE, params={"token": segundo}).status_code == 200
+    assert c.post(CANJE, json={"token": segundo}).status_code == 200
     # El nonce se borró al canjear: el primero ya no sirve en este navegador.
-    assert es_401(c.get(CANJE, params={"token": primero}), "enlace_invalido")
+    assert es_401(c.post(CANJE, json={"token": primero}), "enlace_invalido")
 
 
 # Sesiones ---------------------------------------------------------------------------------
@@ -505,7 +530,7 @@ def test_veinte_pedidos_por_minuto_por_ip_en_auth(app):
     assert {c.get(SESION).status_code for _ in range(cupo)} == {401}
     r = c.get(SESION)
     assert r.status_code == 429
-    assert c.get(CANJE, params={"token": secrets.token_urlsafe(32)}).status_code == 429
+    assert c.post(CANJE, json={"token": secrets.token_urlsafe(32)}).status_code == 429
     # Fuera de /api/v1/auth/ rige solo el cupo general.
     assert c.get("/api/v1/me/consorcios").status_code == 401
     assert navegador(app, ip="203.0.113.78").get(SESION).status_code == 401
@@ -519,7 +544,7 @@ def test_los_registros_no_llevan_token_nonce_ni_cookies(app, motor_migrate, sali
     pedir(c, ANA)
     nonce = c.cookies[sesiones.COOKIE_NONCE]
     token = ultimo_token(motor_migrate, ANA)
-    c.get(CANJE, params={"token": token})
+    c.post(CANJE, json={"token": token})
     secretos = [token, nonce, c.cookies[sesiones.COOKIE_SESION], c.cookies[sesiones.COOKIE_CSRF]]
     c.post(SALIR, headers=csrf(c))
     lineas = salida_json()

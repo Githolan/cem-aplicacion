@@ -1,6 +1,21 @@
 {
   "components": {
     "schemas": {
+      "CanjeEnlace": {
+        "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
+        "properties": {
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "CanjeEnlace",
+        "type": "object"
+      },
       "ConsorcioResumen": {
         "description": "Un consorcio donde la persona tiene vínculo vigente (selector de edificio).",
         "properties": {
@@ -346,21 +361,19 @@
   "openapi": "3.1.0",
   "paths": {
     "/api/v1/auth/canje": {
-      "get": {
-        "description": "Valida el token (existe, no venció, no se usó) y que el navegador tenga la cookie\n`nonce` con la que se pidió; crea la sesión y deja sus cookies. Todo rechazo responde\nigual: 401 `enlace_invalido`.",
-        "operationId": "canjear_api_v1_auth_canje_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "token",
-            "required": true,
-            "schema": {
-              "pattern": "^[A-Za-z0-9_-]{43}$",
-              "title": "Token",
-              "type": "string"
+      "post": {
+        "description": "Valida el token (existe, no venció, no se usó) y que el navegador tenga la cookie\n`nonce` con la que se pidió; crea la sesión y deja sus cookies. Todo rechazo responde\nigual: 401 `enlace_invalido`.\n\nSin token CSRF, porque todavía no hay sesión. La protección equivalente es el nonce: la\ncookie es `SameSite=Lax`, así que un `POST` desde otro sitio llega sin ella y se rechaza; y\naunque llegara, el token canjeado tendría que ser uno pedido desde este mismo navegador. Una\nfalsificación de inicio de sesión (meter a la víctima en la cuenta del atacante) necesita el\nnonce de la víctima ligado al token del atacante, y no lo tiene. Además, si el navegador\ndeclara `Sec-Fetch-Site` y no es `same-origin`, se rechaza.",
+        "operationId": "canjear_api_v1_auth_canje_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanjeEnlace"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {

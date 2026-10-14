@@ -9,12 +9,11 @@ import logging
 import re
 import time
 from datetime import timedelta
-from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
-from cem_contracts.identidad import EnlacePedido, PedidoEnlace, SesionActual
-from fastapi import APIRouter, Query, Request, Response
+from cem_contracts.identidad import CanjeEnlace, EnlacePedido, PedidoEnlace, SesionActual
+from fastapi import APIRouter, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Connection, Engine, text
 
@@ -31,12 +30,17 @@ DURACION_MINIMA_PEDIDO = timedelta(milliseconds=400)
 """Ningún pedido de enlace responde antes: con cuenta o sin ella tarda lo mismo (§10.3). Debe
 superar holgadamente lo que tarda el camino con cuenta; si no, se registra una advertencia."""
 FORMATO_ORIGEN = re.compile(r"^https://[a-z0-9.-]+(:[0-9]{1,5})?$")
-RUTA_CANJE = "/api/v1/auth/canje"
+RUTA_ENTRAR = "/entrar"
+"""Página del frontend que abre el enlace del correo. El token va en el fragmento (`#token=`):
+el navegador nunca lo manda al servidor, así que no queda en el registro de acceso de nginx ni
+en `Referer`. La página lo lee, lo borra de la URL y lo manda en el cuerpo de `POST /canje`."""
 MENSAJE_PEDIDO = (
     "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar."
     " Abrilo en este mismo navegador."
 )
 SIN_CACHE = {"Cache-Control": "no-store"}
+ENCABEZADO_SITIO = "Sec-Fetch-Site"
+MISMO_ORIGEN = "same-origin"
 
 
 def validar_origen(origen: str) -> None:
@@ -66,7 +70,7 @@ def _registrar_pedido(
             eventos.solicitar_enlace(
                 conn,
                 para=correo,
-                enlace=f"{origen}{RUTA_CANJE}?token={token}",
+                enlace=f"{origen}{RUTA_ENTRAR}#token={token}",
                 minutos=int(sesiones.VIGENCIA_ENLACE.total_seconds() // 60),
             )
     return hay_cuenta
@@ -119,17 +123,28 @@ def _persona(conn: Connection, persona_id: UUID) -> tuple[str, str]:
     return nombre, correo
 
 
-@router.get("/canje", response_model=SesionActual, summary="Canjear el enlace de acceso")
+@router.post("/canje", response_model=SesionActual, summary="Canjear el enlace de acceso")
 def canjear(
-    token: Annotated[str, Query(pattern=sesiones.FORMATO_TOKEN.pattern)],
-    request: Request,
-    response: Response,
-    motor: MotorDep,
+    canje: CanjeEnlace, request: Request, response: Response, motor: MotorDep
 ) -> SesionActual:
     """Valida el token (existe, no venció, no se usó) y que el navegador tenga la cookie
     `nonce` con la que se pidió; crea la sesión y deja sus cookies. Todo rechazo responde
-    igual: 401 `enlace_invalido`."""
+    igual: 401 `enlace_invalido`.
+
+    Sin token CSRF, porque todavía no hay sesión. La protección equivalente es el nonce: la
+    cookie es `SameSite=Lax`, así que un `POST` desde otro sitio llega sin ella y se rechaza; y
+    aunque llegara, el token canjeado tendría que ser uno pedido desde este mismo navegador. Una
+    falsificación de inicio de sesión (meter a la víctima en la cuenta del atacante) necesita el
+    nonce de la víctima ligado al token del atacante, y no lo tiene. Además, si el navegador
+    declara `Sec-Fetch-Site` y no es `same-origin`, se rechaza."""
     response.headers.update(SIN_CACHE)
+    sitio = request.headers.get(ENCABEZADO_SITIO)
+    if sitio is not None and sitio != MISMO_ORIGEN:
+        log.info("canje rechazado: otro_sitio")
+        raise ErrorApi(
+            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+        )
+    token = canje.token
     nonce = request.cookies.get(sesiones.COOKIE_NONCE)
     if not sesiones.token_valido(nonce):
         log.info("canje rechazado: sin_nonce")

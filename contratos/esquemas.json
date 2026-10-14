@@ -1,4 +1,19 @@
 {
+  "CanjeEnlace": {
+    "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
+    "properties": {
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "CanjeEnlace",
+    "type": "object"
+  },
   "ConsorcioResumen": {
     "$defs": {
       "TipoVinculo": {
