@@ -47,6 +47,7 @@ cd ../frontend && pnpm install && pnpm lint && pnpm test && pnpm build
 - El ámbito se fija con `set_config(..., true)` (equivale a `SET LOCAL`); si falta, las políticas no devuelven filas.
 - No hay atajo de desarrollo para la autenticación: hasta que exista `identidad`, toda ruta protegida responde 401.
 - **slowapi descartado (14-10-2026).** slowapi 0.1.10 busca el manejador solo entre las rutas de primer nivel; FastAPI 0.141 deja las de `include_router` anidadas (`_IncludedRouter`), así que eximía toda la API sin avisar: las 301 peticiones daban 401 y ninguna 429. El middleware propio usa el mismo motor (`limits`) y lo prueban `test_limite_de_tasa.py` (con el middleware quitado fallan 5 de 7).
+- **NO VERIFICADO: que Traefik solo sea alcanzable por el túnel.** Si el puerto 443 de la VM respondiera desde Internet sin pasar por Cloudflare, `CF-Connecting-IP` se podría inventar y rotar cupos del límite de tasa. Comprobarlo (lista de seguridad de OCI o `curl` a la IP pública) antes de dar TB-8 por cerrado del todo.
 - Sin Redis no se atiende: el límite de tasa es un control de seguridad, no una caché. Si el propietario prefiere que la API siga sin límite cuando Redis cae, es una decisión suya y hay que registrarla.
 
 ## Antes de desplegar este corte (propietario, staging primero)

@@ -1,6 +1,7 @@
 """Límite de tasa con Redis real (documento 13, §10.6; cierre de TB-8)."""
 
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -105,6 +106,8 @@ def test_arranque_exige_forwarded_allow_ips():
 def test_uvicorn_usa_x_forwarded_for_solo_desde_un_proxy_confiable(
     redis_limpio, confiables, ip_contada, ip_ignorada
 ):
+    with socket.socket() as s:  # arranque.sh usa el 8000: si está ocupado, la prueba no vale
+        assert s.connect_ex(("127.0.0.1", 8000)) != 0, "el puerto 8000 ya está en uso"
     proceso = arrancar(confiables)
     try:
         for _ in range(100):
