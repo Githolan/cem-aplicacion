@@ -5,9 +5,9 @@ Documento 08: RF03 ("invitación de un solo uso y aceptación de identidad y ám
 un solo uso guardados como hash) y §8.5 (RLS por consorcio).
 
 - `nucleo.invitacion` tiene `consorcio_id`: RLS forzada por consorcio. Quien invita la crea con
-  su persona en `invitada_por` (la política lo exige) o, sin persona, el equipo de la
-  plataforma con `scripts/invitar.py`. `cem_app` lee, inserta y solo puede cambiar
-  `revocada_en`.
+  su persona en `invitada_por` (una política restrictiva de `insert` lo exige) o, sin persona,
+  el equipo de la plataforma con `scripts/invitar.py`. `cem_app` lee, inserta y solo puede
+  cambiar `revocada_en`, también en la pendiente que creó otra propietaria de la unidad.
 - Del token queda solo el SHA-256; 7 días como máximo, impuesto por la base.
 - Abrir y aceptar una invitación ocurre antes de saber en qué consorcio está ni, a veces,
   quién es la persona: lo hacen dos funciones `security definer` que reciben el hash del token
@@ -64,8 +64,12 @@ alter table nucleo.invitacion enable row level security;
 alter table nucleo.invitacion force row level security;
 create policy por_consorcio on nucleo.invitacion
   using (consorcio_id = plataforma.consorcio_actual())
-  with check (consorcio_id = plataforma.consorcio_actual()
-              and invitada_por is not distinct from plataforma.persona_actual());
+  with check (consorcio_id = plataforma.consorcio_actual());
+-- Al crear, quien invita es la persona del ámbito (o nadie, si la carga el equipo con el
+-- script). Solo al crear: retirar o reemplazar una pendiente de otra propietaria de la
+-- unidad, o del equipo, lo decide `puede_invitar`, y `cem_app` solo cambia `revocada_en`.
+create policy invitada_por_quien_crea on nucleo.invitacion as restrictive for insert
+  with check (invitada_por is not distinct from plataforma.persona_actual());
 
 -- Lo que ve quien abre el enlace, antes de aceptar. `resultado` es 'ok' o el motivo del
 -- rechazo (para los registros; la API responde igual a todos).

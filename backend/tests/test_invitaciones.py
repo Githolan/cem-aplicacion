@@ -436,6 +436,62 @@ def test_retirar(app, motor_migrate):  # noqa: F811
     assert ana.post(ruta(e, f"/{uuid4()}/revocar"), headers=csrf(ana)).status_code == 404
 
 
+def test_otra_propietaria_retira_y_reemplaza_lo_que_invito_la_primera(app, motor_migrate):  # noqa: F811
+    """Dos propietarias vigentes de la misma unidad pasan las dos `puede_invitar` y las dos ven
+    la lista de esa unidad. Cualquiera de las dos retira o reemplaza lo que invitó la otra. La
+    política pide que `invitada_por` sea la persona del ámbito solo al crear."""
+    e = edificio(motor_migrate)
+    segunda = correo_nuevo()
+    with motor_migrate.begin() as c:
+        berta_id = c.execute(
+            text("insert into nucleo.persona (correo, nombre) values (:c, 'Berta') returning id"),
+            {"c": segunda},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde) values (:c, :u, :p, 'propietario', '2020-01-01')"
+            ),
+            {"c": e.consorcio, "u": e.u1, "p": berta_id},
+        )
+    ana = entrar_como(app, motor_migrate, e.propietaria)
+    berta = entrar_como(app, motor_migrate, segunda)
+    a_retirar, a_reemplazar = correo_nuevo(), correo_nuevo()
+    retirada = invitar(ana, e, a_retirar).json()
+    reemplazada = invitar(ana, e, a_reemplazar).json()
+
+    r = berta.post(ruta(e, f"/{retirada['id']}/revocar"), headers=csrf(berta))
+    assert r.status_code == 204, r.text
+    nueva = invitar(berta, e, a_reemplazar)
+    assert nueva.status_code == 201, nueva.text
+    estados = {x["id"]: x["estado"] for x in ana.get(ruta(e)).json()["elementos"]}
+    assert estados[retirada["id"]] == estados[reemplazada["id"]] == "revocada"
+    assert estados[nueva.json()["id"]] == "pendiente"
+    with motor_migrate.connect() as conn:
+        por = conn.execute(
+            text("select invitada_por from nucleo.invitacion where id = :i"),
+            {"i": nueva.json()["id"]},
+        ).scalar_one()
+    assert por == berta_id  # quien crea sigue siendo quien está en el ámbito
+    acciones = [a["accion"] for a in auditoria_de(motor_migrate, UUID(retirada["id"]))]
+    assert acciones == ["identidad.invitacion.crear", "identidad.invitacion.revocar"]
+
+
+def test_la_propietaria_retira_lo_que_cargo_el_equipo(app, motor_migrate, monkeypatch):  # noqa: F811
+    """Una invitación del script (sin persona en `invitada_por`) a una unidad con propietaria:
+    ella la ve y la puede retirar."""
+    e = edificio(motor_migrate)
+    nuevo = correo_nuevo()
+    monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", ORIGEN)
+    argumentos = ["--consorcio", str(e.consorcio), "--unidad", str(e.u1), "--tipo", "inquilino"]
+    assert script_invitar.main([*argumentos, "--correo", nuevo, "--nombre", "Eva"]) == 0
+    ana = entrar_como(app, motor_migrate, e.propietaria)
+    [cargada] = [x for x in ana.get(ruta(e)).json()["elementos"] if x["correo"] == nuevo]
+    r = ana.post(ruta(e, f"/{cargada['id']}/revocar"), headers=csrf(ana))
+    assert r.status_code == 204, r.text
+
+
 # Base: RLS, privilegios y topes -----------------------------------------------------------
 
 
