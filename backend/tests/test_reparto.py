@@ -11,7 +11,7 @@ from app.liquidacion.reparto import RepartoBloqueado, repartir
 D = Decimal
 
 
-def test_tres_partes_iguales_reparte_el_centavo_por_unidad_id():
+def test_pa03_tres_partes_iguales_reparte_el_centavo_por_unidad_id():
     assert repartir(D("100.00"), {"c": D(1), "a": D(1), "b": D(1)}) == {
         "a": D("33.34"), "b": D("33.33"), "c": D("33.33"),
     }  # fmt: skip
@@ -42,7 +42,7 @@ def test_unidad_con_peso_cero_no_paga():
         (10, {"a": D(1)}),
     ],
 )
-def test_grupo_sin_pesos_validos_bloquea(total, pesos):
+def test_pa02_grupo_sin_pesos_validos_bloquea(total, pesos):
     with pytest.raises(RepartoBloqueado):
         repartir(total, pesos)
 
@@ -55,7 +55,7 @@ grupo = st.dictionaries(
 
 
 @given(centavos, grupo)
-def test_conserva_el_total(total, pesos):
+def test_pa03_conserva_el_total(total, pesos):
     assert sum(repartir(total, pesos).values()) == total
 
 
@@ -68,7 +68,7 @@ def test_cada_parte_esta_a_menos_de_un_centavo_de_la_exacta(total, pesos):
 
 
 @given(centavos, grupo)
-def test_es_determinista_e_independiente_del_orden(total, pesos):
+def test_pa03_es_determinista_e_independiente_del_orden(total, pesos):
     invertido = dict(reversed(list(pesos.items())))
     assert repartir(total, pesos) == repartir(total, pesos) == repartir(total, invertido)
 

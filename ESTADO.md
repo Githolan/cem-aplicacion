@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 15-10-2026 (`main` en `41df581`; rama `claude/identidad-invitaciones-46xhhl` con las invitaciones, sin fusionar).
+**Actualizado:** 15-10-2026.
 
 ## Qué existe
 
@@ -43,6 +43,17 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - Al corte de identidad (#25): 250 pruebas (230 del backend, 3 de contratos, 17 del frontend con `axe`) más 31 de extremo a extremo; los PR #27 a #30 sumaron más (el total se toma del próximo `ci.ps1`) (1 omitida: iPhone solo en móvil), incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
 
 ## Cómo probar
+
+**En una sesión de Claude Code en la nube:** el hook `.claude/hooks/session-start.sh` instala y levanta lo mismo que `backend/pruebas/compose.yml`, sin Docker:
+- PostgreSQL 18 de PGDG en el 5432, en UTF8;
+- Redis 7;
+- Mailpit v1.31.4 con STARTTLS;
+- Versity S3 Gateway v1.0.18;
+- `age`, el `.venv` del backend y las dependencias del frontend.
+
+Deja las variables `CEM_TEST_*` en el entorno. Corre todo salvo 6 pruebas de `test_copias.py`, porque `initdb` no arranca como root y la sesión corre como root. Esas 6 se corren en la corrida oficial: `pytest --deselect tests/test_copias.py`.
+
+**Cobertura de PA:** `python -m scripts.cobertura_pa` desde `backend/` lista las PA del conjunto P0-piloto que ya tienen una prueba `test_paNN_…` y las que faltan. Con `--estricto` sale con 1 si falta alguna (puerta G5). Hoy hay 4 de 25: PA02 y PA03 en el motor de reparto, PA05 y PA15.
 
 **Corrida oficial** (Linux, PostgreSQL 18 y Redis 7 reales, las mismas imágenes que producción), desde la raíz:
 
@@ -91,8 +102,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 
 1. Llevar `main` a staging con `ci.ps1` completo y `cd.ps1` (copia antes de migrar de `0004` a `0006`), correr las e2e contra staging y, con la aprobación del propietario, pasar a producción con `CEM_CODIGO_CLAVE`.
 2. Carril C: el propietario ya tiene las liquidaciones anonimizadas. Subirlas al proyecto y preparar los prototipos HTML de las pantallas P0 para la puerta G3.
-3. Identidad, lo que falta de 2a: fusionar y desplegar las invitaciones (rama `claude/identidad-invitaciones-46xhhl`; migración `0007`), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
-4. Trazabilidad: nombrar las pruebas de aceptación `test_paNN_…` (hoy solo `test_pa05_…`) para que `ci.ps1` liste las PA cubiertas.
+3. Identidad, lo que falta de 2a: fusionar y desplegar las invitaciones (PR #35, rama `claude/identidad-invitaciones-46xhhl`; migración `0007`), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
+4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
 6. Comprobar que el 443 de la VM no responde sin pasar por Cloudflare (cierre de TB-8).
-7. Hook `SessionStart` que instale PostgreSQL 18 y Redis 7 en las sesiones de Claude.
