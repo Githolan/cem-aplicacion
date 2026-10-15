@@ -5,7 +5,9 @@
 #
 # Para cada aplicación de deploy-map.ps1 lee GET /applications/<uuid> y exige:
 #   - nombre en Coolify == nombre canónico del mapa
-#   - repositorio == cem-aplicacion y rama == main
+#   - build_pack == dockerimage y docker_registry_image_name == la imagen de ghcr.io
+#     de su función (backend, trabajos, planificador -> cem-backend; frontend ->
+#     cem-frontend), con la misma función que usa cd.ps1
 # Y para la base de cada entorno, GET /databases/<uuid>: nombre == nombre canónico.
 # Controles (si un control falla, ningún verde vale):
 #   - un UUID inventado debe dar 404 (la API distingue lo que existe de lo que no)
@@ -18,6 +20,7 @@
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'deploy-map.ps1')
 . (Join-Path $PSScriptRoot 'api-coolify.ps1')
+. (Join-Path $PSScriptRoot 'compuertas.ps1')
 
 # UUID con la forma de los de Coolify (24 caracteres [a-z0-9]) que no existe.
 $UuidInventado  = 'cemnoexiste0000000000000'
@@ -58,9 +61,13 @@ foreach ($entorno in @('staging', 'produccion')) {
             continue
         }
         Comprobar "$($app.Uuid) se llama '$($app.Nombre)' en Coolify" ($leida.name -ceq $app.Nombre) "se llama '$($leida.name)'"
-        Comprobar "$($app.Nombre): repositorio cem-aplicacion" ($leida.git_repository -eq $CemRepositorioGit) $leida.git_repository
-        Comprobar "$($app.Nombre): rama $CemRamaDespliegue" ($leida.git_branch -eq $CemRamaDespliegue) $leida.git_branch
-        Write-Host "        estado en Coolify: $($leida.status); commit fijado: $($leida.git_commit_sha)" -ForegroundColor DarkGray
+        Comprobar "$($app.Nombre): build_pack dockerimage" ($leida.build_pack -eq 'dockerimage') "es '$($leida.build_pack)'"
+        $esperada = "$CemRegistroImagenes/$($app.Imagen)"
+        Comprobar "$($app.Nombre): imagen $esperada (función $($app.Funcion))" ($leida.docker_registry_image_name -eq $esperada) "usa '$($leida.docker_registry_image_name)'"
+        # La misma regla que aplica cd.ps1 (compuertas.ps1), para que no diverjan.
+        $problemas = Get-CemProblemasAppCoolify -Leida $leida -App $app
+        Comprobar "$($app.Nombre): cd.ps1 lo aceptaría" ($problemas.Count -eq 0) ($problemas -join '; ')
+        Write-Host "        estado en Coolify: $($leida.status); etiqueta: $($leida.docker_registry_image_tag)" -ForegroundColor DarkGray
     }
     $base = Get-CemBaseDatos -Entorno $entorno
     try {

@@ -94,8 +94,21 @@ Comprobar 'staging sin ci.ps1 en verde: se niega' ($r.Codigo -eq 1 -and $r.Salid
 Write-CemResultadoCi -Sha $punta -Resultado @{ sha = $punta; resultado = 'ok' } | Out-Null
 $r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta)
 Comprobar 'staging sin -Autorizacion: se niega' ($r.Codigo -eq 1 -and $r.Salida -match 'falta -Autorizacion') $r.Salida
+# La constancia en verde pero sin imágenes (corrida con -SinSubirImagenes).
 $r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-Autorizacion', 'prueba')
-Comprobar 'control: con todo en regla llega a Coolify y falla por falta de credenciales' ($r.Codigo -ne 0 -and $r.Salida -match 'faltan variables de entorno') $r.Salida
+Comprobar 'staging con ci.ps1 en verde pero sin imágenes subidas: se niega' ($r.Codigo -eq 1 -and $r.Salida -match 'no tiene imágenes subidas' -and $r.Salida -notmatch 'faltan variables de entorno') $r.Salida
+$r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-SoloVerificar')
+Comprobar '-SoloVerificar sin imágenes en la constancia: se niega (no hay digest contra qué comparar)' ($r.Codigo -eq 1 -and $r.Salida -match 'no tiene imágenes subidas') $r.Salida
+function ImagenesDe([string]$sha, [string]$digestBackend, [string]$digestFrontend) {
+    [ordered]@{
+        'cem-backend'  = [ordered]@{ referencia = "ghcr.io/githolan/cem-backend:$sha";  digest = $digestBackend;  plataforma = 'linux/arm64' }
+        'cem-frontend' = [ordered]@{ referencia = "ghcr.io/githolan/cem-frontend:$sha"; digest = $digestFrontend; plataforma = 'linux/arm64' }
+    }
+}
+$digB = 'sha256:' + ('1' * 64); $digF = 'sha256:' + ('2' * 64)
+Write-CemResultadoCi -Sha $punta -Resultado @{ sha = $punta; resultado = 'ok'; imagenes = (ImagenesDe $punta $digB $digF) } | Out-Null
+$r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-Autorizacion', 'prueba')
+Comprobar 'control: con todo en regla (imágenes incluidas) llega a Coolify y falla por falta de credenciales' ($r.Codigo -ne 0 -and $r.Salida -match 'faltan variables de entorno' -and $r.Salida -match [regex]::Escape($digB)) $r.Salida
 
 Write-Host "`n=== 5. Revisiones de Alembic de una SHA (git real, sin red) ===" -ForegroundColor Cyan
 $repoLocal = Split-Path -Parent $PSScriptRoot
@@ -174,6 +187,119 @@ $parametros = (Get-Command $cd).Parameters
 Comprobar 'cd.ps1 acepta -SinCopiaPrevia (switch)' ($parametros.ContainsKey('SinCopiaPrevia') -and $parametros['SinCopiaPrevia'].SwitchParameter) ($parametros.Keys -join ',')
 $r = CorrerCd @('-Entorno', 'staging', '-Sha', $punta, '-Autorizacion', 'prueba', '-SinCopiaPrevia')
 Comprobar 'con -SinCopiaPrevia las demás compuertas siguen valiendo (llega a credenciales y falla)' ($r.Codigo -ne 0 -and $r.Salida -match 'faltan variables de entorno') $r.Salida
+
+Write-Host "`n=== 9. Imágenes en ghcr.io: constancia, Coolify y contenedor ===" -ForegroundColor Cyan
+. (Join-Path $PSScriptRoot 'deploy-map.ps1')
+function Falla([scriptblock]$b) { try { & $b | Out-Null; $null } catch { "$_" } }
+
+# 9a. Constancia de ci.ps1 con imágenes
+$imgs = @('cem-backend', 'cem-frontend')
+$d = Get-CemImagenesAprobadas -Sha $punta -Imagenes $imgs
+Comprobar 'control: constancia con las dos imágenes -> devuelve sus digests' ($d['cem-backend'] -eq $digB -and $d['cem-frontend'] -eq $digF) ($d | ConvertTo-Json -Compress)
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok' } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia verde sin digests -> falla y nombra -SinSubirImagenes' ($e -match 'no tiene imágenes subidas' -and $e -match '-SinSubirImagenes') $e
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'falla'; imagenes = (ImagenesDe $shaA $digB $digF) } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia en rojo aunque tenga digests -> falla' ($e -match 'no tiene un resultado verde') $e
+$sinFront = ImagenesDe $shaA $digB $digF; $sinFront.Remove('cem-frontend')
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok'; imagenes = $sinFront } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia sin cem-frontend -> falla y la nombra' ($e -match 'no tiene la imagen cem-frontend') $e
+$d = Get-CemImagenesAprobadas -Sha $shaA -Imagenes @('cem-backend')
+Comprobar 'control: la misma constancia sirve si el entorno solo pide cem-backend' ($d['cem-backend'] -eq $digB) ($d | ConvertTo-Json -Compress)
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok'; imagenes = (ImagenesDe $shaB $digB $digF) } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia con la imagen etiquetada con otra SHA -> falla' ($e -match 'se esperaba' -and $e -match $shaB) $e
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok'; imagenes = (ImagenesDe $shaA 'sha256:abc' $digF) } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia con un digest malformado -> falla' ($e -match 'digest inválido') $e
+$amd = ImagenesDe $shaA $digB $digF; $amd['cem-backend'].plataforma = 'linux/amd64'
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok'; imagenes = $amd } | Out-Null
+$e = Falla { Get-CemImagenesAprobadas -Sha $shaA -Imagenes $imgs }
+Comprobar 'constancia con una imagen linux/amd64 -> falla' ($e -match 'linux/amd64') $e
+
+# 9b. Token de ghcr.io: nunca aparece en el mensaje
+$e = Falla { Assert-CemTokenRegistro -Token $null }
+Comprobar 'sin CEM_GHCR_TOKEN -> falla y nombra la variable' ($e -match 'falta la variable de usuario CEM_GHCR_TOKEN') $e
+$fino = 'github_pat_' + ('Z' * 30)
+$e = Falla { Assert-CemTokenRegistro -Token $fino }
+Comprobar 'token de grano fino -> falla' ($e -match 'no es un token clásico') $e
+Comprobar 'control: el mensaje no contiene el token' ($e -notmatch 'Z{10}') $e
+$e = Falla { Assert-CemTokenRegistro -Token ('xghp_' + ('Y' * 30)) }
+Comprobar 'ghp_ en el medio no cuenta como clásico' ($e -match 'no es un token clásico' -and $e -notmatch 'Y{10}') $e
+$e = Falla { Assert-CemTokenRegistro -Token ('ghp_' + ('X' * 36)) }
+Comprobar 'control: un token clásico pasa' ($null -eq $e) $e
+
+# 9c. Manifiesto de ghcr.io (salida de imagetools inspect --format '{{json .Manifest}}')
+$digI = 'sha256:' + ('3' * 64)
+function Manifiesto([string]$tipo, [string[]]$plataformas) {
+    @{ mediaType = $tipo; digest = $digI; manifests = @($plataformas | ForEach-Object { $p = $_ -split '/'; @{ digest = 'sha256:' + ('4' * 64); platform = @{ os = $p[0]; architecture = $p[1] } } }) } | ConvertTo-Json -Depth 5
+}
+$indice = 'application/vnd.oci.image.index.v1+json'
+$r = Read-CemManifiestoImagen -Json (Manifiesto $indice @('linux/arm64', 'unknown/unknown')) -Referencia 'x'
+Comprobar 'control: índice con linux/arm64 y atestación -> devuelve el digest del índice' ($r -eq $digI) $r
+$e = Falla { Read-CemManifiestoImagen -Json (Manifiesto $indice @('linux/amd64', 'unknown/unknown')) -Referencia 'x' }
+Comprobar 'índice sin linux/arm64 -> falla' ($e -match 'no tiene linux/arm64') $e
+$e = Falla { Read-CemManifiestoImagen -Json (Manifiesto 'application/vnd.oci.image.manifest.v1+json' @()) -Referencia 'x' }
+Comprobar 'manifiesto suelto (no índice) -> falla' ($e -match 'se esperaba un índice') $e
+$e = Falla { Read-CemManifiestoImagen -Json 'ERROR: unauthorized' -Referencia 'x' }
+Comprobar 'salida que no es JSON (p. ej. sin permiso) -> falla' ($e -match 'no devolvió JSON') $e
+
+# 9d. Aplicación en Coolify: tipo dockerimage e imagen de su función
+$apps = @(Get-CemAplicaciones -Entorno staging)
+$back = $apps | Where-Object Funcion -eq 'backend'; $front = $apps | Where-Object Funcion -eq 'frontend'
+$plan = $apps | Where-Object Funcion -eq 'planificador'
+function Leida([string]$tipo, [string]$imagen) { [pscustomobject]@{ build_pack = $tipo; docker_registry_image_name = $imagen; docker_registry_image_tag = $punta } }
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/githolan/cem-backend') -App $back
+Comprobar 'control: backend dockerimage con cem-backend -> sin problemas' ($p.Count -eq 0) ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/githolan/cem-backend') -App $plan
+Comprobar 'control: planificador dockerimage con cem-backend -> sin problemas' ($p.Count -eq 0) ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/githolan/cem-frontend') -App $front
+Comprobar 'control: frontend dockerimage con cem-frontend -> sin problemas' ($p.Count -eq 0) ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerfile' $null) -App $back
+Comprobar 'app que no es dockerimage (la construye Coolify) -> problema' ($p -match "tipo 'dockerfile'") ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/githolan/cem-backend') -App $front
+Comprobar 'frontend apuntando a cem-backend -> problema' ($p -match 'se espera .ghcr.io/githolan/cem-frontend') ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/githolan/cem-frontend') -App $plan
+Comprobar 'planificador apuntando a cem-frontend -> problema' ($p -match 'se espera .ghcr.io/githolan/cem-backend') ($p -join '; ')
+$p = Get-CemProblemasAppCoolify -Leida (Leida 'dockerimage' 'ghcr.io/otro/cem-backend') -App $back
+Comprobar 'backend con la imagen de otro dueño -> problema' ($p.Count -eq 1) ($p -join '; ')
+
+# 9e. El mapa: cada app con la imagen de su función; un mapa con la imagen cambiada falla
+foreach ($ent in $CemEntornos.Keys) {
+    foreach ($a in Get-CemAplicaciones -Entorno $ent) {
+        Comprobar "mapa $ent/$($a.Nombre): imagen $($a.Imagen) = la de su función" ($a.Imagen -eq $CemImagenPorFuncion[$a.Funcion] -and $a.Imagen) $a.Imagen
+    }
+}
+$original = $CemEntornos.staging.Aplicaciones.frontend.Imagen
+$CemEntornos.staging.Aplicaciones.frontend.Imagen = 'cem-backend'
+$e = Falla { Get-CemAplicaciones -Entorno staging }
+$CemEntornos.staging.Aplicaciones.frontend.Imagen = $original
+Comprobar 'control: un mapa con el frontend en cem-backend falla al leerse' ($e -match 'cem-frontend-staging' -and $e -match "usa 'cem-frontend'") $e
+
+# 9f. Contenedor en la VM frente a la constancia
+$labelsOk = "{""$CemEtiquetaRevision"":""$punta"",""otra"":""x""}"
+function Contenedor([string]$imagenConfig, [string]$labels, [string[]]$repoDigests, $app = $back, [string]$digest = $digB) {
+    Get-CemProblemasContenedor -App $app -Sha $punta -Digest $digest -ImagenConfig $imagenConfig -Etiquetas $labels -RepoDigests (ConvertTo-Json @($repoDigests) -Compress)
+}
+$refB = "ghcr.io/githolan/cem-backend:$punta"
+$p = Contenedor "$refB`n" $labelsOk @("ghcr.io/githolan/cem-backend@$digB")
+Comprobar 'control: imagen, etiqueta y digest correctos -> sin problemas' ($p.Count -eq 0) ($p -join '; ')
+$p = Contenedor $refB $labelsOk @("ghcr.io/githolan/cem-backend@sha256:$('9' * 64)")
+Comprobar 'digest distinto al de la constancia -> problema' ($p.Count -eq 1 -and $p[0] -match 'no es ghcr.io/githolan/cem-backend@') ($p -join '; ')
+$p = Contenedor $refB $labelsOk @("ghcr.io/githolan/cem-frontend@$digB")
+Comprobar 'mismo digest pero de otra imagen -> problema' ($p.Count -eq 1) ($p -join '; ')
+$p = Contenedor "ghcr.io/githolan/cem-backend:$shaB" $labelsOk @("ghcr.io/githolan/cem-backend@$digB")
+Comprobar 'contenedor con la etiqueta de otra SHA -> problema' ($p.Count -eq 1 -and $p[0] -match 'corre') ($p -join '; ')
+$p = Contenedor $refB "{""$CemEtiquetaRevision"":""$shaB""}" @("ghcr.io/githolan/cem-backend@$digB")
+Comprobar 'etiqueta revision de otra SHA -> problema' ($p.Count -eq 1 -and $p[0] -match $CemEtiquetaRevision) ($p -join '; ')
+$p = Contenedor $refB 'null' @("ghcr.io/githolan/cem-backend@$digB")
+Comprobar 'contenedor sin etiquetas -> problema' ($p.Count -eq 1) ($p -join '; ')
+$p = Contenedor $refB $labelsOk @()
+Comprobar 'imagen sin RepoDigests (construida en la VM) -> problema' ($p.Count -eq 1) ($p -join '; ')
+$p = Contenedor $refB $labelsOk @("ghcr.io/githolan/cem-backend@$digB") $front $digF
+Comprobar 'frontend corriendo la imagen de backend -> problema' ($p.Count -ge 1 -and $p[0] -match 'cem-frontend') ($p -join '; ')
 
 Remove-Item Env:\CEM_DESPLIEGUE_ESTADO
 if ((Split-Path -Leaf $raiz) -like "$prefijo*" -and $raiz.StartsWith([IO.Path]::GetTempPath())) { Remove-Item -Recurse -Force $raiz }

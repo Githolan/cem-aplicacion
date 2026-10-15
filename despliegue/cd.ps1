@@ -4,14 +4,22 @@
 # Despliega UN entorno desde UNA SHA de main y lo verifica sobre el contenido.
 # Sin CI/CD en la nube: corre en la PC del propietario (PowerShell 7).
 #
+# Imágenes (decisión del propietario, 15-10-2026): Coolify NO construye. ci.ps1
+# construye y sube ghcr.io/githolan/cem-backend:<sha> y cem-frontend:<sha>
+# (linux/arm64) y anota sus digests en la constancia; cada aplicación de Coolify es
+# de tipo dockerimage y cd.ps1 solo le cambia la etiqueta (docker_registry_image_tag).
+#
 # Compuertas (se niega y sale con código 1 si alguna no se cumple; nada cambia):
-#   - la SHA está en origin/main y es su punta (Coolify construye la punta de main)
-#   - ci.ps1 terminó en verde sobre esa SHA (constancia local de ci.ps1)
+#   - la SHA está en origin/main y es su punta (se despliega solo la punta de main)
+#   - ci.ps1 terminó en verde sobre esa SHA y su constancia tiene el digest de
+#     cada imagen que usa el entorno (también en -SoloVerificar: es contra lo que
+#     se compara el contenedor)
 #   - fuera de la ventana de actualización de Coolify, 02:45-03:10 UTC
 #   - producción: solo con -Entorno produccion -Confirmar, y solo si cd.ps1 ya
 #     desplegó y verificó esa misma SHA en staging
-#   - cada UUID del mapa se llama en Coolify como su nombre canónico, construye
-#     cem-aplicacion desde main y no tiene un commit fijado
+#   - cada UUID del mapa se llama en Coolify como su nombre canónico, es de tipo
+#     dockerimage y usa la imagen de su función (backend, trabajos y planificador
+#     -> cem-backend; frontend -> cem-frontend)
 #
 # Copia previa a la migración (§18.3, regla 5). Se compara la última revisión de
 # Alembic de la SHA con plataforma.alembic_version de cem-postgres(-staging), leída
@@ -26,14 +34,18 @@
 # En -SoloVerificar solo se informa la decisión; nunca se copia.
 #
 # Despliegue: por cada aplicación del entorno en deploy-map.ps1, en orden
-# (backend; trabajos y planificador si existen; frontend): actualiza
-# CEM_SHA_IMAGEN donde corresponde, pide el despliegue y espera que termine con
-# el commit esperado. Un despliegue fallido detiene todo.
+# (backend; trabajos y planificador si existen; frontend): PATCH de
+# docker_registry_image_tag = SHA (leído de vuelta), CEM_SHA_IMAGEN donde
+# corresponde, pide el despliegue y espera que termine. Un despliegue fallido
+# detiene todo.
 #
 # Verificación sobre contenido (por ssh a la VM, a través de Traefik con el Host
 # del entorno; lo mismo en -SoloVerificar):
-#   - cada contenedor corre, está healthy y su SOURCE_COMMIT es la SHA
-#   - CEM_SHA_IMAGEN en Coolify es la SHA
+#   - cada contenedor corre, está healthy, su imagen (.Config.Image) es
+#     ghcr.io/githolan/<imagen>:<sha>, su etiqueta org.opencontainers.image.revision
+#     es la SHA y los RepoDigests de su imagen contienen el digest de la constancia
+#     (las apps dockerimage no tienen SOURCE_COMMIT)
+#   - docker_registry_image_tag y CEM_SHA_IMAGEN en Coolify son la SHA
 #   - /health: "estado":"ok" y sha_imagen == SHA
 #   - /api/v1/health/deps y /api/v1/health/cola: "estado":"ok"
 #   - control: con un Host que no existe, Traefik NO devuelve "estado":"ok"
@@ -133,23 +145,28 @@ if (-not $SoloVerificar) {
     Bien "ci.ps1 en verde sobre $sha7"
     if (-not $Autorizacion) { Negarse 'falta -Autorizacion (quién lo autorizó y dónde; va al registro de despliegue)' }
     if ($shaCompleta -ne $puntaMain) {
-        Negarse "$sha7 no es la punta de main ($($puntaMain.Substring(0, 7))); Coolify construye la punta de main y desplegaría otro commit"
+        Negarse "$sha7 no es la punta de main ($($puntaMain.Substring(0, 7))); se despliega solo la punta de main"
     }
     Bien "$sha7 es la punta de main"
 }
+
+# --- Imágenes subidas por ci.ps1 (también en -SoloVerificar) -----------------------
+$imagenesEntorno = @($aplicaciones.Imagen | Sort-Object -Unique)
+try {
+    $digests = Get-CemImagenesAprobadas -Sha $shaCompleta -Imagenes $imagenesEntorno
+} catch {
+    Negarse "$($_.Exception.Message); correr: pwsh despliegue/ci.ps1 -Sha $sha7"
+}
+foreach ($img in $imagenesEntorno) { Bien "$(Get-CemReferenciaImagen -Imagen $img -Sha $shaCompleta) subida por ci.ps1: $($digests[$img])" }
 
 # --- Coolify: el mapa coincide ---------------------------------------------------
 Assert-CemCredenciales
 foreach ($app in $aplicaciones) {
     $leida = Invoke-CemCoolify GET "/applications/$($app.Uuid)"
     if ($leida.name -cne $app.Nombre) { Negarse "$($app.Uuid) se llama '$($leida.name)' en Coolify, no '$($app.Nombre)'" }
-    if ($leida.git_repository -ne $CemRepositorioGit -or $leida.git_branch -ne $CemRamaDespliegue) {
-        Negarse "$($app.Nombre) construye $($leida.git_repository)@$($leida.git_branch), no $CemRepositorioGit@$CemRamaDespliegue"
-    }
-    if (-not $SoloVerificar -and $leida.git_commit_sha -ne 'HEAD') {
-        Negarse "$($app.Nombre) tiene fijado el commit '$($leida.git_commit_sha)' en Coolify; se espera HEAD"
-    }
-    Bien "$($app.Nombre) = $($app.Uuid) (Coolify: $($leida.status))"
+    $problemas = Get-CemProblemasAppCoolify -Leida $leida -App $app
+    if ($problemas.Count -gt 0) { Negarse ($problemas -join '; ') }
+    Bien "$($app.Nombre) = $($app.Uuid), dockerimage $($leida.docker_registry_image_name):$($leida.docker_registry_image_tag) (Coolify: $($leida.status))"
 }
 $leidaBase = Invoke-CemCoolify GET "/databases/$($baseDatos.Uuid)"
 if ($leidaBase.name -cne $baseDatos.Nombre) { Negarse "$($baseDatos.Uuid) se llama '$($leidaBase.name)' en Coolify, no '$($baseDatos.Nombre)'" }
@@ -196,6 +213,10 @@ if (-not $SoloVerificar) {
     foreach ($app in $aplicaciones) {
         $orden++
         Info "`n== $($app.Nombre) =="
+        Invoke-CemCoolify PATCH "/applications/$($app.Uuid)" @{ docker_registry_image_tag = $shaCompleta } | Out-Null
+        $etiqueta = (Invoke-CemCoolify GET "/applications/$($app.Uuid)").docker_registry_image_tag
+        if ($etiqueta -ne $shaCompleta) { throw "docker_registry_image_tag de $($app.Nombre) no quedó en $shaCompleta (leído: '$etiqueta')" }
+        Bien "docker_registry_image_tag = $sha7 (leída de vuelta; imagen $($app.Imagen), $($digests[$app.Imagen]))"
         if ($app.ConShaImagen) {
             Set-CemVariablePublicaApp -Uuid $app.Uuid -Clave 'CEM_SHA_IMAGEN' -Valor $shaCompleta
             Bien "CEM_SHA_IMAGEN = $sha7 (leída de vuelta)"
@@ -210,7 +231,7 @@ if (-not $SoloVerificar) {
             $s = Invoke-CemCoolify GET "/deployments/$dep"
         } while ($s.status -notin $EstadosFinales -and (Get-Date) -lt $limite)
         $estado = if ($s.status -in $EstadosFinales) { $s.status } else { "sin terminar a los $MinutosPorDespliegue min ($($s.status))" }
-        $filas.Add("| $orden | ``$($app.Nombre)`` | ``$($app.Uuid)`` | ``$dep`` | $estado | ``$($s.commit)`` |")
+        $filas.Add("| $orden | ``$($app.Nombre)`` | ``$($app.Uuid)`` | ``$dep`` | $estado | ``$(Get-CemReferenciaImagen -Imagen $app.Imagen -Sha $shaCompleta)`` ``$($digests[$app.Imagen])`` |")
         if ($s.status -ne 'finished') {
             Write-Host "  FALLA: despliegue $estado" -ForegroundColor Red
             if ($s.logs) {
@@ -220,12 +241,7 @@ if (-not $SoloVerificar) {
             $desplegadoOk = $false
             break
         }
-        if ($s.commit -ne $shaCompleta) {
-            Write-Host "  FALLA: Coolify construyó $($s.commit), no $shaCompleta" -ForegroundColor Red
-            $desplegadoOk = $false
-            break
-        }
-        Bien "despliegue terminado con el commit $sha7"
+        Bien "despliegue terminado (la imagen se comprueba en la verificación)"
     }
 }
 
@@ -253,8 +269,16 @@ if ($desplegadoOk) {
         $c = $contenedores[0]
         $salud = Invoke-CemSsh "docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}sin-healthcheck{{end}}' $c"
         Anotar ($salud -eq 'running healthy') "$($app.Nombre): contenedor $c $salud"
-        $commit = Invoke-CemSsh "docker exec $c printenv SOURCE_COMMIT"
-        Anotar ($commit -eq $shaCompleta) "$($app.Nombre): SOURCE_COMMIT $commit"
+        # Sin comillas dobles: el formato pasa por ssh y por sh entre comillas simples.
+        $imagenConfig = Invoke-CemSsh "docker inspect -f '{{.Config.Image}}' $c"
+        $etiquetas = Invoke-CemSsh "docker inspect -f '{{json .Config.Labels}}' $c"
+        $idImagen = Invoke-CemSsh "docker inspect -f '{{.Image}}' $c"
+        $repoDigests = Invoke-CemSsh "docker image inspect -f '{{json .RepoDigests}}' $($idImagen.Trim())"
+        $problemas = Get-CemProblemasContenedor -App $app -Sha $shaCompleta -Digest $digests[$app.Imagen] `
+            -ImagenConfig $imagenConfig -Etiquetas $etiquetas -RepoDigests $repoDigests
+        Anotar ($problemas.Count -eq 0) "$($app.Nombre): imagen $($imagenConfig.Trim()) $(if ($problemas.Count -eq 0) { "con $CemEtiquetaRevision = $sha7 y digest $($digests[$app.Imagen])" } else { $problemas -join '; ' })"
+        $tag = (Invoke-CemCoolify GET "/applications/$($app.Uuid)").docker_registry_image_tag
+        Anotar ($tag -eq $shaCompleta) "$($app.Nombre): docker_registry_image_tag en Coolify $tag"
         if ($app.ConShaImagen) {
             $var = Get-CemVariableApp -Uuid $app.Uuid -Clave 'CEM_SHA_IMAGEN'
             Anotar ($var -eq $shaCompleta) "$($app.Nombre): CEM_SHA_IMAGEN en Coolify $var"
