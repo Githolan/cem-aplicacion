@@ -10,6 +10,10 @@
 #      (backend/pruebas/compose.yml, proyecto de compose propio 'cem-ci')
 #   2. ruff check + ruff format --check, en el mismo contenedor
 #   3. contratos: pytest en /src/contratos, en el mismo contenedor
+#   3b. cobertura de PA: `python -m scripts.cobertura_pa --json` en el mismo
+#      contenedor (documento 14, §11); las PA del P0-piloto cubiertas y faltantes
+#      van a la constancia (campo cobertura_pa) y al .log. Que falten PA no es
+#      rojo (sin --estricto); que el script falle o no devuelva el informe, sí
 #   4. frontend: pnpm install --frozen-lockfile, lint, test, build
 #   5. imagen del frontend: docker build + frontend/scripts/probar-imagen.sh
 #   6. extremo a extremo: pnpm e2e (frontend/scripts/probar-extremo-a-extremo.sh:
@@ -68,6 +72,8 @@ $PrefijoE2e        = 'cem-frontend-e2e'
 $PrefijoDockerConfig = 'cem-ci-docker-config-'
 # Imagen -> referencia, digest y plataforma de lo subido en la etapa 7.
 $imagenes = [ordered]@{}
+# Informe de scripts/cobertura_pa.py (etapa 3b); va a la constancia.
+$coberturaPa = $null
 
 $repo = Split-Path -Parent $PSScriptRoot
 $shaCompleta = (git -C $repo rev-parse --verify "$Sha^{commit}" 2>$null)
@@ -169,6 +175,30 @@ function Subir-Imagenes {
     }
 }
 
+# Etapa 3b: lista las PA del P0-piloto con prueba y las que faltan, sobre la misma copia
+# y en el mismo contenedor. Sin --estricto: que falten PA no pone la corrida en rojo; que
+# el script falle o devuelva algo que no es el informe, sí.
+function Medir-CoberturaPa {
+    try {
+        # stdout trae solo el JSON; los avisos de compose (stderr) van al registro.
+        $salida = (docker @composeArgs run --rm $ServicioPruebas python -m scripts.cobertura_pa --json 2>>$log) -join "`n"
+        if ($LASTEXITCODE -ne 0) { throw "python -m scripts.cobertura_pa salió con código $LASTEXITCODE" }
+        $script:coberturaPa = Read-CemCoberturaPa -Json $salida
+        $c = $script:coberturaPa
+        Escribir "  PA del $($c.conjunto) con prueba: $($c.cantidad_cubiertas) de $($c.total)"
+        foreach ($pa in $c.cubiertas.Keys | Sort-Object) { Escribir "    $pa`: $($c.cubiertas[$pa] -join ', ')" }
+        foreach ($pa in $c.fuera_del_conjunto.Keys | Sort-Object) { Escribir "    $pa (fuera del $($c.conjunto)): $($c.fuera_del_conjunto[$pa] -join ', ')" }
+        Escribir "  Sin prueba: $(if ($c.faltan) { $c.faltan -join ', ' } else { 'ninguna' })" $(if ($c.faltan) { 'Yellow' } else { 'Green' })
+        $script:etapas['cobertura-pa'] = 'ok'
+        Escribir '  cobertura-pa: ok' 'Green'
+    }
+    catch {
+        $script:coberturaPa = $null
+        $script:etapas['cobertura-pa'] = "falla ($($_.Exception.Message))"
+        Escribir "  cobertura-pa: FALLA ($($_.Exception.Message))" 'Red'
+    }
+}
+
 function Guardar-Resultado {
     $ok = Test-TodoVerde
     $ruta = Write-CemResultadoCi -Sha $shaCompleta -Resultado @{
@@ -177,6 +207,8 @@ function Guardar-Resultado {
         etapas     = $etapas
         # Sin imágenes ($null) si no se subieron: cd.ps1 se niega a desplegar esa SHA.
         imagenes   = if ($ok -and $imagenes.Count -gt 0) { $imagenes } else { $null }
+        # PA del P0-piloto cubiertas y faltantes; $null si la etapa no llegó a correr o falló.
+        cobertura_pa = $coberturaPa
         fecha_utc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         minutos    = [math]::Round(((Get-Date) - $inicio).TotalMinutes, 1)
         equipo     = $env:COMPUTERNAME
@@ -225,6 +257,8 @@ try {
     Correr 'ruff' { docker @composeArgs run --rm $ServicioPruebas sh -c 'ruff check .. && ruff format --check ..' } | Out-Null
     Etapa 'Contratos (pytest)'
     Correr 'contratos' { docker @composeArgs run --rm $ServicioPruebas sh -c 'cd /src/contratos && pytest' } | Out-Null
+    Etapa 'Cobertura de PA (documento 14, §11)'
+    Medir-CoberturaPa
 
     # --- 4. frontend ------------------------------------------------------------
     Etapa 'Frontend (pnpm)'
