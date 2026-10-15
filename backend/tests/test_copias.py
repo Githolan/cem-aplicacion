@@ -2,14 +2,21 @@
 
 Todo real: PostgreSQL 18 (`cem-postgres-pruebas`), el rol `cem_backup` de
 `scripts/crear_roles.sql`, `pg_dump`/`pg_restore`/`initdb` 18, `age` con un par de claves que
-genera cada prueba y un almacén S3 compatible (`cem-almacen-s3-pruebas`, compose.yml).
+genera cada prueba y un almacén S3 compatible (`cem-almacen-s3-pruebas`, compose.yml). El aviso
+a Kuma va a un servidor HTTP de verdad, levantado en el proceso de la prueba, que responde como
+el push de Uptime Kuma 2 (`{"ok": true}`; token desconocido → 404 `{"ok": false, ...}`).
 """
 
+import logging
 import os
 import subprocess
+import threading
 import time
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
@@ -23,6 +30,8 @@ from tests.conftest import ADMIN_URL, url_rol
 
 VENTANA = datetime(2026, 10, 15, 3, 30, tzinfo=UTC)
 ESPERA_ALMACEN_S = 15
+TOKEN_KUMA = "tokenDePrueba123"
+RESUMEN = {"objetos": ["diarias/x"], "bytes": 2048, "sha256": "ab", "tablas": 9, "filas": 40}
 
 
 @pytest.fixture
@@ -66,6 +75,61 @@ def tabla_de_prueba(motor_migrate):
     yield
     with motor_migrate.begin() as c:
         c.execute(text("drop table plataforma.prueba_copias"))
+
+
+class Kuma(ThreadingHTTPServer):
+    """Push de Uptime Kuma de prueba. `modo` elige la respuesta; `pedidos` guarda lo que llegó."""
+
+    modo = "ok"
+    pedidos: list[str]
+
+
+class _PushKuma(BaseHTTPRequestHandler):
+    server: Kuma
+
+    def do_GET(self) -> None:
+        self.server.pedidos.append(self.path)
+        modo = self.server.modo
+        if modo == "colgado":  # acepta la conexión y no contesta
+            time.sleep(2)
+        elif modo == "access":  # lo que haría Cloudflare Access sin la exención del push
+            self.send_response(302)
+            self.send_header(
+                "Location", "https://ejemplo.cloudflareaccess.com/cdn-cgi/access/login"
+            )
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif modo == "html":
+            self._responder(200, b"<html>inicio de sesion</html>", "text/html")
+        elif modo == "ok" and urlsplit(self.path).path == f"/api/push/{TOKEN_KUMA}":
+            self._responder(200, b'{"ok":true}')
+        else:
+            self._responder(404, b'{"ok":false,"msg":"Monitor not found or not active."}')
+
+    def _responder(self, estado: int, cuerpo: bytes, tipo: str = "application/json") -> None:
+        self.send_response(estado)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(cuerpo)))
+        self.end_headers()
+        self.wfile.write(cuerpo)
+
+    def log_message(self, *args) -> None:  # sin ruido en la salida de pytest
+        return
+
+
+@pytest.fixture
+def kuma() -> Iterator[Kuma]:
+    servidor = Kuma(("127.0.0.1", 0), _PushKuma)
+    servidor.pedidos = []
+    threading.Thread(target=servidor.serve_forever, daemon=True).start()
+    yield servidor
+    servidor.shutdown()
+    servidor.server_close()
+
+
+def url_push(kuma: Kuma, token: str = TOKEN_KUMA) -> str:
+    """Como la copia el propietario del panel de Kuma."""
+    return f"http://127.0.0.1:{kuma.server_port}/api/push/{token}?status=up&msg=OK&ping="
 
 
 def libpq(url: URL) -> str:
@@ -280,6 +344,145 @@ def test_el_planificador_la_encola_a_las_0330_y_el_trabajador_la_hace(
         copias.hashlib.sha256(leer_objeto(cfg, resultado["objetos"][0])).hexdigest()
         == (resultado["sha256"])
     )
+
+
+# Aviso a Kuma ------------------------------------------------------------------------
+
+
+def encolar_copia(motor_app, motor_migrate, cfg, monkeypatch, url_aviso: str):
+    """La copia de VENTANA encolada por el planificador, con la configuración de prueba."""
+    import app.plataforma.tareas  # noqa: F401
+    from app.plataforma.planificador import TAREAS, programar
+
+    for campo, variable in copias.VARIABLES.items():
+        monkeypatch.setenv(variable, getattr(cfg, campo))
+    monkeypatch.setenv(copias.VARIABLE_AVISO, url_aviso)
+    with motor_migrate.begin() as c:
+        c.execute(text("truncate plataforma.jobs, plataforma.ejecuciones_programadas"))
+    copia = [t for t in TAREAS if t.tipo == "plataforma.copia_diaria"]
+    assert programar(motor_app, VENTANA + timedelta(minutes=1), copia) == 1
+
+
+@pytest.mark.db
+def test_la_copia_hecha_avisa_a_kuma(motor_app, motor_migrate, datos, cfg, kuma, monkeypatch):
+    """Control: sin la llamada a `avisar_copia` en `tareas.copia_diaria` esta prueba falla."""
+    from app.plataforma.trabajos import Trabajador
+
+    encolar_copia(motor_app, motor_migrate, cfg, monkeypatch, url_push(kuma))
+    assert kuma.pedidos == []  # encolarla no avisa: solo la copia hecha
+    assert Trabajador(motor_app).procesar_lote() == 1
+    with motor_migrate.connect() as c:
+        estado, resultado = c.execute(
+            text("select estado::text, resultado from plataforma.jobs")
+        ).one()
+    assert (estado, resultado["aviso"]) == ("hecho", "enviado")
+    assert len(kuma.pedidos) == 1
+    pedido = urlsplit(kuma.pedidos[0])
+    assert pedido.path == f"/api/push/{TOKEN_KUMA}"
+    assert parse_qs(pedido.query, keep_blank_values=True) == {
+        "status": ["up"],
+        "msg": [
+            f"copia verificada: {resultado['tablas']} tablas, {resultado['filas']} filas,"
+            f" {resultado['bytes']} bytes"
+        ],
+        "ping": [""],
+    }
+
+
+@pytest.mark.db
+def test_un_aviso_caido_no_rompe_la_copia_pero_queda_registrado(
+    motor_app, motor_migrate, datos, cfg, kuma, monkeypatch, caplog
+):
+    from app.plataforma.trabajos import Trabajador
+
+    # Un token que Kuma no conoce (monitor borrado o pausado): responde 404.
+    encolar_copia(motor_app, motor_migrate, cfg, monkeypatch, url_push(kuma, "tokenQueNoExiste"))
+    with caplog.at_level(logging.INFO, logger="cem"):
+        assert Trabajador(motor_app).procesar_lote() == 1
+    with motor_migrate.connect() as c:
+        estado, intentos, resultado = c.execute(
+            text("select estado::text, intentos, resultado from plataforma.jobs")
+        ).one()
+    # La copia cuenta: hecha al primer intento, sin repetir el volcado, y el objeto subido.
+    assert (estado, intentos, resultado["aviso"]) == ("hecho", 1, "fallido")
+    subido = leer_objeto(cfg, resultado["objetos"][0])
+    assert copias.hashlib.sha256(subido).hexdigest() == resultado["sha256"]
+    assert len(kuma.pedidos) == 1
+    # Y no es silencioso: un ERROR que dice qué pasó, sin el token.
+    errores = [r for r in caplog.records if r.name == "cem.copias" and r.levelno == logging.ERROR]
+    assert [r.getMessage() for r in errores] == [
+        "copia hecha pero el aviso a Kuma falló: Kuma respondió 404"
+    ]
+    assert not any("tokenQueNoExiste" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize(
+    ("modo", "error"),
+    [
+        ("access", "Kuma respondió 302"),
+        ("html", "Kuma respondió 200 sin confirmar el latido"),
+        ("token_desconocido", "Kuma respondió 404"),
+    ],
+)
+def test_solo_cuenta_como_aviso_un_ok_de_kuma(kuma, modo, error):
+    copias.avisar(url_push(kuma), RESUMEN)  # control: el push sano pasa
+    kuma.modo = modo
+    with pytest.raises(copias.ErrorAviso) as e:
+        copias.avisar(url_push(kuma), RESUMEN)
+    assert str(e.value) == error
+    assert len(kuma.pedidos) == 2  # la redirección no se siguió
+
+
+def test_un_kuma_colgado_corta_por_tiempo(kuma):
+    kuma.modo = "colgado"
+    inicio = time.monotonic()
+    with pytest.raises(copias.ErrorAviso, match="no se pudo llegar a Kuma: .*timed out"):
+        copias.avisar(url_push(kuma), RESUMEN, espera=0.3)
+    assert time.monotonic() - inicio < 1.5
+
+
+def test_un_kuma_apagado_es_falla_registrada_sin_lanzar(kuma, caplog):
+    url = url_push(kuma)
+    kuma.shutdown()
+    kuma.server_close()
+    with caplog.at_level(logging.INFO, logger="cem"):
+        assert copias.avisar_copia(RESUMEN, {copias.VARIABLE_AVISO: url}) == "fallido"
+    registros = [(r.levelname, r.getMessage()) for r in caplog.records if r.name == "cem.copias"]
+    assert len(registros) == 1
+    assert registros[0][0] == "ERROR"
+    assert "ConnectionRefusedError" in registros[0][1]
+
+
+def test_sin_url_de_aviso_no_avisa_y_lo_registra(kuma, caplog):
+    with caplog.at_level(logging.INFO, logger="cem"):
+        assert copias.avisar_copia(RESUMEN, {}) == "sin_configurar"
+    assert [(r.levelname, r.getMessage()) for r in caplog.records if r.name == "cem.copias"] == [
+        ("WARNING", "copia hecha sin aviso a Kuma: falta CEM_COPIAS_AVISO_URL")
+    ]
+    assert kuma.pedidos == []
+
+
+def test_una_url_de_aviso_que_no_es_http_es_falla(caplog):
+    with caplog.at_level(logging.INFO, logger="cem"):
+        resultado = copias.avisar_copia(RESUMEN, {copias.VARIABLE_AVISO: "kuma/api/push/x"})
+    assert resultado == "fallido"
+    assert caplog.records[-1].getMessage().endswith("CEM_COPIAS_AVISO_URL no es una URL http(s)")
+
+
+def test_la_url_del_panel_se_reemplaza_por_status_up_y_el_resumen():
+    url = copias.url_aviso("https://kuma.ejemplo/api/push/abc?status=down&msg=OK&ping=#x", RESUMEN)
+    partes = urlsplit(url)
+    assert (partes.scheme, partes.netloc, partes.path, partes.fragment) == (
+        "https",
+        "kuma.ejemplo",
+        "/api/push/abc",
+        "",
+    )
+    assert parse_qs(partes.query, keep_blank_values=True) == {
+        "status": ["up"],
+        "msg": ["copia verificada: 9 tablas, 40 filas, 2048 bytes"],
+        "ping": [""],
+    }
 
 
 def test_la_imagen_trae_las_herramientas_de_la_version_del_servidor():

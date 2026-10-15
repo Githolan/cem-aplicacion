@@ -18,12 +18,33 @@ reintenta y, agotado, queda `muerto` y visible en `/api/v1/health/cola`:
 Controles: por cada tabla, cantidad de filas y una huella (md5 de las huellas de cada fila,
 ordenadas). Cubre la cantidad de consorcios y cualquier suma de §17.3, porque una fila distinta
 cambia la huella de su tabla.
+
+Aviso a Uptime Kuma
+-------------------
+Una copia que falla deja el trabajo muerto y lo ve el monitor de la cola, pero una que no corre
+(planificador o trabajador detenidos, tarea sin encolar) no deja rastro. Por eso, después de una
+copia verificada y subida, `cem-trabajos` hace un GET al push de un monitor "Push" de Kuma
+(`CEM_COPIAS_AVISO_URL`, con el token del monitor). El monitor espera un latido cada ~26 h:
+si una noche no llega, se pone rojo.
+
+El aviso no forma parte de la copia: si falla, la copia igual cuenta (el trabajo queda hecho y
+no se repite el volcado), pero queda un ERROR en los registros y `"aviso": "fallido"` en el
+resultado del trabajo; sin la variable, un WARNING y `"aviso": "sin_configurar"`. En los dos
+casos el monitor de Kuma se pone rojo a las ~26 h, que es lo que tiene que pasar. Solo cuenta
+como enviado un 200 con `{"ok": true}`, la respuesta del push de Kuma: un 302 (p. ej. hacia el
+inicio de sesión de Cloudflare Access) o una página HTML son fallas. La URL lleva el token,
+así que nunca va a un registro ni a un error.
 """
 
 import hashlib
+import json
+import logging
 import os
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,6 +57,8 @@ from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
+log = logging.getLogger("cem.copias")
+
 VARIABLES = {
     "url_backup": "CEM_DATABASE_URL_BACKUP",
     "clave_publica": "CEM_COPIAS_CLAVE_PUBLICA",
@@ -45,6 +68,13 @@ VARIABLES = {
     "s3_clave_id": "CEM_OCI_S3_CLAVE_ID",
     "s3_clave_secreta": "CEM_OCI_S3_CLAVE_SECRETA",
 }
+
+VARIABLE_AVISO = "CEM_COPIAS_AVISO_URL"
+"""URL del push del monitor de Kuma de la copia. Opcional: sin ella la copia se hace igual."""
+
+TIEMPO_DE_ESPERA_AVISO = 10
+"""Segundos para el aviso a Kuma: corto, para que un Kuma colgado no retenga al trabajador
+cerca del plazo de reserva (5 minutos en `cem-trabajos`)."""
 
 TROZO = 1024 * 1024
 """Bytes por lectura al calcular sumas: el volcado no se carga entero en memoria."""
@@ -271,3 +301,69 @@ def copia_diaria(cfg: ConfigCopias, ventana: datetime) -> dict[str, Any]:
             "tablas": len(esperados),
             "filas": sum(filas for filas, _ in esperados.values()),
         }
+
+
+# Aviso a Uptime Kuma ------------------------------------------------------------------
+
+
+class ErrorAviso(Exception):
+    """Kuma no confirmó el latido. Nunca lleva la URL: tiene el token del monitor."""
+
+
+class _SinRedirecciones(urllib.request.HTTPRedirectHandler):
+    # Una redirección no es un latido: es Access o una URL mal copiada.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_ABRIDOR_AVISO = urllib.request.build_opener(_SinRedirecciones)
+
+
+def url_aviso(url: str, resumen: Mapping[str, Any]) -> str:
+    """La URL del push con `status=up` y el resumen como mensaje (Kuma toma como caída
+    cualquier `status` distinto de `up`). Reemplaza la consulta que trae la URL copiada del
+    panel (`?status=up&msg=OK&ping=`)."""
+    partes = urllib.parse.urlsplit(url)
+    if partes.scheme not in ("http", "https") or not partes.netloc:
+        raise ErrorAviso(f"{VARIABLE_AVISO} no es una URL http(s)")
+    mensaje = (
+        f"copia verificada: {resumen['tablas']} tablas, {resumen['filas']} filas,"
+        f" {resumen['bytes']} bytes"
+    )
+    consulta = urllib.parse.urlencode({"status": "up", "msg": mensaje, "ping": ""})
+    return urllib.parse.urlunsplit(partes._replace(query=consulta, fragment=""))
+
+
+def avisar(url: str, resumen: Mapping[str, Any], espera: float = TIEMPO_DE_ESPERA_AVISO) -> None:
+    """GET al push de Kuma. Sin un 200 con `{"ok": true}` → `ErrorAviso`."""
+    destino = url_aviso(url, resumen)
+    try:
+        with _ABRIDOR_AVISO.open(destino, timeout=espera) as respuesta:
+            estado, cuerpo = respuesta.status, respuesta.read(4096)
+    except urllib.error.HTTPError as e:  # incluye las redirecciones que no se siguen
+        raise ErrorAviso(f"Kuma respondió {e.code}") from None
+    except (urllib.error.URLError, OSError) as e:
+        motivo = e.reason if isinstance(e, urllib.error.URLError) else e
+        raise ErrorAviso(f"no se pudo llegar a Kuma: {type(motivo).__name__}: {motivo}") from None
+    try:
+        confirmado = estado == 200 and json.loads(cuerpo).get("ok") is True
+    except (ValueError, AttributeError):
+        confirmado = False
+    if not confirmado:
+        raise ErrorAviso(f"Kuma respondió {estado} sin confirmar el latido")
+
+
+def avisar_copia(resumen: Mapping[str, Any], entorno: Mapping[str, str] = os.environ) -> str:
+    """Avisa la copia hecha a Kuma. Devuelve `enviado`, `fallido` o `sin_configurar`; nunca
+    lanza: la copia ya está verificada y subida, y repetirla no arregla el aviso."""
+    url = entorno.get(VARIABLE_AVISO)
+    if not url:
+        log.warning("copia hecha sin aviso a Kuma: falta %s", VARIABLE_AVISO)
+        return "sin_configurar"
+    try:
+        avisar(url, resumen)
+    except ErrorAviso as e:
+        log.error("copia hecha pero el aviso a Kuma falló: %s", e)
+        return "fallido"
+    log.info("copia avisada a Kuma")
+    return "enviado"
