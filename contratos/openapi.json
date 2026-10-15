@@ -1,6 +1,34 @@
 {
   "components": {
     "schemas": {
+      "CanjeCodigo": {
+        "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
+        "properties": {
+          "codigo": {
+            "examples": [
+              "042917"
+            ],
+            "pattern": "^[0-9]{6}$",
+            "title": "Codigo",
+            "type": "string"
+          },
+          "correo": {
+            "examples": [
+              "ana@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "codigo"
+        ],
+        "title": "CanjeCodigo",
+        "type": "object"
+      },
       "CanjeEnlace": {
         "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
         "properties": {
@@ -125,6 +153,23 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ListaSesiones": {
+        "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/SesionDispositivo"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaSesiones",
         "type": "object"
       },
       "ListaUnidades": {
@@ -256,6 +301,55 @@
         "title": "SesionActual",
         "type": "object"
       },
+      "SesionDispositivo": {
+        "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+        "properties": {
+          "actual": {
+            "description": "Es la sesión de esta misma petición.",
+            "title": "Actual",
+            "type": "boolean"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "dispositivo": {
+            "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+            "examples": [
+              "Chrome en Android"
+            ],
+            "title": "Dispositivo",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ultimo_uso_en": {
+            "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+            "format": "date-time",
+            "title": "Ultimo Uso En",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dispositivo",
+          "creada_en",
+          "ultimo_uso_en",
+          "vence_en",
+          "actual"
+        ],
+        "title": "SesionDispositivo",
+        "type": "object"
+      },
       "SesionSoporte": {
         "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
         "properties": {
@@ -277,6 +371,21 @@
           "tipo"
         ],
         "title": "SesionSoporte",
+        "type": "object"
+      },
+      "SesionesRevocadas": {
+        "description": "`POST /api/v1/auth/sesiones/revocar-otras`: cuántas sesiones se cerraron.",
+        "properties": {
+          "revocadas": {
+            "minimum": 0.0,
+            "title": "Revocadas",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revocadas"
+        ],
+        "title": "SesionesRevocadas",
         "type": "object"
       },
       "TipoVinculo": {
@@ -402,9 +511,54 @@
         ]
       }
     },
+    "/api/v1/auth/codigo": {
+      "post": {
+        "description": "Entra con el correo y el código de seis dígitos del último pedido, desde cualquier\ndispositivo. Crea la sesión como el canje del enlace y gasta el pedido entero (el enlace\ndeja de servir). Todo rechazo responde igual, 401 `codigo_invalido`, y en el mismo tiempo,\nexista o no la cuenta.\n\nVale 10 minutos y cinco intentos fallidos; al quinto queda agotado aunque después llegue el\ncorrecto. Además, cada correo tiene un cupo de intentos (10 por hora, 20 por día) que no\ndepende de la IP.\n\nNo pide el `nonce`: sirve justamente en otro navegador. Lo que lo reemplaza contra una\nfalsificación de inicio de sesión desde otro sitio: `Sec-Fetch-Site` debe ser `same-origin`\nsi el navegador lo declara, y el cuerpo debe ser `application/json` (FastAPI 0.141 no\ninterpreta otro tipo ni un cuerpo sin tipo: 422), que un formulario de otro sitio no puede\nmandar y que desde `fetch` obliga a una consulta previa CORS que la API no autoriza. Lo\ndemás lo cubre que el código solo llega al correo de la persona.",
+        "operationId": "canjear_codigo_api_v1_auth_codigo_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CanjeCodigo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionActual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "El código no sirve (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entrar con el código del correo",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
     "/api/v1/auth/enlace": {
       "post": {
-        "description": "Responde siempre 202 con el mismo cuerpo y en el mismo tiempo, exista o no la cuenta.\nDeja en el navegador la cookie `nonce` a la que queda ligado el enlace.",
+        "description": "Responde siempre 202 con el mismo cuerpo y en el mismo tiempo, exista o no la cuenta.\nDeja en el navegador la cookie `nonce` a la que queda ligado el enlace. El mismo correo\nlleva un código de seis dígitos para entrar desde otro dispositivo (`POST /codigo`).",
         "operationId": "pedir_enlace_api_v1_auth_enlace_post",
         "requestBody": {
           "content": {
@@ -438,7 +592,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pedir un enlace de acceso por correo",
+        "summary": "Pedir la entrada: enlace y código por correo",
         "tags": [
           "identidad"
         ]
@@ -475,6 +629,90 @@
           }
         },
         "summary": "Quién soy",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones": {
+      "get": {
+        "description": "Las sesiones vigentes (ni vencidas ni revocadas) de la persona, con la actual marcada.\nEl dispositivo es una descripción del navegador; ni el agente crudo ni la IP salen.",
+        "operationId": "listar_sesiones_api_v1_auth_sesiones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaSesiones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mis sesiones vigentes",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones/revocar-otras": {
+      "post": {
+        "description": "Revoca todas las sesiones vigentes de la persona menos la de esta petición.",
+        "operationId": "revocar_otras_api_v1_auth_sesiones_revocar_otras_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionesRevocadas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cerrar las sesiones de los otros dispositivos",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones/{sesion_id}/revocar": {
+      "post": {
+        "description": "Revoca una sesión propia. Repetirlo responde lo mismo y conserva la fecha de la primera\nrevocación. Si es la actual, además borra sus cookies, como `salir`.",
+        "operationId": "revocar_sesion_api_v1_auth_sesiones__sesion_id__revocar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sesion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Sesion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La sesión no existe o no es de la persona."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cerrar una sesión",
         "tags": [
           "identidad"
         ]

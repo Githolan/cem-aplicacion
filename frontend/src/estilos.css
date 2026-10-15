@@ -127,3 +127,32 @@ button:focus-visible {
 .pasos li + li {
   margin-top: 0.5rem;
 }
+
+/* Formularios (entrar con un código): etiqueta arriba, campo de 44 px de alto. */
+.formulario {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 24rem;
+}
+
+.formulario label {
+  font-weight: 600;
+}
+
+.formulario input {
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #5a6573;
+  border-radius: 0.5rem;
+  font: inherit;
+}
+
+.formulario input:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
+.formulario button {
+  justify-self: start;
+  margin-top: 0.5rem;
+}

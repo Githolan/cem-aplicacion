@@ -12,11 +12,19 @@ subdominio las puede fijar ni pisar):
 
 En la base solo queda el SHA-256 de cada token y de cada nonce, nunca el valor (§15.2).
 
+**Código por correo (§10.3).** El correo del enlace lleva también un código de seis dígitos
+para entrar desde otro dispositivo. Seis dígitos son 10⁶ valores: un SHA-256 sin clave se
+invierte probándolos todos. En la base queda `HMAC-SHA256(CEM_CODIGO_CLAVE, correo || código)`
+(`hash_codigo`); la clave vive solo en el entorno de la API, así que un volcado de la base no
+alcanza para probar códigos. No hace falta un hash lento: sin la clave no hay nada que probar, y
+con la clave ningún costo por intento salva a un espacio de 10⁶.
+
 **CSRF de token doble (§10.4).** El token CSRF es `HMAC-SHA256(token de sesión, "cem-csrf")`:
 ligado a la sesión, se verifica sin guardarlo y una cookie CSRF puesta por otro (o de otra
 sesión) no sirve. Toda petición que modifica estado con sesión debe traerlo en `X-CSRF-Token`.
 """
 
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -34,9 +42,19 @@ from app.errores import ErrorApi
 
 VIGENCIA_ENLACE = timedelta(minutes=15)
 """Enlace de un solo uso (§10.3). La migración 0004 impone el mismo tope."""
+VIGENCIA_CODIGO = timedelta(minutes=10)
+"""Código por correo (§10.3). La migración 0006 impone el mismo tope."""
+INTENTOS_CODIGO = 5
+"""Intentos fallidos que agotan un código (§10.3). La migración 0006 impone el mismo tope."""
+DIGITOS_CODIGO = 6
+FORMATO_CODIGO = re.compile(rf"^[0-9]{{{DIGITOS_CODIGO}}}$")
 VIGENCIA_SESION = timedelta(days=30)
 """Vencimiento deslizante para vecinos (§10.4). Las 12 h de los roles con facultades de dinero
-llegan con los roles (pendiente)."""
+llegan con los roles (H2 2b, pendiente): la vigencia pasará a depender de la persona y
+`nucleo.validar_sesion` ya la recibe como parámetro."""
+RETENCION_ACCESO = timedelta(days=90)
+"""Cuánto se conservan una sesión y un enlace después de dejar de servir (vencer, revocarse o
+usarse): son registros de acceso técnico, 90 días (§15.6). Los borra la purga diaria."""
 RENOVAR_CADA = timedelta(minutes=5)
 """Cada cuánto, como mucho, una petición corre el vencimiento: evita escribir en cada una."""
 VIGENCIA_DISPOSITIVO = timedelta(days=400)
@@ -56,6 +74,7 @@ ENCABEZADO_CSRF = "X-CSRF-Token"
 METODOS_SEGUROS = frozenset({"GET", "HEAD", "OPTIONS"})
 """Los que no modifican estado: no piden token CSRF."""
 _ETIQUETA_CSRF = b"cem-csrf"
+_ETIQUETA_CODIGO = b"cem-codigo-acceso"
 
 
 def nuevo_token() -> str:
@@ -68,6 +87,32 @@ def hash_token(token: str) -> bytes:
 
 def token_valido(valor: str | None) -> bool:
     return valor is not None and FORMATO_TOKEN.fullmatch(valor) is not None
+
+
+def nuevo_codigo() -> str:
+    """Seis dígitos uniformes, con ceros a la izquierda."""
+    return f"{secrets.randbelow(10**DIGITOS_CODIGO):0{DIGITOS_CODIGO}d}"
+
+
+def clave_codigo(valor: str) -> bytes:
+    """`CEM_CODIGO_CLAVE`: 256 bits en base64url sin relleno (`secrets.token_urlsafe(32)`).
+
+    Una clave corta o mal copiada impide el arranque: haría los hashes adivinables.
+    """
+    if not token_valido(valor):
+        raise RuntimeError(
+            "CEM_CODIGO_CLAVE debe ser 32 bytes en base64url sin relleno (43 caracteres):"
+            " python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+        )
+    return base64.urlsafe_b64decode(valor + "=")
+
+
+def hash_codigo(clave: bytes, correo: str, codigo: str) -> bytes:
+    """HMAC-SHA256 del correo normalizado y el código, con la clave de la API.
+
+    El correo separa a las personas: el mismo código de dos personas da hashes distintos."""
+    mensaje = b"\0".join((_ETIQUETA_CODIGO, correo.encode(), codigo.encode("ascii")))
+    return hmac.new(clave, mensaje, hashlib.sha256).digest()
 
 
 def token_csrf(token_sesion: str) -> str:
@@ -101,6 +146,16 @@ def _cookie(response: Response, nombre: str, valor: str, vida: timedelta, *, leg
     )
 
 
+def fijar_dispositivo(request: Request, response: Response) -> UUID:
+    """El identificador del navegador, reusando el que ya tenga."""
+    try:
+        dispositivo = UUID(request.cookies.get(COOKIE_DISPOSITIVO, ""))
+    except ValueError:
+        dispositivo = UUID(bytes=secrets.token_bytes(16), version=4)
+    _cookie(response, COOKIE_DISPOSITIVO, str(dispositivo), VIGENCIA_DISPOSITIVO)
+    return dispositivo
+
+
 def fijar_nonce_y_dispositivo(request: Request, response: Response) -> tuple[str, UUID]:
     """El nonce y el dispositivo del navegador, reusando los que ya tenga.
 
@@ -109,13 +164,8 @@ def fijar_nonce_y_dispositivo(request: Request, response: Response) -> tuple[str
     nonce = request.cookies.get(COOKIE_NONCE)
     if not token_valido(nonce):
         nonce = nuevo_token()
-    try:
-        dispositivo = UUID(request.cookies.get(COOKIE_DISPOSITIVO, ""))
-    except ValueError:
-        dispositivo = UUID(bytes=secrets.token_bytes(16), version=4)
     _cookie(response, COOKIE_NONCE, nonce, VIGENCIA_ENLACE)
-    _cookie(response, COOKIE_DISPOSITIVO, str(dispositivo), VIGENCIA_DISPOSITIVO)
-    return nonce, dispositivo
+    return nonce, fijar_dispositivo(request, response)
 
 
 def fijar_sesion(response: Response, token_sesion: str) -> None:

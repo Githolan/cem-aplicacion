@@ -6,8 +6,9 @@ los campos del contexto cuando existen: `id_correlacion`, `consorcio_id`, `perso
 (identificador opaco, nunca el correo ni el nombre) y `duracion_ms`. Dozzle los muestra en vivo.
 
 Antes de escribir, el mensaje, la excepción y todo campo de texto pasan por `redactar()`:
-correos, tokens, claves (también las de una URL como `redis://usuario:clave@`), teléfonos e
-importes. La redacción es la última barrera; el código no debe registrar esos datos a propósito.
+correos, tokens, códigos de acceso, claves (también las de una URL como `redis://usuario:clave@`),
+teléfonos e importes. La redacción es la última barrera; el código no debe registrar esos datos
+a propósito.
 
 Los tres procesos usan la misma configuración, `registros.json`: `trabajos` y `planificador`
 con `configurar()` y la API con `uvicorn --log-config app/registros.json --no-access-log`. El
@@ -55,6 +56,10 @@ _PATRONES: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         rf"\1{REDACTADO}",
     ),
+    # Código de acceso por correo (§10.3): seis dígitos, con o sin espacio al medio, después de
+    # «código» (codigo=123456, "codigo": "123 456", código:\n123 456). Solo dígitos: el campo
+    # `codigo` de un error ("codigo": "enlace_invalido") no se toca.
+    (re.compile(r"(?i)(c[óo]digo\W{0,6})\d{3}\s?\d{3}(?!\d)"), rf"\1{REDACTADO}"),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[correo]"),
     # Importes: con moneda ($ 1.234,56 · ARS 100 · U$S 20) o como Decimal('1234.56').
     (re.compile(r"(?:\bARS|\bUSD|U\$S|\$)\s?-?\d+(?:[.,]\d+)*"), "[importe]"),

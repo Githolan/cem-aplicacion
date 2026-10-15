@@ -11,21 +11,34 @@ from pydantic import BaseModel
 
 from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
 from cem_contracts.errores import Error
-from cem_contracts.identidad import CanjeEnlace, EnlacePedido, PedidoEnlace, SesionActual
+from cem_contracts.identidad import (
+    CanjeCodigo,
+    CanjeEnlace,
+    EnlacePedido,
+    ListaSesiones,
+    PedidoEnlace,
+    SesionActual,
+    SesionDispositivo,
+    SesionesRevocadas,
+)
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.soporte import SesionSoporte
 
 MODELOS: tuple[type[BaseModel], ...] = (
+    CanjeCodigo,
     CanjeEnlace,
     ConsorcioResumen,
     EnlacePedido,
     Error,
     EstadoCola,
+    ListaSesiones,
     ListaUnidades,
     PedidoEnlace,
     Salud,
     SaludDependencias,
     SesionActual,
+    SesionDispositivo,
+    SesionesRevocadas,
     SesionSoporte,
     Unidad,
 )

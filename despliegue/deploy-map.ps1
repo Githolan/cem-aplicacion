@@ -12,7 +12,9 @@
 #   $CemEntornos          entornos, su Host público y sus aplicaciones
 #   $CemOrdenDespliegue   orden de despliegue por función (§18.3, regla 3)
 #   $CemConShaImagen      funciones cuya imagen lleva CEM_SHA_IMAGEN
-#   Get-CemAplicaciones   aplicaciones de un entorno, en orden de despliegue
+#   $CemImagenPorFuncion  imagen de ghcr.io que corresponde a cada función
+#   Get-CemAplicaciones   aplicaciones de un entorno, en orden de despliegue (falla si
+#                         la imagen de una aplicación no es la de su función)
 #   Get-CemBaseDatos      cem-postgres(-staging) del entorno (tabla "Bases de datos"
 #                         del registro), para leer plataforma.alembic_version
 # ==============================================================================
@@ -24,31 +26,46 @@ $CemOrdenDespliegue = @('backend', 'trabajos', 'planificador', 'frontend')
 # Funciones que se construyen con backend/Dockerfile y leen CEM_SHA_IMAGEN en /health.
 $CemConShaImagen = @('backend', 'trabajos', 'planificador')
 
+# Imagen de ghcr.io (bajo $CemRegistroImagenes de compuertas.ps1) por función: el
+# backend y sus dos procesos usan la misma imagen (eligen qué correr con CEM_PROCESO).
+$CemImagenPorFuncion = @{
+    backend      = 'cem-backend'
+    trabajos     = 'cem-backend'
+    planificador = 'cem-backend'
+    frontend     = 'cem-frontend'
+}
+
+# Todas las aplicaciones son de tipo dockerimage en Coolify (decisión del 15-10-2026):
+# Coolify baja la imagen de ghcr.io con la SHA como etiqueta; no construye.
 $CemEntornos = @{
     staging    = @{
         Proyecto     = 'consorcio-en-mano-staging'
         Host         = 'cem-staging.holancloud.com'
         BaseDatos    = @{ Nombre = 'cem-postgres-staging'; Uuid = 'ai3mquqkmpcqkg30paos0nxr' }
+        # Apps dockerimage de ghcr.io desde el 15-10-2026 (reemplazo hecho por la sesión principal).
         Aplicaciones = @{
-            backend      = @{ Nombre = 'cem-backend-staging';      Uuid = 'f0zuaaegv16yxl8ioriwtmcs' }
-            trabajos     = @{ Nombre = 'cem-trabajos-staging';     Uuid = 'aw4btg2jqc24tnelnca0ubib' }
-            planificador = @{ Nombre = 'cem-planificador-staging'; Uuid = 'zhbxjxbfcg0a8zchfbhd4scg' }
-            frontend     = @{ Nombre = 'cem-frontend-staging';     Uuid = '7bvgssu01usajeaf6cnzwqnk' }
+            backend      = @{ Nombre = 'cem-backend-staging';      Imagen = 'cem-backend';  Uuid = 'yepjjanuzkdvtibdk1hngn21' }
+            trabajos     = @{ Nombre = 'cem-trabajos-staging';     Imagen = 'cem-backend';  Uuid = 'wqndx1oq0tdsshbjutmbbifg' }
+            planificador = @{ Nombre = 'cem-planificador-staging'; Imagen = 'cem-backend';  Uuid = 'lqli8onu8sojoo5ai59fyiuu' }
+            frontend     = @{ Nombre = 'cem-frontend-staging';     Imagen = 'cem-frontend'; Uuid = 'qor6tckbjzlenawynxxepchp' }
         }
     }
     produccion = @{
         Proyecto     = 'consorcio-en-mano'
         Host         = 'cem.holancloud.com'
         BaseDatos    = @{ Nombre = 'cem-postgres'; Uuid = 'ijhpfart48jbqhqa0th2th9l' }
+        # PENDIENTE: producción todavía tiene las apps viejas de tipo dockerfile; cd.ps1 se
+        # niega a desplegarla hasta que la sesión principal las reemplace por dockerimage.
         Aplicaciones = @{
-            backend  = @{ Nombre = 'cem-backend';  Uuid = '965fpbuy4kldof88tkgf5wrv' }
-            frontend = @{ Nombre = 'cem-frontend'; Uuid = 'xc0kpzbog3qdko8moxyqnmn7' }
+            # UUID: lo actualiza la sesión principal después del reemplazo
+            backend  = @{ Nombre = 'cem-backend';  Imagen = 'cem-backend';  Uuid = '965fpbuy4kldof88tkgf5wrv' }
+            # UUID: lo actualiza la sesión principal después del reemplazo
+            frontend = @{ Nombre = 'cem-frontend'; Imagen = 'cem-frontend'; Uuid = 'xc0kpzbog3qdko8moxyqnmn7' }
         }
     }
 }
 
-# Repositorio y rama de los que Coolify construye todas las aplicaciones de CEM.
-$CemRepositorioGit = 'git@github.com:Githolan/cem-aplicacion.git'
+# Rama de la que sale toda SHA desplegable (cd.ps1 despliega solo su punta).
 $CemRamaDespliegue = 'main'
 
 # Base transaccional del entorno (tabla "Bases de datos" del registro de recursos).
@@ -72,10 +89,14 @@ function Get-CemAplicaciones {
     $apps = $CemEntornos[$Entorno].Aplicaciones
     foreach ($funcion in $CemOrdenDespliegue) {
         if ($apps.ContainsKey($funcion)) {
+            if ($apps[$funcion].Imagen -ne $CemImagenPorFuncion[$funcion]) {
+                throw "$($apps[$funcion].Nombre): el mapa dice imagen '$($apps[$funcion].Imagen)', la función $funcion usa '$($CemImagenPorFuncion[$funcion])'"
+            }
             [pscustomobject]@{
                 Funcion       = $funcion
                 Nombre        = $apps[$funcion].Nombre
                 Uuid          = $apps[$funcion].Uuid
+                Imagen        = $apps[$funcion].Imagen
                 ConShaImagen  = $CemConShaImagen -contains $funcion
             }
         }

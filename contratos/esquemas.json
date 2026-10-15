@@ -1,4 +1,32 @@
 {
+  "CanjeCodigo": {
+    "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
+    "properties": {
+      "codigo": {
+        "examples": [
+          "042917"
+        ],
+        "pattern": "^[0-9]{6}$",
+        "title": "Codigo",
+        "type": "string"
+      },
+      "correo": {
+        "examples": [
+          "ana@ejemplo.com"
+        ],
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+        "title": "Correo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "correo",
+      "codigo"
+    ],
+    "title": "CanjeCodigo",
+    "type": "object"
+  },
   "CanjeEnlace": {
     "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
     "properties": {
@@ -90,6 +118,7 @@
           "idempotencia_reutilizada",
           "idempotencia_en_curso",
           "enlace_invalido",
+          "codigo_invalido",
           "csrf_invalido"
         ],
         "title": "CodigoError",
@@ -170,6 +199,74 @@
       "segundos_mas_viejo"
     ],
     "title": "EstadoCola",
+    "type": "object"
+  },
+  "ListaSesiones": {
+    "$defs": {
+      "SesionDispositivo": {
+        "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+        "properties": {
+          "actual": {
+            "description": "Es la sesión de esta misma petición.",
+            "title": "Actual",
+            "type": "boolean"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "dispositivo": {
+            "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+            "examples": [
+              "Chrome en Android"
+            ],
+            "title": "Dispositivo",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ultimo_uso_en": {
+            "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+            "format": "date-time",
+            "title": "Ultimo Uso En",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dispositivo",
+          "creada_en",
+          "ultimo_uso_en",
+          "vence_en",
+          "actual"
+        ],
+        "title": "SesionDispositivo",
+        "type": "object"
+      }
+    },
+    "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/SesionDispositivo"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaSesiones",
     "type": "object"
   },
   "ListaUnidades": {
@@ -336,6 +433,55 @@
     "title": "SesionActual",
     "type": "object"
   },
+  "SesionDispositivo": {
+    "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+    "properties": {
+      "actual": {
+        "description": "Es la sesión de esta misma petición.",
+        "title": "Actual",
+        "type": "boolean"
+      },
+      "creada_en": {
+        "format": "date-time",
+        "title": "Creada En",
+        "type": "string"
+      },
+      "dispositivo": {
+        "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+        "examples": [
+          "Chrome en Android"
+        ],
+        "title": "Dispositivo",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "ultimo_uso_en": {
+        "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+        "format": "date-time",
+        "title": "Ultimo Uso En",
+        "type": "string"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "dispositivo",
+      "creada_en",
+      "ultimo_uso_en",
+      "vence_en",
+      "actual"
+    ],
+    "title": "SesionDispositivo",
+    "type": "object"
+  },
   "SesionSoporte": {
     "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
     "properties": {
@@ -357,6 +503,21 @@
       "tipo"
     ],
     "title": "SesionSoporte",
+    "type": "object"
+  },
+  "SesionesRevocadas": {
+    "description": "`POST /api/v1/auth/sesiones/revocar-otras`: cuántas sesiones se cerraron.",
+    "properties": {
+      "revocadas": {
+        "minimum": 0,
+        "title": "Revocadas",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revocadas"
+    ],
+    "title": "SesionesRevocadas",
     "type": "object"
   },
   "Unidad": {

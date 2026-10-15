@@ -16,22 +16,36 @@
 #      Playwright contra las imágenes de cem-frontend y cem-backend con Redis, en
 #      una red de Docker propia); al final se borran sus contenedores y su red,
 #      aunque falle, y se comprueba que no quede ninguno
+#   7. imágenes para la VM: SOLO si todo lo anterior dio verde, construye
+#      cem-backend y cem-frontend para linux/arm64 desde la misma copia LF, las
+#      sube a ghcr.io/githolan/<imagen>:<sha> (privado), comprueba con
+#      `docker buildx imagetools inspect` que el índice tiene linux/arm64 y que la
+#      etiqueta y el digest dan el mismo manifiesto, y guarda el digest de cada
+#      una en la constancia (cd.ps1 lo exige). El login es temporal: un
+#      DOCKER_CONFIG propio en una carpeta temporal, con el token clásico de la
+#      variable de usuario de Windows CEM_GHCR_TOKEN por stdin; al final siempre
+#      `docker logout` y se borra esa carpeta. El token nunca se imprime.
 #
 # Código de salida 0 = todo verde. Distinto de 0 = alguna etapa falló.
 # Deja el resultado en <estado>\ci\<sha>.json (ver compuertas.ps1), que cd.ps1
 # exige antes de desplegar esa SHA, y la salida completa en <estado>\ci\<sha>.log.
 #
 # Uso (PowerShell 7, desde cualquier carpeta):
-#   pwsh despliegue/ci.ps1                     prueba HEAD
-#   pwsh despliegue/ci.ps1 -Sha 49ac99f        prueba ese commit
+#   pwsh despliegue/ci.ps1                     prueba HEAD y sube sus imágenes
+#   pwsh despliegue/ci.ps1 -Sha 49ac99f        prueba ese commit y sube sus imágenes
+#   pwsh despliegue/ci.ps1 -SinSubirImagenes   corrida local: prueba y no sube nada
+#                                              (la constancia queda sin imágenes y
+#                                              cd.ps1 no despliega esa SHA)
 #   pwsh despliegue/ci.ps1 -ConservarCopia     no borra la copia temporal
-# Requiere: git, Docker en marcha, pnpm 10 y Node 22, bash de Git for Windows
-# (o $env:CEM_BASH con la ruta de otro bash que no sea el de WSL).
+# Requiere: git, Docker en marcha (con buildx y emulación arm64), pnpm 10 y Node 22,
+# bash de Git for Windows (o $env:CEM_BASH con la ruta de otro bash que no sea el
+# de WSL) y, para subir, CEM_GHCR_TOKEN como variable de usuario de Windows.
 # ==============================================================================
 
 param(
     [string]$Sha = 'HEAD',
-    [switch]$ConservarCopia
+    [switch]$ConservarCopia,
+    [switch]$SinSubirImagenes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,6 +64,10 @@ $PrefijoCopia      = 'cem-ci-'
 $ShConocido        = 'frontend/scripts/probar-imagen.sh'
 # Prefijo de los contenedores y la red de frontend/scripts/probar-extremo-a-extremo.sh.
 $PrefijoE2e        = 'cem-frontend-e2e'
+# Carpeta temporal del DOCKER_CONFIG del login a ghcr.io (se borra siempre).
+$PrefijoDockerConfig = 'cem-ci-docker-config-'
+# Imagen -> referencia, digest y plataforma de lo subido en la etapa 7.
+$imagenes = [ordered]@{}
 
 $repo = Split-Path -Parent $PSScriptRoot
 $shaCompleta = (git -C $repo rev-parse --verify "$Sha^{commit}" 2>$null)
@@ -88,12 +106,77 @@ function Get-BashDeGit {
     $bash
 }
 
+function Test-TodoVerde { ($etapas.Count -gt 0) -and -not ($etapas.Values | Where-Object { $_ -ne 'ok' }) }
+
+# Etapa 7: construye y sube cada imagen, verifica el índice y anota el digest en
+# $imagenes. Cualquier error marca la etapa en rojo (y por lo tanto toda la
+# corrida); el login temporal se deshace siempre.
+function Subir-Imagenes {
+    $carpeta = Join-Path ([IO.Path]::GetTempPath()) "$PrefijoDockerConfig$sha7-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+    $configAnterior = $env:DOCKER_CONFIG
+    $configPropia = $false
+    try {
+        $token = [Environment]::GetEnvironmentVariable($CemVariableTokenRegistro, 'User')
+        Assert-CemTokenRegistro -Token $token
+        New-Item -ItemType Directory -Path $carpeta | Out-Null
+        $env:DOCKER_CONFIG = $carpeta
+        $configPropia = $true
+        # El token va por stdin; la salida de docker login no lo contiene.
+        $salidaLogin = $token | docker login $CemServidorRegistro -u $CemUsuarioRegistro --password-stdin 2>&1 | ForEach-Object { "$_" }
+        $codigoLogin = $LASTEXITCODE
+        Remove-Variable token
+        $salidaLogin | Tee-Object -FilePath $log -Append | Out-Host
+        if ($codigoLogin -ne 0) { throw "docker login $CemServidorRegistro falló (código $codigoLogin)" }
+        foreach ($img in $CemDockerfiles.Keys) {
+            $referencia = Get-CemReferenciaImagen -Imagen $img -Sha $shaCompleta
+            Escribir "  $img -> $referencia ($CemPlataformaImagenes)"
+            docker buildx build --platform $CemPlataformaImagenes -f (Join-Path $copia $CemDockerfiles[$img]) `
+                -t $referencia --label "$CemEtiquetaRevision=$shaCompleta" --push $copia 2>&1 |
+                ForEach-Object { "$_" } | Tee-Object -FilePath $log -Append | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "docker buildx build --push de $img falló (código $LASTEXITCODE)" }
+            $porEtiqueta = (docker buildx imagetools inspect $referencia --format '{{json .Manifest}}' 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "docker buildx imagetools inspect $referencia falló: $porEtiqueta" }
+            $digest = Read-CemManifiestoImagen -Json $porEtiqueta -Referencia $referencia
+            # Control: el digest leído resuelve en ghcr.io al mismo manifiesto que la etiqueta.
+            $conDigest = "$CemRegistroImagenes/$img@$digest"
+            $porDigest = (docker buildx imagetools inspect $conDigest --format '{{json .Manifest}}' 2>&1 | ForEach-Object { "$_" }) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "docker buildx imagetools inspect $conDigest falló: $porDigest" }
+            if ((Read-CemManifiestoImagen -Json $porDigest -Referencia $conDigest) -ne $digest) { throw "$conDigest no devuelve el digest $digest" }
+            $script:imagenes[$img] = [ordered]@{ referencia = $referencia; digest = $digest; plataforma = $CemPlataformaImagenes }
+            Escribir "  $img`: $digest, índice con $CemPlataformaImagenes" 'Green'
+        }
+        $script:etapas['imagenes-ghcr'] = 'ok'
+        Escribir "  imagenes-ghcr: ok" 'Green'
+    }
+    catch {
+        $script:etapas['imagenes-ghcr'] = "falla ($($_.Exception.Message))"
+        $script:imagenes.Clear()
+        Escribir "  imagenes-ghcr: FALLA ($($_.Exception.Message))" 'Red'
+    }
+    finally {
+        if ($configPropia) {
+            # Con el DOCKER_CONFIG temporal todavía puesto: borra la credencial de ahí.
+            docker logout $CemServidorRegistro 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $log -Append | Out-Host
+            if ($configAnterior) { $env:DOCKER_CONFIG = $configAnterior } else { Remove-Item Env:\DOCKER_CONFIG }
+        }
+        $esCarpeta = $carpeta.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath())) -and ((Split-Path -Leaf $carpeta) -like "$PrefijoDockerConfig$sha7-*")
+        if ($esCarpeta -and (Test-Path $carpeta)) { Remove-Item -Recurse -Force $carpeta }
+        if (Test-Path $carpeta) {
+            $script:etapas['imagenes-ghcr'] = "falla (no se pudo borrar el DOCKER_CONFIG temporal $carpeta)"
+            $script:imagenes.Clear()
+            Escribir "  imagenes-ghcr: FALLA (quedó el DOCKER_CONFIG temporal $carpeta; borrarlo a mano)" 'Red'
+        }
+    }
+}
+
 function Guardar-Resultado {
-    $ok = ($etapas.Count -gt 0) -and -not ($etapas.Values | Where-Object { $_ -ne 'ok' })
+    $ok = Test-TodoVerde
     $ruta = Write-CemResultadoCi -Sha $shaCompleta -Resultado @{
         sha        = $shaCompleta
         resultado  = if ($ok) { 'ok' } else { 'falla' }
         etapas     = $etapas
+        # Sin imágenes ($null) si no se subieron: cd.ps1 se niega a desplegar esa SHA.
+        imagenes   = if ($ok -and $imagenes.Count -gt 0) { $imagenes } else { $null }
         fecha_utc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         minutos    = [math]::Round(((Get-Date) - $inicio).TotalMinutes, 1)
         equipo     = $env:COMPUTERNAME
@@ -209,6 +292,15 @@ finally {
         $quedan = @(docker ps -aq --filter "name=$PrefijoE2e.*-$sufijoE2e`$") + @(docker network ls -q --filter "name=$PrefijoE2e-red-$sufijoE2e`$")
         if ($quedan) { $etapas['limpieza-e2e'] = "falla (quedan $($quedan.Count) contenedores o redes)" }
         else { $etapas['limpieza-e2e'] = 'ok'; Escribir "  limpieza-e2e: sin contenedores ni redes de la corrida $sufijoE2e ($($restos.Count) contenedores y $($redes.Count) redes borrados acá)" 'Green' }
+    }
+    # --- 7. imágenes en ghcr.io (solo con todo lo anterior en verde) -----------
+    Etapa "Imágenes $CemPlataformaImagenes en $CemRegistroImagenes"
+    if ($SinSubirImagenes) {
+        Escribir '  omitida por -SinSubirImagenes: la constancia queda sin imágenes y cd.ps1 no despliega esta SHA' 'Yellow'
+    } elseif (-not (Test-TodoVerde)) {
+        Escribir '  no se suben imágenes: hay etapas en rojo' 'Red'
+    } else {
+        Subir-Imagenes
     }
     $ok = Guardar-Resultado
     $tmp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())

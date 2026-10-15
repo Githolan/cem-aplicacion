@@ -44,6 +44,11 @@ LIMITE_AUTENTICACION_IP: RateLimitItem = parse("20/minute")
 """Familia autenticación (§10.6), por IP: se suma al cupo general."""
 LIMITE_AUTENTICACION_CORREO: RateLimitItem = parse("5/minute")
 """Familia autenticación (§10.6), por correo pedido: lo consume `POST /api/v1/auth/enlace`."""
+LIMITES_CODIGO_CORREO: tuple[RateLimitItem, ...] = (parse("10/hour"), parse("20/day"))
+"""Intentos de canjear un código por correo (`POST /api/v1/auth/codigo`), acierten o no.
+Por correo y no por IP: quien rota direcciones no gana intentos. Con 10⁶ códigos posibles,
+20 por día dan 0,002 % de acertar en un día y 0,7 % en un año de intentos sin pausa, cada uno
+con un correo que le llega a la persona; una persona real usa uno o dos."""
 PREFIJO = "cem:rl"
 ESPERA_REDIS_S = 1.0
 """Tope para conectar y para cada orden a Redis: una caída no deja colgada la petición."""

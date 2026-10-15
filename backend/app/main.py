@@ -6,6 +6,7 @@ from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.router import router as consorcios
 from app.db import crear_motor
+from app.identidad import sesiones
 from app.identidad.router import router as identidad
 from app.identidad.router import validar_origen
 from app.plataforma.router import SIN_LIMITE_DE_TASA
@@ -19,6 +20,8 @@ def crear_app(config: Config | None = None) -> FastAPI:
         raise RuntimeError("CEM_REDIS_URL es obligatoria: sin Redis no hay límite de tasa (TB-8)")
     if config.origen_publico:
         validar_origen(config.origen_publico)
+    if config.codigo_clave:
+        sesiones.clave_codigo(config.codigo_clave)
     app = FastAPI(title="Consorcio en Mano", version=config.version)
     app.state.config = config
     app.state.motor = crear_motor(config.database_url) if config.database_url else None

@@ -1,4 +1,4 @@
-"""Identidad: enlace mágico y sesiones (documento 13, §10.3 y §10.4)."""
+"""Identidad: enlace mágico, código por correo y sesiones (documento 13, §10.3 y §10.4)."""
 
 from datetime import datetime
 from typing import Literal
@@ -57,3 +57,59 @@ class SesionActual(BaseModel):
     vence_en: datetime = Field(
         description="Vencimiento deslizante: cada uso de la sesión lo vuelve a correr."
     )
+
+
+class SesionDispositivo(BaseModel):
+    """Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).
+
+    Nunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la
+    huella del navegador y la dirección de los otros dispositivos de la persona."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    dispositivo: str = Field(
+        description="Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+        examples=["Chrome en Android"],
+    )
+    creada_en: datetime
+    ultimo_uso_en: datetime = Field(
+        description="Se actualiza como mucho cada pocos minutos, no en cada petición."
+    )
+    vence_en: datetime
+    actual: bool = Field(description="Es la sesión de esta misma petición.")
+
+
+class ListaSesiones(BaseModel):
+    """`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[SesionDispositivo]
+
+
+class SesionesRevocadas(BaseModel):
+    """`POST /api/v1/auth/sesiones/revocar-otras`: cuántas sesiones se cerraron."""
+
+    model_config = ConfigDict(frozen=True)
+
+    revocadas: int = Field(ge=0)
+
+
+FORMATO_CODIGO = r"^[0-9]{6}$"
+"""Código por correo: seis dígitos (§10.3)."""
+
+
+class CanjeCodigo(BaseModel):
+    """`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo
+    correo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.
+
+    Vale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace
+    del mismo pedido, y al revés."""
+
+    model_config = ConfigDict(frozen=True)
+
+    correo: str = Field(
+        max_length=LARGO_MAXIMO_CORREO, pattern=FORMATO_CORREO, examples=["ana@ejemplo.com"]
+    )
+    codigo: str = Field(pattern=FORMATO_CODIGO, examples=["042917"])
