@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { AvisoVersion } from "./AvisoVersion";
 import { escucharInstalacion } from "./instalacion";
+import { ProveedorVersion } from "./ProveedorVersion";
 import "./estilos.css";
 
 escucharInstalacion();
@@ -14,11 +15,13 @@ const consultas = new QueryClient({ defaultOptions: { queries: { retry: 1 } } })
 
 createRoot(document.getElementById("raiz")!).render(
   <StrictMode>
-    <QueryClientProvider client={consultas}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-      <AvisoVersion />
-    </QueryClientProvider>
+    <ProveedorVersion>
+      <QueryClientProvider client={consultas}>
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>
+        <AvisoVersion />
+      </QueryClientProvider>
+    </ProveedorVersion>
   </StrictMode>,
 );
