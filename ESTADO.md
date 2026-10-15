@@ -29,15 +29,18 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
   - **Migración `0005`:** `nucleo.revocar_sesiones_de(persona)`, que cierra al instante todas las sesiones de una persona (RN22; la usará el módulo de mandatos), y `nucleo.purgar_identidad(retencion)`. La purga diaria borra sesiones y enlaces que dejaron de servir hace más de 90 días.
   - **Sesiones propias (RF04):** `GET /api/v1/auth/sesiones` (vigentes, con la actual marcada y el dispositivo legible, sin IP ni agente crudo), `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`, con CSRF. Contrato 0.7.0.
   - **Migración `0006`, código de seis dígitos:** el mismo correo del enlace trae un código para entrar desde otro dispositivo (`POST /api/v1/auth/codigo`). Dura 10 minutos y admite cinco intentos fallidos; usar el código gasta el enlace y al revés. En la base queda `HMAC-SHA256(CEM_CODIGO_CLAVE, …)`, nunca el código. Límites: 10 por hora y 20 por día por correo. Contrato 0.8.0. En `/entrar`, sección "Entrar con un código".
-- **Invitaciones y alta de personas (RF03; PR #35, fusionado el 15-10-2026):**
-  - **Migración `0007`:** `nucleo.invitacion` (consorcio, unidad, vínculo, correo, nombre, hash del token, quién invitó, 7 días como máximo, aceptada o retirada) con RLS forzada por consorcio; la política exige que `invitada_por` sea la persona del ámbito. `cem_app` solo cambia `revocada_en`. Funciones `security definer` `consultar_invitacion` y `aceptar_invitacion`.
+- **Invitaciones y alta de personas (RF03; PR #35, en `main` desde el 15-10-2026):**
+  - **Migración `0007`:** `nucleo.invitacion` (consorcio, unidad, vínculo, correo, nombre, hash del token, quién invitó, 7 días como máximo, aceptada o retirada) con RLS forzada por consorcio.
+    - Una política restrictiva **solo de `insert`** exige que `invitada_por` sea la persona del ámbito.
+    - Retirar o reemplazar la pendiente de otra propietaria de la unidad, o la que cargó el equipo, lo decide `puede_invitar`. Con la política anterior, que alcanzaba también a los `update`, eso daba 500 (corregido en el #35).
+    - `cem_app` solo cambia `revocada_en`. Funciones `security definer`: `consultar_invitacion` y `aceptar_invitacion`.
   - **Quién invita (provisorio hasta los mandatos de H2 2b):** el propietario vigente de esa unidad, a su unidad (inquilino, ocupante u otro titular). Las primeras personas de un consorcio las da de alta el equipo con `python -m scripts.invitar` dentro de `cem-backend` (sin `invitada_por`, auditoría con origen `soporte`).
   - **Rutas:** `POST /api/v1/consorcios/{id}/invitaciones` (correo con `/invitacion#token=…`; invitar de nuevo al mismo correo, unidad y vínculo retira la anterior; 20 por hora y 50 por día por persona), `GET …/invitaciones`, `POST …/invitaciones/{id}/revocar`, `POST /api/v1/auth/invitacion/consultar` y `POST /api/v1/auth/invitacion/aceptar`.
   - **Aceptar:** correo sin cuenta → persona, vínculo desde hoy (zona horaria del consorcio) y sesión, en una transacción; correo con cuenta → solo con la sesión de esa persona (409 `invitacion_requiere_sesion` u `invitacion_de_otra_persona`). Sin sesión, la defensa contra otro sitio es `Sec-Fetch-Site` y el cuerpo JSON, como en `/auth/codigo`. Toda invitación que no sirve responde igual (404 `invitacion_invalida`).
   - **Auditoría encadenada:** crear, reemplazar, retirar y aceptar escriben en `auditoria.eventos` (primer uso), con identificadores y sin el correo. Las invitaciones no se purgan: son la constancia de quién dio acceso a quién.
   - **Frontend:** página `/invitacion` (muestra edificio, unidad y vínculo; nombre editable; acepta con CSRF si hay sesión) y la navegación a `/invitacion` nunca sale de la caché del service worker. Contrato 0.9.0.
-  - **Pruebas:** 27 del backend contra PostgreSQL 18 y Redis reales (RLS de otro consorcio, política de `invitada_por`, privilegios, tope de 7 días, aceptación simultánea al mismo correo nuevo, script) y 9 de Vitest con `axe`. Sin e2e todavía.
-- **Segundo factor TOTP y verificación reciente (TB-CEM-3; rama `claude/identidad-invitaciones-46xhhl`, sin fusionar):**
+  - **Pruebas:** 29 del backend contra PostgreSQL 18 y Redis reales y 9 de Vitest con `axe`. Las del backend cubren: RLS de otro consorcio, política de `invitada_por`, otra propietaria y el equipo que retiran o reemplazan, privilegios, tope de 7 días, aceptación simultánea al mismo correo nuevo y el script. No hay e2e propias de invitaciones.
+- **Segundo factor TOTP y verificación reciente (TB-CEM-3; PR #37, sin fusionar):**
   - **Migración `0008`:** `nucleo.factor_totp` (una fila por persona: secreto AES-256-GCM, pendiente hasta confirmar, último paso aceptado contra la repetición), `nucleo.codigo_recuperacion` (diez, HMAC, un solo uso) con RLS forzada por persona, y `nucleo.sesion.segundo_factor_en`.
   - **Rutas `/api/v1/auth/totp`:** estado, `alta` (secreto en base32 y URI `otpauth://`), `confirmar` (primer código; devuelve los diez códigos de recuperación, una sola vez), `verificar` (código de la aplicación o de recuperación: la sesión queda verificada 10 minutos) y `baja` (pide verificación reciente). Alta y baja avisan por correo.
   - **Claves:** derivadas con HKDF de `CEM_CODIGO_CLAVE`; no hay secreto nuevo que cargar en Coolify. Cambiar esa clave obliga a volver a dar de alta los segundos factores.
@@ -45,7 +48,7 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
 - **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- Según `ci.ps1` sobre `951114b` (15-10-2026), hay 332 pruebas y 43 de extremo a extremo. Las 332 son 291 del backend, 3 de contratos y 38 del frontend con `axe`. De las de extremo a extremo se omite 1: la de iPhone, que solo corre en móvil. Están incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
+- Según `ci.ps1` sobre `3251caf` (15-10-2026), hay 370 pruebas y 43 de extremo a extremo. Las 370 son 320 del backend, 3 de contratos y 47 del frontend con `axe`. De las de extremo a extremo se omite 1: la de iPhone, que solo corre en móvil. Están incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
 
 ## Cómo probar
 
@@ -99,9 +102,24 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registro del despliegue en su `doc/deploys/2026-10-15-951114b.md`.
+Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `951114b`** (= `main` al 15-10-2026), base `0006`, contrato 0.8.0. Identidad completa hasta el código de seis dígitos; los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `3251caf`** (= `main` con las invitaciones, 15-10-2026), base `0007`, contrato 0.9.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Invitaciones (`3251caf`), 15-10.**
+  - **CI:** `ci.ps1` con imágenes en verde.
+  - **Staging, 21:38–21:41 UTC:** `cd.ps1` por Claude, con copia previa `diarias/2026-10-15/cem-20261015T213819Z.dump.age` (14 tablas, 19 filas).
+  - **Producción, 22:12–22:14 UTC:** `cd.ps1 -Confirmar` por el propietario, con copia previa `diarias/2026-10-15/cem-20261015T221250Z.dump.age` (14 tablas, 9 filas).
+  - **Comprobado en los dos entornos:**
+    - base en `0007`;
+    - las dos políticas de `nucleo.invitacion` y la RLS forzada;
+    - un token inventado da 404 `invitacion_invalida`, y como control una ruta inexistente da 404 `no_encontrado`;
+    - la lista sin sesión da 401;
+    - `/invitacion` está en el JavaScript servido;
+    - 0 reinicios y 0 errores en los registros.
+  - **NO VERIFICADO:** una invitación de punta a punta. Staging no tiene consorcios ni unidades.
+
+Antes, con `951114b` (identidad hasta el código de seis dígitos):
 
 - **Staging, 15-10 de 20:09 a 20:11 UTC.**
   - Es el primer despliegue hecho con `cd.ps1` real, después de `ci.ps1` en verde.
@@ -119,21 +137,20 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
     - 0 reinicios y 0 errores en los registros de las 4 apps.
   - Sigue funcionando lo que ya estaba: límite de tasa con la IP real, Access `cem-soporte`, copia diaria de las 03:30 UTC y Kuma.
 - **Prueba de punta a punta en staging (propietario, 14-10 22:08 UTC):** pidió el enlace, el correo salió por OCI, `/entrar#token=…` mostró "Entraste." y `/api/v1/auth/sesion` devolvió su persona. La persona de prueba existe solo en staging.
-- **Trampa de las constancias.** La app de Claude en Windows es un paquete MSIX: lo que sus procesos crean en `%LOCALAPPDATA%\cem-despliegue` queda en `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\cem-despliegue`.
-  - Para correr `cd.ps1` en una terminal propia sobre constancias que dejó Claude: `$env:CEM_DESPLIEGUE_ESTADO = '<esa carpeta>'`.
-  - Si no, se niega: "no está registrada como desplegada y verificada en staging".
+- **Trampa de las constancias, ya resuelta.** La app de Claude en Windows es un paquete MSIX: lo que sus procesos crean en `%LOCALAPPDATA%` queda en su carpeta privada (`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\`), y una terminal del propietario no lo ve.
+  - Desde el 15-10, las constancias están en `C:\Users\holan\cem-despliegue`, que no se virtualiza. Las apunta la variable de usuario `CEM_DESPLIEGUE_ESTADO`.
+  - Una terminal nueva del propietario la vio sin que él la creara: el registro de usuario no se virtualiza.
+  - Así corrió el despliegue de producción de `3251caf`.
 
 ## Próximo paso
 
 Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 
-1. **Hecho el 15-10:** `main` (`951114b`) en staging y producción.
-   - Las constancias de `ci.ps1` y `cd.ps1` están en `C:\Users\holan\cem-despliegue`, fuera de `AppData`, con `CEM_DESPLIEGUE_ESTADO` como variable de usuario de Windows (decisión del propietario, 15-10). Los originales siguen en la carpeta privada de la app.
-   - Falta confirmar que una terminal nueva del propietario ve la variable.
+1. **Hecho el 15-10:** `main` en staging y producción, primero `951114b` y después `3251caf` con las invitaciones. Las constancias están en `C:\Users\holan\cem-despliegue`, y una terminal nueva del propietario ve `CEM_DESPLIEGUE_ESTADO`.
+   - Para probar una invitación de punta a punta en staging, primero hay que cargar un consorcio y una unidad de prueba.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
-3. Identidad, lo que falta de 2a:
-   - invitaciones (PR #35, fusionado el 15-10; migración `0007`): falta desplegarlas;
-   - segundo factor TOTP y verificación reciente (migración `0008`, rama `claude/identidad-invitaciones-46xhhl`): falta revisarlo, fusionarlo y la página del frontend;
+3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
+   - segundo factor TOTP y verificación reciente (PR #37; migración `0008`): falta fusionarlo, desplegarlo y hacer la página del frontend;
    - contraseña Argon2id, TOTP obligatorio para roles de dinero (con los mandatos, 2b), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
 4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
