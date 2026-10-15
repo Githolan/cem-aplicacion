@@ -1,4 +1,32 @@
 {
+  "CanjeCodigo": {
+    "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
+    "properties": {
+      "codigo": {
+        "examples": [
+          "042917"
+        ],
+        "pattern": "^[0-9]{6}$",
+        "title": "Codigo",
+        "type": "string"
+      },
+      "correo": {
+        "examples": [
+          "ana@ejemplo.com"
+        ],
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+        "title": "Correo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "correo",
+      "codigo"
+    ],
+    "title": "CanjeCodigo",
+    "type": "object"
+  },
   "CanjeEnlace": {
     "description": "`POST /api/v1/auth/canje`: el token que la página `/entrar` leyó del fragmento del enlace.\n\nVa en el cuerpo y no en la URL: así no queda en ningún registro de acceso ni en `Referer`.",
     "properties": {
@@ -90,6 +118,7 @@
           "idempotencia_reutilizada",
           "idempotencia_en_curso",
           "enlace_invalido",
+          "codigo_invalido",
           "csrf_invalido"
         ],
         "title": "CodigoError",
