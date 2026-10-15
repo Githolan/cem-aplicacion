@@ -30,6 +30,30 @@
         "title": "AceptacionInvitacion",
         "type": "object"
       },
+      "AltaTotp": {
+        "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
+        "properties": {
+          "secreto": {
+            "description": "Base32 sin relleno, para escribirlo a mano.",
+            "title": "Secreto",
+            "type": "string"
+          },
+          "uri": {
+            "description": "`otpauth://totp/…` para abrir la aplicación o dibujar un código QR.",
+            "examples": [
+              "otpauth://totp/Consorcio%20en%20Mano:ana%40ejemplo.com?secret=…"
+            ],
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secreto",
+          "uri"
+        ],
+        "title": "AltaTotp",
+        "type": "object"
+      },
       "CanjeCodigo": {
         "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
         "properties": {
@@ -91,10 +115,51 @@
           "invitacion_invalida",
           "invitacion_requiere_sesion",
           "invitacion_de_otra_persona",
-          "invitacion_no_pendiente"
+          "invitacion_no_pendiente",
+          "segundo_factor_requerido",
+          "segundo_factor_invalido",
+          "segundo_factor_ya_activo",
+          "segundo_factor_sin_alta"
         ],
         "title": "CodigoError",
         "type": "string"
+      },
+      "CodigoTotp": {
+        "description": "`POST /api/v1/auth/totp/confirmar` y `POST /api/v1/auth/totp/baja`.",
+        "properties": {
+          "codigo": {
+            "examples": [
+              "042917"
+            ],
+            "pattern": "^[0-9]{6}$",
+            "title": "Codigo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo"
+        ],
+        "title": "CodigoTotp",
+        "type": "object"
+      },
+      "CodigosRecuperacion": {
+        "description": "Respuesta de `POST /api/v1/auth/totp/confirmar`: se muestran una sola vez.",
+        "properties": {
+          "codigos": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "minItems": 10,
+            "title": "Codigos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "codigos"
+        ],
+        "title": "CodigosRecuperacion",
+        "type": "object"
       },
       "ConsorcioResumen": {
         "description": "Un consorcio donde la persona tiene vínculo vigente (selector de edificio).",
@@ -239,6 +304,53 @@
         ],
         "title": "EstadoInvitacion",
         "type": "string"
+      },
+      "EstadoSegundoFactor": {
+        "description": "`GET /api/v1/auth/totp`.",
+        "properties": {
+          "activado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activado En"
+          },
+          "activo": {
+            "description": "Tiene una aplicación de autenticación confirmada.",
+            "title": "Activo",
+            "type": "boolean"
+          },
+          "codigos_recuperacion_restantes": {
+            "minimum": 0.0,
+            "title": "Codigos Recuperacion Restantes",
+            "type": "integer"
+          },
+          "verificado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Última verificación del segundo factor en esta sesión.",
+            "title": "Verificado En"
+          }
+        },
+        "required": [
+          "activo",
+          "codigos_recuperacion_restantes",
+          "verificado_en"
+        ],
+        "title": "EstadoSegundoFactor",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -589,6 +701,34 @@
         "title": "SaludDependencias",
         "type": "object"
       },
+      "SegundoFactorVerificado": {
+        "description": "Respuesta de `POST /api/v1/auth/totp/verificar`.",
+        "properties": {
+          "codigos_recuperacion_restantes": {
+            "minimum": 0.0,
+            "title": "Codigos Recuperacion Restantes",
+            "type": "integer"
+          },
+          "vale_hasta": {
+            "description": "Hasta cuándo cuenta como reciente (10 minutos).",
+            "format": "date-time",
+            "title": "Vale Hasta",
+            "type": "string"
+          },
+          "verificado_en": {
+            "format": "date-time",
+            "title": "Verificado En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "verificado_en",
+          "vale_hasta",
+          "codigos_recuperacion_restantes"
+        ],
+        "title": "SegundoFactorVerificado",
+        "type": "object"
+      },
       "SesionActual": {
         "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
         "properties": {
@@ -800,6 +940,25 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerificacionSegundoFactor": {
+        "description": "`POST /api/v1/auth/totp/verificar`: el código de la aplicación o uno de recuperación.",
+        "properties": {
+          "codigo": {
+            "examples": [
+              "042917",
+              "k7m2q-x9p4t"
+            ],
+            "pattern": "^[0-9]{6}$|^[a-z2-9]{5}-[a-z2-9]{5}$",
+            "title": "Codigo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo"
+        ],
+        "title": "VerificacionSegundoFactor",
         "type": "object"
       }
     }
@@ -1161,6 +1320,208 @@
           }
         },
         "summary": "Cerrar una sesión",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/totp": {
+      "get": {
+        "operationId": "estado_api_v1_auth_totp_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstadoSegundoFactor"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Estado de mi segundo factor",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/alta": {
+      "post": {
+        "description": "Genera un secreto nuevo, pendiente hasta confirmarlo con un código. Pedir otro reemplaza\nel pendiente. Si ya hay uno confirmado, primero hay que darlo de baja.",
+        "operationId": "alta_api_v1_auth_totp_alta_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AltaTotp"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Ya hay una aplicación activa."
+          }
+        },
+        "summary": "Empezar el alta de una aplicación de autenticación",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/baja": {
+      "post": {
+        "description": "Pide haber verificado en los últimos 10 minutos: quien solo tiene la sesión (un\ndispositivo olvidado abierto) no puede sacar el segundo factor. Borra el secreto y los\ncódigos de recuperación y avisa por correo.",
+        "operationId": "baja_api_v1_auth_totp_baja_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta una verificación reciente (10 minutos)."
+          }
+        },
+        "summary": "Desactivar el segundo factor",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/confirmar": {
+      "post": {
+        "description": "Con el código correcto activa el segundo factor, deja la sesión verificada y devuelve diez\ncódigos de recuperación que no se vuelven a mostrar. Avisa por correo.",
+        "operationId": "confirmar_api_v1_auth_totp_confirmar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodigoTotp"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodigosRecuperacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El código no sirve."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay un alta pendiente."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar el alta con el primer código",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/totp/verificar": {
+      "post": {
+        "description": "Con un código de la aplicación o uno de recuperación (que queda gastado), la sesión\ncuenta como verificada durante 10 minutos (TB-CEM-3).",
+        "operationId": "verificar_api_v1_auth_totp_verificar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificacionSegundoFactor"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegundoFactorVerificado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El código no sirve."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay una aplicación activa."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verificar el segundo factor en esta sesión",
         "tags": [
           "identidad"
         ]

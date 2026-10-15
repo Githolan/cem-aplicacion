@@ -10,6 +10,7 @@ from app.identidad import sesiones
 from app.identidad.invitaciones import router as invitaciones
 from app.identidad.router import router as identidad
 from app.identidad.router import validar_origen
+from app.identidad.segundo_factor import router as segundo_factor
 from app.plataforma.router import SIN_LIMITE_DE_TASA
 from app.plataforma.router import router as plataforma
 from app.soporte.router import router as soporte
@@ -47,6 +48,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(plataforma)
     app.include_router(identidad)
     app.include_router(invitaciones)
+    app.include_router(segundo_factor)
     app.include_router(consorcios)
     app.include_router(soporte)
     return app

@@ -31,16 +31,28 @@ from cem_contracts.invitaciones import (
     TokenInvitacion,
 )
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
+from cem_contracts.segundo_factor import (
+    AltaTotp,
+    CodigosRecuperacion,
+    CodigoTotp,
+    EstadoSegundoFactor,
+    SegundoFactorVerificado,
+    VerificacionSegundoFactor,
+)
 from cem_contracts.soporte import SesionSoporte
 
 MODELOS: tuple[type[BaseModel], ...] = (
     AceptacionInvitacion,
+    AltaTotp,
     CanjeCodigo,
     CanjeEnlace,
+    CodigosRecuperacion,
+    CodigoTotp,
     ConsorcioResumen,
     EnlacePedido,
     Error,
     EstadoCola,
+    EstadoSegundoFactor,
     Invitacion,
     InvitacionAceptada,
     InvitacionNueva,
@@ -51,12 +63,14 @@ MODELOS: tuple[type[BaseModel], ...] = (
     PedidoEnlace,
     Salud,
     SaludDependencias,
+    SegundoFactorVerificado,
     SesionActual,
     SesionDispositivo,
     SesionesRevocadas,
     SesionSoporte,
     TokenInvitacion,
     Unidad,
+    VerificacionSegundoFactor,
 )
 
 
