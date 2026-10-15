@@ -54,13 +54,13 @@ $CemEntornos = @{
         Proyecto     = 'consorcio-en-mano'
         Host         = 'cem.holancloud.com'
         BaseDatos    = @{ Nombre = 'cem-postgres'; Uuid = 'ijhpfart48jbqhqa0th2th9l' }
-        # PENDIENTE: producción todavía tiene las apps viejas de tipo dockerfile; cd.ps1 se
-        # niega a desplegarla hasta que la sesión principal las reemplace por dockerimage.
+        # Apps dockerimage de ghcr.io desde el 15-10-2026 03:11-03:15 UTC (orden del propietario:
+        # "pasar producción a ghcr con identidad"; imagen f48858a, la validada en staging).
         Aplicaciones = @{
-            # UUID: lo actualiza la sesión principal después del reemplazo
-            backend  = @{ Nombre = 'cem-backend';  Imagen = 'cem-backend';  Uuid = '965fpbuy4kldof88tkgf5wrv' }
-            # UUID: lo actualiza la sesión principal después del reemplazo
-            frontend = @{ Nombre = 'cem-frontend'; Imagen = 'cem-frontend'; Uuid = 'xc0kpzbog3qdko8moxyqnmn7' }
+            backend      = @{ Nombre = 'cem-backend';      Imagen = 'cem-backend';  Uuid = 'xqm5yub6sbfygenrsd1nxo3w' }
+            trabajos     = @{ Nombre = 'cem-trabajos';     Imagen = 'cem-backend';  Uuid = 'hlt2qkoijhrq9slhxmxplkih' }
+            planificador = @{ Nombre = 'cem-planificador'; Imagen = 'cem-backend';  Uuid = '1c1y4dkwcyic4hknug92y7mt' }
+            frontend     = @{ Nombre = 'cem-frontend';     Imagen = 'cem-frontend'; Uuid = '53rot1nz8zmpjppgz3yib6tq' }
         }
     }
 }
