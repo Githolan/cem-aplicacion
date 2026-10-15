@@ -32,7 +32,7 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
 - **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- Al corte de identidad (#25): 250 pruebas (230 del backend, 3 de contratos, 17 del frontend con `axe`) más 31 de extremo a extremo; los PR #27 a #30 sumaron más (el total se toma del próximo `ci.ps1`) (1 omitida: iPhone solo en móvil), incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
+- Según `ci.ps1` sobre `951114b` (15-10-2026), hay 332 pruebas y 43 de extremo a extremo. Las 332 son 291 del backend, 3 de contratos y 38 del frontend con `axe`. De las de extremo a extremo se omite 1: la de iPhone, que solo corre en móvil. Están incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
 
 ## Cómo probar
 
@@ -78,23 +78,49 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 - El ámbito se fija con `set_config(..., true)` (equivale a `SET LOCAL`); si falta, las políticas no devuelven filas.
 - No hay atajo de desarrollo para la autenticación: toda ruta protegida exige una sesión de `identidad` (enlace o código por correo) y responde 401 sin ella.
 - **slowapi descartado (14-10-2026).** slowapi 0.1.10 busca el manejador solo entre las rutas de primer nivel; FastAPI 0.141 deja las de `include_router` anidadas (`_IncludedRouter`), así que eximía toda la API sin avisar: las 301 peticiones daban 401 y ninguna 429. El middleware propio usa el mismo motor (`limits`) y lo prueban `test_limite_de_tasa.py` (con el middleware quitado fallan 5 de 7).
-- **NO VERIFICADO: que Traefik solo sea alcanzable por el túnel.** Si el puerto 443 de la VM respondiera desde Internet sin pasar por Cloudflare, `CF-Connecting-IP` se podría inventar y rotar cupos del límite de tasa. Comprobarlo (lista de seguridad de OCI o `curl` a la IP pública) antes de dar TB-8 por cerrado del todo.
+- **Traefik solo es alcanzable por el túnel: comprobado el 15-10-2026, de 19:47 a 19:51 UTC, desde la PC.** Si el 443 de la VM respondiera desde Internet sin pasar por Cloudflare, `CF-Connecting-IP` se podría inventar y rotar los cupos del límite de tasa.
+  - **Lo medido:** el 443 y el 80 de la IP pública no responden (`curl` da timeout con los dos Host, `nmap` los marca `filtered`), y tampoco el 22 ni los puertos que publica Docker.
+  - **Controles:** la misma sonda contra 1.1.1.1 da 200 y los puertos `open`; desde la propia VM, Traefik responde 200.
+  - **NO VERIFICADO:** las reglas de OCI (lista de seguridad y NSG), porque el MCP de OCI no tiene perfil. TB-8 queda cerrado en la práctica.
 - Sin Redis no se atiende: el límite de tasa es un control de seguridad, no una caché. Si el propietario prefiere que la API siga sin límite cuando Redis cae, es una decisión suya y hay que registrarla.
 
 ## Desplegado
 
-- **Staging y producción en `f48858a`** (identidad, primer corte), base `0004`, contrato 0.6.0, las cuatro apps de cada entorno como apps `dockerimage` que bajan de ghcr.io. Staging desde el 15-10-2026 00:30 UTC; producción desde las 03:11–03:15 UTC, con copia verificada antes de migrar (`diarias/2026-10-15/cem-20261015T031126Z.dump.age`), aprobada por el propietario. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
-- **Producción:** `/health`, `/deps` y `/cola` en `ok`; `/entrar` → 200; límite de tasa con la IP real; Access `cem-soporte`; copia diaria de las 03:30 UTC verificada con las apps nuevas (13 tablas); Kuma 10 monitores en verde.
+Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registro del despliegue en su `doc/deploys/2026-10-15-951114b.md`.
+
+**Staging y producción en `951114b`** (= `main` al 15-10-2026), base `0006`, contrato 0.8.0. Identidad completa hasta el código de seis dígitos; los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Staging, 15-10 de 20:09 a 20:11 UTC.**
+  - Es el primer despliegue hecho con `cd.ps1` real, después de `ci.ps1` en verde.
+  - No hubo copia previa: la base ya estaba en `0006`, porque `0bdb33d` se había desplegado a las 04:15 UTC sin registrarse.
+  - La verificación sobre contenido salió en verde. Como control, antes de desplegar daba rojo.
+  - Prueba de humo: `/auth/codigo` sin cuerpo → 422, sin enviar correo; `/auth/sesiones` → 401; una ruta inexistente → 404.
+  - **El propietario probó desde el celular la entrada con código de seis dígitos y funcionó** (15-10, ~20:20 UTC).
+- **Producción, 15-10 de 20:35 a 20:37 UTC.** `cd.ps1 -Confirmar` lo corrió el propietario en la PC, porque el clasificador no deja correrlo a Claude.
+  - Copia previa verificada a la migración `0004` → `0006`: `diarias/2026-10-15/cem-20261015T203554Z.dump.age`, con 13 tablas y 9 filas.
+  - `CEM_CODIGO_CLAVE`, nueva y distinta de la de staging, se cargó a las 20:22 UTC con la aprobación del propietario.
+  - **Comprobado desde afuera (20:40–20:45 UTC):**
+    - `/health` público con `951114b`;
+    - base en `0006`;
+    - un código inventado da 401 `codigo_invalido`, lo que prueba que la clave está cargada (sin ella sería 503);
+    - 0 reinicios y 0 errores en los registros de las 4 apps.
+  - Sigue funcionando lo que ya estaba: límite de tasa con la IP real, Access `cem-soporte`, copia diaria de las 03:30 UTC y Kuma.
 - **Prueba de punta a punta en staging (propietario, 14-10 22:08 UTC):** pidió el enlace, el correo salió por OCI, `/entrar#token=…` mostró "Entraste." y `/api/v1/auth/sesion` devolvió su persona. La persona de prueba existe solo en staging.
-- **Sin desplegar:** `main` (`0bdb33d`) va 13 commits por delante: migraciones `0005` y `0006`, sesiones propias, código de seis dígitos y el arreglo de `/entrar` con caché vieja (#30). Producción necesita además `CEM_CODIGO_CLAVE`, que hoy solo existe en staging. Las pruebas de extremo a extremo contra staging no se corrieron antes de pasar a producción.
+- **Trampa de las constancias.** La app de Claude en Windows es un paquete MSIX: lo que sus procesos crean en `%LOCALAPPDATA%\cem-despliegue` queda en `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\cem-despliegue`.
+  - Para correr `cd.ps1` en una terminal propia sobre constancias que dejó Claude: `$env:CEM_DESPLIEGUE_ESTADO = '<esa carpeta>'`.
+  - Si no, se niega: "no está registrada como desplegada y verificada en staging".
 
 ## Próximo paso
 
 Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 
-1. Llevar `main` a staging con `ci.ps1` completo y `cd.ps1` (copia antes de migrar de `0004` a `0006`), correr las e2e contra staging y, con la aprobación del propietario, pasar a producción con `CEM_CODIGO_CLAVE`.
-2. Carril C: el propietario ya tiene las liquidaciones anonimizadas. Subirlas al proyecto y preparar los prototipos HTML de las pantallas P0 para la puerta G3.
-3. Identidad, lo que falta de 2a: invitaciones (hoy no hay forma de dar de alta personas), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
+1. **Hecho el 15-10:** `main` (`951114b`) en staging y producción.
+   - Falta una decisión del propietario: fijar `CEM_DESPLIEGUE_ESTADO` como variable de usuario apuntando a una carpeta fuera de `AppData`, que no se virtualiza, y mover ahí las constancias. Así Claude y el propietario ven las mismas.
+2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
+3. Identidad, lo que falta de 2a:
+   - invitaciones: el PR #35 está abierto, con conflictos con `main`; se rehace sobre `main` cuando le toque;
+   - contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
 4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
-6. Comprobar que el 443 de la VM no responde sin pasar por Cloudflare (cierre de TB-8).
+6. TB-8: falta leer las reglas de OCI para cerrarlo con prueba firme (ver "Decisiones vigentes"); para eso hay que configurar el perfil del MCP de OCI.
+7. Probar `/instalar` en un iPhone y en un Android reales. El cartel con el QR está en el repositorio CEM (#28); falta comprobar que el QR lleva a `/instalar`.
