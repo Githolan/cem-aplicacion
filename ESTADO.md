@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 14-10-2026.
+**Actualizado:** 15-10-2026 (`main` en `0bdb33d`).
 
 ## Qué existe
 
@@ -19,8 +19,20 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
 - **Integración y despliegue (`despliegue/`, PR #11):** `ci.ps1` corre la suite oficial completa sobre una copia LF del commit y deja una constancia en `%LOCALAPPDATA%\cem-despliegue`; `cd.ps1` despliega por la API de Coolify solo la punta de `main` con `ci.ps1` en verde, fuera de 02:45-03:10 UTC, producción solo con `-Confirmar` y la SHA ya verificada en staging, y verifica por `ssh oci` y Traefik; `-SoloVerificar` solo lee. `deploy-map.ps1` (UUID de Coolify por entorno, comprobado con `test-deploy-map.ps1`), `test-compuertas.ps1` y la plantilla de registro (§18.6). Cubre lo que el plan llama `cem-despliegue`.
 - **Pruebas de extremo a extremo (PR #13):** `pnpm e2e` construye las imágenes reales de `cem-frontend` y `cem-backend`, las levanta con Redis en una red propia y corre Playwright 1.57.0 + `@axe-core/playwright` (escritorio y Pixel 7): inicio con el `/health` del backend real, `/api/` hasta el backend, `/instalar` (`beforeinstallprompt` real, iPhone, standalone simulado porque Chromium no emula `display-mode`), manifiesto, service worker, sin conexión, cabeceras y CSP, y `axe` WCAG 2.2 AA en cada página.
 - **Idempotencia (documento 13, §7.4; PR #19 y #20):** migración `0003` con `plataforma.idempotencia` (clave por consorcio, persona, método, ruta y clave; huella SHA-256 del pedido; respuesta guardada 24 h; RLS forzada; `cem_app` sin `UPDATE`) y `purgar_idempotencia()` dentro de la purga diaria. `app/plataforma/idempotencia.py`: las rutas declaran `IdempotenciaDep` (encabezado `Idempotency-Key` obligatorio) y hacen su efecto en `responder_una_vez()` con un bloqueo consultivo de la clave. Mismo pedido → misma respuesta con `Idempotent-Replayed: true`; otro pedido con la misma clave → 422 `idempotencia_reutilizada`; concurrente → espera, o 409 `idempotencia_en_curso` pasados 2 s. Contrato 0.5.0. Ninguna ruta de negocio lo usa todavía: el primer `POST` de dinero, cargos o expedientes lo adopta.
+- **Correo transaccional (documento 13, §12.4; PR #22):** el tipo de trabajo `notificar.correo` (`app/plataforma/correo.py`) envía desde `cem-trabajos` por SMTP con STARTTLS obligatorio y certificado verificado (OCI Email Delivery, puerto 587). Los módulos publican `correo.solicitado` con `correo.solicitar(conn, para=, asunto=, texto=, html=None, consorcio_id=None)`. 5 intentos con retroceso de 7,5 a 60 min; un 5xx o una carga inválida dejan el trabajo `muerto`. Al menos una vez: `Message-ID` fijo y encabezados `X-CEM-Clave-Envio`/`X-CEM-Intento`. Solo `cem-trabajos` tiene `CEM_SMTP_*` y `CEM_CORREO_REMITENTE` (TB-CEM-6; comprobado en Coolify y dentro de los contenedores). Pruebas con Mailpit.
+- **Identidad, primer corte (H2 2a; PR #23, #24 y #25):** migración `0004` con `nucleo.sesion` y `nucleo.enlace_acceso` (solo hashes, topes de 15 minutos y 30 días en la base, RLS forzada, funciones `security definer`).
+  - **Rutas:** `POST /api/v1/auth/enlace` (202 igual con cuenta o sin ella, 400 ms mínimos, correo por `correo.solicitar`), `POST /api/v1/auth/canje` (token en el cuerpo; el correo apunta a `/entrar#token=…`, página del frontend que lo lee y lo borra de la URL), `GET /api/v1/auth/sesion` y `POST /api/v1/auth/salir`.
+  - **Cookies y CSRF:** cookies `__Host-` (sesión opaca `HttpOnly`, CSRF legible, nonce y dispositivo). `obtener_identidad` valida la sesión en la base (30 días deslizantes) y exige `X-CSRF-Token` en todo lo que modifica estado.
+  - **Límites:** 20 por minuto por IP en `/api/v1/auth/*` y 5 por minuto por correo.
+  - **Configuración:** variable `CEM_ORIGEN_PUBLICO`; contrato 0.6.0. El nginx del frontend registra el acceso sin la consulta.
+- **Identidad, segundo corte (PR #27, #28 y #29):**
+  - **Migración `0005`:** `nucleo.revocar_sesiones_de(persona)`, que cierra al instante todas las sesiones de una persona (RN22; la usará el módulo de mandatos), y `nucleo.purgar_identidad(retencion)`. La purga diaria borra sesiones y enlaces que dejaron de servir hace más de 90 días.
+  - **Sesiones propias (RF04):** `GET /api/v1/auth/sesiones` (vigentes, con la actual marcada y el dispositivo legible, sin IP ni agente crudo), `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`, con CSRF. Contrato 0.7.0.
+  - **Migración `0006`, código de seis dígitos:** el mismo correo del enlace trae un código para entrar desde otro dispositivo (`POST /api/v1/auth/codigo`). Dura 10 minutos y admite cinco intentos fallidos; usar el código gasta el enlace y al revés. En la base queda `HMAC-SHA256(CEM_CODIGO_CLAVE, …)`, nunca el código. Límites: 10 por hora y 20 por día por correo. Contrato 0.8.0. En `/entrar`, sección "Entrar con un código".
+- **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
+- **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
-- 179 pruebas (165 del backend, 3 de contratos, 11 del frontend con `axe`) más 27 de extremo a extremo (1 omitida: iPhone solo en móvil), incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
+- Al corte de identidad (#25): 250 pruebas (230 del backend, 3 de contratos, 17 del frontend con `axe`) más 31 de extremo a extremo; los PR #27 a #30 sumaron más (el total se toma del próximo `ci.ps1`) (1 omitida: iPhone solo en móvil), incluidas las de RLS contra PostgreSQL real, las de la cola con procesos reales, las de Access con un emisor de claves HTTP real y las de la copia con un S3 compatible, y `frontend/scripts/probar-imagen.sh` para la imagen.
 
 ## Cómo probar
 
@@ -53,21 +65,26 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 - Monorrepositorio (AD-23); contratos como fuente única y tipos TypeScript generados desde `contratos/openapi.json` (AD-06).
 - Migraciones en SQL explícito con Alembic, aplicadas con `cem_migrate` (AD-09). Los roles los crea una vez `backend/scripts/crear_roles.sql` con un superusuario, porque `cem_migrate` no tiene `CREATEROLE`.
 - El ámbito se fija con `set_config(..., true)` (equivale a `SET LOCAL`); si falta, las políticas no devuelven filas.
-- No hay atajo de desarrollo para la autenticación: hasta que exista `identidad`, toda ruta protegida responde 401.
+- No hay atajo de desarrollo para la autenticación: toda ruta protegida exige una sesión de `identidad` (enlace o código por correo) y responde 401 sin ella.
 - **slowapi descartado (14-10-2026).** slowapi 0.1.10 busca el manejador solo entre las rutas de primer nivel; FastAPI 0.141 deja las de `include_router` anidadas (`_IncludedRouter`), así que eximía toda la API sin avisar: las 301 peticiones daban 401 y ninguna 429. El middleware propio usa el mismo motor (`limits`) y lo prueban `test_limite_de_tasa.py` (con el middleware quitado fallan 5 de 7).
 - **NO VERIFICADO: que Traefik solo sea alcanzable por el túnel.** Si el puerto 443 de la VM respondiera desde Internet sin pasar por Cloudflare, `CF-Connecting-IP` se podría inventar y rotar cupos del límite de tasa. Comprobarlo (lista de seguridad de OCI o `curl` a la IP pública) antes de dar TB-8 por cerrado del todo.
 - Sin Redis no se atiende: el límite de tasa es un control de seguridad, no una caché. Si el propietario prefiere que la API siga sin límite cuando Redis cae, es una decisión suya y hay que registrarla.
 
 ## Desplegado
 
-- **Staging y producción en `99067fb` (14-10-2026)**, las cuatro apps de cada entorno (`cem-backend`, `cem-trabajos`, `cem-planificador`, `cem-frontend`, con `-staging` en staging), con la base en `0003` y el contrato 0.5.0. `ci.ps1` dio verde sobre `99067fb` antes de desplegar.
-- **Copia antes de migrar (§18.3, regla 5):** en los dos entornos se hizo una copia verificada con `cem-trabajos` antes de pasar de `0002` a `0003`: staging `diarias/2026-10-14/cem-20261014T180309Z.dump.age` y producción `diarias/2026-10-14/cem-20261014T182613Z.dump.age`. Mismo programa que usa `cd.ps1`; el despliegue se hizo con un script propio porque el clasificador de permisos de la sesión de Claude no deja correr `cd.ps1`.
-- **Producción:** `/health`, `/deps` y `/cola` en `ok`; límite de tasa con la IP real; Access `cem-soporte` sobre `/api/v1/soporte` y `/soporte` (verificado en el navegador del propietario); copia diaria a las 03:30 UTC; Kuma 10, 12, 14, 18 y 19.
+- **Staging y producción en `f48858a`** (identidad, primer corte), base `0004`, contrato 0.6.0, las cuatro apps de cada entorno como apps `dockerimage` que bajan de ghcr.io. Staging desde el 15-10-2026 00:30 UTC; producción desde las 03:11–03:15 UTC, con copia verificada antes de migrar (`diarias/2026-10-15/cem-20261015T031126Z.dump.age`), aprobada por el propietario. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
+- **Producción:** `/health`, `/deps` y `/cola` en `ok`; `/entrar` → 200; límite de tasa con la IP real; Access `cem-soporte`; copia diaria de las 03:30 UTC verificada con las apps nuevas (13 tablas); Kuma 10 monitores en verde.
+- **Prueba de punta a punta en staging (propietario, 14-10 22:08 UTC):** pidió el enlace, el correo salió por OCI, `/entrar#token=…` mostró "Entraste." y `/api/v1/auth/sesion` devolvió su persona. La persona de prueba existe solo en staging.
+- **Sin desplegar:** `main` (`0bdb33d`) va 13 commits por delante: migraciones `0005` y `0006`, sesiones propias, código de seis dígitos y el arreglo de `/entrar` con caché vieja (#30). Producción necesita además `CEM_CODIGO_CLAVE`, que hoy solo existe en staging. Las pruebas de extremo a extremo contra staging no se corrieron antes de pasar a producción.
 
 ## Próximo paso
 
-1. Módulo `identidad` (H2): personas, sesiones, passkeys; la primera ruta de escritura adopta `IdempotenciaDep`.
-2. Pendientes de las copias: push a Kuma (una copia que nunca corrió hoy no alerta), WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
-3. Probar `/instalar` en un iPhone y un Android reales.
-4. Hook `SessionStart` que instale PostgreSQL 18 y Redis 7 en las sesiones de Claude.
-5. Que el clasificador de permisos de la sesión de Claude deje correr `cd.ps1` (hoy se despliega con scripts equivalentes).
+Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
+
+1. Llevar `main` a staging con `ci.ps1` completo y `cd.ps1` (copia antes de migrar de `0004` a `0006`), correr las e2e contra staging y, con la aprobación del propietario, pasar a producción con `CEM_CODIGO_CLAVE`.
+2. Carril C: el propietario ya tiene las liquidaciones anonimizadas. Subirlas al proyecto y preparar los prototipos HTML de las pantallas P0 para la puerta G3.
+3. Identidad, lo que falta de 2a: invitaciones (hoy no hay forma de dar de alta personas), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
+4. Trazabilidad: nombrar las pruebas de aceptación `test_paNN_…` (hoy solo `test_pa05_…`) para que `ci.ps1` liste las PA cubiertas.
+5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
+6. Comprobar que el 443 de la VM no responde sin pasar por Cloudflare (cierre de TB-8).
+7. Hook `SessionStart` que instale PostgreSQL 18 y Redis 7 en las sesiones de Claude.
