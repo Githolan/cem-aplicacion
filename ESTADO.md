@@ -88,27 +88,34 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registro del despliegue en su `doc/deploys/2026-10-15-951114b.md`.
 
-- **Staging en `951114b`** (= `main`, identidad completa hasta el código de seis dígitos), base `0006`, contrato 0.8.0, desde el 15-10-2026 a las 20:09–20:11 UTC.
-  - Es el primer despliegue hecho con `cd.ps1` real. `ci.ps1` dio verde antes.
+**Staging y producción en `951114b`** (= `main` al 15-10-2026), base `0006`, contrato 0.8.0. Identidad completa hasta el código de seis dígitos; los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Staging, 15-10 de 20:09 a 20:11 UTC.**
+  - Es el primer despliegue hecho con `cd.ps1` real, después de `ci.ps1` en verde.
   - No hubo copia previa: la base ya estaba en `0006`, porque `0bdb33d` se había desplegado a las 04:15 UTC sin registrarse.
-  - La verificación sobre contenido salió en verde, y en rojo antes de desplegar, como control.
-  - Prueba de humo por Traefik: `/auth/codigo` sin cuerpo → 422 sin correo; `/auth/sesiones` → 401; una ruta inexistente → 404.
-  - **NO VERIFICADO en staging:** la entrada completa con el código de seis dígitos, porque necesita un correo real.
-- **Producción en `f48858a`** (identidad, primer corte), base `0004`, contrato 0.6.0, desde las 03:11–03:15 UTC del 15-10. Hubo copia verificada antes de migrar (`diarias/2026-10-15/cem-20261015T031126Z.dump.age`), aprobada por el propietario.
-  - Funcionando: `/health`, `/deps` y `/cola` en `ok`; `/entrar` → 200; límite de tasa con la IP real; Access `cem-soporte`; copia diaria de las 03:30 UTC verificada con las apps nuevas (13 tablas); 10 monitores de Kuma en verde.
+  - La verificación sobre contenido salió en verde. Como control, antes de desplegar daba rojo.
+  - Prueba de humo: `/auth/codigo` sin cuerpo → 422, sin enviar correo; `/auth/sesiones` → 401; una ruta inexistente → 404.
+  - **El propietario probó desde el celular la entrada con código de seis dígitos y funcionó** (15-10, ~20:20 UTC).
+- **Producción, 15-10 de 20:35 a 20:37 UTC.** `cd.ps1 -Confirmar` lo corrió el propietario en la PC, porque el clasificador no deja correrlo a Claude.
+  - Copia previa verificada a la migración `0004` → `0006`: `diarias/2026-10-15/cem-20261015T203554Z.dump.age`, con 13 tablas y 9 filas.
+  - `CEM_CODIGO_CLAVE`, nueva y distinta de la de staging, se cargó a las 20:22 UTC con la aprobación del propietario.
+  - **Comprobado desde afuera (20:40–20:45 UTC):**
+    - `/health` público con `951114b`;
+    - base en `0006`;
+    - un código inventado da 401 `codigo_invalido`, lo que prueba que la clave está cargada (sin ella sería 503);
+    - 0 reinicios y 0 errores en los registros de las 4 apps.
+  - Sigue funcionando lo que ya estaba: límite de tasa con la IP real, Access `cem-soporte`, copia diaria de las 03:30 UTC y Kuma.
 - **Prueba de punta a punta en staging (propietario, 14-10 22:08 UTC):** pidió el enlace, el correo salió por OCI, `/entrar#token=…` mostró "Entraste." y `/api/v1/auth/sesion` devolvió su persona. La persona de prueba existe solo en staging.
-- **Sin desplegar en producción:** migraciones `0005` y `0006`, sesiones propias, código de seis dígitos y el arreglo de `/entrar` con caché vieja (#30).
-  - Comparando solo nombres de variables, a producción le falta únicamente `CEM_CODIGO_CLAVE` en `cem-backend`.
-  - El clasificador de permisos de la sesión de Claude no deja escribir esa variable ("Secret-Store Writes"): la carga el propietario o se habilita con una regla de permiso.
+- **Trampa de las constancias.** La app de Claude en Windows es un paquete MSIX: lo que sus procesos crean en `%LOCALAPPDATA%\cem-despliegue` queda en `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\cem-despliegue`.
+  - Para correr `cd.ps1` en una terminal propia sobre constancias que dejó Claude: `$env:CEM_DESPLIEGUE_ESTADO = '<esa carpeta>'`.
+  - Si no, se niega: "no está registrada como desplegada y verificada en staging".
 
 ## Próximo paso
 
 Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 
-1. **Producción:** con la aprobación del propietario, cargar `CEM_CODIGO_CLAVE` en `cem-backend` (32 bytes al azar en base64url, distinta de la de staging) y correr `cd.ps1 -Entorno produccion -Confirmar` sobre la punta de `main`.
-   - `cd.ps1` hace la copia antes de migrar de `0004` a `0006`.
-   - Si `main` avanzó desde `951114b`, antes hay que repetir `ci.ps1` y staging sobre la punta nueva.
-   - Staging ya está hecho: `951114b`, el 15-10 a las 20:11 UTC.
+1. **Hecho el 15-10:** `main` (`951114b`) en staging y producción.
+   - Falta una decisión del propietario: fijar `CEM_DESPLIEGUE_ESTADO` como variable de usuario apuntando a una carpeta fuera de `AppData`, que no se virtualiza, y mover ahí las constancias. Así Claude y el propietario ven las mismas.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
 3. Identidad, lo que falta de 2a:
    - invitaciones: el PR #35 está abierto, con conflictos con `main`; se rehace sobre `main` cuando le toque;
