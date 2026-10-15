@@ -1,10 +1,11 @@
 import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INVITACION } from "./enlace";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
+import { Invitacion } from "./Invitacion";
 import { useVersion } from "./version";
 
 function Inicio() {
@@ -63,6 +64,7 @@ export function App() {
           <Route path="/" element={<Inicio />} />
           <Route path="/instalar" element={<Instalar />} />
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
+          <Route path={RUTA_INVITACION} element={<Invitacion />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>

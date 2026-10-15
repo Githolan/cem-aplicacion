@@ -1,0 +1,465 @@
+"""Invitaciones y alta de personas (documento 08, RF03; plan H2 2a; migración 0007).
+
+**Quién invita, hasta que lleguen los mandatos (H2 2b).** Por ahora invita a una unidad quien
+tiene un vínculo de propietario vigente en esa misma unidad: puede sumar a su inquilino, al
+ocupante o a otro titular. Ninguna otra unidad, y nadie que solo sea inquilino u ocupante. Los
+roles del Consejo y del administrador, que invitan en todo el consorcio, reemplazan esta regla
+cuando existan (`puede_invitar` es el único lugar que la decide). El equipo de la plataforma da
+de alta a las primeras personas de un consorcio con `scripts/invitar.py`.
+
+**Recorrido.** Crear la invitación registra el hash del token y, en la misma transacción,
+publica el correo con el enlace `/invitacion#token=…` (el token va en el fragmento, como en
+`/entrar`). La página consulta la invitación (`POST /api/v1/auth/invitacion/consultar`) para
+mostrar edificio, unidad y vínculo, y la acepta (`POST /api/v1/auth/invitacion/aceptar`):
+
+- correo sin cuenta: se crea la persona, el vínculo y una sesión, sin pasar por el enlace de
+  acceso (el token le llegó a ese correo y sirve una sola vez);
+- correo con cuenta: hay que aceptar con la sesión de esa persona (409
+  `invitacion_requiere_sesion` si no hay sesión, 409 `invitacion_de_otra_persona` si es de otra).
+
+Invitar de nuevo al mismo correo, unidad y vínculo retira la pendiente anterior (reenviar).
+Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo.
+"""
+
+import logging
+from dataclasses import dataclass
+from datetime import timedelta
+from uuid import UUID
+from zoneinfo import ZoneInfo
+
+from cem_contracts.errores import CodigoError, Error
+from cem_contracts.estados import TipoVinculo
+from cem_contracts.invitaciones import (
+    AceptacionInvitacion,
+    Invitacion,
+    InvitacionAceptada,
+    InvitacionNueva,
+    InvitacionRecibida,
+    ListaInvitaciones,
+    TokenInvitacion,
+)
+from fastapi import APIRouter, Request, Response
+from sqlalchemy import Connection, text
+
+from app import auditoria, limite
+from app.contexto import ContextoDep, MotorDep
+from app.db import transaccion
+from app.errores import ErrorApi
+from app.identidad import eventos, sesiones
+
+router = APIRouter(prefix="/api/v1", tags=["identidad"])
+log = logging.getLogger("cem.identidad")
+
+VIGENCIA_INVITACION = timedelta(days=7)
+"""La migración 0007 impone el mismo tope."""
+RUTA_INVITACION = "/invitacion"
+"""Página del frontend que abre el enlace del correo; lee el token del fragmento."""
+LIMITE_INVITAR = "invitar"
+SIN_CACHE = {"Cache-Control": "no-store"}
+ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
+  when i.revocada_en is not null then 'revocada'
+  when i.vence_en <= now() then 'vencida' else 'pendiente' end"""
+COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo, i.correo,
+  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
+NO_ENCONTRADA = "No encontramos lo que buscás."
+
+
+@dataclass(frozen=True)
+class Creada:
+    invitacion: Invitacion
+    token: str
+
+
+def puede_invitar(conn: Connection, persona_id: UUID, unidad_id: UUID) -> bool:
+    """Regla provisoria hasta los mandatos (H2 2b): propietario vigente de esa unidad. Corre
+    con el consorcio en el ámbito, así que una unidad de otro consorcio no aparece."""
+    return bool(
+        conn.execute(
+            text(
+                "select exists (select 1 from nucleo.vinculo where unidad_id = :u"
+                " and persona_id = :p and tipo = 'propietario'"
+                " and daterange(vigente_desde, vigente_hasta) @> current_date)"
+            ),
+            {"u": unidad_id, "p": persona_id},
+        ).scalar_one()
+    )
+
+
+def crear(
+    conn: Connection,
+    *,
+    consorcio_id: UUID,
+    nueva: InvitacionNueva,
+    invitada_por: UUID | None,
+    origen_publico: str,
+    origen: str = "api",
+    ip: str | None = None,
+) -> Creada | None:
+    """Registra la invitación, retira la pendiente igual y publica el correo, todo en la
+    transacción de `conn` (con el consorcio en el ámbito). None si la unidad no está en el
+    consorcio o está dada de baja."""
+    unidad = conn.execute(
+        text("select designacion from nucleo.unidad where id = :u and eliminado_en is null"),
+        {"u": nueva.unidad_id},
+    ).scalar_one_or_none()
+    if unidad is None:
+        return None
+    correo = nueva.correo.lower()
+    for (anterior,) in conn.execute(
+        text(
+            "update nucleo.invitacion set revocada_en = now()"
+            " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
+            " and aceptada_en is null and revocada_en is null returning id"
+        ),
+        {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo},
+    ).all():
+        auditoria.registrar(
+            conn,
+            consorcio_id=consorcio_id,
+            actor=invitada_por,
+            origen=origen,
+            accion="identidad.invitacion.reemplazar",
+            entidad="invitacion",
+            entidad_id=anterior,
+            ip=ip,
+        )
+    token = sesiones.nuevo_token()
+    fila = (
+        conn.execute(
+            text(
+                "with i as (insert into nucleo.invitacion"
+                " (consorcio_id, unidad_id, tipo, correo, nombre, token_hash, invitada_por,"
+                " vence_en) values (:co, :u, cast(:t as nucleo.tipo_vinculo), :c, :n, :h, :p,"
+                " now() + :v) returning *)"
+                f" select {COLUMNAS} from i join nucleo.unidad u on u.id = i.unidad_id"
+            ),
+            {
+                "co": consorcio_id,
+                "u": nueva.unidad_id,
+                "t": nueva.tipo.value,
+                "c": correo,
+                "n": nueva.nombre.strip(),
+                "h": sesiones.hash_token(token),
+                "p": invitada_por,
+                "v": VIGENCIA_INVITACION,
+            },
+        )
+        .mappings()
+        .one()
+    )
+    invitacion = Invitacion(**fila)
+    auditoria.registrar(
+        conn,
+        consorcio_id=consorcio_id,
+        actor=invitada_por,
+        origen=origen,
+        accion="identidad.invitacion.crear",
+        entidad="invitacion",
+        entidad_id=invitacion.id,
+        despues={"unidad_id": invitacion.unidad_id, "tipo": invitacion.tipo.value},
+        ip=ip,
+    )
+    consorcio, zona = conn.execute(
+        text("select nombre, zona_horaria from nucleo.consorcio where id = :c"),
+        {"c": consorcio_id},
+    ).one()
+    quien = (
+        conn.execute(
+            text("select nombre from nucleo.persona where id = :p"), {"p": invitada_por}
+        ).scalar_one()
+        if invitada_por
+        else None
+    )
+    eventos.solicitar_invitacion(
+        conn,
+        consorcio_id=consorcio_id,
+        para=correo,
+        nombre=invitacion.nombre,
+        quien=quien,
+        consorcio=consorcio,
+        unidad=unidad,
+        tipo=invitacion.tipo.value,
+        enlace=f"{origen_publico}{RUTA_INVITACION}#token={token}",
+        vence=invitacion.vence_en.astimezone(ZoneInfo(zona)).strftime("%d/%m/%Y a las %H:%M"),
+    )
+    return Creada(invitacion, token)
+
+
+def _origen_publico(request: Request) -> str:
+    origen = request.app.state.config.origen_publico
+    if not origen:
+        log.error("CEM_ORIGEN_PUBLICO sin configurar: no se puede armar el enlace de invitación")
+        raise ErrorApi(503, CodigoError.SERVICIO_NO_DISPONIBLE, "El servicio no está disponible.")
+    return origen
+
+
+def _sin_permiso() -> ErrorApi:
+    return ErrorApi(
+        403,
+        CodigoError.SIN_PERMISO,
+        "Solo quien es propietario de la unidad puede invitar a otras personas a ella.",
+    )
+
+
+# Rutas de quien invita ---------------------------------------------------------------------
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/invitaciones",
+    status_code=201,
+    response_model=Invitacion,
+    summary="Invitar a una persona a una unidad",
+    responses={403: {"description": "La persona no es propietaria vigente de esa unidad."}},
+)
+async def invitar(
+    nueva: InvitacionNueva, ctx: ContextoDep, request: Request, motor: MotorDep
+) -> Invitacion:
+    """Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga
+    o no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la
+    anterior. Cupo: 20 por hora y 50 por día por persona."""
+    origen = _origen_publico(request)
+    for cupo in limite.LIMITES_INVITACIONES_PERSONA:
+        await limite.consumir(
+            request.app.state.limitador, cupo, LIMITE_INVITAR, str(ctx.persona_id)
+        )
+    ip = sesiones.ip_cliente(request)
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        if not puede_invitar(conn, ctx.persona_id, nueva.unidad_id):
+            raise _sin_permiso()
+        creada = crear(
+            conn,
+            consorcio_id=ctx.consorcio_id,
+            nueva=nueva,
+            invitada_por=ctx.persona_id,
+            origen_publico=origen,
+            ip=ip,
+        )
+    if creada is None:
+        raise _sin_permiso()
+    log.info(
+        "invitación creada",
+        extra={
+            "campos": {
+                "consorcio_id": str(ctx.consorcio_id),
+                "persona_id": str(ctx.persona_id),
+                "invitacion_id": str(creada.invitacion.id),
+            }
+        },
+    )
+    return creada.invitacion
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/invitaciones",
+    response_model=ListaInvitaciones,
+    summary="Invitaciones de mis unidades",
+)
+def listar(ctx: ContextoDep, motor: MotorDep, response: Response) -> ListaInvitaciones:
+    """Las invitaciones de las unidades donde la persona puede invitar, la más reciente
+    primero, con su estado."""
+    response.headers.update(SIN_CACHE)
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        filas = conn.execute(
+            text(
+                f"select {COLUMNAS} from nucleo.invitacion i"
+                " join nucleo.unidad u on u.id = i.unidad_id"
+                " where i.unidad_id in (select v.unidad_id from nucleo.vinculo v"
+                "  where v.persona_id = :p and v.tipo = 'propietario'"
+                "  and daterange(v.vigente_desde, v.vigente_hasta) @> current_date)"
+                " order by i.creada_en desc, i.id desc"
+            ),
+            {"p": ctx.persona_id},
+        ).mappings()
+        return ListaInvitaciones(elementos=[Invitacion(**f) for f in filas])
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar",
+    status_code=204,
+    response_class=Response,
+    summary="Retirar una invitación pendiente",
+    responses={
+        404: {"description": "La invitación no existe o no es de una unidad de la persona."},
+        409: {"description": "Ya se aceptó: para quitar el acceso se termina el vínculo."},
+    },
+)
+def revocar(invitacion_id: UUID, ctx: ContextoDep, request: Request, motor: MotorDep) -> Response:
+    """Repetirlo responde lo mismo. Una vencida también se puede retirar."""
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        fila = conn.execute(
+            text(
+                "select unidad_id, aceptada_en, revocada_en from nucleo.invitacion"
+                " where id = :i for update"
+            ),
+            {"i": invitacion_id},
+        ).one_or_none()
+        if fila is None or not puede_invitar(conn, ctx.persona_id, fila.unidad_id):
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADA)
+        if fila.aceptada_en is not None:
+            raise ErrorApi(
+                409,
+                CodigoError.INVITACION_NO_PENDIENTE,
+                "La invitación ya se aceptó. Para quitar el acceso hay que terminar el vínculo.",
+            )
+        if fila.revocada_en is None:
+            conn.execute(
+                text("update nucleo.invitacion set revocada_en = now() where id = :i"),
+                {"i": invitacion_id},
+            )
+            auditoria.registrar(
+                conn,
+                consorcio_id=ctx.consorcio_id,
+                actor=ctx.persona_id,
+                origen="api",
+                accion="identidad.invitacion.revocar",
+                entidad="invitacion",
+                entidad_id=invitacion_id,
+                ip=sesiones.ip_cliente(request),
+            )
+    return Response(status_code=204, headers=SIN_CACHE)
+
+
+# Rutas de quien recibe la invitación --------------------------------------------------------
+# Bajo /api/v1/auth/: comparten el cupo por IP de la familia de autenticación (§10.6).
+
+
+def _invitacion_invalida() -> ErrorApi:
+    return ErrorApi(
+        404,
+        CodigoError.INVITACION_INVALIDA,
+        "La invitación no sirve: venció, ya se usó o la retiraron. Pedí una nueva a quien te"
+        " invitó.",
+        encabezados=SIN_CACHE,
+    )
+
+
+@router.post(
+    "/auth/invitacion/consultar",
+    response_model=InvitacionRecibida,
+    summary="Ver una invitación antes de aceptarla",
+    responses={404: {"description": "La invitación no sirve (todas las causas responden igual)."}},
+)
+def consultar(pedido: TokenInvitacion, motor: MotorDep, response: Response) -> InvitacionRecibida:
+    """No la consume: abrirla no la acepta."""
+    response.headers.update(SIN_CACHE)
+    with transaccion(motor, persona_id=None) as conn:
+        r = conn.execute(
+            text(
+                "select resultado, consorcio, unidad, tipo, correo, nombre, invitada_por, vence"
+                " from nucleo.consultar_invitacion(:t)"
+            ),
+            {"t": sesiones.hash_token(pedido.token)},
+        ).one()
+    if r.resultado != "ok":
+        log.info("invitación consultada sin servir: %s", r.resultado)
+        raise _invitacion_invalida()
+    return InvitacionRecibida(
+        consorcio=r.consorcio,
+        unidad=r.unidad,
+        tipo=TipoVinculo(r.tipo),
+        correo=r.correo,
+        nombre=r.nombre,
+        invitada_por=r.invitada_por,
+        vence_en=r.vence,
+    )
+
+
+def _persona_de_la_sesion(request: Request, motor) -> UUID | None:
+    """La persona de la sesión de la petición, si trae una válida; con ella, exige CSRF. Una
+    cookie vencida o inventada cuenta como sin sesión."""
+    token = request.cookies.get(sesiones.COOKIE_SESION)
+    if not sesiones.token_valido(token):
+        return None
+    with transaccion(motor, persona_id=None) as conn:
+        sesion = sesiones.validar(conn, token)
+    if sesion is None:
+        return None
+    sesiones.exigir_csrf(request, token)
+    return sesion.persona_id
+
+
+@router.post(
+    "/auth/invitacion/aceptar",
+    response_model=InvitacionAceptada,
+    summary="Aceptar una invitación",
+    responses={
+        404: {
+            "model": Error,
+            "description": "La invitación no sirve (todas las causas responden igual).",
+        },
+        409: {
+            "model": Error,
+            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay.",
+        },
+    },
+)
+def aceptar(
+    pedido: AceptacionInvitacion, request: Request, response: Response, motor: MotorDep
+) -> InvitacionAceptada:
+    """Crea el vínculo con vigencia desde hoy. Si el correo no tenía cuenta crea la persona y
+    una sesión (deja sus cookies). Si la tenía, pide la sesión de esa persona (con su
+    `X-CSRF-Token`).
+
+    Sin sesión no hay token CSRF; como en `POST /auth/codigo`, protegen contra que otro sitio
+    haga aceptar una invitación ajena (y meta al navegador en una cuenta que no es suya):
+    `Sec-Fetch-Site` debe ser `same-origin` si el navegador lo declara, y el cuerpo debe ser
+    `application/json`, que un formulario de otro sitio no puede mandar."""
+    response.headers.update(SIN_CACHE)
+    sitio = request.headers.get("Sec-Fetch-Site")
+    if sitio is not None and sitio != "same-origin":
+        log.info("aceptación de invitación rechazada: otro_sitio")
+        raise ErrorApi(
+            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+        )
+    persona_sesion = _persona_de_la_sesion(request, motor)
+    token_sesion = sesiones.nuevo_token()
+    dispositivo = sesiones.fijar_dispositivo(request, response)
+    with transaccion(motor, persona_id=None) as conn:
+        r = conn.execute(
+            text(
+                "select resultado, persona, consorcio, cuenta_nueva, sesion, vence"
+                " from nucleo.aceptar_invitacion(:t, :p, :n, :s, :d, :a, cast(:ip as inet), :v)"
+            ),
+            {
+                "t": sesiones.hash_token(pedido.token),
+                "p": persona_sesion,
+                "n": pedido.nombre.strip() if pedido.nombre else None,
+                "s": sesiones.hash_token(token_sesion),
+                "d": dispositivo,
+                "a": sesiones.agente(request),
+                "ip": sesiones.ip_cliente(request),
+                "v": sesiones.VIGENCIA_SESION,
+            },
+        ).one()
+    if r.resultado == "requiere_sesion":
+        raise ErrorApi(
+            409,
+            CodigoError.INVITACION_REQUIERE_SESION,
+            "Ya tenés una cuenta con este correo. Entrá con él y volvé a abrir la invitación.",
+            encabezados=SIN_CACHE,
+        )
+    if r.resultado == "otra_persona":
+        raise ErrorApi(
+            409,
+            CodigoError.INVITACION_DE_OTRA_PERSONA,
+            "La invitación es para otro correo. Salí de esta cuenta y abrila de nuevo.",
+            encabezados=SIN_CACHE,
+        )
+    if r.resultado != "ok":
+        log.info("aceptación de invitación rechazada: %s", r.resultado)
+        raise _invitacion_invalida()
+    if r.cuenta_nueva:
+        sesiones.fijar_sesion(response, token_sesion)
+    log.info(
+        "invitación aceptada",
+        extra={
+            "campos": {
+                "consorcio_id": str(r.consorcio),
+                "persona_id": str(r.persona),
+                "cuenta_nueva": r.cuenta_nueva,
+            }
+        },
+    )
+    return InvitacionAceptada(
+        consorcio_id=r.consorcio, persona_id=r.persona, cuenta_nueva=r.cuenta_nueva
+    )

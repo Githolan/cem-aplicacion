@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 15-10-2026 (`main` en `0bdb33d`).
+**Actualizado:** 15-10-2026 (`main` en `41df581`; rama `claude/identidad-invitaciones-46xhhl` con las invitaciones, sin fusionar).
 
 ## Qué existe
 
@@ -29,6 +29,14 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
   - **Migración `0005`:** `nucleo.revocar_sesiones_de(persona)`, que cierra al instante todas las sesiones de una persona (RN22; la usará el módulo de mandatos), y `nucleo.purgar_identidad(retencion)`. La purga diaria borra sesiones y enlaces que dejaron de servir hace más de 90 días.
   - **Sesiones propias (RF04):** `GET /api/v1/auth/sesiones` (vigentes, con la actual marcada y el dispositivo legible, sin IP ni agente crudo), `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`, con CSRF. Contrato 0.7.0.
   - **Migración `0006`, código de seis dígitos:** el mismo correo del enlace trae un código para entrar desde otro dispositivo (`POST /api/v1/auth/codigo`). Dura 10 minutos y admite cinco intentos fallidos; usar el código gasta el enlace y al revés. En la base queda `HMAC-SHA256(CEM_CODIGO_CLAVE, …)`, nunca el código. Límites: 10 por hora y 20 por día por correo. Contrato 0.8.0. En `/entrar`, sección "Entrar con un código".
+- **Invitaciones y alta de personas (RF03; rama `claude/identidad-invitaciones-46xhhl`, sin fusionar):**
+  - **Migración `0007`:** `nucleo.invitacion` (consorcio, unidad, vínculo, correo, nombre, hash del token, quién invitó, 7 días como máximo, aceptada o retirada) con RLS forzada por consorcio; la política exige que `invitada_por` sea la persona del ámbito. `cem_app` solo cambia `revocada_en`. Funciones `security definer` `consultar_invitacion` y `aceptar_invitacion`.
+  - **Quién invita (provisorio hasta los mandatos de H2 2b):** el propietario vigente de esa unidad, a su unidad (inquilino, ocupante u otro titular). Las primeras personas de un consorcio las da de alta el equipo con `python -m scripts.invitar` dentro de `cem-backend` (sin `invitada_por`, auditoría con origen `soporte`).
+  - **Rutas:** `POST /api/v1/consorcios/{id}/invitaciones` (correo con `/invitacion#token=…`; invitar de nuevo al mismo correo, unidad y vínculo retira la anterior; 20 por hora y 50 por día por persona), `GET …/invitaciones`, `POST …/invitaciones/{id}/revocar`, `POST /api/v1/auth/invitacion/consultar` y `POST /api/v1/auth/invitacion/aceptar`.
+  - **Aceptar:** correo sin cuenta → persona, vínculo desde hoy (zona horaria del consorcio) y sesión, en una transacción; correo con cuenta → solo con la sesión de esa persona (409 `invitacion_requiere_sesion` u `invitacion_de_otra_persona`). Sin sesión, la defensa contra otro sitio es `Sec-Fetch-Site` y el cuerpo JSON, como en `/auth/codigo`. Toda invitación que no sirve responde igual (404 `invitacion_invalida`).
+  - **Auditoría encadenada:** crear, reemplazar, retirar y aceptar escriben en `auditoria.eventos` (primer uso), con identificadores y sin el correo. Las invitaciones no se purgan: son la constancia de quién dio acceso a quién.
+  - **Frontend:** página `/invitacion` (muestra edificio, unidad y vínculo; nombre editable; acepta con CSRF si hay sesión) y la navegación a `/invitacion` nunca sale de la caché del service worker. Contrato 0.9.0.
+  - **Pruebas:** 27 del backend contra PostgreSQL 18 y Redis reales (RLS de otro consorcio, política de `invitada_por`, privilegios, tope de 7 días, aceptación simultánea al mismo correo nuevo, script) y 9 de Vitest con `axe`. Sin e2e todavía.
 - **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
 - **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
@@ -83,7 +91,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 
 1. Llevar `main` a staging con `ci.ps1` completo y `cd.ps1` (copia antes de migrar de `0004` a `0006`), correr las e2e contra staging y, con la aprobación del propietario, pasar a producción con `CEM_CODIGO_CLAVE`.
 2. Carril C: el propietario ya tiene las liquidaciones anonimizadas. Subirlas al proyecto y preparar los prototipos HTML de las pantallas P0 para la puerta G3.
-3. Identidad, lo que falta de 2a: invitaciones (hoy no hay forma de dar de alta personas), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
+3. Identidad, lo que falta de 2a: fusionar y desplegar las invitaciones (rama `claude/identidad-invitaciones-46xhhl`; migración `0007`), contraseña Argon2id + TOTP para roles de dinero (TB-CEM-3), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
 4. Trazabilidad: nombrar las pruebas de aceptación `test_paNN_…` (hoy solo `test_pa05_…`) para que `ci.ps1` liste las PA cubiertas.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
 6. Comprobar que el 443 de la VM no responde sin pasar por Cloudflare (cierre de TB-8).

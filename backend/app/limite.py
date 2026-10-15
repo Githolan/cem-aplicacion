@@ -49,6 +49,10 @@ LIMITES_CODIGO_CORREO: tuple[RateLimitItem, ...] = (parse("10/hour"), parse("20/
 Por correo y no por IP: quien rota direcciones no gana intentos. Con 10⁶ códigos posibles,
 20 por día dan 0,002 % de acertar en un día y 0,7 % en un año de intentos sin pausa, cada uno
 con un correo que le llega a la persona; una persona real usa uno o dos."""
+LIMITES_INVITACIONES_PERSONA: tuple[RateLimitItem, ...] = (parse("20/hour"), parse("50/day"))
+"""Invitaciones que una persona puede mandar (`POST /api/v1/consorcios/{id}/invitaciones`): cada
+una es un correo a una dirección que eligió ella, así que no puede servir para mandar correo en
+cantidad."""
 PREFIJO = "cem:rl"
 ESPERA_REDIS_S = 1.0
 """Tope para conectar y para cada orden a Redis: una caída no deja colgada la petición."""
