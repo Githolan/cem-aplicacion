@@ -127,6 +127,23 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "ListaSesiones": {
+        "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/SesionDispositivo"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaSesiones",
+        "type": "object"
+      },
       "ListaUnidades": {
         "properties": {
           "elementos": {
@@ -256,6 +273,55 @@
         "title": "SesionActual",
         "type": "object"
       },
+      "SesionDispositivo": {
+        "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+        "properties": {
+          "actual": {
+            "description": "Es la sesión de esta misma petición.",
+            "title": "Actual",
+            "type": "boolean"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "dispositivo": {
+            "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+            "examples": [
+              "Chrome en Android"
+            ],
+            "title": "Dispositivo",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ultimo_uso_en": {
+            "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+            "format": "date-time",
+            "title": "Ultimo Uso En",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dispositivo",
+          "creada_en",
+          "ultimo_uso_en",
+          "vence_en",
+          "actual"
+        ],
+        "title": "SesionDispositivo",
+        "type": "object"
+      },
       "SesionSoporte": {
         "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
         "properties": {
@@ -277,6 +343,21 @@
           "tipo"
         ],
         "title": "SesionSoporte",
+        "type": "object"
+      },
+      "SesionesRevocadas": {
+        "description": "`POST /api/v1/auth/sesiones/revocar-otras`: cuántas sesiones se cerraron.",
+        "properties": {
+          "revocadas": {
+            "minimum": 0.0,
+            "title": "Revocadas",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revocadas"
+        ],
+        "title": "SesionesRevocadas",
         "type": "object"
       },
       "TipoVinculo": {
@@ -475,6 +556,90 @@
           }
         },
         "summary": "Quién soy",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones": {
+      "get": {
+        "description": "Las sesiones vigentes (ni vencidas ni revocadas) de la persona, con la actual marcada.\nEl dispositivo es una descripción del navegador; ni el agente crudo ni la IP salen.",
+        "operationId": "listar_sesiones_api_v1_auth_sesiones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaSesiones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mis sesiones vigentes",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones/revocar-otras": {
+      "post": {
+        "description": "Revoca todas las sesiones vigentes de la persona menos la de esta petición.",
+        "operationId": "revocar_otras_api_v1_auth_sesiones_revocar_otras_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionesRevocadas"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Cerrar las sesiones de los otros dispositivos",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/sesiones/{sesion_id}/revocar": {
+      "post": {
+        "description": "Revoca una sesión propia. Repetirlo responde lo mismo y conserva la fecha de la primera\nrevocación. Si es la actual, además borra sus cookies, como `salir`.",
+        "operationId": "revocar_sesion_api_v1_auth_sesiones__sesion_id__revocar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sesion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Sesion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La sesión no existe o no es de la persona."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cerrar una sesión",
         "tags": [
           "identidad"
         ]

@@ -172,6 +172,74 @@
     "title": "EstadoCola",
     "type": "object"
   },
+  "ListaSesiones": {
+    "$defs": {
+      "SesionDispositivo": {
+        "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+        "properties": {
+          "actual": {
+            "description": "Es la sesión de esta misma petición.",
+            "title": "Actual",
+            "type": "boolean"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "dispositivo": {
+            "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+            "examples": [
+              "Chrome en Android"
+            ],
+            "title": "Dispositivo",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ultimo_uso_en": {
+            "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+            "format": "date-time",
+            "title": "Ultimo Uso En",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "dispositivo",
+          "creada_en",
+          "ultimo_uso_en",
+          "vence_en",
+          "actual"
+        ],
+        "title": "SesionDispositivo",
+        "type": "object"
+      }
+    },
+    "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/SesionDispositivo"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaSesiones",
+    "type": "object"
+  },
   "ListaUnidades": {
     "$defs": {
       "Unidad": {
@@ -336,6 +404,55 @@
     "title": "SesionActual",
     "type": "object"
   },
+  "SesionDispositivo": {
+    "description": "Una sesión vigente de la persona, para listarla y revocarla (RF04, §10.4).\n\nNunca lleva el agente crudo ni la IP: quien tuviera una sesión robada vería, si no, la\nhuella del navegador y la dirección de los otros dispositivos de la persona.",
+    "properties": {
+      "actual": {
+        "description": "Es la sesión de esta misma petición.",
+        "title": "Actual",
+        "type": "boolean"
+      },
+      "creada_en": {
+        "format": "date-time",
+        "title": "Creada En",
+        "type": "string"
+      },
+      "dispositivo": {
+        "description": "Descripción legible derivada del navegador, p. ej. «Chrome en Android».",
+        "examples": [
+          "Chrome en Android"
+        ],
+        "title": "Dispositivo",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "ultimo_uso_en": {
+        "description": "Se actualiza como mucho cada pocos minutos, no en cada petición.",
+        "format": "date-time",
+        "title": "Ultimo Uso En",
+        "type": "string"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "dispositivo",
+      "creada_en",
+      "ultimo_uso_en",
+      "vence_en",
+      "actual"
+    ],
+    "title": "SesionDispositivo",
+    "type": "object"
+  },
   "SesionSoporte": {
     "description": "`GET /api/v1/soporte/sesion`: el operador según el JWT de Access verificado.",
     "properties": {
@@ -357,6 +474,21 @@
       "tipo"
     ],
     "title": "SesionSoporte",
+    "type": "object"
+  },
+  "SesionesRevocadas": {
+    "description": "`POST /api/v1/auth/sesiones/revocar-otras`: cuántas sesiones se cerraron.",
+    "properties": {
+      "revocadas": {
+        "minimum": 0,
+        "title": "Revocadas",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revocadas"
+    ],
+    "title": "SesionesRevocadas",
     "type": "object"
   },
   "Unidad": {

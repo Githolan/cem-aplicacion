@@ -11,7 +11,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `app/limite.py` | Límite de tasa por IP real con Redis (§10.6, cierra TB-8) |
 | `app/db.py` | `transaccion()`: abre la transacción y fija persona y consorcio para la RLS (§7.2) |
 | `app/contexto.py` | `obtener_identidad`: valida la cookie de sesión (y el `X-CSRF-Token` si la petición modifica estado); `require_scope`: vínculos vigentes de la persona en el consorcio de la ruta |
-| `app/identidad/` | Enlace mágico, sesiones y CSRF (§10.3, §10.4): `POST /api/v1/auth/enlace`, `POST /api/v1/auth/canje` (token en el cuerpo; el correo lleva `<origen>/entrar#token=…`), `GET /api/v1/auth/sesion`, `POST /api/v1/auth/salir`. Necesita `CEM_ORIGEN_PUBLICO` (`https://<dominio>`) para armar el enlace |
+| `app/identidad/` | Enlace mágico, sesiones y CSRF (§10.3, §10.4): `POST /api/v1/auth/enlace`, `POST /api/v1/auth/canje` (token en el cuerpo; el correo lleva `<origen>/entrar#token=…`), `GET /api/v1/auth/sesion`, `POST /api/v1/auth/salir`. Sesiones de la persona (RF04): `GET /api/v1/auth/sesiones`, `POST /api/v1/auth/sesiones/{id}/revocar` y `POST /api/v1/auth/sesiones/revocar-otras`. Necesita `CEM_ORIGEN_PUBLICO` (`https://<dominio>`) para armar el enlace |
 | `app/consorcios/` | `GET /api/v1/me/consorcios` y `GET /api/v1/consorcios/{id}/unidades` |
 | `app/liquidacion/reparto.py` | Motor de reparto: función pura con `Decimal` y restos mayores (§7.3) |
 | `app/plataforma/cola.py` | Cola de trabajos en PostgreSQL: `encolar()` dentro de la transacción de negocio, tipos con reintentos y retroceso (§12.1) |
