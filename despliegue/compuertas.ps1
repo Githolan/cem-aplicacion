@@ -8,7 +8,32 @@
 #   ci\<sha>.json                 resultado de ci.ps1 sobre esa SHA
 #   verificado-staging\<sha>.json SHA desplegada y verificada en staging por cd.ps1
 #   deploys\AAAA-MM-DD-<sha7>.md  registro de despliegue (§18.6), para copiar al repo CEM
+#
+# Imágenes (decisión del propietario, 15-10-2026): Coolify ya no construye en la
+# VM. ci.ps1 construye cem-backend y cem-frontend para linux/arm64 en la PC, las
+# sube a ghcr.io (privado) con la SHA como etiqueta y guarda el digest de cada una
+# en la constancia; cd.ps1 solo despliega esos digests y los compara en la VM.
 # ==============================================================================
+
+# Repositorio de imágenes de CEM en ghcr.io (minúsculas: así las nombra ghcr.io).
+$CemRegistroImagenes = 'ghcr.io/githolan'
+$CemServidorRegistro = 'ghcr.io'
+# Usuario de GitHub con el que ci.ps1 hace el login temporal para subir.
+$CemUsuarioRegistro  = 'Githolan'
+# Variable de usuario de Windows con el token clásico (write:packages) para subir.
+$CemVariableTokenRegistro = 'CEM_GHCR_TOKEN'
+$CemPrefijoTokenClasico   = 'ghp_'
+# Plataforma de la VM (OCI Ampere A1).
+$CemPlataformaImagenes = 'linux/arm64'
+# Imagen -> Dockerfile, relativo a la raíz del commit (que es el contexto de construcción).
+$CemDockerfiles = [ordered]@{
+    'cem-backend'  = 'backend/Dockerfile'
+    'cem-frontend' = 'frontend/Dockerfile'
+}
+# Etiqueta OCI con el commit, que cd.ps1 compara en el contenedor.
+$CemEtiquetaRevision = 'org.opencontainers.image.revision'
+$CemPatronDigest     = '^sha256:[0-9a-f]{64}$'
+$CemTiposIndice      = @('application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json')
 
 $CemCarpetaEstadoPorDefecto = Join-Path $env:LOCALAPPDATA 'cem-despliegue'
 
@@ -242,4 +267,114 @@ function Test-CemVerificadoStaging {
     if (-not (Test-Path $ruta)) { return $false }
     $d = Get-Content -Raw $ruta | ConvertFrom-Json
     ($d.sha -eq $Sha) -and ($d.entorno -eq 'staging') -and ($d.verificacion -eq 'ok')
+}
+
+# --- Imágenes en ghcr.io (ci.ps1 las sube, cd.ps1 las despliega) ---------------
+
+function Get-CemReferenciaImagen {
+    param([Parameter(Mandatory)][string]$Imagen, [Parameter(Mandatory)][string]$Sha)
+    if (-not $CemDockerfiles.Contains($Imagen)) { throw "imagen desconocida '$Imagen' (válidas: $($CemDockerfiles.Keys -join ', '))" }
+    Assert-CemShaCompleta $Sha
+    "$CemRegistroImagenes/${Imagen}:$Sha"
+}
+
+# Exige un token clásico de GitHub (los de grano fino no sirven para ghcr.io).
+# Ningún mensaje lleva el token ni una parte de él.
+function Assert-CemTokenRegistro {
+    param([AllowEmptyString()][AllowNull()][string]$Token)
+    if (-not $Token) {
+        throw "falta la variable de usuario $CemVariableTokenRegistro (token clásico de GitHub con write:packages); no se pueden subir las imágenes"
+    }
+    if (-not $Token.StartsWith($CemPrefijoTokenClasico, [StringComparison]::Ordinal)) {
+        throw "$CemVariableTokenRegistro no es un token clásico de GitHub (debe empezar con $CemPrefijoTokenClasico); ghcr.io no acepta los de grano fino"
+    }
+}
+
+# Lee la salida de `docker buildx imagetools inspect <ref> --format '{{json .Manifest}}'`
+# y devuelve el digest del índice. Exige un índice (Docker con el almacén de
+# containerd sube índice + atestación) que contenga $CemPlataformaImagenes.
+function Read-CemManifiestoImagen {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Json, [Parameter(Mandatory)][string]$Referencia)
+    try { $m = $Json | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw "${Referencia}: la inspección del manifiesto no devolvió JSON" }
+    if ($null -eq $m) { throw "${Referencia}: la inspección del manifiesto no devolvió nada" }
+    if ("$($m.digest)" -notmatch $CemPatronDigest) { throw "${Referencia}: digest inválido '$($m.digest)'" }
+    if ($CemTiposIndice -notcontains $m.mediaType) {
+        throw "${Referencia}: se esperaba un índice de imágenes y es '$($m.mediaType)'; ¿cambió el almacén de imágenes de Docker?"
+    }
+    $plataformas = @($m.manifests | ForEach-Object { "$($_.platform.os)/$($_.platform.architecture)" })
+    if ($plataformas -notcontains $CemPlataformaImagenes) {
+        throw "${Referencia}: el manifiesto no tiene $CemPlataformaImagenes (tiene: $($plataformas -join ', '))"
+    }
+    $m.digest
+}
+
+# Digests que ci.ps1 subió para la SHA, uno por imagen pedida. Falla si la
+# constancia no existe, no está en verde, no tiene imágenes (corrida con
+# -SinSubirImagenes) o alguna imagen falta, es de otra SHA, de otra plataforma o
+# tiene un digest inválido.
+function Get-CemImagenesAprobadas {
+    param([Parameter(Mandatory)][string]$Sha, [Parameter(Mandatory)][string[]]$Imagenes)
+    if (-not (Test-CemCiAprobado -Sha $Sha)) { throw "ci.ps1 no tiene un resultado verde sobre $Sha" }
+    $r = Read-CemResultadoCi -Sha $Sha
+    if ($null -eq $r.imagenes) {
+        throw "la constancia de ci.ps1 sobre $Sha no tiene imágenes subidas (¿se corrió con -SinSubirImagenes?); correr ci.ps1 sin ese parámetro"
+    }
+    $digests = [ordered]@{}
+    foreach ($img in $Imagenes) {
+        $d = $r.imagenes.$img
+        if ($null -eq $d) { throw "la constancia de ci.ps1 sobre $Sha no tiene la imagen $img" }
+        $esperada = Get-CemReferenciaImagen -Imagen $img -Sha $Sha
+        if ($d.referencia -ne $esperada) { throw "la constancia dice que $img se subió como '$($d.referencia)', se esperaba '$esperada'" }
+        if ($d.plataforma -ne $CemPlataformaImagenes) { throw "la constancia dice que $img es para '$($d.plataforma)', se esperaba $CemPlataformaImagenes" }
+        if ("$($d.digest)" -notmatch $CemPatronDigest) { throw "la constancia tiene un digest inválido para ${img}: '$($d.digest)'" }
+        $digests[$img] = $d.digest
+    }
+    $digests
+}
+
+# Problemas de una aplicación leída de Coolify (GET /applications/<uuid>) frente a
+# lo que espera el mapa: tipo dockerimage e imagen de ghcr.io según su función.
+function Get-CemProblemasAppCoolify {
+    param([Parameter(Mandatory)]$Leida, [Parameter(Mandatory)]$App)
+    $problemas = [System.Collections.Generic.List[string]]::new()
+    if ($Leida.build_pack -ne 'dockerimage') {
+        $problemas.Add("$($App.Nombre) es de tipo '$($Leida.build_pack)' en Coolify; se espera 'dockerimage' (Coolify ya no construye)")
+    }
+    $esperada = "$CemRegistroImagenes/$($App.Imagen)"
+    if ($Leida.docker_registry_image_name -ne $esperada) {
+        $problemas.Add("$($App.Nombre) usa la imagen '$($Leida.docker_registry_image_name)'; para la función $($App.Funcion) se espera '$esperada'")
+    }
+    , $problemas.ToArray()
+}
+
+# Problemas del contenedor en marcha frente a la imagen esperada. Recibe lo que
+# devuelve la VM:
+#   ImagenConfig  docker inspect -f '{{.Config.Image}}' <contenedor>
+#   Etiquetas     docker inspect -f '{{json .Config.Labels}}' <contenedor>
+#   RepoDigests   docker image inspect -f '{{json .RepoDigests}}' <id de la imagen>
+function Get-CemProblemasContenedor {
+    param(
+        [Parameter(Mandatory)]$App, [Parameter(Mandatory)][string]$Sha, [Parameter(Mandatory)][string]$Digest,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ImagenConfig,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Etiquetas,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$RepoDigests
+    )
+    $problemas = [System.Collections.Generic.List[string]]::new()
+    $referencia = Get-CemReferenciaImagen -Imagen $App.Imagen -Sha $Sha
+    if ($ImagenConfig.Trim() -ne $referencia) { $problemas.Add("$($App.Nombre): corre '$($ImagenConfig.Trim())', se espera '$referencia'") }
+    $etq = $null
+    $etiquetasJson = $true
+    try { $etq = $Etiquetas | ConvertFrom-Json -ErrorAction Stop } catch { $etiquetasJson = $false; $problemas.Add("$($App.Nombre): las etiquetas del contenedor no son JSON") }
+    # Sin etiquetas ('null') también es un problema: la imagen no es la que subió ci.ps1.
+    if ($etiquetasJson -and ($null -eq $etq -or $etq.$CemEtiquetaRevision -ne $Sha)) {
+        $problemas.Add("$($App.Nombre): la etiqueta $CemEtiquetaRevision es '$($etq.$CemEtiquetaRevision)', se espera $Sha")
+    }
+    $lista = $null
+    try { $lista = @($RepoDigests | ConvertFrom-Json -ErrorAction Stop) } catch { $problemas.Add("$($App.Nombre): RepoDigests de la imagen no es JSON") }
+    $conDigest = "$CemRegistroImagenes/$($App.Imagen)@$Digest"
+    if ($null -ne $lista -and $lista -notcontains $conDigest) {
+        $problemas.Add("$($App.Nombre): la imagen del contenedor no es $conDigest (RepoDigests: $($lista -join ', '))")
+    }
+    , $problemas.ToArray()
 }

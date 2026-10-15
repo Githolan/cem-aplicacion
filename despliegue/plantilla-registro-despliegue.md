@@ -24,7 +24,7 @@ Registro de despliegue del documento 13, §18.6. Lo genera `despliegue/cd.ps1` d
 
 ### Aplicaciones
 
-| Orden | Aplicación | UUID de Coolify | Despliegue | Estado | Commit construido |
+| Orden | Aplicación | UUID de Coolify | Despliegue | Estado | Imagen y digest (ghcr.io) |
 |---|---|---|---|---|---|
 {{FILAS_APLICACIONES}}
 
