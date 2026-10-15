@@ -156,3 +156,18 @@ button:focus-visible {
   justify-self: start;
   margin-top: 0.5rem;
 }
+
+.secreto {
+  font-size: 1.1rem;
+  letter-spacing: 0.05em;
+  word-break: break-word;
+}
+
+.codigos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  padding: 0;
+  list-style: none;
+  font-size: 1.1rem;
+}
