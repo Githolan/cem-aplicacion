@@ -1,8 +1,11 @@
+import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
-import { Entrar, RUTA_ENTRAR } from "./Entrar";
+import { RUTA_ENTRAR } from "./enlace";
+import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
+import { useVersion } from "./version";
 
 function Inicio() {
   return (
@@ -18,7 +21,26 @@ function Inicio() {
   );
 }
 
+// Una ruta que esta versión no conoce puede ser de una versión más nueva (un enlace del correo,
+// abierto con la aplicación vieja en caché). Si hay una versión nueva esperando, se aplica sola en
+// la misma URL completa, en vez de dejar a la persona en "No encontramos". En las rutas conocidas
+// la versión nueva sigue esperando el botón del aviso (documento 13, §14.4).
 function NoEncontrada() {
+  const { hayVersionNueva, actualizar } = useVersion();
+  useEffect(() => {
+    if (hayVersionNueva) actualizar();
+  }, [hayVersionNueva, actualizar]);
+
+  if (hayVersionNueva) {
+    return (
+      <>
+        <h1>Actualizando la aplicación</h1>
+        <p role="status" className="tarjeta">
+          Cargando la versión nueva…
+        </p>
+      </>
+    );
+  }
   return (
     <>
       <h1>No encontramos esa página</h1>

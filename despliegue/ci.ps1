@@ -261,12 +261,15 @@ try {
         $env:PATH = "$rutaGit;$pathAnterior"
         $env:CEM_E2E_SUFIJO = $sufijoE2e
         $env:CEM_E2E_SHA = $shaCompleta
+        # La copia no tiene .git: la versión anterior del frontend (e2e/versiones.e2e.ts) se
+        # construye desde el repositorio.
+        $env:CEM_E2E_REPO = $repo
         Push-Location (Join-Path $copia 'frontend')
         try { Correr 'frontend-e2e' { pnpm e2e } | Out-Null }
         finally {
             Pop-Location
             $env:PATH = $pathAnterior
-            Remove-Item Env:\CEM_E2E_SUFIJO, Env:\CEM_E2E_SHA
+            Remove-Item Env:\CEM_E2E_SUFIJO, Env:\CEM_E2E_SHA, Env:\CEM_E2E_REPO
         }
     }
 }

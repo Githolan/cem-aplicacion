@@ -36,6 +36,14 @@ curl -s "$URL/assets/no-existe.js" | grep -q '<div id="raiz">' && falla "un acti
 cabecera /assets/no-existe.js cache-control | grep -q immutable && falla "un 404 de /assets/ quedó inmutable"
 [ "$(cabecera /manifest.webmanifest content-type)" = "application/manifest+json" ] || falla "tipo del manifiesto"
 [ "$(cabecera /sw.js cache-control)" = "no-cache" ] || falla "sw.js no lleva no-cache"
+# Extensión del service worker para el enlace de entrada (src/swEntrar.ts): sw.js la carga, se
+# sirve como JavaScript, sin caché, y /entrar nunca sale de la caché del service worker.
+curl -s "$URL/sw.js" | grep -q 'importScripts("/sw-entrar.js")' || falla "sw.js no carga sw-entrar.js"
+curl -s "$URL/sw.js" | grep -q '\^\\/entrar' || falla "sw.js no excluye /entrar de navigateFallback"
+[ "$(codigo /sw-entrar.js)" = 200 ] || falla "/sw-entrar.js no da 200"
+[ "$(cabecera /sw-entrar.js cache-control)" = "no-cache" ] || falla "sw-entrar.js no lleva no-cache"
+cabecera /sw-entrar.js content-type | grep -q '^application/javascript' || falla "tipo de sw-entrar.js"
+curl -s "$URL/sw-entrar.js" | grep -q 'const RUTA_ENTRAR = "/entrar"' || falla "sw-entrar.js sin la ruta de entrada"
 [ "$(codigo /health)" = 502 ] || falla "/health sin backend debería dar 502 (prueba que se reenvía)"
 
 # IP real hacia el backend (límite de tasa, TB-8): X-Forwarded-For sale de CF-Connecting-IP y

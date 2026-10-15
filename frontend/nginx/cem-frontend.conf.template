@@ -67,8 +67,9 @@ server {
         try_files $uri =404;
     }
 
-    # El service worker y el manifiesto se revalidan siempre, si no la versión nueva no llega.
-    location ~ ^/(sw\.js|workbox-[^/]+\.js|manifest\.webmanifest)$ {
+    # El service worker (con su extensión sw-entrar.js) y el manifiesto se revalidan siempre, si
+    # no la versión nueva no llega.
+    location ~ ^/(sw\.js|sw-entrar\.js|workbox-[^/]+\.js|manifest\.webmanifest)$ {
         include /etc/nginx/cem/cabeceras.conf;
         add_header Cache-Control "no-cache" always;
         types {

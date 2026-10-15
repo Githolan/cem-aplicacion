@@ -10,13 +10,16 @@
 set -eu
 
 RAIZ=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGEN_FRONTEND=cem-frontend
-IMAGEN_BACKEND=cem-backend
-# La misma imagen de Redis que la suite oficial del backend (backend/pruebas/compose.yml).
-IMAGEN_REDIS=redis:7-alpine
 # Nombres propios de esta corrida (sufijo = PID), así dos corridas no se pisan. Quien llama
 # puede fijarlo con CEM_E2E_SUFIJO para borrar después lo que quede (ci.ps1 lo hace siempre).
 SUFIJO=${CEM_E2E_SUFIJO:-$$}
+# También las imágenes llevan el sufijo: con un nombre fijo, otra corrida en paralelo (otra rama,
+# ci.ps1) la reemplaza a mitad de camino y las pruebas corren contra un código ajeno (medido el
+# 14-10-2026). Al terminar se borran las etiquetas; las capas quedan en la caché de Docker.
+IMAGEN_FRONTEND="cem-frontend-e2e-$SUFIJO"
+IMAGEN_BACKEND="cem-backend-e2e-$SUFIJO"
+# La misma imagen de Redis que la suite oficial del backend (backend/pruebas/compose.yml).
+IMAGEN_REDIS=redis:7-alpine
 RED="cem-frontend-e2e-red-$SUFIJO"
 REDIS="cem-frontend-e2e-redis-$SUFIJO"
 BACKEND="cem-frontend-e2e-backend-$SUFIJO"
@@ -25,12 +28,26 @@ FRONTEND_SIN_BACKEND="cem-frontend-e2e-sin-backend-$SUFIJO"
 # Alias de red como en Coolify (custom_network_aliases): el frontend llega al backend por nombre.
 ALIAS_BACKEND="cem-backend-e2e"
 ALIAS_REDIS="cem-redis-e2e"
+# Versiones del frontend para las pruebas de caché del service worker (e2e/versiones.e2e.ts):
+# - anterior: la que estaba en staging y producción antes de que existiera /entrar (38aca25,
+#   ESTADO.md), construida desde git. Sin .git (la copia de ci.ps1), el repositorio llega en
+#   CEM_E2E_REPO.
+# - siguiente: la de esta corrida con otros bytes en sw.js, para que el navegador la tome como
+#   versión nueva; su aplicación es la misma.
+COMMIT_ANTERIOR=38aca25b58e748648d18ac1623b5595a06006d67
+IMAGEN_ANTERIOR="cem-frontend-e2e-anterior-$SUFIJO"
+IMAGEN_SIGUIENTE="cem-frontend-e2e-siguiente-$SUFIJO"
+REPO_GIT=${CEM_E2E_REPO:-$RAIZ}
+# Los contenedores que levanta cada prueba de versiones (nombre con el sufijo de la corrida).
+PREFIJO_VERSIONES="cem-frontend-e2e-version"
 # Segundos que se espera a que el frontend reenvíe /health al backend antes de rendirse.
 ESPERA_S=60
 
 limpiar() {
   docker rm -f "$FRONTEND" "$FRONTEND_SIN_BACKEND" "$BACKEND" "$REDIS" >/dev/null 2>&1 || true
+  docker ps -aq --filter "name=^$PREFIJO_VERSIONES-.*-$SUFIJO$" | xargs -r docker rm -f >/dev/null 2>&1 || true
   docker network rm "$RED" >/dev/null 2>&1 || true
+  docker rmi "$IMAGEN_FRONTEND" "$IMAGEN_BACKEND" "$IMAGEN_ANTERIOR" "$IMAGEN_SIGUIENTE" >/dev/null 2>&1 || true
 }
 falla() { echo "FALLA: $*" >&2; exit 1; }
 trap limpiar EXIT
@@ -38,6 +55,17 @@ trap 'exit 130' INT TERM
 
 docker build -q -f "$RAIZ/frontend/Dockerfile" -t "$IMAGEN_FRONTEND" "$RAIZ" >/dev/null
 docker build -q -f "$RAIZ/backend/Dockerfile" -t "$IMAGEN_BACKEND" "$RAIZ" >/dev/null
+git -C "$REPO_GIT" cat-file -e "$COMMIT_ANTERIOR^{commit}" ||
+  falla "no encuentro el commit $COMMIT_ANTERIOR en $REPO_GIT (sin .git, pasar CEM_E2E_REPO)"
+# Sin pipefail: si git archive falla a mitad, docker build recibe un tar roto y falla él.
+git -C "$REPO_GIT" -c core.autocrlf=false archive --format=tar "$COMMIT_ANTERIOR" |
+  docker build -q -f frontend/Dockerfile -t "$IMAGEN_ANTERIOR" - >/dev/null
+docker build -q -t "$IMAGEN_SIGUIENTE" - >/dev/null <<FIN
+FROM $IMAGEN_FRONTEND
+USER root
+RUN echo "// versión siguiente: solo cambian los bytes de sw.js (pruebas e2e)" >> /usr/share/nginx/html/sw.js
+USER 101
+FIN
 
 # La SHA que el backend informa en /health; la prueba exige verla en la página. Sin .git (la
 # copia de `git archive` que usa ci.ps1) la SHA llega en CEM_E2E_SHA.
@@ -79,4 +107,7 @@ done
 echo "cem-frontend en $URL (sin backend: $URL_SIN_BACKEND); backend con SHA $SHA"
 cd "$RAIZ/frontend"
 CEM_E2E_URL="$URL" CEM_E2E_URL_SIN_BACKEND="$URL_SIN_BACKEND" CEM_E2E_SHA="$SHA" \
+  CEM_E2E_RED="$RED" CEM_E2E_BACKEND_DESTINO="$ALIAS_BACKEND:8000" CEM_E2E_SUFIJO="$SUFIJO" \
+  CEM_E2E_PREFIJO_VERSIONES="$PREFIJO_VERSIONES" CEM_E2E_IMAGEN_ACTUAL="$IMAGEN_FRONTEND" \
+  CEM_E2E_IMAGEN_ANTERIOR="$IMAGEN_ANTERIOR" CEM_E2E_IMAGEN_SIGUIENTE="$IMAGEN_SIGUIENTE" \
   pnpm exec playwright test "$@"

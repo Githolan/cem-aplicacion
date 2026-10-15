@@ -42,6 +42,25 @@ test.describe("PWA servida por la imagen", () => {
     expect(installabilityErrors).toEqual([]);
   });
 
+  test("una navegación a /entrar nunca sale de la caché del service worker", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // Control: con el service worker al mando, las demás rutas sí salen de su caché.
+    const inicio = await page.reload();
+    expect(inicio?.fromServiceWorker()).toBe(true);
+    const otra = await page.goto("/una-ruta-cualquiera");
+    expect(otra?.fromServiceWorker()).toBe(true);
+
+    for (const ruta of ["/entrar", "/entrar?x=1", "/entrar/"]) {
+      const respuesta = await page.goto(ruta);
+      expect(respuesta?.fromServiceWorker(), ruta).toBe(false);
+      expect(respuesta?.status(), ruta).toBe(200);
+      expect(respuesta?.headers()["cache-control"], ruta).toBe("no-cache");
+    }
+    // /entrarx no es /entrar: sigue saliendo de la caché.
+    expect((await page.goto("/entrarx"))?.fromServiceWorker()).toBe(true);
+  });
+
   test("sin conexión el shell carga desde caché y /health no sale de caché", async ({ page, context }) => {
     await page.goto("/");
     await page.evaluate(() => navigator.serviceWorker.ready);

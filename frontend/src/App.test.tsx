@@ -1,12 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import axe from "axe-core";
+import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { AvisoVersion } from "./AvisoVersion";
 import type { Salud } from "./api/cliente";
 import { manifiesto } from "./manifiesto";
+import { ContextoVersion, type Version } from "./version";
 
 const SALUD: Salud = {
   estado: "ok",
@@ -16,20 +19,28 @@ const SALUD: Salud = {
   version_contrato: "0.1.0",
 };
 
-function montar(ruta = "/") {
+const SIN_VERSION_NUEVA: Version = { hayVersionNueva: false, actualizar: () => undefined };
+
+function montar(ruta = "/", version: Version = SIN_VERSION_NUEVA) {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={consultas}>
-      <MemoryRouter initialEntries={[ruta]}>
-        <App />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    <StrictMode>
+      <ContextoVersion.Provider value={version}>
+        <QueryClientProvider client={consultas}>
+          <MemoryRouter initialEntries={[ruta]}>
+            <App />
+          </MemoryRouter>
+          <AvisoVersion />
+        </QueryClientProvider>
+      </ContextoVersion.Provider>
+    </StrictMode>,
   );
 }
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("página de inicio", () => {
@@ -75,6 +86,53 @@ describe("rutas", () => {
     expect(screen.getByRole("heading", { name: "No encontramos esa página" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Volver al inicio" }).getAttribute("href")).toBe("/");
     expect(pedido).not.toHaveBeenCalled();
+  });
+});
+
+describe("versión nueva (documento 13, §14.4)", () => {
+  it("en una ruta conocida espera el botón: no se aplica sola", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SALUD)));
+    const actualizar = vi.fn();
+
+    const { container } = montar("/", { hayVersionNueva: true, actualizar });
+
+    await screen.findByText("El servicio funciona.");
+    expect(screen.getByRole("alert").textContent).toContain("Hay una versión nueva");
+    expect(actualizar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+    expect(actualizar).toHaveBeenCalled();
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+
+  it("en una ruta que esta versión no conoce, se aplica sola", async () => {
+    const pedido = vi.fn();
+    vi.stubGlobal("fetch", pedido);
+    const actualizar = vi.fn();
+
+    const { container } = montar("/ruta-de-una-version-nueva", { hayVersionNueva: true, actualizar });
+
+    expect(actualizar).toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: "Actualizando la aplicación" })).toBeTruthy();
+    expect(screen.queryByText("No encontramos esa página")).toBeNull();
+    expect(pedido).not.toHaveBeenCalled();
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+
+  it("sin versión nueva, una ruta desconocida no actualiza nada", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const actualizar = vi.fn();
+
+    montar("/no-existe", { hayVersionNueva: false, actualizar });
+
+    expect(screen.getByRole("heading", { name: "No encontramos esa página" })).toBeTruthy();
+    expect(actualizar).not.toHaveBeenCalled();
+  });
+
+  it("sin ProveedorVersion falla en vez de suponer que no hay versión nueva", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(() => render(<AvisoVersion />)).toThrow(/fuera de ProveedorVersion/);
   });
 });
 
