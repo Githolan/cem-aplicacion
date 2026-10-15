@@ -36,7 +36,7 @@ def test_sin_ambito_no_se_ve_ninguna_fila(motor_app, datos, tabla):
         assert contar(conn, tabla) == 0
 
 
-def test_con_ambito_solo_se_ven_las_unidades_del_consorcio(motor_app, datos):
+def test_pa15_con_ambito_solo_se_ven_las_unidades_del_consorcio(motor_app, datos):
     with transaccion(motor_app, persona_id=datos.persona_a, consorcio_id=datos.consorcio_a) as c:
         ids = set(c.execute(text("select id from nucleo.unidad")).scalars())
         assert ids == {datos.unidad_a1, datos.unidad_a2}
@@ -54,7 +54,7 @@ def test_el_ambito_vence_con_la_transaccion(motor_app, datos):
         assert contar(conn, "nucleo.unidad") == 0
 
 
-def test_no_se_puede_escribir_en_otro_consorcio(motor_app, datos):
+def test_pa15_no_se_puede_escribir_en_otro_consorcio(motor_app, datos):
     with pytest.raises(ProgrammingError, match="row-level security"):
         with transaccion(
             motor_app, persona_id=datos.persona_a, consorcio_id=datos.consorcio_a
@@ -65,7 +65,7 @@ def test_no_se_puede_escribir_en_otro_consorcio(motor_app, datos):
             )
 
 
-def test_no_se_puede_mover_una_fila_a_otro_consorcio(motor_app, datos):
+def test_pa15_no_se_puede_mover_una_fila_a_otro_consorcio(motor_app, datos):
     with pytest.raises(ProgrammingError, match="row-level security"):
         with transaccion(
             motor_app, persona_id=datos.persona_a, consorcio_id=datos.consorcio_a
@@ -99,7 +99,7 @@ def test_lista_de_consorcios_de_la_persona(motor_app, datos):
             c.execute(text("insert into nucleo.consorcio (nombre) values ('Intruso')"))
 
 
-def test_clave_compuesta_impide_referencias_entre_consorcios(motor_migrate, datos):
+def test_pa15_clave_compuesta_impide_referencias_entre_consorcios(motor_migrate, datos):
     with pytest.raises(IntegrityError, match="foreign key"):
         with motor_migrate.begin() as c:
             c.execute(
