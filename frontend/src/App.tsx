@@ -6,6 +6,7 @@ import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
+import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
 function Inicio() {
@@ -65,6 +66,7 @@ export function App() {
           <Route path="/instalar" element={<Instalar />} />
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
+          <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>
