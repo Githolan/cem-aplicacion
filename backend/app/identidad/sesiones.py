@@ -36,7 +36,11 @@ VIGENCIA_ENLACE = timedelta(minutes=15)
 """Enlace de un solo uso (§10.3). La migración 0004 impone el mismo tope."""
 VIGENCIA_SESION = timedelta(days=30)
 """Vencimiento deslizante para vecinos (§10.4). Las 12 h de los roles con facultades de dinero
-llegan con los roles (pendiente)."""
+llegan con los roles (H2 2b, pendiente): la vigencia pasará a depender de la persona y
+`nucleo.validar_sesion` ya la recibe como parámetro."""
+RETENCION_ACCESO = timedelta(days=90)
+"""Cuánto se conservan una sesión y un enlace después de dejar de servir (vencer, revocarse o
+usarse): son registros de acceso técnico, 90 días (§15.6). Los borra la purga diaria."""
 RENOVAR_CADA = timedelta(minutes=5)
 """Cada cuánto, como mucho, una petición corre el vencimiento: evita escribir en cada una."""
 VIGENCIA_DISPOSITIVO = timedelta(days=400)
