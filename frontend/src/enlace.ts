@@ -19,3 +19,8 @@ export function tokenDelFragmento(fragmento: string): string | null {
  * Workbox compara contra la ruta más la consulta, sin el fragmento.
  */
 export const NAVEGACION_ENTRAR = new RegExp(`^${RUTA_ENTRAR}(?:[/?]|$)`);
+
+// El enlace de la invitación del correo (RF03): /invitacion#token=…. Como /entrar, su navegación
+// va siempre a la red: el correo puede llegar a un teléfono con una versión vieja en caché.
+export const RUTA_INVITACION = "/invitacion";
+export const NAVEGACION_INVITACION = new RegExp(`^${RUTA_INVITACION}(?:[/?]|$)`);

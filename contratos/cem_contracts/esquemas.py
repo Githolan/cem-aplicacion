@@ -21,16 +21,31 @@ from cem_contracts.identidad import (
     SesionDispositivo,
     SesionesRevocadas,
 )
+from cem_contracts.invitaciones import (
+    AceptacionInvitacion,
+    Invitacion,
+    InvitacionAceptada,
+    InvitacionNueva,
+    InvitacionRecibida,
+    ListaInvitaciones,
+    TokenInvitacion,
+)
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.soporte import SesionSoporte
 
 MODELOS: tuple[type[BaseModel], ...] = (
+    AceptacionInvitacion,
     CanjeCodigo,
     CanjeEnlace,
     ConsorcioResumen,
     EnlacePedido,
     Error,
     EstadoCola,
+    Invitacion,
+    InvitacionAceptada,
+    InvitacionNueva,
+    InvitacionRecibida,
+    ListaInvitaciones,
     ListaSesiones,
     ListaUnidades,
     PedidoEnlace,
@@ -40,6 +55,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     SesionDispositivo,
     SesionesRevocadas,
     SesionSoporte,
+    TokenInvitacion,
     Unidad,
 )
 

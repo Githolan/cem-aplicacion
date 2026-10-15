@@ -1,6 +1,35 @@
 {
   "components": {
     "schemas": {
+      "AceptacionInvitacion": {
+        "description": "`POST /api/v1/auth/invitacion/aceptar`.",
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo para una cuenta nueva: el nombre con que queda. Sin él, el de la invitación. Una cuenta que ya existe conserva el suyo.",
+            "title": "Nombre"
+          },
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "AceptacionInvitacion",
+        "type": "object"
+      },
       "CanjeCodigo": {
         "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
         "properties": {
@@ -43,6 +72,29 @@
         ],
         "title": "CanjeEnlace",
         "type": "object"
+      },
+      "CodigoError": {
+        "description": "Identificadores estables que el frontend traduce. Nunca cambian de significado.",
+        "enum": [
+          "no_autenticado",
+          "no_encontrado",
+          "peticion_invalida",
+          "demasiadas_peticiones",
+          "error_interno",
+          "servicio_no_disponible",
+          "idempotencia_reutilizada",
+          "idempotencia_en_curso",
+          "enlace_invalido",
+          "codigo_invalido",
+          "csrf_invalido",
+          "sin_permiso",
+          "invitacion_invalida",
+          "invitacion_requiere_sesion",
+          "invitacion_de_otra_persona",
+          "invitacion_no_pendiente"
+        ],
+        "title": "CodigoError",
+        "type": "string"
       },
       "ConsorcioResumen": {
         "description": "Un consorcio donde la persona tiene vínculo vigente (selector de edificio).",
@@ -94,6 +146,42 @@
         "title": "EnlacePedido",
         "type": "object"
       },
+      "Error": {
+        "properties": {
+          "codigo": {
+            "$ref": "#/components/schemas/CodigoError"
+          },
+          "detalle": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detalle"
+          },
+          "id_correlacion": {
+            "description": "Identificador para cruzar con los registros.",
+            "title": "Id Correlacion",
+            "type": "string"
+          },
+          "mensaje": {
+            "description": "Texto genérico para la persona usuaria; sin trazas.",
+            "title": "Mensaje",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo",
+          "mensaje",
+          "id_correlacion"
+        ],
+        "title": "Error",
+        "type": "object"
+      },
       "EstadoCola": {
         "description": "Respuesta de `GET /api/v1/health/cola` (documento 13, §16.2 y §16.3).\n\nSolo totales: ningún dato de un consorcio. Kuma alerta cuando `estado` es `alerta`.",
         "properties": {
@@ -142,6 +230,16 @@
         "title": "EstadoDependencia",
         "type": "string"
       },
+      "EstadoInvitacion": {
+        "enum": [
+          "pendiente",
+          "aceptada",
+          "vencida",
+          "revocada"
+        ],
+        "title": "EstadoInvitacion",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -153,6 +251,234 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Invitacion": {
+        "description": "Una invitación, como la ve quien puede invitar en esa unidad.",
+        "properties": {
+          "aceptada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aceptada En"
+          },
+          "correo": {
+            "title": "Correo",
+            "type": "string"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoInvitacion"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "revocada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocada En"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad": {
+            "description": "Designación de la unidad.",
+            "examples": [
+              "3° B"
+            ],
+            "title": "Unidad",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unidad_id",
+          "unidad",
+          "tipo",
+          "correo",
+          "nombre",
+          "estado",
+          "creada_en",
+          "vence_en"
+        ],
+        "title": "Invitacion",
+        "type": "object"
+      },
+      "InvitacionAceptada": {
+        "description": "Respuesta de `POST /api/v1/auth/invitacion/aceptar`.",
+        "properties": {
+          "consorcio_id": {
+            "format": "uuid",
+            "title": "Consorcio Id",
+            "type": "string"
+          },
+          "cuenta_nueva": {
+            "description": "Se creó la persona y una sesión (llegan sus cookies). Si es falso, la persona ya tenía cuenta y aceptó con su sesión.",
+            "title": "Cuenta Nueva",
+            "type": "boolean"
+          },
+          "persona_id": {
+            "format": "uuid",
+            "title": "Persona Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consorcio_id",
+          "persona_id",
+          "cuenta_nueva"
+        ],
+        "title": "InvitacionAceptada",
+        "type": "object"
+      },
+      "InvitacionNueva": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/invitaciones`.",
+        "properties": {
+          "correo": {
+            "examples": [
+              "beto@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          },
+          "nombre": {
+            "description": "Cómo se llama la persona invitada; ella lo puede corregir al aceptar.",
+            "examples": [
+              "Beto"
+            ],
+            "maxLength": 100,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "tipo",
+          "correo",
+          "nombre"
+        ],
+        "title": "InvitacionNueva",
+        "type": "object"
+      },
+      "InvitacionRecibida": {
+        "description": "Lo que ve quien abre una invitación pendiente, antes de aceptarla.",
+        "properties": {
+          "consorcio": {
+            "description": "Nombre del consorcio.",
+            "examples": [
+              "Edificio Alvear 100"
+            ],
+            "title": "Consorcio",
+            "type": "string"
+          },
+          "correo": {
+            "description": "El correo invitado: con él queda la cuenta.",
+            "title": "Correo",
+            "type": "string"
+          },
+          "invitada_por": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nombre de quien invitó; nulo si la cargó el equipo de la plataforma.",
+            "title": "Invitada Por"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad": {
+            "examples": [
+              "3° B"
+            ],
+            "title": "Unidad",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consorcio",
+          "unidad",
+          "tipo",
+          "correo",
+          "nombre",
+          "invitada_por",
+          "vence_en"
+        ],
+        "title": "InvitacionRecibida",
+        "type": "object"
+      },
+      "ListaInvitaciones": {
+        "description": "`GET /api/v1/consorcios/{consorcio_id}/invitaciones`: la más reciente primero.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Invitacion"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaInvitaciones",
         "type": "object"
       },
       "ListaSesiones": {
@@ -398,6 +724,21 @@
         "title": "TipoVinculo",
         "type": "string"
       },
+      "TokenInvitacion": {
+        "description": "`POST /api/v1/auth/invitacion/consultar`: el token que la página `/invitacion` leyó del\nfragmento del enlace. Va en el cuerpo, nunca en la URL.",
+        "properties": {
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenInvitacion",
+        "type": "object"
+      },
       "Unidad": {
         "description": "Unidad funcional del padrón.",
         "properties": {
@@ -598,6 +939,113 @@
         ]
       }
     },
+    "/api/v1/auth/invitacion/aceptar": {
+      "post": {
+        "description": "Crea el vínculo con vigencia desde hoy. Si el correo no tenía cuenta crea la persona y\nuna sesión (deja sus cookies). Si la tenía, pide la sesión de esa persona (con su\n`X-CSRF-Token`).\n\nSin sesión no hay token CSRF; como en `POST /auth/codigo`, protegen contra que otro sitio\nhaga aceptar una invitación ajena (y meta al navegador en una cuenta que no es suya):\n`Sec-Fetch-Site` debe ser `same-origin` si el navegador lo declara, y el cuerpo debe ser\n`application/json`, que un formulario de otro sitio no puede mandar.",
+        "operationId": "aceptar_api_v1_auth_invitacion_aceptar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AceptacionInvitacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionAceptada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La invitación no sirve (todas las causas responden igual)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aceptar una invitación",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/invitacion/consultar": {
+      "post": {
+        "description": "No la consume: abrirla no la acepta.",
+        "operationId": "consultar_api_v1_auth_invitacion_consultar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenInvitacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionRecibida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La invitación no sirve (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver una invitación antes de aceptarla",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
     "/api/v1/auth/salir": {
       "post": {
         "description": "Revoca la sesión actual y borra sus cookies. Pide `X-CSRF-Token`.",
@@ -713,6 +1161,158 @@
           }
         },
         "summary": "Cerrar una sesión",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/invitaciones": {
+      "get": {
+        "description": "Las invitaciones de las unidades donde la persona puede invitar, la más reciente\nprimero, con su estado.",
+        "operationId": "listar_api_v1_consorcios__consorcio_id__invitaciones_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaInvitaciones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invitaciones de mis unidades",
+        "tags": [
+          "identidad"
+        ]
+      },
+      "post": {
+        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.",
+        "operationId": "invitar_api_v1_consorcios__consorcio_id__invitaciones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitacionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Invitacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "La persona no es propietaria vigente de esa unidad."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invitar a una persona a una unidad",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar": {
+      "post": {
+        "description": "Repetirlo responde lo mismo. Una vencida también se puede retirar.",
+        "operationId": "revocar_api_v1_consorcios__consorcio_id__invitaciones__invitacion_id__revocar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La invitación no existe o no es de una unidad de la persona."
+          },
+          "409": {
+            "description": "Ya se aceptó: para quitar el acceso se termina el vínculo."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar una invitación pendiente",
         "tags": [
           "identidad"
         ]

@@ -1,4 +1,34 @@
 {
+  "AceptacionInvitacion": {
+    "description": "`POST /api/v1/auth/invitacion/aceptar`.",
+    "properties": {
+      "nombre": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Solo para una cuenta nueva: el nombre con que queda. Sin él, el de la invitación. Una cuenta que ya existe conserva el suyo.",
+        "title": "Nombre"
+      },
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "AceptacionInvitacion",
+    "type": "object"
+  },
   "CanjeCodigo": {
     "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
     "properties": {
@@ -119,7 +149,12 @@
           "idempotencia_en_curso",
           "enlace_invalido",
           "codigo_invalido",
-          "csrf_invalido"
+          "csrf_invalido",
+          "sin_permiso",
+          "invitacion_invalida",
+          "invitacion_requiere_sesion",
+          "invitacion_de_otra_persona",
+          "invitacion_no_pendiente"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -199,6 +234,390 @@
       "segundos_mas_viejo"
     ],
     "title": "EstadoCola",
+    "type": "object"
+  },
+  "Invitacion": {
+    "$defs": {
+      "EstadoInvitacion": {
+        "enum": [
+          "pendiente",
+          "aceptada",
+          "vencida",
+          "revocada"
+        ],
+        "title": "EstadoInvitacion",
+        "type": "string"
+      },
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "Una invitación, como la ve quien puede invitar en esa unidad.",
+    "properties": {
+      "aceptada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Aceptada En"
+      },
+      "correo": {
+        "title": "Correo",
+        "type": "string"
+      },
+      "creada_en": {
+        "format": "date-time",
+        "title": "Creada En",
+        "type": "string"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoInvitacion"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "revocada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revocada En"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoVinculo"
+      },
+      "unidad": {
+        "description": "Designación de la unidad.",
+        "examples": [
+          "3° B"
+        ],
+        "title": "Unidad",
+        "type": "string"
+      },
+      "unidad_id": {
+        "format": "uuid",
+        "title": "Unidad Id",
+        "type": "string"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "unidad_id",
+      "unidad",
+      "tipo",
+      "correo",
+      "nombre",
+      "estado",
+      "creada_en",
+      "vence_en"
+    ],
+    "title": "Invitacion",
+    "type": "object"
+  },
+  "InvitacionAceptada": {
+    "description": "Respuesta de `POST /api/v1/auth/invitacion/aceptar`.",
+    "properties": {
+      "consorcio_id": {
+        "format": "uuid",
+        "title": "Consorcio Id",
+        "type": "string"
+      },
+      "cuenta_nueva": {
+        "description": "Se creó la persona y una sesión (llegan sus cookies). Si es falso, la persona ya tenía cuenta y aceptó con su sesión.",
+        "title": "Cuenta Nueva",
+        "type": "boolean"
+      },
+      "persona_id": {
+        "format": "uuid",
+        "title": "Persona Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "consorcio_id",
+      "persona_id",
+      "cuenta_nueva"
+    ],
+    "title": "InvitacionAceptada",
+    "type": "object"
+  },
+  "InvitacionNueva": {
+    "$defs": {
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/invitaciones`.",
+    "properties": {
+      "correo": {
+        "examples": [
+          "beto@ejemplo.com"
+        ],
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+        "title": "Correo",
+        "type": "string"
+      },
+      "nombre": {
+        "description": "Cómo se llama la persona invitada; ella lo puede corregir al aceptar.",
+        "examples": [
+          "Beto"
+        ],
+        "maxLength": 100,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Nombre",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoVinculo"
+      },
+      "unidad_id": {
+        "format": "uuid",
+        "title": "Unidad Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "unidad_id",
+      "tipo",
+      "correo",
+      "nombre"
+    ],
+    "title": "InvitacionNueva",
+    "type": "object"
+  },
+  "InvitacionRecibida": {
+    "$defs": {
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "Lo que ve quien abre una invitación pendiente, antes de aceptarla.",
+    "properties": {
+      "consorcio": {
+        "description": "Nombre del consorcio.",
+        "examples": [
+          "Edificio Alvear 100"
+        ],
+        "title": "Consorcio",
+        "type": "string"
+      },
+      "correo": {
+        "description": "El correo invitado: con él queda la cuenta.",
+        "title": "Correo",
+        "type": "string"
+      },
+      "invitada_por": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Nombre de quien invitó; nulo si la cargó el equipo de la plataforma.",
+        "title": "Invitada Por"
+      },
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoVinculo"
+      },
+      "unidad": {
+        "examples": [
+          "3° B"
+        ],
+        "title": "Unidad",
+        "type": "string"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "consorcio",
+      "unidad",
+      "tipo",
+      "correo",
+      "nombre",
+      "invitada_por",
+      "vence_en"
+    ],
+    "title": "InvitacionRecibida",
+    "type": "object"
+  },
+  "ListaInvitaciones": {
+    "$defs": {
+      "EstadoInvitacion": {
+        "enum": [
+          "pendiente",
+          "aceptada",
+          "vencida",
+          "revocada"
+        ],
+        "title": "EstadoInvitacion",
+        "type": "string"
+      },
+      "Invitacion": {
+        "description": "Una invitación, como la ve quien puede invitar en esa unidad.",
+        "properties": {
+          "aceptada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aceptada En"
+          },
+          "correo": {
+            "title": "Correo",
+            "type": "string"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/$defs/EstadoInvitacion"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "revocada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Revocada En"
+          },
+          "tipo": {
+            "$ref": "#/$defs/TipoVinculo"
+          },
+          "unidad": {
+            "description": "Designación de la unidad.",
+            "examples": [
+              "3° B"
+            ],
+            "title": "Unidad",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unidad_id",
+          "unidad",
+          "tipo",
+          "correo",
+          "nombre",
+          "estado",
+          "creada_en",
+          "vence_en"
+        ],
+        "title": "Invitacion",
+        "type": "object"
+      },
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "`GET /api/v1/consorcios/{consorcio_id}/invitaciones`: la más reciente primero.",
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/Invitacion"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaInvitaciones",
     "type": "object"
   },
   "ListaSesiones": {
@@ -518,6 +937,21 @@
       "revocadas"
     ],
     "title": "SesionesRevocadas",
+    "type": "object"
+  },
+  "TokenInvitacion": {
+    "description": "`POST /api/v1/auth/invitacion/consultar`: el token que la página `/invitacion` leyó del\nfragmento del enlace. Va en el cuerpo, nunca en la URL.",
+    "properties": {
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "TokenInvitacion",
     "type": "object"
   },
   "Unidad": {

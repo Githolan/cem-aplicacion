@@ -30,6 +30,18 @@ class CodigoError(StrEnum):
     igual: la diferencia solo va a los registros."""
     CSRF_INVALIDO = "csrf_invalido"
     """Falta el encabezado `X-CSRF-Token` o no corresponde a la sesión (documento 13, §10.4)."""
+    SIN_PERMISO = "sin_permiso"
+    """La persona está en el consorcio pero su vínculo no le da esa acción (documento 08, §4)."""
+    INVITACION_INVALIDA = "invitacion_invalida"
+    """La invitación no existe, venció, ya se aceptó o la retiraron (RF03). Todas las causas
+    responden igual: la diferencia solo va a los registros."""
+    INVITACION_REQUIERE_SESION = "invitacion_requiere_sesion"
+    """El correo invitado ya tiene cuenta: hay que entrar con él y volver a abrir la invitación."""
+    INVITACION_DE_OTRA_PERSONA = "invitacion_de_otra_persona"
+    """La sesión abierta es de otra persona que la del correo invitado."""
+    INVITACION_NO_PENDIENTE = "invitacion_no_pendiente"
+    """Se pidió retirar una invitación que ya se aceptó: para quitar el acceso se termina el
+    vínculo."""
 
 
 class Error(BaseModel):
