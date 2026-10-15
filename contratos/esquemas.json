@@ -29,6 +29,30 @@
     "title": "AceptacionInvitacion",
     "type": "object"
   },
+  "AltaTotp": {
+    "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
+    "properties": {
+      "secreto": {
+        "description": "Base32 sin relleno, para escribirlo a mano.",
+        "title": "Secreto",
+        "type": "string"
+      },
+      "uri": {
+        "description": "`otpauth://totp/…` para abrir la aplicación o dibujar un código QR.",
+        "examples": [
+          "otpauth://totp/Consorcio%20en%20Mano:ana%40ejemplo.com?secret=…"
+        ],
+        "title": "Uri",
+        "type": "string"
+      }
+    },
+    "required": [
+      "secreto",
+      "uri"
+    ],
+    "title": "AltaTotp",
+    "type": "object"
+  },
   "CanjeCodigo": {
     "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
     "properties": {
@@ -70,6 +94,43 @@
       "token"
     ],
     "title": "CanjeEnlace",
+    "type": "object"
+  },
+  "CodigoTotp": {
+    "description": "`POST /api/v1/auth/totp/confirmar` y `POST /api/v1/auth/totp/baja`.",
+    "properties": {
+      "codigo": {
+        "examples": [
+          "042917"
+        ],
+        "pattern": "^[0-9]{6}$",
+        "title": "Codigo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "codigo"
+    ],
+    "title": "CodigoTotp",
+    "type": "object"
+  },
+  "CodigosRecuperacion": {
+    "description": "Respuesta de `POST /api/v1/auth/totp/confirmar`: se muestran una sola vez.",
+    "properties": {
+      "codigos": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "minItems": 10,
+        "title": "Codigos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "codigos"
+    ],
+    "title": "CodigosRecuperacion",
     "type": "object"
   },
   "ConsorcioResumen": {
@@ -154,7 +215,11 @@
           "invitacion_invalida",
           "invitacion_requiere_sesion",
           "invitacion_de_otra_persona",
-          "invitacion_no_pendiente"
+          "invitacion_no_pendiente",
+          "segundo_factor_requerido",
+          "segundo_factor_invalido",
+          "segundo_factor_ya_activo",
+          "segundo_factor_sin_alta"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -234,6 +299,54 @@
       "segundos_mas_viejo"
     ],
     "title": "EstadoCola",
+    "type": "object"
+  },
+  "EstadoSegundoFactor": {
+    "description": "`GET /api/v1/auth/totp`.",
+    "properties": {
+      "activado_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Activado En"
+      },
+      "activo": {
+        "description": "Tiene una aplicación de autenticación confirmada.",
+        "title": "Activo",
+        "type": "boolean"
+      },
+      "codigos_recuperacion_restantes": {
+        "minimum": 0,
+        "title": "Codigos Recuperacion Restantes",
+        "type": "integer"
+      },
+      "verificado_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Última verificación del segundo factor en esta sesión.",
+        "title": "Verificado En"
+      }
+    },
+    "required": [
+      "activo",
+      "codigos_recuperacion_restantes",
+      "verificado_en"
+    ],
+    "title": "EstadoSegundoFactor",
     "type": "object"
   },
   "Invitacion": {
@@ -814,6 +927,34 @@
     "title": "SaludDependencias",
     "type": "object"
   },
+  "SegundoFactorVerificado": {
+    "description": "Respuesta de `POST /api/v1/auth/totp/verificar`.",
+    "properties": {
+      "codigos_recuperacion_restantes": {
+        "minimum": 0,
+        "title": "Codigos Recuperacion Restantes",
+        "type": "integer"
+      },
+      "vale_hasta": {
+        "description": "Hasta cuándo cuenta como reciente (10 minutos).",
+        "format": "date-time",
+        "title": "Vale Hasta",
+        "type": "string"
+      },
+      "verificado_en": {
+        "format": "date-time",
+        "title": "Verificado En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "verificado_en",
+      "vale_hasta",
+      "codigos_recuperacion_restantes"
+    ],
+    "title": "SegundoFactorVerificado",
+    "type": "object"
+  },
   "SesionActual": {
     "description": "`GET /api/v1/auth/sesion` y respuesta del canje: quién es la persona de la sesión.",
     "properties": {
@@ -975,6 +1116,25 @@
       "designacion"
     ],
     "title": "Unidad",
+    "type": "object"
+  },
+  "VerificacionSegundoFactor": {
+    "description": "`POST /api/v1/auth/totp/verificar`: el código de la aplicación o uno de recuperación.",
+    "properties": {
+      "codigo": {
+        "examples": [
+          "042917",
+          "k7m2q-x9p4t"
+        ],
+        "pattern": "^[0-9]{6}$|^[a-z2-9]{5}-[a-z2-9]{5}$",
+        "title": "Codigo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "codigo"
+    ],
+    "title": "VerificacionSegundoFactor",
     "type": "object"
   }
 }

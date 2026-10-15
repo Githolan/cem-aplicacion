@@ -42,6 +42,16 @@ class CodigoError(StrEnum):
     INVITACION_NO_PENDIENTE = "invitacion_no_pendiente"
     """Se pidió retirar una invitación que ya se aceptó: para quitar el acceso se termina el
     vínculo."""
+    SEGUNDO_FACTOR_REQUERIDO = "segundo_factor_requerido"
+    """La acción pide haber verificado el segundo factor en los últimos 10 minutos en esta
+    sesión (TB-CEM-3), o la persona todavía no tiene uno activo."""
+    SEGUNDO_FACTOR_INVALIDO = "segundo_factor_invalido"
+    """El código de la aplicación o de recuperación no sirve: incorrecto, ya usado o fuera de
+    tiempo. Todas las causas responden igual."""
+    SEGUNDO_FACTOR_YA_ACTIVO = "segundo_factor_ya_activo"
+    """Ya hay una aplicación de autenticación confirmada: para cambiarla, primero se da de baja."""
+    SEGUNDO_FACTOR_SIN_ALTA = "segundo_factor_sin_alta"
+    """No hay un alta pendiente que confirmar, ni una aplicación activa con que verificar."""
 
 
 class Error(BaseModel):
