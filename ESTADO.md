@@ -40,11 +40,20 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
   - **Auditoría encadenada:** crear, reemplazar, retirar y aceptar escriben en `auditoria.eventos` (primer uso), con identificadores y sin el correo. Las invitaciones no se purgan: son la constancia de quién dio acceso a quién.
   - **Frontend:** página `/invitacion` (muestra edificio, unidad y vínculo; nombre editable; acepta con CSRF si hay sesión) y la navegación a `/invitacion` nunca sale de la caché del service worker. Contrato 0.9.0.
   - **Pruebas:** 29 del backend contra PostgreSQL 18 y Redis reales y 9 de Vitest con `axe`. Las del backend cubren: RLS de otro consorcio, política de `invitada_por`, otra propietaria y el equipo que retiran o reemplazan, privilegios, tope de 7 días, aceptación simultánea al mismo correo nuevo y el script. No hay e2e propias de invitaciones.
-- **Segundo factor TOTP y verificación reciente (TB-CEM-3; PR #37, sin fusionar):**
+- **Segundo factor TOTP y verificación reciente (TB-CEM-3; PR #37 fusionado en `a6060c1`, sin desplegar):**
   - **Migración `0008`:** `nucleo.factor_totp` (una fila por persona: secreto AES-256-GCM, pendiente hasta confirmar, último paso aceptado contra la repetición), `nucleo.codigo_recuperacion` (diez, HMAC, un solo uso) con RLS forzada por persona, y `nucleo.sesion.segundo_factor_en`.
   - **Rutas `/api/v1/auth/totp`:** estado, `alta` (secreto en base32 y URI `otpauth://`), `confirmar` (primer código; devuelve los diez códigos de recuperación, una sola vez), `verificar` (código de la aplicación o de recuperación: la sesión queda verificada 10 minutos) y `baja` (pide verificación reciente). Alta y baja avisan por correo.
   - **Claves:** derivadas con HKDF de `CEM_CODIGO_CLAVE`; no hay secreto nuevo que cargar en Coolify. Cambiar esa clave obliga a volver a dar de alta los segundos factores.
-  - **Falta:** que el segundo factor sea obligatorio para los roles de dinero y la sesión de 12 h llegan con los mandatos (H2 2b); la página del frontend (alta con QR y verificación); contraseña Argon2id.
+  - **Frontend, página `/cuenta/segundo-factor` (en su PR, sin fusionar):**
+    - **Alta:** QR dibujado en el navegador como SVG con `uqr` 0.1.3 (sin servicio externo; la CSP no cambia), enlace `otpauth://` y la clave en bloques de cuatro para escribirla a mano.
+    - **Confirmación:** muestra los diez códigos de recuperación una sola vez.
+    - **Verificación:** acepta el código de la aplicación o uno de recuperación, escrito como venga.
+    - **Desactivar:** si falta la verificación reciente, la página lo explica.
+    - Todo lo que cambia estado lleva CSRF. Por ahora no hay enlace desde el inicio: se entra escribiendo la ruta.
+  - **Pruebas de la página:** 14 de Vitest con `axe` y 3 de extremo a extremo contra el nginx de la imagen, con la API simulada desde Playwright.
+    - Las de extremo a extremo comprueban: QR y códigos enteros a 360 px, sin violar la CSP; `axe` con contraste; sin sesión, el backend real responde 401. El control comprueba que la vigilancia sí ve un estilo en línea.
+    - El QR se decodificó con OpenCV y dio la URI exacta; como control, con la mitad borrada no da nada.
+  - **Falta:** que el segundo factor sea obligatorio para los roles de dinero y la sesión de 12 h llegan con los mandatos (H2 2b); probarlo con una aplicación real en un teléfono; contraseña Argon2id.
 - **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
 - **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
@@ -150,7 +159,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - Para probar una invitación de punta a punta en staging, primero hay que cargar un consorcio y una unidad de prueba.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
 3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
-   - segundo factor TOTP y verificación reciente (PR #37; migración `0008`): falta fusionarlo, desplegarlo y hacer la página del frontend;
+   - segundo factor TOTP y verificación reciente (PR #37 fusionado; migración `0008`) y su página `/cuenta/segundo-factor`: falta fusionar la página, desplegar las dos juntas (copia previa por la `0008`) y probar el alta con una aplicación real en el teléfono;
    - contraseña Argon2id, TOTP obligatorio para roles de dinero (con los mandatos, 2b), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
 4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
