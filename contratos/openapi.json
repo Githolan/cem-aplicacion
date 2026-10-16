@@ -97,6 +97,25 @@
         "title": "CanjeEnlace",
         "type": "object"
       },
+      "CodigoEntrada": {
+        "description": "`POST /api/v1/auth/contrasena/segundo-factor`: el código de la aplicación o uno de\nrecuperación (que queda gastado).",
+        "properties": {
+          "codigo": {
+            "examples": [
+              "042917",
+              "k7m2q-x9p4t"
+            ],
+            "pattern": "^[0-9]{6}$|^[a-z2-9]{5}-[a-z2-9]{5}$",
+            "title": "Codigo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo"
+        ],
+        "title": "CodigoEntrada",
+        "type": "object"
+      },
       "CodigoError": {
         "description": "Identificadores estables que el frontend traduce. Nunca cambian de significado.",
         "enum": [
@@ -119,7 +138,11 @@
           "segundo_factor_requerido",
           "segundo_factor_invalido",
           "segundo_factor_ya_activo",
-          "segundo_factor_sin_alta"
+          "segundo_factor_sin_alta",
+          "credenciales_invalidas",
+          "entrada_vencida",
+          "contrasena_actual_invalida",
+          "contrasena_debil"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -190,6 +213,28 @@
         "title": "ConsorcioResumen",
         "type": "object"
       },
+      "ContrasenaGuardada": {
+        "description": "Respuesta de `PUT /api/v1/auth/contrasena`.",
+        "properties": {
+          "cambiada_en": {
+            "format": "date-time",
+            "title": "Cambiada En",
+            "type": "string"
+          },
+          "sesiones_cerradas": {
+            "description": "Al cambiar una contraseña existente se cierran las sesiones de los otros dispositivos; al definirla por primera vez, ninguna.",
+            "minimum": 0.0,
+            "title": "Sesiones Cerradas",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cambiada_en",
+          "sesiones_cerradas"
+        ],
+        "title": "ContrasenaGuardada",
+        "type": "object"
+      },
       "EnlacePedido": {
         "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
         "properties": {
@@ -209,6 +254,34 @@
           "mensaje"
         ],
         "title": "EnlacePedido",
+        "type": "object"
+      },
+      "EntradaContrasena": {
+        "description": "`POST /api/v1/auth/contrasena/entrar`.",
+        "properties": {
+          "contrasena": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Contrasena",
+            "type": "string",
+            "writeOnly": true
+          },
+          "correo": {
+            "examples": [
+              "ana@ejemplo.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "contrasena"
+        ],
+        "title": "EntradaContrasena",
         "type": "object"
       },
       "Error": {
@@ -287,6 +360,32 @@
         "title": "EstadoCola",
         "type": "object"
       },
+      "EstadoContrasena": {
+        "description": "`GET /api/v1/auth/contrasena`.",
+        "properties": {
+          "cambiada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cambiada En"
+          },
+          "definida": {
+            "title": "Definida",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "definida"
+        ],
+        "title": "EstadoContrasena",
+        "type": "object"
+      },
       "EstadoDependencia": {
         "enum": [
           "ok",
@@ -350,6 +449,27 @@
           "verificado_en"
         ],
         "title": "EstadoSegundoFactor",
+        "type": "object"
+      },
+      "FaltaSegundoFactor": {
+        "description": "La contraseña sirvió y la persona tiene segundo factor: falta el código\n(`POST /api/v1/auth/contrasena/segundo-factor`) desde el mismo navegador, antes de\n`vence_en`.",
+        "properties": {
+          "estado": {
+            "const": "falta_segundo_factor",
+            "title": "Estado",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "estado",
+          "vence_en"
+        ],
+        "title": "FaltaSegundoFactor",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -626,6 +746,38 @@
         "title": "ListaUnidades",
         "type": "object"
       },
+      "NuevaContrasena": {
+        "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
+        "properties": {
+          "contrasena_actual": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "password",
+            "title": "Contrasena Actual",
+            "writeOnly": true
+          },
+          "contrasena_nueva": {
+            "format": "password",
+            "maxLength": 128,
+            "minLength": 12,
+            "title": "Contrasena Nueva",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "contrasena_nueva"
+        ],
+        "title": "NuevaContrasena",
+        "type": "object"
+      },
       "PedidoEnlace": {
         "description": "`POST /api/v1/auth/enlace`: pide un enlace de acceso para ese correo.",
         "properties": {
@@ -727,6 +879,25 @@
           "codigos_recuperacion_restantes"
         ],
         "title": "SegundoFactorVerificado",
+        "type": "object"
+      },
+      "SesionAbierta": {
+        "description": "La contraseña sirvió y la persona no tiene segundo factor: la sesión ya está abierta.",
+        "properties": {
+          "estado": {
+            "const": "sesion_abierta",
+            "title": "Estado",
+            "type": "string"
+          },
+          "sesion": {
+            "$ref": "#/components/schemas/SesionActual"
+          }
+        },
+        "required": [
+          "estado",
+          "sesion"
+        ],
+        "title": "SesionAbierta",
         "type": "object"
       },
       "SesionActual": {
@@ -1051,6 +1222,206 @@
           }
         },
         "summary": "Entrar con el código del correo",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/contrasena": {
+      "get": {
+        "operationId": "estado_api_v1_auth_contrasena_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstadoContrasena"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Estado de mi contraseña",
+        "tags": [
+          "identidad"
+        ]
+      },
+      "put": {
+        "description": "Define la contraseña o la cambia, y avisa por correo. Con el segundo factor activo pide\nhaberlo verificado en esta sesión en los últimos 10 minutos (TB-CEM-3); sin él, cambiar\nuna existente pide la actual. Cambiarla cierra las sesiones de los otros dispositivos.",
+        "operationId": "guardar_api_v1_auth_contrasena_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NuevaContrasena"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContrasenaGuardada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta la verificación reciente del segundo factor o la contraseña actual no es correcta."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La contraseña nueva es demasiado débil."
+          }
+        },
+        "summary": "Definir o cambiar mi contraseña",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/contrasena/entrar": {
+      "post": {
+        "description": "Sin segundo factor, abre la sesión y deja sus cookies (`sesion_abierta`). Con segundo\nfactor, deja la cookie del desafío y pide el código en `POST /segundo-factor`\n(`falta_segundo_factor`). Todo rechazo responde 401 `credenciales_invalidas`, en el mismo\ntiempo, exista o no la cuenta.",
+        "operationId": "entrar_api_v1_auth_contrasena_entrar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntradaContrasena"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "discriminator": {
+                    "mapping": {
+                      "falta_segundo_factor": "#/components/schemas/FaltaSegundoFactor",
+                      "sesion_abierta": "#/components/schemas/SesionAbierta"
+                    },
+                    "propertyName": "estado"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SesionAbierta"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FaltaSegundoFactor"
+                    }
+                  ],
+                  "title": "Response Entrar Api V1 Auth Contrasena Entrar Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No sirven (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entrar con correo y contraseña",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/contrasena/segundo-factor": {
+      "post": {
+        "description": "Con el código de la aplicación o uno de recuperación, desde el navegador que escribió la\ncontraseña (cookie `__Host-cem_desafio`), abre la sesión con el segundo factor ya\nverificado. Cinco códigos incorrectos agotan el paso; vale 5 minutos.",
+        "operationId": "completar_con_segundo_factor_api_v1_auth_contrasena_segundo_factor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodigoEntrada"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SesionActual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El código no sirve."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El paso venció, se agotó o falta su cookie."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Completar la entrada con el código del segundo factor",
         "tags": [
           "identidad"
         ]

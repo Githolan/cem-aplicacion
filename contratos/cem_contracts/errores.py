@@ -52,6 +52,19 @@ class CodigoError(StrEnum):
     """Ya hay una aplicación de autenticación confirmada: para cambiarla, primero se da de baja."""
     SEGUNDO_FACTOR_SIN_ALTA = "segundo_factor_sin_alta"
     """No hay un alta pendiente que confirmar, ni una aplicación activa con que verificar."""
+    CREDENCIALES_INVALIDAS = "credenciales_invalidas"
+    """El correo y la contraseña no sirven: no hay cuenta, no tiene contraseña o es incorrecta
+    (§10.3). Todas las causas responden igual y en el mismo tiempo: la diferencia solo va a los
+    registros."""
+    ENTRADA_VENCIDA = "entrada_vencida"
+    """El paso del segundo factor de la entrada con contraseña ya no sirve: venció (5 minutos),
+    se agotaron sus intentos o se abrió en otro navegador. Hay que volver a escribir la
+    contraseña."""
+    CONTRASENA_ACTUAL_INVALIDA = "contrasena_actual_invalida"
+    """Para cambiar la contraseña sin segundo factor activo hay que escribir la actual, y no
+    coincide (o falta)."""
+    CONTRASENA_DEBIL = "contrasena_debil"
+    """La contraseña nueva es demasiado corta una vez normalizada o es igual al correo."""
 
 
 class Error(BaseModel):

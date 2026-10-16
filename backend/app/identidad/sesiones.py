@@ -1,6 +1,6 @@
 """Tokens, cookies y validación de sesiones (documento 13, §10.3, §10.4 y §15.3).
 
-Cuatro cookies, todas con prefijo `__Host-` (solo `Secure`, `Path=/` y sin `Domain`: ningún
+Cinco cookies, todas con prefijo `__Host-` (solo `Secure`, `Path=/` y sin `Domain`: ningún
 subdominio las puede fijar ni pisar):
 
 | Cookie | Qué guarda | `HttpOnly` | Vida |
@@ -9,6 +9,7 @@ subdominio las puede fijar ni pisar):
 | `__Host-cem_csrf` | Token CSRF, derivado de la sesión | no: el frontend lo lee | la de la sesión |
 | `__Host-cem_nonce` | Nonce que liga el enlace al navegador que lo pidió | sí | 15 minutos |
 | `__Host-cem_dispositivo` | Identificador del navegador (no es secreto) | sí | 400 días |
+| `__Host-cem_desafio` | Paso del segundo factor al entrar con contraseña | sí | 5 minutos |
 
 En la base solo queda el SHA-256 de cada token y de cada nonce, nunca el valor (§15.2).
 
@@ -70,6 +71,7 @@ COOKIE_SESION = "__Host-cem_sesion"
 COOKIE_CSRF = "__Host-cem_csrf"
 COOKIE_NONCE = "__Host-cem_nonce"
 COOKIE_DISPOSITIVO = "__Host-cem_dispositivo"
+COOKIE_DESAFIO = "__Host-cem_desafio"
 ENCABEZADO_CSRF = "X-CSRF-Token"
 METODOS_SEGUROS = frozenset({"GET", "HEAD", "OPTIONS"})
 """Los que no modifican estado: no piden token CSRF."""
@@ -180,6 +182,14 @@ def borrar_sesion(response: Response) -> None:
 
 def borrar_nonce(response: Response) -> None:
     response.delete_cookie(COOKIE_NONCE, path="/", secure=True, httponly=True, samesite="lax")
+
+
+def fijar_desafio(response: Response, token: str, vida: timedelta) -> None:
+    _cookie(response, COOKIE_DESAFIO, token, vida)
+
+
+def borrar_desafio(response: Response) -> None:
+    response.delete_cookie(COOKIE_DESAFIO, path="/", secure=True, httponly=True, samesite="lax")
 
 
 @dataclass(frozen=True)

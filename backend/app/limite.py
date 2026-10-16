@@ -53,6 +53,22 @@ LIMITES_INVITACIONES_PERSONA: tuple[RateLimitItem, ...] = (parse("20/hour"), par
 """Invitaciones que una persona puede mandar (`POST /api/v1/consorcios/{id}/invitaciones`): cada
 una es un correo a una dirección que eligió ella, así que no puede servir para mandar correo en
 cantidad."""
+LIMITES_CONTRASENA_CORREO: tuple[RateLimitItem, ...] = (
+    parse("5/minute"),
+    parse("20/hour"),
+    parse("100/day"),
+)
+"""Intentos de entrar con contraseña (`POST /api/v1/auth/contrasena/entrar`) por correo pedido,
+acierten o no y aunque cambie la IP: 5 por minuto como toda la familia (§10.6) y un tope de 100
+por día (NIST SP 800-63B, §5.2.2: no más de 100 fallos seguidos por cuenta). Exista o no la
+cuenta, el cupo es el mismo. Quien lo agota a propósito le impide a la persona entrar con
+contraseña ese día, pero no con el enlace o el código por correo."""
+LIMITES_CONTRASENA_IP: tuple[RateLimitItem, ...] = (parse("60/hour"),)
+"""Intentos de entrar con contraseña por IP, sumados a los 20 por minuto de la familia: frena
+probar una contraseña común contra muchos correos desde una dirección."""
+LIMITES_CAMBIO_CONTRASENA: tuple[RateLimitItem, ...] = (parse("5/minute"), parse("20/day"))
+"""Pedidos de definir o cambiar la contraseña por persona (`PUT /api/v1/auth/contrasena`):
+cada uno puede comprobar la contraseña actual, así que no puede servir para probarla."""
 PREFIJO = "cem:rl"
 ESPERA_REDIS_S = 1.0
 """Tope para conectar y para cada orden a Redis: una caída no deja colgada la petición."""

@@ -201,12 +201,12 @@ def exigir_segundo_factor_reciente(identidad: IdentidadDep, motor: MotorDep) -> 
 SegundoFactorRecienteDep = Annotated[Identidad, Depends(exigir_segundo_factor_reciente)]
 
 
-async def _consumir_intento(request: Request, persona_id: UUID) -> None:
+async def consumir_intento(request: Request, persona_id: UUID) -> None:
     for cupo in LIMITES_INTENTOS:
         await limite.consumir(request.app.state.limitador, cupo, LIMITE_NOMBRE, str(persona_id))
 
 
-def _invalido() -> ErrorApi:
+def codigo_invalido() -> ErrorApi:
     return ErrorApi(
         400,
         CodigoError.SEGUNDO_FACTOR_INVALIDO,
@@ -246,6 +246,33 @@ def _comprobar_totp(
         return False
     conn.execute(text("update nucleo.factor_totp set ultimo_paso = :p"), {"p": paso})
     return True
+
+
+def comprobar_codigo(conn: Connection, claves: Claves, persona_id: UUID, codigo: str) -> str | None:
+    """Comprueba un código de la aplicación o uno de recuperación (que queda gastado) contra el
+    factor confirmado de la persona del ámbito. Devuelve el medio ('totp' o 'recuperacion') si
+    sirve; None si no. Sin factor confirmado responde 409."""
+    if "-" not in codigo:
+        return (
+            "totp" if _comprobar_totp(conn, claves, persona_id, codigo, confirmado=True) else None
+        )
+    hay_factor = conn.execute(
+        text("select exists (select 1 from nucleo.factor_totp where confirmado_en is not null)")
+    ).scalar_one()
+    if not hay_factor:
+        raise ErrorApi(
+            409,
+            CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
+            "No hay una aplicación de autenticación activa.",
+        )
+    usado = conn.execute(
+        text(
+            "update nucleo.codigo_recuperacion set usado_en = now()"
+            " where codigo_hash = :h and usado_en is null returning id"
+        ),
+        {"h": claves.hash_recuperacion(persona_id, codigo)},
+    ).one_or_none()
+    return "recuperacion" if usado is not None else None
 
 
 def _restantes(conn: Connection) -> int:
@@ -335,11 +362,11 @@ async def confirmar(
     """Con el código correcto activa el segundo factor, deja la sesión verificada y devuelve diez
     códigos de recuperación que no se vuelven a mostrar. Avisa por correo."""
     response.headers.update(SIN_CACHE)
-    await _consumir_intento(request, identidad.persona_id)
+    await consumir_intento(request, identidad.persona_id)
     codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         if not _comprobar_totp(conn, claves, identidad.persona_id, pedido.codigo, confirmado=False):
-            raise _invalido()
+            raise codigo_invalido()
         conn.execute(text("update nucleo.factor_totp set confirmado_en = now()"))
         conn.execute(text("delete from nucleo.codigo_recuperacion"))
         conn.execute(
@@ -380,39 +407,16 @@ async def verificar(
     """Con un código de la aplicación o uno de recuperación (que queda gastado), la sesión
     cuenta como verificada durante 10 minutos (TB-CEM-3)."""
     response.headers.update(SIN_CACHE)
-    await _consumir_intento(request, identidad.persona_id)
+    await consumir_intento(request, identidad.persona_id)
     persona = identidad.persona_id
     with transaccion(motor, persona_id=persona) as conn:
-        if "-" in pedido.codigo:
-            hay_factor = conn.execute(
-                text(
-                    "select exists (select 1 from nucleo.factor_totp"
-                    " where confirmado_en is not null)"
-                )
-            ).scalar_one()
-            if not hay_factor:
-                raise ErrorApi(
-                    409,
-                    CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
-                    "No hay una aplicación de autenticación activa.",
-                )
-            usado = conn.execute(
-                text(
-                    "update nucleo.codigo_recuperacion set usado_en = now()"
-                    " where codigo_hash = :h and usado_en is null returning id"
-                ),
-                {"h": claves.hash_recuperacion(persona, pedido.codigo)},
-            ).one_or_none()
-            ok, medio = usado is not None, "recuperacion"
-        else:
-            ok = _comprobar_totp(conn, claves, persona, pedido.codigo, confirmado=True)
-            medio = "totp"
-        if not ok:
+        medio = comprobar_codigo(conn, claves, persona, pedido.codigo)
+        if medio is None:
             log.info(
                 "verificación de segundo factor rechazada",
                 extra={"campos": {"persona_id": str(persona)}},
             )
-            raise _invalido()
+            raise codigo_invalido()
         verificado_en = conn.execute(
             text(
                 "update nucleo.sesion set segundo_factor_en = now() where id = :s"
