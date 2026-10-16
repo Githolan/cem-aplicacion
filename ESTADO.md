@@ -49,7 +49,7 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
     - **Confirmación:** muestra los diez códigos de recuperación una sola vez.
     - **Verificación:** acepta el código de la aplicación o uno de recuperación, escrito como venga.
     - **Desactivar:** si falta la verificación reciente, la página lo explica.
-    - Todo lo que cambia estado lleva CSRF. Por ahora no hay enlace desde el inicio: se entra escribiendo la ruta.
+    - Todo lo que cambia estado lleva CSRF. Se llega desde `/cuenta` (PR #46).
   - **Pruebas de la página:** 14 de Vitest con `axe` y 3 de extremo a extremo contra el nginx de la imagen, con la API simulada desde Playwright.
     - Las de extremo a extremo comprueban: QR y códigos enteros a 360 px, sin violar la CSP; `axe` con contraste; sin sesión, el backend real responde 401. El control comprueba que la vigilancia sí ve un estilo en línea.
     - El QR se decodificó con OpenCV y dio la URI exacta; como control, con la mitad borrada no da nada.
@@ -113,7 +113,22 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `7c23fd0`** (= `main`, 16-10-2026), base `0008`, contrato 0.10.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `ce41e90`** (= `main`, 16-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Mi cuenta, modo lectura y contraseña (`ce41e90`, PR #46, #47 y #48), 16-10.** Registro en `doc/deploys/2026-10-16-ce41e90.md` del repositorio CEM.
+  - **Qué trae:**
+    - `/cuenta`: quién soy, sesiones vigentes, cerrar una o las otras, salir y el estado del segundo factor, con enlace desde el inicio;
+    - modo lectura ampliada (RF53, sin la "ayuda por persona autorizada", que espera a 2b);
+    - contraseña Argon2id: `nucleo.contrasena` y `nucleo.desafio_contrasena`, entrada en dos pasos con TOTP, y definición y cambio con verificación reciente. El backend está; las pantallas, no.
+  - **CI:** antes de fusionar corrió sobre la combinación de las tres ramas: 378 pruebas del backend, 3 de contratos, 93 del frontend y 69 de extremo a extremo.
+  - **Staging:** `cd.ps1` por Claude, con copia previa de 17 tablas y 32 filas.
+  - **Producción:** `cd.ps1 -Confirmar` por el propietario (21:15–21:18 UTC), con copia previa de 17 tablas y 13 filas.
+  - **Comprobado en los dos entornos:**
+    - base en `0009` con la RLS forzada;
+    - una cuenta inventada da 401 `credenciales_invalidas`, y como control otro sitio da 403 `csrf_invalido`;
+    - `/cuenta` está en el JavaScript servido;
+    - 0 reinicios y 0 errores.
+  - **NO VERIFICADO:** definir una contraseña y entrar con ella. Falta su pantalla, que está propuesta como tarea aparte.
 
 - **Aviso de la copia a Kuma, formulario de `/entrar` y cobertura de PA (`7c23fd0`, PR #40, #41 y #44), 16-10.** Registro en `doc/deploys/2026-10-16-7c23fd0.md` del repositorio CEM.
   - **Despliegue:** staging lo hizo Claude (17:34–17:37 UTC) y producción el propietario (19:09–19:11 UTC). No hubo migraciones.
@@ -177,9 +192,17 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - Para probar una invitación de punta a punta en staging, primero hay que cargar un consorcio y una unidad de prueba.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
 3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
-   - **Hecho el 16-10:** segundo factor TOTP con su página, en staging y producción. Falta un enlace a la página desde el inicio;
+   - **Hecho el 16-10:** segundo factor TOTP con su página, en staging y producción, a la que se llega desde `/cuenta`;
    - **Hecho el 16-10:** el formulario para pedir el enlace en `/entrar` (PR #44), en staging y producción;
-   - contraseña Argon2id, TOTP obligatorio para roles de dinero (con los mandatos, 2b), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
+   - **Hecho el 16-10:** contraseña Argon2id en el backend (#48), página `/cuenta` (#46) y modo lectura ampliada (RF53, #47);
+   - **falta:**
+     - las pantallas de la contraseña;
+     - TOTP obligatorio para roles de dinero (con los mandatos, 2b);
+     - la ayuda por persona autorizada (RF53, 2b);
+     - la cuenta de solo carga;
+     - borradores fuera de línea (PA16);
+     - PA29.
+   - Passkeys pueden ir en H6.
 4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Hoy hay 4 de 25. Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
 5. Pendientes de las copias:
    - comprobar el primer latido de `cem-copia-diaria` (03:30 UTC del 17-10);
