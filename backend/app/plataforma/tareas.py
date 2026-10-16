@@ -44,9 +44,11 @@ periodica("plataforma.purgar_cola", timedelta(days=1), desfase=timedelta(hours=6
 
 @cola.REGISTRO.tipo("plataforma.copia_diaria")
 def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
-    """Copia de la base `cem` volcada, verificada, cifrada y subida (documento 13, §17)."""
+    """Copia de la base `cem` volcada, verificada, cifrada y subida (documento 13, §17), y
+    avisada al monitor Push de Kuma para que una noche sin copia dé alerta."""
     ventana = datetime.fromisoformat(trabajo.carga["ventana"])
-    return copias.copia_diaria(copias.ConfigCopias.desde_entorno(), ventana)
+    resumen = copias.copia_diaria(copias.ConfigCopias.desde_entorno(), ventana)
+    return resumen | {"aviso": copias.avisar_copia(resumen)}
 
 
 # Todos los días a las 03:30 UTC, después de la ventana de Coolify (§17.2).
