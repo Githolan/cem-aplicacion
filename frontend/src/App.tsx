@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
+import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { RUTA_ENTRAR, RUTA_INVITACION } from "./enlace";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
@@ -16,6 +17,9 @@ function Inicio() {
       <p>
         Estamos construyendo la aplicación. Pronto vas a poder ver tus expensas, documentos y
         avisos desde acá.
+      </p>
+      <p>
+        <Link to={RUTA_CUENTA}>Mi cuenta</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -66,6 +70,7 @@ export function App() {
           <Route path="/instalar" element={<Instalar />} />
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
+          <Route path={RUTA_CUENTA} element={<Cuenta />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
