@@ -10,6 +10,15 @@ import json
 from pydantic import BaseModel
 
 from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
+from cem_contracts.contrasena import (
+    CodigoEntrada,
+    ContrasenaGuardada,
+    EntradaContrasena,
+    EstadoContrasena,
+    FaltaSegundoFactor,
+    NuevaContrasena,
+    SesionAbierta,
+)
 from cem_contracts.errores import Error
 from cem_contracts.identidad import (
     CanjeCodigo,
@@ -46,13 +55,18 @@ MODELOS: tuple[type[BaseModel], ...] = (
     AltaTotp,
     CanjeCodigo,
     CanjeEnlace,
+    CodigoEntrada,
     CodigosRecuperacion,
     CodigoTotp,
     ConsorcioResumen,
+    ContrasenaGuardada,
     EnlacePedido,
+    EntradaContrasena,
     Error,
     EstadoCola,
+    EstadoContrasena,
     EstadoSegundoFactor,
+    FaltaSegundoFactor,
     Invitacion,
     InvitacionAceptada,
     InvitacionNueva,
@@ -60,10 +74,12 @@ MODELOS: tuple[type[BaseModel], ...] = (
     ListaInvitaciones,
     ListaSesiones,
     ListaUnidades,
+    NuevaContrasena,
     PedidoEnlace,
     Salud,
     SaludDependencias,
     SegundoFactorVerificado,
+    SesionAbierta,
     SesionActual,
     SesionDispositivo,
     SesionesRevocadas,

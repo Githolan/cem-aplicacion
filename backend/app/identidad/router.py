@@ -74,7 +74,7 @@ def _clave_codigo(request: Request) -> bytes:
     return sesiones.clave_codigo(valor)
 
 
-async def _esperar_minimo(inicio: float, que: str) -> None:
+async def esperar_minimo(inicio: float, que: str) -> None:
     """Completa `DURACION_MINIMA_PEDIDO` desde `inicio`, o avisa si ya se pasó."""
     restante = DURACION_MINIMA_PEDIDO.total_seconds() - (time.monotonic() - inicio)
     if restante > 0:
@@ -159,12 +159,12 @@ async def pedir_enlace(
         clave,
     )
     log.info("enlace de acceso pedido", extra={"campos": {"cuenta_existe": hay_cuenta}})
-    await _esperar_minimo(inicio, "pedido de enlace")
+    await esperar_minimo(inicio, "pedido de enlace")
     response.headers.update(SIN_CACHE)
     return EnlacePedido(estado="pedido", mensaje=MENSAJE_PEDIDO)
 
 
-def _persona(conn: Connection, persona_id: UUID) -> tuple[str, str]:
+def persona_de(conn: Connection, persona_id: UUID) -> tuple[str, str]:
     nombre, correo = conn.execute(
         text("select nombre, correo from nucleo.persona where id = :p"), {"p": persona_id}
     ).one()
@@ -217,7 +217,7 @@ def canjear(
             log.info("canje rechazado: %s", r.resultado)
             raise _enlace_invalido()
         fijar_ambito(conn, persona_id=r.persona)
-        nombre, correo = _persona(conn, r.persona)
+        nombre, correo = persona_de(conn, r.persona)
     log.info("sesión creada", extra={"campos": {"persona_id": str(r.persona)}})
     sesiones.fijar_sesion(response, token_sesion)
     sesiones.borrar_nonce(response)
@@ -269,7 +269,7 @@ def _canjear_codigo(
         if r.resultado != "ok":
             return r.resultado, None
         fijar_ambito(conn, persona_id=r.persona)
-        nombre, correo_persona = _persona(conn, r.persona)
+        nombre, correo_persona = persona_de(conn, r.persona)
     return r.resultado, SesionActual(
         persona_id=r.persona,
         nombre=nombre,
@@ -329,7 +329,7 @@ async def canjear_codigo(
         sesiones.agente(request),
         sesiones.ip_cliente(request),
     )
-    await _esperar_minimo(inicio, "canje de código")
+    await esperar_minimo(inicio, "canje de código")
     if sesion is None:
         log.info("canje de código rechazado: %s", resultado)
         raise ErrorApi(
@@ -352,7 +352,7 @@ def sesion_actual(identidad: IdentidadDep, motor: MotorDep, response: Response) 
             text("select vence_en from nucleo.sesion where id = :s"),
             {"s": identidad.sesion_id},
         ).scalar_one()
-        nombre, correo = _persona(conn, identidad.persona_id)
+        nombre, correo = persona_de(conn, identidad.persona_id)
     return SesionActual(
         persona_id=identidad.persona_id,
         nombre=nombre,
