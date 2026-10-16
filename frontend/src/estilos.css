@@ -180,3 +180,36 @@ button:focus-visible {
   padding: 0;
   list-style: none;
 }
+
+/* Mi cuenta: una tarjeta interna por sesión; la actual, con borde. */
+.sesiones {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.sesiones li {
+  padding: 0.75rem 1rem;
+  border: 1px solid #c9d2dd;
+  border-radius: 0.5rem;
+  background: var(--fondo);
+}
+
+.sesiones li[aria-current="true"] {
+  border: 2px solid var(--azul);
+}
+
+.sesiones h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+}
+
+.sesiones .detalles {
+  margin-bottom: 0.75rem;
+}
+
+.detalles dd {
+  overflow-wrap: anywhere;
+}
