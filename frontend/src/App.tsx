@@ -7,6 +7,7 @@ import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
+import { ModoLectura } from "./ModoLectura";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
@@ -63,6 +64,7 @@ export function App() {
       <header className="cabecera">
         <img src="/icono.svg" alt="" width="40" height="40" />
         <span className="marca">Consorcio en Mano</span>
+        <ModoLectura />
       </header>
       <main id="contenido">
         <Routes>

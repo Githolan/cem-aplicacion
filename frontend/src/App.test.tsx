@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -9,6 +9,7 @@ import { App } from "./App";
 import { AvisoVersion } from "./AvisoVersion";
 import type { Salud } from "./api/cliente";
 import { manifiesto } from "./manifiesto";
+import { NOMBRE_MODO_LECTURA } from "./ModoLectura";
 import { ContextoVersion, type Version } from "./version";
 
 const SALUD: Salud = {
@@ -73,6 +74,16 @@ describe("página de inicio", () => {
     // jsdom no calcula estilos: el contraste se mide en el navegador, no aquí.
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("cabecera", () => {
+  it("tiene el botón del modo lectura ampliada (RF53)", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SALUD)));
+    montar();
+    const cabecera = screen.getByRole("banner");
+    const boton = within(cabecera).getByRole("button", { name: NOMBRE_MODO_LECTURA });
+    expect(boton.getAttribute("aria-pressed")).toBe("false");
   });
 });
 
