@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /cuenta servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad, y con eso se prueba que la página
@@ -26,6 +26,7 @@ const SESIONES = [
   ultimo_uso_en: "2026-10-16T12:00:00Z",
   vence_en: "2026-11-15T12:00:00Z",
 }));
+const CONTRASENA = { definida: false, cambiada_en: null };
 const TOTP = { activo: true, activado_en: "2026-10-15T20:00:00Z", codigos_recuperacion_restantes: 10, verificado_en: null };
 
 /** Errores de la página y violaciones de la CSP, que el navegador informa como eventos. */
@@ -56,6 +57,7 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
       if (camino === "/api/v1/auth/sesion") return ruta.fulfill({ json: YO });
       if (camino === "/api/v1/auth/sesiones") return ruta.fulfill({ json: { elementos: SESIONES } });
       if (camino === "/api/v1/auth/totp") return ruta.fulfill({ json: TOTP });
+      if (camino === "/api/v1/auth/contrasena") return ruta.fulfill({ json: CONTRASENA });
       return ruta.abort();
     }
     const encabezado = (await pedido.headerValue("x-csrf-token")) ?? null;
@@ -75,19 +77,29 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
   return csrf;
 }
 
-test.describe("mi cuenta", () => {
+test.describe("mi cuenta sin sesión", () => {
+  // Cuatro pedidos reales a /api/v1/auth/ por proyecto, con un cupo propio: ver otroCliente en entorno.ts.
+  test.use(otroCliente(2));
+
   test("sin sesión, el backend real responde 401 y la página manda a /entrar", async ({ page }) => {
     const errores = vigilarErrores(page);
     const consulta = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/auth/sesion");
+    const contrasena = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/auth/contrasena");
     await page.goto("/cuenta");
 
     expect((await consulta).status()).toBe(401);
+    // El estado de la contraseña tampoco se muestra sin sesión (medido: 401 no_autenticado).
+    const respuesta = await contrasena;
+    expect(respuesta.status()).toBe(401);
+    expect(((await respuesta.json()) as { codigo: string }).codigo).toBe("no_autenticado");
     await expect(page).toHaveURL(/\/entrar$/);
     await expect(page.getByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeVisible();
     // La consola informa los 401 de los recursos; violaciones de la CSP o errores, ninguno.
     expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
+});
 
+test.describe("mi cuenta", () => {
   test("en un teléfono: la cuenta entra entera, cierra otra sesión y sale, con CSRF y sin violar la CSP", async ({
     page,
     baseURL,

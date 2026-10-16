@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "./api/cliente";
 import { EntrarConCodigo } from "./EntrarConCodigo";
+import { EntrarConContrasena } from "./EntrarConContrasena";
 import { PedirEnlace } from "./PedirEnlace";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
 
@@ -134,6 +135,7 @@ export function Entrar() {
         <>
           <PedirEnlace />
           <EntrarConCodigo />
+          <EntrarConContrasena />
         </>
       )}
     </>

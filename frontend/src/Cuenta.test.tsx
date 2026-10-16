@@ -5,7 +5,9 @@ import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
+import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -44,6 +46,9 @@ const TOTP_ACTIVO = {
   verificado_en: null,
 };
 
+const SIN_CONTRASENA = { definida: false, cambiada_en: null };
+const CON_CONTRASENA = { definida: true, cambiada_en: "2026-10-10T15:30:00Z" };
+
 function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status });
 }
@@ -63,11 +68,12 @@ function backend(respuestas: Respuestas) {
 }
 
 /** El backend de una cuenta con sesión: quién soy, las sesiones y el segundo factor. */
-function conSesion(extra: Respuestas = {}, totp: object = TOTP_INACTIVO) {
+function conSesion(extra: Respuestas = {}, totp: object = TOTP_INACTIVO, contrasena: object = SIN_CONTRASENA) {
   return backend({
     "GET /api/v1/auth/sesion": () => Response.json(YO),
     "GET /api/v1/auth/sesiones": () => Response.json({ elementos: SESIONES }),
     "GET /api/v1/auth/totp": () => Response.json(totp),
+    "GET /api/v1/auth/contrasena": () => Response.json(contrasena),
     ...extra,
   });
 }
@@ -125,6 +131,7 @@ describe("página /cuenta", () => {
       "GET /api/v1/auth/sesion": () => error("no_autenticado", 401),
       "GET /api/v1/auth/sesiones": () => error("no_autenticado", 401),
       "GET /api/v1/auth/totp": () => error("no_autenticado", 401),
+      "GET /api/v1/auth/contrasena": () => error("no_autenticado", 401),
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
@@ -275,5 +282,209 @@ describe("página /cuenta", () => {
     // jsdom no calcula colores: el contraste lo mide axe en el navegador (e2e/cuenta.e2e.ts).
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("contraseña en /cuenta", () => {
+  const seccion = () => within(screen.getByRole("region", { name: "Contraseña" }));
+
+  /** Completa el formulario y lo manda; `actual` solo si el campo está. */
+  function completar(nueva: string, repetida = nueva, actual?: string) {
+    if (actual !== undefined)
+      fireEvent.change(seccion().getByLabelText("Contraseña actual"), { target: { value: actual } });
+    fireEvent.change(seccion().getByLabelText(/^Contraseña( nueva)?$/), { target: { value: nueva } });
+    fireEvent.change(seccion().getByLabelText("Repetí la contraseña"), { target: { value: repetida } });
+    const formulario = seccion()
+      .getByRole("button", { name: /(Definir|Cambiar) la contraseña/ })
+      .closest("form");
+    if (formulario === null) throw new Error("el botón no está en un formulario");
+    fireEvent.submit(formulario);
+  }
+
+  const NUEVA = "una frase larga de verdad";
+  const ANTERIOR = "la de antes, larga";
+  const GUARDADA = { cambiada_en: "2026-10-16T18:00:00Z", sesiones_cerradas: 0 };
+
+  it("el largo del formulario es el del contrato", () => {
+    const esquema = contrato.components.schemas.NuevaContrasena.properties;
+    expect(LARGO_MINIMO_CONTRASENA).toBe(esquema.contrasena_nueva.minLength);
+    expect(LARGO_MAXIMO_CONTRASENA).toBe(esquema.contrasena_nueva.maxLength);
+  });
+
+  it("sin contraseña la define con PUT, X-CSRF-Token y sin la actual, y la muestra definida", async () => {
+    const simulado = conSesion({ "PUT /api/v1/auth/contrasena": () => Response.json(GUARDADA) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+
+    expect(await screen.findByText(/Todavía no tenés contraseña/)).toBeTruthy();
+    expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
+    const campo = seccion().getByLabelText("Contraseña");
+    expect(campo.getAttribute("autocomplete")).toBe("new-password");
+    expect(campo.getAttribute("type")).toBe("password");
+    expect(seccion().getByLabelText("Repetí la contraseña").getAttribute("autocomplete")).toBe("new-password");
+    completar(NUEVA);
+
+    expect(await screen.findByText("Listo: definiste tu contraseña. Te avisamos por correo.")).toBeTruthy();
+    expect(screen.getByText(/Tenés una contraseña. La cambiaste por última vez el 16 de octubre de 2026/)).toBeTruthy();
+    const put = pedido(simulado, "PUT", "/api/v1/auth/contrasena");
+    if (put === undefined) throw new Error("no hubo PUT");
+    expect(put.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(await put.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
+    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe("");
+  });
+
+  it("sin segundo factor, cambiarla pide la actual; cierra las otras sesiones y las saca de la lista", async () => {
+    const simulado = conSesion(
+      { "PUT /api/v1/auth/contrasena": () => Response.json({ ...GUARDADA, sesiones_cerradas: 2 }) },
+      TOTP_INACTIVO,
+      CON_CONTRASENA,
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+
+    expect(await screen.findByText(/La cambiaste por última vez el 10 de octubre de 2026/)).toBeTruthy();
+    expect(seccion().getByLabelText("Contraseña actual").getAttribute("autocomplete")).toBe("current-password");
+    expect(screen.getByText("Chrome en Android")).toBeTruthy();
+    completar(NUEVA, NUEVA, ANTERIOR);
+
+    expect(
+      await screen.findByText(
+        "Listo: cambiaste tu contraseña. Cerramos 2 sesiones en otros dispositivos. Te avisamos por correo.",
+      ),
+    ).toBeTruthy();
+    const put = pedido(simulado, "PUT", "/api/v1/auth/contrasena");
+    expect(put?.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(await put?.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: ANTERIOR });
+    expect(screen.queryByText("Chrome en Android")).toBeNull();
+    expect(screen.queryByText("Safari en iPhone")).toBeNull();
+    expect(screen.getByText("Firefox en Windows")).toBeTruthy();
+  });
+
+  it("una corta o dos distintas no salen y se explican junto al campo", async () => {
+    const simulado = conSesion();
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText(/Todavía no tenés contraseña/);
+
+    completar("corta 11 ch");
+    const explicacion = seccion().getByText(/tiene que tener al menos 12/);
+    const campo = seccion().getByLabelText("Contraseña");
+    expect(campo.getAttribute("aria-invalid")).toBe("true");
+    expect(campo.getAttribute("aria-describedby")).toContain(explicacion.id);
+
+    completar(NUEVA, `${NUEVA}!`);
+    expect(seccion().getByText("Las dos contraseñas no coinciden.")).toBeTruthy();
+    expect(seccion().getByLabelText("Repetí la contraseña").getAttribute("aria-invalid")).toBe("true");
+    expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
+  });
+
+  it("con segundo factor no pide la actual, avisa de entrada y explica el 403 con el enlace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conSesion(
+        { "PUT /api/v1/auth/contrasena": () => error("segundo_factor_requerido", 403) },
+        TOTP_ACTIVO,
+        CON_CONTRASENA,
+      ),
+    );
+    abrir();
+    await screen.findByText(/La cambiaste por última vez/);
+
+    expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
+    expect(seccion().getByRole("link", { name: /verificá un código/ }).getAttribute("href")).toBe(
+      "/cuenta/segundo-factor",
+    );
+    completar(NUEVA);
+
+    const aviso = within(await seccion().findByText(/Para esto tenés que confirmar/));
+    expect(aviso.getByRole("link", { name: /Verificá un código/ }).getAttribute("href")).toBe(
+      "/cuenta/segundo-factor",
+    );
+  });
+
+  it.each([
+    [() => error("contrasena_actual_invalida", 403), "La contraseña actual no es correcta."],
+    [
+      () =>
+        Response.json(
+          { codigo: "contrasena_debil", mensaje: "No puede ser tu correo (mensaje del backend).", id_correlacion: "c" },
+          { status: 422 },
+        ),
+      "No puede ser tu correo (mensaje del backend).",
+    ],
+    [() => error("csrf_invalido", 403), /No pudimos verificar el pedido. Recargá la página/],
+    [() => error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
+    [() => error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+  ])("muestra el rechazo del backend a la vista (%#)", async (respuesta, mensaje) => {
+    vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": respuesta }, TOTP_INACTIVO, CON_CONTRASENA));
+    abrir();
+    await screen.findByText(/La cambiaste por última vez/);
+    completar(NUEVA, NUEVA, ANTERIOR);
+
+    expect(await seccion().findByText(mensaje)).toBeTruthy();
+    expect(seccion().queryByText(/Listo:/)).toBeNull();
+    // Los campos quedan como estaban, para corregir sin volver a escribir todo.
+    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe(NUEVA);
+  });
+
+  it("sin red al guardar, lo dice", async () => {
+    const simulado = conSesion();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (p: Request) => (p.method === "PUT" ? Promise.reject(new TypeError("sin red")) : simulado(p))),
+    );
+    abrir();
+    await screen.findByText(/Todavía no tenés contraseña/);
+    completar(NUEVA);
+
+    expect(await seccion().findByText(/No pudimos completar el pedido/)).toBeTruthy();
+  });
+
+  it("si la sesión venció al guardar (401), manda a /entrar", async () => {
+    vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": () => error("no_autenticado", 401) }));
+    abrir();
+    await screen.findByText(/Todavía no tenés contraseña/);
+    completar(NUEVA);
+
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+  });
+
+  it.each([
+    ["sin contraseña", SIN_CONTRASENA, TOTP_INACTIVO, null],
+    ["con contraseña y sin segundo factor", CON_CONTRASENA, TOTP_INACTIVO, null],
+    ["con segundo factor", CON_CONTRASENA, TOTP_ACTIVO, null],
+    ["con un campo mal", SIN_CONTRASENA, TOTP_INACTIVO, "corta"],
+    ["guardada", SIN_CONTRASENA, TOTP_INACTIVO, "ok"],
+    ["sin la verificación reciente", CON_CONTRASENA, TOTP_ACTIVO, "falta_verificacion"],
+    ["con un rechazo", CON_CONTRASENA, TOTP_INACTIVO, "error"],
+  ] as const)("%s no tiene faltas de accesibilidad detectables por axe", async (_, contrasena, totp, paso) => {
+    const respuestas = {
+      ok: () => Response.json(GUARDADA),
+      falta_verificacion: () => error("segundo_factor_requerido", 403),
+      error: () => error("contrasena_actual_invalida", 403),
+    };
+    const extra: Respuestas = paso === null || paso === "corta" ? {} : { "PUT /api/v1/auth/contrasena": respuestas[paso] };
+    vi.stubGlobal("fetch", conSesion(extra, totp, contrasena));
+    const { container } = abrir();
+    await screen.findByRole("region", { name: "Contraseña" });
+    if (paso === "corta") completar("corta");
+    else if (paso !== null) {
+      completar(NUEVA, NUEVA, contrasena.definida && !totp.activo ? ANTERIOR : undefined);
+      await seccion().findByText(paso === "ok" ? /Listo:/ : /Para esto|actual no es correcta/);
+    }
+
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("largoContrasena", () => {
+  it("cuenta puntos de código y vale el menor entre el texto y su NFKC", () => {
+    expect(largoContrasena("año")).toBe(3);
+    expect(largoContrasena("😀😀")).toBe(2);
+    // «e» + tilde combinante: NFKC la compone en «é».
+    expect(largoContrasena("é")).toBe(1);
+    // La ligadura «ﬁ» es un carácter; su NFKC son dos: el contrato mira el texto tal cual.
+    expect(largoContrasena("ﬁ")).toBe(1);
   });
 });
