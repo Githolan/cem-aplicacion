@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -38,8 +38,13 @@ function abrir(url = "/entrar") {
   );
 }
 
+// /entrar tiene dos campos «Correo» (pedir el enlace y entrar con el código): se busca en la sección.
+function seccionCodigo() {
+  return within(screen.getByRole("region", { name: "Entrar con un código" }));
+}
+
 function completar(correo: string, codigo: string) {
-  fireEvent.change(screen.getByLabelText("Correo"), { target: { value: correo } });
+  fireEvent.change(seccionCodigo().getByLabelText("Correo"), { target: { value: correo } });
   fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: codigo } });
   const boton = screen.getByRole("button", { name: "Entrar con el código" });
   const formulario = boton.closest("form");

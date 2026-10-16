@@ -15,7 +15,7 @@ test.describe("entrar con el código del correo", () => {
     await page.goto("/entrar");
     await sinFaltasDeAccesibilidad(page);
 
-    await page.getByLabel("Correo").fill(CORREO);
+    await page.getByRole("region", { name: "Entrar con un código" }).getByLabel("Correo").fill(CORREO);
     await page.getByLabel(/^Código de 6 números/).fill("042 917");
     const canje = page.waitForRequest((r) => new URL(r.url()).pathname === "/api/v1/auth/codigo");
     await page.getByRole("button", { name: "Entrar con el código" }).click();
@@ -39,7 +39,7 @@ test.describe("entrar con el código del correo", () => {
     page.on("request", (r) => pedidos.push(new URL(r.url()).pathname));
     await page.goto("/entrar");
 
-    await page.getByLabel("Correo").fill(CORREO);
+    await page.getByRole("region", { name: "Entrar con un código" }).getByLabel("Correo").fill(CORREO);
     const campo = page.getByLabel(/^Código de 6 números/);
     await campo.fill("04291");
     await page.getByRole("button", { name: "Entrar con el código" }).click();

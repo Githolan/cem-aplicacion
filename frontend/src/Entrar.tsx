@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "./api/cliente";
 import { EntrarConCodigo } from "./EntrarConCodigo";
+import { PedirEnlace } from "./PedirEnlace";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
@@ -126,10 +127,15 @@ export function Entrar() {
           </p>
         )}
         {estado === "sin_enlace" && (
-          <p>Para entrar, abrí el enlace que te mandamos por correo.</p>
+          <p>Para entrar, abrí el enlace que te mandamos por correo. Si todavía no lo tenés, pedilo acá.</p>
         )}
       </div>
-      {(estado === "sin_enlace" || estado === "rechazado") && <EntrarConCodigo />}
+      {(estado === "sin_enlace" || estado === "rechazado") && (
+        <>
+          <PedirEnlace />
+          <EntrarConCodigo />
+        </>
+      )}
     </>
   );
 }
