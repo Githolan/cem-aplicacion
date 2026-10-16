@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La contraseña en /entrar y en /cuenta, servidas por el nginx de la imagen con su CSP real.
 // El backend de la corrida no tiene base de datos: lo que responde de verdad se mide y se afirma
@@ -71,6 +71,9 @@ async function anchoSinDesborde(pagina: Page) {
 // - GET y PUT /contrasena sin sesión → 401 no_autenticado (el GET se afirma en cuenta.e2e.ts, que
 //   ya abre /cuenta sin sesión: cada pedido de más gasta el cupo de 20 por minuto de /api/v1/auth/).
 test.describe("contraseña contra el backend real sin base", () => {
+  // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
+  test.use(otroCliente(1));
+
   test("entrar: manda correo y contraseña por POST, en el cuerpo; el 500 real se avisa sin colgarse", async ({ page }) => {
     const errores = vigilarErrores(page);
     await page.goto("/entrar");

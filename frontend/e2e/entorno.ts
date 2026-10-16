@@ -17,6 +17,15 @@ export const SHA_BACKEND = requerida("CEM_E2E_SHA");
 // La página muestra los primeros 7 caracteres de la SHA, como git.
 export const LARGO_SHA_CORTA = 7;
 
+// El backend limita /api/v1/auth/ a 20 pedidos por minuto por IP (backend/app/limite.py), y toda
+// la corrida sale de la misma IP: la suite de main ya pasa cerca de ese cupo (medido el
+// 16-10-2026: 69 pruebas en 1,0 min, y con 8 pedidos de más fallaron 7 por 429). Las pruebas que
+// necesitan más pedidos reales se presentan como otro cliente, como en producción: nginx toma la IP
+// de CF-Connecting-IP (nginx/cem-frontend.conf.template). Direcciones de documentación (RFC 5737).
+export function otroCliente(n: number): { extraHTTPHeaders: Record<string, string> } {
+  return { extraHTTPHeaders: { "CF-Connecting-IP": `198.51.100.${n}` } };
+}
+
 export const AGENTE_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 

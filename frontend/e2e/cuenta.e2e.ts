@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /cuenta servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad, y con eso se prueba que la página
@@ -77,7 +77,10 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
   return csrf;
 }
 
-test.describe("mi cuenta", () => {
+test.describe("mi cuenta sin sesión", () => {
+  // Cuatro pedidos reales a /api/v1/auth/ por proyecto, con un cupo propio: ver otroCliente en entorno.ts.
+  test.use(otroCliente(2));
+
   test("sin sesión, el backend real responde 401 y la página manda a /entrar", async ({ page }) => {
     const errores = vigilarErrores(page);
     const consulta = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/auth/sesion");
@@ -94,7 +97,9 @@ test.describe("mi cuenta", () => {
     // La consola informa los 401 de los recursos; violaciones de la CSP o errores, ninguno.
     expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
+});
 
+test.describe("mi cuenta", () => {
   test("en un teléfono: la cuenta entra entera, cierra otra sesión y sale, con CSRF y sin violar la CSP", async ({
     page,
     baseURL,
