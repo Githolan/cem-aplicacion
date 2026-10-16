@@ -12,7 +12,6 @@
 .modo-lectura {
   display: grid;
   justify-items: end;
-  gap: 0.25rem;
   max-width: 100%;
   margin-left: auto;
 }
@@ -32,9 +31,15 @@
   font-weight: 700;
 }
 
-.aviso-modo-lectura {
+/* Vacío no ocupa lugar; queda en el DOM para que el lector de pantalla anuncie el aviso. */
+.aviso-modo-lectura,
+.lectura-ampliada .aviso-modo-lectura {
   margin: 0;
   font-size: 0.875rem;
+}
+
+.aviso-modo-lectura:not(:empty) {
+  margin-top: 0.25rem;
 }
 
 /* Modo activo: base de 20 px (125 % de la normal en todo el rango del clamp). */
