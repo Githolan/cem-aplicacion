@@ -40,11 +40,11 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
   - **Auditoría encadenada:** crear, reemplazar, retirar y aceptar escriben en `auditoria.eventos` (primer uso), con identificadores y sin el correo. Las invitaciones no se purgan: son la constancia de quién dio acceso a quién.
   - **Frontend:** página `/invitacion` (muestra edificio, unidad y vínculo; nombre editable; acepta con CSRF si hay sesión) y la navegación a `/invitacion` nunca sale de la caché del service worker. Contrato 0.9.0.
   - **Pruebas:** 29 del backend contra PostgreSQL 18 y Redis reales y 9 de Vitest con `axe`. Las del backend cubren: RLS de otro consorcio, política de `invitada_por`, otra propietaria y el equipo que retiran o reemplazan, privilegios, tope de 7 días, aceptación simultánea al mismo correo nuevo y el script. No hay e2e propias de invitaciones.
-- **Segundo factor TOTP y verificación reciente (TB-CEM-3; PR #37 fusionado en `a6060c1`, sin desplegar):**
+- **Segundo factor TOTP y verificación reciente (TB-CEM-3; PR #37 y #42, en staging y producción con `099ab21` desde el 16-10):**
   - **Migración `0008`:** `nucleo.factor_totp` (una fila por persona: secreto AES-256-GCM, pendiente hasta confirmar, último paso aceptado contra la repetición), `nucleo.codigo_recuperacion` (diez, HMAC, un solo uso) con RLS forzada por persona, y `nucleo.sesion.segundo_factor_en`.
   - **Rutas `/api/v1/auth/totp`:** estado, `alta` (secreto en base32 y URI `otpauth://`), `confirmar` (primer código; devuelve los diez códigos de recuperación, una sola vez), `verificar` (código de la aplicación o de recuperación: la sesión queda verificada 10 minutos) y `baja` (pide verificación reciente). Alta y baja avisan por correo.
   - **Claves:** derivadas con HKDF de `CEM_CODIGO_CLAVE`; no hay secreto nuevo que cargar en Coolify. Cambiar esa clave obliga a volver a dar de alta los segundos factores.
-  - **Frontend, página `/cuenta/segundo-factor` (en su PR, sin fusionar):**
+  - **Frontend, página `/cuenta/segundo-factor` (PR #42):**
     - **Alta:** QR dibujado en el navegador como SVG con `uqr` 0.1.3 (sin servicio externo; la CSP no cambia), enlace `otpauth://` y la clave en bloques de cuatro para escribirla a mano.
     - **Confirmación:** muestra los diez códigos de recuperación una sola vez.
     - **Verificación:** acepta el código de la aplicación o uno de recuperación, escrito como venga.
@@ -113,7 +113,19 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `3251caf`** (= `main` con las invitaciones, 15-10-2026), base `0007`, contrato 0.9.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `099ab21`** (= `main` con el segundo factor, 16-10-2026), base `0008`, contrato 0.10.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Segundo factor (`099ab21`), 16-10.** Registro en `doc/deploys/2026-10-16-099ab21.md` del repositorio CEM.
+  - **CI:** `ci.ps1` con imágenes en verde.
+  - **Staging, 00:31–00:34 UTC:** `cd.ps1` por Claude, con copia previa `diarias/2026-10-16/cem-20261016T003156Z.dump.age` (15 tablas, 19 filas).
+  - **Producción, 01:14–01:17 UTC:** `cd.ps1 -Confirmar` por el propietario, con copia previa `diarias/2026-10-16/cem-20261016T011453Z.dump.age` (15 tablas, 9 filas).
+  - **Comprobado en los dos entornos:**
+    - base en `0008`, con la RLS forzada en `factor_totp` y `codigo_recuperacion`;
+    - `/api/v1/auth/totp` sin sesión y con una cookie inventada dan 401, y como control una ruta inexistente da 404;
+    - el JavaScript servido contiene `/cuenta/segundo-factor`;
+    - 0 reinicios y 0 errores.
+  - **El propietario probó el ciclo entero en staging, con una aplicación real en el teléfono (01:08–01:13 UTC):** alta, confirmación (dos códigos rechazados antes de acertar), verificación y baja. La base quedó limpia.
+  - Para entrar hubo que pedir el correo con `curl`: `/entrar` no tiene formulario para pedir el enlace (ver "Próximo paso").
 
 - **Invitaciones (`3251caf`), 15-10.**
   - **CI:** `ci.ps1` con imágenes en verde.
@@ -159,9 +171,14 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - Para probar una invitación de punta a punta en staging, primero hay que cargar un consorcio y una unidad de prueba.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
 3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
-   - segundo factor TOTP y verificación reciente (PR #37 fusionado; migración `0008`) y su página `/cuenta/segundo-factor`: falta fusionar la página, desplegar las dos juntas (copia previa por la `0008`) y probar el alta con una aplicación real en el teléfono;
+   - **Hecho el 16-10:** segundo factor TOTP con su página, en staging y producción. Falta un enlace a la página desde el inicio;
+   - **formulario para pedir el enlace en `/entrar`:** nadie en el frontend llama a `POST /api/v1/auth/enlace`, así que una persona no puede entrar sola. Está propuesto como tarea aparte;
    - contraseña Argon2id, TOTP obligatorio para roles de dinero (con los mandatos, 2b), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
 4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
 5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
 6. TB-8: falta leer las reglas de OCI para cerrarlo con prueba firme (ver "Decisiones vigentes"); para eso hay que configurar el perfil del MCP de OCI.
 7. Probar `/instalar` en un iPhone y en un Android reales. El cartel con el QR está en el repositorio CEM (#28); falta comprobar que el QR lleva a `/instalar`.
+8. **Cloudflare Access de `cem-staging` (decidido por el propietario el 16-10, para más adelante):**
+   - poner la marca en la pantalla de entrada (*Custom pages → Access login page*), después de confirmar que el plan gratuito la incluye;
+   - alargar la sesión de Access a un mes.
+   - Producción no lleva Access y queda como está: la sesión de la aplicación dura 30 días.
