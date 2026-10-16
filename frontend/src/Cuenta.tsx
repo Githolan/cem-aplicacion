@@ -5,11 +5,12 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
 // con la actual marcada (cada una se puede cerrar, o todas las otras de una vez), salir, y el
-// estado del segundo factor con el enlace a su página. Sin sesión manda a /entrar, igual que
+// estado del segundo factor con el enlace a su página, y la contraseña (SeccionContrasena). Sin sesión manda a /entrar, igual que
 // después de cerrar la sesión actual. Diseño provisorio: el definitivo llega con G3.
 
 type Yo = components["schemas"]["SesionActual"];
@@ -33,7 +34,7 @@ const fecha = (iso: string) => FORMATO_FECHA.format(new Date(iso));
 type Pantalla =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
-  | { tipo: "lista"; yo: Yo; sesiones: Sesion[]; segundoFactor: boolean };
+  | { tipo: "lista"; yo: Yo; sesiones: Sesion[]; segundoFactor: boolean; contrasena: EstadoContrasena };
 
 type Aviso = { texto: string; ok: boolean };
 
@@ -70,10 +71,16 @@ export function Cuenta() {
       api.GET("/api/v1/auth/sesion"),
       api.GET("/api/v1/auth/sesiones"),
       api.GET("/api/v1/auth/totp"),
+      api.GET("/api/v1/auth/contrasena"),
     ])
-      .then(([sesion, sesiones, totp]) => {
-        for (const r of [sesion, sesiones, totp]) exigirSesion(r.response);
-        if (sesion.data === undefined || sesiones.data === undefined || totp.data === undefined)
+      .then(([sesion, sesiones, totp, contrasena]) => {
+        for (const r of [sesion, sesiones, totp, contrasena]) exigirSesion(r.response);
+        if (
+          sesion.data === undefined ||
+          sesiones.data === undefined ||
+          totp.data === undefined ||
+          contrasena.data === undefined
+        )
           setPantalla({ tipo: "sin_servicio" });
         else
           setPantalla({
@@ -81,6 +88,7 @@ export function Cuenta() {
             yo: sesion.data,
             sesiones: sesiones.data.elementos,
             segundoFactor: totp.data.activo,
+            contrasena: contrasena.data,
           });
       })
       .catch((e: unknown) => {
@@ -231,6 +239,23 @@ export function Cuenta() {
               </Link>
             </p>
           </section>
+
+          <SeccionContrasena
+            estado={pantalla.contrasena}
+            correo={pantalla.yo.correo}
+            segundoFactor={pantalla.segundoFactor}
+            fecha={fecha}
+            alGuardar={(guardada) => {
+              setPantalla((actual) =>
+                actual.tipo === "lista"
+                  ? { ...actual, contrasena: { definida: true, cambiada_en: guardada.cambiada_en } }
+                  : actual,
+              );
+              // Cambiar una existente cierra las sesiones de los otros dispositivos.
+              if (guardada.sesiones_cerradas > 0) quitar((s) => s.actual);
+            }}
+            sinSesion={aEntrar}
+          />
         </>
       )}
 
