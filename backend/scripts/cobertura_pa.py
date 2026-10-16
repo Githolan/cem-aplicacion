@@ -4,12 +4,14 @@ Documento 14, §3 regla 3 y §11: cada PA lleva una prueba `test_paNN_…` y el 
 están cubiertas y cuáles faltan. Busca `def test_paNN_` en `backend/tests` y títulos que empiecen
 con `PANN` en las pruebas del frontend (Vitest y Playwright).
 
-Uso, desde `backend/`:  python -m scripts.cobertura_pa [--estricto]
+Uso, desde `backend/`:  python -m scripts.cobertura_pa [--estricto] [--json]
 Con `--estricto` sale con 1 si falta alguna (para la puerta G5); sin él solo informa.
+Con `--json` imprime solo un objeto JSON (lo guarda `despliegue/ci.ps1` en su constancia).
 Que una PA tenga prueba no la cierra: puede cubrir solo una parte (por ejemplo, el motor y no la
 pantalla). La revisión de cada PA sigue siendo manual.
 """
 
+import json
 import re
 import sys
 from pathlib import Path
@@ -43,15 +45,31 @@ def cobertura() -> dict[str, list[str]]:
     return encontradas
 
 
-def main(argumentos: list[str]) -> int:
+def informe() -> dict:
     encontradas = cobertura()
-    faltan = [pa for pa in P0_PILOTO if pa not in encontradas]
-    cubiertas = len(P0_PILOTO) - len(faltan)
-    print(f"PA del conjunto P0-piloto con prueba: {cubiertas} de {len(P0_PILOTO)}")
-    for pa in sorted(encontradas):
-        fuera = "" if pa in P0_PILOTO else " (fuera del P0-piloto)"
-        print(f"  {pa}{fuera}: {', '.join(encontradas[pa])}")
-    print(f"Sin prueba: {', '.join(faltan) if faltan else 'ninguna'}")
+    return {
+        "conjunto": "P0-piloto",
+        "total": len(P0_PILOTO),
+        "cubiertas": {pa: encontradas[pa] for pa in P0_PILOTO if pa in encontradas},
+        "faltan": [pa for pa in P0_PILOTO if pa not in encontradas],
+        "fuera_del_conjunto": {
+            pa: encontradas[pa] for pa in sorted(encontradas) if pa not in P0_PILOTO
+        },
+    }
+
+
+def main(argumentos: list[str]) -> int:
+    datos = informe()
+    faltan = datos["faltan"]
+    if "--json" in argumentos:
+        print(json.dumps(datos, ensure_ascii=False))
+    else:
+        cubiertas = len(datos["cubiertas"])
+        print(f"PA del conjunto P0-piloto con prueba: {cubiertas} de {datos['total']}")
+        for pa, rutas in sorted({**datos["cubiertas"], **datos["fuera_del_conjunto"]}.items()):
+            fuera = "" if pa in P0_PILOTO else " (fuera del P0-piloto)"
+            print(f"  {pa}{fuera}: {', '.join(rutas)}")
+        print(f"Sin prueba: {', '.join(faltan) if faltan else 'ninguna'}")
     return 1 if faltan and "--estricto" in argumentos else 0
 
 

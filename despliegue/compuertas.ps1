@@ -290,6 +290,34 @@ function Assert-CemTokenRegistro {
     }
 }
 
+# Lee la salida de `python -m scripts.cobertura_pa --json` (documento 14, §11) y devuelve
+# el objeto que ci.ps1 guarda en su constancia. Falla si no es JSON o le falta la forma
+# esperada: un informe roto no puede pasar por "no hay PA cubiertas".
+function Read-CemCoberturaPa {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Json)
+    try { $c = $Json | ConvertFrom-Json -AsHashtable -ErrorAction Stop }
+    catch { throw "cobertura_pa no devolvió JSON: '$Json'" }
+    if ($c -isnot [hashtable]) { throw "cobertura_pa no devolvió un objeto: '$Json'" }
+    foreach ($campo in 'conjunto', 'total', 'cubiertas', 'faltan', 'fuera_del_conjunto') {
+        if (-not $c.ContainsKey($campo)) { throw "cobertura_pa: falta el campo '$campo'" }
+    }
+    if ($c.cubiertas -isnot [hashtable] -or $c.fuera_del_conjunto -isnot [hashtable]) { throw 'cobertura_pa: cubiertas y fuera_del_conjunto tienen que ser objetos' }
+    $pas = @($c.cubiertas.Keys) + @($c.faltan) + @($c.fuera_del_conjunto.Keys)
+    $malas = @($pas | Where-Object { "$_" -notmatch '^PA\d{2}$' })
+    if ($malas) { throw "cobertura_pa: nombres de PA inválidos: $($malas -join ', ')" }
+    if ($c.cubiertas.Count + @($c.faltan).Count -ne $c.total) {
+        throw "cobertura_pa: cubiertas ($($c.cubiertas.Count)) más faltan ($(@($c.faltan).Count)) no suman el total ($($c.total))"
+    }
+    [ordered]@{
+        conjunto           = $c.conjunto
+        total              = $c.total
+        cantidad_cubiertas = $c.cubiertas.Count
+        cubiertas          = $c.cubiertas
+        faltan             = @($c.faltan)
+        fuera_del_conjunto = $c.fuera_del_conjunto
+    }
+}
+
 # Lee la salida de `docker buildx imagetools inspect <ref> --format '{{json .Manifest}}'`
 # y devuelve el digest del índice. Exige un índice (Docker con el almacén de
 # containerd sube índice + atestación) que contenga $CemPlataformaImagenes.

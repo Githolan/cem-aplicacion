@@ -1,5 +1,7 @@
 """El informe de PA encuentra las pruebas `test_paNN_` y cuenta el P0-piloto (documento 14, §7)."""
 
+import json
+
 from scripts import cobertura_pa
 
 
@@ -21,3 +23,16 @@ def test_estricto_falla_solo_si_falta_alguna(capsys):
     assert cobertura_pa.main([]) == 0
     assert cobertura_pa.main(["--estricto"]) == (1 if faltan else 0)
     assert "Sin prueba:" in capsys.readouterr().out
+
+
+def test_json_es_lo_unico_que_imprime_y_separa_cubiertas_de_faltantes(capsys):
+    faltan = set(cobertura_pa.P0_PILOTO) - set(cobertura_pa.cobertura())
+    assert cobertura_pa.main(["--json"]) == 0
+    datos = json.loads(capsys.readouterr().out)
+    assert datos["total"] == 25
+    assert "backend/tests/test_rls.py" in datos["cubiertas"]["PA15"]
+    assert set(datos["faltan"]) == faltan
+    assert not set(datos["cubiertas"]) & set(datos["faltan"])
+    # Control: una PA inventada no aparece en ningún lado.
+    assert "PA99" not in datos["cubiertas"] and "PA99" not in datos["fuera_del_conjunto"]
+    assert cobertura_pa.main(["--json", "--estricto"]) == (1 if faltan else 0)

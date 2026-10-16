@@ -14,6 +14,7 @@
 #    cem-trabajos, con -SinCopiaPrevia, base en una revisión desconocida o vacía.
 # 7. Resumen de la copia (JSON válido e inválidos) y la fila del registro.
 # 8. cd.ps1 acepta -SinCopiaPrevia y con él las demás compuertas siguen valiendo.
+# 10. Cobertura de PA: la constancia guarda cubiertas y faltantes; un informe roto falla.
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -300,6 +301,27 @@ $p = Contenedor $refB $labelsOk @()
 Comprobar 'imagen sin RepoDigests (construida en la VM) -> problema' ($p.Count -eq 1) ($p -join '; ')
 $p = Contenedor $refB $labelsOk @("ghcr.io/githolan/cem-backend@$digB") $front $digF
 Comprobar 'frontend corriendo la imagen de backend -> problema' ($p.Count -ge 1 -and $p[0] -match 'cem-frontend') ($p -join '; ')
+
+Write-Host "`n=== 10. Cobertura de PA en la constancia de ci.ps1 ===" -ForegroundColor Cyan
+$jsonPa = '{"conjunto": "P0-piloto", "total": 3, "cubiertas": {"PA15": ["backend/tests/test_rls.py"], "PA02": ["backend/tests/test_reparto.py"]}, "faltan": ["PA04"], "fuera_del_conjunto": {"PA40": ["frontend/e2e/x.e2e.ts"]}}'
+$c = Read-CemCoberturaPa -Json $jsonPa
+Write-CemResultadoCi -Sha $shaA -Resultado @{ sha = $shaA; resultado = 'ok'; cobertura_pa = $c } | Out-Null
+$leida = (Read-CemResultadoCi -Sha $shaA).cobertura_pa
+Comprobar 'la constancia guarda PA15 cubierta con su archivo' ($leida.cubiertas.PA15 -contains 'backend/tests/test_rls.py') ($leida | ConvertTo-Json -Depth 5)
+Comprobar 'la constancia guarda las faltantes' (@($leida.faltan) -contains 'PA04' -and $leida.cantidad_cubiertas -eq 2) ($leida | ConvertTo-Json -Depth 5)
+Comprobar 'control: PA99 (inexistente) no figura como cubierta' ($null -eq $leida.cubiertas.PA99 -and $null -eq $leida.fuera_del_conjunto.PA99) ($leida | ConvertTo-Json -Depth 5)
+Comprobar 'control: una faltante no figura como cubierta' ($null -eq $leida.cubiertas.PA04) ($leida | ConvertTo-Json -Depth 5)
+Comprobar 'una constancia con faltantes sigue en verde' (Test-CemCiAprobado -Sha $shaA) 'no aprobado'
+foreach ($caso in @(
+        @('salida vacía', ''),
+        @('texto que no es JSON', 'Traceback (most recent call last):'),
+        @('una lista en vez de un objeto', '[1, 2]'),
+        @('sin el campo faltan', '{"conjunto": "P0-piloto", "total": 1, "cubiertas": {"PA02": ["a"]}, "fuera_del_conjunto": {}}'),
+        @('cubiertas + faltan != total', '{"conjunto": "P0-piloto", "total": 25, "cubiertas": {"PA02": ["a"]}, "faltan": [], "fuera_del_conjunto": {}}'),
+        @('nombre de PA inválido', '{"conjunto": "P0-piloto", "total": 1, "cubiertas": {"PA2": ["a"]}, "faltan": [], "fuera_del_conjunto": {}}'))) {
+    $e = $null; try { Read-CemCoberturaPa -Json $caso[1] | Out-Null } catch { $e = $_ }
+    Comprobar "informe roto ($($caso[0])) -> falla" ($null -ne $e) 'aceptado'
+}
 
 Remove-Item Env:\CEM_DESPLIEGUE_ESTADO
 if ((Split-Path -Leaf $raiz) -like "$prefijo*" -and $raiz.StartsWith([IO.Path]::GetTempPath())) { Remove-Item -Recurse -Force $raiz }
