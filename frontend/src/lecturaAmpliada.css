@@ -1,0 +1,178 @@
+/* Modo lectura ampliada (RF53; documento 08, §13.4; documento 13, §14.1). Se activa con la clase
+   lectura-ampliada en <html> (src/lecturaAmpliada.ts). Redefine los colores de estilos.css, así
+   que las reglas de cada página lo siguen sin tocarlas. Contrastes (texto sobre fondo), todos AAA:
+   claro #000/#fff 21:1, #0b3a6f/#fff 11.4:1, #0f5223/#fff 9.3:1, #8a0f12/#fff 9.7:1;
+   oscuro #fff/#000 21:1, #9cc9ff/#000 12.2:1, #7fe08f/#000 13:1, #ff9b9b/#000 10.4:1. */
+
+/* El botón de la cabecera, en los dos modos. */
+.cabecera {
+  flex-wrap: wrap;
+}
+
+.modo-lectura {
+  display: grid;
+  justify-items: end;
+  gap: 0.25rem;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.boton-modo-lectura {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  border: 2px solid #ffffff;
+  background: #ffffff;
+  color: var(--azul);
+  text-align: left;
+}
+
+.marca-modo-lectura {
+  font-weight: 700;
+}
+
+.aviso-modo-lectura {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+/* Modo activo: base de 20 px (125 % de la normal en todo el rango del clamp). */
+:root.lectura-ampliada {
+  --azul: #0b3a6f;
+  --texto: #000000;
+  --fondo: #ffffff;
+  --tarjeta: #ffffff;
+  --ok: #0f5223;
+  --error: #8a0f12;
+  --enlace: #0b3a6f;
+  --sobre-azul: #ffffff;
+  --foco: #000000;
+  --foco-cabecera: #ffffff;
+  --cabecera-fondo: #0b3a6f;
+  font-size: clamp(1.25rem, 1.1875rem + 0.375vw, 1.40625rem);
+  line-height: 1.6;
+  word-spacing: 0.08em;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root.lectura-ampliada {
+    --azul: #9cc9ff;
+    --texto: #ffffff;
+    --fondo: #000000;
+    --tarjeta: #000000;
+    --ok: #7fe08f;
+    --error: #ff9b9b;
+    --enlace: #9cc9ff;
+    --sobre-azul: #000000;
+    --foco: #ffd166;
+    --foco-cabecera: #ffd166;
+    --cabecera-fondo: #000000;
+    color-scheme: dark;
+  }
+}
+
+/* Cabecera: blanco sobre azul oscuro (claro) o sobre negro con un filete (oscuro). */
+.lectura-ampliada .cabecera {
+  padding: 1rem;
+  border-bottom: 2px solid var(--texto);
+  background: var(--cabecera-fondo);
+  color: #ffffff;
+}
+
+/* Nada decorativo: sin logo, sin fondos teñidos ni esquinas redondeadas. */
+.lectura-ampliada .cabecera img {
+  display: none;
+}
+
+.lectura-ampliada .boton-modo-lectura {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #000000;
+}
+
+.lectura-ampliada main {
+  padding: 2rem 1rem 4rem;
+}
+
+.lectura-ampliada p,
+.lectura-ampliada li {
+  margin-block: 0.75em;
+}
+
+.lectura-ampliada a {
+  display: inline-block;
+  padding-block: 0.375rem;
+  color: var(--enlace);
+  text-decoration-thickness: 0.12em;
+  text-underline-offset: 0.2em;
+}
+
+.lectura-ampliada .tarjeta {
+  margin-top: 2.5rem;
+  padding: 1.25rem;
+  border: 2px solid var(--texto);
+  border-radius: 0;
+  background: var(--tarjeta);
+}
+
+.lectura-ampliada button {
+  min-height: 3rem;
+  min-width: 3rem;
+  padding: 0.75rem 1.25rem;
+  border: 2px solid var(--azul);
+  border-radius: 0.25rem;
+  color: var(--sobre-azul);
+}
+
+.lectura-ampliada :focus-visible,
+.lectura-ampliada button:focus-visible,
+.lectura-ampliada .formulario input:focus-visible {
+  outline: 4px solid var(--foco);
+  outline-offset: 3px;
+}
+
+.lectura-ampliada .cabecera :focus-visible,
+.lectura-ampliada .cabecera button:focus-visible {
+  outline-color: var(--foco-cabecera);
+}
+
+.lectura-ampliada .aviso-version {
+  background: var(--texto);
+  color: var(--fondo);
+}
+
+.lectura-ampliada .aviso-version button {
+  border-color: var(--fondo);
+}
+
+/* Una sola columna: los pares título/valor y la grilla de códigos quedan uno abajo del otro. */
+.lectura-ampliada .detalles {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.lectura-ampliada .detalles dd {
+  margin-bottom: 0.75rem;
+}
+
+.lectura-ampliada .codigos-recuperacion {
+  grid-template-columns: 1fr;
+}
+
+.lectura-ampliada .pasos li + li {
+  margin-top: 1rem;
+}
+
+.lectura-ampliada .formulario {
+  gap: 0.75rem;
+  max-width: none;
+}
+
+.lectura-ampliada .formulario input {
+  min-height: 3rem;
+  border: 2px solid var(--texto);
+  border-radius: 0.25rem;
+  background: var(--fondo);
+  color: var(--texto);
+}

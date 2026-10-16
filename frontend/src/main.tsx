@@ -6,8 +6,13 @@ import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { AvisoVersion } from "./AvisoVersion";
 import { escucharInstalacion } from "./instalacion";
+import { aplicarLecturaAmpliada, preferenciaInicial } from "./lecturaAmpliada";
 import { ProveedorVersion } from "./ProveedorVersion";
 import "./estilos.css";
+import "./lecturaAmpliada.css";
+
+// Antes del primer render: así la página no aparece un instante con la letra normal (RF53).
+aplicarLecturaAmpliada(preferenciaInicial());
 
 escucharInstalacion();
 

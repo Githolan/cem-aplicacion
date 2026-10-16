@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -142,7 +142,7 @@ describe("página /invitacion", () => {
     abrir(`/invitacion#token=${TOKEN}`);
 
     expect(await screen.findByText(/Esta invitación no sirve/)).toBeTruthy();
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(within(screen.getByRole("main")).queryByRole("button")).toBeNull();
   });
 
   it("sin token no pide nada", () => {
