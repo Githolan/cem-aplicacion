@@ -113,7 +113,13 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `099ab21`** (= `main` con el segundo factor, 16-10-2026), base `0008`, contrato 0.10.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `7c23fd0`** (= `main`, 16-10-2026), base `0008`, contrato 0.10.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Aviso de la copia a Kuma, formulario de `/entrar` y cobertura de PA (`7c23fd0`, PR #40, #41 y #44), 16-10.** Registro en `doc/deploys/2026-10-16-7c23fd0.md` del repositorio CEM.
+  - **Despliegue:** staging lo hizo Claude (17:34–17:37 UTC) y producción el propietario (19:09–19:11 UTC). No hubo migraciones.
+  - **Aviso de la copia:** `CEM_COPIAS_AVISO_URL` en `cem-trabajos(-staging)` apunta al push interno de los monitores Push `cem-copia-diaria-staging` (20) y `cem-copia-diaria` (21). Tienen intervalo de 26 h y avisan por Infra Alert.
+  - **Probado en staging con una copia real:** 0 → 1 latido, en verde. Controles: con un token inventado da `fallido` y sin la variable da `sin_configurar`; ninguno de los dos agrega latidos.
+  - **NO VERIFICADO:** el primer latido de producción, que llega con la copia de las 03:30 UTC del 17-10.
 
 - **Segundo factor (`099ab21`), 16-10.** Registro en `doc/deploys/2026-10-16-099ab21.md` del repositorio CEM.
   - **CI:** `ci.ps1` con imágenes en verde.
@@ -172,10 +178,15 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 2. Carril C: los prototipos P0 y el guion de prueba ya están en el repositorio CEM, en `doc/descubrimiento/` (CEM #26 y #27, 15-10-2026). Lo que sigue es la prueba de uso para la puerta G3.
 3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
    - **Hecho el 16-10:** segundo factor TOTP con su página, en staging y producción. Falta un enlace a la página desde el inicio;
-   - **formulario para pedir el enlace en `/entrar`:** nadie en el frontend llama a `POST /api/v1/auth/enlace`, así que una persona no puede entrar sola. Está propuesto como tarea aparte;
+   - **Hecho el 16-10:** el formulario para pedir el enlace en `/entrar` (PR #44), en staging y producción;
    - contraseña Argon2id, TOTP obligatorio para roles de dinero (con los mandatos, 2b), persona autorizada (RF53), cuenta de solo carga, borradores fuera de línea (PA16) y PA29. Passkeys pueden ir en H6.
-4. Que `ci.ps1` llame a `python -m scripts.cobertura_pa` y guarde la salida en la constancia. Toda prueba nueva que cubra una PA lleva su prefijo `test_paNN_`.
-5. Pendientes de las copias: push a Kuma, WAL continuo (H2c), bloqueo de objeto del bucket y el primer descifrado con la identidad real.
+4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Hoy hay 4 de 25. Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
+5. Pendientes de las copias:
+   - comprobar el primer latido de `cem-copia-diaria` (03:30 UTC del 17-10);
+   - WAL continuo (H2c);
+   - bloqueo de objeto del bucket;
+   - el primer descifrado con la identidad real.
+   - El inventario de copias de la VM y de la PC (16-10) se ordena aparte, para todos los proyectos.
 6. TB-8: falta leer las reglas de OCI para cerrarlo con prueba firme (ver "Decisiones vigentes"); para eso hay que configurar el perfil del MCP de OCI.
 7. Probar `/instalar` en un iPhone y en un Android reales. El cartel con el QR está en el repositorio CEM (#28); falta comprobar que el QR lleva a `/instalar`.
 8. **Cloudflare Access de `cem-staging` (decidido por el propietario el 16-10, para más adelante):**
