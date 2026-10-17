@@ -288,14 +288,21 @@ describe("página /cuenta", () => {
 describe("contraseña en /cuenta", () => {
   const seccion = () => within(screen.getByRole("region", { name: "Contraseña" }));
 
-  /** Completa el formulario y lo manda; `actual` solo si el campo está. */
+  /** El formulario empieza plegado: lo abre con su botón si todavía está cerrado. */
+  function desplegar() {
+    const boton = seccion().queryByRole("button", { name: /^(Cambiar la contraseña|Definir una contraseña)$/ });
+    if (boton !== null) fireEvent.click(boton);
+  }
+
+  /** Abre el formulario si hace falta, lo completa y lo manda; `actual` solo si el campo está. */
   function completar(nueva: string, repetida = nueva, actual?: string) {
+    desplegar();
     if (actual !== undefined)
       fireEvent.change(seccion().getByLabelText("Contraseña actual"), { target: { value: actual } });
     fireEvent.change(seccion().getByLabelText(/^Contraseña( nueva)?$/), { target: { value: nueva } });
     fireEvent.change(seccion().getByLabelText("Repetí la contraseña"), { target: { value: repetida } });
     const formulario = seccion()
-      .getByRole("button", { name: /(Definir|Cambiar) la contraseña/ })
+      .getByRole("button", { name: /^Guardar la contraseña( nueva)?$/ })
       .closest("form");
     if (formulario === null) throw new Error("el botón no está en un formulario");
     fireEvent.submit(formulario);
@@ -317,8 +324,13 @@ describe("contraseña en /cuenta", () => {
     abrir();
 
     expect(await screen.findByText(/Todavía no tenés contraseña/)).toBeTruthy();
+    const definir = seccion().getByRole("button", { name: "Definir una contraseña" });
+    expect(definir.getAttribute("aria-expanded")).toBe("false");
+    expect(seccion().queryByLabelText("Contraseña")).toBeNull();
+    desplegar();
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
     const campo = seccion().getByLabelText("Contraseña");
+    expect(document.activeElement).toBe(campo);
     expect(campo.getAttribute("autocomplete")).toBe("new-password");
     expect(campo.getAttribute("type")).toBe("password");
     expect(seccion().getByLabelText("Repetí la contraseña").getAttribute("autocomplete")).toBe("new-password");
@@ -330,7 +342,9 @@ describe("contraseña en /cuenta", () => {
     if (put === undefined) throw new Error("no hubo PUT");
     expect(put.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(await put.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
-    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe("");
+    // Guardada, el formulario se pliega y el foco vuelve al botón, que ahora es el de cambiarla.
+    expect(seccion().queryByLabelText("Contraseña nueva")).toBeNull();
+    expect(document.activeElement).toBe(seccion().getByRole("button", { name: "Cambiar la contraseña" }));
   });
 
   it("sin segundo factor, cambiarla pide la actual; cierra las otras sesiones y las saca de la lista", async () => {
@@ -343,7 +357,14 @@ describe("contraseña en /cuenta", () => {
     abrir();
 
     expect(await screen.findByText(/La cambiaste por última vez el 10 de octubre de 2026/)).toBeTruthy();
-    expect(seccion().getByLabelText("Contraseña actual").getAttribute("autocomplete")).toBe("current-password");
+    // Plegado: ni la actual a la vista (que el navegador autocompletaría) ni el aviso de sesiones.
+    expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
+    expect(seccion().queryByText(/cerramos las sesiones de tus otros dispositivos/)).toBeNull();
+    desplegar();
+    const actual = seccion().getByLabelText("Contraseña actual");
+    expect(actual.getAttribute("autocomplete")).toBe("current-password");
+    expect(document.activeElement).toBe(actual);
+    expect(seccion().getByText(/cerramos las sesiones de tus otros dispositivos/)).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
     completar(NUEVA, NUEVA, ANTERIOR);
 
@@ -390,6 +411,7 @@ describe("contraseña en /cuenta", () => {
     abrir();
     await screen.findByText(/La cambiaste por última vez/);
 
+    desplegar();
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
     expect(seccion().getByRole("link", { name: /verificá un código/ }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
@@ -425,6 +447,24 @@ describe("contraseña en /cuenta", () => {
     expect(seccion().queryByText(/Listo:/)).toBeNull();
     // Los campos quedan como estaban, para corregir sin volver a escribir todo.
     expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe(NUEVA);
+  });
+
+  it("Cancelar pliega el formulario, borra lo escrito y devuelve el foco al botón", async () => {
+    const simulado = conSesion({}, TOTP_INACTIVO, CON_CONTRASENA);
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText(/La cambiaste por última vez/);
+
+    desplegar();
+    fireEvent.change(seccion().getByLabelText("Contraseña nueva"), { target: { value: NUEVA } });
+    fireEvent.click(seccion().getByRole("button", { name: "Cancelar" }));
+
+    expect(seccion().queryByLabelText("Contraseña nueva")).toBeNull();
+    const cambiar = seccion().getByRole("button", { name: "Cambiar la contraseña" });
+    expect(document.activeElement).toBe(cambiar);
+    desplegar();
+    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe("");
+    expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
   it("sin red al guardar, lo dice", async () => {
