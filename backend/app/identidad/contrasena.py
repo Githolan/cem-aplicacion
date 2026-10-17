@@ -21,6 +21,9 @@ tiene que haberlo verificado en los últimos 10 minutos; sin él, cambiar una ex
 actual. Siempre avisa por correo, y al cambiar una existente cierra las sesiones de los otros
 dispositivos (quien la conocía y entró con ella queda afuera).
 
+Toda respuesta de estas rutas lleva `Cache-Control: no-store` (`errores.sin_cache`), también
+los errores que salen de las dependencias: límite de tasa, sesión, CSRF, claves y base.
+
 Cupos: además de los 20 por minuto por IP de la familia `/api/v1/auth/`, la entrada gasta
 `LIMITES_CONTRASENA_CORREO` por correo pedido y `LIMITES_CONTRASENA_IP` por IP; el paso del
 segundo factor, el mismo cupo de intentos por persona que `/totp/verificar`.
@@ -51,20 +54,22 @@ from cem_contracts.contrasena import (
 )
 from cem_contracts.errores import CodigoError, Error
 from cem_contracts.identidad import SesionActual
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import Connection, Engine, text
 
 from app import limite
 from app.contexto import Identidad, IdentidadDep, MotorDep
 from app.db import fijar_ambito, transaccion
-from app.errores import ErrorApi
+from app.errores import ErrorApi, sin_cache
 from app.identidad import router as rutas_auth
 from app.identidad import segundo_factor as sf
 from app.identidad import sesiones
 from app.plataforma import correo
 
-router = APIRouter(prefix="/api/v1/auth/contrasena", tags=["identidad"])
+router = APIRouter(
+    prefix="/api/v1/auth/contrasena", tags=["identidad"], dependencies=[Depends(sin_cache)]
+)
 log = logging.getLogger("cem.identidad")
 
 # Argon2id (RFC 9106) ------------------------------------------------------------------------
@@ -104,7 +109,6 @@ INTENTOS_DESAFIO = 5
 LIMITE_CORREO = "auth-contrasena"
 LIMITE_IP = "auth-contrasena-ip"
 LIMITE_CAMBIO = "auth-contrasena-cambio"
-SIN_CACHE = {"Cache-Control": "no-store"}
 
 ASUNTO_DEFINIDA = "Definiste una contraseña"
 ASUNTO_CAMBIADA = "Cambiaste tu contraseña"
@@ -245,7 +249,6 @@ def _credenciales_invalidas() -> ErrorApi:
         CodigoError.CREDENCIALES_INVALIDAS,
         "El correo o la contraseña no son correctos. Si no tenés contraseña, entrá con el"
         " enlace por correo.",
-        encabezados=SIN_CACHE,
     )
 
 
@@ -265,7 +268,6 @@ async def entrar(
     (`falta_segundo_factor`). Todo rechazo responde 401 `credenciales_invalidas`, en el mismo
     tiempo, exista o no la cuenta."""
     inicio = time.monotonic()
-    response.headers.update(SIN_CACHE)
     _exigir_mismo_origen(request, "entrada con contraseña")
     correo_pedido = pedido.correo.lower()
     ip = sesiones.ip_cliente(request)
@@ -316,7 +318,6 @@ def _entrada_vencida() -> ErrorApi:
         401,
         CodigoError.ENTRADA_VENCIDA,
         "Pasó demasiado tiempo o hubo demasiados intentos. Volvé a escribir la contraseña.",
-        encabezados=SIN_CACHE,
     )
 
 
@@ -397,7 +398,6 @@ async def completar_con_segundo_factor(
     """Con el código de la aplicación o uno de recuperación, desde el navegador que escribió la
     contraseña (cookie `__Host-cem_desafio`), abre la sesión con el segundo factor ya
     verificado. Cinco códigos incorrectos agotan el paso; vale 5 minutos."""
-    response.headers.update(SIN_CACHE)
     _exigir_mismo_origen(request, "segundo factor de la entrada")
     token = request.cookies.get(sesiones.COOKIE_DESAFIO)
     if not sesiones.token_valido(token):
@@ -435,8 +435,7 @@ async def completar_con_segundo_factor(
 
 
 @router.get("", response_model=EstadoContrasena, summary="Estado de mi contraseña")
-def estado(identidad: IdentidadDep, motor: MotorDep, response: Response) -> EstadoContrasena:
-    response.headers.update(SIN_CACHE)
+def estado(identidad: IdentidadDep, motor: MotorDep) -> EstadoContrasena:
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         cambiada_en = conn.execute(
             text("select cambiada_en from nucleo.contrasena")
@@ -471,7 +470,6 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
                 403,
                 CodigoError.CONTRASENA_ACTUAL_INVALIDA,
                 "La contraseña actual no es correcta.",
-                encabezados=SIN_CACHE,
             )
         cambiada_en = conn.execute(
             text(
@@ -542,13 +540,11 @@ def _exigir_verificacion_reciente(conn: Connection, identidad: Identidad) -> Non
     },
 )
 async def guardar(
-    pedido: NuevaContrasena, request: Request, identidad: IdentidadDep, motor: MotorDep,
-    response: Response,
-) -> ContrasenaGuardada:  # fmt: skip
+    pedido: NuevaContrasena, request: Request, identidad: IdentidadDep, motor: MotorDep
+) -> ContrasenaGuardada:
     """Define la contraseña o la cambia, y avisa por correo. Con el segundo factor activo pide
     haberlo verificado en esta sesión en los últimos 10 minutos (TB-CEM-3); sin él, cambiar
     una existente pide la actual. Cambiarla cierra las sesiones de los otros dispositivos."""
-    response.headers.update(SIN_CACHE)
     for cupo in limite.LIMITES_CAMBIO_CONTRASENA:
         await limite.consumir(
             request.app.state.limitador, cupo, LIMITE_CAMBIO, str(identidad.persona_id)
