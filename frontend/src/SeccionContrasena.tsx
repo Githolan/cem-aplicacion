@@ -1,6 +1,7 @@
 import { type FormEvent, useId, useState } from "react";
 import { Link } from "react-router";
 
+import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
@@ -157,9 +158,8 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         {pideActual && (
           <>
             <label htmlFor={`${id}-actual`}>Contraseña actual</label>
-            <input
+            <CampoContrasena
               id={`${id}-actual`}
-              type="password"
               autoComplete="current-password"
               required
               maxLength={LARGO_MAXIMO_CONTRASENA}
@@ -169,9 +169,8 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           </>
         )}
         <label htmlFor={`${id}-nueva`}>{estado.definida ? "Contraseña nueva" : "Contraseña"}</label>
-        <input
+        <CampoContrasena
           id={`${id}-nueva`}
-          type="password"
           autoComplete="new-password"
           required
           minLength={LARGO_MINIMO_CONTRASENA}
@@ -191,9 +190,8 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           </p>
         )}
         <label htmlFor={`${id}-repetida`}>Repetí la contraseña</label>
-        <input
+        <CampoContrasena
           id={`${id}-repetida`}
-          type="password"
           autoComplete="new-password"
           required
           maxLength={LARGO_MAXIMO_CONTRASENA}

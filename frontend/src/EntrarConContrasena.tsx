@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
+import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
 
@@ -141,10 +142,9 @@ export function EntrarConContrasena() {
               onChange={(e) => setCorreo(e.target.value)}
             />
             <label htmlFor={`${id}-contrasena`}>Contraseña</label>
-            <input
+            <CampoContrasena
               id={`${id}-contrasena`}
               ref={campoContrasena}
-              type="password"
               autoComplete="current-password"
               required
               value={contrasena}
