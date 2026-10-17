@@ -28,6 +28,11 @@ WORKDIR /app
 COPY --chown=cem backend/app app
 COPY --chown=cem backend/migrations migrations
 COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
+# Herramientas del equipo que corren dentro del contenedor (`docker exec … python -m scripts.…`):
+# alta de un consorcio e invitación de sus primeras personas. Las demás (roles, OpenAPI,
+# cobertura de PA) corren fuera de la imagen.
+COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
+     backend/scripts/invitar.py scripts/
 USER cem
 EXPOSE 8000
 # La misma imagen corre cem-backend, cem-trabajos o cem-planificador según CEM_PROCESO

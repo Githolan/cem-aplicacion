@@ -31,6 +31,7 @@ API con las reglas del negocio de **Consorcio en Mano** (FastAPI, PostgreSQL con
 | `migrations/versions/0006_*` | `nucleo.codigo_acceso` (HMAC del código, intentos, vencimiento; uno por pedido, se borra con su enlace) con RLS y sin privilegios para `cem_app`, y las funciones `registrar_codigo` y `canjear_codigo` |
 | `migrations/versions/0007_*` | `nucleo.invitacion` (hash del token, 7 días como máximo, una pendiente por correo, unidad y vínculo) con RLS por consorcio que exige `invitada_por` = persona del ámbito, y las funciones `consultar_invitacion` y `aceptar_invitacion` (persona, vínculo desde hoy en la zona del consorcio, sesión y auditoría en una transacción) |
 | `migrations/versions/0008_*` | `nucleo.factor_totp` (secreto cifrado, último paso aceptado), `nucleo.codigo_recuperacion` (HMAC, un solo uso) con RLS por persona, y `nucleo.sesion.segundo_factor_en` |
+| `scripts/alta_consorcio.py` | Alta de un consorcio y sus unidades por el equipo de la plataforma, desde un JSON, idempotente y con `--simular`: `python -m scripts.alta_consorcio --archivo - < edificio.json` dentro del contenedor de `cem-backend`. Pasos completos en [`docs/alta-de-un-consorcio.md`](../docs/alta-de-un-consorcio.md) |
 | `scripts/invitar.py` | Alta de las primeras personas de un consorcio por el equipo de la plataforma: `python -m scripts.invitar --consorcio … --unidad … --tipo … --correo … --nombre …` dentro del contenedor de `cem-backend` |
 | `scripts/crear_roles.sql` | Roles `cem_migrate`, `cem_app`, `cem_ro` y la base (una vez por servidor, con superusuario) |
 
