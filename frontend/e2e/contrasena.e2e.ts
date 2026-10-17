@@ -246,11 +246,22 @@ async function simularCuenta(pagina: Page, baseURL: string, respuestaPut: { stat
   return puts;
 }
 
+/** El formulario empieza plegado: el botón lo abre y deja el foco en el primer campo. */
+async function desplegar(pagina: Page) {
+  const seccion = seccionCuenta(pagina);
+  const boton = seccion.getByRole("button", { name: "Cambiar la contraseña" });
+  await expect(boton).toHaveAttribute("aria-expanded", "false");
+  await expect(seccion.getByLabel("Contraseña nueva")).toHaveCount(0);
+  await boton.click();
+  await expect(seccion.getByLabel("Contraseña nueva")).toBeFocused();
+}
+
 async function cambiar(pagina: Page) {
   const seccion = seccionCuenta(pagina);
+  if ((await seccion.getByLabel("Contraseña nueva").count()) === 0) await desplegar(pagina);
   await seccion.getByLabel("Contraseña nueva").fill(NUEVA);
   await seccion.getByLabel("Repetí la contraseña").fill(NUEVA);
-  await seccion.getByRole("button", { name: "Cambiar la contraseña" }).click();
+  await seccion.getByRole("button", { name: "Guardar la contraseña nueva" }).click();
 }
 
 test.describe("contraseña en /cuenta (API simulada)", () => {
@@ -265,12 +276,14 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
 
     const seccion = seccionCuenta(page);
     await expect(seccion.getByText(/La cambiaste por última vez el 10 de octubre de 2026/)).toBeVisible();
+    await desplegar(page);
     await expect(seccion.getByLabel("Contraseña nueva")).toHaveAttribute("autocomplete", "new-password");
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
     await cambiar(page);
 
     await expect(seccion.getByRole("status")).toContainText("Listo: cambiaste tu contraseña.");
+    await expect(seccion.getByRole("button", { name: "Cambiar la contraseña" })).toBeFocused();
     expect(puts).toEqual([{ csrf: CSRF, cuerpo: { contrasena_nueva: NUEVA, contrasena_actual: null } }]);
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);

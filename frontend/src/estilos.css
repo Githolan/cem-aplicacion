@@ -229,3 +229,20 @@ button:focus-visible {
   background: transparent;
   color: var(--azul);
 }
+
+/* Guardar y Cancelar en una fila que baja a dos si no entra; Cancelar con el borde de "Mostrar". */
+.formulario .acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.formulario .acciones button {
+  margin-top: 0.5rem;
+}
+
+.formulario .acciones .secundario {
+  border: 1px solid var(--azul);
+  background: transparent;
+  color: var(--azul);
+}

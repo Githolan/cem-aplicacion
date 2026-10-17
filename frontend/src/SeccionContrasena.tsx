@@ -1,4 +1,4 @@
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
@@ -13,6 +13,10 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // sesión en los últimos 10 minutos (403 `segundo_factor_requerido`); sin él, cambiar una
 // existente pide la actual (403 `contrasena_actual_invalida`). Cambiarla cierra las sesiones de
 // los otros dispositivos y siempre avisa por correo.
+// El formulario empieza plegado detrás de un botón (pedido del propietario, 17-10-2026): quien
+// acaba de definirla no tiene por qué ver tres campos vacíos cada vez que entra a /cuenta, y el
+// navegador no autocompleta la actual en un campo que nadie pidió. Se pliega de nuevo al guardar
+// o al cancelar, y el foco va al primer campo al abrir y vuelve al botón al cerrar.
 
 export type EstadoContrasena = components["schemas"]["EstadoContrasena"];
 type Guardada = components["schemas"]["ContrasenaGuardada"];
@@ -72,6 +76,36 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   const [distintas, setDistintas] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [abierto, setAbierto] = useState(false);
+  // `null`: todavía no se abrió ni se cerró, y el foco queda donde estaba.
+  const [foco, setFoco] = useState<"campo" | "boton" | null>(null);
+  const primerCampo = useRef<HTMLInputElement>(null);
+  const botonAbrir = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (foco === "campo") primerCampo.current?.focus();
+    if (foco === "boton") botonAbrir.current?.focus();
+  }, [foco, abierto]);
+
+  function vaciar() {
+    setActual("");
+    setNueva("");
+    setRepetida("");
+    setCorta(false);
+    setDistintas(false);
+  }
+
+  function abrir() {
+    setAviso(null);
+    setAbierto(true);
+    setFoco("campo");
+  }
+
+  function cerrar() {
+    vaciar();
+    setAbierto(false);
+    setFoco("boton");
+  }
 
   // Sin segundo factor, cambiar una existente pide la actual; con él, la verificación reciente.
   const pideActual = estado.definida && !segundoFactor;
@@ -92,9 +126,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
       })
       .then(({ data, error, response }) => {
         if (data !== undefined) {
-          setActual("");
-          setNueva("");
-          setRepetida("");
+          cerrar();
           const cerradas =
             data.sesiones_cerradas === 0
               ? ""
@@ -142,23 +174,30 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
             : "Tenés una contraseña."
           : "Todavía no tenés contraseña: entrás con el enlace o el código que te mandamos por correo."}
       </p>
-      {segundoFactor && (
+      {!abierto && (
+        <button type="button" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
+          {estado.definida ? "Cambiar la contraseña" : "Definir una contraseña"}
+        </button>
+      )}
+      {abierto && segundoFactor && (
         <p>
           Como tenés el segundo factor activado, antes de {estado.definida ? "cambiarla" : "definirla"}{" "}
           <Link to={RUTA_SEGUNDO_FACTOR}>verificá un código en la página del segundo factor</Link> (vale
           10 minutos).
         </p>
       )}
-      {estado.definida && (
+      {abierto && estado.definida && (
         <p>Al cambiarla cerramos las sesiones de tus otros dispositivos.</p>
       )}
-      <form className="formulario" onSubmit={guardar} noValidate>
+      {abierto && (
+      <form id={`${id}-formulario`} className="formulario" onSubmit={guardar} noValidate>
         {/* Para que el gestor de contraseñas sepa de qué cuenta es: no se ve ni se edita. */}
         <input type="email" name="username" autoComplete="username" value={correo} readOnly hidden />
         {pideActual && (
           <>
             <label htmlFor={`${id}-actual`}>Contraseña actual</label>
             <CampoContrasena
+              ref={primerCampo}
               id={`${id}-actual`}
               autoComplete="current-password"
               required
@@ -170,6 +209,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         )}
         <label htmlFor={`${id}-nueva`}>{estado.definida ? "Contraseña nueva" : "Contraseña"}</label>
         <CampoContrasena
+          ref={pideActual ? undefined : primerCampo}
           id={`${id}-nueva`}
           autoComplete="new-password"
           required
@@ -205,10 +245,16 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
             Las dos contraseñas no coinciden.
           </p>
         )}
-        <button type="submit" disabled={enviando}>
-          {estado.definida ? "Cambiar la contraseña" : "Definir la contraseña"}
-        </button>
+        <div className="acciones">
+          <button type="submit" disabled={enviando}>
+            {estado.definida ? "Guardar la contraseña nueva" : "Guardar la contraseña"}
+          </button>
+          <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
+            Cancelar
+          </button>
+        </div>
       </form>
+      )}
       <div role="status" aria-live="polite">
         {enviando && <p>Guardando…</p>}
         {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
