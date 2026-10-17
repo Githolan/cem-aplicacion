@@ -113,12 +113,19 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging en `f9130aa` (= `main`) y producción en `69374bc`** (17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `000734d`** (= `main`, 17-10-2026), base `0010`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
 
-- **Formulario de la contraseña plegado (`f9130aa`, PR #57), 17-10, solo en staging.**
+- **H2b 2b-1, modo de operación (`000734d`, PR #59), 17-10.** Diseño: `doc/diseno/H2b_Mandatos_Padron_y_Permisos.md` del repositorio CEM (#40).
+  - Migración `0010`: `nucleo.decision_formal` (registro mínimo con referencia del acta) y `nucleo.modo_operacion` (historial, uno vigente por consorcio). `cem_app` solo lee; escriben `nucleo.registrar_decision` y `nucleo.cambiar_modo` (`security definer`, consorcio del ámbito, auditoría). El modo solo cambia con decisión de asamblea (RN26, **PA31**).
+  - `require_scope` usa la fecha del consorcio (`nucleo.hoy_del_consorcio`; la base corre en GMT) y el `Contexto` lleva el modo vigente. `ModoOperacion`: `consejo` reemplaza a `administrador_tradicional`.
+  - CI con imágenes en verde: 418 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo. Cobertura de PA: **5 de 25** (se suma PA31).
+  - Staging y producción los desplegó Claude (18:18–18:24 UTC, corrida `/seguisolo` con producción autorizada), con copia previa verificada en los dos. Producción incluye también `f9130aa`.
+  - **Pendiente:** registrar el modo de Pareja 3750 (necesita el acta y la decisión D3 del diseño); los cortes 2b-2 a 2b-7 esperan D2, D3, D5 y D8.
+
+- **Formulario de la contraseña plegado (`f9130aa`, PR #57), 17-10.**
   - Qué trae: en `/cuenta` la sección muestra el estado y un botón "Cambiar la contraseña" (o "Definir una contraseña"); los campos aparecen al abrirlo, con el foco en el primero, y se pliegan al guardar o con "Cancelar". Plegado, el navegador no autocompleta la actual.
   - CI con imágenes en verde: 405 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo.
-  - Staging lo desplegó Claude (05:22 UTC, corrida `/seguisolo`); comprobado en la página servida. **Producción: pendiente**, la corre el propietario.
+  - Staging lo desplegó Claude (05:22 UTC); producción llegó con `000734d` (18:24 UTC). Comprobado en la página servida de los dos.
 - **Primer consorcio en staging, 17-10:** Pareja 3750, 37 unidades, con `scripts.alta_consorcio`; el propietario aceptó la invitación como dueño de la 3-A. En producción todavía no hay consorcio.
 
 - **Ver la contraseña, 503 sin base y alta de consorcio (`69374bc`, PR #52, #53, #54 y #55), 17-10.**
@@ -224,7 +231,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - borradores fuera de línea (PA16);
      - PA29.
    - Passkeys pueden ir en H6.
-4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Hoy hay 4 de 25. Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
+4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Hoy hay 5 de 25 (PA31 desde el 17-10). Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
 5. Pendientes de las copias:
    - comprobar el primer latido de `cem-copia-diaria` (03:30 UTC del 17-10);
    - WAL continuo (H2c);
