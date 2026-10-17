@@ -213,3 +213,19 @@ button:focus-visible {
 .detalles dd {
   overflow-wrap: anywhere;
 }
+
+/* Campo de contraseña con su botón "Mostrar": el campo ocupa el resto de la fila. */
+.campo-contrasena {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.formulario .campo-contrasena .boton-ver {
+  margin-top: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--azul);
+  background: transparent;
+  color: var(--azul);
+}

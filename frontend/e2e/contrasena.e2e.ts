@@ -70,6 +70,28 @@ async function anchoSinDesborde(pagina: Page) {
 //   CEM_CODIGO_CLAVE) responde antes de mirar la cookie del desafío.
 // - GET y PUT /contrasena sin sesión → 401 no_autenticado (el GET se afirma en cuenta.e2e.ts, que
 //   ya abre /cuenta sin sesión: cada pedido de más gasta el cupo de 20 por minuto de /api/v1/auth/).
+test.describe("ver la contraseña mientras se escribe", () => {
+  test("el botón Mostrar la deja ver y la vuelve a ocultar, sin desbordar ni faltas de axe", async ({ page }) => {
+    const errores = vigilarErrores(page);
+    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
+    await page.goto("/entrar");
+    const seccion = seccionEntrar(page);
+    const campo = seccion.getByLabel("Contraseña", { exact: true });
+    await campo.fill(CONTRASENA);
+    await expect(campo).toHaveAttribute("type", "password");
+
+    await seccion.getByRole("button", { name: "Mostrar lo escrito" }).click();
+    await expect(campo).toHaveAttribute("type", "text");
+    await expect(campo).toHaveValue(CONTRASENA);
+    await anchoSinDesborde(page);
+    await sinFaltasDeAccesibilidad(page);
+
+    await seccion.getByRole("button", { name: "Ocultar lo escrito" }).click();
+    await expect(campo).toHaveAttribute("type", "password");
+    expect(errores).toEqual([]);
+  });
+});
+
 test.describe("contraseña contra el backend real sin base", () => {
   // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
   test.use(otroCliente(1));
