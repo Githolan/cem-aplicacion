@@ -113,7 +113,15 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `9865ab4`** (= `main`, 17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `69374bc`** (= `main`, 17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Ver la contraseña, 503 sin base y alta de consorcio (`69374bc`, PR #52, #53, #54 y #55), 17-10.**
+  - Qué trae: botón "Mostrar"/"Ocultar" en los campos de contraseña (#55); la entrada con contraseña da 503 sin base y todos sus errores llevan `no-store` (#52); `python -m scripts.alta_consorcio --archivo … [--simular]` dentro de `cem-backend` para que el equipo dé de alta un consorcio y sus unidades (#53); la e2e corre con 4 navegadores y separa las pruebas lentas (#54).
+  - CI con imágenes en verde: 405 pruebas del backend, 3 de contratos, 133 del frontend y 103 de extremo a extremo.
+  - Despliegue: staging lo hizo Claude (03:48–03:50 UTC) y producción el propietario (04:01–04:03 UTC). Sin migraciones. Registro en `doc/deploys/2026-10-17-69374bc.md` del repositorio CEM.
+  - Comprobado afuera con controles: el botón sale en la página servida, el script está en la imagen y los errores 422 y 401 llevan `no-store`. **NO VERIFICADO en vivo:** el 503 sin base (cubierto por las pruebas).
+  - Primer latido de la copia de producción en Kuma (monitor 21): 17-10, 03:30:10 UTC.
+  - **Falta:** dar de alta el primer consorcio de producción con `scripts.alta_consorcio` (el propietario pasa los datos del edificio).
 
 - **Pantallas de la contraseña (`9865ab4`, PR #50), 17-10.**
   - Qué trae: "Entrar con contraseña" en `/entrar`, con el paso del segundo factor, y la sección "Contraseña" en `/cuenta` para definirla o cambiarla.
@@ -121,7 +129,7 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
   - Despliegue: staging lo hizo Claude (00:52–00:54 UTC) y producción el propietario (00:56–00:58 UTC). Sin migraciones.
   - Comprobado en los dos entornos con controles; registro en `doc/deploys/2026-10-17-9865ab4.md` del repositorio CEM.
   - **NO VERIFICADO:** definir una contraseña y entrar con ella en un navegador real.
-  - **Pendiente, en un PR aparte:** sin base, la entrada con contraseña da 500 en vez de 503, y algunos errores no llevan `no-store`.
+  - **Resuelto en `69374bc` (#52):** sin base, la entrada con contraseña daba 500 en vez de 503, y algunos errores no llevaban `no-store`.
 
 - **Mi cuenta, modo lectura y contraseña (`ce41e90`, PR #46, #47 y #48), 16-10.** Registro en `doc/deploys/2026-10-16-ce41e90.md` del repositorio CEM.
   - **Qué trae:**
