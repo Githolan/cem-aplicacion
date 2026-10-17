@@ -113,7 +113,15 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `ce41e90`** (= `main`, 16-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `9865ab4`** (= `main`, 17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Pantallas de la contraseña (`9865ab4`, PR #50), 17-10.**
+  - Qué trae: "Entrar con contraseña" en `/entrar`, con el paso del segundo factor, y la sección "Contraseña" en `/cuenta` para definirla o cambiarla.
+  - CI con imágenes en verde: 378 pruebas del backend, 3 de contratos, 130 del frontend y 87 de extremo a extremo.
+  - Despliegue: staging lo hizo Claude (00:52–00:54 UTC) y producción el propietario (00:56–00:58 UTC). Sin migraciones.
+  - Comprobado en los dos entornos con controles; registro en `doc/deploys/2026-10-17-9865ab4.md` del repositorio CEM.
+  - **NO VERIFICADO:** definir una contraseña y entrar con ella en un navegador real.
+  - **Pendiente, en un PR aparte:** sin base, la entrada con contraseña da 500 en vez de 503, y algunos errores no llevan `no-store`.
 
 - **Mi cuenta, modo lectura y contraseña (`ce41e90`, PR #46, #47 y #48), 16-10.** Registro en `doc/deploys/2026-10-16-ce41e90.md` del repositorio CEM.
   - **Qué trae:**
@@ -194,9 +202,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 3. Identidad, lo que falta de 2a (las invitaciones ya están en producción):
    - **Hecho el 16-10:** segundo factor TOTP con su página, en staging y producción, a la que se llega desde `/cuenta`;
    - **Hecho el 16-10:** el formulario para pedir el enlace en `/entrar` (PR #44), en staging y producción;
-   - **Hecho el 16-10:** contraseña Argon2id en el backend (#48), página `/cuenta` (#46) y modo lectura ampliada (RF53, #47);
+   - **Hecho el 16 y el 17-10:** contraseña Argon2id con sus pantallas (#48 y #50), página `/cuenta` (#46) y modo lectura ampliada (RF53, #47);
    - **falta:**
-     - las pantallas de la contraseña;
      - TOTP obligatorio para roles de dinero (con los mandatos, 2b);
      - la ayuda por persona autorizada (RF53, 2b);
      - la cuenta de solo carga;
