@@ -4,9 +4,9 @@ from enum import StrEnum
 
 
 class ModoOperacion(StrEnum):
-    """Modo de operación del consorcio (documento 08)."""
+    """Modo de operación del consorcio (documento 08, §5; `nucleo.tipo_modo`, 0010)."""
 
-    ADMINISTRADOR_TRADICIONAL = "administrador_tradicional"
+    CONSEJO = "consejo"
     ADMINISTRADOR_AUMENTADO = "administrador_aumentado"
     AUTOGESTION = "autogestion"
 

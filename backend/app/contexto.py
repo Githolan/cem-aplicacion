@@ -12,6 +12,7 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
+from cem_contracts.estados import ModoOperacion
 from fastapi import Depends, Request, Response
 from sqlalchemy import Engine, text
 
@@ -32,6 +33,11 @@ class Contexto:
     persona_id: UUID
     consorcio_id: UUID
     vinculos: tuple[str, ...]
+    modo: ModoOperacion | None
+    """Modo vigente hoy en el consorcio; None si todavía no se registró (sin acta de arranque).
+
+    Filtra acciones en las políticas (2b-3), nunca concede una facultad por sí solo.
+    """
 
 
 def obtener_motor(request: Request) -> Engine:
@@ -61,23 +67,37 @@ IdentidadDep = Annotated[Identidad, Depends(obtener_identidad)]
 
 
 def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) -> Contexto:
-    """Carga los vínculos vigentes de la persona en el consorcio de la ruta.
+    """Carga los vínculos vigentes de la persona en el consorcio de la ruta y su modo vigente.
 
-    Sin vínculo vigente responde 404, igual que si el consorcio no existiera.
+    "Vigente" es con la fecha del consorcio (`nucleo.hoy_del_consorcio`), no con la de la base,
+    que corre en GMT. Sin vínculo vigente responde 404, igual que si el consorcio no existiera.
     """
-    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+    with transaccion(motor, persona_id=identidad.persona_id, consorcio_id=consorcio_id) as conn:
         vinculos = conn.execute(
             text(
                 "select tipo from nucleo.vinculo"
                 " where consorcio_id = :c and persona_id = :p"
-                " and daterange(vigente_desde, vigente_hasta) @> current_date order by tipo"
+                " and daterange(vigente_desde, vigente_hasta) @> nucleo.hoy_del_consorcio(:c)"
+                " order by tipo"
             ),
             {"c": consorcio_id, "p": identidad.persona_id},
         ).scalars()
         tipos = tuple(vinculos)
-    if not tipos:
-        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
-    return Contexto(persona_id=identidad.persona_id, consorcio_id=consorcio_id, vinculos=tipos)
+        if not tipos:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
+        modo = conn.execute(
+            text(
+                "select modo from nucleo.modo_operacion where consorcio_id = :c"
+                " and daterange(vigente_desde, vigente_hasta) @> nucleo.hoy_del_consorcio(:c)"
+            ),
+            {"c": consorcio_id},
+        ).scalar_one_or_none()
+    return Contexto(
+        persona_id=identidad.persona_id,
+        consorcio_id=consorcio_id,
+        vinculos=tipos,
+        modo=ModoOperacion(modo) if modo is not None else None,
+    )
 
 
 ContextoDep = Annotated[Contexto, Depends(require_scope)]
