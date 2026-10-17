@@ -69,13 +69,16 @@ test.describe("modo lectura ampliada", () => {
     });
   }
 
-  test("prendido, ninguna página sin sesión se sale de 360 px ni baja de AAA", async ({ page }) => {
-    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
-    await page.goto("/");
-    await prender(page);
-    for (const ruta of PAGINAS) {
-      for (const esquema of ESQUEMAS) {
+  // Una prueba por página y esquema: juntas eran 8 pasadas de axe en AAA dentro de un solo plazo
+  // de 30 s, y con la PC cargada (CI con 8 navegadores) se pasaba de tiempo sin que nada
+  // estuviera mal (medido el 17-10-2026: 8 de 18 corridas repetidas, también sin cambios).
+  for (const ruta of PAGINAS) {
+    for (const esquema of ESQUEMAS) {
+      test(`prendido, ${ruta} (${esquema}) no se sale de 360 px ni baja de AAA`, async ({ page }) => {
+        await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
         await page.emulateMedia({ colorScheme: esquema });
+        await page.goto("/");
+        await prender(page);
         await page.goto(ruta);
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
         await expect(page.locator("html"), ruta).toHaveClass(CLASE);
@@ -86,9 +89,9 @@ test.describe("modo lectura ampliada", () => {
         expect(visible, `${ruta} (${esquema})`).toBe(ANCHO_TELEFONO_PX);
         expect(ancho, `${ruta} (${esquema}): desplazamiento horizontal`).toBeLessThanOrEqual(visible);
         await contrasteAAA(page);
-      }
+      });
     }
-  });
+  }
 
   test("la elección se recuerda al recargar y se aplica antes de pintar", async ({ page }) => {
     // Se anota si <html> ya tenía la clase cuando React puso el primer elemento en #raiz.

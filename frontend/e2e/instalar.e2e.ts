@@ -18,6 +18,10 @@ test.describe("página /instalar", () => {
     playwright,
     baseURL,
   }, info) => {
+    // Lanza su propio Chromium completo con perfil nuevo y espera a que el service worker se
+    // active: con la PC cargada (CI con 8 navegadores) no entra en 30 s sin que nada esté mal
+    // (medido el 17-10-2026). test.slow() triplica el plazo solo para esta prueba.
+    test.slow();
     // Un perfil persistente y Chromium completo (no el headless shell): en incógnito el navegador
     // no ofrece instalar (Page.getInstallabilityErrors da "in-incognito"). El evento no se fabrica.
     // El perfil va en la carpeta temporal del sistema: con la ruta de test-results (lleva el
