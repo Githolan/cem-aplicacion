@@ -4,6 +4,11 @@ Toda consulta de negocio pasa por `transaccion()`: abre la transacción y fija c
 `set_config(..., true)` (equivalente a `SET LOCAL`) la persona, el consorcio y la lista de
 consorcios de la persona. Las políticas de PostgreSQL filtran con esos valores; si faltan,
 no devuelven filas (fallan cerradas).
+
+Sin `CEM_DATABASE_URL` la API arranca igual (`/health/deps` lo informa) y no hay motor:
+`transaccion()` lanza `SinBase` recién cuando un pedido necesita la base, así lo que se
+rechaza antes de consultarla (sin sesión, sin la cookie del enlace) responde lo mismo que con
+base. `app/errores.py` convierte `SinBase` y `OperationalError` en 503.
 """
 
 from collections.abc import Iterable, Iterator
@@ -14,6 +19,10 @@ from sqlalchemy import Connection, Engine, create_engine, text
 
 ESPERA_CONEXION_S = 3
 """Tope para abrir una conexión: si PostgreSQL no responde, la petición falla en vez de colgarse."""
+
+
+class SinBase(RuntimeError):
+    """El proceso no tiene motor: `CEM_DATABASE_URL` sin configurar."""
 
 
 def crear_motor(url: str) -> Engine:
@@ -47,13 +56,15 @@ def fijar_ambito(
 
 @contextmanager
 def transaccion(
-    motor: Engine,
+    motor: Engine | None,
     *,
     persona_id: UUID | None,
     consorcio_id: UUID | None = None,
     consorcios_persona: Iterable[UUID] = (),
 ) -> Iterator[Connection]:
     """`persona_id` es None solo en los procesos sin persona: trabajos y planificador."""
+    if motor is None:
+        raise SinBase("CEM_DATABASE_URL sin configurar")
     with motor.begin() as conn:
         fijar_ambito(
             conn,

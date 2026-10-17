@@ -63,9 +63,9 @@ async function anchoSinDesborde(pagina: Page) {
 }
 
 // Medido el 16-10-2026 contra la imagen de esta rama, sin CEM_DATABASE_URL ni CEM_CODIGO_CLAVE:
-// - POST /contrasena/entrar → 500 error_interno: la conexión a la base falla dentro de la entrada
-//   (obtener_motor no comprueba nada) y responde el manejador genérico. Con la base caída en
-//   producción pasaría lo mismo; se informa en el PR.
+// - POST /contrasena/entrar → 503 servicio_no_disponible: sin motor, `transaccion()` lanza
+//   SinBase al consultar la cuenta (antes era un 500 error_interno; con la base caída, 503 por
+//   OperationalError). Lo prueba backend/tests/test_contrasena_errores.py.
 // - POST /contrasena/segundo-factor → 503 servicio_no_disponible: ClavesDep (sin
 //   CEM_CODIGO_CLAVE) responde antes de mirar la cookie del desafío.
 // - GET y PUT /contrasena sin sesión → 401 no_autenticado (el GET se afirma en cuenta.e2e.ts, que
@@ -74,7 +74,7 @@ test.describe("contraseña contra el backend real sin base", () => {
   // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
   test.use(otroCliente(1));
 
-  test("entrar: manda correo y contraseña por POST, en el cuerpo; el 500 real se avisa sin colgarse", async ({ page }) => {
+  test("entrar: manda correo y contraseña por POST, en el cuerpo; el 503 real se avisa sin colgarse", async ({ page }) => {
     const errores = vigilarErrores(page);
     await page.goto("/entrar");
     const seccion = seccionEntrar(page);
@@ -89,15 +89,16 @@ test.describe("contraseña contra el backend real sin base", () => {
     expect(await pedido.headerValue("content-type")).toBe("application/json");
     expect(pedido.postDataJSON()).toEqual({ correo: CORREO, contrasena: CONTRASENA });
     const respuesta = await pedido.response();
-    expect(respuesta?.status()).toBe(500);
-    expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("error_interno");
+    expect(respuesta?.status()).toBe(503);
+    expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("servicio_no_disponible");
+    expect(respuesta?.headers()["cache-control"]).toBe("no-store");
 
     await expect(seccion.getByRole("status")).toContainText("No pudimos completar el pedido.");
     await expect(seccion.getByRole("button", { name: "Entrar con la contraseña" })).toBeEnabled();
     expect(page.url()).not.toContain("frase");
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa el 500 del recurso; violaciones de la CSP o errores de la página, ninguno.
-    expect(errores.filter((e) => !e.includes("500"))).toEqual([]);
+    // La consola informa el 503 del recurso; violaciones de la CSP o errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("503"))).toEqual([]);
   });
 
   test("paso del segundo factor: con la contraseña simulada, el 503 real del código se avisa y deja reintentar", async ({

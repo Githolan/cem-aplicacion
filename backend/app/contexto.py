@@ -35,6 +35,7 @@ class Contexto:
 
 
 def obtener_motor(request: Request) -> Engine:
+    """None sin `CEM_DATABASE_URL`: `transaccion()` responde 503 cuando se usa (`app/db.py`)."""
     return request.app.state.motor
 
 
