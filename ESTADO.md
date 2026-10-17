@@ -113,7 +113,13 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `69374bc`** (= `main`, 17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging en `f9130aa` (= `main`) y producción en `69374bc`** (17-10-2026), base `0009`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Formulario de la contraseña plegado (`f9130aa`, PR #57), 17-10, solo en staging.**
+  - Qué trae: en `/cuenta` la sección muestra el estado y un botón "Cambiar la contraseña" (o "Definir una contraseña"); los campos aparecen al abrirlo, con el foco en el primero, y se pliegan al guardar o con "Cancelar". Plegado, el navegador no autocompleta la actual.
+  - CI con imágenes en verde: 405 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo.
+  - Staging lo desplegó Claude (05:22 UTC, corrida `/seguisolo`); comprobado en la página servida. **Producción: pendiente**, la corre el propietario.
+- **Primer consorcio en staging, 17-10:** Pareja 3750, 37 unidades, con `scripts.alta_consorcio`; el propietario aceptó la invitación como dueño de la 3-A. En producción todavía no hay consorcio.
 
 - **Ver la contraseña, 503 sin base y alta de consorcio (`69374bc`, PR #52, #53, #54 y #55), 17-10.**
   - Qué trae: botón "Mostrar"/"Ocultar" en los campos de contraseña (#55); la entrada con contraseña da 503 sin base y todos sus errores llevan `no-store` (#52); `python -m scripts.alta_consorcio --archivo … [--simular]` dentro de `cem-backend` para que el equipo dé de alta un consorcio y sus unidades (#53); la e2e corre con 4 navegadores y separa las pruebas lentas (#54).
@@ -121,7 +127,7 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
   - Despliegue: staging lo hizo Claude (03:48–03:50 UTC) y producción el propietario (04:01–04:03 UTC). Sin migraciones. Registro en `doc/deploys/2026-10-17-69374bc.md` del repositorio CEM.
   - Comprobado afuera con controles: el botón sale en la página servida, el script está en la imagen y los errores 422 y 401 llevan `no-store`. **NO VERIFICADO en vivo:** el 503 sin base (cubierto por las pruebas).
   - Primer latido de la copia de producción en Kuma (monitor 21): 17-10, 03:30:10 UTC.
-  - **Falta:** dar de alta el primer consorcio de producción con `scripts.alta_consorcio` (el propietario pasa los datos del edificio).
+  - **Falta:** dar de alta el primer consorcio de producción con `scripts.alta_consorcio` (hecho en staging: Pareja 3750).
 
 - **Pantallas de la contraseña (`9865ab4`, PR #50), 17-10.**
   - Qué trae: "Entrar con contraseña" en `/entrar`, con el paso del segundo factor, y la sección "Contraseña" en `/cuenta` para definirla o cambiarla.
