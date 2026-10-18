@@ -17,7 +17,7 @@ from sqlalchemy import text
 from app.db import transaccion
 from app.identidad import sesiones
 from app.plataforma import cola, tareas
-from tests.conftest import alembic_config
+from tests.conftest import alembic_config, vaciar_mandatos
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     CANJE,
     SESION,
@@ -185,6 +185,7 @@ def test_la_migracion_0005_baja_y_sube(base_de_prueba, motor_migrate):
 
     assert existe() == (True, True, True)
     cfg = alembic_config()
+    vaciar_mandatos(motor_migrate)
     command.downgrade(cfg, "0004")
     assert existe() == (False, False, True)  # la 0004 queda: solo se van las funciones
     command.upgrade(cfg, "head")

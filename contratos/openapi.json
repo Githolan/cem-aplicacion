@@ -1900,7 +1900,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/invitaciones": {
       "get": {
-        "description": "Las invitaciones de las unidades donde la persona puede invitar, la más reciente\nprimero, con su estado.",
+        "description": "Las invitaciones de las unidades que la persona alcanza (por su vínculo de propietaria o\npor su facultad y su recurso), la más reciente primero, con su estado. Cada fila pasa por la\npolítica: no hay una consulta aparte que decida.",
         "operationId": "listar_api_v1_consorcios__consorcio_id__invitaciones_get",
         "parameters": [
           {
@@ -1942,7 +1942,7 @@
         ]
       },
       "post": {
-        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.",
+        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.\n\nPuede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un\nrecurso que la alcanza (tabla de verdad, §2.1).",
         "operationId": "invitar_api_v1_consorcios__consorcio_id__invitaciones_post",
         "parameters": [
           {
@@ -1978,7 +1978,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "La persona no es propietaria vigente de esa unidad."
+            "description": "La persona no es propietaria vigente de esa unidad ni tiene `invitaciones.crear` sobre ella."
           },
           "422": {
             "content": {
@@ -1999,7 +1999,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar": {
       "post": {
-        "description": "Repetirlo responde lo mismo. Una vencida también se puede retirar.",
+        "description": "Repetirlo responde lo mismo. Una vencida también se puede retirar. Una invitación de una\nunidad que la persona no alcanza responde 404, igual que una que no existe.",
         "operationId": "revocar_api_v1_consorcios__consorcio_id__invitaciones__invitacion_id__revocar_post",
         "parameters": [
           {
@@ -2052,6 +2052,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/unidades": {
       "get": {
+        "description": "Id y designación de las unidades, sin personas (D6). Concede por ámbito: cualquier\nvínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1).",
         "operationId": "unidades_api_v1_consorcios__consorcio_id__unidades_get",
         "parameters": [
           {
@@ -2149,7 +2150,7 @@
     },
     "/api/v1/me/consorcios": {
       "get": {
-        "description": "Consorcios donde la persona tiene al menos un vínculo vigente.",
+        "description": "Consorcios donde la persona tiene un vínculo vigente o un mandato vigente, con la fecha\nde cada consorcio.",
         "operationId": "mis_consorcios_api_v1_me_consorcios_get",
         "responses": {
           "200": {
