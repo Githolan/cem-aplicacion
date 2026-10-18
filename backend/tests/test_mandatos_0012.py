@@ -691,3 +691,31 @@ def test_upgrade_con_datos_que_violan_falla_y_no_transforma(base_aparte):
             "0011"
         )
         assert c.execute(text("select mandatario_cuit from nucleo.mandato")).scalar() is None
+
+
+def test_el_actor_es_la_persona_de_la_sesion(escena, motor_app):
+    """Con origen `api` el actor es la persona de la sesión; con `soporte`, no hay persona."""
+    e = escena
+    llamada = (
+        "select nucleo.alta_mandato('miembro_consejo', :p, null, null, null, :d, '2026-01-01',"
+        " null, null, :a, :o)"
+    )
+    # La sesión es de p1, pero dice actuar como per para darse un mandato a sí misma.
+    with pytest.raises(DBAPIError, match="actor_no_coincide|no es la persona de la sesión"):
+        with transaccion(motor_app, persona_id=e["p1"], consorcio_id=e["cons"]) as c:
+            c.execute(text(llamada), {"p": e["p1"], "d": e["acta"], "a": e["per"], "o": "api"})
+    # Con una persona en la sesión, no puede declararse soporte.
+    with pytest.raises(DBAPIError, match="origen_invalido|origen soporte"):
+        with transaccion(motor_app, persona_id=e["p1"], consorcio_id=e["cons"]) as c:
+            c.execute(text(llamada), {"p": e["p1"], "d": e["acta"], "a": None, "o": "soporte"})
+    # Controles: la sesión de per da el mandato a p1; soporte sin persona en la sesión también.
+    m = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"])
+    with transaccion(motor_app, persona_id=None, consorcio_id=e["cons"]) as c:
+        c.execute(text(llamada), {"p": e["p2"], "d": e["acta"], "a": None, "o": "soporte"})
+    # La baja, igual: la sesión de p2 no puede registrarla en nombre de per.
+    with pytest.raises(DBAPIError, match="actor_no_coincide|no es la persona de la sesión"):
+        with transaccion(motor_app, persona_id=e["p2"], consorcio_id=e["cons"]) as c:
+            c.execute(
+                text("select nucleo.baja_mandato(:m, 'renuncia', null, 'Nota', 'x', :a, 'api')"),
+                {"m": m, "a": e["per"]},
+            )

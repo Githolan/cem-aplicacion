@@ -294,6 +294,16 @@ create or replace function nucleo.alta_mandato(
     if persona is not null and not exists (select 1 from nucleo.persona p where p.id = persona) then
       raise exception 'la persona no existe' using errcode = 'P0001', hint = 'persona_invalida';
     end if;
+    -- El actor es la persona de la sesión (la misma que usa la RLS): con origen 'api' no se
+    -- acepta otro, y con 'soporte' no puede haber persona en la sesión (scripts del equipo).
+    if origen_pedido = 'api' and actor is distinct from plataforma.persona_actual() then
+      raise exception 'el actor no es la persona de la sesión'
+        using errcode = 'P0001', hint = 'actor_no_coincide';
+    end if;
+    if origen_pedido = 'soporte' and plataforma.persona_actual() is not null then
+      raise exception 'el origen soporte no admite una persona en la sesión'
+        using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
     -- A4: nadie se da un mandato a sí mismo.
     if origen_pedido = 'api' and persona is not null and actor = persona then
       raise exception 'nadie se da un mandato a sí mismo'
@@ -392,6 +402,16 @@ create function nucleo.baja_mandato(
     if origen_pedido = 'api' and actor is null then
       raise exception 'una baja por la API necesita quién la registra'
         using errcode = 'P0001', hint = 'actor_requerido';
+    end if;
+    -- El actor es la persona de la sesión (la misma que usa la RLS): con origen 'api' no se
+    -- acepta otro, y con 'soporte' no puede haber persona en la sesión (scripts del equipo).
+    if origen_pedido = 'api' and actor is distinct from plataforma.persona_actual() then
+      raise exception 'el actor no es la persona de la sesión'
+        using errcode = 'P0001', hint = 'actor_no_coincide';
+    end if;
+    if origen_pedido = 'soporte' and plataforma.persona_actual() is not null then
+      raise exception 'el origen soporte no admite una persona en la sesión'
+        using errcode = 'P0001', hint = 'origen_invalido';
     end if;
     select * into m from nucleo.mandato x where x.consorcio_id = c and x.id = mandato for update;
     if m.id is null then
