@@ -114,6 +114,10 @@ class Entidad:
     propuesto_por: UUID | None = None
     persona_objetivo: UUID | None = None
     """La persona del mandato que se da de alta o de baja, o del vínculo que se confirma."""
+    objetivo_sin_cuenta: bool = False
+    """El mandatario no tiene cuenta (administrador externo sin `persona_id`, A11): no puede ser
+    quien actúa, así que "no es su propio mandato" se cumple. Tiene que venir explícito: un
+    `persona_objetivo` nulo sin este dato es un dato que falta y niega."""
     respaldo_presente: bool = False
 
 
@@ -227,7 +231,11 @@ def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) 
             otras = (entidad.solicitado_por,)
         case CodigoSeparacion.NO_ES_QUIEN_PROPUSO:
             otras = (entidad.propuesto_por,)
-        case CodigoSeparacion.NO_ES_SU_PROPIO_MANDATO | CodigoSeparacion.NO_ES_SU_PROPIO_VINCULO:
+        case CodigoSeparacion.NO_ES_SU_PROPIO_MANDATO:
+            if entidad.persona_objetivo is None and entidad.objetivo_sin_cuenta:
+                return None
+            otras = (entidad.persona_objetivo,)
+        case CodigoSeparacion.NO_ES_SU_PROPIO_VINCULO:
             otras = (entidad.persona_objetivo,)
         case CodigoSeparacion.NO_ES_QUIEN_APROBO:
             # Distinta de todos los aprobadores (A5).

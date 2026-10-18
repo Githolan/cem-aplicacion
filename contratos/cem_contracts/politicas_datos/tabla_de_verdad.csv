@@ -252,7 +252,8 @@ caso 20,solicitud_formal.firmar,MC,C,,vigente,si,actor=nadie,403,identidad_indet
 caso 20,liquidacion.revisar,MC,AA,,vigente,si,preparo=nula,403,identidad_indeterminada,no se sabe quién preparó: se niega
 caso 20,solicitud_formal.firmar,MC,C,,vigente,si,firmas=nula,403,identidad_indeterminada,una firma sin persona: se niega
 caso 20,egresos.ejecutar_pago,AD,AA,cuenta:X,vigente,si,aprobaron=otro|nula;respaldo=si,403,identidad_indeterminada,un aprobador sin persona: se niega
-caso 20,mandatos.alta,MC,C,,vigente,si,objetivo=nula;respaldo=si,403,identidad_indeterminada,mandatario sin persona: se niega en 2b-3 (desvío restrictivo)
+caso 20,mandatos.alta,MC,C,,vigente,si,objetivo=nula;respaldo=si,403,identidad_indeterminada,objetivo sin dato: un dato que falta niega
+caso 6,mandatos.alta,MC,C,,vigente,si,objetivo=sin_cuenta;respaldo=si,200,concedido_por_facultad,AE sin cuenta (A11): no puede ser quien actúa; es a otra persona
 caso 21,solicitud_formal.firmar,MC,AG,,vigente,si,firmas=otro,403,modo_no_admitido,la segunda firma llega con el consorcio ya en Autogestión
 caso 23,solicitud_formal.preparar,MC,C,,vigente,no,,200,concedido_por_facultad,preparar no necesita destinatario
 caso 23,solicitud_formal.firmar,MC,C,,vigente,no,,200,concedido_por_facultad,la primera firma no necesita destinatario

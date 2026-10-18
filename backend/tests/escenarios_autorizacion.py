@@ -162,6 +162,8 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
 
     def persona(clave: str) -> UUID | None:
+        if clave == "objetivo" and valores.get(clave) == "sin_cuenta":
+            return None
         return PERSONAS[valores[clave]] if clave in valores else None
 
     def personas(clave: str) -> tuple[UUID | None, ...]:
@@ -180,6 +182,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
         solicitado_por=persona("solicito"),
         propuesto_por=persona("propuso"),
         persona_objetivo=persona("objetivo"),
+        objetivo_sin_cuenta=valores.get("objetivo") == "sin_cuenta",
         respaldo_presente=valores.get("respaldo") == "si",
     )
     return entidad, valores.get("actor") == "nadie"
