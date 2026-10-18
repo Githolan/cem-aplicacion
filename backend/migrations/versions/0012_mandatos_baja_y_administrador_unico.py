@@ -296,6 +296,10 @@ create or replace function nucleo.alta_mandato(
     end if;
     -- El actor es la persona de la sesión (la misma que usa la RLS): con origen 'api' no se
     -- acepta otro, y con 'soporte' no puede haber persona en la sesión (scripts del equipo).
+    if origen_pedido is null or origen_pedido not in ('api', 'soporte') then
+      raise exception 'origen no admitido: solo api o soporte'
+        using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
     if origen_pedido = 'api' and actor is distinct from plataforma.persona_actual() then
       raise exception 'el actor no es la persona de la sesión'
         using errcode = 'P0001', hint = 'actor_no_coincide';
@@ -405,6 +409,10 @@ create function nucleo.baja_mandato(
     end if;
     -- El actor es la persona de la sesión (la misma que usa la RLS): con origen 'api' no se
     -- acepta otro, y con 'soporte' no puede haber persona en la sesión (scripts del equipo).
+    if origen_pedido is null or origen_pedido not in ('api', 'soporte') then
+      raise exception 'origen no admitido: solo api o soporte'
+        using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
     if origen_pedido = 'api' and actor is distinct from plataforma.persona_actual() then
       raise exception 'el actor no es la persona de la sesión'
         using errcode = 'P0001', hint = 'actor_no_coincide';

@@ -719,3 +719,26 @@ def test_el_actor_es_la_persona_de_la_sesion(escena, motor_app):
                 text("select nucleo.baja_mandato(:m, 'renuncia', null, 'Nota', 'x', :a, 'api')"),
                 {"m": m, "a": e["per"]},
             )
+
+
+@pytest.mark.parametrize("origen", ["trabajos", "planificador"])
+def test_solo_se_admiten_los_origenes_api_y_soporte(escena, motor_app, origen):
+    """La auditoría acepta más orígenes, pero alta y baja solo `api` y `soporte`."""
+    e = escena
+    m = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"])
+    with pytest.raises(DBAPIError, match="origen no admitido"):
+        with transaccion(motor_app, persona_id=e["p1"], consorcio_id=e["cons"]) as c:
+            c.execute(
+                text("select nucleo.baja_mandato(:m, 'renuncia', null, 'Nota', 'x', :a, :o)"),
+                {"m": m, "a": e["per"], "o": origen},
+            )
+    with pytest.raises(DBAPIError, match="origen no admitido"):
+        with transaccion(motor_app, persona_id=e["p1"], consorcio_id=e["cons"]) as c:
+            c.execute(
+                text(
+                    "select nucleo.alta_mandato('miembro_consejo', :p, null, null, null, :d,"
+                    " '2027-01-01', null, null, :a, :o)"
+                ),
+                {"p": e["p1"], "d": e["acta"], "a": e["per"], "o": origen},
+            )
+    assert fila(motor_app, e["cons"], e["per"], m)["causa"] is None  # control: no se tocó
