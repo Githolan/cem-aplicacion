@@ -1,9 +1,10 @@
 """Políticas de autorización por acción (H2b 2b-3; tabla de verdad, §1.2, §1.3 y §6).
 
 Cada acción declara cómo se concede y qué filtros la pueden negar. El modelo es estricto
-(`extra="forbid"`): un campo mal escrito no se ignora, invalida el archivo. Las políticas viven
-en `politicas_datos/<módulo>.json`, dentro de este paquete, para que el backend las encuentre
-instalado; el frontend lee los mismos archivos.
+(`extra="forbid"`): un campo mal escrito no se ignora, invalida el archivo. Los booleanos son
+`StrictBool`: `"yes"` o `1` no se convierten en `true`, invalidan el archivo (deciden
+concesiones). Las políticas viven en `politicas_datos/<módulo>.json`, dentro de este paquete,
+para que el backend las encuentre instalado; el frontend lee los mismos archivos.
 
 - **Concesión:** por vínculo (`concede_por_vinculo`), por ámbito (`concede_por_ambito`, por
   defecto `false`) o por una facultad exacta (`facultad`) cuyo recurso alcance (`recurso`).
@@ -22,7 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints, model_validator
 
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 
@@ -68,7 +69,7 @@ class _Estricto(BaseModel):
 
 class ConcesionPorVinculo(_Estricto):
     tipos: tuple[TipoVinculo, ...] = Field(min_length=1)
-    misma_unidad: bool
+    misma_unidad: StrictBool
     """Si es `true`, el vínculo tiene que ser de la unidad de la entidad (p. ej. P de 3-A)."""
 
     @model_validator(mode="after")
@@ -82,7 +83,7 @@ class RecursoAceptado(_Estricto):
     """Qué recursos de facultad acepta la acción (§1.3). Sin este campo, solo la general."""
 
     tipos: tuple[TipoRecurso, ...] = Field(min_length=1)
-    general: bool
+    general: StrictBool
     """Si admite la facultad sin recurso, que alcanza a todo el consorcio del mandato."""
 
     @model_validator(mode="after")
@@ -95,19 +96,19 @@ class RecursoAceptado(_Estricto):
 class Politica(_Estricto):
     accion: CodigoAccion
     concede_por_vinculo: ConcesionPorVinculo | None = None
-    concede_por_ambito: bool = False
+    concede_por_ambito: StrictBool = False
     """Concede a cualquiera que pase el ámbito. Hoy solo `unidades.listar` (D6)."""
     facultad: CodigoAccion | None = None
     """Código exacto de la facultad (catálogo de D2) que concede la acción."""
     modos: tuple[ModoOperacion, ...]
-    sin_modo: bool
+    sin_modo: StrictBool
     """Si corre también sin modo registrado (las acciones marcadas "y —" en §2)."""
     recurso: RecursoAceptado | None = None
     separacion: tuple[CodigoSeparacion, ...] = ()
     respaldo: TextoNoVacio | None = None
     """Respaldo documental que exige la acción (R9). Sin él, se niega."""
-    economica: bool
-    destinatario_unico: bool = False
+    economica: StrictBool
+    destinatario_unico: StrictBool = False
     """La transición necesita al único administrador vigente (A14)."""
     fuente_normativa: TextoNoVacio
 

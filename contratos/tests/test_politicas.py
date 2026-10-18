@@ -69,6 +69,33 @@ def test_politica_mal_formada_no_valida(cambio):
         Politica.model_validate(MINIMA | cambio)
 
 
+BOOLEANOS = [
+    ("concede_por_ambito", lambda v: {"concede_por_ambito": v}),
+    ("sin_modo", lambda v: {"sin_modo": v}),
+    ("economica", lambda v: {"economica": v}),
+    ("destinatario_unico", lambda v: {"destinatario_unico": v}),
+    (
+        "misma_unidad",
+        lambda v: {"concede_por_vinculo": {"tipos": ["inquilino"], "misma_unidad": v}},
+    ),
+    ("general", lambda v: {"recurso": {"tipos": ["unidad"], "general": v}}),
+]
+
+
+@pytest.mark.parametrize("campo,cambio", BOOLEANOS, ids=[c for c, _ in BOOLEANOS])
+@pytest.mark.parametrize("valor", ["yes", "no", "true", 1, 0])
+def test_los_booleanos_no_aceptan_valores_convertibles(campo, cambio, valor):
+    """Deciden concesiones: un `"yes"` escrito a mano no se convierte en `true`."""
+    with pytest.raises(ValidationError, match=campo):
+        Politica.model_validate(MINIMA | cambio(valor))
+
+
+@pytest.mark.parametrize("campo,cambio", BOOLEANOS, ids=[c for c, _ in BOOLEANOS])
+def test_control_los_booleanos_aceptan_true_y_false(campo, cambio):
+    for valor in (True, False):
+        Politica.model_validate(MINIMA | cambio(valor))
+
+
 def test_las_politicas_cargadas_son_inmutables():
     """Las mismas instancias sirven a todo el proceso: ni un campo ni una colección se alteran."""
     p = Politica.model_validate(
