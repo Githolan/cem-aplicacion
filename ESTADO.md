@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 15-10-2026.
+**Actualizado:** 18-10-2026.
 
 ## Qué existe
 
@@ -113,14 +113,29 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `000734d`** (= `main`, 17-10-2026), base `0010`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging en `484f8ef`** (= `main`, 18-10-2026), base `0011`. **Producción en `000734d`**, base `0010`. Contrato 0.11.0 en los dos. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging; producción espera la decisión del propietario.** El diseño suma los criterios 9 y 10 (CEM #43).
+  - Migración `0011`:
+    - catálogo `nucleo.facultad` (21 facultades, 6 económicas) y `nucleo.paquete_facultad` (paquetes de D2);
+    - `nucleo.mandato` (D1, con decisión de respaldo obligatoria, sin superposición del mismo tipo y persona);
+    - `nucleo.facultad_otorgada` (acotada al consorcio y, si tiene recurso, a ese recurso);
+    - `decision_formal.sha256_acta` (opcional).
+  - `cem_app` solo lee. Escriben dos funciones `security definer`:
+    - `nucleo.alta_mandato`: paquete del tipo o un subconjunto;
+    - `nucleo.baja_mandato`: cierra la vigencia con la fecha del consorcio, revoca las sesiones del mandatario (RN22) y no borra nada.
+  - `python -m scripts.alta_mandato --archivo … [--simular]` registra el arranque de D3 (decisión, modo inicial y mandatos) en una transacción. **Nunca con una referencia inventada** (criterio 9).
+  - Ninguna ruta usa los mandatos todavía: las políticas llegan con 2b-3.
+  - CI con imágenes en verde: 433 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo.
+  - Staging lo desplegó Claude (03:40–03:42 UTC), con copia previa verificada. La validación funcional en la base corrió con `ROLLBACK`. La integridad (conteos y cadena de auditoría recalculada) y la regresión están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
+  - **Abierto:** un mandato que vence por fecha, sin baja, no revoca sesiones (tracker E15). Pareja 3750 sigue sin modo ni mandatos: espera el acta real.
 
 - **H2b 2b-1, modo de operación (`000734d`, PR #59), 17-10.** Diseño: `doc/diseno/H2b_Mandatos_Padron_y_Permisos.md` del repositorio CEM (#40).
   - Migración `0010`: `nucleo.decision_formal` (registro mínimo con referencia del acta) y `nucleo.modo_operacion` (historial, uno vigente por consorcio). `cem_app` solo lee; escriben `nucleo.registrar_decision` y `nucleo.cambiar_modo` (`security definer`, consorcio del ámbito, auditoría). El modo solo cambia con decisión de asamblea (RN26, **PA31**).
   - `require_scope` usa la fecha del consorcio (`nucleo.hoy_del_consorcio`; la base corre en GMT) y el `Contexto` lleva el modo vigente. `ModoOperacion`: `consejo` reemplaza a `administrador_tradicional`.
   - CI con imágenes en verde: 418 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo. Cobertura de PA: **5 de 25** (se suma PA31).
   - Staging y producción los desplegó Claude (18:18–18:24 UTC, corrida `/seguisolo` con producción autorizada), con copia previa verificada en los dos. Producción incluye también `f9130aa`.
-  - **Pendiente:** registrar el modo de Pareja 3750 (necesita el acta y la decisión D3 del diseño); los cortes 2b-2 a 2b-7 esperan D2, D3, D5 y D8.
+  - Las 8 decisiones del diseño quedaron cerradas el 17-10; 2b-2 llegó a staging el 18-10 (arriba).
 
 - **Formulario de la contraseña plegado (`f9130aa`, PR #57), 17-10.**
   - Qué trae: en `/cuenta` la sección muestra el estado y un botón "Cambiar la contraseña" (o "Definir una contraseña"); los campos aparecen al abrirlo, con el foco en el primero, y se pliegan al guardar o con "Cancelar". Plegado, el navegador no autocompleta la actual.
