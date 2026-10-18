@@ -130,6 +130,7 @@
           "title": "Respaldo"
         },
         "separacion": {
+          "default": [],
           "items": {
             "$ref": "#/$defs/CodigoSeparacion"
           },

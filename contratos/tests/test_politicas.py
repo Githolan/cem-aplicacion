@@ -67,3 +67,17 @@ def test_sin_fuente_normativa_no_valida(fuente):
 def test_politica_mal_formada_no_valida(cambio):
     with pytest.raises(ValidationError):
         Politica.model_validate(MINIMA | cambio)
+
+
+def test_las_politicas_cargadas_son_inmutables():
+    """Las mismas instancias sirven a todo el proceso: ni un campo ni una colección se alteran."""
+    p = Politica.model_validate(
+        MINIMA | {"separacion": ["no_es_su_propio_vinculo"], "concede_por_vinculo": None}
+    )
+    assert isinstance(p.modos, tuple) and isinstance(p.separacion, tuple)
+    with pytest.raises(AttributeError):
+        p.modos.append("autogestion")  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        p.separacion.clear()  # type: ignore[attr-defined]
+    with pytest.raises(ValidationError):
+        p.economica = True  # control: el modelo ya era frozen en sus campos

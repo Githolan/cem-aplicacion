@@ -67,7 +67,7 @@ class _Estricto(BaseModel):
 
 
 class ConcesionPorVinculo(_Estricto):
-    tipos: list[TipoVinculo] = Field(min_length=1)
+    tipos: tuple[TipoVinculo, ...] = Field(min_length=1)
     misma_unidad: bool
     """Si es `true`, el vínculo tiene que ser de la unidad de la entidad (p. ej. P de 3-A)."""
 
@@ -81,7 +81,7 @@ class ConcesionPorVinculo(_Estricto):
 class RecursoAceptado(_Estricto):
     """Qué recursos de facultad acepta la acción (§1.3). Sin este campo, solo la general."""
 
-    tipos: list[TipoRecurso] = Field(min_length=1)
+    tipos: tuple[TipoRecurso, ...] = Field(min_length=1)
     general: bool
     """Si admite la facultad sin recurso, que alcanza a todo el consorcio del mandato."""
 
@@ -99,11 +99,11 @@ class Politica(_Estricto):
     """Concede a cualquiera que pase el ámbito. Hoy solo `unidades.listar` (D6)."""
     facultad: CodigoAccion | None = None
     """Código exacto de la facultad (catálogo de D2) que concede la acción."""
-    modos: list[ModoOperacion]
+    modos: tuple[ModoOperacion, ...]
     sin_modo: bool
     """Si corre también sin modo registrado (las acciones marcadas "y —" en §2)."""
     recurso: RecursoAceptado | None = None
-    separacion: list[CodigoSeparacion] = Field(default_factory=list)
+    separacion: tuple[CodigoSeparacion, ...] = ()
     respaldo: TextoNoVacio | None = None
     """Respaldo documental que exige la acción (R9). Sin él, se niega."""
     economica: bool
@@ -125,7 +125,7 @@ class Politica(_Estricto):
 class ArchivoPoliticas(_Estricto):
     """Un archivo `politicas_datos/<módulo>.json`."""
 
-    politicas: list[Politica] = Field(min_length=1)
+    politicas: tuple[Politica, ...] = Field(min_length=1)
 
 
 def esquema_texto() -> str:
