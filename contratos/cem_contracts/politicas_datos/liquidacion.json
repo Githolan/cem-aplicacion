@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "liquidacion.preparar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "liquidacion.preparar",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (liquidacion.preparar); documento 08 §5 (modos)"
+    },
+    {
+      "accion": "liquidacion.revisar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "liquidacion.revisar",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": ["no_es_quien_preparo"],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (liquidacion.revisar; incompatibilidades por acción: quien preparó no revisa ese ítem)"
+    },
+    {
+      "accion": "liquidacion.aprobar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "liquidacion.aprobar",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": ["no_es_quien_preparo"],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (liquidacion.aprobar, económica; quien preparó no aprueba ese mismo ítem); R10"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+"""Modelo de políticas de autorización y su instantánea (H2b 2b-3; tabla de verdad, §6)."""
+
+import json
+
+import pytest
+from pydantic import ValidationError
+
+from cem_contracts.politicas import ESQUEMA, ArchivoPoliticas, Politica, archivos, esquema_texto
+
+MINIMA = {
+    "accion": "padron.ver",
+    "facultad": "padron.ver",
+    "modos": ["consejo"],
+    "sin_modo": False,
+    "economica": False,
+    "fuente_normativa": "D2",
+}
+
+
+def test_esquema_coincide_con_la_instantanea_aprobada():
+    assert ESQUEMA.read_text(encoding="utf-8") == esquema_texto(), (
+        "El modelo de políticas cambió. Si el cambio es intencional, regenerar con "
+        "`python -m cem_contracts.politicas` desde contratos/ y revisarlo en el PR."
+    )
+
+
+def test_todos_los_archivos_validan_y_hay_uno_por_modulo():
+    nombres = {p.stem for p in archivos()}
+    assert nombres == {
+        "consorcios", "invitaciones", "padron", "mandatos", "fiscalizacion",
+        "documentos", "liquidacion", "egresos", "fondo_reserva", "coeficientes",
+    }  # fmt: skip
+    for ruta in archivos():
+        ArchivoPoliticas.model_validate(json.loads(ruta.read_text(encoding="utf-8")))
+
+
+def test_control_la_politica_minima_valida():
+    assert Politica.model_validate(MINIMA).concede_por_ambito is False
+
+
+@pytest.mark.parametrize("fuente", [None, "", "   "])
+def test_sin_fuente_normativa_no_valida(fuente):
+    datos = {k: v for k, v in MINIMA.items() if k != "fuente_normativa"}
+    if fuente is not None:
+        datos["fuente_normativa"] = fuente
+    with pytest.raises(ValidationError, match="fuente_normativa"):
+        Politica.model_validate(datos)
+
+
+@pytest.mark.parametrize(
+    "cambio",
+    [
+        {"concede_por_vinculos": None},  # campo mal escrito: extra="forbid"
+        {"recurso": {"tipos": ["edificio"], "general": True}},
+        {"recurso": {"tipos": [], "general": True}},
+        {"recurso": {"tipos": ["unidad", "unidad"], "general": True}},
+        {"modos": ["consejo", "consejo"]},
+        {"modos": ["otro"]},
+        {"separacion": ["no_es_quien_preparo", "no_es_quien_preparo"]},
+        {"separacion": ["inventada"]},
+        {"concede_por_vinculo": {"tipos": [], "misma_unidad": True}},
+        {"accion": "Padron.Ver"},
+        {"accion": "padron"},
+        {"facultad": None, "recurso": {"tipos": ["unidad"], "general": True}},
+    ],
+)
+def test_politica_mal_formada_no_valida(cambio):
+    with pytest.raises(ValidationError):
+        Politica.model_validate(MINIMA | cambio)

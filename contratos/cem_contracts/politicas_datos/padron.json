@@ -1,0 +1,60 @@
+{
+  "politicas": [
+    {
+      "accion": "padron.ver_propio",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; D6"
+    },
+    {
+      "accion": "padron.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "padron.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (padron.ver); D6 (padrón con datos mínimos)"
+    },
+    {
+      "accion": "padron.gestionar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "padron.gestionar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (padron.gestionar: alta y fin de vínculos); PA17"
+    },
+    {
+      "accion": "padron.confirmar_vinculo",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "padron.confirmar_vinculo",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": ["no_es_su_propio_vinculo"],
+      "respaldo": "título (escritura o locación) como referencia; el detalle llega en 2b-4",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (padron.confirmar_vinculo); criterio 6 de H2b"
+    }
+  ]
+}

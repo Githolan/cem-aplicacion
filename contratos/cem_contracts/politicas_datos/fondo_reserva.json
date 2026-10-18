@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "fondo_reserva.solicitar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "fondo_reserva.solicitar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (fondo_reserva.solicitar)"
+    },
+    {
+      "accion": "fondo_reserva.autorizar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "fondo_reserva.autorizar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": ["no_es_quien_solicito"],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "art. 2064 inc. c CCyC; D2 (fondo_reserva.autorizar, económica; quien solicitó no autoriza esa misma solicitud); R10"
+    }
+  ]
+}

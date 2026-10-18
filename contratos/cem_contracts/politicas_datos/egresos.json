@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "egresos.preparar_orden",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "egresos.preparar_orden",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["cuenta", "grupo"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (egresos.preparar_orden, económica); R10"
+    },
+    {
+      "accion": "egresos.aprobar_orden",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "egresos.aprobar_orden",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["cuenta", "grupo"], "general": true},
+      "separacion": ["no_es_quien_preparo"],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (egresos.aprobar_orden, económica; quien preparó no aprueba ese mismo ítem); R10"
+    },
+    {
+      "accion": "egresos.ejecutar_pago",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "egresos.ejecutar_pago",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["cuenta", "grupo"], "general": true},
+      "separacion": ["no_es_quien_aprobo"],
+      "respaldo": "orden aprobada",
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (egresos.ejecutar_pago, económica); A5; R10"
+    }
+  ]
+}

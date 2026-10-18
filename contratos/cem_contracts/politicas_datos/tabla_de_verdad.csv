@@ -1,0 +1,267 @@
+caso,accion,figura,modo,recurso,mandato,hay_administrador,entidad,esperado,motivo,descripcion
+§2.3,unidades.listar,P,C,,sin_mandato,si,,200,concedido_por_ambito,propietario de 3-A lista unidades
+§2.3,unidades.listar,I,C,,sin_mandato,si,,200,concedido_por_ambito,inquilino de 3-A lista unidades
+§2.3,unidades.listar,MC,C,,vigente,si,,200,concedido_por_ambito,miembro del Consejo sin vínculo
+§2.3,unidades.listar,AD,C,,vigente,si,,200,concedido_por_ambito,administrador sin vínculo (C3)
+§2.3,unidades.listar,AE,C,,vigente,si,,200,concedido_por_ambito,administrador externo con cuenta
+§2.3,unidades.listar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,invitaciones.crear,P,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,P invita a su unidad
+§2.3,invitaciones.crear,I,C,unidad:3A,sin_mandato,si,,403,sin_concesion,I no invita
+§2.3,invitaciones.crear,MC,C,unidad:3A,vigente,si,,200,concedido_por_facultad,MC con la facultad general
+§2.3,invitaciones.crear,AD,C,unidad:3A,vigente,si,,200,concedido_por_facultad,AD con la facultad general
+§2.3,invitaciones.crear,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE solo carga documentos
+§2.3,invitaciones.crear,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,invitaciones.crear,P,C,unidad:5B,sin_mandato,si,,403,sin_concesion,P de 3-A no invita a 5-B
+§2.3,invitaciones.crear,I,C,unidad:5B,sin_mandato,si,,403,sin_concesion,I no invita
+§2.3,invitaciones.crear,MC,C,unidad:5B,vigente,si,,200,concedido_por_facultad,MC invita a otra unidad
+§2.3,invitaciones.crear,AD,C,unidad:5B,vigente,si,,200,concedido_por_facultad,AD invita a otra unidad
+§2.3,invitaciones.crear,AE,C,unidad:5B,vigente,si,,403,sin_concesion,AE no invita
+§2.3,invitaciones.crear,ninguna,C,unidad:5B,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,padron.ver,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,P no ve el padrón mínimo
+§2.3,padron.ver,I,C,unidad:3A,sin_mandato,si,,403,sin_concesion,I no ve el padrón mínimo
+§2.3,padron.ver,MC,C,unidad:3A,vigente,si,,200,concedido_por_facultad,MC ve el padrón mínimo
+§2.3,padron.ver,AD,C,unidad:3A,vigente,si,,200,concedido_por_facultad,AD ve el padrón mínimo
+§2.3,padron.ver,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no ve el padrón
+§2.3,padron.ver,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,fiscalizacion.ver_resumen,P,C,,sin_mandato,si,,200,concedido_por_vinculo,P ve el resumen
+§2.3,fiscalizacion.ver_resumen,I,C,,sin_mandato,si,,403,sin_concesion,I no ve el resumen
+§2.3,fiscalizacion.ver_resumen,MC,C,,vigente,si,,403,sin_concesion,MC sin vínculo no ve el resumen
+§2.3,fiscalizacion.ver_resumen,AD,C,,vigente,si,,403,sin_concesion,AD sin vínculo no ve el resumen
+§2.3,fiscalizacion.ver_resumen,AE,C,,vigente,si,,403,sin_concesion,AE no ve el resumen
+§2.3,fiscalizacion.ver_resumen,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,fiscalizacion.ver_panel,P,C,,sin_mandato,si,,403,sin_concesion,P no ve el panel completo
+§2.3,fiscalizacion.ver_panel,I,C,,sin_mandato,si,,403,sin_concesion,I no ve el panel
+§2.3,fiscalizacion.ver_panel,MC,C,,vigente,si,,200,concedido_por_facultad,MC ve el panel completo
+§2.3,fiscalizacion.ver_panel,AD,C,,vigente,si,,200,concedido_por_facultad,AD ve el panel completo (A2)
+§2.3,fiscalizacion.ver_panel,AE,C,,vigente,si,,403,sin_concesion,AE no ve el panel
+§2.3,fiscalizacion.ver_panel,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,documentos.ver,P,AA,,sin_mandato,si,,200,concedido_por_vinculo,P ve la rendición común
+§2.3,documentos.ver,I,AA,,sin_mandato,si,,403,sin_concesion,I no ve documentos comunes (A6)
+§2.3,documentos.ver,MC,AA,,vigente,si,,200,concedido_por_facultad,MC con documentos.ver
+§2.3,documentos.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD con documentos.ver
+§2.3,documentos.ver,AE,AA,,vigente,si,,403,sin_concesion,AE solo carga
+§2.3,documentos.ver,ninguna,AA,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,documentos.cargar,P,AA,,sin_mandato,si,,403,sin_concesion,P no carga
+§2.3,documentos.cargar,I,AA,,sin_mandato,si,,403,sin_concesion,I no carga
+§2.3,documentos.cargar,MC,AA,,vigente,si,,403,sin_concesion,MC no carga
+§2.3,documentos.cargar,AD,AA,,vigente,si,,200,concedido_por_facultad,AD carga
+§2.3,documentos.cargar,AE,AA,,vigente,si,,200,concedido_por_facultad,AE carga
+§2.3,documentos.cargar,ninguna,AA,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,liquidacion.preparar,P,C,,sin_mandato,si,,403,sin_concesion,P no prepara
+§2.3,liquidacion.preparar,I,C,,sin_mandato,si,,403,sin_concesion,I no prepara
+§2.3,liquidacion.preparar,MC,C,,vigente,si,,403,sin_concesion,MC no prepara
+§2.3,liquidacion.preparar,AD,C,,vigente,si,,403,modo_no_admitido,AD en Consejo: filtro de modo
+§2.3,liquidacion.preparar,AE,C,,vigente,si,,403,sin_concesion,AE no prepara
+§2.3,liquidacion.preparar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,liquidacion.preparar,P,AA,,sin_mandato,si,,403,sin_concesion,P no prepara
+§2.3,liquidacion.preparar,I,AA,,sin_mandato,si,,403,sin_concesion,I no prepara
+§2.3,liquidacion.preparar,MC,AA,,vigente,si,,403,sin_concesion,MC no prepara
+§2.3,liquidacion.preparar,AD,AA,,vigente,si,,200,concedido_por_facultad,AD prepara en Administrador Aumentado
+§2.3,liquidacion.preparar,AE,AA,,vigente,si,,403,sin_concesion,AE no prepara
+§2.3,liquidacion.preparar,ninguna,AA,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,fondo_reserva.autorizar,P,C,,sin_mandato,si,solicito=otro,403,sin_concesion,P no autoriza
+§2.3,fondo_reserva.autorizar,I,C,,sin_mandato,si,solicito=otro,403,sin_concesion,I no autoriza
+§2.3,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=otro,403,requiere_controles_2b6,MC: económica hasta 2b-6
+§2.3,fondo_reserva.autorizar,AD,C,,vigente,si,solicito=otro,403,sin_concesion,AD no tiene la facultad
+§2.3,fondo_reserva.autorizar,AE,C,,vigente,si,solicito=otro,403,sin_concesion,AE no autoriza
+§2.3,fondo_reserva.autorizar,ninguna,C,,sin_mandato,si,solicito=otro,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,solicitud_formal.firmar,P,C,,sin_mandato,si,,403,sin_concesion,P no firma
+§2.3,solicitud_formal.firmar,I,C,,sin_mandato,si,,403,sin_concesion,I no firma
+§2.3,solicitud_formal.firmar,MC,C,,vigente,si,,200,concedido_por_facultad,MC pone una de las dos firmas
+§2.3,solicitud_formal.firmar,MC,AA,,vigente,si,,200,concedido_por_facultad,MC firma también en Administrador Aumentado
+§2.3,solicitud_formal.firmar,AD,C,,vigente,si,,403,sin_concesion,AD no firma
+§2.3,solicitud_formal.firmar,AE,C,,vigente,si,,403,sin_concesion,AE no firma
+§2.3,solicitud_formal.firmar,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,solicitud_formal.firmar,P,AG,,sin_mandato,si,,403,sin_concesion,P no firma
+§2.3,solicitud_formal.firmar,I,AG,,sin_mandato,si,,403,sin_concesion,I no firma
+§2.3,solicitud_formal.firmar,MC,AG,,vigente,si,,403,modo_no_admitido,MC en Autogestión: filtro de modo (A3)
+§2.3,solicitud_formal.firmar,MC,—,,vigente,si,,403,sin_modo_registrado,MC sin modo: filtro de modo (A3)
+§2.3,solicitud_formal.firmar,AD,AG,,vigente,si,,403,sin_concesion,AD no firma
+§2.3,solicitud_formal.firmar,AE,AG,,vigente,si,,403,sin_concesion,AE no firma
+§2.3,solicitud_formal.firmar,ninguna,AG,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,solicitud_formal.firmar,P,C,,sin_mandato,no,firmas=otro,403,sin_concesion,P no firma
+§2.3,solicitud_formal.firmar,I,C,,sin_mandato,no,firmas=otro,403,sin_concesion,I no firma
+§2.3,solicitud_formal.firmar,MC,C,,vigente,no,firmas=otro,403,sin_administrador_vigente,segunda firma sin administrador: queda en borrador (A14)
+§2.3,solicitud_formal.firmar,AD,C,,vigente,no,firmas=otro,403,sin_concesion,AD no firma
+§2.3,solicitud_formal.firmar,AE,C,,vigente,no,firmas=otro,403,sin_concesion,AE no firma
+§2.3,solicitud_formal.firmar,ninguna,C,,sin_mandato,no,firmas=otro,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,MC da de alta a otra persona (C2)
+§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,AD da de alta a otra persona (C2)
+§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
+§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
+§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=yo;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=yo;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,MC da de baja a otra persona con respaldo
+§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,AD da de baja a otra persona con respaldo
+§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
+§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
+§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=yo;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=yo;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,decisiones.registrar,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,P no registra decisiones
+§2.3,decisiones.registrar,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,I no registra decisiones
+§2.3,decisiones.registrar,MC,C,,vigente,si,respaldo=si,200,concedido_por_facultad,MC registra decisiones (C2)
+§2.3,decisiones.registrar,AD,C,,vigente,si,respaldo=si,200,concedido_por_facultad,AD registra decisiones (C2)
+§2.3,decisiones.registrar,AE,C,,vigente,si,respaldo=si,403,sin_concesion,AE no registra decisiones
+§2.3,decisiones.registrar,ninguna,C,,sin_mandato,si,respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,modo.cambiar,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,nadie cambia el modo desde la API (C7)
+§2.3,modo.cambiar,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,nadie cambia el modo desde la API (C7)
+§2.3,modo.cambiar,MC,C,,vigente,si,respaldo=si,403,sin_concesion,nadie cambia el modo desde la API (C7)
+§2.3,modo.cambiar,AD,C,,vigente,si,respaldo=si,403,sin_concesion,nadie cambia el modo desde la API (C7)
+§2.3,modo.cambiar,AE,C,,vigente,si,respaldo=si,403,sin_concesion,nadie cambia el modo desde la API (C7)
+§2.3,modo.cambiar,ninguna,C,,sin_mandato,si,respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+R1,invitaciones.crear,P,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,acción declarada y concedida
+R1,invitaciones.crar,P,C,unidad:3A,sin_mandato,si,,403,accion_no_declarada,nombre mal escrito: se niega
+R1,invitaciones.crar,MC,C,unidad:3A,vigente,si,,403,accion_no_declarada,ni siquiera con todas las facultades
+R2,unidades.listar,P,C,,sin_mandato,si,,200,concedido_por_ambito,Ana (P de 3-A) entra a su consorcio
+R2,invitaciones.crear,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,Beto sin vínculo ni mandato: 404 y no 403
+R2,invitaciones.crar,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,el ámbito va antes que la acción: no revela nada
+R3,invitaciones.crear,P,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,Ana invita a su inquilino a 3-A
+R3,documentos.ver,P,C,,sin_mandato,si,,200,concedido_por_vinculo,Ana ve la rendición común
+R3,invitaciones.crear,P,C,unidad:5B,sin_mandato,si,,403,sin_concesion,Ana invita a 5-B donde no es P
+R3,invitaciones.crear,I,C,unidad:3A,sin_mandato,si,,403,sin_concesion,Carla (I de 3-A) intenta invitar
+R3,documentos.ver,I,C,,sin_mandato,si,,403,sin_concesion,Carla pide la rendición común (A6)
+R3,fiscalizacion.ver_panel,P,C,,sin_mandato,si,,403,sin_concesion,Ana pide el panel completo: su vínculo concede solo el resumen
+R3,invitaciones.revocar,P,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,Ana revoca una invitación de 3-A
+R3,invitaciones.revocar,P,C,unidad:5B,sin_mandato,si,,403,sin_concesion,Ana no revoca una invitación de 5-B
+R3,invitaciones.listar,P,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,Ana lista las invitaciones de 3-A
+R3,invitaciones.listar,P,C,unidad:5B,sin_mandato,si,,403,sin_concesion,Ana no lista las de 5-B
+R3,invitaciones.crear,P@5B,C,unidad:5B,sin_mandato,si,,200,concedido_por_vinculo,la P de 5-B sí invita a 5-B
+R3,invitaciones.crear,O,C,unidad:3A,sin_mandato,si,,403,sin_concesion,el ocupante no invita
+R4,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vigente,si,,200,concedido_por_facultad,Diego (MC con invitaciones.crear) invita a 5-B
+R4,invitaciones.crear,MC[padron.ver],C,unidad:5B,vigente,si,,403,sin_concesion,Diego con el mandato achicado a padron.ver: tener un mandato no alcanza
+R4,invitaciones.listar,Fac(invitaciones.crear),C,unidad:5B,vigente,si,,200,concedido_por_facultad,con invitaciones.crear lista las que alcanza
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vigente,si,,200,concedido_por_facultad,mandato del 01-01 al 31-12 consultado el 15-06
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vigente_ultimo_dia,si,,200,concedido_por_facultad,último día del mandato: hasta es mañana
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,sin_fin,si,,200,concedido_por_facultad,mandato sin fecha de fin
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vencido,si,,404,fuera_de_ambito,hasta = hoy: vencido; sin vínculo no entra
+R5,invitaciones.crear,P+Fac(invitaciones.crear),C,unidad:5B,vencido,si,,403,sin_concesion,vencido con vínculo: entra pero la facultad no cuenta
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,futuro,si,,404,fuera_de_ambito,desde el 01-07 consultado el 15-06
+R5,invitaciones.crear,P+Fac(invitaciones.crear),C,unidad:5B,futuro,si,,403,sin_concesion,futuro con vínculo: la facultad no cuenta
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,baja_hoy,si,,404,fuera_de_ambito,dado de baja hoy: ya no vale hoy
+R5,invitaciones.crear,P+Fac(invitaciones.crear),C,unidad:5B,baja_hoy,si,,403,sin_concesion,dado de baja hoy con vínculo
+R5,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,error_carga,si,,404,fuera_de_ambito,corregido por error_carga: no vale para ninguna fecha (A9)
+R5,invitaciones.crear,P+Fac(invitaciones.crear),C,unidad:5B,error_carga,si,,403,sin_concesion,error_carga con vínculo: la facultad no cuenta
+R6,liquidacion.preparar,AD,AA,,vigente,si,,200,concedido_por_facultad,AD con liquidacion.preparar en Administrador Aumentado
+R6,liquidacion.preparar,AD,AG,,vigente,si,,200,concedido_por_facultad,AD con liquidacion.preparar en Autogestión
+R6,solicitud_formal.preparar,MC,C,,vigente,si,,200,concedido_por_facultad,MC con solicitud_formal.preparar en Consejo (A3)
+R6,solicitud_formal.preparar,MC,AA,,vigente,si,,200,concedido_por_facultad,MC prepara en Administrador Aumentado (A3)
+R6,liquidacion.preparar,AD,C,,vigente,si,,403,modo_no_admitido,el mismo AD con el consorcio en Consejo
+R6,liquidacion.preparar,AD,—,,vigente,si,,403,sin_modo_registrado,sin modo registrado
+R6,solicitud_formal.preparar,MC,AG,,vigente,si,,403,modo_no_admitido,el mismo MC en Autogestión (A3)
+R6,solicitud_formal.preparar,MC,—,,vigente,si,,403,sin_modo_registrado,el mismo MC sin modo (A3)
+R6,liquidacion.preparar,P,AG,,sin_mandato,si,,403,sin_concesion,ningún modo concede: P sin facultad en Autogestión
+R6,solicitud_formal.preparar,P,C,,sin_mandato,si,,403,sin_concesion,ningún modo concede: P sin facultad en Consejo
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:X),AA,cuenta:X,vigente,si,,403,requiere_controles_2b6,el recurso alcanza; la económica niega hasta 2b-6
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:X),AA,cuenta:Y,vigente,si,,403,recurso_no_alcanza,la misma facultad sobre la cuenta Y
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:X),AA,cuenta:Y;grupo:agua,vigente,si,,403,recurso_no_alcanza,otra cuenta aunque la orden tenga grupo
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@grupo:agua),AA,cuenta:Y;grupo:agua,vigente,si,,403,requiere_controles_2b6,por grupo alcanza; la económica niega
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@unidad:X),AA,cuenta:X,vigente,si,,403,recurso_tipo_inesperado,unidad en una acción que espera cuenta o grupo
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:),AA,cuenta:X,vigente,si,,403,recurso_invalido,cuenta: con id vacío
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:abc),AA,cuenta:X,vigente,si,,403,recurso_invalido,cuenta:abc no es un UUID
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:X_MAYUS),AA,cuenta:X,vigente,si,,403,recurso_invalido,UUID en mayúsculas: no canónico
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@CUENTA:X),AA,cuenta:X,vigente,si,,403,recurso_invalido,tipo en mayúsculas: no canónico
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@edificio:X),AA,cuenta:X,vigente,si,,403,recurso_invalido,tipo desconocido
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@cuenta:X:x),AA,cuenta:X,vigente,si,,403,recurso_invalido,dos dos puntos
+R7,egresos.preparar_orden,Fac(egresos.preparar_orden@grupo:Agua),AA,grupo:Agua,vigente,si,,403,recurso_invalido,código de grupo con mayúscula
+R7,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vigente,si,,200,concedido_por_facultad,facultad sin recurso: todas las unidades del consorcio
+R7,invitaciones.crear,Fac(invitaciones.crear@unidad:5B),C,unidad:5B,vigente,si,,200,concedido_por_facultad,facultad con su unidad exacta
+R7,invitaciones.crear,Fac(invitaciones.crear@unidad:X),C,unidad:X2,vigente,si,,403,recurso_no_alcanza,unidad:X no alcanza a unidad:X2
+R7,invitaciones.crear,Fac(invitaciones.crear@cuenta:X),C,unidad:X,vigente,si,,403,recurso_tipo_inesperado,cuenta:X no alcanza a la unidad X
+R7,invitaciones.crear,Fac(invitaciones.crear@unidad:5B),C,,vigente,si,,403,recurso_no_alcanza,la entidad no tiene unidad
+R7,coeficientes.proponer,Fac(coeficientes.proponer@grupo:agua),C,grupo:agua,vigente,si,respaldo=si,200,concedido_por_facultad,grupo exacto
+R7,coeficientes.proponer,Fac(coeficientes.proponer@grupo:agua),C,grupo:agua_caliente,vigente,si,respaldo=si,403,recurso_no_alcanza,nunca por prefijo
+R7,coeficientes.proponer,Fac(coeficientes.proponer@grupo:agua_caliente),C,grupo:agua,vigente,si,respaldo=si,403,recurso_no_alcanza,nunca por subcadena
+R7,documentos.cargar,Fac(documentos.cargar@unidad:3A),AA,unidad:3A,vigente,si,,403,recurso_tipo_inesperado,recurso en una acción sin recurso declarado
+R7,documentos.cargar,Fac(documentos.cargar),AA,unidad:3A,vigente,si,,200,concedido_por_facultad,control: la misma acción con la facultad general
+R8,liquidacion.aprobar,Fac(liquidacion.aprobar),AA,,vigente,si,preparo=otro,403,requiere_controles_2b6,Fabio aprueba la L de Eva: pasa la separación y la económica niega hasta 2b-6
+R8,liquidacion.aprobar,Fac(liquidacion.aprobar)+Fac(liquidacion.preparar),AA,,vigente,si,preparo=yo,403,no_es_quien_preparo,Eva aprueba la L que preparó aunque tenga las dos facultades
+R8,liquidacion.revisar,MC,AA,,vigente,si,preparo=otro,200,concedido_por_facultad,MC revisa lo que preparó otro
+R8,liquidacion.revisar,MC,AA,,vigente,si,preparo=yo,403,no_es_quien_preparo,no revisa lo que preparó
+R8,egresos.aprobar_orden,Fac(egresos.aprobar_orden),AA,cuenta:X,vigente,si,preparo=yo,403,no_es_quien_preparo,no aprueba la orden que preparó
+R8,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,aprobaron=otro;respaldo=si,403,requiere_controles_2b6,Hugo ejecuta la O que aprobó Gina: la económica niega hasta 2b-6
+R8,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,aprobaron=yo;respaldo=si,403,no_es_quien_aprobo,Gina ejecuta la O que aprobó ella
+R8,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,aprobaron=otro|yo;respaldo=si,403,no_es_quien_aprobo,distinta de todos los aprobadores (A5)
+R8,egresos.ejecutar_pago,Fac(egresos.preparar_orden),AA,cuenta:X,vigente,si,aprobaron=otro;respaldo=si,403,sin_concesion,el filtro nunca concede: Hugo sin egresos.ejecutar_pago
+R8,solicitud_formal.firmar,MC,C,,vigente,si,preparo=yo,200,concedido_por_facultad,Diego prepara S y la firma: preparar no cuenta como firma (A5)
+R8,solicitud_formal.firmar,MC,C,,vigente,si,preparo=otro;firmas=otro,200,concedido_por_facultad,Eva pone la segunda firma con administrador vigente
+R8,solicitud_formal.firmar,MC,C,,vigente,si,firmas=yo,403,firma_repetida,Diego pone las dos firmas de S
+R8,solicitud_formal.firmar,MC+Fac(solicitud_formal.firmar),C,,vigente,si,firmas=yo,403,firma_repetida,aunque sea con dos mandatos distintos (caso 19)
+R8,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=yo,403,no_es_quien_solicito,no autoriza lo que solicitó
+R8,coeficientes.aprobar,Fac(coeficientes.aprobar),C,grupo:agua,vigente,si,propuso=yo;respaldo=si,403,no_es_quien_propuso,no aprueba lo que propuso
+R8,coeficientes.aprobar,Fac(coeficientes.aprobar),C,grupo:agua,vigente,si,propuso=otro;respaldo=si,403,requiere_controles_2b6,lo que propuso otro: la económica niega hasta 2b-6
+R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_vinculo,no confirma su propio vínculo
+R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,confirma el vínculo de otra persona
+R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,alta con una decisión del mismo consorcio
+R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
+R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
+R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
+R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión sin referencia del acta
+R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
+R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)
+R10,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=otro,403,requiere_controles_2b6,MC con fondo_reserva.autorizar: se niega hasta 2b-6
+R10,liquidacion.aprobar,Fac(liquidacion.aprobar),AG,,vigente,si,preparo=otro,403,requiere_controles_2b6,liquidacion.aprobar es económica
+R10,egresos.preparar_orden,AD,AA,cuenta:X,vigente,si,,403,requiere_controles_2b6,egresos.preparar_orden es económica
+R10,egresos.aprobar_orden,Fac(egresos.aprobar_orden),AA,cuenta:X,vigente,si,preparo=otro,403,requiere_controles_2b6,egresos.aprobar_orden es económica
+R10,egresos.ejecutar_pago,AD,AA,cuenta:X,vigente,si,aprobaron=otro;respaldo=si,403,requiere_controles_2b6,egresos.ejecutar_pago es económica
+R10,coeficientes.aprobar,Fac(coeficientes.aprobar),AA,grupo:agua,vigente,si,propuso=otro;respaldo=si,403,requiere_controles_2b6,coeficientes.aprobar es económica
+R10,fondo_reserva.solicitar,AD,C,,vigente,si,,200,concedido_por_facultad,control: fondo_reserva.solicitar no es económica
+R11,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,vigente,si,,200,concedido_por_facultad,mandato de Diego en el edificio A vale en A
+R11,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,otro_consorcio,si,,404,fuera_de_ambito,Diego en B sin vínculo: 404
+R11,invitaciones.crear,P+Fac(invitaciones.crear),C,unidad:5B,otro_consorcio,si,,403,sin_concesion,con vínculo en B: entra y sus facultades de A no cuentan
+R11,invitaciones.crear,Fac(invitaciones.crear@unidad:B1),C,unidad:3A,vigente,si,,403,recurso_no_alcanza,recurso de una unidad de B no alcanza nada en A
+R11,invitaciones.crear,Fac(invitaciones.crear@unidad:B1),C,unidad:5B,vigente,si,,403,recurso_no_alcanza,ni a otra unidad
+R12,solicitud_formal.firmar,MC,C,,vigente,si,firmas=otro,200,concedido_por_facultad,la segunda firma emite dirigida al AD vigente
+R12,solicitud_formal.firmar,MC,C,,vigente,no,firmas=otro,403,sin_administrador_vigente,sin mandato de administración: queda en borrador
+R12,solicitud_formal.firmar,MC,AA,,vigente,no,firmas=otro,403,sin_administrador_vigente,también en Administrador Aumentado
+caso 1,invitaciones.crear,P+MC,C,unidad:5B,vigente,si,,200,concedido_por_facultad,P de 3-A y MC: invita a 5-B por la facultad
+caso 1,fiscalizacion.ver_resumen,P+MC,C,,vigente,si,,200,concedido_por_vinculo,P y MC: ve el resumen por su vínculo
+caso 1,fiscalizacion.ver_panel,P+MC,C,,vigente,si,,200,concedido_por_facultad,P y MC: ve el panel por su facultad
+caso 4,invitaciones.crear,Fac(invitaciones.crear),C,unidad:5B,rango_vacio,si,,404,fuera_de_ambito,baja el mismo día del alta: nunca valió
+caso 5,liquidacion.revisar,AD+MC,AA,,vigente,si,preparo=yo,403,no_es_quien_preparo,AD y MC: no revisa lo que preparó con el otro mandato
+caso 5,liquidacion.preparar,AD+MC,AA,,vigente,si,,200,concedido_por_facultad,AD y MC: se suman las facultades
+caso 7,unidades.listar,P,—,,sin_mandato,no,,200,concedido_por_ambito,sin modo: unidades.listar corre
+caso 7,invitaciones.crear,P,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinculo,sin modo: las invitaciones corren
+caso 7,padron.ver_propio,P,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinculo,sin modo: padron.ver_propio corre
+caso 7,padron.ver,MC,—,unidad:3A,vigente,no,,200,concedido_por_facultad,sin modo: padron.ver corre
+caso 7,decisiones.registrar,MC,—,,vigente,no,respaldo=si,200,concedido_por_facultad,sin modo: decisiones.registrar corre
+caso 7,mandatos.alta,MC,—,,vigente,no,objetivo=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.alta corre
+caso 7,mandatos.baja,AD,—,,vigente,no,objetivo=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.baja corre
+caso 7,padron.gestionar,AD,—,unidad:3A,vigente,no,,403,sin_modo_registrado,sin modo: padron.gestionar no corre
+caso 7,fiscalizacion.ver_resumen,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: el resumen no corre
+caso 7,documentos.ver,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: los documentos no corren
+caso 7,documentos.cargar,AE,—,,vigente,no,,403,sin_modo_registrado,sin modo: la carga no corre
+caso 8,invitaciones.crear,Fac(invitaciones.crear@unidad:3A)+Fac(invitaciones.crear@unidad:5B),C,unidad:5B,vigente,si,,200,concedido_por_facultad,facultad duplicada: alcanza 5-B
+caso 8,invitaciones.crear,Fac(invitaciones.crear@unidad:3A)+Fac(invitaciones.crear@unidad:5B),C,unidad:7C,vigente,si,,403,recurso_no_alcanza,otra unidad no
+caso 8,invitaciones.crear,Fac(invitaciones.crear@unidad:abc)+Fac(invitaciones.crear@unidad:5B),C,unidad:5B,vigente,si,,200,concedido_por_facultad,la mal formada no anula la otra
+caso 8,invitaciones.crear,Fac(invitaciones.crear@unidad:5B)+Fac(invitaciones.crear@unidad:abc),C,unidad:5B,vigente,si,,200,concedido_por_facultad,el orden no importa
+caso 9,invitaciones.crear,MC[padron.ver|documentos.ver],C,unidad:5B,vigente,si,,403,sin_concesion,el acta quitó invitaciones.crear
+caso 19,solicitud_formal.firmar,MC+Fac(solicitud_formal.firmar),C,,vigente,si,firmas=yo,403,firma_repetida,separación por persona y no por mandato
+caso 20,solicitud_formal.firmar,MC,C,,vigente,si,actor=nadie,403,identidad_indeterminada,actor sin persona: no cuenta como firma
+caso 20,liquidacion.revisar,MC,AA,,vigente,si,preparo=nula,403,identidad_indeterminada,no se sabe quién preparó: se niega
+caso 20,solicitud_formal.firmar,MC,C,,vigente,si,firmas=nula,403,identidad_indeterminada,una firma sin persona: se niega
+caso 20,egresos.ejecutar_pago,AD,AA,cuenta:X,vigente,si,aprobaron=otro|nula;respaldo=si,403,identidad_indeterminada,un aprobador sin persona: se niega
+caso 20,mandatos.alta,MC,C,,vigente,si,objetivo=nula;respaldo=si,403,identidad_indeterminada,mandatario sin persona: se niega en 2b-3 (desvío restrictivo)
+caso 21,solicitud_formal.firmar,MC,AG,,vigente,si,firmas=otro,403,modo_no_admitido,la segunda firma llega con el consorcio ya en Autogestión
+caso 23,solicitud_formal.preparar,MC,C,,vigente,no,,200,concedido_por_facultad,preparar no necesita destinatario
+caso 23,solicitud_formal.firmar,MC,C,,vigente,no,,200,concedido_por_facultad,la primera firma no necesita destinatario
+caso 23,solicitud_formal.firmar,MC,C,,vigente,no,firmas=otro,403,sin_administrador_vigente,la segunda firma sí
+caso 23,solicitud_formal.firmar,MC,C,,vigente,si,firmas=otro|otro2,403,solicitud_ya_emitida,con dos firmas ya no hay otra (desvío restrictivo)
+caso 25,documentos.ver,I,AA,,sin_mandato,si,,403,sin_concesion,Carla (I) pide la rendición común
+caso 25,documentos.ver,O,AA,,sin_mandato,si,,403,sin_concesion,el ocupante tampoco
+caso 25,documentos.ver,I+P@5B,AA,,sin_mandato,si,,200,concedido_por_vinculo,control: si además es P de otra unidad la ve por ser P
+caso 25,documentos.ver,I+Fac(documentos.ver),AA,,vigente,si,,200,concedido_por_facultad,Carla con documentos.ver la ve por la facultad
+D6,padron.ver_propio,I,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,I ve su unidad y sus vínculos
+D6,padron.ver_propio,I,C,unidad:5B,sin_mandato,si,,403,sin_concesion,I no ve otra unidad
+D6,padron.ver_propio,MC,C,unidad:3A,vigente,si,,403,sin_concesion,padron.ver_propio no se concede por facultad
