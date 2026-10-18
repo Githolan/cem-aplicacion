@@ -113,9 +113,9 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging en `484f8ef`** (= `main`, 18-10-2026), base `0011`. **Producción en `000734d`**, base `0010`. Contrato 0.11.0 en los dos. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `f242295`** (18-10-2026; mismo código que `484f8ef` más `ESTADO.md`), base `0011`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
 
-- **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging; producción espera la decisión del propietario.** El diseño suma los criterios 9 y 10 (CEM #43).
+- **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging y producción como `f242295`.** El diseño suma los criterios 9 y 10 (CEM #43).
   - Migración `0011`:
     - catálogo `nucleo.facultad` (21 facultades, 6 económicas) y `nucleo.paquete_facultad` (paquetes de D2);
     - `nucleo.mandato` (D1, con decisión de respaldo obligatoria, sin superposición del mismo tipo y persona);
@@ -127,7 +127,10 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
   - `python -m scripts.alta_mandato --archivo … [--simular]` registra el arranque de D3 (decisión, modo inicial y mandatos) en una transacción. **Nunca con una referencia inventada** (criterio 9).
   - Ninguna ruta usa los mandatos todavía: las políticas llegan con 2b-3.
   - CI con imágenes en verde: 433 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo.
-  - Staging lo desplegó Claude (03:40–03:42 UTC), con copia previa verificada. La validación funcional en la base corrió con `ROLLBACK`. La integridad (conteos y cadena de auditoría recalculada) y la regresión están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
+  - Staging lo desplegó Claude (03:40–03:42 UTC), con copia previa verificada.
+  - A las 19:22–19:27 UTC Claude desplegó `f242295` en staging y producción, con el sí del propietario. Producción migró de `0010` a `0011` con copia previa verificada.
+    - `cd.ps1` solo despliega la punta de `main`, y `484f8ef` dejó de serlo al fusionar este `ESTADO.md`. Por eso se desplegó `f242295`, que tiene el mismo código.
+    - Los dos entornos se validaron en la base con `ROLLBACK` y quedaron healthy, sin reinicios ni errores. La validación funcional en la base corrió con `ROLLBACK`. La integridad (conteos y cadena de auditoría recalculada) y la regresión están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
   - **Abierto:** un mandato que vence por fecha, sin baja, no revoca sesiones (tracker E15). Pareja 3750 sigue sin modo ni mandatos: espera el acta real.
 
 - **H2b 2b-1, modo de operación (`000734d`, PR #59), 17-10.** Diseño: `doc/diseno/H2b_Mandatos_Padron_y_Permisos.md` del repositorio CEM (#40).
