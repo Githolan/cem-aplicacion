@@ -26,8 +26,11 @@ dentro del contenedor de `cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`):
 
 **Criterio 9:** la referencia tiene que ser la del acta o instrumento real. Si el documento no
 está, no se corre el script: nunca se inventa una referencia. `facultades` omitida = el paquete
-del tipo (D2); si viene, solo puede achicarlo. Toda regla (decisión de este consorcio, paquete,
-superposición, modo solo con asamblea) la valida la base. Si algo falla, no se escribe nada.
+del tipo (D2); si viene, solo puede achicarlo. `miembro_consejo` y `administrador` necesitan
+`persona_id` (A12); `administrador_externo` necesita su CUIT, que se normaliza quitando guiones y
+espacios (A11). Toda regla (decisión de este consorcio, paquete, CUIT válido, un solo
+administrador por consorcio y fecha, modo solo con asamblea) la valida la base, que es la fuente
+única. Si algo falla, no se escribe nada.
 `--simular` hace todo y deshace la transacción al final: prueba las mismas reglas sin escribir.
 """
 
@@ -38,7 +41,7 @@ from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -70,6 +73,15 @@ class Mandato(_Estricto):
     persona_id: UUID | None = None
     mandatario_nombre: str | None = Field(default=None, min_length=1, max_length=200)
     mandatario_cuit: str | None = Field(default=None, pattern=r"^[0-9]{11}$")
+
+    @field_validator("mandatario_cuit", mode="before")
+    @classmethod
+    def normalizar_cuit(cls, valor: object) -> object:
+        # El dígito verificador lo valida la base (`nucleo.cuit_valido`); acá solo el formato.
+        if isinstance(valor, str):
+            return valor.replace("-", "").replace(" ", "")
+        return valor
+
     matricula: str | None = Field(default=None, min_length=1, max_length=100)
     desde: date
     hasta: date | None = None
@@ -79,6 +91,10 @@ class Mandato(_Estricto):
     def identificado(self) -> "Mandato":
         if self.persona_id is None and self.mandatario_nombre is None:
             raise ValueError("cada mandato necesita persona_id o mandatario_nombre")
+        if self.tipo != "administrador_externo" and self.persona_id is None:
+            raise ValueError(f"un mandato de {self.tipo} necesita persona_id (A12)")
+        if self.tipo == "administrador_externo" and self.mandatario_cuit is None:
+            raise ValueError("un administrador_externo necesita mandatario_cuit (A11)")
         return self
 
 

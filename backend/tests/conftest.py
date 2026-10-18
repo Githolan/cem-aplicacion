@@ -77,6 +77,18 @@ def base_de_prueba() -> None:
     command.upgrade(cfg, "head")
 
 
+def vaciar_mandatos(motor_migrate: Engine) -> None:
+    """Borra los mandatos de la base **descartable** de la sesión antes de bajar migraciones.
+
+    El downgrade de 0012 se niega si existe cualquier mandato (`downgrade_con_datos`), y está
+    bien que así sea en una base real. Las pruebas que bajan la cadena por debajo de 0012 llaman
+    a esto primero; `cem_migrate` es el dueño de las tablas.
+    """
+    with motor_migrate.begin() as c:
+        c.execute(text("delete from nucleo.facultad_otorgada"))
+        c.execute(text("delete from nucleo.mandato"))
+
+
 @pytest.fixture
 def redis_limpio() -> Iterator[Redis]:
     """Redis real sin claves del límite de tasa de pruebas anteriores."""
