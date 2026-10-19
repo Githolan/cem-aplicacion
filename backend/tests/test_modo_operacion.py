@@ -19,7 +19,7 @@ from app.config import Config
 from app.contexto import Identidad, obtener_identidad, require_scope
 from app.db import transaccion
 from app.main import crear_app
-from tests.conftest import alembic_config, url_rol
+from tests.conftest import alembic_config, url_rol, vaciar_mandatos
 
 pytestmark = pytest.mark.db
 
@@ -282,6 +282,7 @@ def test_la_migracion_0010_baja_y_sube(base_de_prueba, motor_migrate):
             )
 
     assert existe() == (True, True, True)
+    vaciar_mandatos(motor_migrate)  # el downgrade de 0012 se niega con mandatos
     cfg = alembic_config()
     command.downgrade(cfg, "0009")
     assert existe() == (False, False, True)  # la 0009 queda

@@ -18,7 +18,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.db import transaccion
 from scripts import alta_mandato
-from tests.conftest import alembic_config, url_rol
+from tests.conftest import alembic_config, url_rol, vaciar_mandatos
 from tests.test_modo_operacion import consorcio_con_persona, decidir
 
 pytestmark = pytest.mark.db
@@ -26,11 +26,13 @@ pytestmark = pytest.mark.db
 DESDE = date(2026, 1, 1)
 PAQUETE_CONSEJO = sorted(
     [
+        "decisiones.registrar",
         "documentos.ver",
         "fiscalizacion.ver_panel",
         "fondo_reserva.autorizar",
         "invitaciones.crear",
         "liquidacion.revisar",
+        "mandatos.registrar",
         "padron.ver",
         "solicitud_formal.firmar",
         "solicitud_formal.preparar",
@@ -39,17 +41,18 @@ PAQUETE_CONSEJO = sorted(
 
 
 def alta(motor_app, cons, actor, decision, *, tipo="miembro_consejo", persona=None,
-         nombre=None, facultades=None, desde=DESDE, hasta=None) -> UUID:  # fmt: skip
+         nombre=None, cuit=None, facultades=None, desde=DESDE, hasta=None) -> UUID:  # fmt: skip
     with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
         return c.execute(
             text(
-                "select nucleo.alta_mandato(:t, :p, :n, null, null, :d, :desde, :hasta, :f,"
+                "select nucleo.alta_mandato(:t, :p, :n, :cuit, null, :d, :desde, :hasta, :f,"
                 " :a, 'api')"
             ),
             {
                 "t": tipo,
                 "p": persona,
                 "n": nombre,
+                "cuit": cuit,
                 "d": decision,
                 "desde": desde,
                 "hasta": hasta,
@@ -60,9 +63,13 @@ def alta(motor_app, cons, actor, decision, *, tipo="miembro_consejo", persona=No
 
 
 def baja(motor_app, cons, actor, mandato) -> int:
+    """Baja ordinaria por renuncia, respaldada por la nota (C6, desde 0012)."""
     with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
         return c.execute(
-            text("select nucleo.baja_mandato(:m, 'Renuncia aceptada en asamblea', :a, 'api')"),
+            text(
+                "select nucleo.baja_mandato(:m, 'renuncia', null, 'Nota de renuncia del 05-11',"
+                " 'Renuncia aceptada en asamblea', :a, 'api')"
+            ),
             {"m": mandato, "a": actor},
         ).scalar_one()
 
@@ -111,7 +118,8 @@ def otra_persona(motor_migrate, cons) -> UUID:
 
 def test_alta_con_el_paquete_del_tipo_y_auditada(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    m = alta(motor_app, cons, per, decidir(motor_app, cons, per), persona=per)
+    otra = otra_persona(motor_migrate, cons)
+    m = alta(motor_app, cons, per, decidir(motor_app, cons, per), persona=otra)
     assert facultades_de(motor_app, cons, per, m) == PAQUETE_CONSEJO
     with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
         accion, despues = c.execute(
@@ -125,7 +133,8 @@ def test_alta_con_el_paquete_del_tipo_y_auditada(motor_migrate, motor_app):
 def test_el_acta_puede_achicar_el_paquete_pero_no_ampliarlo(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)
-    m = alta(motor_app, cons, per, acta, persona=per, facultades=["padron.ver"])
+    m = alta(motor_app, cons, per, acta, persona=otra_persona(motor_migrate, cons),
+             facultades=["padron.ver"])  # fmt: skip
     assert facultades_de(motor_app, cons, per, m) == ["padron.ver"]
     otra = otra_persona(motor_migrate, cons)
     with pytest.raises(
@@ -140,10 +149,16 @@ def test_el_acta_puede_achicar_el_paquete_pero_no_ampliarlo(motor_migrate, motor
 def test_administrador_externo_sin_cuenta_con_nombre(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per, "contrato_administracion")
-    m = alta(motor_app, cons, per, acta, tipo="administrador_externo", nombre="Administración X")
+    despues = DESDE + timedelta(days=30)
+    m = alta(motor_app, cons, per, acta, tipo="administrador_externo", nombre="Administración X",
+             cuit="20123456786", hasta=despues)  # fmt: skip
     assert facultades_de(motor_app, cons, per, m) == ["documentos.cargar"]
     with pytest.raises(DBAPIError, match="mandato_check"):
-        alta(motor_app, cons, per, acta, tipo="administrador_externo")
+        alta(motor_app, cons, per, acta, tipo="administrador_externo", cuit="20123456786",
+             desde=despues)  # fmt: skip
+    with pytest.raises(DBAPIError, match="necesita su CUIT"):
+        alta(motor_app, cons, per, acta, tipo="administrador_externo", nombre="Administración X",
+             desde=despues)  # fmt: skip
 
 
 def test_criterio_9_sin_decision_de_respaldo_no_hay_mandato(motor_migrate, motor_app):
@@ -158,12 +173,13 @@ def test_criterio_9_sin_decision_de_respaldo_no_hay_mandato(motor_migrate, motor
 def test_superposicion_del_mismo_tipo_y_persona_rechazada(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)
-    alta(motor_app, cons, per, acta, persona=per, hasta=DESDE + timedelta(days=365))
+    otra = otra_persona(motor_migrate, cons)
+    alta(motor_app, cons, per, acta, persona=otra, hasta=DESDE + timedelta(days=365))
     with pytest.raises(DBAPIError, match="ya hay un mandato de miembro_consejo"):
-        alta(motor_app, cons, per, acta, persona=per, desde=DESDE + timedelta(days=100))
+        alta(motor_app, cons, per, acta, persona=otra, desde=DESDE + timedelta(days=100))
     # Controles: otro tipo en las mismas fechas, y el mismo tipo después del primero, sí.
-    alta(motor_app, cons, per, acta, tipo="administrador", persona=per)
-    alta(motor_app, cons, per, acta, persona=per, desde=DESDE + timedelta(days=365))
+    alta(motor_app, cons, per, acta, tipo="administrador", persona=otra)
+    alta(motor_app, cons, per, acta, persona=otra, desde=DESDE + timedelta(days=365))
 
 
 def test_rn22_la_baja_revoca_las_sesiones_y_no_borra_nada(motor_migrate, motor_app):
@@ -204,7 +220,8 @@ def test_rn22_la_baja_revoca_las_sesiones_y_no_borra_nada(motor_migrate, motor_a
         )
     assert (hasta, motivo, vigentes) == (hoy, "Renuncia aceptada en asamblea", 0)
     assert acciones == ["consorcio.mandato.alta", "consorcio.mandato.baja"]
-    with pytest.raises(DBAPIError, match="ya terminó"):
+    # Desde 0012 la baja es irreversible: un mandato con causa no admite otra (A10).
+    with pytest.raises(DBAPIError, match="ya tiene una baja"):
         baja(motor_app, cons, per, m)
 
 
@@ -212,7 +229,7 @@ def test_un_mandato_en_el_edificio_a_no_da_nada_en_el_b(motor_migrate, motor_app
     cons_a, _, per_a = consorcio_con_persona(motor_migrate)
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
     acta_a = decidir(motor_app, cons_a, per_a)
-    m = alta(motor_app, cons_a, per_a, acta_a, persona=per_a)
+    m = alta(motor_app, cons_a, per_a, acta_a, persona=per_b)
 
     def visibles(cons, per) -> tuple[int, int]:
         with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
@@ -236,7 +253,7 @@ def test_un_mandato_en_el_edificio_a_no_da_nada_en_el_b(motor_migrate, motor_app
 def test_cem_app_no_escribe_mandatos_ni_facultades_directo(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)
-    m = alta(motor_app, cons, per, acta, persona=per)
+    m = alta(motor_app, cons, per, acta, persona=otra_persona(motor_migrate, cons))
     sentencias = [
         "update nucleo.mandato set vigente_hasta = null",
         "delete from nucleo.mandato",
@@ -296,7 +313,7 @@ def arranque(cons: UUID, persona: UUID) -> dict:
         "mandatos": [
             {"tipo": "miembro_consejo", "persona_id": str(persona), "desde": "2026-01-01"},
             {"tipo": "administrador_externo", "mandatario_nombre": "Administración X",
-             "mandatario_cuit": "20123456789", "desde": "2026-01-01"},
+             "mandatario_cuit": "20-12345678-6", "desde": "2026-01-01"},
         ],
     }  # fmt: skip
 
@@ -362,6 +379,10 @@ def test_script_correrlo_dos_veces_falla_y_no_duplica(correr, motor_migrate):
                        "referencia_acta": "  "}}, "referencia_acta"),
         ({"mandatos": [{"tipo": "miembro_consejo", "desde": "2026-01-01"}]},
          "persona_id o mandatario_nombre"),
+        ({"mandatos": [{"tipo": "administrador", "mandatario_nombre": "Sin cuenta",
+                        "desde": "2026-01-01"}]}, "necesita persona_id (A12)"),
+        ({"mandatos": [{"tipo": "administrador_externo", "mandatario_nombre": "X",
+                        "desde": "2026-01-01"}]}, "necesita mandatario_cuit (A11)"),
     ],
 )  # fmt: skip
 def test_script_archivos_invalidos_no_llegan_a_la_base(correr, motor_migrate, cambio, esperado):
@@ -385,6 +406,9 @@ def test_la_migracion_0011_baja_y_sube(base_de_prueba, motor_migrate):
             )
 
     assert existe() == (True, True, True)
+    # El downgrade de 0012 se niega con mandatos (downgrade_con_datos): la base de la sesión es
+    # descartable, así que se vacían antes de bajar.
+    vaciar_mandatos(motor_migrate)
     cfg = alembic_config()
     command.downgrade(cfg, "0010")
     assert existe() == (False, False, True)  # la 0010 queda
