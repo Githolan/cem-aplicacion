@@ -175,6 +175,37 @@ test.describe("invitar", () => {
     await expect(page.getByLabel("Correo")).toBeFocused();
   });
 
+  test("si durante el envío la persona lleva el foco a otro lado, no se lo saca", async ({ page, baseURL }) => {
+    await simularApi(page, baseURL!, "consejo");
+    let soltar: () => void = () => undefined;
+    const retenido = new Promise<void>((r) => {
+      soltar = r;
+    });
+    await page.route(`**/api/v1/consorcios/${C1}/invitaciones`, async (ruta) => {
+      if (ruta.request().method() !== "POST") return ruta.fallback();
+      await retenido;
+      return ruta.fallback();
+    });
+    await page.goto("/invitaciones");
+    await page.getByLabel("Nombre").fill("Fito Sosa");
+    await page.getByLabel("Correo").fill("fito@ejemplo.com");
+    await page.getByLabel("Correo").press("Enter");
+    await expect(page.getByLabel("Correo")).toBeDisabled();
+    await expect(page.getByLabel("Correo")).not.toBeFocused();
+    // La persona va a otra parte (acá, el título; en la app real, la barra o el lector).
+    const elegido = await page.evaluate(() => {
+      const titulo = document.querySelector("h1") as HTMLElement;
+      titulo.tabIndex = -1;
+      titulo.focus();
+      return document.activeElement?.textContent ?? "";
+    });
+    expect(elegido).toBe("Invitar a una persona");
+    soltar();
+    await expect(page.getByText("Listo: le mandamos la invitación a Fito Sosa.")).toBeVisible();
+    expect(await page.evaluate(() => document.activeElement?.textContent ?? "")).toBe(elegido);
+    await expect(page.getByLabel("Correo")).not.toBeFocused();
+  });
+
   test("retirar pide confirmación y manda el CSRF", async ({ page, baseURL }) => {
     const { retiros } = await simularApi(page, baseURL!, "propietaria");
     await page.goto("/invitaciones");

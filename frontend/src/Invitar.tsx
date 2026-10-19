@@ -101,7 +101,9 @@ export function Invitar() {
 
   useEffect(() => {
     if (enviando || foco.current === null) return;
-    foco.current.focus();
+    // Solo si nadie tomó el foco en el medio (la persona pudo ir a otra parte de la página).
+    const ahora = document.activeElement;
+    if (ahora === null || ahora === document.body || ahora === foco.current) foco.current.focus();
     foco.current = null;
   }, [enviando]);
 
@@ -192,7 +194,8 @@ export function Invitar() {
 
   function invitar(evento: FormEvent) {
     evento.preventDefault();
-    foco.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const activo = document.activeElement;
+    foco.current = activo instanceof HTMLElement && activo !== document.body ? activo : null;
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
