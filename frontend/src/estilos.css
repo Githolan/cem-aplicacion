@@ -139,7 +139,8 @@ button:focus-visible {
   font-weight: 600;
 }
 
-.formulario input {
+.formulario input,
+.formulario select {
   min-height: 44px;
   padding: 0.5rem 0.75rem;
   border: 1px solid #5a6573;
@@ -147,7 +148,8 @@ button:focus-visible {
   font: inherit;
 }
 
-.formulario input:focus-visible {
+.formulario input:focus-visible,
+.formulario select:focus-visible {
   outline: 3px solid #f2a900;
   outline-offset: 2px;
 }

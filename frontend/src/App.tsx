@@ -7,6 +7,7 @@ import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
+import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { ModoLectura } from "./ModoLectura";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -21,6 +22,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_CUENTA}>Mi cuenta</Link>
+      </p>
+      <p>
+        <Link to={RUTA_INVITACIONES}>Invitar a una persona</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -73,6 +77,7 @@ export function App() {
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
           <Route path={RUTA_CUENTA} element={<Cuenta />} />
+          <Route path={RUTA_INVITACIONES} element={<Invitar />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
