@@ -509,8 +509,16 @@
         "title": "Aceptada En"
       },
       "correo": {
-        "title": "Correo",
-        "type": "string"
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "El correo invitado. Nulo en el listado cuando ya se aceptó: desde ahí es el correo con el que la persona entra, y nadie lo ve de forma automática (D6).",
+        "title": "Correo"
       },
       "creada_en": {
         "format": "date-time",
@@ -758,8 +766,16 @@
             "title": "Aceptada En"
           },
           "correo": {
-            "title": "Correo",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El correo invitado. Nulo en el listado cuando ya se aceptó: desde ahí es el correo con el que la persona entra, y nadie lo ve de forma automática (D6).",
+            "title": "Correo"
           },
           "creada_en": {
             "format": "date-time",
