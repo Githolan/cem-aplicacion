@@ -50,8 +50,8 @@ def consorcio_con_persona(motor_migrate, zona: str = "America/Argentina/Buenos_A
         c.execute(
             text(
                 "insert into nucleo.vinculo"
-                " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde)"
-                " values (:c, :u, :p, 'propietario', '2020-01-01')"
+                " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, fuente, origen)"
+                " values (:c, :u, :p, 'propietario', '2020-01-01', 'documento', 'soporte')"
             ),
             {"c": cons, "u": uni, "p": per},
         )

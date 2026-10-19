@@ -16,7 +16,7 @@ from sqlalchemy import Connection, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 
 from app.db import transaccion
-from tests.conftest import alembic_config, vaciar_mandatos
+from tests.conftest import alembic_config, vaciar_mandatos, volver_a_subir
 
 pytestmark = pytest.mark.db
 
@@ -311,5 +311,5 @@ def test_la_migracion_0004_baja_y_sube(base_de_prueba, motor_migrate):
     vaciar_mandatos(motor_migrate)
     command.downgrade(cfg, "0003")
     assert existe() == (False,) * 5
-    command.upgrade(cfg, "head")
+    volver_a_subir(cfg, motor_migrate)  # bajó por debajo de 0007
     assert existe() == (True,) * 5
