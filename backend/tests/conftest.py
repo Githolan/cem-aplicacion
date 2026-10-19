@@ -99,6 +99,20 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
             )
         )
     dar_procedencia_sintetica(motor_migrate)
+    # Ya con su evento sintético, la procedencia de esos vínculos es la invitación: así el
+    # downgrade de 0014 no se niega por vínculos de otra fuente (si la base está en 0014).
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "do $$ begin"
+                " if exists (select 1 from information_schema.columns"
+                "            where table_schema = 'nucleo' and table_name = 'vinculo'"
+                "              and column_name = 'fuente') then"
+                "   update nucleo.vinculo set fuente = 'invitacion', origen = 'soporte',"
+                "          registrado_por = null where fuente <> 'invitacion';"
+                " end if; end $$"
+            )
+        )
 
 
 def dar_procedencia_sintetica(motor_migrate: Engine) -> None:
