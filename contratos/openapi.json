@@ -2091,7 +2091,7 @@
         ]
       },
       "post": {
-        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.\n\nPuede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un\nrecurso que la alcanza (tabla de verdad, §2.1).\n\nPide `Idempotency-Key`: un reintento con la misma clave y los mismos datos recibe la misma\nrespuesta durante 24 horas, sin mandar otro correo ni gastar el cupo. Esa respuesta guardada\nconserva el correo, solo para quien la creó (la clave es por persona; excepción acotada de\nP6).",
+        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.\n\nPuede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un\nrecurso que la alcanza (tabla de verdad, §2.1).\n\nPide `Idempotency-Key`: un reintento con la misma clave y los mismos datos recibe la misma\nrespuesta durante 24 horas, sin mandar otro correo ni gastar el cupo, también si llega\nmientras el primero sigue en curso. Esa respuesta guardada conserva el correo, solo para\nquien la creó (la clave es por persona; excepción acotada de P6).",
         "operationId": "invitar_api_v1_consorcios__consorcio_id__invitaciones_post",
         "parameters": [
           {
