@@ -8,10 +8,11 @@ Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (§2 a §4).
 - E26: nombre, matrícula, vigencia, facultad nula, descripción de la baja, instrumento largo, y
   tipo, fecha, descripción, referencia y sha256 de la decisión salen con su motivo en vez de un
   `check_violation` o `not_null_violation` crudo. Los `check` siguen como última barrera.
-- R10 y P1-d: el alta de un miembro del Consejo con cuenta toma el mismo bloqueo consultivo
-  (`persona:<correo>`) que la aceptación de A7 y, bajo él, rechaza con
-  `consejo_incompatible_con_administracion` si la persona está asociada a una administración
-  externa que se superpone.
+- R10 y P1-d: el alta de un miembro del Consejo o de un administrador externo con cuenta toma
+  el mismo bloqueo consultivo (`persona:<correo>`) que la aceptación de A7 y, bajo él, rechaza
+  con `consejo_incompatible_con_administracion` si la persona tiene el otro mandato superpuesto
+  (el predicado de A7, en los dos sentidos).
+- `alta_mandato` suma `actor_requerido` y el soporte sin actor (#66), como las otras dos.
 
 Solo cambian las tres funciones: no hay datos que migrar ni barrera de downgrade. El downgrade
 restaura las definiciones de 0014 tal cual.
@@ -63,12 +64,21 @@ create or replace function nucleo.alta_mandato(
       raise exception 'origen no admitido: solo api o soporte'
         using errcode = 'P0001', hint = 'origen_invalido';
     end if;
+    -- E26 (0016): como baja_mandato y registrar_decision (#66); sin esto, `mandato_check1`.
+    if origen_pedido = 'api' and actor is null then
+      raise exception 'un alta por la API necesita quién la registra'
+        using errcode = 'P0001', hint = 'actor_requerido';
+    end if;
     if origen_pedido = 'api' and actor is distinct from plataforma.persona_actual() then
       raise exception 'el actor no es la persona de la sesión'
         using errcode = 'P0001', hint = 'actor_no_coincide';
     end if;
     if origen_pedido = 'soporte' and plataforma.persona_actual() is not null then
       raise exception 'el origen soporte no admite una persona en la sesión'
+        using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
+    if origen_pedido = 'soporte' and actor is not null then
+      raise exception 'el origen soporte no lleva actor: lo registra el equipo'
         using errcode = 'P0001', hint = 'origen_invalido';
     end if;
     -- A4: nadie se da un mandato a sí mismo.
@@ -81,20 +91,6 @@ create or replace function nucleo.alta_mandato(
     if origen_pedido = 'api' and dec.registrada_por = actor then
       raise exception 'quien registró la decisión no la usa para dar de alta'
         using errcode = 'P0001', hint = 'decision_registrada_por_el_actor';
-    end if;
-    -- E26 (0016): lo que antes salía como check_violation crudo sale con su motivo.
-    if (nombre is null and persona is null)
-       or (nombre is not null and length(btrim(nombre)) not between 1 and 200) then
-      raise exception 'el nombre del mandatario falta o no tiene entre 1 y 200 caracteres'
-        using errcode = 'P0001', hint = 'nombre_invalido';
-    end if;
-    if matricula_nueva is not null and length(btrim(matricula_nueva)) not between 1 and 100 then
-      raise exception 'la matrícula no tiene entre 1 y 100 caracteres'
-        using errcode = 'P0001', hint = 'matricula_invalida';
-    end if;
-    if desde is null or (hasta is not null and hasta < desde) then
-      raise exception 'la vigencia necesita un desde, y el hasta no puede ser anterior'
-        using errcode = 'P0001', hint = 'vigencia_invalida';
     end if;
     -- A12: miembro del Consejo y administrador, con cuenta.
     if tipo_nuevo <> 'administrador_externo' and persona is null then
@@ -109,6 +105,21 @@ create or replace function nucleo.alta_mandato(
     if cuit is not null and not nucleo.cuit_valido(cuit) then
       raise exception 'el CUIT no es válido (11 dígitos, sin guiones, con dígito verificador)'
         using errcode = 'P0001', hint = 'cuit_invalido';
+    end if;
+    -- E26 (0016): lo que antes salía como check_violation crudo sale con su motivo, después
+    -- de A12 y A11 para no cambiar qué motivo sale primero.
+    if (nombre is null and persona is null)
+       or (nombre is not null and length(btrim(nombre)) not between 1 and 200) then
+      raise exception 'el nombre del mandatario falta o no tiene entre 1 y 200 caracteres'
+        using errcode = 'P0001', hint = 'nombre_invalido';
+    end if;
+    if matricula_nueva is not null and length(btrim(matricula_nueva)) not between 1 and 100 then
+      raise exception 'la matrícula no tiene entre 1 y 100 caracteres'
+        using errcode = 'P0001', hint = 'matricula_invalida';
+    end if;
+    if desde is null or (hasta is not null and hasta < desde) then
+      raise exception 'la vigencia necesita un desde, y el hasta no puede ser anterior'
+        using errcode = 'P0001', hint = 'vigencia_invalida';
     end if;
 
     select array_agg(p.facultad order by p.facultad) into paquete
@@ -130,19 +141,26 @@ create or replace function nucleo.alta_mandato(
         using errcode = 'P0001', hint = 'facultad_fuera_de_paquete';
     end if;
 
-    -- R10 y P1-d (0016): el Consejo fiscaliza y no co-administra. El mismo bloqueo consultivo
-    -- que toma la aceptación de A7 antes de su control; bajo él, el control al revés.
-    if tipo_nuevo = 'miembro_consejo' and persona is not null then
-      select p.correo into correo_persona from nucleo.persona p where p.id = persona;
+    -- R10 y P1-d (0016): el Consejo fiscaliza y no co-administra, en los dos sentidos. El alta
+    -- de un Consejo o de un AE con cuenta toma el mismo bloqueo consultivo que la aceptación de
+    -- A7 y, bajo él, aplica su predicado: el otro mandato de la persona, que no sea un error de
+    -- carga, vigente o futuro y superpuesto. Un alta que ya terminó (histórica) no lo activa,
+    -- como en A7.
+    if persona is not null and tipo_nuevo in ('miembro_consejo', 'administrador_externo')
+       and (hasta is null or hasta > nucleo.hoy_del_consorcio(c)) then
+      select p.correo into strict correo_persona from nucleo.persona p where p.id = persona;
       perform pg_advisory_xact_lock(hashtextextended('persona:' || correo_persona, 0));
       if exists (
            select 1 from nucleo.mandato x
             where x.consorcio_id = c and x.persona_id = persona
-              and x.tipo = 'administrador_externo'
+              and x.tipo = case tipo_nuevo when 'miembro_consejo'
+                                then 'administrador_externo'::nucleo.tipo_mandato
+                                else 'miembro_consejo'::nucleo.tipo_mandato end
               and x.causa_baja is distinct from 'error_carga'
               and (x.vigente_hasta is null or x.vigente_hasta > nucleo.hoy_del_consorcio(c))
               and daterange(x.vigente_desde, x.vigente_hasta) && daterange(desde, hasta)) then
-        raise exception 'la persona está asociada a una administración externa en esas fechas'
+        raise exception 'la persona tendría un mandato de Consejo y una administración externa'
+                        ' superpuestos'
           using errcode = 'P0001', hint = 'consejo_incompatible_con_administracion';
       end if;
     end if;

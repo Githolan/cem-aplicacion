@@ -279,6 +279,93 @@ def test_r10_el_alta_toma_el_bloqueo_de_la_aceptacion(escena, motor_app, motor_m
          tipo="miembro_consejo")  # fmt: skip
 
 
+def test_r10_un_miembro_del_consejo_no_entra_como_externo(escena, motor_app):
+    """P1-d al revés: el alta de un AE con cuenta mira el Consejo de la persona."""
+    e = escena
+    alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), persona=e["mc"],
+         tipo="miembro_consejo")  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        _ae_asociado(motor_app, e)
+    assert _motivo(error) == "consejo_incompatible_con_administracion"
+    # Control: el mismo AE sin cuenta entra (la cuenta se asocia después, por A7).
+    externo(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]))
+
+
+def test_r10_un_ae_futuro_superpuesto_cuenta(escena, motor_app):
+    e = escena
+    _ae_asociado(motor_app, e, desde=date.today() + timedelta(days=30))
+    with pytest.raises(DBAPIError) as error:
+        alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]),
+             persona=e["mc"], tipo="miembro_consejo", desde=date.today())  # fmt: skip
+    assert _motivo(error) == "consejo_incompatible_con_administracion"
+
+
+def test_r10_un_ae_que_ya_termino_no_cuenta(escena, motor_app):
+    """Como en A7: el otro mandato tiene que estar vigente o ser futuro."""
+    e = escena
+    _ae_asociado(motor_app, e, hasta=date.today() - timedelta(days=1))
+    alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), persona=e["mc"],
+         tipo="miembro_consejo")  # fmt: skip
+
+
+def test_r10_un_consejo_historico_no_lo_activa(escena, motor_app):
+    """Un alta que ya terminó (carga histórica) no choca con el AE de hoy, como en A7."""
+    e = escena
+    _ae_asociado(motor_app, e)
+    alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), persona=e["mc"],
+         tipo="miembro_consejo", hasta=date.today() - timedelta(days=1))  # fmt: skip
+
+
+def test_r10_el_administrador_con_cuenta_no_entra_en_p1d(escena, motor_app):
+    """P1-d habla del AE: un `administrador` y el Consejo de la misma persona no chocan acá."""
+    e = escena
+    alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), persona=e["mc"],
+         tipo="administrador")  # fmt: skip
+    alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), persona=e["mc"],
+         tipo="miembro_consejo")  # fmt: skip
+
+
+# Actor, origen y precedencia ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("tipo", ["miembro_consejo", "administrador"])
+def test_sin_cuenta_ni_nombre_sigue_saliendo_mandato_sin_cuenta(escena, motor_app, tipo):
+    """E26 no le gana a A12: el defecto real es la falta de cuenta."""
+    e = escena
+    with pytest.raises(DBAPIError) as error:
+        alta(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]), tipo=tipo)
+    assert _motivo(error) == "mandato_sin_cuenta"
+
+
+def _alta_con(motor_app, e, sesion, actor, origen):
+    with transaccion(motor_app, persona_id=sesion, consorcio_id=e["cons"]) as c:
+        return c.execute(
+            text(
+                "select nucleo.alta_mandato('miembro_consejo', :p, null, null, null, :d, :desde,"
+                " null, null, :a, :o)"
+            ),
+            {"p": e["mc"], "d": decidir_equipo(motor_app, e["cons"]), "desde": DESDE, "a": actor,
+             "o": origen},
+        ).scalar_one()  # fmt: skip
+
+
+def test_el_alta_por_la_api_necesita_actor(escena, motor_app):
+    e = escena
+    with pytest.raises(DBAPIError) as error:
+        _alta_con(motor_app, e, None, None, "api")
+    assert _motivo(error) == "actor_requerido"
+
+
+def test_el_alta_por_soporte_no_lleva_actor(escena, motor_app, motor_migrate):
+    e = escena
+    with pytest.raises(DBAPIError) as error:
+        _alta_con(motor_app, e, None, e["per"], "soporte")
+    assert _motivo(error) == "origen_invalido"
+    # Control: por soporte, sin actor, entra.
+    _alta_con(motor_app, e, None, None, "soporte")
+    assert _mandatos(motor_migrate, e["cons"]) == 1
+
+
 # Downgrade ----------------------------------------------------------------------------------
 
 
