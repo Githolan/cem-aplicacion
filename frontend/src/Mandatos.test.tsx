@@ -720,7 +720,7 @@ describe("página /mandatos", () => {
       soltar();
       await waitFor(() => expect(fallos).toBe(1));
       await new Promise((r) => setTimeout(r, 0));
-      expect(screen.queryByText(/No pudimos consultar quién registró esa decisión/)).toBeNull();
+      expect(screen.queryByText(/No pudimos consultar quién registró esta decisión/)).toBeNull();
     });
   });
 
@@ -735,8 +735,13 @@ describe("página /mandatos", () => {
     );
     abrir();
     await completarAlta(D_PROPIA);
-    expect(await screen.findByText(/No pudimos consultar quién registró esa decisión/)).toBeTruthy();
+    expect(await screen.findByText(/No pudimos consultar quién registró esta decisión/)).toBeTruthy();
     expect(boton("Dar de alta").hasAttribute("disabled")).toBe(false);
+    // El aviso es de esa decisión: al elegir otra, que sí se pudo consultar, desaparece.
+    fireEvent.change(screen.getByLabelText("Decisión que lo respalda"), { target: { value: D_EQUIPO } });
+    expect(screen.queryByText(/No pudimos consultar quién registró esta decisión/)).toBeNull();
+    // Y no queda como error de la página.
+    expect(within(screen.getByRole("status")).queryByText(/No pudimos consultar/)).toBeNull();
   });
 
   it("el detalle de una baja muestra cuándo se registró, en la hora del edificio", async () => {

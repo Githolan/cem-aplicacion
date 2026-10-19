@@ -195,6 +195,7 @@ function leer<T>({ data, response }: Resultado<{ elementos: T[] }>): Lectura<T> 
 }
 
 const CARGANDO = { tipo: "cargando" } as const;
+const SIN_RESPUESTA = "sin_respuesta";
 const SIN_SERVICIO = { tipo: "sin_servicio" } as const;
 
 /** Una lista que no se pudo consultar no arrastra a las otras; un 401 sí corta todo. */
@@ -218,8 +219,9 @@ export function Mandatos() {
   const [decisiones, setDecisiones] = useState<Lectura<Decision>>(CARGANDO);
   const [candidatos, setCandidatos] = useState<Lectura<Candidato>>(CARGANDO);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
-  // A15: qué decisiones registró quien mira, según el detalle que manda la API.
-  const [propias, setPropias] = useState<Record<string, boolean>>({});
+  // A15: qué decisiones registró quien mira, según el detalle que manda la API; `sin_respuesta`
+  // si la consulta falló (el aviso es de esa decisión, no de la página).
+  const [propias, setPropias] = useState<Record<string, boolean | "sin_respuesta">>({});
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   // Cada envío vuelve a pedir las listas: qué se ve lo decide la API.
@@ -238,9 +240,6 @@ export function Mandatos() {
   // Cada pedido de detalle lleva su número: una respuesta que llega después de otro pedido, de
   // cerrar el detalle o de cambiar de edificio se descarta.
   const pedidoDetalle = useRef(0);
-  // Lo mismo para todo lo que pertenece a un edificio (la consulta A15): cambiar de edificio
-  // deja viejas sus respuestas.
-  const edificio = useRef(0);
   // El botón «Ver detalle» que abrió el detalle: al cerrarlo, el foco vuelve ahí.
   const origenDetalle = useRef<HTMLElement | null>(null);
   const formularioBaja = useRef<HTMLFormElement | null>(null);
@@ -358,25 +357,21 @@ export function Mandatos() {
   /** Pregunta a la API si quien mira registró la decisión (A15), para avisar antes de enviar. */
   const consultarPropia = useCallback(
     (decision: string) => {
-      if (decision === "" || decision in propias) return;
-      const deEdificio = edificio.current;
+      // Una consulta que falló se repite al volver a elegir la decisión.
+      if (decision === "" || (decision in propias && propias[decision] !== SIN_RESPUESTA)) return;
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
           params: { path: { consorcio_id: consorcio, decision_id: decision } },
         })
         .then(({ data, response }) => {
           exigirSesion(response);
-          if (deEdificio !== edificio.current) return;
           if (data === undefined) throw new Error(String(response.status));
           setPropias((actual) => ({ ...actual, [data.id]: data.registrada_por_vos }));
         })
         .catch((e: unknown) => {
           if (e instanceof SinSesion) aEntrar();
-          else if (deEdificio === edificio.current)
-            setAviso({
-              texto: "No pudimos consultar quién registró esa decisión. Si la registraste vos, la plataforma igual rechaza el envío.",
-              ok: false,
-            });
+          // Queda en esa decisión (por su id): una respuesta tardía de otro edificio no se ve acá.
+          else setPropias((actual) => ({ ...actual, [decision]: SIN_RESPUESTA }));
         });
     },
     [consorcio, propias, aEntrar],
@@ -610,7 +605,6 @@ export function Mandatos() {
     // Nada del edificio anterior queda elegible mientras llegan los datos del nuevo.
     for (const clave of [claveDecision, claveAlta, claveBaja]) clave.current = null;
     pedidoDetalle.current += 1;
-    edificio.current += 1;
     setMandatos(CARGANDO);
     setDecisiones(CARGANDO);
     setCandidatos(CARGANDO);
@@ -628,7 +622,9 @@ export function Mandatos() {
   const textoDecision = (d: Decision) => `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}: ${d.descripcion}`;
   // Siempre montado: el lector anuncia el aviso cuando llega, aunque el foco siga en el selector.
   const avisoA15 = (decision: string, clave: "alta" | "remover", uso: string) => (
-    <p id={`${id}-a15-${clave}`} aria-live="polite" className={propias[decision] === true ? "aviso-error" : undefined}>
+    <p id={`${id}-a15-${clave}`} aria-live="polite" className={propias[decision] === undefined || propias[decision] === false ? undefined : "aviso-error"}>
+      {propias[decision] === SIN_RESPUESTA &&
+        "No pudimos consultar quién registró esta decisión. Si la registraste vos, la plataforma igual rechaza el envío."}
       {propias[decision] === true &&
         `Esa decisión la registraste vos: no podés usarla para ${uso}. Tiene que hacerlo otra persona del Consejo o de la administración.`}
     </p>
