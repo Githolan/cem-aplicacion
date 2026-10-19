@@ -755,6 +755,22 @@ describe("página /mandatos", () => {
     expect(etiqueta.nextElementSibling?.textContent).toMatch(/19 de octubre de 2026.*12:30/);
   });
 
+  it("al pedir otro detalle, el anterior (y su baja) se cierra aunque el nuevo se niegue", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE),
+        [`GET ${RUTA_MANDATOS}/${M_MC}`]: () => error("sin_permiso", 403),
+      }),
+    );
+    abrir();
+    await abrirBaja();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Ana Díaz, Consejo de propietarios" }));
+    expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
+    expect(await screen.findByText("No tenés permiso para ver ese mandato.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeNull();
+  });
+
   it("el detalle de una remoción muestra la asamblea que la respaldó", async () => {
     const removido = { ...DETALLE_AE, estado: "dado_de_baja", causa_baja: "remocion", baja_decision_id: D_EQUIPO, motivo_fin: "Remoción" };
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(removido) }));

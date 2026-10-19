@@ -545,6 +545,8 @@ export function Mandatos() {
     const activo = document.activeElement;
     origenDetalle.current = activo instanceof HTMLElement ? activo : null;
     const numero = ++pedidoDetalle.current;
+    // El detalle anterior (y su baja) no queda operable mientras llega el que se eligió.
+    setDetalle(null);
     setAviso(null);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}", {
@@ -576,6 +578,8 @@ export function Mandatos() {
     const activo = document.activeElement;
     origenDetalle.current = activo instanceof HTMLElement ? activo : null;
     const numero = ++pedidoDetalle.current;
+    // El detalle anterior (y su baja) no queda operable mientras llega el que se eligió.
+    setDetalle(null);
     setAviso(null);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
