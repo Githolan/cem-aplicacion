@@ -14,8 +14,10 @@ Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (§2 a §4).
   (el predicado de A7, en los dos sentidos).
 - `alta_mandato` suma `actor_requerido` y el soporte sin actor (#66), como las otras dos.
 
-Solo cambian las tres funciones: no hay datos que migrar ni barrera de downgrade. El downgrade
-restaura las definiciones de 0014 tal cual.
+Solo cambian las tres funciones: no hay datos que migrar ni barrera de downgrade. El upgrade se
+niega (`mandatos_incompatibles_previos`) si ya hay un Consejo y un AE vigentes o futuros,
+superpuestos, de la misma persona: los corrige el equipo, con su respaldo. El downgrade restaura
+las definiciones de 0014 tal cual.
 
 Revisión: 0016
 Anterior: 0015
@@ -29,6 +31,31 @@ branch_labels = None
 depends_on = None
 
 UPGRADE = r"""
+-- R10 (Codex): el control nuevo solo mira las altas futuras. Un Consejo y un AE vigentes o
+-- futuros, superpuestos, de la misma persona, cargados antes por script, quedarían vivos: el
+-- upgrade se niega y los deja para que el equipo los corrija con su respaldo. No se elige cuál
+-- terminar: es una decisión institucional, no de la migración.
+do $guarda$
+begin
+  if exists (
+       select 1
+         from nucleo.mandato mc
+         join nucleo.mandato ae
+           on ae.consorcio_id = mc.consorcio_id and ae.persona_id = mc.persona_id
+        cross join lateral (select nucleo.hoy_del_consorcio(mc.consorcio_id) as hoy) h
+        where mc.tipo = 'miembro_consejo' and ae.tipo = 'administrador_externo'
+          and mc.causa_baja is distinct from 'error_carga'
+          and ae.causa_baja is distinct from 'error_carga'
+          and (mc.vigente_hasta is null or mc.vigente_hasta > h.hoy)
+          and (ae.vigente_hasta is null or ae.vigente_hasta > h.hoy)
+          and daterange(mc.vigente_desde, mc.vigente_hasta)
+              && daterange(ae.vigente_desde, ae.vigente_hasta)) then
+    raise exception 'hay personas con Consejo y administración externa superpuestos'
+      using errcode = 'P0001', hint = 'mandatos_incompatibles_previos';
+  end if;
+end
+$guarda$;
+
 create or replace function nucleo.alta_mandato(
   tipo_nuevo nucleo.tipo_mandato, persona uuid, nombre text, cuit text, matricula_nueva text,
   decision uuid, desde date, hasta date, facultades text[], actor uuid, origen_pedido text)

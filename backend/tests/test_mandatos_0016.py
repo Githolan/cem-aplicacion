@@ -396,3 +396,39 @@ def test_el_downgrade_de_0016_restaura_las_funciones_de_0015(base_aparte):  # no
     assert _funciones(motor) == en_0015
     command.upgrade(cfg, "0016")
     assert _funciones(motor) == en_0016
+
+
+def test_el_upgrade_se_niega_con_consejo_y_externo_superpuestos(base_aparte):  # noqa: F811
+    """R10 (Codex): lo que se cargó antes por script no queda vivo en silencio."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0015")
+    with motor.begin() as c:
+        cons = c.execute(text("insert into nucleo.consorcio (nombre) values ('A') returning id"))
+        cons = cons.scalar_one()
+        dec = c.execute(
+            text("insert into nucleo.decision_formal (consorcio_id, tipo, fecha, descripcion,"
+                 " referencia_acta, origen) values (:c, 'asamblea', '2026-01-01', 'x', 'Acta',"
+                 " 'soporte') returning id"), {"c": cons},
+        ).scalar_one()  # fmt: skip
+        per = c.execute(
+            text("insert into nucleo.persona (correo, nombre) values ('r10@e.com', 'R')"
+                 " returning id")).scalar_one()  # fmt: skip
+        consejo = c.execute(
+            text("insert into nucleo.mandato (consorcio_id, tipo, persona_id, decision_id,"
+                 " vigente_desde, origen) values (:c, 'miembro_consejo', :p, :d, '2026-01-01',"
+                 " 'soporte') returning id"), {"c": cons, "p": per, "d": dec},
+        ).scalar_one()  # fmt: skip
+        c.execute(
+            text("insert into nucleo.mandato (consorcio_id, tipo, persona_id, mandatario_nombre,"
+                 " mandatario_cuit, decision_id, vigente_desde, origen) values (:c,"
+                 " 'administrador_externo', :p, 'Estudio', :cuit, :d, '2026-01-01', 'soporte')"),
+            {"c": cons, "p": per, "d": dec, "cuit": CUIT_X},
+        )  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        command.upgrade(cfg, "0016")
+    assert error.value.orig.diag.message_hint == "mandatos_incompatibles_previos"
+    # Control: con el Consejo terminado ayer, el mismo upgrade pasa.
+    with motor.begin() as c:
+        c.execute(text("update nucleo.mandato set vigente_hasta = current_date - 1,"
+                       " vigente_desde = '2025-01-01' where id = :m"), {"m": consejo})  # fmt: skip
+    command.upgrade(cfg, "0016")
