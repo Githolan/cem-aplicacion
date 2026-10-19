@@ -98,6 +98,11 @@ CAMPOS_DEL_OUTBOX = ("evento_id", "evento")
 LARGO_MAXIMO_DIRECCION = 254
 """RFC 5321, §4.5.3.1.3: el camino tiene 256 octetos con los corchetes angulares."""
 
+DOMINIO_RESERVADO = ".invalid"
+"""RFC 6761, §6.4: `.invalid` nunca resuelve. Lo usan solo las cuentas sintéticas del smoke de
+staging (decisión P3 del propietario: no sale ningún correo). A esas direcciones no se intenta
+enviar: el trabajo termina como hecho con `no_enviado`, sin abrir la conexión SMTP."""
+
 # Una dirección simple `local@dominio`: sin nombre, sin comentarios, sin varias direcciones.
 _DIRECCION = re.compile(
     r"[^@\s<>()\[\],;:\"\\]+"
@@ -255,6 +260,10 @@ def notificar_correo(conn: Connection, trabajo: cola.Trabajo) -> dict[str, str]:
     """Manejador de `notificar.correo` (lo registra `tareas.py`)."""
     carga = validar(trabajo.carga)
     clave = clave_envio(trabajo)
+    if carga.para.lower().endswith(DOMINIO_RESERVADO):
+        log.info("correo no enviado: destino en un dominio reservado (%s)", clave,
+                 extra={"campos": {"clave_envio": clave}})  # fmt: skip
+        return {"clave_envio": clave, "no_enviado": "dominio_reservado"}
     config = ConfigCorreo.desde_entorno()
     mensaje = armar(config, carga, clave, trabajo.intentos)
     try:
