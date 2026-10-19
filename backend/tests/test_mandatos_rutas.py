@@ -12,7 +12,7 @@ from sqlalchemy import text
 
 from tests.conftest import clave_idempotencia
 from tests.test_contexto_mandatos import cliente, denegaciones
-from tests.test_mandatos import otra_persona, sesiones_abiertas
+from tests.test_mandatos import otra_persona, sesiones_abiertas, vinculo_confirmado
 from tests.test_mandatos_0012 import CUIT_X, alta
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
@@ -25,15 +25,19 @@ CUIT_DIGITO_MAL = "20123456780"
 @pytest.fixture
 def escena(motor_migrate, motor_app):
     """Consorcio con su propietaria, dos miembros del Consejo (con `mandatos.registrar` y
-    `decisiones.registrar`, C2) y una persona más sin mandato."""
+    `decisiones.registrar`, C2) y una vecina sin mandato. La vecina y la propietaria tienen un
+    vínculo confirmado: desde 0018, solo a ellas se les da un mandato por la API."""
     cons, _, prop = consorcio_con_persona(motor_migrate)
     acta = decidir_equipo(motor_app, cons)
     mc1, mc2 = otra_persona(motor_migrate, cons), otra_persona(motor_migrate, cons)
     m_mc1 = alta(motor_app, cons, None, acta, persona=mc1, tipo="miembro_consejo",
                  origen="soporte")  # fmt: skip
     alta(motor_app, cons, None, acta, persona=mc2, tipo="miembro_consejo", origen="soporte")
+    vecina = otra_persona(motor_migrate, cons)
+    vinculo_confirmado(motor_app, cons, vecina)
+    vinculo_confirmado(motor_app, cons, prop)
     return {"cons": cons, "prop": prop, "acta": acta, "mc1": mc1, "mc2": mc2, "m_mc1": m_mc1,
-            "vecina": otra_persona(motor_migrate, cons)}  # fmt: skip
+            "vecina": vecina}  # fmt: skip
 
 
 def _post(persona, url, cuerpo, clave=None):
@@ -168,11 +172,11 @@ def test_la_administracion_es_unica(escena):
     assert (r.status_code, r.json()["codigo"]) == (409, "administracion_ocupada")
 
 
-def test_r10_un_externo_asociado_no_entra_al_consejo(escena):
+def test_r10_un_externo_asociado_no_entra_al_consejo(escena, motor_app):
+    """El AE con cuenta lo carga soporte (la API no asocia cuentas a un AE, 2b-4c)."""
     e = escena
-    r = alta_http(e["mc1"], e["cons"], e["acta"], tipo="administrador_externo",
-                  persona_id=e["vecina"], nombre="Estudio", cuit=CUIT_X)  # fmt: skip
-    assert r.status_code == 201, r.text
+    alta(motor_app, e["cons"], None, e["acta"], tipo="administrador_externo", persona=e["vecina"],
+         nombre="Estudio", cuit=CUIT_X, origen="soporte")  # fmt: skip
     r = alta_http(e["mc1"], e["cons"], e["acta"], persona_id=e["vecina"])
     assert (r.status_code, r.json()["codigo"]) == (409, "consejo_incompatible_con_administracion")
 
@@ -259,7 +263,8 @@ def test_la_remocion_con_instrumento_no_llega_a_la_base(escena):
 @pytest.mark.parametrize(
     ("cuerpo", "estado", "codigo"),
     [
-        ({"persona_id": "01a10000-0000-7000-8000-000000000001"}, 422, "persona_invalida"),
+        # Una cuenta que no existe da el mismo motivo que una sin vínculo (sin oráculo, 2b-4c).
+        ({"persona_id": "01a10000-0000-7000-8000-000000000001"}, 422, "persona_sin_vinculo"),
         ({"tipo": "administrador", "nombre": "Sin cuenta"}, 422, "mandato_sin_cuenta"),
         ({"persona_id": "VECINA", "facultades": []}, 422, "facultad_fuera_de_paquete"),
         ({"persona_id": "VECINA", "facultades": ["pagos.autorizar"]}, 422,

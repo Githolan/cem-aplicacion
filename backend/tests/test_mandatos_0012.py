@@ -18,7 +18,12 @@ from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
 from tests.conftest import ADMIN_URL, CLAVES, alembic_config
-from tests.test_mandatos import facultades_de, otra_persona, sesiones_abiertas
+from tests.test_mandatos import (
+    facultades_de,
+    otra_persona,
+    sesiones_abiertas,
+    vinculo_confirmado,
+)
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
@@ -54,7 +59,12 @@ FUNCIONES = {
 
 
 def alta(motor_app, cons, actor, decision, *, tipo="administrador", persona=None, nombre=None,
-         cuit=None, desde=DESDE, hasta=None, facultades=None, origen="api") -> UUID:  # fmt: skip
+         cuit=None, desde=DESDE, hasta=None, facultades=None, origen="api",
+         con_vinculo=True) -> UUID:  # fmt: skip
+    """Con origen `api` y `con_vinculo`, antes le da a la persona el vínculo confirmado que pide
+    `0018` para el Consejo y el administrador (2b-4c, decisión 3)."""
+    if con_vinculo and origen == "api" and persona is not None and tipo != "administrador_externo":
+        vinculo_confirmado(motor_app, cons, persona)
     with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
         return c.execute(
             text(
@@ -431,6 +441,7 @@ def test_a14_concurrencia_la_segunda_carga_espera_y_se_rechaza(escena, motor_app
         except DBAPIError as error:
             resultado["r"] = str(error.orig)
 
+    vinculo_confirmado(motor_app, e["cons"], e["p1"])
     with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
         c.execute(
             text(

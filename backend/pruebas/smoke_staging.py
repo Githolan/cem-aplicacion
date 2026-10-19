@@ -361,6 +361,13 @@ def recorrer(corrida: Corrida) -> None:
     comprobar(de_la_lista(mc1)["estado"] == "revocada", "la lista la muestra revocada")
     corrida.ok("crear, listar (P6) y revocar una invitación")
 
+    # 2b-4c: la propietaria, sin mandato, no lee los mandatos (403 auditado). Va antes del
+    # alta por HTTP, que la hace miembro del Consejo y, al removerla, le revoca la sesión.
+    r = prop.pedir("GET", corrida.c("/mandatos"))
+    comprobar(r.estado == 403, f"la propietaria no lista mandatos: {r.texto}")
+    comprobar(denegado(corrida, corrida.personas["propietaria"], "mandatos.ver", "sin_concesion"),
+              "el 403 de la lectura quedó auditado")  # fmt: skip
+
     # 2b-4b: decisión, alta y baja por HTTP. A15: quien registró la decisión no la usa.
     r = mc1.pedir("POST", corrida.c("/decisiones"),
                   {"tipo": "asamblea", "fecha": str(hoy), "referencia": REFERENCIA,
@@ -390,6 +397,22 @@ def recorrer(corrida: Corrida) -> None:
     comprobar(r.estado == 200 and r.cuerpo["causa"] == "remocion", f"remoción: {r.texto}")
     corrida.terminados.add("consejo_http")
     corrida.ok("decisión, alta y remoción por HTTP, con A15 (403 auditado al que registró)")
+
+    # 2b-4c: lectura minimizada. El Consejo lee lo mínimo y el detalle.
+    r = mc2.pedir("GET", corrida.c("/mandatos"))
+    comprobar(r.estado == 200, f"listar mandatos: {r.texto}")
+    removido = {f["id"]: f for f in r.cuerpo["elementos"]}.get(
+        str(corrida.mandatos["consejo_http"])
+    )
+    comprobar(removido is not None and removido["estado"] == "dado_de_baja",
+              "el mandato removido sale dado de baja en la lista")  # fmt: skip
+    comprobar("@" not in r.texto, "la lista de mandatos no trae correos")
+    r = mc2.pedir("GET", corrida.c(f"/decisiones/{acta}"))
+    comprobar(r.estado == 200 and r.cuerpo["referencia"] == REFERENCIA
+              and r.cuerpo["registrada_por_vos"] is False,
+              f"detalle de la decisión: {r.texto}")  # fmt: skip
+    corrida.ok("lectura de mandatos y decisiones: lo mínimo al Consejo, 403 auditado a la"
+               " propietaria")  # fmt: skip
 
     baja(corrida, "administracion")
     alta(corrida, "externo", "administrador_externo", decision, hoy,

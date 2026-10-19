@@ -124,7 +124,7 @@ def segundo_consorcio_con_mandato(motor_migrate, motor_app, persona: UUID) -> tu
 def test_c3_administrador_sin_vinculo_entra_y_lista_unidades(motor_migrate, motor_app, edificio):
     e = edificio
     adm = otra_persona(motor_migrate, e["cons"])
-    alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=adm)
+    alta(motor_app, e["cons"], None, e["acta"], persona=adm, origen="soporte")
     url = f"/api/v1/consorcios/{e['cons']}/unidades"
     with cliente(adm) as c:
         r = c.get(url)
@@ -139,7 +139,7 @@ def test_c3_un_mandato_corregido_por_error_de_carga_no_da_ambito(
 ):
     e = edificio
     adm = otra_persona(motor_migrate, e["cons"])
-    m = alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=adm)
+    m = alta(motor_app, e["cons"], None, e["acta"], persona=adm, origen="soporte")
     url = f"/api/v1/consorcios/{e['cons']}/unidades"
     with cliente(adm) as c:
         assert c.get(url).status_code == 200  # control: antes de la corrección entra
@@ -156,7 +156,7 @@ def test_c3_el_contexto_lleva_el_mandato_sus_facultades_y_el_administrador(
 ):
     e = edificio
     adm = otra_persona(motor_migrate, e["cons"])
-    m = alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=adm)
+    m = alta(motor_app, e["cons"], None, e["acta"], persona=adm, origen="soporte")
     ctx = require_scope(e["cons"], Identidad(adm), motor_app)
     assert ctx.vinculos == ()
     assert [x.id for x in ctx.mandatos] == [m]
@@ -210,7 +210,7 @@ def test_c4_me_consorcios_incluye_el_del_mandato_y_no_el_corregido(
 ):
     e = edificio
     adm = otra_persona(motor_migrate, e["cons"])
-    m = alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=adm)
+    m = alta(motor_app, e["cons"], None, e["acta"], persona=adm, origen="soporte")
     with cliente(adm) as c:
         r = c.get("/api/v1/me/consorcios")
         assert r.status_code == 200, r.text
