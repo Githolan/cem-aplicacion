@@ -105,8 +105,8 @@ def test_pa15_clave_compuesta_impide_referencias_entre_consorcios(motor_migrate,
             c.execute(
                 text(
                     "insert into nucleo.vinculo"
-                    " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde)"
-                    " values (:a, :ub, :p, 'ocupante', '2026-01-01')"
+                    " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, fuente, origen)"
+                    " values (:a, :ub, :p, 'ocupante', '2026-01-01', 'documento', 'soporte')"
                 ),
                 {"a": datos.consorcio_a, "ub": datos.unidad_b1, "p": datos.persona_a},
             )
@@ -118,8 +118,8 @@ def test_vigencias_del_mismo_vinculo_no_se_solapan(motor_migrate, datos):
             c.execute(
                 text(
                     "insert into nucleo.vinculo"
-                    " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde)"
-                    " values (:a, :u, :p, 'propietario', '2026-01-01')"
+                    " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, fuente, origen)"
+                    " values (:a, :u, :p, 'propietario', '2026-01-01', 'documento', 'soporte')"
                 ),
                 {"a": datos.consorcio_a, "u": datos.unidad_a1, "p": datos.persona_a},
             )
@@ -136,7 +136,18 @@ def _auditar(c, consorcio, accion: str) -> None:
     )
 
 
+def _ultimo_hash(motor_app, cons, persona) -> tuple[int, str]:
+    with transaccion(motor_app, persona_id=persona, consorcio_id=cons) as c:
+        fila = c.execute(
+            text("select secuencia, hash from auditoria.eventos order by secuencia desc limit 1")
+        ).one_or_none()
+    return (fila.secuencia, fila.hash) if fila else (0, "")
+
+
 def test_auditoria_encadena_por_consorcio(motor_app, datos):
+    # La base de la sesión puede tener eventos previos en A (p. ej. los de procedencia que
+    # `vaciar_mandatos` agrega antes de bajar migraciones): la cadena sigue desde el último.
+    desde, hash_anterior = _ultimo_hash(motor_app, datos.consorcio_a, datos.persona_a)
     for cons, persona in [
         (datos.consorcio_a, datos.persona_a),
         (datos.consorcio_b, datos.persona_b),
@@ -146,10 +157,14 @@ def test_auditoria_encadena_por_consorcio(motor_app, datos):
                 _auditar(c, cons, accion)
     with transaccion(motor_app, persona_id=datos.persona_a, consorcio_id=datos.consorcio_a) as c:
         filas = c.execute(
-            text("select hash_previo, hash, consorcio_id from auditoria.eventos order by secuencia")
+            text(
+                "select hash_previo, hash, consorcio_id from auditoria.eventos"
+                " where secuencia > :d order by secuencia"
+            ),
+            {"d": desde},
         ).all()
     assert len(filas) == 3 and {f.consorcio_id for f in filas} == {datos.consorcio_a}
-    assert filas[0].hash_previo == ""
+    assert filas[0].hash_previo == hash_anterior
     for previa, actual in zip(filas, filas[1:], strict=False):
         assert actual.hash_previo == previa.hash
     assert all(len(f.hash) == 64 and f.hash != "ignorado" for f in filas)

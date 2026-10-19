@@ -29,7 +29,7 @@ from app.identidad import eventos, router, sesiones
 from app.limite import LIMITES_CODIGO_CORREO
 from app.plataforma import cola, tareas
 from app.registros import redactar
-from tests.conftest import alembic_config, vaciar_mandatos
+from tests.conftest import alembic_config, vaciar_mandatos, volver_a_subir
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     ANA,
     CANJE,
@@ -655,7 +655,7 @@ def test_la_migracion_0006_baja_y_sube(base_de_prueba, motor_migrate):
     vaciar_mandatos(motor_migrate)
     command.downgrade(cfg, "0005")
     assert existe() == (False, False, False, True)  # la 0004 queda
-    command.upgrade(cfg, "head")
+    volver_a_subir(cfg, motor_migrate)  # bajó por debajo de 0007
     assert existe() == (True, True, True, True)
 
 

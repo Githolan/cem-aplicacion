@@ -69,7 +69,8 @@ def edificio(motor_migrate) -> Edificio:
             )
             uno(
                 "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
-                " vigente_desde) values (:c, :u, :p, :t, '2020-01-01')",
+                " vigente_desde, fuente, origen)"
+                " values (:c, :u, :p, :t, '2020-01-01', 'documento', 'soporte')",
                 c=co, u=u1, p=p, t=tipo,
             )  # fmt: skip
     return Edificio(co, u1, u2, prop, inq)
@@ -450,7 +451,8 @@ def test_otra_propietaria_retira_y_reemplaza_lo_que_invito_la_primera(app, motor
         c.execute(
             text(
                 "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
-                " vigente_desde) values (:c, :u, :p, 'propietario', '2020-01-01')"
+                " vigente_desde, fuente, origen)"
+                " values (:c, :u, :p, 'propietario', '2020-01-01', 'documento', 'soporte')"
             ),
             {"c": e.consorcio, "u": e.u1, "p": berta_id},
         )
@@ -599,7 +601,8 @@ def test_dos_invitaciones_al_mismo_correo_nuevo_aceptadas_a_la_vez_crean_una_per
         conn.execute(
             text(
                 "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
-                " vigente_desde) select :c, :u, id, 'propietario', '2020-01-01'"
+                " vigente_desde, fuente, origen)"
+                " select :c, :u, id, 'propietario', '2020-01-01', 'documento', 'soporte'"
                 " from nucleo.persona where correo = :p"
             ),
             {"c": e.consorcio, "u": e.u2, "p": e.propietaria},

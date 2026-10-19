@@ -83,10 +83,76 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     El downgrade de 0012 se niega si existe cualquier mandato (`downgrade_con_datos`), y está
     bien que así sea en una base real. Las pruebas que bajan la cadena por debajo de 0012 llaman
     a esto primero; `cem_migrate` es el dueño de las tablas.
+
+    Lo mismo con 0014, que se niega a bajar si hay un vínculo confirmado y, al volver a subir,
+    si algún vínculo no tiene su evento de aceptación (`vinculo_sin_procedencia`). Los datos de
+    prueba cargan vínculos a mano: aquí se les da una invitación y un evento de aceptación
+    sintéticos (correo `.invalid`), solo en esta base.
     """
     with motor_migrate.begin() as c:
         c.execute(text("delete from nucleo.facultad_otorgada"))
         c.execute(text("delete from nucleo.mandato"))
+        c.execute(
+            text(
+                "update nucleo.vinculo set confirmado_por = null, confirmado_en = null,"
+                " confirmacion_referencia = null where confirmado_en is not null"
+            )
+        )
+    dar_procedencia_sintetica(motor_migrate)
+
+
+def dar_procedencia_sintetica(motor_migrate: Engine) -> None:
+    """Invitación aceptada y evento de aceptación sintéticos (correo `.invalid`) para cada
+    vínculo de la base **descartable** que no tiene su evento, como los que cargan a mano los
+    datos de prueba. Sin eso, el upgrade a 0014 se niega (`vinculo_sin_procedencia`, criterio
+    9), como debe hacerlo en una base real. Sirve desde 0007, que trae las invitaciones.
+    """
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "with sin as ("
+                "  select v.* from nucleo.vinculo v where not exists ("
+                "    select 1 from auditoria.eventos e"
+                "     where e.accion = 'identidad.invitacion.aceptar'"
+                "       and e.despues ->> 'vinculo_id' = v.id::text)),"
+                " inv as ("
+                "  insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
+                "    token_hash, vence_en, aceptada_en, persona_id)"
+                "  select s.consorcio_id, s.unidad_id, s.tipo,"
+                "    'sintetica-' || s.id || '@ejemplo.invalid', 'Sintética',"
+                "    sha256(s.id::text::bytea), now() + interval '1 day', now(), s.persona_id"
+                "    from sin s"
+                "  returning id, consorcio_id, persona_id, token_hash)"
+                " insert into auditoria.eventos (consorcio_id, actor_persona_id, origen, accion,"
+                "   entidad, entidad_id, despues, hash_previo, hash)"
+                " select i.consorcio_id, i.persona_id, 'api', 'identidad.invitacion.aceptar',"
+                "   'invitacion', i.id, jsonb_build_object('vinculo_id', s.id), '', ''"
+                "   from inv i join sin s on sha256(s.id::text::bytea) = i.token_hash"
+            )
+        )
+        # Bajar por debajo de 0007 borra las invitaciones y deja sus eventos: se recrean con
+        # el mismo id, para que el primer evento de cada vínculo vuelva a tener su invitación.
+        c.execute(
+            text(
+                "insert into nucleo.invitacion (id, consorcio_id, unidad_id, tipo, correo, nombre,"
+                "   token_hash, vence_en, aceptada_en, persona_id)"
+                " select distinct on (e.entidad_id) e.entidad_id, v.consorcio_id, v.unidad_id,"
+                "   v.tipo, 'recreada-' || e.entidad_id || '@ejemplo.invalid', 'Recreada',"
+                "   sha256(e.entidad_id::text::bytea), now() + interval '1 day', now(),"
+                "   v.persona_id"
+                "  from auditoria.eventos e"
+                "  join nucleo.vinculo v on v.id::text = e.despues ->> 'vinculo_id'"
+                " where e.accion = 'identidad.invitacion.aceptar'"
+                "   and not exists (select 1 from nucleo.invitacion i where i.id = e.entidad_id)"
+            )
+        )
+
+
+def volver_a_subir(cfg, motor_migrate: Engine) -> None:
+    """Sube a `head` después de bajar por debajo de 0007, que se lleva las invitaciones."""
+    command.upgrade(cfg, "0013")
+    dar_procedencia_sintetica(motor_migrate)
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture
@@ -152,8 +218,9 @@ def datos(motor_migrate: Engine) -> Datos:
         pv = uno(c, ins_p, c="dario@ejemplo.com", n="Darío")
         ins_v = (
             "insert into nucleo.vinculo"
-            " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, vigente_hasta)"
-            " values (:c, :u, :p, :t, :desde, :hasta)"
+            " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, vigente_hasta, fuente,"
+            " origen)"
+            " values (:c, :u, :p, :t, :desde, :hasta, 'documento', 'soporte')"
         )
         for cons, uni, per, tipo, desde, hasta in [
             (ca, a1, pa, "propietario", "2020-01-01", None),

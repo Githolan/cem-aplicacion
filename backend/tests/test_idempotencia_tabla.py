@@ -11,7 +11,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError, ProgrammingError
 
 from app.db import transaccion
 from app.plataforma import cola, tareas
-from tests.conftest import alembic_config, vaciar_mandatos
+from tests.conftest import alembic_config, vaciar_mandatos, volver_a_subir
 
 pytestmark = pytest.mark.db
 
@@ -125,5 +125,5 @@ def test_la_migracion_0003_baja_y_vuelve_a_subir(tabla_limpia, motor_migrate):
     vaciar_mandatos(motor_migrate)
     command.downgrade(alembic_config(), "0002")
     assert estado() == (False, False, False)
-    command.upgrade(alembic_config(), "head")
+    volver_a_subir(alembic_config(), motor_migrate)  # bajó por debajo de 0007
     assert estado() == (True, True, True)

@@ -57,8 +57,8 @@ def otra_unidad(motor_migrate, cons: UUID, designacion: str = "2° B") -> tuple[
         c.execute(
             text(
                 "insert into nucleo.vinculo"
-                " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde)"
-                " values (:c, :u, :p, 'propietario', '2020-01-01')"
+                " (consorcio_id, unidad_id, persona_id, tipo, vigente_desde, fuente, origen)"
+                " values (:c, :u, :p, 'propietario', '2020-01-01', 'documento', 'soporte')"
             ),
             {"c": cons, "u": uni, "p": per},
         )
@@ -323,7 +323,8 @@ def test_la_vigencia_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate
         c.execute(
             text(
                 "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
-                " vigente_desde, vigente_hasta) values (:c, :u, :p, 'propietario', :d, :h)"
+                " vigente_desde, vigente_hasta, fuente, origen)"
+                " values (:c, :u, :p, 'propietario', :d, :h, 'documento', 'soporte')"
             ),
             {"c": cons, "u": uni, "p": per, "d": desde, "h": hasta},
         )
