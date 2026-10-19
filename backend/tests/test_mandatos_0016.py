@@ -13,7 +13,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.test_mandatos import PAQUETE_CONSEJO, otra_persona, sesiones_abiertas
+from tests.test_mandatos import (
+    PAQUETE_CONSEJO,
+    otra_persona,
+    sesiones_abiertas,
+    vinculo_confirmado,
+)
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
@@ -152,6 +157,7 @@ def test_e26_la_vigencia_vacia_sigue_admitida(escena, motor_app):
 @pytest.mark.parametrize("matricula", ["   ", "m" * 101])
 def test_e26_la_matricula_se_traduce(escena, motor_app, matricula):
     e = escena
+    vinculo_confirmado(motor_app, e["cons"], e["mc"])  # 0018: el destinatario va antes
     with pytest.raises(DBAPIError) as error:
         with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
             c.execute(
@@ -214,8 +220,10 @@ def test_e26_la_decision_traduce_los_errores(escena, motor_app, motor_migrate, t
 
 
 def _ae_asociado(motor_app, e, **kw):
-    return externo(motor_app, e["cons"], e["per"], decidir_equipo(motor_app, e["cons"]),
-                   persona=e["mc"], **kw)  # fmt: skip
+    """Un AE con cuenta: desde 0018 solo por soporte (la API lo da de alta sin cuenta y la
+    asocia por A7)."""
+    return externo(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
+                   persona=e["mc"], origen="soporte", **kw)  # fmt: skip
 
 
 def test_r10_un_ae_asociado_no_entra_al_consejo(escena, motor_app, motor_migrate):
@@ -251,6 +259,7 @@ def test_r10_un_ae_dado_de_baja_por_error_de_carga_no_cuenta(escena, motor_app):
 def test_r10_el_alta_toma_el_bloqueo_de_la_aceptacion(escena, motor_app, motor_migrate):
     """Otra transacción con el bloqueo `persona:<correo>` de A7 detiene el alta de Consejo."""
     e = escena
+    vinculo_confirmado(motor_app, e["cons"], e["mc"])  # 0018: el destinatario va antes
     with motor_migrate.connect() as c:
         correo = c.execute(
             text("select correo from nucleo.persona where id = :p"), {"p": e["mc"]}

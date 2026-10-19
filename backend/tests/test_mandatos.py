@@ -13,12 +13,13 @@ from uuid import UUID
 
 import pytest
 from alembic import command
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.db import transaccion
 from scripts import alta_mandato
-from tests.conftest import alembic_config, url_rol, vaciar_mandatos
+from tests.conftest import CLAVES, alembic_config, url_rol, vaciar_mandatos
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
@@ -27,12 +28,14 @@ DESDE = date(2026, 1, 1)
 PAQUETE_CONSEJO = sorted(
     [
         "decisiones.registrar",
+        "decisiones.ver",
         "documentos.ver",
         "fiscalizacion.ver_panel",
         "fondo_reserva.autorizar",
         "invitaciones.crear",
         "liquidacion.revisar",
         "mandatos.registrar",
+        "mandatos.ver",
         "padron.ver",
         "solicitud_formal.firmar",
         "solicitud_formal.preparar",
@@ -40,8 +43,50 @@ PAQUETE_CONSEJO = sorted(
 )
 
 
+_MOTORES_DUENIO: dict[str, Engine] = {}
+
+
+def vinculo_confirmado(motor_app, cons, persona) -> None:
+    """Escena: la persona con un vínculo confirmado y vigente en el consorcio, en una unidad
+    propia y confirmado por otra persona. Es lo que pide `0018` (2b-4c, decisión 3) para darle
+    por la API un mandato de Consejo o de administración. Escribe como `cem_migrate` en la misma
+    base que `motor_app`."""
+    url = motor_app.url.set(username="cem_migrate", password=CLAVES["migrate"])
+    clave = url.render_as_string(hide_password=False)
+    motor = _MOTORES_DUENIO.setdefault(clave, create_engine(url))
+    with motor.begin() as c:
+        unidad = c.execute(
+            text(
+                "insert into nucleo.unidad (consorcio_id, designacion)"
+                " values (:c, 'UF ' || left(md5(random()::text), 6)) returning id"
+            ),
+            {"c": cons},
+        ).scalar_one()
+        confirma = c.execute(
+            text(
+                "insert into nucleo.persona (correo, nombre) values (:c, 'Confirma') returning id"
+            ),
+            {"c": f"confirma-{os.urandom(6).hex()}@ejemplo.com"},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde, fuente, origen, confirmado_por, confirmado_en,"
+                " confirmacion_referencia)"
+                " values (:c, :u, :p, 'propietario', '2020-01-01', 'documento', 'soporte', :k,"
+                " now(), 'Escritura de prueba')"
+            ),
+            {"c": cons, "u": unidad, "p": persona, "k": confirma},
+        )
+
+
 def alta(motor_app, cons, actor, decision, *, tipo="miembro_consejo", persona=None,
-         nombre=None, cuit=None, facultades=None, desde=DESDE, hasta=None) -> UUID:  # fmt: skip
+         nombre=None, cuit=None, facultades=None, desde=DESDE, hasta=None,
+         con_vinculo=True) -> UUID:  # fmt: skip
+    """Alta por la API. Con `con_vinculo`, antes le da a la persona el vínculo confirmado que
+    pide `0018` para el Consejo y el administrador."""
+    if con_vinculo and persona is not None and tipo != "administrador_externo":
+        vinculo_confirmado(motor_app, cons, persona)
     with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
         return c.execute(
             text(

@@ -66,8 +66,11 @@ def escena(motor_migrate, motor_app, edificio):  # noqa: F811
     cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
     e["admin"] = otra_persona(motor_migrate, e["cons"])
     e["mc"] = otra_persona(motor_migrate, e["cons"])
-    e["m_admin"] = alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=e["admin"])
-    alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=e["mc"], tipo="miembro_consejo")
+    # Por soporte: el padrón no depende de cómo se cargó el mandato (la vía de la API, desde
+    # 0018, agregaría un vínculo confirmado que el padrón mostraría).
+    e["m_admin"] = alta(motor_app, e["cons"], None, e["acta"], persona=e["admin"], origen="soporte")
+    alta(motor_app, e["cons"], None, e["acta"], persona=e["mc"], tipo="miembro_consejo",
+         origen="soporte")  # fmt: skip
     e["v_inq_mc"] = invitar_y_aceptar(motor_migrate, e["cons"], e["u1"], e["mc"])
     e["v_inq_admin"] = invitar_y_aceptar(motor_migrate, e["cons"], e["u2"], e["admin"])
     with motor_migrate.connect() as c:

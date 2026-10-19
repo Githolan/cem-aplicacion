@@ -12,8 +12,18 @@ MC o AD por C2), en todos los modos y sin modo. La política decide antes de cua
 Las funciones de la base (`0014`, `0016`) vuelven a garantizarlo. Un motivo de separación que
 llega a la base es una discrepancia y responde 500.
 
-**Qué devuelven.** Identificadores y fechas: ningún nombre, CUIT ni referencia. Leer mandatos y
-decisiones queda para cuando el propietario decida quién los ve (diseño 2b-4b, §7).
+**Qué devuelven.** Identificadores y fechas: ningún nombre, CUIT ni referencia.
+
+**Lectura (2b-4c, `doc/diseno/H2b_4c_Diseno.md`).** `mandatos.ver` y `decisiones.ver` (MC y AD).
+La política decide antes de leer; las funciones de `0018` vuelven a exigir la facultad como
+segunda barrera. Si la base niega lo que el evaluador concedió, es una discrepancia (500), nunca
+una lista vacía. Un detalle inexistente responde 404 solo a quien tiene la facultad: quien no la
+tiene recibe el mismo 403 auditado exista o no (sin oráculo).
+
+**Destinatario (decisión 3).** Por la API, el Consejo y el administrador se dan solo a personas
+con un vínculo confirmado, vigente o futuro, en el consorcio, y el administrador externo entra
+sin cuenta (la asocia A7). Lo garantiza `alta_mandato` (`0018`), después de la política: un
+pedido sin permiso nunca llega a validar a la persona.
 """
 
 import logging
@@ -23,13 +33,22 @@ from uuid import UUID
 from cem_contracts.errores import CodigoError
 from cem_contracts.mandatos import (
     BajaMandato,
+    CandidatoMandato,
+    DecisionDetalle,
     DecisionNueva,
     DecisionRegistrada,
+    DecisionResumen,
+    ListaCandidatos,
+    ListaDecisiones,
+    ListaMandatos,
     MandatoDadoDeBaja,
+    MandatoDetalle,
     MandatoNuevo,
     MandatoRegistrado,
+    MandatoResumen,
 )
 from fastapi import APIRouter, Depends, Response
+from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
@@ -78,7 +97,14 @@ ERRORES = {
         "La decisión no existe en este consorcio o no corresponde (la remoción pide una"
         " asamblea).",
     ),
-    "persona_invalida": (422, CodigoError.PERSONA_INVALIDA, "La cuenta indicada no existe."),
+    "persona_sin_vinculo": (
+        422, CodigoError.PERSONA_SIN_VINCULO,
+        "La persona no tiene un vínculo confirmado, vigente o futuro, en este consorcio.",
+    ),
+    "externo_por_invitacion": (
+        422, CodigoError.EXTERNO_POR_INVITACION,
+        "El administrador externo se da de alta sin cuenta: la cuenta se asocia por invitación.",
+    ),
     "mandato_sin_cuenta": (
         422, CodigoError.MANDATO_SIN_CUENTA,
         "Un miembro del Consejo o un administrador necesita su cuenta.",
@@ -108,7 +134,7 @@ ERRORES = {
     "sha256_invalido": (*DATOS, "La huella del acta no es un SHA-256."),
     "decision_incompleta": (*DATOS, "La decisión necesita tipo y fecha."),
 }  # fmt: skip
-"""Motivos de las funciones de `0014` y `0016`. Los de separación (`alta_de_si_mismo`,
+"""Motivos de las funciones de `0014`, `0016` y `0018`. Los de separación (`alta_de_si_mismo`,
 `baja_de_si_mismo`, `decision_registrada_por_el_actor`) y los de actor u origen los niega antes
 el evaluador o los fija esta ruta: si llegan a la base, es una discrepancia (500)."""
 
@@ -285,3 +311,141 @@ def baja_mandato(
         return 200, MandatoDadoDeBaja(id=mandato_id, causa=baja.causa, vigente_hasta=hasta)
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+class Discrepancia(RuntimeError):
+    """La base niega lo que el evaluador concedió: un defecto, no un caso de uso."""
+
+
+def _leer(permiso: Permiso, motor, sql: str, parametros: dict) -> list:
+    """Lee con una función de `0018` después de que la política concedió."""
+    ctx = permiso.ctx
+    permiso.verificar(Entidad())
+    try:
+        with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
+            return list(c.execute(text(sql), parametros).mappings().all())
+    except DBAPIError as e:
+        if isinstance(e.orig, InsufficientPrivilege):
+            raise Discrepancia(f"la base niega {permiso.accion} y el evaluador lo concede") from e
+        raise
+
+
+COLUMNAS_RESUMEN = (
+    "id, tipo::text as tipo, nombre, cuit, vigente_desde, vigente_hasta, estado, con_cuenta"
+)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/mandatos",
+    response_model=ListaMandatos,
+    summary="Mandatos del consorcio, con lo mínimo",
+    responses={403: {"description": "Sin `mandatos.ver` en el consorcio."}},
+)
+def listar_mandatos(
+    permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))], motor: MotorDep
+) -> ListaMandatos:
+    """Sin referencias, instrumentos ni facultades (van en el detalle); el CUIT, solo del
+    administrador externo."""
+    filas = _leer(
+        permiso, motor, f"select {COLUMNAS_RESUMEN} from nucleo.mandatos_del_consorcio()", {}
+    )
+    return ListaMandatos(elementos=[MandatoResumen(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/mandatos/candidatos",
+    response_model=ListaCandidatos,
+    summary="Personas a las que se les puede dar un mandato de Consejo o de administración",
+    responses={403: {"description": "Sin `mandatos.registrar` en el consorcio."}},
+)
+def candidatos(
+    permiso: Annotated[Permiso, Depends(requiere("mandatos.ver_candidatos"))], motor: MotorDep
+) -> ListaCandidatos:
+    """Las personas con un vínculo confirmado, vigente o futuro, en el consorcio (decisión 3).
+    Sin correo ni teléfono."""
+    filas = _leer(
+        permiso, motor, "select persona_id, nombre, unidades from nucleo.candidatos_a_mandato()", {}
+    )
+    return ListaCandidatos(elementos=[CandidatoMandato(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/mandatos/{mandato_id}",
+    response_model=MandatoDetalle,
+    summary="Detalle de un mandato",
+    responses={
+        403: {"description": "Sin `mandatos.ver` en el consorcio (exista o no el mandato)."},
+        404: {"description": "El mandato no existe en este consorcio."},
+    },
+)
+def detalle_mandato(
+    mandato_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))],
+    motor: MotorDep,
+) -> MandatoDetalle:
+    filas = _leer(
+        permiso,
+        motor,
+        f"select {COLUMNAS_RESUMEN}, matricula, decision_id, facultades, causa_baja,"
+        " baja_decision_id, instrumento_referencia, motivo_fin, finalizado_en"
+        " from nucleo.mandato_detalle(:m)",
+        {"m": mandato_id},
+    )
+    if not filas:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return MandatoDetalle(**filas[0])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/decisiones",
+    response_model=ListaDecisiones,
+    summary="Decisiones formales del consorcio, sin la referencia del acta",
+    responses={403: {"description": "Sin `decisiones.ver` en el consorcio."}},
+)
+def listar_decisiones(
+    permiso: Annotated[Permiso, Depends(requiere("decisiones.ver"))], motor: MotorDep
+) -> ListaDecisiones:
+    filas = _leer(
+        permiso,
+        motor,
+        "select id, tipo::text as tipo, fecha, descripcion from nucleo.decisiones_del_consorcio()",
+        {},
+    )
+    return ListaDecisiones(elementos=[DecisionResumen(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/decisiones/{decision_id}",
+    response_model=DecisionDetalle,
+    summary="Detalle de una decisión formal, con la referencia del acta",
+    responses={
+        403: {"description": "Sin `decisiones.ver` en el consorcio (exista o no la decisión)."},
+        404: {"description": "La decisión no existe en este consorcio."},
+    },
+)
+def detalle_decision(
+    decision_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere("decisiones.ver"))],
+    motor: MotorDep,
+) -> DecisionDetalle:
+    """Quién la registró no sale: solo si fue quien lee (A15) o el equipo."""
+    filas = _leer(
+        permiso,
+        motor,
+        "select id, tipo::text as tipo, fecha, descripcion, referencia_acta, sha256_acta, origen,"
+        " registrada_por from nucleo.decision_detalle(:d)",
+        {"d": decision_id},
+    )
+    if not filas:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    f = filas[0]
+    return DecisionDetalle(
+        id=f["id"],
+        tipo=f["tipo"],
+        fecha=f["fecha"],
+        descripcion=f["descripcion"],
+        referencia=f["referencia_acta"],
+        sha256=f["sha256_acta"],
+        registrada_por_vos=f["registrada_por"] == permiso.ctx.persona_id,
+        del_equipo=f["registrada_por"] is None and f["origen"] == ORIGEN_SOPORTE,
+    )

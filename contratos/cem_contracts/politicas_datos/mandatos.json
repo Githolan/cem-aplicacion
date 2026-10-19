@@ -1,6 +1,48 @@
 {
   "politicas": [
     {
+      "accion": "decisiones.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "decisiones.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Decisión 1 del propietario (19-10-2026, diseño 2b-4c): lectura minimizada para MC y AD; el detalle suma la referencia y la huella del acta"
+    },
+    {
+      "accion": "mandatos.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "mandatos.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Decisión 1 del propietario (19-10-2026, diseño 2b-4c): lectura minimizada para MC y AD; el CUIT solo del administrador externo; nunca correo ni teléfono"
+    },
+    {
+      "accion": "mandatos.ver_candidatos",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "mandatos.registrar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Decisión 3 del propietario (19-10-2026, diseño 2b-4c): para el alta por la API, solo personas con vínculo confirmado, vigente o futuro, en el consorcio"
+    },
+    {
       "accion": "decisiones.registrar",
       "concede_por_vinculo": null,
       "concede_por_ambito": false,

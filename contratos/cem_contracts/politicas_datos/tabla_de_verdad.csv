@@ -314,3 +314,34 @@ A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,c
 A15,mandatos.baja,MC,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por instrumento (renuncia): sin decisión A15 no aplica
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=equipo;respaldo=si,200,concedido_por_facultad,remoción con una asamblea que cargó el equipo
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,identidad_indeterminada,remoción con una decisión sin quién la registró ni marca: niega
+§2.3,mandatos.ver,P,C,,sin_mandato,si,,403,sin_concesion,P no lee los mandatos (decisión 1 de 2b-4c)
+§2.3,mandatos.ver,I,C,,sin_mandato,si,,403,sin_concesion,I no lee los mandatos
+§2.3,mandatos.ver,O,C,,sin_mandato,si,,403,sin_concesion,O no lee los mandatos
+§2.3,mandatos.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee los mandatos
+§2.3,mandatos.ver,AD,C,,vigente,si,,200,concedido_por_facultad,AD lee los mandatos
+§2.3,mandatos.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee los mandatos: sin lectura general
+§2.3,mandatos.ver,P+MC,C,,vencido,si,,403,sin_concesion,propietaria con el mandato de Consejo vencido no lee los mandatos
+§2.3,mandatos.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+caso 7,mandatos.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: mandatos.ver corre
+§2.3,decisiones.ver,P,C,,sin_mandato,si,,403,sin_concesion,P no lee las decisiones (decisión 1 de 2b-4c)
+§2.3,decisiones.ver,I,C,,sin_mandato,si,,403,sin_concesion,I no lee las decisiones
+§2.3,decisiones.ver,O,C,,sin_mandato,si,,403,sin_concesion,O no lee las decisiones
+§2.3,decisiones.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee las decisiones
+§2.3,decisiones.ver,AD,C,,vigente,si,,200,concedido_por_facultad,AD lee las decisiones
+§2.3,decisiones.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee las decisiones: sin lectura general
+§2.3,decisiones.ver,P+MC,C,,vencido,si,,403,sin_concesion,propietaria con el mandato de Consejo vencido no lee las decisiones
+§2.3,decisiones.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+caso 7,decisiones.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: decisiones.ver corre
+§2.3,mandatos.ver_candidatos,P,C,,sin_mandato,si,,403,sin_concesion,P no lee los candidatos al mandato (decisión 1 de 2b-4c)
+§2.3,mandatos.ver_candidatos,I,C,,sin_mandato,si,,403,sin_concesion,I no lee los candidatos al mandato
+§2.3,mandatos.ver_candidatos,O,C,,sin_mandato,si,,403,sin_concesion,O no lee los candidatos al mandato
+§2.3,mandatos.ver_candidatos,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee los candidatos al mandato
+§2.3,mandatos.ver_candidatos,AD,C,,vigente,si,,200,concedido_por_facultad,AD lee los candidatos al mandato
+§2.3,mandatos.ver_candidatos,AE,C,,vigente,si,,403,sin_concesion,AE no lee los candidatos al mandato: sin lectura general
+§2.3,mandatos.ver_candidatos,P+MC,C,,vencido,si,,403,sin_concesion,propietaria con el mandato de Consejo vencido no lee los candidatos al mandato
+§2.3,mandatos.ver_candidatos,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+caso 7,mandatos.ver_candidatos,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: mandatos.ver_candidatos corre
+2b-4c,mandatos.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la lectura de mandatos
+2b-4c,decisiones.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la lectura de decisiones
+2b-4c,mandatos.ver,Fac(mandatos.ver),C,,vigente,si,,200,concedido_por_facultad,la facultad sola alcanza
+2b-4c,decisiones.ver,Fac(decisiones.ver),C,,vigente,si,,200,concedido_por_facultad,la facultad sola alcanza

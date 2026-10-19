@@ -279,12 +279,13 @@ def test_las_politicas_usan_el_catalogo_de_d2_y_su_marca_economica():
         if p.facultad is not None:
             assert p.facultad in CATALOGO, accion
             assert p.economica == CATALOGO[p.facultad], accion
-    # Las 21 facultades del catálogo tienen alguna acción que las usa.
+    # Las 23 facultades del catálogo (21 de D2 y 2 de `0018`) tienen alguna acción que las usa.
     assert {p.facultad for p in POLITICAS.values()} - {None} == set(CATALOGO)
 
 
 def test_las_acciones_de_la_tabla():
-    assert len(POLITICAS) == 34  # 5 de §2.1, 24 de §2.2 y las 5 de A7 (2b-4, PR 4)
+    # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4) y las 3 de lectura (2b-4c)
+    assert len(POLITICAS) == 37
 
 
 def _archivo(tmp_path, nombre, politicas):

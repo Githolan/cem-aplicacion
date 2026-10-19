@@ -151,6 +151,35 @@
     "title": "BajaMandato",
     "type": "object"
   },
+  "CandidatoMandato": {
+    "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
+    "properties": {
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "persona_id": {
+        "format": "uuid",
+        "title": "Persona Id",
+        "type": "string"
+      },
+      "unidades": {
+        "description": "Designaciones de sus unidades con vínculo confirmado.",
+        "items": {
+          "type": "string"
+        },
+        "title": "Unidades",
+        "type": "array"
+      }
+    },
+    "required": [
+      "persona_id",
+      "nombre",
+      "unidades"
+    ],
+    "title": "CandidatoMandato",
+    "type": "object"
+  },
   "CanjeCodigo": {
     "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
     "properties": {
@@ -333,6 +362,75 @@
     "title": "ContrasenaGuardada",
     "type": "object"
   },
+  "DecisionDetalle": {
+    "$defs": {
+      "TipoDecision": {
+        "enum": [
+          "asamblea",
+          "consejo",
+          "contrato_administracion",
+          "inscripcion_rpa"
+        ],
+        "title": "TipoDecision",
+        "type": "string"
+      }
+    },
+    "description": "El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede\nusarla para dar de alta ni para remover) o el equipo.",
+    "properties": {
+      "del_equipo": {
+        "title": "Del Equipo",
+        "type": "boolean"
+      },
+      "descripcion": {
+        "title": "Descripcion",
+        "type": "string"
+      },
+      "fecha": {
+        "format": "date",
+        "title": "Fecha",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "referencia": {
+        "title": "Referencia",
+        "type": "string"
+      },
+      "registrada_por_vos": {
+        "title": "Registrada Por Vos",
+        "type": "boolean"
+      },
+      "sha256": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Sha256"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoDecision"
+      }
+    },
+    "required": [
+      "id",
+      "tipo",
+      "fecha",
+      "descripcion",
+      "referencia",
+      "sha256",
+      "registrada_por_vos",
+      "del_equipo"
+    ],
+    "title": "DecisionDetalle",
+    "type": "object"
+  },
   "DecisionNueva": {
     "$defs": {
       "TipoDecision": {
@@ -415,6 +513,48 @@
       "id"
     ],
     "title": "DecisionRegistrada",
+    "type": "object"
+  },
+  "DecisionResumen": {
+    "$defs": {
+      "TipoDecision": {
+        "enum": [
+          "asamblea",
+          "consejo",
+          "contrato_administracion",
+          "inscripcion_rpa"
+        ],
+        "title": "TipoDecision",
+        "type": "string"
+      }
+    },
+    "description": "Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella.",
+    "properties": {
+      "descripcion": {
+        "title": "Descripcion",
+        "type": "string"
+      },
+      "fecha": {
+        "format": "date",
+        "title": "Fecha",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoDecision"
+      }
+    },
+    "required": [
+      "id",
+      "tipo",
+      "fecha",
+      "descripcion"
+    ],
+    "title": "DecisionResumen",
     "type": "object"
   },
   "Desasociacion": {
@@ -542,7 +682,8 @@
           "asociacion_incompatible_con_consejo",
           "asociacion_de_si_mismo",
           "decision_invalida",
-          "persona_invalida",
+          "persona_sin_vinculo",
+          "externo_por_invitacion",
           "mandato_sin_cuenta",
           "cuit_invalido",
           "facultad_fuera_de_paquete",
@@ -1394,6 +1535,111 @@
     "title": "InvitacionRecibida",
     "type": "object"
   },
+  "ListaCandidatos": {
+    "$defs": {
+      "CandidatoMandato": {
+        "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
+        "properties": {
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "persona_id": {
+            "format": "uuid",
+            "title": "Persona Id",
+            "type": "string"
+          },
+          "unidades": {
+            "description": "Designaciones de sus unidades con vínculo confirmado.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unidades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "persona_id",
+          "nombre",
+          "unidades"
+        ],
+        "title": "CandidatoMandato",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/CandidatoMandato"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaCandidatos",
+    "type": "object"
+  },
+  "ListaDecisiones": {
+    "$defs": {
+      "DecisionResumen": {
+        "description": "Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella.",
+        "properties": {
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/$defs/TipoDecision"
+          }
+        },
+        "required": [
+          "id",
+          "tipo",
+          "fecha",
+          "descripcion"
+        ],
+        "title": "DecisionResumen",
+        "type": "object"
+      },
+      "TipoDecision": {
+        "enum": [
+          "asamblea",
+          "consejo",
+          "contrato_administracion",
+          "inscripcion_rpa"
+        ],
+        "title": "TipoDecision",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/DecisionResumen"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaDecisiones",
+    "type": "object"
+  },
   "ListaInvitaciones": {
     "$defs": {
       "EstadoInvitacion": {
@@ -1671,6 +1917,113 @@
     "title": "ListaInvitacionesMandato",
     "type": "object"
   },
+  "ListaMandatos": {
+    "$defs": {
+      "EstadoMandato": {
+        "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
+        "enum": [
+          "vigente",
+          "futuro",
+          "terminado",
+          "dado_de_baja",
+          "error_carga"
+        ],
+        "title": "EstadoMandato",
+        "type": "string"
+      },
+      "MandatoResumen": {
+        "description": "Una fila de la lista de mandatos (2b-4c): lo mínimo.",
+        "properties": {
+          "con_cuenta": {
+            "description": "Si el mandato tiene una cuenta asociada.",
+            "title": "Con Cuenta",
+            "type": "boolean"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo del administrador externo.",
+            "title": "Cuit"
+          },
+          "estado": {
+            "$ref": "#/$defs/EstadoMandato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nombre": {
+            "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/$defs/TipoMandato"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusivo (A1).",
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "id",
+          "tipo",
+          "nombre",
+          "cuit",
+          "vigente_desde",
+          "vigente_hasta",
+          "estado",
+          "con_cuenta"
+        ],
+        "title": "MandatoResumen",
+        "type": "object"
+      },
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/MandatoResumen"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaMandatos",
+    "type": "object"
+  },
   "ListaSesiones": {
     "$defs": {
       "SesionDispositivo": {
@@ -1825,6 +2178,195 @@
     "title": "MandatoDadoDeBaja",
     "type": "object"
   },
+  "MandatoDetalle": {
+    "$defs": {
+      "CausaBaja": {
+        "enum": [
+          "remocion",
+          "renuncia",
+          "fallecimiento_incapacidad",
+          "error_carga",
+          "otro"
+        ],
+        "title": "CausaBaja",
+        "type": "string"
+      },
+      "EstadoMandato": {
+        "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
+        "enum": [
+          "vigente",
+          "futuro",
+          "terminado",
+          "dado_de_baja",
+          "error_carga"
+        ],
+        "title": "EstadoMandato",
+        "type": "string"
+      },
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
+      }
+    },
+    "description": "El detalle autorizado: suma la matrícula, la decisión, las facultades y la baja.",
+    "properties": {
+      "baja_decision_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Baja Decision Id"
+      },
+      "causa_baja": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CausaBaja"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "con_cuenta": {
+        "description": "Si el mandato tiene una cuenta asociada.",
+        "title": "Con Cuenta",
+        "type": "boolean"
+      },
+      "cuit": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Solo del administrador externo.",
+        "title": "Cuit"
+      },
+      "decision_id": {
+        "format": "uuid",
+        "title": "Decision Id",
+        "type": "string"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoMandato"
+      },
+      "facultades": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Facultades",
+        "type": "array"
+      },
+      "finalizado_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Finalizado En"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "instrumento_referencia": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Instrumento Referencia"
+      },
+      "matricula": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Matricula"
+      },
+      "motivo_fin": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Motivo Fin"
+      },
+      "nombre": {
+        "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
+        "title": "Nombre",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoMandato"
+      },
+      "vigente_desde": {
+        "format": "date",
+        "title": "Vigente Desde",
+        "type": "string"
+      },
+      "vigente_hasta": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Exclusivo (A1).",
+        "title": "Vigente Hasta"
+      }
+    },
+    "required": [
+      "id",
+      "tipo",
+      "nombre",
+      "cuit",
+      "vigente_desde",
+      "vigente_hasta",
+      "estado",
+      "con_cuenta",
+      "matricula",
+      "decision_id",
+      "facultades",
+      "causa_baja",
+      "baja_decision_id",
+      "instrumento_referencia",
+      "motivo_fin",
+      "finalizado_en"
+    ],
+    "title": "MandatoDetalle",
+    "type": "object"
+  },
   "MandatoNuevo": {
     "$defs": {
       "TipoMandato": {
@@ -1966,6 +2508,97 @@
       "id"
     ],
     "title": "MandatoRegistrado",
+    "type": "object"
+  },
+  "MandatoResumen": {
+    "$defs": {
+      "EstadoMandato": {
+        "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
+        "enum": [
+          "vigente",
+          "futuro",
+          "terminado",
+          "dado_de_baja",
+          "error_carga"
+        ],
+        "title": "EstadoMandato",
+        "type": "string"
+      },
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
+      }
+    },
+    "description": "Una fila de la lista de mandatos (2b-4c): lo mínimo.",
+    "properties": {
+      "con_cuenta": {
+        "description": "Si el mandato tiene una cuenta asociada.",
+        "title": "Con Cuenta",
+        "type": "boolean"
+      },
+      "cuit": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Solo del administrador externo.",
+        "title": "Cuit"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoMandato"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "nombre": {
+        "description": "El del mandatario sin cuenta (razón social) o el de la persona del mandato.",
+        "title": "Nombre",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoMandato"
+      },
+      "vigente_desde": {
+        "format": "date",
+        "title": "Vigente Desde",
+        "type": "string"
+      },
+      "vigente_hasta": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Exclusivo (A1).",
+        "title": "Vigente Hasta"
+      }
+    },
+    "required": [
+      "id",
+      "tipo",
+      "nombre",
+      "cuit",
+      "vigente_desde",
+      "vigente_hasta",
+      "estado",
+      "con_cuenta"
+    ],
+    "title": "MandatoResumen",
     "type": "object"
   },
   "NuevaContrasena": {

@@ -85,8 +85,12 @@ class CodigoError(StrEnum):
     DECISION_INVALIDA = "decision_invalida"
     """La decisión no existe en este consorcio, o la causa pide otro tipo (la remoción, una
     asamblea; C6)."""
-    PERSONA_INVALIDA = "persona_invalida"
-    """La cuenta del mandatario no existe."""
+    PERSONA_SIN_VINCULO = "persona_sin_vinculo"
+    """La persona no tiene un vínculo confirmado, vigente o futuro, en este consorcio (2b-4c). El
+    mismo código sale si la cuenta no existe o es de otro consorcio: no permite enumerarlas."""
+    EXTERNO_POR_INVITACION = "externo_por_invitacion"
+    """El administrador externo se da de alta sin cuenta; la cuenta se asocia por invitación con
+    cuatro ojos (A7)."""
     MANDATO_SIN_CUENTA = "mandato_sin_cuenta"
     """Un miembro del Consejo o un administrador necesita su cuenta (A12)."""
     CUIT_INVALIDO = "cuit_invalido"

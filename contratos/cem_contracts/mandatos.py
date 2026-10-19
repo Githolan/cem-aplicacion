@@ -5,11 +5,18 @@ un acto ya tomado (la referencia del acta es el respaldo, criterio 9); dar de al
 mandato usa las funciones de la base tal cual, más A15: quien registró la decisión no la usa
 para dar de alta ni para remover.
 
-Las respuestas devuelven identificadores y fechas: ningún nombre, CUIT ni referencia de terceros.
-Los topes son los de la base (`0010`, `0011`, `0012`); la base vuelve a validarlos (E26, `0016`).
+Las respuestas de escritura devuelven identificadores y fechas: ningún nombre, CUIT ni
+referencia de terceros. Los topes son los de la base (`0010`, `0011`, `0012`); la base vuelve a
+validarlos (E26, `0016`).
+
+**Lectura (2b-4c, `doc/diseno/H2b_4c_Diseno.md`).** Con `mandatos.ver` y `decisiones.ver`, de MC
+y AD. Las listas son mínimas: sin referencias, instrumentos ni hashes, que van solo en el
+detalle; el CUIT, solo del administrador externo. Nunca correo, teléfono ni el identificador de
+la persona del mandato. Los candidatos al alta (con `mandatos.registrar`) son las personas con
+un vínculo confirmado, vigente o futuro, en el consorcio.
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Self
 from uuid import UUID
@@ -173,3 +180,94 @@ class MandatoDadoDeBaja(BaseModel):
     id: UUID
     causa: CausaBaja
     vigente_hasta: date | None = Field(description="Exclusivo (A1).")
+
+
+class EstadoMandato(StrEnum):
+    """Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo)."""
+
+    VIGENTE = "vigente"
+    FUTURO = "futuro"
+    TERMINADO = "terminado"
+    """Terminó por su fecha, sin baja."""
+    DADO_DE_BAJA = "dado_de_baja"
+    ERROR_CARGA = "error_carga"
+    """Dado de baja por error de carga: nunca valió."""
+
+
+class MandatoResumen(BaseModel):
+    """Una fila de la lista de mandatos (2b-4c): lo mínimo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tipo: TipoMandato
+    nombre: str = Field(
+        description="El del mandatario sin cuenta (razón social) o el de la persona del mandato."
+    )
+    cuit: str | None = Field(description="Solo del administrador externo.")
+    vigente_desde: date
+    vigente_hasta: date | None = Field(description="Exclusivo (A1).")
+    estado: EstadoMandato
+    con_cuenta: bool = Field(description="Si el mandato tiene una cuenta asociada.")
+
+
+class ListaMandatos(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[MandatoResumen]
+
+
+class MandatoDetalle(MandatoResumen):
+    """El detalle autorizado: suma la matrícula, la decisión, las facultades y la baja."""
+
+    matricula: str | None
+    decision_id: UUID
+    facultades: list[str]
+    causa_baja: CausaBaja | None
+    baja_decision_id: UUID | None
+    instrumento_referencia: str | None
+    motivo_fin: str | None
+    finalizado_en: datetime | None
+
+
+class DecisionResumen(BaseModel):
+    """Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tipo: TipoDecision
+    fecha: date
+    descripcion: str
+
+
+class ListaDecisiones(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[DecisionResumen]
+
+
+class DecisionDetalle(DecisionResumen):
+    """El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede
+    usarla para dar de alta ni para remover) o el equipo."""
+
+    referencia: str
+    sha256: str | None
+    registrada_por_vos: bool
+    del_equipo: bool
+
+
+class CandidatoMandato(BaseModel):
+    """Una persona a la que se le puede dar un mandato de Consejo o de administración."""
+
+    model_config = ConfigDict(frozen=True)
+
+    persona_id: UUID
+    nombre: str
+    unidades: list[str] = Field(description="Designaciones de sus unidades con vínculo confirmado.")
+
+
+class ListaCandidatos(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[CandidatoMandato]

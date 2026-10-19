@@ -155,8 +155,11 @@ def escena(motor_migrate, motor_app):
     acta = decidir_equipo(motor_app, cons)
     admin = otra_persona(motor_migrate, cons)
     mc = otra_persona(motor_migrate, cons)
-    m_admin = alta(motor_app, cons, prop, acta, tipo="administrador", persona=admin)
-    m_mc = alta(motor_app, cons, prop, acta, tipo="miembro_consejo", persona=mc)
+    # Por soporte: el padrón no depende de cómo se cargó el mandato, y la vía de la API (0018)
+    # agregaría un vínculo confirmado que el padrón mostraría.
+    m_admin = alta(motor_app, cons, None, acta, tipo="administrador", persona=admin,
+                   origen="soporte")  # fmt: skip
+    m_mc = alta(motor_app, cons, None, acta, tipo="miembro_consejo", persona=mc, origen="soporte")
     inq = invitar_y_aceptar(motor_migrate, cons, u1, admin)
     with motor_migrate.connect() as c:
         v_prop = c.execute(
@@ -522,7 +525,7 @@ def test_el_padron_no_muestra_otro_consorcio(escena, motor_migrate, motor_app):
     otro, u_otro, prop_otro = consorcio_con_persona(motor_migrate)
     acta = decidir_equipo(motor_app, otro)
     admin_otro = otra_persona(motor_migrate, otro)
-    alta(motor_app, otro, prop_otro, acta, tipo="administrador", persona=admin_otro)
+    alta(motor_app, otro, None, acta, tipo="administrador", persona=admin_otro, origen="soporte")
     filas_otro = padron(motor_app, otro, admin_otro)
     assert {f["unidad_id"] for f in filas_otro} == {u_otro}
     # El administrador de A, con el ámbito en B, no tiene mandato ahí.
