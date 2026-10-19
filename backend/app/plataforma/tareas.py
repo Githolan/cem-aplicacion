@@ -70,8 +70,8 @@ def revocar_por_vencimiento(conn: Connection, trabajo: cola.Trabajo) -> dict[str
     return {"mandatos_procesados": procesados}
 
 
-# Cada hora, a los 5 minutos: la medianoche de cada zona horaria cae en una corrida y la
-# ventana sin revocar dura menos de una hora.
+# Cada hora, a los 5 minutos: el cambio de día de cualquier zona horaria (también las de
+# desfase :30 o :45) espera menos de una hora a la corrida siguiente.
 periodica("consorcio.revocar_por_vencimiento", timedelta(hours=1), desfase=timedelta(minutes=5))
 
 

@@ -11,8 +11,12 @@ mandatario siguen abiertas. Esta migración agrega:
   en la corrida siguiente.
 - `nucleo.revocar_sesiones_por_vencimiento(tope)`, `security definer` de `cem_migrate`. Recorre los
   mandatos de consorcios no eliminados con `vigente_hasta <= hoy` del consorcio (A1: exclusivo),
-  sin baja, con persona y sin la marca. Por cada uno, con `for no key update skip locked` (no
-  choca con los bloqueos de clave foránea ni con el `for share` de A7), revoca las
+  sin baja, con persona, sin la marca y que estuvieron vigentes después de registrarse
+  (`vigente_hasta` posterior al día de `creado_en` en la zona del consorcio): un mandato cargado
+  ya vencido nunca concedió nada a ninguna sesión, y revocar por él le cortaría la sesión a una
+  persona activa (revisión independiente). Por cada uno, con `for no key update skip locked`
+  (no choca con los bloqueos de clave foránea; si A7 tiene el mandato con `for share`, la
+  corrida lo saltea y lo toma la siguiente), revoca las
   sesiones de la persona (`revocar_sesiones_de`, como la baja), pone la marca y escribe el
   evento `consorcio.mandato.vencimiento`, con origen `planificador` y sin actor. Devuelve
   cuántos mandatos procesó, nunca más que `tope`: el trabajo tiene que terminar dentro del plazo
@@ -63,6 +67,7 @@ create function nucleo.revocar_sesiones_por_vencimiento(tope integer)
          and x.vencimiento_procesado_en is null
          and x.vigente_hasta is not null
          and x.vigente_hasta <= nucleo.hoy_del_consorcio(x.consorcio_id)
+         and x.vigente_hasta > (x.creado_en at time zone co.zona_horaria)::date
        order by x.id
        limit tope
          for no key update of x skip locked

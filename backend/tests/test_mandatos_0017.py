@@ -32,11 +32,25 @@ DESDE = date(2026, 1, 1)
 TIPO = "consorcio.revocar_por_vencimiento"
 
 
-def _vencido(motor_app, cons, persona, hasta=None):
-    """Un mandato de Consejo por soporte que ya terminó por su fecha (A1: exclusivo)."""
-    return alta(motor_app, cons, None, decidir_equipo(motor_app, cons), persona=persona,
-                tipo="miembro_consejo", hasta=hasta or date.today() - timedelta(days=2),
-                origen="soporte")  # fmt: skip
+def _vencido(motor_app, motor_migrate, cons, persona, hasta=None):
+    """Un mandato de Consejo por soporte que ya terminó por su fecha (A1: exclusivo) y que
+    estuvo vigente: se registró 30 días antes de su fin."""
+    m = alta(motor_app, cons, None, decidir_equipo(motor_app, cons), persona=persona,
+             tipo="miembro_consejo", hasta=hasta or date.today() - timedelta(days=2),
+             origen="soporte")  # fmt: skip
+    _registrado_antes(motor_migrate, m)
+    return m
+
+
+def _registrado_antes(motor_migrate, mandato):
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.mandato set creado_en = vigente_hasta - interval '30 days'"
+                " where id = :m"
+            ),
+            {"m": mandato},
+        )
 
 
 def _procesar(motor_app) -> int:
@@ -74,7 +88,7 @@ def escena(motor_migrate, motor_app):
 
 def test_el_vencimiento_revoca_las_sesiones_una_sola_vez(escena, motor_app, motor_migrate):
     e = escena
-    m = _vencido(motor_app, e["cons"], e["mc"])
+    m = _vencido(motor_app, motor_migrate, e["cons"], e["mc"])
     assert sesiones_abiertas(motor_migrate, e["mc"], 2) == 2
     assert _procesar(motor_app) >= 1
     assert sesiones_abiertas(motor_migrate, e["mc"]) == 0
@@ -95,10 +109,34 @@ def test_hoy_es_el_primer_dia_sin_mandato(escena, motor_app, motor_migrate):
     e = escena
     with motor_migrate.connect() as c:
         hoy = c.execute(text("select nucleo.hoy_del_consorcio(:c)"), {"c": e["cons"]}).scalar_one()
-    m = _vencido(motor_app, e["cons"], e["mc"], hasta=hoy)
+    m = _vencido(motor_app, motor_migrate, e["cons"], e["mc"], hasta=hoy)
+    # Control del otro borde: el que termina mañana sigue vigente hoy.
+    otra = otra_persona(motor_migrate, e["cons"])
+    manana = _vencido(motor_app, motor_migrate, e["cons"], otra, hasta=hoy + timedelta(days=1))
     sesiones_abiertas(motor_migrate, e["mc"], 1)
+    sesiones_abiertas(motor_migrate, otra, 1)
     _procesar(motor_app)
     assert _marca(motor_migrate, m) is not None
+    assert sesiones_abiertas(motor_migrate, e["mc"]) == 0
+    assert _marca(motor_migrate, manana) is None
+    assert sesiones_abiertas(motor_migrate, otra) == 1
+
+
+def test_un_mandato_cargado_ya_vencido_no_revoca(escena, motor_app, motor_migrate):
+    """Un mandato histórico, registrado después de su fin, nunca concedió nada: no le corta la
+    sesión a la persona, que puede estar activa por otro mandato o vínculo."""
+    e = escena
+    historico = alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
+                     persona=e["mc"], tipo="miembro_consejo",
+                     hasta=date.today() - timedelta(days=2), origen="soporte")  # fmt: skip
+    sesiones_abiertas(motor_migrate, e["mc"], 1)
+    _procesar(motor_app)
+    assert _marca(motor_migrate, historico) is None
+    assert sesiones_abiertas(motor_migrate, e["mc"]) == 1
+    # Control: el mismo mandato, registrado antes de su fin, sí revoca.
+    _registrado_antes(motor_migrate, historico)
+    _procesar(motor_app)
+    assert _marca(motor_migrate, historico) is not None
     assert sesiones_abiertas(motor_migrate, e["mc"]) == 0
 
 
@@ -116,6 +154,10 @@ def test_lo_que_no_vencio_o_ya_tiene_baja_no_se_toca(escena, motor_app, motor_mi
          descripcion="Renuncia", origen="soporte")  # fmt: skip
     sin_cuenta = externo(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
                          hasta=date.today() - timedelta(days=2), origen="soporte")  # fmt: skip
+    # Registrados antes de su fin: el único motivo para no procesarlos es la baja o la falta de
+    # persona, no el filtro del mandato histórico.
+    for m in (con_baja, sin_cuenta):
+        _registrado_antes(motor_migrate, m)
     sesiones_abiertas(motor_migrate, e["mc"], 1)
     sesiones_abiertas(motor_migrate, otra, 1)
     _procesar(motor_app)
@@ -124,7 +166,7 @@ def test_lo_que_no_vencio_o_ya_tiene_baja_no_se_toca(escena, motor_app, motor_mi
     assert sesiones_abiertas(motor_migrate, otra) == 1
     # Control: el mismo proceso sí toma uno vencido de esta escena (otra persona: el período de
     # la renuncia se superpondría).
-    vencido = _vencido(motor_app, e["cons"], otra_persona(motor_migrate, e["cons"]))
+    vencido = _vencido(motor_app, motor_migrate, e["cons"], otra_persona(motor_migrate, e["cons"]))
     _procesar(motor_app)
     assert _marca(motor_migrate, vencido) is not None
 
@@ -141,7 +183,7 @@ def test_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate, motor_app)
             {"c": cons},
         ).one()
     assert (hoy - utc).days == desfase
-    m = _vencido(motor_app, cons, persona, hasta=max(hoy, utc))
+    m = _vencido(motor_app, motor_migrate, cons, persona, hasta=max(hoy, utc))
     _procesar(motor_app)
     assert (_marca(motor_migrate, m) is not None) is (desfase > 0)
 
@@ -149,7 +191,7 @@ def test_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate, motor_app)
 def test_un_mandato_bloqueado_se_saltea_y_se_toma_despues(escena, motor_app, motor_migrate):
     """`skip locked`: una baja en curso sobre el mandato no detiene la corrida."""
     e = escena
-    m = _vencido(motor_app, e["cons"], e["mc"])
+    m = _vencido(motor_app, motor_migrate, e["cons"], e["mc"])
     with motor_migrate.connect() as otra:
         otra.execute(text("begin"))
         otra.execute(text("select 1 from nucleo.mandato where id = :m for update"), {"m": m})
@@ -164,7 +206,7 @@ def test_un_mandato_bloqueado_se_saltea_y_se_toma_despues(escena, motor_app, mot
 
 def test_un_consorcio_dado_de_baja_no_se_procesa(escena, motor_app, motor_migrate):
     e = escena
-    m = _vencido(motor_app, e["cons"], e["mc"])
+    m = _vencido(motor_app, motor_migrate, e["cons"], e["mc"])
     with motor_migrate.begin() as c:
         c.execute(text("update nucleo.consorcio set eliminado_en = now() where id = :c"),
                   {"c": e["cons"]})  # fmt: skip
@@ -193,7 +235,7 @@ def test_el_trabajo_horario_corre_de_punta_a_punta(escena, motor_app, motor_migr
     [tarea] = [t for t in TAREAS if t.tipo == TIPO]
     assert (tarea.periodo, tarea.desfase) == (timedelta(hours=1), timedelta(minutes=5))
     assert tareas.revocar_por_vencimiento is not None
-    m = _vencido(motor_app, e["cons"], e["mc"])
+    m = _vencido(motor_app, motor_migrate, e["cons"], e["mc"])
     sesiones_abiertas(motor_migrate, e["mc"], 1)
     assert programar(motor_app, datetime.now(UTC), [tarea]) == 1
     trabajador = Trabajador(motor_app)
@@ -248,7 +290,10 @@ def test_el_lote_respeta_su_tope(escena, motor_app, motor_migrate):
     """Codex: el trabajo no puede pasarse del plazo del trabajador; lo que queda, sigue."""
     e = escena
     otra = otra_persona(motor_migrate, e["cons"])
-    a, b = _vencido(motor_app, e["cons"], e["mc"]), _vencido(motor_app, e["cons"], otra)
+    a, b = (
+        _vencido(motor_app, motor_migrate, e["cons"], e["mc"]),
+        _vencido(motor_app, motor_migrate, e["cons"], otra),
+    )
     _procesar(motor_app)  # vacía lo que dejaron otras pruebas
     with motor_migrate.begin() as c:
         c.execute(text("update nucleo.mandato set vencimiento_procesado_en = null"
