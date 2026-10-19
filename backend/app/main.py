@@ -4,6 +4,7 @@ from redis import Redis
 from app import errores, limite, registros
 from app.acceso import crear_verificador
 from app.config import Config, cargar
+from app.consorcios.mandatos_invitaciones import router as mandatos_invitaciones
 from app.consorcios.padron import router as padron
 from app.consorcios.router import router as consorcios
 from app.db import crear_motor
@@ -54,5 +55,6 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(contrasena)
     app.include_router(consorcios)
     app.include_router(padron)
+    app.include_router(mandatos_invitaciones)
     app.include_router(soporte)
     return app

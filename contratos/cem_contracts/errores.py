@@ -69,6 +69,19 @@ class CodigoError(StrEnum):
     """El vínculo ya está confirmado: una confirmación no se repite ni se reemplaza en 2b-4."""
     VINCULO_FINALIZADO = "vinculo_finalizado"
     """El vínculo ya terminó: no se confirma."""
+    MANDATO_YA_ASOCIADO = "mandato_ya_asociado"
+    """El mandato ya tiene una cuenta: para cambiarla, primero se desasocia (A7)."""
+    MANDATO_NO_VIGENTE = "mandato_no_vigente"
+    """El mandato terminó o tiene una baja: no admite una cuenta (A7)."""
+    MANDATO_NO_ASOCIABLE = "mandato_no_asociable"
+    """Solo un administrador externo se asocia o desasocia por invitación (A7)."""
+    MANDATO_SIN_PERSONA = "mandato_sin_persona"
+    """El mandato no tiene una cuenta asociada: no hay qué desasociar."""
+    ASOCIACION_INCOMPATIBLE_CON_CONSEJO = "asociacion_incompatible_con_consejo"
+    """La persona tiene en ese consorcio un mandato de Consejo vigente o futuro que se
+    superpone con el del administrador externo: el Consejo fiscaliza y no co-administra (P1-d)."""
+    ASOCIACION_DE_SI_MISMO = "asociacion_de_si_mismo"
+    """Quien emitió o aprobó la invitación de mandato no la acepta para sí."""
 
 
 class Error(BaseModel):

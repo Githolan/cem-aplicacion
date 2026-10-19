@@ -189,7 +189,7 @@ def crear(
     return Creada(invitacion, token)
 
 
-def _origen_publico(request: Request) -> str:
+def origen_publico(request: Request) -> str:
     origen = request.app.state.config.origen_publico
     if not origen:
         log.error("CEM_ORIGEN_PUBLICO sin configurar: no se puede armar el enlace de invitación")
@@ -233,7 +233,7 @@ async def invitar(
     quien la creó (la clave es por persona; excepción acotada de P6)."""
     ctx = permiso.ctx
     permiso.verificar(sobre_unidad(nueva.unidad_id))
-    origen = _origen_publico(request)
+    origen = origen_publico(request)
     ip = sesiones.ip_cliente(request)
 
     async def cupo() -> None:
@@ -401,7 +401,7 @@ def consultar(pedido: TokenInvitacion, motor: MotorDep, response: Response) -> I
     )
 
 
-def _persona_de_la_sesion(request: Request, motor) -> UUID | None:
+def persona_de_la_sesion(request: Request, motor) -> UUID | None:
     """La persona de la sesión de la petición, si trae una válida; con ella, exige CSRF. Una
     cookie vencida o inventada cuenta como sin sesión."""
     token = request.cookies.get(sesiones.COOKIE_SESION)
@@ -448,7 +448,7 @@ def aceptar(
         raise ErrorApi(
             403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
         )
-    persona_sesion = _persona_de_la_sesion(request, motor)
+    persona_sesion = persona_de_la_sesion(request, motor)
     token_sesion = sesiones.nuevo_token()
     dispositivo = sesiones.fijar_dispositivo(request, response)
     with transaccion(motor, persona_id=None) as conn:

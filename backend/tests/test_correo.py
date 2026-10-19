@@ -226,6 +226,25 @@ def test_el_correo_llega_con_asunto_remitente_cuerpo_y_encabezados(
 
 
 @pytest.mark.db
+def test_a_un_dominio_invalid_no_se_intenta_enviar(motor_app, motor_migrate, mailpit, datos):
+    """P3: las cuentas sintéticas del smoke de staging usan `.invalid` y no sale ningún correo.
+    Control: un dominio que solo contiene `.invalid` en el medio sí se envía."""
+    reservado = encolar_correo(
+        motor_app, datos.consorcio_a, carga(para="smoke-ae@cem-prueba.invalid")
+    )
+    parecido = encolar_correo(motor_app, datos.consorcio_a, carga(para="a@x.invalid.ejemplo.com"))
+    trabajador = Trabajador(motor_app)
+    assert trabajador.procesar_lote() + trabajador.procesar_lote() == 2
+    f = fila(motor_migrate, reservado)
+    assert (f.estado, f.intentos) == ("hecho", 1)
+    assert f.resultado == {"clave_envio": f"trabajo-{reservado}", "no_enviado": "dominio_reservado"}
+    assert fila(motor_migrate, parecido).estado == "hecho"
+    assert [[x["Address"] for x in m["To"]] for m in mailpit.mensajes()] == [
+        ["a@x.invalid.ejemplo.com"]
+    ]
+
+
+@pytest.mark.db
 def test_un_4xx_se_reintenta_y_entrega_una_sola_vez(motor_app, motor_migrate, mailpit, datos):
     id_ = encolar_correo(motor_app, datos.consorcio_a, carga(html=None))
     trabajador = Trabajador(motor_app)

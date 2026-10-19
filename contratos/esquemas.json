@@ -29,6 +29,36 @@
     "title": "AceptacionInvitacion",
     "type": "object"
   },
+  "AceptacionInvitacionMandato": {
+    "description": "`POST /api/v1/auth/invitacion-mandato/aceptar`.",
+    "properties": {
+      "nombre": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Solo para una cuenta nueva: el nombre con que queda. Sin él, el del mandatario. Una cuenta que ya existe conserva el suyo.",
+        "title": "Nombre"
+      },
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "AceptacionInvitacionMandato",
+    "type": "object"
+  },
   "AltaTotp": {
     "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
     "properties": {
@@ -235,6 +265,44 @@
     "title": "ContrasenaGuardada",
     "type": "object"
   },
+  "Desasociacion": {
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/desasociar-persona`.",
+    "properties": {
+      "referencia": {
+        "description": "Por qué la cuenta asociada no es la del mandatario (P1-c). Queda en la fila de la desasociación, no en la auditoría.",
+        "maxLength": 300,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Referencia",
+        "type": "string"
+      }
+    },
+    "required": [
+      "referencia"
+    ],
+    "title": "Desasociacion",
+    "type": "object"
+  },
+  "DesasociacionHecha": {
+    "description": "Respuesta de desasociar: el mandato, su CUIT y su vigencia quedan como estaban.",
+    "properties": {
+      "mandato_id": {
+        "format": "uuid",
+        "title": "Mandato Id",
+        "type": "string"
+      },
+      "sesiones_revocadas": {
+        "description": "Sesiones de la persona que se cerraron (RN22).",
+        "title": "Sesiones Revocadas",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "mandato_id",
+      "sesiones_revocadas"
+    ],
+    "title": "DesasociacionHecha",
+    "type": "object"
+  },
   "EnlacePedido": {
     "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
     "properties": {
@@ -314,7 +382,13 @@
           "contrasena_actual_invalida",
           "contrasena_debil",
           "vinculo_ya_confirmado",
-          "vinculo_finalizado"
+          "vinculo_finalizado",
+          "mandato_ya_asociado",
+          "mandato_no_vigente",
+          "mandato_no_asociable",
+          "mandato_sin_persona",
+          "asociacion_incompatible_con_consejo",
+          "asociacion_de_si_mismo"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -712,6 +786,327 @@
     "title": "InvitacionAceptada",
     "type": "object"
   },
+  "InvitacionMandato": {
+    "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      }
+    },
+    "description": "Una invitación de mandato, como la ve quien tiene `mandatos.registrar`.",
+    "properties": {
+      "aceptada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Aceptada En"
+      },
+      "aprobada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Aprobada En"
+      },
+      "correo": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Solo mientras está por aprobar, para quien la emitió o tiene `mandatos.registrar`; nulo en cualquier otro estado.",
+        "title": "Correo"
+      },
+      "creada_en": {
+        "format": "date-time",
+        "title": "Creada En",
+        "type": "string"
+      },
+      "emitida_por_mi": {
+        "title": "Emitida Por Mi",
+        "type": "boolean"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoInvitacionMandato"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "origen": {
+        "description": "`api`, o `soporte` si la emitió el equipo en un paso.",
+        "title": "Origen",
+        "type": "string"
+      },
+      "referencia": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Con la misma regla que el correo.",
+        "title": "Referencia"
+      },
+      "revocada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revocada En"
+      },
+      "vence_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Vence En"
+      }
+    },
+    "required": [
+      "id",
+      "estado",
+      "correo",
+      "referencia",
+      "origen",
+      "emitida_por_mi",
+      "creada_en"
+    ],
+    "title": "InvitacionMandato",
+    "type": "object"
+  },
+  "InvitacionMandatoAceptada": {
+    "description": "Respuesta de aceptar: el mandato quedó asociado a la persona.",
+    "properties": {
+      "consorcio_id": {
+        "format": "uuid",
+        "title": "Consorcio Id",
+        "type": "string"
+      },
+      "cuenta_nueva": {
+        "title": "Cuenta Nueva",
+        "type": "boolean"
+      },
+      "mandato_id": {
+        "format": "uuid",
+        "title": "Mandato Id",
+        "type": "string"
+      },
+      "persona_id": {
+        "format": "uuid",
+        "title": "Persona Id",
+        "type": "string"
+      },
+      "vigente_desde": {
+        "description": "Desde cuándo vale el mandato: si es futuro, el consorcio aparece en `/me/consorcios` recién desde esa fecha.",
+        "format": "date",
+        "title": "Vigente Desde",
+        "type": "string"
+      }
+    },
+    "required": [
+      "consorcio_id",
+      "persona_id",
+      "mandato_id",
+      "cuenta_nueva",
+      "vigente_desde"
+    ],
+    "title": "InvitacionMandatoAceptada",
+    "type": "object"
+  },
+  "InvitacionMandatoAprobada": {
+    "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      }
+    },
+    "description": "Respuesta de aprobar: el correo con el enlace salió por la cola.",
+    "properties": {
+      "estado": {
+        "$ref": "#/$defs/EstadoInvitacionMandato",
+        "description": "Siempre `pendiente`."
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "estado",
+      "vence_en"
+    ],
+    "title": "InvitacionMandatoAprobada",
+    "type": "object"
+  },
+  "InvitacionMandatoEmitida": {
+    "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      }
+    },
+    "description": "Respuesta de emitir: queda por aprobar, sin enlace ni correo enviado.",
+    "properties": {
+      "estado": {
+        "$ref": "#/$defs/EstadoInvitacionMandato",
+        "description": "Siempre `por_aprobar`."
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "mandato_id": {
+        "format": "uuid",
+        "title": "Mandato Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "mandato_id",
+      "estado"
+    ],
+    "title": "InvitacionMandatoEmitida",
+    "type": "object"
+  },
+  "InvitacionMandatoNueva": {
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones`.",
+    "properties": {
+      "correo": {
+        "description": "El correo del mandatario que figura en el respaldo.",
+        "examples": [
+          "administracion@estudio.com"
+        ],
+        "maxLength": 254,
+        "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+        "title": "Correo",
+        "type": "string"
+      },
+      "referencia": {
+        "description": "De dónde sale ese correo: contrato de administración, nota del administrador u otro instrumento (P1-b). Queda en la invitación, no en la auditoría.",
+        "examples": [
+          "Contrato de administración del 01-10-2026, cláusula 12"
+        ],
+        "maxLength": 300,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Referencia",
+        "type": "string"
+      }
+    },
+    "required": [
+      "correo",
+      "referencia"
+    ],
+    "title": "InvitacionMandatoNueva",
+    "type": "object"
+  },
+  "InvitacionMandatoRecibida": {
+    "description": "Lo que ve quien abre el enlace, antes de aceptar. Sin CUIT.",
+    "properties": {
+      "consorcio": {
+        "title": "Consorcio",
+        "type": "string"
+      },
+      "invitada_por": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Nombre de quien emitió; nulo si la emitió el equipo de la plataforma.",
+        "title": "Invitada Por"
+      },
+      "mandatario": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Nombre del mandatario que figura en el mandato.",
+        "title": "Mandatario"
+      },
+      "vence_en": {
+        "format": "date-time",
+        "title": "Vence En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "consorcio",
+      "mandatario",
+      "invitada_por",
+      "vence_en"
+    ],
+    "title": "InvitacionMandatoRecibida",
+    "type": "object"
+  },
   "InvitacionNueva": {
     "$defs": {
       "TipoVinculo": {
@@ -967,6 +1362,150 @@
       "elementos"
     ],
     "title": "ListaInvitaciones",
+    "type": "object"
+  },
+  "ListaInvitacionesMandato": {
+    "$defs": {
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
+        "type": "string"
+      },
+      "InvitacionMandato": {
+        "description": "Una invitación de mandato, como la ve quien tiene `mandatos.registrar`.",
+        "properties": {
+          "aceptada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aceptada En"
+          },
+          "aprobada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Aprobada En"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo mientras está por aprobar, para quien la emitió o tiene `mandatos.registrar`; nulo en cualquier otro estado.",
+            "title": "Correo"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "emitida_por_mi": {
+            "title": "Emitida Por Mi",
+            "type": "boolean"
+          },
+          "estado": {
+            "$ref": "#/$defs/EstadoInvitacionMandato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "origen": {
+            "description": "`api`, o `soporte` si la emitió el equipo en un paso.",
+            "title": "Origen",
+            "type": "string"
+          },
+          "referencia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Con la misma regla que el correo.",
+            "title": "Referencia"
+          },
+          "revocada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Revocada En"
+          },
+          "vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vence En"
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "correo",
+          "referencia",
+          "origen",
+          "emitida_por_mi",
+          "creada_en"
+        ],
+        "title": "InvitacionMandato",
+        "type": "object"
+      }
+    },
+    "description": "`GET /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones`.",
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/InvitacionMandato"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaInvitacionesMandato",
     "type": "object"
   },
   "ListaSesiones": {
@@ -1515,6 +2054,21 @@
       "token"
     ],
     "title": "TokenInvitacion",
+    "type": "object"
+  },
+  "TokenInvitacionMandato": {
+    "description": "`POST /api/v1/auth/invitacion-mandato/consultar`: el token del fragmento del enlace.",
+    "properties": {
+      "token": {
+        "pattern": "^[A-Za-z0-9_-]{43}$",
+        "title": "Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "token"
+    ],
+    "title": "TokenInvitacionMandato",
     "type": "object"
   },
   "Unidad": {

@@ -124,6 +124,8 @@ class Entidad:
     """El vínculo lo registró el equipo (origen `soporte`): no hay persona que separar, así que
     "no es quien lo registró" se cumple. Tiene que venir explícito, como `objetivo_sin_cuenta`:
     un `registrado_por` nulo sin este dato es un dato que falta y niega."""
+    emitido_por: UUID | None = None
+    """Quien emitió la invitación de mandato que se aprueba (A7, cuatro ojos)."""
     respaldo_presente: bool = False
 
 
@@ -247,6 +249,8 @@ def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) 
             if entidad.registrado_por is None and entidad.registrado_por_soporte:
                 return None
             otras = (entidad.registrado_por,)
+        case CodigoSeparacion.NO_ES_QUIEN_EMITIO:
+            otras = (entidad.emitido_por,)
         case CodigoSeparacion.NO_ES_QUIEN_APROBO:
             # Distinta de todos los aprobadores (A5).
             otras = entidad.aprobado_por

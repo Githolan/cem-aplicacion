@@ -39,6 +39,19 @@ from cem_contracts.invitaciones import (
     ListaInvitaciones,
     TokenInvitacion,
 )
+from cem_contracts.mandatos_invitaciones import (
+    AceptacionInvitacionMandato,
+    Desasociacion,
+    DesasociacionHecha,
+    InvitacionMandato,
+    InvitacionMandatoAceptada,
+    InvitacionMandatoAprobada,
+    InvitacionMandatoEmitida,
+    InvitacionMandatoNueva,
+    InvitacionMandatoRecibida,
+    ListaInvitacionesMandato,
+    TokenInvitacionMandato,
+)
 from cem_contracts.padron import ConfirmacionVinculo, FilaPadron, Padron, VinculoConfirmado
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.segundo_factor import (
@@ -53,6 +66,7 @@ from cem_contracts.soporte import SesionSoporte
 
 MODELOS: tuple[type[BaseModel], ...] = (
     AceptacionInvitacion,
+    AceptacionInvitacionMandato,
     AltaTotp,
     CanjeCodigo,
     CanjeEnlace,
@@ -62,6 +76,8 @@ MODELOS: tuple[type[BaseModel], ...] = (
     ConfirmacionVinculo,
     ConsorcioResumen,
     ContrasenaGuardada,
+    Desasociacion,
+    DesasociacionHecha,
     EnlacePedido,
     EntradaContrasena,
     Error,
@@ -72,9 +88,16 @@ MODELOS: tuple[type[BaseModel], ...] = (
     FilaPadron,
     Invitacion,
     InvitacionAceptada,
+    InvitacionMandato,
+    InvitacionMandatoAceptada,
+    InvitacionMandatoAprobada,
+    InvitacionMandatoEmitida,
+    InvitacionMandatoNueva,
+    InvitacionMandatoRecibida,
     InvitacionNueva,
     InvitacionRecibida,
     ListaInvitaciones,
+    ListaInvitacionesMandato,
     ListaSesiones,
     ListaUnidades,
     NuevaContrasena,
@@ -89,6 +112,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     SesionesRevocadas,
     SesionSoporte,
     TokenInvitacion,
+    TokenInvitacionMandato,
     Unidad,
     VerificacionSegundoFactor,
     VinculoConfirmado,

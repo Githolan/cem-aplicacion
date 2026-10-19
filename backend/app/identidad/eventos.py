@@ -120,3 +120,55 @@ def solicitar_invitacion(
         ),
         consorcio_id=consorcio_id,
     )
+
+
+# Invitación de mandato (A7, H2b 2b-4) ------------------------------------------------------
+# La pide `POST /api/v1/consorcios/{id}/invitaciones-mandato/{i}/aprobar` (cuatro ojos) o
+# `scripts/mandato_soporte.py`, en la misma transacción que aprueba la invitación. Nombra al
+# mandatario como figura en el mandato y nunca lleva el CUIT ni la referencia del respaldo.
+
+ASUNTO_INVITACION_MANDATO = "Te invitaron a administrar {consorcio} en Consorcio en Mano"
+TEXTO_INVITACION_MANDATO = """Hola:
+
+{quien} te invitó a entrar a {consorcio} en Consorcio en Mano con la cuenta del administrador
+externo {mandatario}.
+
+Para aceptar abrí este enlace:
+
+{enlace}
+
+La invitación vence el {vence} y sirve una sola vez. Al aceptarla, la cuenta de este correo queda
+asociada a ese mandato. Si ya tenés cuenta con este correo, entrá primero y después abrí el
+enlace.
+
+Si no esperabas esta invitación, ignorá este correo: sin aceptarla no se asocia nada.
+"""
+
+
+def solicitar_invitacion_mandato(
+    conn: Connection,
+    *,
+    consorcio_id: UUID,
+    para: str,
+    quien: str | None,
+    consorcio: str,
+    mandatario: str | None,
+    enlace: str,
+    vence: str,
+) -> None:
+    consorcio = " ".join(consorcio.split())
+    mandatario = " ".join(mandatario.split()) if mandatario else "del consorcio"
+    quien = " ".join(quien.split()) if quien else None
+    correo.solicitar(
+        conn,
+        para=para,
+        asunto=ASUNTO_INVITACION_MANDATO.format(consorcio=consorcio),
+        texto=TEXTO_INVITACION_MANDATO.format(
+            quien=quien or "El equipo de Consorcio en Mano",
+            consorcio=consorcio,
+            mandatario=mandatario,
+            enlace=enlace,
+            vence=vence,
+        ),
+        consorcio_id=consorcio_id,
+    )

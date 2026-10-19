@@ -71,8 +71,8 @@ def O(unidad: UUID = U3A) -> Vinculo:  # noqa: E743
     return Vinculo(TipoVinculo.OCUPANTE, unidad)
 
 
-# Entidad en la que todos los filtros pasan: otra persona preparó, aprobó, solicitó, propuso y
-# registró; sin firmas previas; con respaldo; recursos de todos los tipos.
+# Entidad en la que todos los filtros pasan: otra persona preparó, aprobó, solicitó, propuso,
+# registró y emitió; sin firmas previas; con respaldo; recursos de todos los tipos.
 TODO_PASA = Entidad(
     recursos={
         TipoRecurso.UNIDAD: str(U3A),
@@ -85,6 +85,7 @@ TODO_PASA = Entidad(
     propuesto_por=OTRO,
     persona_objetivo=OTRO,
     registrado_por=OTRO,
+    emitido_por=OTRO,
     respaldo_presente=True,
 )
 
@@ -282,7 +283,7 @@ def test_las_politicas_usan_el_catalogo_de_d2_y_su_marca_economica():
 
 
 def test_las_acciones_de_la_tabla():
-    assert len(POLITICAS) == 29  # 5 de §2.1 y 24 de §2.2
+    assert len(POLITICAS) == 34  # 5 de §2.1, 24 de §2.2 y las 5 de A7 (2b-4, PR 4)
 
 
 def _archivo(tmp_path, nombre, politicas):

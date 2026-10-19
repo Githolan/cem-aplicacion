@@ -24,3 +24,8 @@ export const NAVEGACION_ENTRAR = new RegExp(`^${RUTA_ENTRAR}(?:[/?]|$)`);
 // va siempre a la red: el correo puede llegar a un teléfono con una versión vieja en caché.
 export const RUTA_INVITACION = "/invitacion";
 export const NAVEGACION_INVITACION = new RegExp(`^${RUTA_INVITACION}(?:[/?]|$)`);
+
+// El enlace con que se asocia la cuenta de un administrador externo a su mandato (A7):
+// /invitacion-mandato#token=…. Misma razón: su navegación va siempre a la red.
+export const RUTA_INVITACION_MANDATO = "/invitacion-mandato";
+export const NAVEGACION_INVITACION_MANDATO = new RegExp(`^${RUTA_INVITACION_MANDATO}(?:[/?]|$)`);
