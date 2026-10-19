@@ -99,40 +99,63 @@ _CLAVE = (
 )
 
 
-def responder_una_vez(
-    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
-) -> Response:
-    claves = {
+def _claves(ctx: Contexto, pedido: PedidoIdempotente) -> dict[str, Any]:
+    return {
         "consorcio": ctx.consorcio_id,
         "persona": ctx.persona_id,
         "metodo": pedido.metodo,
         "ruta": pedido.ruta,
         "clave": pedido.clave,
     }
+
+
+def _guardada(
+    conn: Connection, claves: dict[str, Any], pedido: PedidoIdempotente
+) -> Response | None:
+    """La respuesta guardada y vigente de la clave (repetida), 422 si la clave se usó con otro
+    pedido, o None si no hay."""
+    guardada = conn.execute(
+        text(
+            "select huella, estado_http, respuesta::text as respuesta"
+            f" from plataforma.idempotencia where {_CLAVE} and vence_en > now()"
+        ),
+        claves,
+    ).one_or_none()
+    if guardada is None:
+        return None
+    if guardada.huella != pedido.huella:
+        raise ErrorApi(
+            422,
+            CodigoError.IDEMPOTENCIA_REUTILIZADA,
+            "Esa clave de reintento ya se usó con otros datos. Generá una nueva.",
+        )
+    return Response(
+        guardada.respuesta,
+        status_code=guardada.estado_http,
+        media_type="application/json",
+        headers={ENCABEZADO_REPETIDA: "true"},
+    )
+
+
+def respuesta_guardada(motor: Engine, ctx: Contexto, pedido: PedidoIdempotente) -> Response | None:
+    """Mira, sin bloquear ni ejecutar nada, si la clave ya tiene respuesta: así un reintento no
+    gasta un cupo de tasa antes de `responder_una_vez`, que vuelve a mirar con el bloqueo y es
+    la que decide."""
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        return _guardada(conn, _claves(ctx, pedido), pedido)
+
+
+def responder_una_vez(
+    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
+) -> Response:
+    claves = _claves(ctx, pedido)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         _esperar_turno(conn, claves)
         conn.execute(text(f"delete from plataforma.idempotencia where {_CLAVE}"
                           " and vence_en <= now()"), claves)  # fmt: skip
-        guardada = conn.execute(
-            text(
-                "select huella, estado_http, respuesta::text as respuesta"
-                f" from plataforma.idempotencia where {_CLAVE}"
-            ),
-            claves,
-        ).one_or_none()
+        guardada = _guardada(conn, claves, pedido)
         if guardada is not None:
-            if guardada.huella != pedido.huella:
-                raise ErrorApi(
-                    422,
-                    CodigoError.IDEMPOTENCIA_REUTILIZADA,
-                    "Esa clave de reintento ya se usó con otros datos. Generá una nueva.",
-                )
-            return Response(
-                guardada.respuesta,
-                status_code=guardada.estado_http,
-                media_type="application/json",
-                headers={ENCABEZADO_REPETIDA: "true"},
-            )
+            return guardada
         estado, cuerpo = efecto(conn)
         if not 200 <= estado <= 299:
             raise RuntimeError(f"un efecto idempotente devolvió {estado}: los errores se lanzan")

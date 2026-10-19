@@ -292,7 +292,9 @@
           "credenciales_invalidas",
           "entrada_vencida",
           "contrasena_actual_invalida",
-          "contrasena_debil"
+          "contrasena_debil",
+          "vinculo_ya_confirmado",
+          "vinculo_finalizado"
         ],
         "title": "CodigoError",
         "type": "string"

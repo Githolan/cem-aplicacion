@@ -50,6 +50,7 @@ from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.identidad import eventos, sesiones
+from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez, respuesta_guardada
 
 router = APIRouter(prefix="/api/v1", tags=["identidad"])
 log = logging.getLogger("cem.identidad")
@@ -66,11 +67,14 @@ ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
 COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo, i.correo,
   i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 NO_ENCONTRADA = "No encontramos lo que buscás."
-# El listado no devuelve el correo de las aceptadas: desde que se acepta es el correo con el que
-# la persona entra, y nadie lo ve de forma automática (D6; E30 del tracker de CEM). Quién ve el
-# correo de las demás (pendientes, vencidas, revocadas) es la decisión P6 del diseño de 2b-4.
+# El correo en el listado (P6 del propietario, 19-10-2026): solo el de una invitación
+# **pendiente** y solo para quien la creó. Para cualquier otro autorizado, y para toda aceptada,
+# vencida o revocada, es null: una aceptada es el correo con el que la persona entra (D6; E30).
+# Las cargadas por el equipo (`invitada_por` nulo) no lo muestran a nadie. Es un filtro de la
+# consulta, no del frontend.
 COLUMNAS_LISTA = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo,
-  case when i.aceptada_en is null then i.correo end as correo,
+  case when i.aceptada_en is null and i.revocada_en is null and i.vence_en > now()
+    and i.invitada_por = :yo then i.correo end as correo,
   i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 
 
@@ -212,24 +216,34 @@ def _origen_publico(request: Request) -> str:
 async def invitar(
     nueva: InvitacionNueva,
     permiso: Annotated[Permiso, Depends(requiere("invitaciones.crear"))],
+    idempotencia: IdempotenciaDep,
     request: Request,
     motor: MotorDep,
-) -> Invitacion:
+) -> Response:
     """Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga
     o no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la
     anterior. Cupo: 20 por hora y 50 por día por persona.
 
     Puede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un
-    recurso que la alcanza (tabla de verdad, §2.1)."""
+    recurso que la alcanza (tabla de verdad, §2.1).
+
+    Pide `Idempotency-Key`: un reintento con la misma clave y los mismos datos recibe la misma
+    respuesta durante 24 horas, sin mandar otro correo ni gastar el cupo. Esa respuesta guardada
+    conserva el correo, solo para quien la creó (la clave es por persona; excepción acotada de
+    P6)."""
     ctx = permiso.ctx
     permiso.verificar(sobre_unidad(nueva.unidad_id))
     origen = _origen_publico(request)
+    repetida = respuesta_guardada(motor, ctx, idempotencia)
+    if repetida is not None:
+        return repetida
     for cupo in limite.LIMITES_INVITACIONES_PERSONA:
         await limite.consumir(
             request.app.state.limitador, cupo, LIMITE_INVITAR, str(ctx.persona_id)
         )
     ip = sesiones.ip_cliente(request)
-    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+
+    def efecto(conn: Connection) -> tuple[int, Invitacion]:
         creada = crear(
             conn,
             consorcio_id=ctx.consorcio_id,
@@ -238,19 +252,21 @@ async def invitar(
             origen_publico=origen,
             ip=ip,
         )
-    if creada is None:  # la unidad no existe en el consorcio del ámbito (E25)
-        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADA)
-    log.info(
-        "invitación creada",
-        extra={
-            "campos": {
-                "consorcio_id": str(ctx.consorcio_id),
-                "persona_id": str(ctx.persona_id),
-                "invitacion_id": str(creada.invitacion.id),
-            }
-        },
-    )
-    return creada.invitacion
+        if creada is None:  # la unidad no existe en el consorcio del ámbito (E25)
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADA)
+        log.info(
+            "invitación creada",
+            extra={
+                "campos": {
+                    "consorcio_id": str(ctx.consorcio_id),
+                    "persona_id": str(ctx.persona_id),
+                    "invitacion_id": str(creada.invitacion.id),
+                }
+            },
+        )
+        return 201, creada.invitacion
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
 
 
 @router.get(
@@ -276,7 +292,7 @@ def listar(
                 " where i.consorcio_id = :c"
                 " order by i.creada_en desc, i.id desc"
             ),
-            {"c": ctx.consorcio_id},
+            {"c": ctx.consorcio_id, "yo": ctx.persona_id},
         ).mappings()
         return ListaInvitaciones(
             elementos=[

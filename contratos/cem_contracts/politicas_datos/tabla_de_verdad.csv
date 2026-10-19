@@ -202,13 +202,16 @@ R8,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=yo,403,no_es_quien_solicito
 R8,coeficientes.aprobar,Fac(coeficientes.aprobar),C,grupo:agua,vigente,si,propuso=yo;respaldo=si,403,no_es_quien_propuso,no aprueba lo que propuso
 R8,coeficientes.aprobar,Fac(coeficientes.aprobar),C,grupo:agua,vigente,si,propuso=otro;respaldo=si,403,requiere_controles_2b6,lo que propuso otro: la económica niega hasta 2b-6
 R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_vinculo,no confirma su propio vínculo
-R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,confirma el vínculo de otra persona
+R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=si,200,concedido_por_facultad,confirma el vínculo de otra persona
+P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=yo;respaldo=si,403,no_es_quien_registro,no confirma el vínculo que registró (invitó)
+P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=soporte;respaldo=si,200,concedido_por_facultad,confirma un vínculo que registró el equipo
+P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=si,403,identidad_indeterminada,sin saber quién registró el vínculo se niega
 R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,alta con una decisión del mismo consorcio
 R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
 R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión sin referencia del acta
-R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
+R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
 R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)
 R10,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=otro,403,requiere_controles_2b6,MC con fondo_reserva.autorizar: se niega hasta 2b-6
 R10,liquidacion.aprobar,Fac(liquidacion.aprobar),AG,,vigente,si,preparo=otro,403,requiere_controles_2b6,liquidacion.aprobar es económica

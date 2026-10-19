@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from alembic import command
@@ -231,3 +231,8 @@ def datos(motor_migrate: Engine) -> Datos:
         ]:
             uno(c, ins_v, c=cons, u=uni, p=per, t=tipo, desde=desde, hasta=hasta)
     return Datos(ca, cb, a1, a2, b1, pa, pb, pab, pv)
+
+
+def clave_idempotencia() -> dict[str, str]:
+    """Encabezado `Idempotency-Key` nuevo: un intento lógico distinto por llamada."""
+    return {"Idempotency-Key": str(uuid4())}
