@@ -22,7 +22,7 @@ from app.main import crear_app
 from tests.conftest import clave_idempotencia, url_rol
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta, baja
-from tests.test_modo_operacion import consorcio_con_persona, decidir
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
 
@@ -106,14 +106,14 @@ def edificio(motor_migrate, motor_app):
         "prop1": prop1,
         "prop2": prop2,
         "nadie": otra_persona(motor_migrate, cons),
-        "acta": decidir(motor_app, cons, prop1),
+        "acta": decidir_equipo(motor_app, cons),
     }
 
 
 def segundo_consorcio_con_mandato(motor_migrate, motor_app, persona: UUID) -> tuple[UUID, UUID]:
     """Otro consorcio donde `persona` es miembro del consejo."""
     cons_b, _, prop_b = consorcio_con_persona(motor_migrate)
-    m_b = alta(motor_app, cons_b, prop_b, decidir(motor_app, cons_b, prop_b), persona=persona,
+    m_b = alta(motor_app, cons_b, prop_b, decidir_equipo(motor_app, cons_b), persona=persona,
                tipo="miembro_consejo")  # fmt: skip
     return cons_b, m_b
 

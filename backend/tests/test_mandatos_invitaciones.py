@@ -25,7 +25,7 @@ from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
 from tests.test_identidad_cierre_y_purga import entrar_como
 from tests.test_mandatos import otra_persona, sesiones_abiertas
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
-from tests.test_modo_operacion import consorcio_con_persona, decidir
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 from tests.test_vinculo_0014 import _catalogo, base_aparte  # noqa: F401  (fixture)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
@@ -45,7 +45,7 @@ def escena(motor_migrate, motor_app):
     """Consorcio con su propietaria, dos miembros del Consejo (con `mandatos.registrar`) y un
     administrador externo vigente sin cuenta."""
     cons, u1, prop = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, prop)
+    acta = decidir_equipo(motor_app, cons)
     mc1, mc2 = otra_persona(motor_migrate, cons), otra_persona(motor_migrate, cons)
     m_mc1 = alta(motor_app, cons, prop, acta, persona=mc1, tipo="miembro_consejo")
     alta(motor_app, cons, prop, acta, persona=mc2, tipo="miembro_consejo")
@@ -326,7 +326,7 @@ def test_solo_un_externo_sin_cuenta_vigente_o_futuro_admite_la_invitacion(
     assert (r.status_code, r.json()["codigo"]) == (409, "mandato_no_asociable")
     assert emitir(e["mc1"], e["cons"], uuid4(), correo_nuevo()).status_code == 404
     otro_cons, _, otra_prop = consorcio_con_persona(motor_migrate)
-    ajeno = externo(motor_app, otro_cons, otra_prop, decidir(motor_app, otro_cons, otra_prop))
+    ajeno = externo(motor_app, otro_cons, otra_prop, decidir_equipo(motor_app, otro_cons))
     r = emitir(e["mc1"], e["cons"], ajeno, correo_nuevo())  # de otro consorcio: como inexistente
     assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")
     baja(motor_app, e["cons"], e["mc1"], e["ae"], "error_carga", instrumento="Nota",
@@ -337,7 +337,7 @@ def test_solo_un_externo_sin_cuenta_vigente_o_futuro_admite_la_invitacion(
 
 def test_un_mandato_vencido_no_admite_la_invitacion(motor_migrate, motor_app):
     cons, _, prop = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, prop)
+    acta = decidir_equipo(motor_app, cons)
     mc = otra_persona(motor_migrate, cons)
     alta(motor_app, cons, prop, acta, persona=mc, tipo="miembro_consejo")
     vencido = externo(motor_app, cons, prop, acta)
@@ -366,7 +366,7 @@ def test_un_mandato_futuro_se_asocia_y_aparece_en_c4_desde_su_inicio(
 ):
     """Caso 1 bis."""
     cons, _, prop = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, prop)
+    acta = decidir_equipo(motor_app, cons)
     mc1, mc2 = otra_persona(motor_migrate, cons), otra_persona(motor_migrate, cons)
     alta(motor_app, cons, prop, acta, persona=mc1, tipo="miembro_consejo")
     alta(motor_app, cons, prop, acta, persona=mc2, tipo="miembro_consejo")
@@ -732,10 +732,10 @@ def test_soporte_emite_y_aprueba_en_un_paso_con_motivo(
 
 def test_el_downgrade_de_0015_se_niega_con_datos(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0015")
     en_0015 = _catalogo(motor)
     command.downgrade(cfg, "0014")
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "0015")
     assert _catalogo(motor) == en_0015  # ida y vuelta sin datos
     with motor.begin() as c:
         cons = c.execute(text("insert into nucleo.consorcio (nombre) values ('A') returning id"))

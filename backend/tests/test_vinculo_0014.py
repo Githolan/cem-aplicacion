@@ -21,7 +21,7 @@ from app.db import transaccion
 from tests.conftest import ADMIN_URL, CLAVES, alembic_config
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import CUIT_X, _insertar_mandato, alta, baja
-from tests.test_modo_operacion import consorcio_con_persona, decidir
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
 
@@ -152,7 +152,7 @@ def escena(motor_migrate, motor_app):
     """Consorcio con su propietaria (vínculo de soporte), un administrador y un miembro del
     Consejo con mandato, y un inquilino invitado por el administrador."""
     cons, u1, prop = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, prop)
+    acta = decidir_equipo(motor_app, cons)
     admin = otra_persona(motor_migrate, cons)
     mc = otra_persona(motor_migrate, cons)
     m_admin = alta(motor_app, cons, prop, acta, tipo="administrador", persona=admin)
@@ -520,7 +520,7 @@ def test_el_padron_muestra_vigentes_y_futuros_y_no_terminados(escena, motor_migr
 def test_el_padron_no_muestra_otro_consorcio(escena, motor_migrate, motor_app):
     e = escena
     otro, u_otro, prop_otro = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, otro, prop_otro)
+    acta = decidir_equipo(motor_app, otro)
     admin_otro = otra_persona(motor_migrate, otro)
     alta(motor_app, otro, prop_otro, acta, tipo="administrador", persona=admin_otro)
     filas_otro = padron(motor_app, otro, admin_otro)
@@ -558,7 +558,7 @@ def test_la_vigencia_del_padron_usa_la_fecha_del_consorcio(motor_migrate, motor_
         hora_gmt = c.execute(text("select extract(hour from now() at time zone 'UTC')")).scalar()
     zona = "Pacific/Kiritimati" if hora_gmt >= 10 else "Etc/GMT+12"
     cons, u1, prop = consorcio_con_persona(motor_migrate, zona)
-    acta = decidir(motor_app, cons, prop)
+    acta = decidir_equipo(motor_app, cons)
     admin = otra_persona(motor_migrate, cons)
     alta(motor_app, cons, prop, acta, tipo="administrador", persona=admin,
          desde=_hoy(motor_migrate, cons) - timedelta(days=400))  # fmt: skip
@@ -585,7 +585,7 @@ def test_e31_los_eventos_de_mandatos_y_decisiones_no_llevan_texto_libre_ni_nombr
     e = escena
     # El externo va en otro consorcio: en este ya hay administrador (A14).
     otro, _, prop_otro = consorcio_con_persona(motor_migrate)
-    acta_otro = decidir(motor_app, otro, prop_otro)
+    acta_otro = decidir_equipo(motor_app, otro)
     externo = alta(motor_app, otro, prop_otro, acta_otro, tipo="administrador_externo",
                    nombre="Administradora Ejemplo SRL", cuit="30500010912")  # fmt: skip
     baja(motor_app, e["cons"], e["prop"], e["m_mc"], instrumento="Nota de renuncia 7",
