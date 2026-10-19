@@ -86,6 +86,7 @@ TODO_PASA = Entidad(
     persona_objetivo=OTRO,
     registrado_por=OTRO,
     emitido_por=OTRO,
+    decision_registrada_por=OTRO,
     respaldo_presente=True,
 )
 
@@ -312,3 +313,12 @@ def test_carga_falla_con_una_politica_invalida(tmp_path):
         cargar([roto])
     with pytest.raises(PoliticasInvalidas):
         cargar([])
+
+
+@pytest.mark.parametrize("marca", ["sin_decision", "decision_del_equipo"])
+def test_a15_una_marca_no_tapa_a_quien_registro(marca):
+    """Si la decisión tiene quién la registró, se compara aunque venga una marca (A15)."""
+    p = POLITICAS["mandatos.alta"]
+    entidad = replace(TODO_PASA, decision_registrada_por=YO, **{marca: True})
+    d = evaluar("mandatos.alta", contexto(facultades=(p.facultad,), modo=modo_que_pasa(p)), entidad)
+    assert (d.estado, d.motivo_interno) == (403, "no_registro_la_decision")
