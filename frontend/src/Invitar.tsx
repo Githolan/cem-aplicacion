@@ -191,7 +191,11 @@ export function Invitar() {
         exigirSesion(response);
         if (data === undefined) {
           const codigo = (error as { codigo?: string } | undefined)?.codigo;
-          if (codigo === "idempotencia_reutilizada" || response.status !== 409) clave.current = null;
+          // Un 5xx es ambiguo (un proxy puede responder después de que el backend guardó el
+          // resultado): igual que con la red caída, el reintento lleva la misma clave para recibir
+          // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
+          const ambigua = response.status >= 500 || response.status === 409;
+          if (codigo === "idempotencia_reutilizada" || !ambigua) clave.current = null;
           setAviso({ texto: mensajeAlInvitar(response.status, codigo), ok: false });
           return;
         }

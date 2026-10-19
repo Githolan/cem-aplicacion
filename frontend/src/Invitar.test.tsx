@@ -244,6 +244,25 @@ describe("página /invitaciones", () => {
     expect(claves[2]).not.toBe(claves[1]);
   });
 
+  it("un 5xx del proxy conserva la clave: el reintento recibe lo que el backend guardó", async () => {
+    let respuesta = () => new Response("<html>Bad Gateway</html>", { status: 502 });
+    const simulado = conConsorcio({ [`POST ${RUTA_LISTA}`]: () => respuesta() });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
+    await waitFor(() => expect(invitarBoton()).not.toHaveProperty("disabled", true));
+    respuesta = () => error("sin_permiso", 403);
+    fireEvent.click(invitarBoton());
+    await screen.findByText(/No tenés permiso/);
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(3));
+    const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
+    expect(claves[1]).toBe(claves[0]);
+    expect(claves[2]).not.toBe(claves[1]);
+  });
+
   it("retirar pide confirmación; «No» no manda nada y «Sí» retira con CSRF", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     const simulado = conConsorcio({ [`POST ${ruta}`]: () => new Response(null, { status: 204 }) });
