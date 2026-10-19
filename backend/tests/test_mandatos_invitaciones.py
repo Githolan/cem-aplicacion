@@ -556,6 +556,15 @@ def test_retirar_dos_veces_responde_igual_con_un_evento(motor_migrate, escena):
     ) == 1
 
 
+def test_aprobar_una_aceptada_responde_409(app, escena):  # noqa: F811
+    e = escena
+    i, token = emitida_y_aprobada(e, correo_nuevo())
+    assert aceptar(navegador(app), token).status_code == 200
+    r = aprobar(e["mc2"], e["cons"], i)
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_no_pendiente")
+    assert "aceptó" in r.json()["mensaje"]
+
+
 def test_retirar_una_aceptada_responde_409(app, escena):  # noqa: F811
     e = escena
     i, token = emitida_y_aprobada(e, correo_nuevo())

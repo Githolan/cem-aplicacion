@@ -196,8 +196,11 @@ def listar(
     summary="Aprobar la invitación de un administrador externo (sale el correo)",
     responses={
         403: {"description": "Sin `mandatos.registrar`, o quien aprueba es quien la emitió."},
-        404: {"description": "La invitación no existe aquí o ya no es la que está por aprobar."},
-        409: {"description": "El mandato ya tiene cuenta, no está vigente o no es externo."},
+        404: {"description": "La invitación no existe aquí, o fue reemplazada o retirada."},
+        409: {
+            "description": "La invitación ya está aprobada o aceptada, o el mandato ya tiene"
+            " cuenta, no está vigente o no es externo."
+        },
     },
 )
 def aprobar(

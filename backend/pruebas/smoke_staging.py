@@ -493,6 +493,8 @@ def main(argumentos: list[str] | None = None) -> int:
                        f" {control} de {total} detectados con la acción alterada)")  # fmt: skip
         except Fallo as e:
             error = e
+            # Antes de cerrar: si el cierre también falla, el desvío original ya quedó dicho.
+            print(f"FALLÓ: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
         finally:
             # Siempre, también ante una excepción inesperada (que después sigue su curso y
             # termina el proceso con su traza): revocar sesiones y dar de baja los mandatos.
@@ -508,7 +510,6 @@ def main(argumentos: list[str] | None = None) -> int:
             }
             print(json.dumps(resumen, ensure_ascii=False, indent=2))
         if error is not None:
-            print(f"FALLÓ: {type(error).__name__}: {error}", file=sys.stderr)
             return 1
         if abiertas != 0 or entran:
             print(
