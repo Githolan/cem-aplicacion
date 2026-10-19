@@ -50,7 +50,7 @@ from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.identidad import eventos, sesiones
-from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez, respuesta_guardada
+from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez_con_cupo
 
 router = APIRouter(prefix="/api/v1", tags=["identidad"])
 log = logging.getLogger("cem.identidad")
@@ -228,20 +228,19 @@ async def invitar(
     recurso que la alcanza (tabla de verdad, §2.1).
 
     Pide `Idempotency-Key`: un reintento con la misma clave y los mismos datos recibe la misma
-    respuesta durante 24 horas, sin mandar otro correo ni gastar el cupo. Esa respuesta guardada
-    conserva el correo, solo para quien la creó (la clave es por persona; excepción acotada de
-    P6)."""
+    respuesta durante 24 horas, sin mandar otro correo ni gastar el cupo, también si llega
+    mientras el primero sigue en curso. Esa respuesta guardada conserva el correo, solo para
+    quien la creó (la clave es por persona; excepción acotada de P6)."""
     ctx = permiso.ctx
     permiso.verificar(sobre_unidad(nueva.unidad_id))
     origen = _origen_publico(request)
-    repetida = respuesta_guardada(motor, ctx, idempotencia)
-    if repetida is not None:
-        return repetida
-    for cupo in limite.LIMITES_INVITACIONES_PERSONA:
-        await limite.consumir(
-            request.app.state.limitador, cupo, LIMITE_INVITAR, str(ctx.persona_id)
-        )
     ip = sesiones.ip_cliente(request)
+
+    async def cupo() -> None:
+        for limite_persona in limite.LIMITES_INVITACIONES_PERSONA:
+            await limite.consumir(
+                request.app.state.limitador, limite_persona, LIMITE_INVITAR, str(ctx.persona_id)
+            )
 
     def efecto(conn: Connection) -> tuple[int, Invitacion]:
         creada = crear(
@@ -266,7 +265,7 @@ async def invitar(
         )
         return 201, creada.invitacion
 
-    return responder_una_vez(motor, ctx, idempotencia, efecto)
+    return await responder_una_vez_con_cupo(motor, ctx, idempotencia, cupo, efecto)
 
 
 @router.get(

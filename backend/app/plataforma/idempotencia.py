@@ -31,7 +31,8 @@ Solo se guardan respuestas 2xx: un error sale como excepción y deshace la trans
 """
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated, Any
@@ -137,44 +138,73 @@ def _guardada(
     )
 
 
-def respuesta_guardada(motor: Engine, ctx: Contexto, pedido: PedidoIdempotente) -> Response | None:
-    """Mira, sin bloquear ni ejecutar nada, si la clave ya tiene respuesta: así un reintento no
-    gasta un cupo de tasa antes de `responder_una_vez`, que vuelve a mirar con el bloqueo y es
-    la que decide."""
-    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
-        return _guardada(conn, _claves(ctx, pedido), pedido)
-
-
-def responder_una_vez(
-    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
-) -> Response:
+@contextmanager
+def _turno(
+    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente
+) -> Iterator[tuple[Connection, dict[str, Any], Response | None]]:
+    """La transacción del pedido con el bloqueo de su clave tomado y la respuesta guardada, si
+    hay. Todo lo que se haga adentro queda serializado con los pedidos de la misma clave."""
     claves = _claves(ctx, pedido)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         _esperar_turno(conn, claves)
         conn.execute(text(f"delete from plataforma.idempotencia where {_CLAVE}"
                           " and vence_en <= now()"), claves)  # fmt: skip
-        guardada = _guardada(conn, claves, pedido)
+        yield conn, claves, _guardada(conn, claves, pedido)
+
+
+def _guardar(
+    conn: Connection,
+    claves: dict[str, Any],
+    pedido: PedidoIdempotente,
+    estado: int,
+    cuerpo: BaseModel,
+) -> Response:
+    if not 200 <= estado <= 299:
+        raise RuntimeError(f"un efecto idempotente devolvió {estado}: los errores se lanzan")
+    texto = cuerpo.model_dump_json()
+    conn.execute(
+        text(
+            "insert into plataforma.idempotencia (consorcio_id, persona_id, metodo, ruta,"
+            " clave, huella, estado_http, respuesta, vence_en) values (:consorcio, :persona,"
+            " :metodo, :ruta, :clave, :huella, :estado, :respuesta, now() + :vigencia)"
+        ),
+        claves
+        | {
+            "huella": pedido.huella,
+            "estado": estado,
+            "respuesta": texto,
+            "vigencia": VIGENCIA,
+        },
+    )
+    return Response(texto, status_code=estado, media_type="application/json")
+
+
+def responder_una_vez(
+    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
+) -> Response:
+    with _turno(motor, ctx, pedido) as (conn, claves, guardada):
         if guardada is not None:
             return guardada
         estado, cuerpo = efecto(conn)
-        if not 200 <= estado <= 299:
-            raise RuntimeError(f"un efecto idempotente devolvió {estado}: los errores se lanzan")
-        texto = cuerpo.model_dump_json()
-        conn.execute(
-            text(
-                "insert into plataforma.idempotencia (consorcio_id, persona_id, metodo, ruta,"
-                " clave, huella, estado_http, respuesta, vence_en) values (:consorcio, :persona,"
-                " :metodo, :ruta, :clave, :huella, :estado, :respuesta, now() + :vigencia)"
-            ),
-            claves
-            | {
-                "huella": pedido.huella,
-                "estado": estado,
-                "respuesta": texto,
-                "vigencia": VIGENCIA,
-            },
-        )
-    return Response(texto, status_code=estado, media_type="application/json")
+        return _guardar(conn, claves, pedido, estado, cuerpo)
+
+
+async def responder_una_vez_con_cupo(
+    motor: Engine,
+    ctx: Contexto,
+    pedido: PedidoIdempotente,
+    cupo: Callable[[], Awaitable[None]],
+    efecto: Efecto,
+) -> Response:
+    """Como `responder_una_vez`, pero gasta un cupo de tasa antes del efecto, con el bloqueo de
+    la clave tomado: solo el pedido que hace el efecto gasta cupo. Un reintento, aunque llegue
+    mientras el primero sigue en curso, espera y recibe la respuesta guardada sin gastar nada."""
+    with _turno(motor, ctx, pedido) as (conn, claves, guardada):
+        if guardada is not None:
+            return guardada
+        await cupo()
+        estado, cuerpo = efecto(conn)
+        return _guardar(conn, claves, pedido, estado, cuerpo)
 
 
 def _esperar_turno(conn: Connection, claves: dict[str, Any]) -> None:

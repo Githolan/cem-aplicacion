@@ -3,6 +3,8 @@
 Diseño: `doc/diseno/H2b_4_Diseno.md` de CEM, §6.5, §10 y §0 (P4, P5, P6).
 """
 
+import threading
+import time
 from uuid import UUID, uuid4
 
 import pytest
@@ -434,6 +436,54 @@ def test_invitar_con_la_misma_clave_no_manda_otro_correo_ni_gasta_cupo(
     assert otra.status_code == 429  # control: un pedido nuevo sí choca con el cupo
     with motor_migrate.connect() as c:
         enviados = c.execute(
+            text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
+            {"p": cuerpo["correo"]},
+        ).scalar_one()
+    assert enviados == 1
+
+
+def test_dos_pedidos_a_la_vez_con_la_misma_clave_gastan_un_solo_cupo(
+    motor_migrate, escena, monkeypatch
+):
+    """El segundo llega mientras el primero sigue en la transacción: espera el bloqueo de la
+    clave y recibe la respuesta guardada, sin chocar con el cupo de 1 que ya gastó el primero."""
+    from limits import parse
+
+    from app.identidad import invitaciones as modulo
+
+    monkeypatch.setattr(
+        "app.limite.LIMITES_INVITACIONES_PERSONA", (parse("1/hour"), parse("50/day"))
+    )
+    original = modulo.crear
+    dentro = threading.Event()
+
+    def crear_lento(*args, **kwargs):
+        dentro.set()
+        time.sleep(0.5)  # el segundo pedido llega con el primero todavía en curso
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(modulo, "crear", crear_lento)
+    e = escena
+    clave = clave_idempotencia()
+    cuerpo = invitacion(e["u1"], "a-la-vez")
+    url = invitaciones_url(e["cons"])
+    respuestas = {}
+    with cliente(e["prop1"]) as c:
+
+        def pedir(nombre):
+            respuestas[nombre] = c.post(url, json=cuerpo, headers=clave)
+
+        primero = threading.Thread(target=pedir, args=("primero",))
+        primero.start()
+        assert dentro.wait(5)
+        pedir("segundo")
+        primero.join()
+    assert respuestas["primero"].status_code == 201, respuestas["primero"].text
+    assert respuestas["segundo"].status_code == 201, respuestas["segundo"].text
+    assert respuestas["segundo"].headers[ENCABEZADO_REPETIDA] == "true"
+    assert respuestas["segundo"].json() == respuestas["primero"].json()
+    with motor_migrate.connect() as conn:
+        enviados = conn.execute(
             text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
             {"p": cuerpo["correo"]},
         ).scalar_one()
