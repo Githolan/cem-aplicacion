@@ -83,6 +83,59 @@
         "title": "AltaTotp",
         "type": "object"
       },
+      "BajaMandato": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/baja`.",
+        "properties": {
+          "causa": {
+            "$ref": "#/components/schemas/CausaBaja"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo para la remoción: una asamblea del mismo consorcio que no registró quien da la baja (C6, A15).",
+            "title": "Decision Id"
+          },
+          "descripcion": {
+            "description": "Por qué termina.",
+            "examples": [
+              "Renuncia presentada"
+            ],
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "instrumento": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Para toda causa que no sea la remoción: la nota, el certificado u otro instrumento.",
+            "title": "Instrumento"
+          }
+        },
+        "required": [
+          "causa",
+          "descripcion"
+        ],
+        "title": "BajaMandato",
+        "type": "object"
+      },
       "CanjeCodigo": {
         "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
         "properties": {
@@ -125,6 +178,17 @@
         ],
         "title": "CanjeEnlace",
         "type": "object"
+      },
+      "CausaBaja": {
+        "enum": [
+          "remocion",
+          "renuncia",
+          "fallecimiento_incapacidad",
+          "error_carga",
+          "otro"
+        ],
+        "title": "CausaBaja",
+        "type": "string"
       },
       "CodigoEntrada": {
         "description": "`POST /api/v1/auth/contrasena/segundo-factor`: el código de la aplicación o uno de\nrecuperación (que queda gastado).",
@@ -179,7 +243,18 @@
           "mandato_no_asociable",
           "mandato_sin_persona",
           "asociacion_incompatible_con_consejo",
-          "asociacion_de_si_mismo"
+          "asociacion_de_si_mismo",
+          "decision_invalida",
+          "persona_invalida",
+          "mandato_sin_cuenta",
+          "cuit_invalido",
+          "facultad_fuera_de_paquete",
+          "respaldo_invalido",
+          "administracion_ocupada",
+          "mandato_superpuesto",
+          "consejo_incompatible_con_administracion",
+          "mandato_ya_dado_de_baja",
+          "mandato_terminado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -290,6 +365,77 @@
           "sesiones_cerradas"
         ],
         "title": "ContrasenaGuardada",
+        "type": "object"
+      },
+      "DecisionNueva": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/decisiones`.",
+        "properties": {
+          "descripcion": {
+            "description": "Qué se decidió.",
+            "examples": [
+              "Designa al Consejo"
+            ],
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "fecha": {
+            "description": "Fecha del acto (asamblea, reunión, contrato o inscripción).",
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "referencia": {
+            "description": "Dónde consta: libro, acta y folio. Nunca se inventa (criterio 9).",
+            "examples": [
+              "Acta 12, libro 3, folio 40"
+            ],
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          },
+          "sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-fA-F]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Huella del acta escaneada, si existe.",
+            "title": "Sha256"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoDecision"
+          }
+        },
+        "required": [
+          "tipo",
+          "fecha",
+          "descripcion",
+          "referencia"
+        ],
+        "title": "DecisionNueva",
+        "type": "object"
+      },
+      "DecisionRegistrada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DecisionRegistrada",
         "type": "object"
       },
       "Desasociacion": {
@@ -1220,6 +1366,164 @@
         "title": "ListaUnidades",
         "type": "object"
       },
+      "MandatoDadoDeBaja": {
+        "properties": {
+          "causa": {
+            "$ref": "#/components/schemas/CausaBaja"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusivo (A1).",
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "id",
+          "causa",
+          "vigente_hasta"
+        ],
+        "title": "MandatoDadoDeBaja",
+        "type": "object"
+      },
+      "MandatoNuevo": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos`.",
+        "properties": {
+          "cuit": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{11}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligatorio para el administrador externo.",
+            "title": "Cuit"
+          },
+          "decision_id": {
+            "description": "La decisión de respaldo, del mismo consorcio, que no registró quien da el alta (A15).",
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "desde": {
+            "format": "date",
+            "title": "Desde",
+            "type": "string"
+          },
+          "facultades": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 100,
+                  "pattern": "^[a-z][a-z_]*(\\.[a-z_]+)+$",
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Un subconjunto del paquete del tipo; sin lista, el paquete completo.",
+            "title": "Facultades"
+          },
+          "hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusivo (A1): el último día es el anterior.",
+            "title": "Hasta"
+          },
+          "matricula": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matricula"
+          },
+          "nombre": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligatorio si no hay cuenta: razón social o nombre del mandatario.",
+            "title": "Nombre"
+          },
+          "persona_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La cuenta del mandatario. Obligatoria salvo para el administrador externo, que puede cargarse sin cuenta y asociarla después (A7).",
+            "title": "Persona Id"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoMandato"
+          }
+        },
+        "required": [
+          "tipo",
+          "decision_id",
+          "desde"
+        ],
+        "title": "MandatoNuevo",
+        "type": "object"
+      },
+      "MandatoRegistrado": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "MandatoRegistrado",
+        "type": "object"
+      },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
         "properties": {
@@ -1515,6 +1819,25 @@
         ],
         "title": "SesionesRevocadas",
         "type": "object"
+      },
+      "TipoDecision": {
+        "enum": [
+          "asamblea",
+          "consejo",
+          "contrato_administracion",
+          "inscripcion_rpa"
+        ],
+        "title": "TipoDecision",
+        "type": "string"
+      },
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
       },
       "TipoVinculo": {
         "description": "Relación de una persona con una unidad funcional.",
@@ -2548,6 +2871,68 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/decisiones": {
+      "post": {
+        "description": "Carga un acto ya tomado: no decide nada (el circuito de asambleas es H4b). La referencia\nqueda en la fila, no en la auditoría (E31).",
+        "operationId": "registrar_decision_api_v1_consorcios__consorcio_id__decisiones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `decisiones.registrar` en el consorcio."
+          },
+          "422": {
+            "description": "Faltan datos o la referencia no es válida."
+          }
+        },
+        "summary": "Registrar una decisión formal ya tomada, con la referencia del acta",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/invitaciones": {
       "get": {
         "description": "Las invitaciones de las unidades que la persona alcanza (por su vínculo de propietaria o\npor su facultad y su recurso), la más reciente primero, con su estado. Cada fila pasa por la\npolítica: no hay una consulta aparte que decida.",
@@ -2852,6 +3237,148 @@
         "summary": "Retirar una invitación pendiente",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mandatos": {
+      "post": {
+        "operationId": "alta_mandato_api_v1_consorcios__consorcio_id__mandatos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MandatoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MandatoRegistrado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar`, a sí mismo (A4), o con una decisión que registró la misma persona (A15)."
+          },
+          "409": {
+            "description": "Administración ocupada, mandato superpuesto o Consejo con AE."
+          },
+          "422": {
+            "description": "La decisión, la cuenta, el CUIT o las facultades no sirven."
+          }
+        },
+        "summary": "Dar de alta un mandato con una decisión de respaldo",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/baja": {
+      "post": {
+        "description": "Revoca las sesiones del mandatario (RN22); cuántas, queda en la auditoría.",
+        "operationId": "baja_mandato_api_v1_consorcios__consorcio_id__mandatos__mandato_id__baja_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mandato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mandato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BajaMandato"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MandatoDadoDeBaja"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar`, el propio (A4), o una remoción con una asamblea que registró la misma persona (A15)."
+          },
+          "404": {
+            "description": "El mandato no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ya tiene una baja, o ya terminó."
+          },
+          "422": {
+            "description": "El respaldo no corresponde a la causa (C6)."
+          }
+        },
+        "summary": "Dar de baja un mandato (irreversible); revoca las sesiones del mandatario",
+        "tags": [
+          "mandatos"
         ]
       }
     },

@@ -126,6 +126,13 @@ class Entidad:
     un `registrado_por` nulo sin este dato es un dato que falta y niega."""
     emitido_por: UUID | None = None
     """Quien emitió la invitación de mandato que se aprueba (A7, cuatro ojos)."""
+    decision_registrada_por: UUID | None = None
+    """Quien registró la decisión con que se da de alta o se remueve (A15)."""
+    decision_del_equipo: bool = False
+    """La decisión la cargó el equipo (`soporte`, sin persona): no hay a quién separar."""
+    sin_decision: bool = False
+    """La baja no usa decisión (renuncia, fallecimiento, `error_carga`, otro). Las dos marcas
+    tienen que venir explícitas: una `decision_registrada_por` nula sin ellas niega."""
     respaldo_presente: bool = False
 
 
@@ -251,6 +258,12 @@ def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) 
             otras = (entidad.registrado_por,)
         case CodigoSeparacion.NO_ES_QUIEN_EMITIO:
             otras = (entidad.emitido_por,)
+        case CodigoSeparacion.NO_REGISTRO_LA_DECISION:
+            if entidad.decision_registrada_por is None and (
+                entidad.decision_del_equipo or entidad.sin_decision
+            ):
+                return None
+            otras = (entidad.decision_registrada_por,)
         case CodigoSeparacion.NO_ES_QUIEN_APROBO:
             # Distinta de todos los aprobadores (A5).
             otras = entidad.aprobado_por

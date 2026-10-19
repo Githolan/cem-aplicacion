@@ -263,13 +263,15 @@ def baja(corrida: Corrida, rol: str) -> None:
     corrida.terminados.add(rol)
 
 
-def denegado(corrida: Corrida, persona: UUID, accion: str) -> bool:
+def denegado(corrida: Corrida, persona: UUID, accion: str, motivo: str | None = None) -> bool:
+    """Si hay un `autorizacion.denegada` de la persona para la acción (y ese motivo, si se da)."""
     with corrida.tx() as conn:
         return conn.execute(
             text("select exists (select 1 from auditoria.eventos where consorcio_id = :c"
                  " and actor_persona_id = :p and accion = 'autorizacion.denegada'"
-                 " and despues->>'accion' = :a)"),
-            {"c": corrida.consorcio, "p": persona, "a": accion},
+                 " and despues->>'accion' = :a"
+                 " and (cast(:m as text) is null or despues->>'motivo' = :m))"),
+            {"c": corrida.consorcio, "p": persona, "a": accion, "m": motivo},
         ).scalar_one()  # fmt: skip
 
 
@@ -358,6 +360,36 @@ def recorrer(corrida: Corrida) -> None:
     comprobar(r.estado == 204, f"revocar: {r.texto}")
     comprobar(de_la_lista(mc1)["estado"] == "revocada", "la lista la muestra revocada")
     corrida.ok("crear, listar (P6) y revocar una invitación")
+
+    # 2b-4b: decisión, alta y baja por HTTP. A15: quien registró la decisión no la usa.
+    r = mc1.pedir("POST", corrida.c("/decisiones"),
+                  {"tipo": "asamblea", "fecha": str(hoy), "referencia": REFERENCIA,
+                   "descripcion": "Prueba automatizada: designa y remueve"},
+                  csrf=True, clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 201, f"registrar una decisión: {r.texto}")
+    acta = r.cuerpo["id"]
+    nuevo = {"tipo": "miembro_consejo", "persona_id": str(corrida.personas["propietaria"]),
+             "decision_id": acta, "desde": str(hoy)}  # fmt: skip
+    r = mc1.pedir("POST", corrida.c("/mandatos"), nuevo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 403, f"A15: quien registró la decisión no da el alta: {r.texto}")
+    comprobar(denegado(corrida, corrida.personas["consejo1"], "mandatos.alta",
+                       "no_registro_la_decision"),
+              "el 403 de A15 en el alta quedó auditado")  # fmt: skip
+    r = mc2.pedir("POST", corrida.c("/mandatos"), nuevo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 201, f"alta por HTTP con la decisión de otra persona: {r.texto}")
+    corrida.mandatos["consejo_http"] = UUID(r.cuerpo["id"])
+    remocion = {"causa": "remocion", "decision_id": acta,
+                "descripcion": "Fin de la prueba automatizada"}  # fmt: skip
+    ruta = corrida.c(f"/mandatos/{corrida.mandatos['consejo_http']}/baja")
+    r = mc1.pedir("POST", ruta, remocion, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 403, f"A15: quien registró la asamblea no remueve: {r.texto}")
+    comprobar(denegado(corrida, corrida.personas["consejo1"], "mandatos.baja",
+                       "no_registro_la_decision"),
+              "el 403 de A15 en la baja quedó auditado")  # fmt: skip
+    r = mc2.pedir("POST", ruta, remocion, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 200 and r.cuerpo["causa"] == "remocion", f"remoción: {r.texto}")
+    corrida.terminados.add("consejo_http")
+    corrida.ok("decisión, alta y remoción por HTTP, con A15 (403 auditado al que registró)")
 
     baja(corrida, "administracion")
     alta(corrida, "externo", "administrador_externo", decision, hoy,
