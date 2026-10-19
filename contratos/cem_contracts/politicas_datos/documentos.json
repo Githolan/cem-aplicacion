@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "documentos.cargar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "documentos.cargar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (documentos.cargar); documento 08 §4, Permisos base (administrador externo: solo carga)"
+    },
+    {
+      "accion": "documentos.ver",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false},
+      "concede_por_ambito": false,
+      "facultad": "documentos.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base (Consultar rendición común); D2 (documentos.ver); A6"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "consorcios.mis",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": false},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 13 §7.2; tabla de verdad §2.1 y C4 (los consorcios con mandato vigente los resuelve nucleo.consorcios_con_mandato_vigente(), PR 3)"
+    },
+    {
+      "accion": "unidades.listar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": true,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; D6 (solo id y designación, sin personas)"
+    }
+  ]
+}

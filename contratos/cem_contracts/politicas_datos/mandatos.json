@@ -1,0 +1,60 @@
+{
+  "politicas": [
+    {
+      "accion": "decisiones.registrar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "decisiones.registrar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": "la acción es el respaldo: referencia obligatoria del acta; queda auditada",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (decisiones.registrar); C2; criterio 9 de H2b; RN03"
+    },
+    {
+      "accion": "mandatos.alta",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "mandatos.registrar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": ["no_es_su_propio_mandato"],
+      "respaldo": "una decisión formal del mismo consorcio (la base ya la exige); queda auditada",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (mandatos.registrar); C2; A4; RN03"
+    },
+    {
+      "accion": "mandatos.baja",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "mandatos.registrar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": ["no_es_su_propio_mandato"],
+      "respaldo": "causa_baja tipificada y respaldo según la causa (C6, tabla §5.1): remocion solo con decisión de asamblea del mismo consorcio; el resto solo con instrumento_referencia; queda auditada",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (mandatos.registrar); C2; C6; A4; RN22"
+    },
+    {
+      "accion": "modo.cambiar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": [],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": "decisión de asamblea (RN26, PA31)",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base (última fila: No para todos); C7; RN26; PA31"
+    }
+  ]
+}

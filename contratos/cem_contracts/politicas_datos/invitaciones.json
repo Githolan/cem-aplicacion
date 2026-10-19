@@ -1,0 +1,46 @@
+{
+  "politicas": [
+    {
+      "accion": "invitaciones.crear",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": true},
+      "concede_por_ambito": false,
+      "facultad": "invitaciones.crear",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; RF03; D2 (invitaciones.crear); R7"
+    },
+    {
+      "accion": "invitaciones.listar",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": true},
+      "concede_por_ambito": false,
+      "facultad": "invitaciones.crear",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; RF03; D2 (invitaciones.crear); R7"
+    },
+    {
+      "accion": "invitaciones.revocar",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": true},
+      "concede_por_ambito": false,
+      "facultad": "invitaciones.crear",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; RF03; D2 (invitaciones.crear); R7"
+    }
+  ]
+}

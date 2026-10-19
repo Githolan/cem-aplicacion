@@ -1,0 +1,217 @@
+{
+  "$defs": {
+    "CodigoSeparacion": {
+      "description": "Incompatibilidades de la separación de funciones (R8, A4 y A5).\n\nSe comparan siempre por `persona_id`; si una identidad no se puede determinar, se niega.\nEl código es también el motivo interno de la negación.",
+      "enum": [
+        "no_es_quien_preparo",
+        "no_es_quien_aprobo",
+        "no_es_quien_solicito",
+        "no_es_quien_propuso",
+        "firma_repetida",
+        "no_es_su_propio_mandato",
+        "no_es_su_propio_vinculo"
+      ],
+      "title": "CodigoSeparacion",
+      "type": "string"
+    },
+    "ConcesionPorVinculo": {
+      "additionalProperties": false,
+      "properties": {
+        "misma_unidad": {
+          "title": "Misma Unidad",
+          "type": "boolean"
+        },
+        "tipos": {
+          "items": {
+            "$ref": "#/$defs/TipoVinculo"
+          },
+          "minItems": 1,
+          "title": "Tipos",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tipos",
+        "misma_unidad"
+      ],
+      "title": "ConcesionPorVinculo",
+      "type": "object"
+    },
+    "ModoOperacion": {
+      "description": "Modo de operación del consorcio (documento 08, §5; `nucleo.tipo_modo`, 0010).",
+      "enum": [
+        "consejo",
+        "administrador_aumentado",
+        "autogestion"
+      ],
+      "title": "ModoOperacion",
+      "type": "string"
+    },
+    "Politica": {
+      "additionalProperties": false,
+      "properties": {
+        "accion": {
+          "pattern": "^[a-z_]+\\.[a-z_]+$",
+          "title": "Accion",
+          "type": "string"
+        },
+        "concede_por_ambito": {
+          "default": false,
+          "title": "Concede Por Ambito",
+          "type": "boolean"
+        },
+        "concede_por_vinculo": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConcesionPorVinculo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "destinatario_unico": {
+          "default": false,
+          "title": "Destinatario Unico",
+          "type": "boolean"
+        },
+        "economica": {
+          "title": "Economica",
+          "type": "boolean"
+        },
+        "facultad": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z_]+\\.[a-z_]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Facultad"
+        },
+        "fuente_normativa": {
+          "minLength": 1,
+          "title": "Fuente Normativa",
+          "type": "string"
+        },
+        "modos": {
+          "items": {
+            "$ref": "#/$defs/ModoOperacion"
+          },
+          "title": "Modos",
+          "type": "array"
+        },
+        "recurso": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecursoAceptado"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "respaldo": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Respaldo"
+        },
+        "separacion": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CodigoSeparacion"
+          },
+          "title": "Separacion",
+          "type": "array"
+        },
+        "sin_modo": {
+          "title": "Sin Modo",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accion",
+        "modos",
+        "sin_modo",
+        "economica",
+        "fuente_normativa"
+      ],
+      "title": "Politica",
+      "type": "object"
+    },
+    "RecursoAceptado": {
+      "additionalProperties": false,
+      "description": "Qué recursos de facultad acepta la acción (§1.3). Sin este campo, solo la general.",
+      "properties": {
+        "general": {
+          "title": "General",
+          "type": "boolean"
+        },
+        "tipos": {
+          "items": {
+            "$ref": "#/$defs/TipoRecurso"
+          },
+          "minItems": 1,
+          "title": "Tipos",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tipos",
+        "general"
+      ],
+      "title": "RecursoAceptado",
+      "type": "object"
+    },
+    "TipoRecurso": {
+      "description": "Tipos de recurso de una facultad (A8, §1.3). `facultad_otorgada.recurso` es `tipo:id`.",
+      "enum": [
+        "unidad",
+        "cuenta",
+        "grupo"
+      ],
+      "title": "TipoRecurso",
+      "type": "string"
+    },
+    "TipoVinculo": {
+      "description": "Relación de una persona con una unidad funcional.",
+      "enum": [
+        "propietario",
+        "inquilino",
+        "ocupante"
+      ],
+      "title": "TipoVinculo",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Un archivo `politicas_datos/<módulo>.json`.",
+  "properties": {
+    "politicas": {
+      "items": {
+        "$ref": "#/$defs/Politica"
+      },
+      "minItems": 1,
+      "title": "Politicas",
+      "type": "array"
+    }
+  },
+  "required": [
+    "politicas"
+  ],
+  "title": "ArchivoPoliticas",
+  "type": "object"
+}

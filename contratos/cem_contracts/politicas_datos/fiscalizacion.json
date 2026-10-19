@@ -1,0 +1,60 @@
+{
+  "politicas": [
+    {
+      "accion": "fiscalizacion.ver_resumen",
+      "concede_por_vinculo": {"tipos": ["propietario"], "misma_unidad": false},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base; tabla de verdad §1.2 (una acción, una vista)"
+    },
+    {
+      "accion": "fiscalizacion.ver_panel",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "fiscalizacion.ver_panel",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Documento 08 §4, Permisos base (Ver panel de fiscalización); D2; A2"
+    },
+    {
+      "accion": "solicitud_formal.preparar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "solicitud_formal.preparar",
+      "modos": ["consejo", "administrador_aumentado"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (solicitud_formal.preparar); A3; documento 08, tabla de pantallas (Solicitud formal: Consejo, Administrador Aumentado)"
+    },
+    {
+      "accion": "solicitud_formal.firmar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "solicitud_formal.firmar",
+      "modos": ["consejo", "administrador_aumentado"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": ["firma_repetida"],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": true,
+      "fuente_normativa": "D2 (solicitud_formal.firmar); PA36; CU12; A3; A5; A14"
+    }
+  ]
+}

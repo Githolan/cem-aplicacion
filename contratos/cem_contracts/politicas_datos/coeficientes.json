@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "coeficientes.proponer",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "coeficientes.proponer",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["grupo"], "general": true},
+      "separacion": [],
+      "respaldo": "fuente documental (D4)",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (coeficientes.proponer); D4"
+    },
+    {
+      "accion": "coeficientes.aprobar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "coeficientes.aprobar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["grupo"], "general": true},
+      "separacion": ["no_es_quien_propuso"],
+      "respaldo": "decisión con su acta (D4)",
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "D2 (coeficientes.aprobar, económica); D4; R10"
+    }
+  ]
+}
