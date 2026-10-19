@@ -128,7 +128,9 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
   - **Producción:** 0 mandatos, 0 decisiones y 0 facultades de lectura otorgadas: todavía puede bajar. **Staging ya no baja de `0018`.**
   - **Abierto:** el punto 4 de §7 de 2b-4b (fecha futura de las decisiones), E34 (también en `Mandatos.tsx`), E27, E29, E33, E35, E39, E40 y A13.
 
-- **H2b 2b-4b: mandatos y decisiones por la aplicación, y E15 (PR #78, #79 y #80), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (#51).
+Antes, **`81d3d55`** (19-10-2026, H2b 2b-4b completo), base `0017`, contrato 0.13.0. Lo que sigue describe ese momento: el downgrade, lo abierto y la pantalla los reemplaza el bloque de `4aa71e7`.
+
+- **H2b 2b-4b: mandatos y decisiones por la aplicación, y E15 (PR #78, #79 y #80), 19-10.** Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (#51).
   - **PR #78, migración `0016`:**
     - A15 (P2): quien registró la decisión no da el alta ni remueve con ella;
     - E26: los errores de alta, baja y decisión salen como motivos, no como `check_violation`;
