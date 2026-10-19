@@ -142,7 +142,10 @@ export function Invitar() {
         setUnidades(data.elementos);
         setUnidad(data.elementos[0]?.id ?? "");
       })
-      .catch(atajar);
+      .catch((e: unknown) => {
+        // Un rechazo del edificio anterior no pisa al que ya se eligió.
+        if (vigente) atajar(e);
+      });
     return () => {
       vigente = false;
     };
@@ -162,7 +165,9 @@ export function Invitar() {
         }
         setInvitaciones(data.elementos);
       })
-      .catch(atajar);
+      .catch((e: unknown) => {
+        if (vigente) atajar(e);
+      });
     return () => {
       vigente = false;
     };
@@ -217,9 +222,20 @@ export function Invitar() {
         params: { path: { consorcio_id: consorcio, invitacion_id: invitacion.id } },
         headers: encabezadoCsrf(),
       })
-      .then(({ response }) => {
+      .then(({ error, response }) => {
         exigirSesion(response);
         setARetirar(null);
+        if (response.status === 403) {
+          const codigo = (error as { codigo?: string } | undefined)?.codigo;
+          setAviso({
+            texto:
+              codigo === "csrf_invalido"
+                ? "No pudimos verificar el pedido. Recargá la página."
+                : "No tenés permiso para retirar esa invitación.",
+            ok: false,
+          });
+          return;
+        }
         if (response.status === 409) {
           setInvitaciones((actual) =>
             (actual ?? []).map((i) => (i.id === invitacion.id ? { ...i, estado: "aceptada" as const } : i)),
@@ -268,6 +284,7 @@ export function Invitar() {
                   <select
                     id={`${id}-consorcio`}
                     value={consorcio}
+                    disabled={enviando}
                     onChange={(e) => {
                       // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
                       setInvitaciones(null);
@@ -285,7 +302,13 @@ export function Invitar() {
                 </>
               )}
               <label htmlFor={`${id}-unidad`}>Unidad</label>
-              <select id={`${id}-unidad`} value={unidad} onChange={(e) => cambiar(setUnidad)(e.target.value)} required>
+              <select
+                id={`${id}-unidad`}
+                value={unidad}
+                onChange={(e) => cambiar(setUnidad)(e.target.value)}
+                disabled={enviando}
+                required
+              >
                 {unidades.map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.designacion}
@@ -296,6 +319,7 @@ export function Invitar() {
               <select
                 id={`${id}-tipo`}
                 value={tipo}
+                disabled={enviando}
                 onChange={(e) => cambiar(setTipo)(e.target.value as TipoVinculo)}
               >
                 {TIPOS.map((t) => (
@@ -310,6 +334,7 @@ export function Invitar() {
                 type="text"
                 autoComplete="off"
                 maxLength={LARGO_MAXIMO_NOMBRE}
+                disabled={enviando}
                 required
                 value={nombre}
                 onChange={(e) => cambiar(setNombre)(e.target.value)}
@@ -319,6 +344,7 @@ export function Invitar() {
                 id={`${id}-correo`}
                 type="email"
                 autoComplete="off"
+                disabled={enviando}
                 required
                 value={correo}
                 onChange={(e) => cambiar(setCorreo)(e.target.value)}

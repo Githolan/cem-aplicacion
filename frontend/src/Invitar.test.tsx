@@ -263,6 +263,69 @@ describe("página /invitaciones", () => {
     expect(claves[2]).not.toBe(claves[1]);
   });
 
+  it("con una invitación en curso no se editan los datos: lo que se limpia es lo que se mandó", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const simulado = conConsorcio();
+    const base = simulado.getMockImplementation();
+    simulado.mockImplementation(async (pedido: Request) =>
+      pedido.method === "POST"
+        ? new Promise<Response>((r) => {
+            soltar = r;
+          })
+        : (base as (p: Request) => Promise<Response>)(pedido),
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
+    for (const campo of ["Unidad", "Vínculo con la unidad", "Nombre", "Correo"])
+      expect((screen.getByLabelText(campo) as HTMLInputElement).disabled).toBe(true);
+    soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
+    expect(await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).disabled).toBe(false);
+  });
+
+  it.each([
+    ["csrf_invalido", "No pudimos verificar el pedido. Recargá la página."],
+    ["sin_permiso", "No tenés permiso para retirar esa invitación."],
+  ])("retirar con 403 %s lo explica en vez de culpar a la conexión", async (codigo, texto) => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error(codigo, 403) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    expect(await screen.findByText(texto)).toBeTruthy();
+  });
+
+  it("un rechazo tardío del edificio anterior no muestra un error en el nuevo", async () => {
+    let fallar: (e: Error) => void = () => undefined;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Rojo", vinculos: ["propietario"] }]),
+      [`GET /api/v1/consorcios/${C2}/unidades`]: () => Response.json(UNIDADES),
+      [`GET /api/v1/consorcios/${C2}/invitaciones`]: () => Response.json({ elementos: [] }),
+      [`GET ${RUTA_LISTA}`]: () => Response.json(LISTA),
+    });
+    const base = simulado.getMockImplementation() as (p: Request) => Promise<Response>;
+    simulado.mockImplementation(async (pedido: Request) =>
+      new URL(pedido.url).pathname === `/api/v1/consorcios/${C1}/unidades`
+        ? new Promise<Response>((_, rechazar) => {
+            fallar = rechazar;
+          })
+        : base(pedido),
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const edificio = await screen.findByLabelText("Edificio");
+    fireEvent.change(edificio, { target: { value: C2 } });
+    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
+    fallar(new TypeError("sin red"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+  });
+
   it("retirar pide confirmación; «No» no manda nada y «Sí» retira con CSRF", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     const simulado = conConsorcio({ [`POST ${ruta}`]: () => new Response(null, { status: 204 }) });
