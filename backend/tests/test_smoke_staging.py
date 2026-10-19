@@ -106,6 +106,31 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
     assert contar(motor_migrate, consorcio) == (1, 8)
 
 
+def test_ante_una_excepcion_inesperada_igual_cierra(servidor, entorno, monkeypatch, motor_migrate):
+    """Revisión independiente: un error que no es un `Fallo` (un 403 de un proxy en HTML, un
+    tiempo agotado) no puede dejar sesiones abiertas ni mandatos vigentes."""
+
+    def rota(corrida):
+        raise RuntimeError("se cortó la red")
+
+    monkeypatch.setattr(smoke_staging, "cadena", rota)
+    consorcio = uuid4()
+    with pytest.raises(RuntimeError, match="se cortó la red"):
+        smoke_staging.main(["--consorcio", str(consorcio), "--base", entorno,
+                            "--url", servidor, "--host", HOST])  # fmt: skip
+    with motor_migrate.connect() as c:
+        vigentes, abiertas = c.execute(
+            text("select (select count(*) from nucleo.mandato where consorcio_id = :c"
+                 " and (vigente_hasta is null or vigente_hasta > vigente_desde)),"
+                 " (select count(*) from nucleo.sesion s join nucleo.persona p on p.id = s.persona_id"
+                 " where p.correo like 'smoke-%' and s.revocada_en is null and s.vence_en > now()"
+                 " and exists (select 1 from nucleo.vinculo v where v.persona_id = p.id"
+                 " and v.consorcio_id = :c))"),
+            {"c": consorcio},
+        ).one()  # fmt: skip
+    assert (vigentes, abiertas) == (0, 0)
+
+
 def test_la_guarda_se_niega_fuera_de_staging_sin_escribir(
     servidor, entorno, capsys, monkeypatch, motor_migrate
 ):

@@ -121,11 +121,11 @@ class Entidad:
     registrado_por: UUID | None = None
     """Quien registró el vínculo que se confirma (P4-c)."""
     registrado_por_soporte: bool = False
-    emitido_por: UUID | None = None
-    """Quien emitió la invitación de mandato que se aprueba (A7, cuatro ojos)."""
     """El vínculo lo registró el equipo (origen `soporte`): no hay persona que separar, así que
     "no es quien lo registró" se cumple. Tiene que venir explícito, como `objetivo_sin_cuenta`:
     un `registrado_por` nulo sin este dato es un dato que falta y niega."""
+    emitido_por: UUID | None = None
+    """Quien emitió la invitación de mandato que se aprueba (A7, cuatro ojos)."""
     respaldo_presente: bool = False
 
 

@@ -96,7 +96,11 @@ export function InvitacionMandato() {
       .catch(() => setEstado("sin_servicio"));
   }
 
-  const hoy = new Date().toISOString().slice(0, 10);
+  // La fecha local, no la UTC: entre las 21 y las 24 de Argentina la UTC ya es mañana.
+  const ahora = new Date();
+  const hoy = [ahora.getFullYear(), ahora.getMonth() + 1, ahora.getDate()]
+    .map((n, i) => String(n).padStart(i === 0 ? 4 : 2, "0"))
+    .join("-");
 
   return (
     <>

@@ -273,7 +273,8 @@ def test_aprobar_con_la_misma_clave_no_manda_otro_correo(motor_migrate, escena):
             ).scalar_one()
             == 1
         )
-    assert aprobar(e["mc2"], e["cons"], i).status_code == 404  # otra clave: ya no está por aprobar
+    otra = aprobar(e["mc2"], e["cons"], i)  # otra clave: ya está aprobada (diseño §12.1)
+    assert (otra.status_code, otra.json()["codigo"]) == (409, "invitacion_no_pendiente")
 
 
 # Qué ve cada uno ----------------------------------------------------------------------------
@@ -573,12 +574,17 @@ def test_desasociar_quita_el_acceso_y_conserva_el_mandato(app, motor_migrate, es
     persona = persona_por_correo(motor_migrate, correo)
     assert sesiones_abiertas(motor_migrate, persona, 2) >= 2
     antes = mandato(motor_migrate, e["ae"])
+    clave = clave_idempotencia()
     with cliente(e["mc2"]) as c:
         r = c.post(url_mandato(e["cons"], e["ae"], "/desasociar-persona"),
-                   json={"referencia": "Nota del estudio del 05-11"},
-                   headers=clave_idempotencia())  # fmt: skip
+                   json={"referencia": "Nota del estudio del 05-11"}, headers=clave)  # fmt: skip
     assert r.status_code == 200, r.text
     assert r.json()["sesiones_revocadas"] >= 2
+    with cliente(e["mc2"]) as c:  # el reintento con la misma clave repite el 200 guardado
+        repetido = c.post(url_mandato(e["cons"], e["ae"], "/desasociar-persona"),
+                          json={"referencia": "Nota del estudio del 05-11"}, headers=clave)  # fmt: skip
+    assert (repetido.status_code, repetido.headers["Idempotent-Replayed"]) == (200, "true")
+    assert repetido.json() == r.json()
     despues = mandato(motor_migrate, e["ae"])
     assert despues == {**antes, "persona_id": None}  # CUIT y vigencia intactos
     assert sesiones_abiertas(motor_migrate, persona) == 0

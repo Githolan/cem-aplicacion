@@ -95,6 +95,11 @@ ERRORES = {
         CodigoError.INVITACION_NO_PENDIENTE,
         "La invitación ya se aceptó. Para corregir la cuenta hay que desasociarla.",
     ),
+    "invitacion_ya_aprobada": (
+        409,
+        CodigoError.INVITACION_NO_PENDIENTE,
+        "La invitación ya está aprobada: el correo con el enlace ya salió.",
+    ),
 }
 """Motivos de las funciones de `0015` que dependen del estado del mandato o de la invitación.
 Los de separación (`aprobacion_de_si_mismo`, `desasociacion_de_si_mismo`) los niega antes el
@@ -308,10 +313,13 @@ def desasociar(
     ctx = permiso.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         m = _mandato(conn, ctx.consorcio_id, mandato_id)
+    # Sin cuenta no se corta acá: un reintento con la misma clave tiene que recibir el 200
+    # guardado (la desasociación ya dejó el mandato sin persona), y una solicitud nueva recibe
+    # el 409 `mandato_sin_persona` de la función. La facultad se verifica igual.
     if m.persona_id is None:
-        estado, codigo, mensaje = ERRORES["mandato_sin_persona"]
-        raise ErrorApi(estado, codigo, mensaje)
-    permiso.verificar(Entidad(persona_objetivo=m.persona_id, respaldo_presente=True))
+        permiso.verificar(Entidad(objetivo_sin_cuenta=True, respaldo_presente=True))
+    else:
+        permiso.verificar(Entidad(persona_objetivo=m.persona_id, respaldo_presente=True))
 
     def efecto(conn: Connection) -> tuple[int, DesasociacionHecha]:
         revocadas = _llamar(

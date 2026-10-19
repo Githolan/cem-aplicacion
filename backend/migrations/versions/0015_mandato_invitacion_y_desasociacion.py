@@ -321,9 +321,19 @@ create function nucleo.aprobar_invitacion_mandato(
     select * into m from nucleo.mandato x
      where x.consorcio_id = c and x.id = i.mandato_id for update;
     select * into i from nucleo.invitacion_mandato x where x.id = invitacion for update;
-    if i.aceptada_en is not null or i.revocada_en is not null or i.aprobada_en is not null then
+    -- Reemplazada o retirada: lo que vio el aprobador ya no vale (404). Ya aceptada o ya
+    -- aprobada: 409, el estado es otro (diseño §12.1).
+    if i.revocada_en is not null then
       raise exception 'la invitación ya no es la que está por aprobar'
         using errcode = 'P0001', hint = 'invitacion_invalida';
+    end if;
+    if i.aceptada_en is not null then
+      raise exception 'la invitación ya se aceptó'
+        using errcode = 'P0001', hint = 'invitacion_aceptada';
+    end if;
+    if i.aprobada_en is not null then
+      raise exception 'la invitación ya está aprobada'
+        using errcode = 'P0001', hint = 'invitacion_ya_aprobada';
     end if;
     if i.emitida_por = actor then
       raise exception 'quien emitió la invitación no la aprueba'

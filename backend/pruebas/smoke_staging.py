@@ -491,19 +491,22 @@ def main(argumentos: list[str] | None = None) -> int:
             comprobar(control == total, f"control de la cadena: {control} de {total}")
             corrida.ok(f"cadena de auditoría: {total} eventos, 0 rotos, 0 distintos (control:"
                        f" {control} de {total} detectados con la acción alterada)")  # fmt: skip
-        except (Fallo, KeyError, ValueError) as e:
+        except Fallo as e:
             error = e
-        abiertas, entran = cerrar(corrida)
-        resumen = {
-            "corrida": corrida.id,
-            "consorcio": str(a.consorcio),
-            "personas": {k: str(v) for k, v in corrida.personas.items()},
-            "mandatos": {k: str(v) for k, v in corrida.mandatos.items()},
-            "sesiones_abiertas_al_cerrar": abiertas,
-            "navegadores_que_siguen_entrando": entran,
-            "controles": corrida.controles,
-        }
-        print(json.dumps(resumen, ensure_ascii=False, indent=2))
+        finally:
+            # Siempre, también ante una excepción inesperada (que después sigue su curso y
+            # termina el proceso con su traza): revocar sesiones y dar de baja los mandatos.
+            abiertas, entran = cerrar(corrida)
+            resumen = {
+                "corrida": corrida.id,
+                "consorcio": str(a.consorcio),
+                "personas": {k: str(v) for k, v in corrida.personas.items()},
+                "mandatos": {k: str(v) for k, v in corrida.mandatos.items()},
+                "sesiones_abiertas_al_cerrar": abiertas,
+                "navegadores_que_siguen_entrando": entran,
+                "controles": corrida.controles,
+            }
+            print(json.dumps(resumen, ensure_ascii=False, indent=2))
         if error is not None:
             print(f"FALLÓ: {type(error).__name__}: {error}", file=sys.stderr)
             return 1
