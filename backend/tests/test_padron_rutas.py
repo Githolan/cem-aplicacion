@@ -3,18 +3,23 @@
 Diseño: `doc/diseno/H2b_4_Diseno.md` de CEM, §6.5, §10 y §0 (P4, P5, P6).
 """
 
+import asyncio
 import threading
 import time
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from sqlalchemy import text
 
 from app.autorizacion.evaluador import Decision
 from app.autorizacion.requiere import Permiso
+from app.config import Config
 from app.consorcios.padron import Discrepancia
+from app.contexto import Identidad, obtener_identidad
+from app.main import crear_app
 from app.plataforma.idempotencia import ENCABEZADO_REPETIDA
-from tests.conftest import clave_idempotencia
+from tests.conftest import REDIS_URL, clave_idempotencia, url_rol
 from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixture)
     cliente,
     denegaciones,
@@ -482,6 +487,57 @@ def test_dos_pedidos_a_la_vez_con_la_misma_clave_gastan_un_solo_cupo(
     assert respuestas["segundo"].status_code == 201, respuestas["segundo"].text
     assert respuestas["segundo"].headers[ENCABEZADO_REPETIDA] == "true"
     assert respuestas["segundo"].json() == respuestas["primero"].json()
+    with motor_migrate.connect() as conn:
+        enviados = conn.execute(
+            text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
+            {"p": cuerpo["correo"]},
+        ).scalar_one()
+    assert enviados == 1
+
+
+def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
+    motor_migrate, escena, monkeypatch, redis_limpio
+):
+    """Los dos pedidos corren en el mismo bucle de eventos, con el cupo en Redis de verdad: el
+    segundo no puede frenar el bucle esperando el bloqueo de la clave mientras el primero
+    espera a Redis (Codex). Los dos reciben 201 (el segundo, repetido), con un solo correo."""
+    from limits import parse
+
+    from app import limite
+
+    monkeypatch.setattr(
+        "app.limite.LIMITES_INVITACIONES_PERSONA", (parse("5/hour"), parse("50/day"))
+    )
+    original = limite.consumir
+
+    async def consumir_lento(*args, **kwargs):
+        # El primero espera el cupo (sin frenar el bucle) cuando llega el segundo.
+        await asyncio.sleep(0.5)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(limite, "consumir", consumir_lento)
+    e = escena
+    aplicacion = crear_app(
+        Config(url_rol("app"), "0.1.0", "sha", "sha", redis_url=REDIS_URL,
+               origen_publico="https://cem.ejemplo.com")
+    )  # fmt: skip
+    aplicacion.dependency_overrides[obtener_identidad] = lambda: Identidad(e["prop1"])
+    clave = clave_idempotencia()
+    cuerpo = invitacion(e["u1"], "mismo-bucle")
+
+    async def dos_pedidos():
+        transporte = httpx.ASGITransport(app=aplicacion, client=("198.51.100.31", 40000))
+        async with httpx.AsyncClient(transport=transporte, base_url="http://cem") as c:
+            url = invitaciones_url(e["cons"])
+            primero = asyncio.create_task(c.post(url, json=cuerpo, headers=clave))
+            await asyncio.sleep(0.1)
+            segundo = await c.post(url, json=cuerpo, headers=clave)
+            return await primero, segundo
+
+    primero, segundo = asyncio.run(dos_pedidos())
+    assert (primero.status_code, segundo.status_code) == (201, 201), segundo.text
+    assert segundo.headers[ENCABEZADO_REPETIDA] == "true"
+    assert segundo.json() == primero.json()
     with motor_migrate.connect() as conn:
         enviados = conn.execute(
             text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
