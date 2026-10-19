@@ -113,7 +113,32 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `06828b2`** (19-10-2026, H2b 2b-4 completo), base `0015`, contrato 0.13.0.
+**Staging y producción en `81d3d55`** (19-10-2026, H2b 2b-4b completo), base `0017`, contrato 0.13.0.
+
+- **H2b 2b-4b: mandatos y decisiones por la aplicación, y E15 (PR #78, #79 y #80), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (#51).
+  - **PR #78, migración `0016`:**
+    - A15 (P2): quien registró la decisión no da el alta ni remueve con ella;
+    - E26: los errores de alta, baja y decisión salen como motivos, no como `check_violation`;
+    - R10/P1-d en los dos sentidos: Consejo y administración externa de la misma persona son incompatibles, con bloqueo por correo. El upgrade se niega si ya hay conflictos (`mandatos_incompatibles_previos`).
+  - **PR #79, rutas:**
+    - `POST /api/v1/consorcios/{c}/decisiones` (`decisiones.registrar`), `POST …/mandatos` (`mandatos.alta`) y `POST …/mandatos/{m}/baja` (`mandatos.baja`), con `Idempotency-Key` y CSRF;
+    - A15 en el evaluador (`no_registro_la_decision`, con las marcas `decision_del_equipo` y `sin_decision`);
+    - un mandato inexistente se evalúa con `SIN_OBJETO`: 403 auditado sin oráculo para quien no puede;
+    - 11 códigos de error nuevos y seis modelos en `contratos/`.
+    - El smoke de staging suma el paso "decisión, alta y remoción por HTTP, con A15" (10 controles).
+  - **PR #80, migración `0017` (E15):** `nucleo.revocar_sesiones_por_vencimiento(tope)` y el trabajo horario `consorcio.revocar_por_vencimiento`, que lo llama con tope de 200.
+    - Revoca las sesiones de quien tenía un mandato vencido por fecha, una sola vez, con la marca `vencimiento_procesado_en`.
+    - Un mandato cargado ya vencido no revoca.
+    - El downgrade se niega si hay marcas.
+  - CI con imágenes en verde sobre `81d3d55`: 1147 del backend, 58 de contratos, 171 del frontend y 121 de extremo a extremo. Mutaciones: 27/27, 20/20 y 16/16. Codex limpio en #78 y #79; en #80 se quedó sin cupo y lo reemplazó una revisión adversarial independiente, documentada en el PR.
+  - Despliegue (Claude, mandato del propietario del 19-10), en tres ciclos con la misma SHA en staging y producción: `c41a13d` (`0016`), `f2e20dd` (rutas) y `81d3d55` (`0017`), con copia previa verificada antes de cada migración.
+    - Validación en la base con `ROLLBACK`: 12/12 de `0016` y 13/13 de `0017` en los dos entornos.
+    - El trabajo de vencimientos corrió en los dos entornos (`hecho`, 0 procesados).
+    - Registros en `doc/deploys/2026-10-19-{c41a13d,f2e20dd,81d3d55}.md` del repositorio CEM.
+  - **Producción:** 0 mandatos, 0 decisiones y 0 marcas; sin barrera de downgrade. Staging sigue sin bajar de `0015`.
+  - **Abierto:** E27, E29, E33 a E35, E39 (borrar el script del smoke como root) y E40 (índice de vencimientos), A13, y las preguntas al propietario del diseño 2b-4b §7. La pantalla de mandatos todavía no existe: las rutas se usan por la API.
+
+Antes, **`06828b2`** (19-10-2026, H2b 2b-4 completo), base `0015`, contrato 0.13.0.
 
 - **H2b 2b-4, vínculos, padrón e invitación de mandatos (PR #72, #73, #74 y #75), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_4_Diseno.md` del repositorio CEM (#48), con P1 a P6 decididas por el propietario.
   - **PR #72, migración `0014`:** el vínculo guarda su procedencia y se confirma (P4: atestigua el carácter sobre la unidad, no la identidad civil; no confirma el titular ni quien lo registró, también como restricción en la base). Padrón mínimo (P5) por `padron_del_consorcio()` con `padron.ver`. **E31 resuelto:** los eventos de decisión, alta y baja de mandatos ya no llevan nombre, CUIT ni referencias.
