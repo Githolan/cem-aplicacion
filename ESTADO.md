@@ -113,7 +113,20 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `81d3d55`** (19-10-2026, H2b 2b-4b completo), base `0017`, contrato 0.13.0.
+**Staging y producción en `4aa71e7`** (19-10-2026, H2b 2b-4c completo), base `0018`, contrato 0.14.0.
+
+- **H2b 2b-4c: lectura de mandatos y decisiones, destinatario del mandato y pantalla `/mandatos` (PR #82 y #83), 19-10. En staging y producción.** Decisiones del propietario sobre §7 de 2b-4b (puntos 1, 2, 3, 5 y 6; el 4 sigue abierto). Diseño: `doc/diseno/H2b_4c_Diseno.md` del repositorio CEM (#53).
+  - **PR #82, migración `0018`:**
+    - `mandatos.ver` y `decisiones.ver` en los paquetes de `miembro_consejo` y `administrador` (el externo, sin lectura general; los mandatos que ya existían no se tocan);
+    - cinco lecturas `security definer` que solo ejecuta `cem_app`, con segunda barrera en la base (mandato vigente hoy con la facultad, sin recurso): `mandatos_del_consorcio`, `mandato_detalle`, `decisiones_del_consorcio`, `decision_detalle` y `candidatos_a_mandato`. Listas mínimas: CUIT solo del externo, nombre de la cuenta para MC y AD, referencias y hashes solo en el detalle, nunca correo ni teléfono;
+    - destinatario por la API: MC y AD necesitan un vínculo confirmado, vigente o futuro, en el consorcio (`persona_sin_vinculo`, el mismo motivo si la cuenta no existe o es de otro consorcio); el externo entra sin cuenta (`externo_por_invitacion`) y se asocia por A7; soporte conserva la vía de `0016`; el origen se valida antes que la persona;
+    - E15: una vigencia vacía (`hasta <= desde`) no revoca sesiones al vencer;
+    - rutas `GET /api/v1/consorcios/{c}/mandatos`, `…/mandatos/candidatos`, `…/mandatos/{m}`, `…/decisiones` y `…/decisiones/{d}`, con 403 auditado sin oráculo; el smoke de staging suma "lectura de mandatos y decisiones" (11 controles).
+  - **PR #83, pantalla `/mandatos`** (enlazada desde el inicio): listas, detalle, registrar decisión, alta y baja con confirmación, CSRF e `Idempotency-Key`, motivo por código, aviso A15 que no concede nada, foco al resultado, descarte de respuestas viejas, 360 px.
+  - CI con imágenes en verde sobre `4aa71e7`: 1232 del backend, 58 de contratos, 209 del frontend y 131 de extremo a extremo. Mutaciones: 26/26 (`0018` y rutas) y 25/25 (pantalla). Codex revisó #82 y #83 (ocho P2 en total, corregidos; la última ronda sin hallazgos), además de revisiones adversariales independientes documentadas en los PR.
+  - Despliegue (Claude, mandato del propietario del 19-10) con la misma SHA en staging y producción y copia previa verificada. Validación de `0018` en la base con `ROLLBACK`: 16/16 en los dos entornos. Registro en `doc/deploys/2026-10-19-4aa71e7.md` del repositorio CEM.
+  - **Producción:** 0 mandatos, 0 decisiones y 0 facultades de lectura otorgadas: todavía puede bajar. **Staging ya no baja de `0018`.**
+  - **Abierto:** el punto 4 de §7 de 2b-4b (fecha futura de las decisiones), E34 (también en `Mandatos.tsx`), E27, E29, E33, E35, E39, E40 y A13.
 
 - **H2b 2b-4b: mandatos y decisiones por la aplicación, y E15 (PR #78, #79 y #80), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_4b_Diseno.md` del repositorio CEM (#51).
   - **PR #78, migración `0016`:**
