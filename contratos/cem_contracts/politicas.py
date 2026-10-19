@@ -66,6 +66,10 @@ class CodigoSeparacion(StrEnum):
     (soporte) no tiene persona que separar y lo dice explícito `registrado_por_soporte`."""
     NO_ES_QUIEN_EMITIO = "no_es_quien_emitio"
     """Quien emitió la invitación de mandato no la aprueba: cuatro ojos (A7, P1, 2b-4)."""
+    NO_REGISTRO_LA_DECISION = "no_registro_la_decision"
+    """Quien registró la decisión no la usa para dar de alta ni para remover (A15, P2, 2b-4b).
+    Una decisión del equipo (soporte) o una baja sin decisión lo dicen explícito
+    (`decision_del_equipo`, `sin_decision`)."""
 
 
 class _Estricto(BaseModel):

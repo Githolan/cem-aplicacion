@@ -388,7 +388,18 @@
           "mandato_no_asociable",
           "mandato_sin_persona",
           "asociacion_incompatible_con_consejo",
-          "asociacion_de_si_mismo"
+          "asociacion_de_si_mismo",
+          "decision_invalida",
+          "persona_invalida",
+          "mandato_sin_cuenta",
+          "cuit_invalido",
+          "facultad_fuera_de_paquete",
+          "respaldo_invalido",
+          "administracion_ocupada",
+          "mandato_superpuesto",
+          "consejo_incompatible_con_administracion",
+          "mandato_ya_dado_de_baja",
+          "mandato_terminado"
         ],
         "title": "CodigoError",
         "type": "string"

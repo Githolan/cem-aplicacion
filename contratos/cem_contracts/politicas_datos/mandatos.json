@@ -22,11 +22,11 @@
       "modos": ["consejo", "administrador_aumentado", "autogestion"],
       "sin_modo": true,
       "recurso": null,
-      "separacion": ["no_es_su_propio_mandato"],
+      "separacion": ["no_es_su_propio_mandato", "no_registro_la_decision"],
       "respaldo": "una decisión formal del mismo consorcio (la base ya la exige); queda auditada",
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "D2 (mandatos.registrar); C2; A4; RN03"
+      "fuente_normativa": "D2 (mandatos.registrar); C2; A4; A15 (P2); RN03"
     },
     {
       "accion": "mandatos.baja",
@@ -36,11 +36,11 @@
       "modos": ["consejo", "administrador_aumentado", "autogestion"],
       "sin_modo": true,
       "recurso": null,
-      "separacion": ["no_es_su_propio_mandato"],
+      "separacion": ["no_es_su_propio_mandato", "no_registro_la_decision"],
       "respaldo": "causa_baja tipificada y respaldo según la causa (C6, tabla §5.1): remocion solo con decisión de asamblea del mismo consorcio; el resto solo con instrumento_referencia; queda auditada",
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "D2 (mandatos.registrar); C2; C6; A4; RN22"
+      "fuente_normativa": "D2 (mandatos.registrar); C2; C6; A4; A15 (P2); RN22"
     },
     {
       "accion": "mandatos.asociar_persona",

@@ -82,6 +82,30 @@ class CodigoError(StrEnum):
     superpone con el del administrador externo: el Consejo fiscaliza y no co-administra (P1-d)."""
     ASOCIACION_DE_SI_MISMO = "asociacion_de_si_mismo"
     """Quien emitió o aprobó la invitación de mandato no la acepta para sí."""
+    DECISION_INVALIDA = "decision_invalida"
+    """La decisión no existe en este consorcio, o la causa pide otro tipo (la remoción, una
+    asamblea; C6)."""
+    PERSONA_INVALIDA = "persona_invalida"
+    """La cuenta del mandatario no existe."""
+    MANDATO_SIN_CUENTA = "mandato_sin_cuenta"
+    """Un miembro del Consejo o un administrador necesita su cuenta (A12)."""
+    CUIT_INVALIDO = "cuit_invalido"
+    """El CUIT falta (administrador externo, A11) o su dígito verificador no corresponde."""
+    FACULTAD_FUERA_DE_PAQUETE = "facultad_fuera_de_paquete"
+    """Alguna facultad pedida no está en el paquete del tipo de mandato, o la lista está vacía."""
+    RESPALDO_INVALIDO = "respaldo_invalido"
+    """El respaldo de la baja no corresponde a la causa (C6)."""
+    ADMINISTRACION_OCUPADA = "administracion_ocupada"
+    """Ya hay un mandato de administración en esas fechas en este consorcio (A14)."""
+    MANDATO_SUPERPUESTO = "mandato_superpuesto"
+    """La persona ya tiene un mandato de ese tipo en esas fechas."""
+    CONSEJO_INCOMPATIBLE_CON_ADMINISTRACION = "consejo_incompatible_con_administracion"
+    """La persona está asociada a un administrador externo vigente o futuro que se superpone:
+    el Consejo fiscaliza y no co-administra (P1-d, R10)."""
+    MANDATO_YA_DADO_DE_BAJA = "mandato_ya_dado_de_baja"
+    """El mandato ya tiene una baja registrada (A10, irreversible)."""
+    MANDATO_TERMINADO = "mandato_terminado"
+    """El mandato ya terminó por su fecha: solo admite una baja por error de carga."""
 
 
 class Error(BaseModel):

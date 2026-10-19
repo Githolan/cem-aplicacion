@@ -79,7 +79,7 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
     assert codigo == 0, error
     assert resumen["sesiones_abiertas_al_cerrar"] == 0
     assert resumen["navegadores_que_siguen_entrando"] == []
-    assert len(resumen["controles"]) == 9
+    assert len(resumen["controles"]) == 10
     assert set(resumen["personas"]) == {
         "propietaria", "consejo1", "consejo2", "administracion", "externo",
     }  # fmt: skip

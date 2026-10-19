@@ -85,30 +85,30 @@ caso,accion,figura,modo,recurso,mandato,hay_administrador,entidad,esperado,motiv
 §2.3,solicitud_formal.firmar,AD,C,,vigente,no,firmas=otro,403,sin_concesion,AD no firma
 §2.3,solicitud_formal.firmar,AE,C,,vigente,no,firmas=otro,403,sin_concesion,AE no firma
 §2.3,solicitud_formal.firmar,ninguna,C,,sin_mandato,no,firmas=otro,404,fuera_de_ambito,sin vínculo ni mandato
-§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,P no registra mandatos
-§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,I no registra mandatos
-§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,MC da de alta a otra persona (C2)
-§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,AD da de alta a otra persona (C2)
-§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
-§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
-§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,P no registra mandatos
-§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,I no registra mandatos
-§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
-§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
-§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=yo;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
-§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=yo;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
-§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,P no registra mandatos
-§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,I no registra mandatos
-§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,MC da de baja a otra persona con respaldo
-§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,AD da de baja a otra persona con respaldo
-§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
-§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
-§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,P no registra mandatos
-§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=yo;respaldo=si,403,sin_concesion,I no registra mandatos
-§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
-§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
-§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=yo;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
-§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=yo;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,MC da de alta a otra persona (C2)
+§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,AD da de alta a otra persona (C2)
+§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.alta,P,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.alta,I,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.alta,MC,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
+§2.3,mandatos.alta,AD,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie se da un mandato a sí mismo (A4)
+§2.3,mandatos.alta,AE,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.alta,ninguna,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,MC da de baja a otra persona con respaldo
+§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,AD da de baja a otra persona con respaldo
+§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.baja,P,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.baja,I,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.baja,MC,C,,vigente,si,objetivo=yo;decision=ninguna;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
+§2.3,mandatos.baja,AD,C,,vigente,si,objetivo=yo;decision=ninguna;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
+§2.3,mandatos.baja,AE,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
 §2.3,decisiones.registrar,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,P no registra decisiones
 §2.3,decisiones.registrar,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,I no registra decisiones
 §2.3,decisiones.registrar,MC,C,,vigente,si,respaldo=si,200,concedido_por_facultad,MC registra decisiones (C2)
@@ -206,10 +206,10 @@ R8,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=o
 P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=yo;respaldo=si,403,no_es_quien_registro,no confirma el vínculo que registró (invitó)
 P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=soporte;respaldo=si,200,concedido_por_facultad,confirma un vínculo que registró el equipo
 P4-c,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;respaldo=si,403,identidad_indeterminada,sin saber quién registró el vínculo se niega
-R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,alta con una decisión del mismo consorcio
-R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
-R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
-R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
+R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,alta con una decisión del mismo consorcio
+R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
+R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
+R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
 R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión sin referencia del acta
 R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
 R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)
@@ -239,8 +239,8 @@ caso 7,invitaciones.crear,P,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinc
 caso 7,padron.ver_propio,P,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinculo,sin modo: padron.ver_propio corre
 caso 7,padron.ver,MC,—,unidad:3A,vigente,no,,200,concedido_por_facultad,sin modo: padron.ver corre
 caso 7,decisiones.registrar,MC,—,,vigente,no,respaldo=si,200,concedido_por_facultad,sin modo: decisiones.registrar corre
-caso 7,mandatos.alta,MC,—,,vigente,no,objetivo=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.alta corre
-caso 7,mandatos.baja,AD,—,,vigente,no,objetivo=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.baja corre
+caso 7,mandatos.alta,MC,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.alta corre
+caso 7,mandatos.baja,AD,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.baja corre
 caso 7,padron.gestionar,AD,—,unidad:3A,vigente,no,,403,sin_modo_registrado,sin modo: padron.gestionar no corre
 caso 7,fiscalizacion.ver_resumen,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: el resumen no corre
 caso 7,documentos.ver,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: los documentos no corren
@@ -255,8 +255,8 @@ caso 20,solicitud_formal.firmar,MC,C,,vigente,si,actor=nadie,403,identidad_indet
 caso 20,liquidacion.revisar,MC,AA,,vigente,si,preparo=nula,403,identidad_indeterminada,no se sabe quién preparó: se niega
 caso 20,solicitud_formal.firmar,MC,C,,vigente,si,firmas=nula,403,identidad_indeterminada,una firma sin persona: se niega
 caso 20,egresos.ejecutar_pago,AD,AA,cuenta:X,vigente,si,aprobaron=otro|nula;respaldo=si,403,identidad_indeterminada,un aprobador sin persona: se niega
-caso 20,mandatos.alta,MC,C,,vigente,si,objetivo=nula;respaldo=si,403,identidad_indeterminada,objetivo sin dato: un dato que falta niega
-caso 6,mandatos.alta,MC,C,,vigente,si,objetivo=sin_cuenta;respaldo=si,200,concedido_por_facultad,AE sin cuenta (A11): no puede ser quien actúa; es a otra persona
+caso 20,mandatos.alta,MC,C,,vigente,si,objetivo=nula;decision=otro;respaldo=si,403,identidad_indeterminada,objetivo sin dato: un dato que falta niega
+caso 6,mandatos.alta,MC,C,,vigente,si,objetivo=sin_cuenta;decision=otro;respaldo=si,200,concedido_por_facultad,AE sin cuenta (A11): no puede ser quien actúa; es a otra persona
 caso 21,solicitud_formal.firmar,MC,AG,,vigente,si,firmas=otro,403,modo_no_admitido,la segunda firma llega con el consorcio ya en Autogestión
 caso 23,solicitud_formal.preparar,MC,C,,vigente,no,,200,concedido_por_facultad,preparar no necesita destinatario
 caso 23,solicitud_formal.firmar,MC,C,,vigente,no,,200,concedido_por_facultad,la primera firma no necesita destinatario
@@ -306,3 +306,9 @@ A7,mandatos.ver_asociaciones,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee
 A7,mandatos.ver_asociaciones,AD,C,,vigente,si,,200,concedido_por_facultad,AD lee las invitaciones de un mandato (C2)
 A7,mandatos.ver_asociaciones,AE,C,,vigente,si,,403,sin_concesion,AE no recibe mandatos.registrar
 A7,mandatos.ver_asociaciones,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+A15,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=yo;respaldo=si,403,no_registro_la_decision,quien registró la decisión no la usa para dar de alta (A15)
+A15,mandatos.alta,AD,C,,vigente,si,objetivo=otro;decision=equipo;respaldo=si,200,concedido_por_facultad,una decisión del equipo (soporte) no activa A15
+A15,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,identidad_indeterminada,decisión sin quién la registró ni marca: un dato que falta niega
+A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=yo;respaldo=si,403,no_registro_la_decision,remoción con una asamblea que registró él (A15)
+A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,remoción con una asamblea que registró otra persona
+A15,mandatos.baja,MC,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por instrumento (renuncia): sin decisión A15 no aplica

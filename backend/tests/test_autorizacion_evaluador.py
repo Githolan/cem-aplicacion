@@ -86,6 +86,7 @@ TODO_PASA = Entidad(
     persona_objetivo=OTRO,
     registrado_por=OTRO,
     emitido_por=OTRO,
+    decision_registrada_por=OTRO,
     respaldo_presente=True,
 )
 
