@@ -1,11 +1,11 @@
 """Invitaciones y alta de personas (documento 08, RF03; plan H2 2a; migración 0007).
 
-**Quién invita, hasta que lleguen los mandatos (H2 2b).** Por ahora invita a una unidad quien
-tiene un vínculo de propietario vigente en esa misma unidad: puede sumar a su inquilino, al
-ocupante o a otro titular. Ninguna otra unidad, y nadie que solo sea inquilino u ocupante. Los
-roles del Consejo y del administrador, que invitan en todo el consorcio, reemplazan esta regla
-cuando existan (`puede_invitar` es el único lugar que la decide). El equipo de la plataforma da
-de alta a las primeras personas de un consorcio con `scripts/invitar.py`.
+**Quién invita (H2b 2b-3).** Lo decide la política `invitaciones.crear` (`requiere`): el
+propietario vigente de esa misma unidad (puede sumar a su inquilino, al ocupante o a otro
+titular), o quien tiene la facultad `invitaciones.crear` en un mandato vigente de este consorcio
+con un recurso que alcanza la unidad (sin recurso, todo el consorcio). Nadie que solo sea
+inquilino u ocupante. Listar y retirar siguen la misma regla. El equipo de la plataforma da de
+alta a las primeras personas de un consorcio con `scripts/invitar.py`.
 
 **Recorrido.** Crear la invitación registra el hash del token y, en la misma transacción,
 publica el correo con el enlace `/invitacion#token=…` (el token va en el fragmento, como en
@@ -24,6 +24,7 @@ Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo.
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import Annotated
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -38,11 +39,14 @@ from cem_contracts.invitaciones import (
     ListaInvitaciones,
     TokenInvitacion,
 )
-from fastapi import APIRouter, Request, Response
+from cem_contracts.politicas import TipoRecurso
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import Connection, text
 
 from app import auditoria, limite
-from app.contexto import ContextoDep, MotorDep
+from app.autorizacion.evaluador import Entidad
+from app.autorizacion.requiere import Permiso, requiere
+from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.identidad import eventos, sesiones
@@ -70,19 +74,9 @@ class Creada:
     token: str
 
 
-def puede_invitar(conn: Connection, persona_id: UUID, unidad_id: UUID) -> bool:
-    """Regla provisoria hasta los mandatos (H2 2b): propietario vigente de esa unidad. Corre
-    con el consorcio en el ámbito, así que una unidad de otro consorcio no aparece."""
-    return bool(
-        conn.execute(
-            text(
-                "select exists (select 1 from nucleo.vinculo where unidad_id = :u"
-                " and persona_id = :p and tipo = 'propietario'"
-                " and daterange(vigente_desde, vigente_hasta) @> current_date)"
-            ),
-            {"u": unidad_id, "p": persona_id},
-        ).scalar_one()
-    )
+def sobre_unidad(unidad_id: UUID) -> Entidad:
+    """La entidad de las acciones de invitaciones: su unidad (recurso `unidad`, A8)."""
+    return Entidad(recursos={TipoRecurso.UNIDAD: str(unidad_id)})
 
 
 def crear(
@@ -209,14 +203,27 @@ def _sin_permiso() -> ErrorApi:
     status_code=201,
     response_model=Invitacion,
     summary="Invitar a una persona a una unidad",
-    responses={403: {"description": "La persona no es propietaria vigente de esa unidad."}},
+    responses={
+        403: {
+            "description": "La persona no es propietaria vigente de esa unidad ni tiene"
+            " `invitaciones.crear` sobre ella."
+        }
+    },
 )
 async def invitar(
-    nueva: InvitacionNueva, ctx: ContextoDep, request: Request, motor: MotorDep
+    nueva: InvitacionNueva,
+    permiso: Annotated[Permiso, Depends(requiere("invitaciones.crear"))],
+    request: Request,
+    motor: MotorDep,
 ) -> Invitacion:
     """Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga
     o no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la
-    anterior. Cupo: 20 por hora y 50 por día por persona."""
+    anterior. Cupo: 20 por hora y 50 por día por persona.
+
+    Puede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un
+    recurso que la alcanza (tabla de verdad, §2.1)."""
+    ctx = permiso.ctx
+    permiso.verificar(sobre_unidad(nueva.unidad_id))
     origen = _origen_publico(request)
     for cupo in limite.LIMITES_INVITACIONES_PERSONA:
         await limite.consumir(
@@ -224,8 +231,6 @@ async def invitar(
         )
     ip = sesiones.ip_cliente(request)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
-        if not puede_invitar(conn, ctx.persona_id, nueva.unidad_id):
-            raise _sin_permiso()
         creada = crear(
             conn,
             consorcio_id=ctx.consorcio_id,
@@ -254,23 +259,33 @@ async def invitar(
     response_model=ListaInvitaciones,
     summary="Invitaciones de mis unidades",
 )
-def listar(ctx: ContextoDep, motor: MotorDep, response: Response) -> ListaInvitaciones:
-    """Las invitaciones de las unidades donde la persona puede invitar, la más reciente
-    primero, con su estado."""
+def listar(
+    permiso: Annotated[Permiso, Depends(requiere("invitaciones.listar"))],
+    motor: MotorDep,
+    response: Response,
+) -> ListaInvitaciones:
+    """Las invitaciones de las unidades que la persona alcanza (por su vínculo de propietaria o
+    por su facultad y su recurso), la más reciente primero, con su estado. Cada fila pasa por la
+    política: no hay una consulta aparte que decida."""
     response.headers.update(SIN_CACHE)
+    ctx = permiso.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         filas = conn.execute(
             text(
                 f"select {COLUMNAS} from nucleo.invitacion i"
                 " join nucleo.unidad u on u.id = i.unidad_id"
-                " where i.unidad_id in (select v.unidad_id from nucleo.vinculo v"
-                "  where v.persona_id = :p and v.tipo = 'propietario'"
-                "  and daterange(v.vigente_desde, v.vigente_hasta) @> current_date)"
+                " where i.consorcio_id = :c"
                 " order by i.creada_en desc, i.id desc"
             ),
-            {"p": ctx.persona_id},
+            {"c": ctx.consorcio_id},
         ).mappings()
-        return ListaInvitaciones(elementos=[Invitacion(**f) for f in filas])
+        return ListaInvitaciones(
+            elementos=[
+                Invitacion(**f)
+                for f in filas
+                if permiso.decidir(sobre_unidad(f["unidad_id"])).permitido
+            ]
+        )
 
 
 @router.post(
@@ -283,18 +298,26 @@ def listar(ctx: ContextoDep, motor: MotorDep, response: Response) -> ListaInvita
         409: {"description": "Ya se aceptó: para quitar el acceso se termina el vínculo."},
     },
 )
-def revocar(invitacion_id: UUID, ctx: ContextoDep, request: Request, motor: MotorDep) -> Response:
-    """Repetirlo responde lo mismo. Una vencida también se puede retirar."""
+def revocar(
+    invitacion_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere("invitaciones.revocar"))],
+    request: Request,
+    motor: MotorDep,
+) -> Response:
+    """Repetirlo responde lo mismo. Una vencida también se puede retirar. Una invitación de una
+    unidad que la persona no alcanza responde 404, igual que una que no existe."""
+    ctx = permiso.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         fila = conn.execute(
             text(
                 "select unidad_id, aceptada_en, revocada_en from nucleo.invitacion"
-                " where id = :i for update"
+                " where id = :i and consorcio_id = :c for update"
             ),
-            {"i": invitacion_id},
+            {"i": invitacion_id, "c": ctx.consorcio_id},
         ).one_or_none()
-        if fila is None or not puede_invitar(conn, ctx.persona_id, fila.unidad_id):
+        if fila is None:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADA)
+        permiso.verificar(sobre_unidad(fila.unidad_id), estado_negado=404)
         if fila.aceptada_en is not None:
             raise ErrorApi(
                 409,
