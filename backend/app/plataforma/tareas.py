@@ -55,11 +55,18 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
 
 
+TOPE_VENCIMIENTOS = 200
+"""Mandatos por corrida: cada uno revoca y audita en milisegundos, así que el lote termina muy
+dentro del plazo de cinco minutos del trabajador; un atraso mayor se reparte entre corridas."""
+
+
 @cola.REGISTRO.tipo("consorcio.revocar_por_vencimiento")
 def revocar_por_vencimiento(conn: Connection, trabajo: cola.Trabajo) -> dict[str, int]:
     """E15 (criterio 3, RN22): un mandato que venció por su fecha revoca las sesiones del
     mandatario, como la baja. Idempotente por la marca de `0017`."""
-    procesados = conn.execute(text("select nucleo.revocar_sesiones_por_vencimiento()")).scalar_one()
+    procesados = conn.execute(
+        text("select nucleo.revocar_sesiones_por_vencimiento(:t)"), {"t": TOPE_VENCIMIENTOS}
+    ).scalar_one()
     return {"mandatos_procesados": procesados}
 
 

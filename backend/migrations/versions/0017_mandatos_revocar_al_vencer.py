@@ -9,13 +9,16 @@ mandatario siguen abiertas. Esta migración agrega:
 - `nucleo.mandato.vencimiento_procesado_en`: la marca de que ya se revocó por el vencimiento.
   Hace al trabajo idempotente: una persona que vuelve a entrar después no pierde su sesión nueva
   en la corrida siguiente.
-- `nucleo.revocar_sesiones_por_vencimiento()`, `security definer` de `cem_migrate`. Recorre los
+- `nucleo.revocar_sesiones_por_vencimiento(tope)`, `security definer` de `cem_migrate`. Recorre los
   mandatos de consorcios no eliminados con `vigente_hasta <= hoy` del consorcio (A1: exclusivo),
-  sin baja, con persona y sin la marca. Por cada uno, con `for update skip locked`, revoca las
+  sin baja, con persona y sin la marca. Por cada uno, con `for no key update skip locked` (no
+  choca con los bloqueos de clave foránea ni con el `for share` de A7), revoca las
   sesiones de la persona (`revocar_sesiones_de`, como la baja), pone la marca y escribe el
   evento `consorcio.mandato.vencimiento`, con origen `planificador` y sin actor. Devuelve
-  cuántos mandatos procesó. Solo `cem_app` la ejecuta: los trabajos corren con ese rol, sin
-  persona ni consorcio, y la RLS de `nucleo.mandato` no les deja ver nada sin la función.
+  cuántos mandatos procesó, nunca más que `tope`: el trabajo tiene que terminar dentro del plazo
+  del trabajador (Codex); lo que quede, lo toma la corrida siguiente. Solo `cem_app` la ejecuta:
+  los trabajos corren con ese rol, sin persona ni consorcio, y la RLS de `nucleo.mandato` no les
+  deja ver nada sin la función.
 
 Downgrade: se niega si algún mandato tiene la marca (`downgrade_con_datos`): es la constancia de
 que se revocaron sesiones, como las guardas de 0012, 0014 y 0015. Si no, quita la función y la
@@ -32,12 +35,12 @@ down_revision = "0016"
 branch_labels = None
 depends_on = None
 
-FIRMA = "nucleo.revocar_sesiones_por_vencimiento()"
+FIRMA = "nucleo.revocar_sesiones_por_vencimiento(integer)"
 
 UPGRADE = rf"""
 alter table nucleo.mandato add column vencimiento_procesado_en timestamptz;
 
-create function {FIRMA}
+create function nucleo.revocar_sesiones_por_vencimiento(tope integer)
   returns integer
   language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
@@ -47,6 +50,10 @@ create function {FIRMA}
     revocadas bigint;
     procesados integer := 0;
   begin
+    if tope is null or tope < 1 then
+      raise exception 'el tope del lote tiene que ser positivo'
+        using errcode = 'P0001', hint = 'tope_invalido';
+    end if;
     for m in
       select x.id, x.consorcio_id, x.persona_id, x.vigente_hasta
         from nucleo.mandato x
@@ -57,7 +64,8 @@ create function {FIRMA}
          and x.vigente_hasta is not null
          and x.vigente_hasta <= nucleo.hoy_del_consorcio(x.consorcio_id)
        order by x.id
-         for update of x skip locked
+       limit tope
+         for no key update of x skip locked
     loop
       revocadas := nucleo.revocar_sesiones_de(m.persona_id);
       update nucleo.mandato set vencimiento_procesado_en = now() where id = m.id;

@@ -19,7 +19,11 @@ from app.plataforma.trabajos import Trabajador
 from tests.test_cola import cola_vacia  # noqa: F401  (fixture)
 from tests.test_mandatos import otra_persona, sesiones_abiertas
 from tests.test_mandatos_0012 import alta, baja, externo
-from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
+from tests.test_modo_operacion import (
+    consorcio_con_persona,
+    decidir_equipo,
+    zona_con_otra_fecha,
+)
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.db
@@ -37,7 +41,7 @@ def _vencido(motor_app, cons, persona, hasta=None):
 
 def _procesar(motor_app) -> int:
     with transaccion(motor_app, persona_id=None) as c:
-        return c.execute(text("select nucleo.revocar_sesiones_por_vencimiento()")).scalar_one()
+        return c.execute(text("select nucleo.revocar_sesiones_por_vencimiento(1000)")).scalar_one()
 
 
 def _marca(motor_migrate, mandato):
@@ -104,10 +108,12 @@ def test_lo_que_no_vencio_o_ya_tiene_baja_no_se_toca(escena, motor_app, motor_mi
                    persona=e["mc"], tipo="miembro_consejo",
                    hasta=date.today() + timedelta(days=30), origen="soporte")  # fmt: skip
     otra = otra_persona(motor_migrate, e["cons"])
+    # La baja deja `vigente_hasta` en hoy: sin el filtro de `causa_baja`, el trabajo la
+    # tomaría como un vencimiento más.
     con_baja = alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
                     persona=otra, tipo="miembro_consejo", origen="soporte")  # fmt: skip
-    baja(motor_app, e["cons"], None, con_baja, "error_carga", instrumento="Nota",
-         descripcion="Error", origen="soporte")  # fmt: skip
+    baja(motor_app, e["cons"], None, con_baja, "renuncia", instrumento="Nota",
+         descripcion="Renuncia", origen="soporte")  # fmt: skip
     sin_cuenta = externo(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
                          hasta=date.today() - timedelta(days=2), origen="soporte")  # fmt: skip
     sesiones_abiertas(motor_migrate, e["mc"], 1)
@@ -116,10 +122,44 @@ def test_lo_que_no_vencio_o_ya_tiene_baja_no_se_toca(escena, motor_app, motor_mi
     assert [_marca(motor_migrate, m) for m in (vigente, con_baja, sin_cuenta)] == [None] * 3
     assert sesiones_abiertas(motor_migrate, e["mc"]) == 1
     assert sesiones_abiertas(motor_migrate, otra) == 1
-    # Control: el mismo proceso sí toma uno vencido de esta escena.
-    vencido = _vencido(motor_app, e["cons"], otra)
+    # Control: el mismo proceso sí toma uno vencido de esta escena (otra persona: el período de
+    # la renuncia se superpondría).
+    vencido = _vencido(motor_app, e["cons"], otra_persona(motor_migrate, e["cons"]))
     _procesar(motor_app)
     assert _marca(motor_migrate, vencido) is not None
+
+
+def test_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate, motor_app):
+    """Una zona cuyo día difiere del de la base (UTC) a esta hora. Adelantada: un mandato que
+    termina en su hoy ya venció. Atrasada: uno que termina en el hoy de UTC todavía no."""
+    zona, desfase = zona_con_otra_fecha(motor_app)
+    cons, _, _ = consorcio_con_persona(motor_migrate, zona)
+    persona = otra_persona(motor_migrate, cons)
+    with motor_migrate.connect() as c:
+        hoy, utc = c.execute(
+            text("select nucleo.hoy_del_consorcio(:c), (now() at time zone 'UTC')::date"),
+            {"c": cons},
+        ).one()
+    assert (hoy - utc).days == desfase
+    m = _vencido(motor_app, cons, persona, hasta=max(hoy, utc))
+    _procesar(motor_app)
+    assert (_marca(motor_migrate, m) is not None) is (desfase > 0)
+
+
+def test_un_mandato_bloqueado_se_saltea_y_se_toma_despues(escena, motor_app, motor_migrate):
+    """`skip locked`: una baja en curso sobre el mandato no detiene la corrida."""
+    e = escena
+    m = _vencido(motor_app, e["cons"], e["mc"])
+    with motor_migrate.connect() as otra:
+        otra.execute(text("begin"))
+        otra.execute(text("select 1 from nucleo.mandato where id = :m for update"), {"m": m})
+        with transaccion(motor_app, persona_id=None) as c:
+            c.execute(text("set local lock_timeout = '300ms'"))
+            c.execute(text("select nucleo.revocar_sesiones_por_vencimiento(1000)"))
+        assert _marca(motor_migrate, m) is None
+        otra.execute(text("rollback"))
+    _procesar(motor_app)
+    assert _marca(motor_migrate, m) is not None
 
 
 def test_un_consorcio_dado_de_baja_no_se_procesa(escena, motor_app, motor_migrate):
@@ -142,7 +182,7 @@ def test_solo_cem_app_ejecuta_la_funcion(motor_migrate):
                 " array_to_string(p.proconfig, ',')"
                 " from pg_proc p where p.oid = to_regprocedure(:f)"
             ),
-            {"f": "nucleo.revocar_sesiones_por_vencimiento()"},
+            {"f": "nucleo.revocar_sesiones_por_vencimiento(integer)"},
         ).one()
     assert tuple(permisos) == (True, False, False, True, "search_path=pg_catalog, pg_temp")
 
@@ -202,3 +242,25 @@ def test_el_downgrade_de_0017_se_niega_con_vencimientos_procesados(base_aparte):
             text("select count(*) from information_schema.columns where table_schema = 'nucleo'"
                  " and table_name = 'mandato' and column_name = 'vencimiento_procesado_en'")
         ).scalar_one() == 1  # fmt: skip
+
+
+def test_el_lote_respeta_su_tope(escena, motor_app, motor_migrate):
+    """Codex: el trabajo no puede pasarse del plazo del trabajador; lo que queda, sigue."""
+    e = escena
+    otra = otra_persona(motor_migrate, e["cons"])
+    a, b = _vencido(motor_app, e["cons"], e["mc"]), _vencido(motor_app, e["cons"], otra)
+    _procesar(motor_app)  # vacía lo que dejaron otras pruebas
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.mandato set vencimiento_procesado_en = null"
+                       " where id in (:a, :b)"), {"a": a, "b": b})  # fmt: skip
+    with transaccion(motor_app, persona_id=None) as c:
+        assert (
+            c.execute(text("select nucleo.revocar_sesiones_por_vencimiento(1)")).scalar_one() == 1
+        )
+    assert [_marca(motor_migrate, m) is None for m in (a, b)].count(True) == 1
+    _procesar(motor_app)
+    assert [_marca(motor_migrate, m) for m in (a, b)].count(None) == 0
+    with pytest.raises(DBAPIError) as error:
+        with transaccion(motor_app, persona_id=None) as c:
+            c.execute(text("select nucleo.revocar_sesiones_por_vencimiento(0)"))
+    assert error.value.orig.diag.message_hint == "tope_invalido"
