@@ -489,14 +489,15 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 2)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 3)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
     # Sin las variables de las copias, la copia falla y lo dice; no se saltea en silencio.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
-                        " where estado = 'hecho' and tipo = 'plataforma.purgar_cola'"
-                        " or error like '%faltan variables de las copias%'") == 2)  # fmt: skip
+                        " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
+                        " 'consorcio.revocar_por_vencimiento')"
+                        " or error like '%faltan variables de las copias%'") == 3)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -506,12 +507,15 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
         registros[nombre] = [json.loads(linea) for linea in texto.splitlines()]
         assert {x["proceso"] for x in registros[nombre]} == {nombre}
     assert "cem-planificador es el líder" in [x["mensaje"] for x in registros["planificador"]]
-    [hecho] = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
-    assert hecho["tipo_trabajo"] == "plataforma.purgar_cola" and hecho["consorcio_id"] is None
+    hechos = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
+    assert sorted(x["tipo_trabajo"] for x in hechos) == [
+        "consorcio.revocar_por_vencimiento", "plataforma.purgar_cola"]  # fmt: skip
+    assert all(x["consorcio_id"] is None for x in hechos)
     with motor_migrate.connect() as c:
         assert c.execute(
             text("select tipo from plataforma.ejecuciones_programadas order by tipo")
         ).all() == [
+            ("consorcio.revocar_por_vencimiento",),
             ("plataforma.copia_diaria",),
             ("plataforma.purgar_cola",),
         ]

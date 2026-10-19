@@ -55,6 +55,19 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
 
 
+@cola.REGISTRO.tipo("consorcio.revocar_por_vencimiento")
+def revocar_por_vencimiento(conn: Connection, trabajo: cola.Trabajo) -> dict[str, int]:
+    """E15 (criterio 3, RN22): un mandato que venció por su fecha revoca las sesiones del
+    mandatario, como la baja. Idempotente por la marca de `0017`."""
+    procesados = conn.execute(text("select nucleo.revocar_sesiones_por_vencimiento()")).scalar_one()
+    return {"mandatos_procesados": procesados}
+
+
+# Cada hora, a los 5 minutos: la medianoche de cada zona horaria cae en una corrida y la
+# ventana sin revocar dura menos de una hora.
+periodica("consorcio.revocar_por_vencimiento", timedelta(hours=1), desfase=timedelta(minutes=5))
+
+
 # Correo transaccional (§12.4): un módulo publica `correo.solicitado` con `correo.solicitar()`
 # y el despachador lo convierte en `notificar.correo`, que envía `cem-trabajos`.
 cola.REGISTRO.tipo(
