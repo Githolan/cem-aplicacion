@@ -95,6 +95,15 @@ export function Invitar() {
   // Una clave por intento lógico: se conserva si el pedido se cae (un reintento recibe la misma
   // respuesta, sin otro correo) y se renueva al cambiar los datos o cuando el intento terminó.
   const clave = useRef<string | null>(null);
+  // El campo con el foco al invitar: mientras el envío corre queda deshabilitado y el navegador
+  // pierde el foco; al terminar vuelve ahí, para que el teclado no arranque de nuevo la página.
+  const foco = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (enviando || foco.current === null) return;
+    foco.current.focus();
+    foco.current = null;
+  }, [enviando]);
 
   const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
 
@@ -183,6 +192,7 @@ export function Invitar() {
 
   function invitar(evento: FormEvent) {
     evento.preventDefault();
+    foco.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);

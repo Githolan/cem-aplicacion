@@ -286,6 +286,33 @@ describe("página /invitaciones", () => {
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).disabled).toBe(false);
   });
 
+  it("con dos edificios, el selector tampoco se cambia con un envío en curso", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Rojo", vinculos: ["propietario"] }]),
+      [`GET /api/v1/consorcios/${C1}/unidades`]: () => Response.json(UNIDADES),
+      [`GET ${RUTA_LISTA}`]: () => Response.json(LISTA),
+    });
+    const base = simulado.getMockImplementation() as (p: Request) => Promise<Response>;
+    simulado.mockImplementation(async (pedido: Request) =>
+      pedido.method === "POST"
+        ? new Promise<Response>((r) => {
+            soltar = r;
+          })
+        : base(pedido),
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).disabled).toBe(true);
+    soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
+    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).disabled).toBe(false);
+  });
+
   it.each([
     ["csrf_invalido", "No pudimos verificar el pedido. Recargá la página."],
     ["sin_permiso", "No tenés permiso para retirar esa invitación."],

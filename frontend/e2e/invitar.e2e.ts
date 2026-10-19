@@ -164,6 +164,17 @@ test.describe("invitar", () => {
     expect(errores.filter((e) => !e.includes("403"))).toEqual([]);
   });
 
+  test("con Enter en el correo, al terminar el envío el foco vuelve a ese campo", async ({ page, baseURL }) => {
+    await simularApi(page, baseURL!, "consejo");
+    await page.goto("/invitaciones");
+    await page.getByLabel("Unidad", { exact: true }).selectOption({ label: "2° B" });
+    await page.getByLabel("Nombre").fill("Elsa Paz");
+    await page.getByLabel("Correo").fill("elsa@ejemplo.com");
+    await page.getByLabel("Correo").press("Enter");
+    await expect(page.getByText("Listo: le mandamos la invitación a Elsa Paz.")).toBeVisible();
+    await expect(page.getByLabel("Correo")).toBeFocused();
+  });
+
   test("retirar pide confirmación y manda el CSRF", async ({ page, baseURL }) => {
     const { retiros } = await simularApi(page, baseURL!, "propietaria");
     await page.goto("/invitaciones");
