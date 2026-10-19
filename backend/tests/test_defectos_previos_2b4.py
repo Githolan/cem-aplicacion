@@ -11,6 +11,7 @@
 
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import text
 
 from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixture)
@@ -20,6 +21,8 @@ from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixt
 )
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
+
+pytestmark = pytest.mark.db
 
 
 def invitaciones_url(cons) -> str:
@@ -73,11 +76,26 @@ def test_e25_la_unidad_de_otro_consorcio_responde_igual_que_una_inexistente(
 
 
 def test_e25_la_propietaria_sigue_recibiendo_403_por_otra_unidad(edificio):  # noqa: F811
-    """Control: el 403 de la política no cambia; solo cambia el caso de la unidad inexistente."""
+    """Control: el 403 de la política no cambia; solo cambia el caso de la unidad inexistente.
+    Sin la facultad, una unidad ajena y una inexistente responden igual (no se distinguen)."""
     e = edificio
     with cliente(e["prop1"]) as c:
+        for unidad in (e["u2"], uuid4()):
+            r = c.post(invitaciones_url(e["cons"]), json=invitacion(unidad))
+            assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+
+
+def test_e25_una_unidad_dada_de_baja_responde_404(motor_migrate, motor_app, edificio):  # noqa: F811
+    e = edificio
+    mc = otra_persona(motor_migrate, e["cons"])
+    alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=mc, tipo="miembro_consejo")
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.unidad set eliminado_en = now() where id = :u"), {"u": e["u2"]}
+        )
+    with cliente(mc) as c:
         r = c.post(invitaciones_url(e["cons"]), json=invitacion(e["u2"]))
-        assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+        assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")
 
 
 def test_e28_un_consorcio_dado_de_baja_no_da_ambito(motor_migrate, edificio):  # noqa: F811

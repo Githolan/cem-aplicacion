@@ -67,11 +67,11 @@ COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo,
   i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 NO_ENCONTRADA = "No encontramos lo que buscás."
 # El listado no devuelve el correo de las aceptadas: desde que se acepta es el correo con el que
-# la persona entra, y nadie lo ve de forma automática (D6). Mientras está pendiente es el correo
-# que escribió quien invitó (E30, tracker de CEM).
-COLUMNAS_LISTA = COLUMNAS.replace(
-    "i.correo,", "case when i.aceptada_en is null then i.correo end as correo,"
-)
+# la persona entra, y nadie lo ve de forma automática (D6; E30 del tracker de CEM). Quién ve el
+# correo de las demás (pendientes, vencidas, revocadas) es la decisión P6 del diseño de 2b-4.
+COLUMNAS_LISTA = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo,
+  case when i.aceptada_en is null then i.correo end as correo,
+  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 
 
 @dataclass(frozen=True)
