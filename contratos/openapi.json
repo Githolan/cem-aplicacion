@@ -142,7 +142,9 @@
           "credenciales_invalidas",
           "entrada_vencida",
           "contrasena_actual_invalida",
-          "contrasena_debil"
+          "contrasena_debil",
+          "vinculo_ya_confirmado",
+          "vinculo_finalizado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -182,6 +184,26 @@
           "codigos"
         ],
         "title": "CodigosRecuperacion",
+        "type": "object"
+      },
+      "ConfirmacionVinculo": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/confirmar`.",
+        "properties": {
+          "referencia": {
+            "description": "Referencia del título que acredita el carácter (escritura, contrato de locación u otro). Queda en el vínculo, no en la auditoría.",
+            "examples": [
+              "Escritura 1234, registro notarial 56"
+            ],
+            "maxLength": 300,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          }
+        },
+        "required": [
+          "referencia"
+        ],
+        "title": "ConfirmacionVinculo",
         "type": "object"
       },
       "ConsorcioResumen": {
@@ -470,6 +492,71 @@
           "vence_en"
         ],
         "title": "FaltaSegundoFactor",
+        "type": "object"
+      },
+      "FilaPadron": {
+        "description": "Un vínculo del padrón, con los datos mínimos de D6.",
+        "properties": {
+          "confirmado": {
+            "title": "Confirmado",
+            "type": "boolean"
+          },
+          "designacion": {
+            "description": "Designación de la unidad.",
+            "examples": [
+              "3° B"
+            ],
+            "title": "Designacion",
+            "type": "string"
+          },
+          "nombre": {
+            "description": "Nombre de la persona del vínculo.",
+            "title": "Nombre",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusivo: ese día ya no vale.",
+            "title": "Vigente Hasta"
+          },
+          "vinculo_id": {
+            "format": "uuid",
+            "title": "Vinculo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vinculo_id",
+          "unidad_id",
+          "designacion",
+          "nombre",
+          "tipo",
+          "vigente_desde",
+          "vigente_hasta",
+          "confirmado"
+        ],
+        "title": "FilaPadron",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -784,6 +871,23 @@
           "contrasena_nueva"
         ],
         "title": "NuevaContrasena",
+        "type": "object"
+      },
+      "Padron": {
+        "description": "`GET /api/v1/consorcios/{consorcio_id}/padron`: vigentes y futuros, por unidad.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/FilaPadron"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "Padron",
         "type": "object"
       },
       "PedidoEnlace": {
@@ -1138,6 +1242,43 @@
           "codigo"
         ],
         "title": "VerificacionSegundoFactor",
+        "type": "object"
+      },
+      "VinculoConfirmado": {
+        "description": "Respuesta de la confirmación.",
+        "properties": {
+          "confirmado": {
+            "description": "Siempre verdadero en esta respuesta.",
+            "title": "Confirmado",
+            "type": "boolean"
+          },
+          "confirmado_en": {
+            "format": "date-time",
+            "title": "Confirmado En",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "vinculo_id": {
+            "format": "uuid",
+            "title": "Vinculo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vinculo_id",
+          "unidad_id",
+          "tipo",
+          "confirmado",
+          "confirmado_en"
+        ],
+        "title": "VinculoConfirmado",
         "type": "object"
       }
     }
@@ -1950,7 +2091,7 @@
         ]
       },
       "post": {
-        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.\n\nPuede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un\nrecurso que la alcanza (tabla de verdad, §2.1).",
+        "description": "Manda por correo una invitación de un solo uso que vence en 7 días. Responde igual tenga\no no cuenta el correo. Invitar de nuevo al mismo correo, unidad y vínculo retira la\nanterior. Cupo: 20 por hora y 50 por día por persona.\n\nPuede invitar quien es propietario vigente de esa unidad o tiene `invitaciones.crear` con un\nrecurso que la alcanza (tabla de verdad, §2.1).\n\nPide `Idempotency-Key`: un reintento con la misma clave y los mismos datos recibe la misma\nrespuesta durante 24 horas, sin mandar otro correo ni gastar el cupo, también si llega\nmientras el primero sigue en curso. Esa respuesta guardada conserva el correo, solo para\nquien la creó (la clave es por persona; excepción acotada de P6).",
         "operationId": "invitar_api_v1_consorcios__consorcio_id__invitaciones_post",
         "parameters": [
           {
@@ -1960,6 +2101,18 @@
             "schema": {
               "format": "uuid",
               "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
               "type": "string"
             }
           }
@@ -2061,6 +2214,53 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/padron": {
+      "get": {
+        "description": "Unidad, nombre, carácter, vigencia y si el vínculo está confirmado (D6). Sin correo ni\nteléfono, sin vínculos terminados. Una facultad acotada a unidades ve solo esas.",
+        "operationId": "padron_api_v1_consorcios__consorcio_id__padron_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Padron"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "La persona no tiene `padron.ver` en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Padrón de vínculos vigentes y futuros",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/unidades": {
       "get": {
         "description": "Id y designación de las unidades, sin personas (D6). Concede por ámbito: cualquier\nvínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1).",
@@ -2100,6 +2300,91 @@
           }
         },
         "summary": "Unidades",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/confirmar": {
+      "post": {
+        "description": "Acredita el carácter de la persona sobre la unidad según el título que se refiere, no su\nidentidad civil. Si el título no lo acredita, no se confirma: no hay estado \"rechazado\". La\nreferencia queda en el vínculo y no sale en ninguna respuesta ni en la auditoría.",
+        "operationId": "confirmar_api_v1_consorcios__consorcio_id__vinculos__vinculo_id__confirmar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vinculo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Vinculo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmacionVinculo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VinculoConfirmado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `padron.confirmar_vinculo` sobre esa unidad, el vínculo es de la propia persona o lo registró ella (P4)."
+          },
+          "404": {
+            "description": "El vínculo no existe en este consorcio."
+          },
+          "409": {
+            "description": "El vínculo ya terminó o ya está confirmado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar un vínculo con el título que lo acredita",
         "tags": [
           "consorcios"
         ]

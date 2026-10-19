@@ -61,6 +61,9 @@ class CodigoSeparacion(StrEnum):
     NO_ES_SU_PROPIO_MANDATO = "no_es_su_propio_mandato"
     """Nadie se da un mandato ni se da de baja a sí mismo (A4)."""
     NO_ES_SU_PROPIO_VINCULO = "no_es_su_propio_vinculo"
+    NO_ES_QUIEN_REGISTRO = "no_es_quien_registro"
+    """Quien registró el vínculo no lo confirma (P4-c, 2b-4). Un vínculo que registró el equipo
+    (soporte) no tiene persona que separar y lo dice explícito `registrado_por_soporte`."""
 
 
 class _Estricto(BaseModel):

@@ -71,8 +71,8 @@ def O(unidad: UUID = U3A) -> Vinculo:  # noqa: E743
     return Vinculo(TipoVinculo.OCUPANTE, unidad)
 
 
-# Entidad en la que todos los filtros pasan: otra persona preparó, aprobó, solicitó y propuso;
-# sin firmas previas; con respaldo; recursos de todos los tipos.
+# Entidad en la que todos los filtros pasan: otra persona preparó, aprobó, solicitó, propuso y
+# registró; sin firmas previas; con respaldo; recursos de todos los tipos.
 TODO_PASA = Entidad(
     recursos={
         TipoRecurso.UNIDAD: str(U3A),
@@ -84,6 +84,7 @@ TODO_PASA = Entidad(
     solicitado_por=OTRO,
     propuesto_por=OTRO,
     persona_objetivo=OTRO,
+    registrado_por=OTRO,
     respaldo_presente=True,
 )
 

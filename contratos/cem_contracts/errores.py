@@ -65,6 +65,10 @@ class CodigoError(StrEnum):
     coincide (o falta)."""
     CONTRASENA_DEBIL = "contrasena_debil"
     """La contraseña nueva es demasiado corta una vez normalizada o es igual al correo."""
+    VINCULO_YA_CONFIRMADO = "vinculo_ya_confirmado"
+    """El vínculo ya está confirmado: una confirmación no se repite ni se reemplaza en 2b-4."""
+    VINCULO_FINALIZADO = "vinculo_finalizado"
+    """El vínculo ya terminó: no se confirma."""
 
 
 class Error(BaseModel):

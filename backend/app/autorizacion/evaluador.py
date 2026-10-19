@@ -118,6 +118,12 @@ class Entidad:
     """El mandatario no tiene cuenta (administrador externo sin `persona_id`, A11): no puede ser
     quien actúa, así que "no es su propio mandato" se cumple. Tiene que venir explícito: un
     `persona_objetivo` nulo sin este dato es un dato que falta y niega."""
+    registrado_por: UUID | None = None
+    """Quien registró el vínculo que se confirma (P4-c)."""
+    registrado_por_soporte: bool = False
+    """El vínculo lo registró el equipo (origen `soporte`): no hay persona que separar, así que
+    "no es quien lo registró" se cumple. Tiene que venir explícito, como `objetivo_sin_cuenta`:
+    un `registrado_por` nulo sin este dato es un dato que falta y niega."""
     respaldo_presente: bool = False
 
 
@@ -237,6 +243,10 @@ def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) 
             otras = (entidad.persona_objetivo,)
         case CodigoSeparacion.NO_ES_SU_PROPIO_VINCULO:
             otras = (entidad.persona_objetivo,)
+        case CodigoSeparacion.NO_ES_QUIEN_REGISTRO:
+            if entidad.registrado_por is None and entidad.registrado_por_soporte:
+                return None
+            otras = (entidad.registrado_por,)
         case CodigoSeparacion.NO_ES_QUIEN_APROBO:
             # Distinta de todos los aprobadores (A5).
             otras = entidad.aprobado_por

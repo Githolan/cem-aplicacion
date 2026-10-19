@@ -156,13 +156,14 @@ def _recursos(texto: str) -> dict[TipoRecurso, str]:
 def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, bool]:
     valores = dict(item.split("=", 1) for item in filter(None, texto.split(";")))
     desconocidas = set(valores) - {
-        "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "respaldo", "actor",
+        "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
+        "respaldo", "actor",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
 
     def persona(clave: str) -> UUID | None:
-        if clave == "objetivo" and valores.get(clave) == "sin_cuenta":
+        if (clave, valores.get(clave)) in {("objetivo", "sin_cuenta"), ("registrado", "soporte")}:
             return None
         return PERSONAS[valores[clave]] if clave in valores else None
 
@@ -183,6 +184,8 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
         propuesto_por=persona("propuso"),
         persona_objetivo=persona("objetivo"),
         objetivo_sin_cuenta=valores.get("objetivo") == "sin_cuenta",
+        registrado_por=persona("registrado"),
+        registrado_por_soporte=valores.get("registrado") == "soporte",
         respaldo_presente=valores.get("respaldo") == "si",
     )
     return entidad, valores.get("actor") == "nadie"

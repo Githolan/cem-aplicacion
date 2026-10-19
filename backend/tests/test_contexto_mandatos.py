@@ -19,7 +19,7 @@ from app.contexto import Identidad, obtener_identidad, require_scope
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.main import crear_app
-from tests.conftest import url_rol
+from tests.conftest import clave_idempotencia, url_rol
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta, baja
 from tests.test_modo_operacion import consorcio_con_persona, decidir
@@ -234,8 +234,12 @@ def test_consejo_con_invitaciones_crear_invita_a_cualquier_unidad_y_las_lista(
     alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=mc, tipo="miembro_consejo")
     url = f"/api/v1/consorcios/{e['cons']}/invitaciones"
     with cliente(mc) as c:
-        assert c.post(url, json=invitacion(e["u1"])).status_code == 201
-        assert c.post(url, json=invitacion(e["u2"])).status_code == 201
+        assert (
+            c.post(url, json=invitacion(e["u1"]), headers=clave_idempotencia()).status_code == 201
+        )
+        assert (
+            c.post(url, json=invitacion(e["u2"]), headers=clave_idempotencia()).status_code == 201
+        )
         assert {i["unidad_id"] for i in c.get(url).json()["elementos"]} == {
             str(e["u1"]),
             str(e["u2"]),
@@ -254,14 +258,17 @@ def test_un_mandato_sin_la_facultad_da_ambito_pero_no_invita_y_se_audita(
     url = f"/api/v1/consorcios/{e['cons']}/invitaciones"
     with cliente(mc) as c:
         assert c.get(f"/api/v1/consorcios/{e['cons']}/unidades").status_code == 200  # ámbito
-        r = c.post(url, json=invitacion(e["u1"]))
+        r = c.post(url, json=invitacion(e["u1"]), headers=clave_idempotencia())
     assert r.status_code == 403, r.text
     assert r.json()["codigo"] == "sin_permiso"
     assert denegaciones(motor_app, e["cons"], e["prop1"], mc) == [
         {"accion": "invitaciones.crear", "motivo": "sin_concesion"}
     ]
     with cliente(e["prop1"]) as c:  # control: la propietaria de u1 sí invita y no se audita
-        assert c.post(url, json=invitacion(e["u1"], "p")).status_code == 201
+        assert (
+            c.post(url, json=invitacion(e["u1"], "p"), headers=clave_idempotencia()).status_code
+            == 201
+        )
     assert denegaciones(motor_app, e["cons"], e["prop1"], e["prop1"]) == []
 
 
@@ -271,7 +278,7 @@ def test_revocar_una_invitacion_de_otra_unidad_responde_404_y_se_audita(
     e = edificio
     url = f"/api/v1/consorcios/{e['cons']}/invitaciones"
     with cliente(e["prop1"]) as c:
-        inv = c.post(url, json=invitacion(e["u1"])).json()["id"]
+        inv = c.post(url, json=invitacion(e["u1"]), headers=clave_idempotencia()).json()["id"]
     with cliente(e["prop2"]) as c:
         assert c.post(f"{url}/{inv}/revocar").status_code == 404
     assert [d["accion"] for d in denegaciones(motor_app, e["cons"], e["prop1"], e["prop2"])] == [
@@ -284,7 +291,11 @@ def test_revocar_una_invitacion_de_otra_unidad_responde_404_y_se_audita(
 def test_sin_ambito_responde_404_y_no_se_audita_en_el_consorcio(motor_migrate, motor_app, edificio):
     e = edificio
     with cliente(e["nadie"]) as c:
-        r = c.post(f"/api/v1/consorcios/{e['cons']}/invitaciones", json=invitacion(e["u1"]))
+        r = c.post(
+            f"/api/v1/consorcios/{e['cons']}/invitaciones",
+            json=invitacion(e["u1"]),
+            headers=clave_idempotencia(),
+        )
     assert r.status_code == 404
     assert denegaciones(motor_app, e["cons"], e["prop1"], e["nadie"]) == []
 
@@ -335,7 +346,7 @@ def test_la_vigencia_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate
         assert [x["id"] for x in c.get("/api/v1/me/consorcios").json()] == [str(cons)]
         assert c.get(f"/api/v1/consorcios/{cons}/unidades").status_code == 200
         url = f"/api/v1/consorcios/{cons}/invitaciones"
-        assert c.post(url, json=invitacion(uni)).status_code == 201
+        assert c.post(url, json=invitacion(uni), headers=clave_idempotencia()).status_code == 201
         assert [i["unidad_id"] for i in c.get(url).json()["elementos"]] == [str(uni)]
 
 

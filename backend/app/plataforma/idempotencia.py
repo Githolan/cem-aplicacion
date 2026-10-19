@@ -31,11 +31,15 @@ Solo se guardan respuestas 2xx: un error sale como excepción y deshace la trans
 """
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated, Any
 
+import anyio
+import anyio.from_thread
+import anyio.to_thread
 from cem_contracts.errores import CodigoError
 from fastapi import Depends, Header, Request, Response
 from psycopg.errors import LockNotAvailable
@@ -99,59 +103,120 @@ _CLAVE = (
 )
 
 
-def responder_una_vez(
-    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
-) -> Response:
-    claves = {
+def _claves(ctx: Contexto, pedido: PedidoIdempotente) -> dict[str, Any]:
+    return {
         "consorcio": ctx.consorcio_id,
         "persona": ctx.persona_id,
         "metodo": pedido.metodo,
         "ruta": pedido.ruta,
         "clave": pedido.clave,
     }
+
+
+def _guardada(
+    conn: Connection, claves: dict[str, Any], pedido: PedidoIdempotente
+) -> Response | None:
+    """La respuesta guardada y vigente de la clave (repetida), 422 si la clave se usó con otro
+    pedido, o None si no hay."""
+    guardada = conn.execute(
+        text(
+            "select huella, estado_http, respuesta::text as respuesta"
+            f" from plataforma.idempotencia where {_CLAVE} and vence_en > now()"
+        ),
+        claves,
+    ).one_or_none()
+    if guardada is None:
+        return None
+    if guardada.huella != pedido.huella:
+        raise ErrorApi(
+            422,
+            CodigoError.IDEMPOTENCIA_REUTILIZADA,
+            "Esa clave de reintento ya se usó con otros datos. Generá una nueva.",
+        )
+    return Response(
+        guardada.respuesta,
+        status_code=guardada.estado_http,
+        media_type="application/json",
+        headers={ENCABEZADO_REPETIDA: "true"},
+    )
+
+
+@contextmanager
+def _turno(
+    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente
+) -> Iterator[tuple[Connection, dict[str, Any], Response | None]]:
+    """La transacción del pedido con el bloqueo de su clave tomado y la respuesta guardada, si
+    hay. Todo lo que se haga adentro queda serializado con los pedidos de la misma clave."""
+    claves = _claves(ctx, pedido)
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         _esperar_turno(conn, claves)
         conn.execute(text(f"delete from plataforma.idempotencia where {_CLAVE}"
                           " and vence_en <= now()"), claves)  # fmt: skip
-        guardada = conn.execute(
-            text(
-                "select huella, estado_http, respuesta::text as respuesta"
-                f" from plataforma.idempotencia where {_CLAVE}"
-            ),
-            claves,
-        ).one_or_none()
-        if guardada is not None:
-            if guardada.huella != pedido.huella:
-                raise ErrorApi(
-                    422,
-                    CodigoError.IDEMPOTENCIA_REUTILIZADA,
-                    "Esa clave de reintento ya se usó con otros datos. Generá una nueva.",
-                )
-            return Response(
-                guardada.respuesta,
-                status_code=guardada.estado_http,
-                media_type="application/json",
-                headers={ENCABEZADO_REPETIDA: "true"},
-            )
-        estado, cuerpo = efecto(conn)
-        if not 200 <= estado <= 299:
-            raise RuntimeError(f"un efecto idempotente devolvió {estado}: los errores se lanzan")
-        texto = cuerpo.model_dump_json()
-        conn.execute(
-            text(
-                "insert into plataforma.idempotencia (consorcio_id, persona_id, metodo, ruta,"
-                " clave, huella, estado_http, respuesta, vence_en) values (:consorcio, :persona,"
-                " :metodo, :ruta, :clave, :huella, :estado, :respuesta, now() + :vigencia)"
-            ),
-            claves
-            | {
-                "huella": pedido.huella,
-                "estado": estado,
-                "respuesta": texto,
-                "vigencia": VIGENCIA,
-            },
-        )
+        yield conn, claves, _guardada(conn, claves, pedido)
+
+
+def _guardar(
+    conn: Connection,
+    claves: dict[str, Any],
+    pedido: PedidoIdempotente,
+    estado: int,
+    cuerpo: BaseModel,
+) -> Response:
+    if not 200 <= estado <= 299:
+        raise RuntimeError(f"un efecto idempotente devolvió {estado}: los errores se lanzan")
+    texto = cuerpo.model_dump_json()
+    conn.execute(
+        text(
+            "insert into plataforma.idempotencia (consorcio_id, persona_id, metodo, ruta,"
+            " clave, huella, estado_http, respuesta, vence_en) values (:consorcio, :persona,"
+            " :metodo, :ruta, :clave, :huella, :estado, :respuesta, now() + :vigencia)"
+        ),
+        claves
+        | {
+            "huella": pedido.huella,
+            "estado": estado,
+            "respuesta": texto,
+            "vigencia": VIGENCIA,
+        },
+    )
     return Response(texto, status_code=estado, media_type="application/json")
+
+
+def responder_una_vez(
+    motor: Engine, ctx: Contexto, pedido: PedidoIdempotente, efecto: Efecto
+) -> Response:
+    with _turno(motor, ctx, pedido) as (conn, claves, guardada):
+        if guardada is not None:
+            return guardada
+        estado, cuerpo = efecto(conn)
+        return _guardar(conn, claves, pedido, estado, cuerpo)
+
+
+async def responder_una_vez_con_cupo(
+    motor: Engine,
+    ctx: Contexto,
+    pedido: PedidoIdempotente,
+    cupo: Callable[[], Awaitable[None]],
+    efecto: Efecto,
+) -> Response:
+    """Como `responder_una_vez`, pero gasta un cupo de tasa antes del efecto, con el bloqueo de
+    la clave tomado: solo el pedido que hace el efecto gasta cupo. Un reintento, aunque llegue
+    mientras el primero sigue en curso, espera y recibe la respuesta guardada sin gastar nada.
+
+    Todo el tramo con el bloqueo corre en un hilo: el bloqueo de PostgreSQL es sincrónico, y si
+    corriera en el bucle de eventos, un segundo pedido de la misma clave lo frenaría mientras
+    el primero espera a Redis, que ya no podría seguir para soltar el bloqueo (Codex). El cupo
+    se espera desde ese hilo, en el bucle."""
+
+    def en_hilo() -> Response:
+        with _turno(motor, ctx, pedido) as (conn, claves, guardada):
+            if guardada is not None:
+                return guardada
+            anyio.from_thread.run(cupo)
+            estado, cuerpo = efecto(conn)
+            return _guardar(conn, claves, pedido, estado, cuerpo)
+
+    return await anyio.to_thread.run_sync(en_hilo)
 
 
 def _esperar_turno(conn: Connection, claves: dict[str, Any]) -> None:

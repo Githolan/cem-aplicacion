@@ -14,6 +14,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 
+from tests.conftest import clave_idempotencia
 from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixture)
     cliente,
     edificio,
@@ -38,11 +39,18 @@ def test_e25_unidad_inexistente_con_la_facultad_general_responde_404_y_no_crea_n
     mc = otra_persona(motor_migrate, e["cons"])
     alta(motor_app, e["cons"], e["prop1"], e["acta"], persona=mc, tipo="miembro_consejo")
     with cliente(mc) as c:
-        r = c.post(invitaciones_url(e["cons"]), json=invitacion(uuid4()))
+        r = c.post(
+            invitaciones_url(e["cons"]), json=invitacion(uuid4()), headers=clave_idempotencia()
+        )
         assert r.status_code == 404, r.text
         assert r.json()["codigo"] == "no_encontrado"
         # Control: la misma persona invita a una unidad que sí existe.
-        assert c.post(invitaciones_url(e["cons"]), json=invitacion(e["u1"])).status_code == 201
+        assert (
+            c.post(
+                invitaciones_url(e["cons"]), json=invitacion(e["u1"]), headers=clave_idempotencia()
+            ).status_code
+            == 201
+        )
     with motor_migrate.connect() as c:
         assert (
             c.execute(
@@ -71,7 +79,9 @@ def test_e25_la_unidad_de_otro_consorcio_responde_igual_que_una_inexistente(
             {"c": otro},
         ).scalar_one()  # fmt: skip
     with cliente(mc) as c:
-        r = c.post(invitaciones_url(e["cons"]), json=invitacion(ajena))
+        r = c.post(
+            invitaciones_url(e["cons"]), json=invitacion(ajena), headers=clave_idempotencia()
+        )
         assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")
 
 
@@ -81,7 +91,9 @@ def test_e25_la_propietaria_sigue_recibiendo_403_por_otra_unidad(edificio):  # n
     e = edificio
     with cliente(e["prop1"]) as c:
         for unidad in (e["u2"], uuid4()):
-            r = c.post(invitaciones_url(e["cons"]), json=invitacion(unidad))
+            r = c.post(
+                invitaciones_url(e["cons"]), json=invitacion(unidad), headers=clave_idempotencia()
+            )
             assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
 
 
@@ -94,7 +106,9 @@ def test_e25_una_unidad_dada_de_baja_responde_404(motor_migrate, motor_app, edif
             text("update nucleo.unidad set eliminado_en = now() where id = :u"), {"u": e["u2"]}
         )
     with cliente(mc) as c:
-        r = c.post(invitaciones_url(e["cons"]), json=invitacion(e["u2"]))
+        r = c.post(
+            invitaciones_url(e["cons"]), json=invitacion(e["u2"]), headers=clave_idempotencia()
+        )
         assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")
 
 
@@ -119,8 +133,10 @@ def test_e30_el_listado_no_devuelve_el_correo_de_las_aceptadas(motor_migrate, ed
     e = edificio
     url = invitaciones_url(e["cons"])
     with cliente(e["prop1"]) as c:
-        pendiente = c.post(url, json=invitacion(e["u1"], "p")).json()
-        aceptada = c.post(url, json={**invitacion(e["u1"], "a"), "tipo": "ocupante"}).json()
+        pendiente = c.post(url, json=invitacion(e["u1"], "p"), headers=clave_idempotencia()).json()
+        aceptada = c.post(
+            url, json={**invitacion(e["u1"], "a"), "tipo": "ocupante"}, headers=clave_idempotencia()
+        ).json()
     persona = otra_persona(motor_migrate, e["cons"])
     with motor_migrate.begin() as c:
         c.execute(

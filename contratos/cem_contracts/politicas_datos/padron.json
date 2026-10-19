@@ -50,11 +50,11 @@
       "modos": ["consejo", "administrador_aumentado", "autogestion"],
       "sin_modo": false,
       "recurso": {"tipos": ["unidad"], "general": true},
-      "separacion": ["no_es_su_propio_vinculo"],
-      "respaldo": "título (escritura o locación) como referencia; el detalle llega en 2b-4",
+      "separacion": ["no_es_su_propio_vinculo", "no_es_quien_registro"],
+      "respaldo": "referencia del título que acredita el carácter sobre la unidad (escritura, contrato de locación u otro); no acredita la identidad civil (P4)",
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "D2 (padron.confirmar_vinculo); criterio 6 de H2b"
+      "fuente_normativa": "D2 (padron.confirmar_vinculo); criterio 6 de H2b; P4 del propietario (19-10-2026)"
     }
   ]
 }

@@ -9,7 +9,8 @@
         "no_es_quien_propuso",
         "firma_repetida",
         "no_es_su_propio_mandato",
-        "no_es_su_propio_vinculo"
+        "no_es_su_propio_vinculo",
+        "no_es_quien_registro"
       ],
       "title": "CodigoSeparacion",
       "type": "string"

@@ -19,7 +19,7 @@ from sqlalchemy import text
 from app.identidad import eventos, invitaciones, sesiones
 from app.limite import FAMILIAS
 from scripts import invitar as script_invitar
-from tests.conftest import url_rol
+from tests.conftest import clave_idempotencia, url_rol
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     ORIGEN,
     SESION,
@@ -84,7 +84,7 @@ def invitar(c, e: Edificio, correo: str, *, unidad=None, tipo="inquilino", nombr
     return c.post(
         ruta(e),
         json={"unidad_id": str(unidad or e.u1), "tipo": tipo, "correo": correo, "nombre": nombre},
-        headers=csrf(c),
+        headers=csrf(c) | clave_idempotencia(),
     )
 
 
@@ -183,7 +183,7 @@ def test_la_propietaria_no_invita_a_una_unidad_que_no_es_suya(app, motor_migrate
     r = ana.post(
         ruta(otro),
         json={"unidad_id": str(otro.u1), "tipo": "inquilino", "correo": nuevo, "nombre": "X"},
-        headers=csrf(ana),
+        headers=csrf(ana) | clave_idempotencia(),
     )
     assert r.status_code == 404
     assert correos_a(motor_migrate, nuevo) == []
@@ -193,8 +193,10 @@ def test_invitar_pide_csrf_y_sesion(app, motor_migrate):  # noqa: F811
     e = edificio(motor_migrate)
     ana = entrar_como(app, motor_migrate, e.propietaria)
     cuerpo = {"unidad_id": str(e.u1), "tipo": "inquilino", "correo": correo_nuevo(), "nombre": "B"}
-    assert ana.post(ruta(e), json=cuerpo).status_code == 403
-    assert navegador(app).post(ruta(e), json=cuerpo).status_code == 401
+    assert ana.post(ruta(e), json=cuerpo, headers=clave_idempotencia()).status_code == 403
+    assert (
+        navegador(app).post(ruta(e), json=cuerpo, headers=clave_idempotencia()).status_code == 401
+    )
 
 
 @pytest.mark.parametrize("nombre", ["", "   ", "Beto\nAsunto: otro", "x" * 101])
@@ -489,7 +491,8 @@ def test_la_propietaria_retira_lo_que_cargo_el_equipo(app, motor_migrate, monkey
     argumentos = ["--consorcio", str(e.consorcio), "--unidad", str(e.u1), "--tipo", "inquilino"]
     assert script_invitar.main([*argumentos, "--correo", nuevo, "--nombre", "Eva"]) == 0
     ana = entrar_como(app, motor_migrate, e.propietaria)
-    [cargada] = [x for x in ana.get(ruta(e)).json()["elementos"] if x["correo"] == nuevo]
+    [cargada] = [x for x in ana.get(ruta(e)).json()["elementos"] if x["nombre"] == "Eva"]
+    assert cargada["correo"] is None  # P6: una carga del equipo no muestra el correo a nadie
     r = ana.post(ruta(e, f"/{cargada['id']}/revocar"), headers=csrf(ana))
     assert r.status_code == 204, r.text
 
