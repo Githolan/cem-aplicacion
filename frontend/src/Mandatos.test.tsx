@@ -694,6 +694,60 @@ describe("página /mandatos", () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
     });
+
+    it("un rechazo tardío de la consulta A15 del edificio anterior no muestra nada en el nuevo", async () => {
+      let soltar: () => void = () => undefined;
+      const retenido = new Promise<void>((r) => {
+        soltar = r;
+      });
+      const base = conDos();
+      let fallos = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (pedido: Request) => {
+          if (new URL(pedido.url).pathname === `${RUTA_DECISIONES}/${D_PROPIA}`) {
+            await retenido;
+            fallos += 1;
+            throw new TypeError("sin red");
+          }
+          return base(pedido);
+        }),
+      );
+      abrir();
+      await completarAlta(D_PROPIA);
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      await screen.findByText("Eva Sosa, Consejo de propietarios");
+      soltar();
+      await waitFor(() => expect(fallos).toBe(1));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByText(/No pudimos consultar quién registró esa decisión/)).toBeNull();
+    });
+  });
+
+  it("si la consulta A15 falla en el mismo edificio, lo dice sin bloquear el envío", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_DECISIONES}/${D_PROPIA}`]: () => {
+          throw new TypeError("sin red");
+        },
+      }),
+    );
+    abrir();
+    await completarAlta(D_PROPIA);
+    expect(await screen.findByText(/No pudimos consultar quién registró esa decisión/)).toBeTruthy();
+    expect(boton("Dar de alta").hasAttribute("disabled")).toBe(false);
+  });
+
+  it("el detalle de una baja muestra cuándo se registró, en la hora del edificio", async () => {
+    const dadoDeBaja = { ...DETALLE_AE, estado: "dado_de_baja", causa_baja: "renuncia", finalizado_en: "2026-10-19T15:30:00Z" };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(dadoDeBaja) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+    const etiqueta = within(titulo.closest("section") as HTMLElement).getByText("Baja registrada");
+    expect(etiqueta.nextElementSibling?.textContent).toMatch(/19 de octubre de 2026.*12:30/);
   });
 
   it("el detalle de una remoción muestra la asamblea que la respaldó", async () => {

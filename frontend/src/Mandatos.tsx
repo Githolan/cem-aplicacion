@@ -89,6 +89,14 @@ const BAJA_SOBRE_ESTADO_VIEJO = ["mandato_ya_dado_de_baja", "mandato_terminado"]
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const fechaDe = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const dia = (iso: string) => FORMATO_DIA.format(fechaDe(iso));
+// Un momento (cuándo se registró la baja) sí tiene hora: se muestra en la zona del edificio.
+const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", {
+  dateStyle: "long",
+  timeStyle: "short",
+  hourCycle: "h23",
+  timeZone: "America/Argentina/Buenos_Aires",
+});
+const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
 const recortar = (texto: string) => (texto.length > LARGO_OPCION ? `${texto.slice(0, LARGO_OPCION - 1)}…` : texto);
 
 /** Qué se estaba haciendo cuando la API respondió con error. */
@@ -230,6 +238,9 @@ export function Mandatos() {
   // Cada pedido de detalle lleva su número: una respuesta que llega después de otro pedido, de
   // cerrar el detalle o de cambiar de edificio se descarta.
   const pedidoDetalle = useRef(0);
+  // Lo mismo para todo lo que pertenece a un edificio (la consulta A15): cambiar de edificio
+  // deja viejas sus respuestas.
+  const edificio = useRef(0);
   // El botón «Ver detalle» que abrió el detalle: al cerrarlo, el foco vuelve ahí.
   const origenDetalle = useRef<HTMLElement | null>(null);
   const formularioBaja = useRef<HTMLFormElement | null>(null);
@@ -348,18 +359,20 @@ export function Mandatos() {
   const consultarPropia = useCallback(
     (decision: string) => {
       if (decision === "" || decision in propias) return;
+      const deEdificio = edificio.current;
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
           params: { path: { consorcio_id: consorcio, decision_id: decision } },
         })
         .then(({ data, response }) => {
           exigirSesion(response);
+          if (deEdificio !== edificio.current) return;
           if (data === undefined) throw new Error(String(response.status));
           setPropias((actual) => ({ ...actual, [data.id]: data.registrada_por_vos }));
         })
         .catch((e: unknown) => {
           if (e instanceof SinSesion) aEntrar();
-          else
+          else if (deEdificio === edificio.current)
             setAviso({
               texto: "No pudimos consultar quién registró esa decisión. Si la registraste vos, la plataforma igual rechaza el envío.",
               ok: false,
@@ -597,6 +610,7 @@ export function Mandatos() {
     // Nada del edificio anterior queda elegible mientras llegan los datos del nuevo.
     for (const clave of [claveDecision, claveAlta, claveBaja]) clave.current = null;
     pedidoDetalle.current += 1;
+    edificio.current += 1;
     setMandatos(CARGANDO);
     setDecisiones(CARGANDO);
     setCandidatos(CARGANDO);
@@ -794,6 +808,12 @@ export function Mandatos() {
                   <>
                     <dt>Causa de la baja</dt>
                     <dd>{TEXTO_CAUSA[detalle.datos.causa_baja]}</dd>
+                  </>
+                )}
+                {detalle.datos.finalizado_en && (
+                  <>
+                    <dt>Baja registrada</dt>
+                    <dd>{momento(detalle.datos.finalizado_en)}</dd>
                   </>
                 )}
                 {detalle.datos.motivo_fin && (
