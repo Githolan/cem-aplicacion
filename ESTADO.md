@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 18-10-2026.
+**Actualizado:** 19-10-2026.
 
 ## Qué existe
 
@@ -113,9 +113,19 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `f242295`** (18-10-2026; mismo código que `484f8ef` más `ESTADO.md`), base `0011`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `18446f0`** (19-10-2026, H2b 2b-3 completo), base `0012`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
 
-- **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging y producción como `f242295`.** El diseño suma los criterios 9 y 10 (CEM #43).
+- **H2b 2b-3, tabla de verdad, políticas y rutas (PR #65, #64 y #67), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_3_Tabla_de_verdad.md` y `H2b_3_Plan_de_implementacion.md` del repositorio CEM (#46).
+  - **PR #65, políticas y evaluador puro:** `contratos/cem_contracts/politicas.py` (modelo `Politica` estricto, booleanos `StrictBool`, `fuente_normativa` obligatoria) y `politicas_datos/*.json` (10 módulos, 29 acciones, una por vista). `backend/app/autorizacion/evaluador.py`: `permitido = ámbito ∧ (vínculo ∨ ámbito declarado ∨ facultad) ∧ filtros`, negar por defecto, gramática de recursos A8. La tabla de verdad es un CSV de 267 filas que se prueba entera. Las 6 acciones económicas se niegan con `requiere_controles_2b6` hasta 2b-6.
+  - **PR #64, migración `0012`:** causas de baja (`remocion` solo con decisión de asamblea; las otras con instrumento; `error_carga` no toca fechas y el mandato no vale para ninguna), un solo mandato de administración por consorcio y fecha (A14), CUIT obligatorio y válido para el administrador externo (A11), mandato con cuenta (A12), nadie se da de alta ni de baja a sí mismo (A4). `nucleo.mandato_vigente(mandato, fecha)` es la única definición de vigencia y `nucleo.consorcios_con_mandato_vigente()` resuelve C4 sin política RLS "propios". Alta y baja atan el actor a la sesión y solo admiten los orígenes `api` y `soporte`. El downgrade se niega si hay mandatos (`downgrade_con_datos`).
+  - **PR #67, `Contexto` y rutas:** el `Contexto` lleva vínculos con su unidad, mandatos vigentes, facultades y si hay administrador vigente, todo con `consorcio_id` explícito y la fecha del consorcio. Un mandato vigente da ámbito (C3). `requiere(accion)` en cada ruta con ámbito; la denegación responde el error genérico y audita `autorizacion.denegada` con el motivo interno. `puede_invitar` ya no existe: invitaciones y unidades pasan por las políticas. `/me/consorcios` suma los consorcios con mandato vigente.
+  - CI con imágenes en verde sobre `18446f0`: 879 del backend, 58 de contratos, 134 del frontend y 103 de extremo a extremo.
+  - Despliegue (Claude, con la autorización del propietario del 18-10): `d41475d` (PR #65 y #64) en staging y producción, con copia previa verificada en los dos, y después `18446f0` (PR #67) en los dos, sin migración. Validación funcional en la base con `ROLLBACK` en los dos entornos; políticas verificadas dentro de la imagen desplegada; rutas sin sesión → 401. Registros en `doc/deploys/2026-10-19-d41475d.md` y `2026-10-19-18446f0.md` del repositorio CEM.
+  - **Producción no tiene mandatos:** desde el primer mandato real, `0012` no se baja a `0011` (barrera del propietario).
+  - **Abierto:** E15 (un mandato que vence por fecha no revoca sesiones), el resto de E18, A7, A13, A15, los controles económicos de 2b-6 e issue #66 (`registrar_decision` y `cambiar_modo` confían en el `actor`).
+
+
+- **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging y producción como `f242295` (hoy reemplazada por `18446f0`).** El diseño suma los criterios 9 y 10 (CEM #43).
   - Migración `0011`:
     - catálogo `nucleo.facultad` (21 facultades, 6 económicas) y `nucleo.paquete_facultad` (paquetes de D2);
     - `nucleo.mandato` (D1, con decisión de respaldo obligatoria, sin superposición del mismo tipo y persona);
@@ -125,7 +135,7 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
     - `nucleo.alta_mandato`: paquete del tipo o un subconjunto;
     - `nucleo.baja_mandato`: cierra la vigencia con la fecha del consorcio, revoca las sesiones del mandatario (RN22) y no borra nada.
   - `python -m scripts.alta_mandato --archivo … [--simular]` registra el arranque de D3 (decisión, modo inicial y mandatos) en una transacción. **Nunca con una referencia inventada** (criterio 9).
-  - Ninguna ruta usa los mandatos todavía: las políticas llegan con 2b-3.
+  - Las políticas y las rutas que leen los mandatos llegaron con 2b-3 (arriba).
   - CI con imágenes en verde: 433 del backend, 3 de contratos, 134 del frontend y 103 de extremo a extremo.
   - Staging lo desplegó Claude (03:40–03:42 UTC), con copia previa verificada.
   - A las 19:22–19:27 UTC Claude desplegó `f242295` en staging y producción, con el sí del propietario. Producción migró de `0010` a `0011` con copia previa verificada.
