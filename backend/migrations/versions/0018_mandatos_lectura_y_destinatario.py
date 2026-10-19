@@ -142,7 +142,7 @@ create function nucleo.tiene_facultad_vigente(c uuid, quien uuid, codigo text, h
         join nucleo.facultad_otorgada f
           on f.consorcio_id = m.consorcio_id and f.mandato_id = m.id
        where m.consorcio_id = c and m.persona_id = quien and f.facultad = codigo
-         and nucleo.mandato_vigente(m.id, hoy))
+         and f.recurso is null and nucleo.mandato_vigente(m.id, hoy))
   $$;
 
 -- Estado de un mandato para leerlo (A1: `vigente_hasta` exclusivo).
@@ -154,6 +154,7 @@ create function nucleo.estado_mandato(causa nucleo.causa_baja, desde date, hasta
     select case
       when causa = 'error_carga' then 'error_carga'
       when causa is not null then 'dado_de_baja'
+      when hasta is not null and hasta <= desde then 'terminado'
       when desde > hoy then 'futuro'
       when hasta is not null and hasta <= hoy then 'terminado'
       else 'vigente'
@@ -179,7 +180,10 @@ create function nucleo.mandatos_del_consorcio()
       raise exception 'sin mandatos.ver en este consorcio' using errcode = '42501';
     end if;
     return query
-      select m.id, m.tipo, coalesce(m.mandatario_nombre, pe.nombre),
+      select m.id, m.tipo,
+             case when m.tipo = 'administrador_externo'
+                  then coalesce(m.mandatario_nombre, pe.nombre)
+                  else coalesce(pe.nombre, m.mandatario_nombre) end,
              case when m.tipo = 'administrador_externo' then m.mandatario_cuit end,
              m.vigente_desde, m.vigente_hasta,
              nucleo.estado_mandato(m.causa_baja, m.vigente_desde, m.vigente_hasta, hoy),
@@ -213,7 +217,10 @@ create function nucleo.mandato_detalle(mandato uuid)
       raise exception 'sin mandatos.ver en este consorcio' using errcode = '42501';
     end if;
     return query
-      select m.id, m.tipo, coalesce(m.mandatario_nombre, pe.nombre),
+      select m.id, m.tipo,
+             case when m.tipo = 'administrador_externo'
+                  then coalesce(m.mandatario_nombre, pe.nombre)
+                  else coalesce(pe.nombre, m.mandatario_nombre) end,
              case when m.tipo = 'administrador_externo' then m.mandatario_cuit end,
              m.vigente_desde, m.vigente_hasta,
              nucleo.estado_mandato(m.causa_baja, m.vigente_desde, m.vigente_hasta, hoy),
@@ -306,6 +313,7 @@ create function nucleo.candidatos_a_mandato()
         join nucleo.unidad u
           on u.consorcio_id = v.consorcio_id and u.id = v.unidad_id and u.eliminado_en is null
        where v.consorcio_id = c
+         and v.persona_id <> quien
          and v.confirmado_en is not null
          and (v.vigente_hasta is null or v.vigente_hasta > hoy)
        group by pe.id, pe.nombre
