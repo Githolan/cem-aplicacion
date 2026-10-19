@@ -66,6 +66,12 @@ ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
 COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo, i.correo,
   i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 NO_ENCONTRADA = "No encontramos lo que buscás."
+# El listado no devuelve el correo de las aceptadas: desde que se acepta es el correo con el que
+# la persona entra, y nadie lo ve de forma automática (D6; E30 del tracker de CEM). Quién ve el
+# correo de las demás (pendientes, vencidas, revocadas) es la decisión P6 del diseño de 2b-4.
+COLUMNAS_LISTA = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo,
+  case when i.aceptada_en is null then i.correo end as correo,
+  i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
 
 
 @dataclass(frozen=True)
@@ -187,14 +193,6 @@ def _origen_publico(request: Request) -> str:
     return origen
 
 
-def _sin_permiso() -> ErrorApi:
-    return ErrorApi(
-        403,
-        CodigoError.SIN_PERMISO,
-        "Solo quien es propietario de la unidad puede invitar a otras personas a ella.",
-    )
-
-
 # Rutas de quien invita ---------------------------------------------------------------------
 
 
@@ -207,7 +205,8 @@ def _sin_permiso() -> ErrorApi:
         403: {
             "description": "La persona no es propietaria vigente de esa unidad ni tiene"
             " `invitaciones.crear` sobre ella."
-        }
+        },
+        404: {"description": "La unidad no existe en este consorcio."},
     },
 )
 async def invitar(
@@ -239,8 +238,8 @@ async def invitar(
             origen_publico=origen,
             ip=ip,
         )
-    if creada is None:
-        raise _sin_permiso()
+    if creada is None:  # la unidad no existe en el consorcio del ámbito (E25)
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADA)
     log.info(
         "invitación creada",
         extra={
@@ -272,7 +271,7 @@ def listar(
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         filas = conn.execute(
             text(
-                f"select {COLUMNAS} from nucleo.invitacion i"
+                f"select {COLUMNAS_LISTA} from nucleo.invitacion i"
                 " join nucleo.unidad u on u.id = i.unidad_id"
                 " where i.consorcio_id = :c"
                 " order by i.creada_en desc, i.id desc"

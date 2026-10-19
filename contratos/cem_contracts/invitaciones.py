@@ -58,7 +58,10 @@ class Invitacion(BaseModel):
     unidad_id: UUID
     unidad: str = Field(description="Designación de la unidad.", examples=["3° B"])
     tipo: TipoVinculo
-    correo: str
+    correo: str | None = Field(
+        description="El correo invitado. Nulo en el listado cuando ya se aceptó: desde ahí es el"
+        " correo con el que la persona entra, y nadie lo ve de forma automática (D6)."
+    )
     nombre: str
     estado: EstadoInvitacion
     creada_en: datetime

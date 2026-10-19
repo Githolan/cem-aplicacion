@@ -105,9 +105,13 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
     p = identidad.persona_id
     with transaccion(motor, persona_id=p, consorcio_id=consorcio_id) as conn:
         hoy = conn.execute(
-            text("select nucleo.hoy_del_consorcio(:c)"), {"c": consorcio_id}
-        ).scalar_one()
-        if hoy is None:  # el consorcio no existe o no está en el ámbito
+            text(
+                "select nucleo.hoy_del_consorcio(c.id) from nucleo.consorcio c"
+                " where c.id = :c and c.eliminado_en is null"
+            ),
+            {"c": consorcio_id},
+        ).scalar_one_or_none()
+        if hoy is None:  # no existe, está dado de baja (E28) o no está en el ámbito
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
         vinculos = tuple(
             Vinculo(tipo=TipoVinculo(f.tipo), unidad_id=f.unidad_id)

@@ -501,8 +501,16 @@
             "title": "Aceptada En"
           },
           "correo": {
-            "title": "Correo",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El correo invitado. Nulo en el listado cuando ya se aceptó: desde ahí es el correo con el que la persona entra, y nadie lo ve de forma automática (D6).",
+            "title": "Correo"
           },
           "creada_en": {
             "format": "date-time",
@@ -1979,6 +1987,9 @@
           },
           "403": {
             "description": "La persona no es propietaria vigente de esa unidad ni tiene `invitaciones.crear` sobre ella."
+          },
+          "404": {
+            "description": "La unidad no existe en este consorcio."
           },
           "422": {
             "content": {
