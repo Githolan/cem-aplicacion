@@ -122,8 +122,10 @@ def test_ante_una_excepcion_inesperada_igual_cierra(servidor, entorno, monkeypat
         vigentes, abiertas = c.execute(
             text("select (select count(*) from nucleo.mandato where consorcio_id = :c"
                  " and (vigente_hasta is null or vigente_hasta > vigente_desde)),"
-                 " (select count(*) from nucleo.sesion s join nucleo.persona p on p.id = s.persona_id"
-                 " where p.correo like 'smoke-%' and s.revocada_en is null and s.vence_en > now()"
+                 " (select count(*) from nucleo.sesion s"
+                 " join nucleo.persona p on p.id = s.persona_id"
+                 " where p.correo like 'smoke-%' and s.revocada_en is null"
+                 " and s.vence_en > now()"
                  " and exists (select 1 from nucleo.vinculo v where v.persona_id = p.id"
                  " and v.consorcio_id = :c))"),
             {"c": consorcio},

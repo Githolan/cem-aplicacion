@@ -582,7 +582,8 @@ def test_desasociar_quita_el_acceso_y_conserva_el_mandato(app, motor_migrate, es
     assert r.json()["sesiones_revocadas"] >= 2
     with cliente(e["mc2"]) as c:  # el reintento con la misma clave repite el 200 guardado
         repetido = c.post(url_mandato(e["cons"], e["ae"], "/desasociar-persona"),
-                          json={"referencia": "Nota del estudio del 05-11"}, headers=clave)  # fmt: skip
+                          json={"referencia": "Nota del estudio del 05-11"},
+                          headers=clave)  # fmt: skip
     assert (repetido.status_code, repetido.headers["Idempotent-Replayed"]) == (200, "true")
     assert repetido.json() == r.json()
     despues = mandato(motor_migrate, e["ae"])
