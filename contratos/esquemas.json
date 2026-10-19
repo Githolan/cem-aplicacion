@@ -2467,7 +2467,7 @@
           }
         ],
         "default": null,
-        "description": "Obligatorio si no hay cuenta: razón social o nombre del mandatario.",
+        "description": "Obligatorio si no hay cuenta: razón social o nombre del mandatario. Del Consejo y del administrador se muestra siempre el nombre de la cuenta.",
         "title": "Nombre"
       },
       "persona_id": {
@@ -2481,7 +2481,7 @@
           }
         ],
         "default": null,
-        "description": "La cuenta del mandatario. Obligatoria salvo para el administrador externo, que puede cargarse sin cuenta y asociarla después (A7).",
+        "description": "La cuenta del mandatario, con un vínculo confirmado (vigente o futuro) en el consorcio. Obligatoria para el Consejo y el administrador. El administrador externo se carga sin cuenta: la cuenta se asocia por invitación (A7).",
         "title": "Persona Id"
       },
       "tipo": {

@@ -12,8 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.test_mandatos import otra_persona, vinculo_confirmado
+from tests.test_mandatos import otra_persona, sesiones_abiertas, vinculo_confirmado
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
+from tests.test_mandatos_0017 import _marca, _procesar, _registrado_antes
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
@@ -29,6 +30,7 @@ COLUMNAS_LISTA = {
 }  # fmt: skip
 SIN_LECTURA = ["padron.ver", "documentos.ver"]
 """Un paquete de Consejo achicado por el acta, sin `mandatos.ver` ni `decisiones.ver`."""
+LECTURAS_ACOTADAS = ["mandatos.ver", "decisiones.ver"]
 
 
 @pytest.fixture
@@ -144,12 +146,40 @@ def test_un_paquete_achicado_sin_la_lectura_no_lee(escena, motor_migrate, motor_
 
 
 @pytest.mark.parametrize("funcion", list(LECTURAS))
-def test_un_mandato_vencido_no_da_lectura(escena, motor_migrate, motor_app, funcion):
+@pytest.mark.parametrize("cuando", ["vencido", "futuro"])
+def test_un_mandato_vencido_o_futuro_no_da_lectura(escena, motor_migrate, motor_app, funcion,
+                                                   cuando):  # fmt: skip
     e = escena
     otro = otra_persona(motor_migrate, e["cons"])
+    hoy = date.today()
+    fechas = ({"hasta": hoy - timedelta(days=1)} if cuando == "vencido"
+              else {"desde": hoy + timedelta(days=5)})  # fmt: skip
     alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=otro,
-         hasta=date.today() - timedelta(days=1), origen="soporte")  # fmt: skip
+         origen="soporte", **fechas)  # fmt: skip
     assert _negado(motor_app, e["cons"], otro, funcion) == "42501"
+
+
+@pytest.mark.parametrize("funcion", ["mandatos_del_consorcio", "decisiones_del_consorcio"])
+def test_una_lectura_acotada_a_un_recurso_no_lee_el_consorcio(escena, motor_migrate, motor_app,
+                                                              funcion):  # fmt: skip
+    """Segunda barrera igual al evaluador: la facultad acotada no alcanza a la lista entera."""
+    e = escena
+    otro = otra_persona(motor_migrate, e["cons"])
+    m = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=otro,
+             facultades=SIN_LECTURA, origen="soporte")  # fmt: skip
+    with motor_migrate.begin() as c:
+        for facultad in LECTURAS_ACOTADAS:
+            c.execute(
+                text("insert into nucleo.facultad_otorgada (consorcio_id, mandato_id, facultad,"
+                     " recurso, decision_id) values (:c, :m, :f, 'cuenta:X', :d)"),
+                {"c": e["cons"], "m": m, "f": facultad, "d": e["acta"]},
+            )  # fmt: skip
+    assert _negado(motor_app, e["cons"], otro, funcion) == "42501"
+    # Control: la misma persona sin recurso lee.
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.facultad_otorgada set recurso = null"
+                       " where mandato_id = :m and recurso = 'cuenta:X'"), {"m": m})  # fmt: skip
+    assert isinstance(leer(motor_app, e["cons"], otro, funcion), list)
 
 
 def test_el_externo_no_tiene_lectura_general(escena, motor_migrate, motor_app):
@@ -176,12 +206,15 @@ def test_la_lista_de_mandatos_trae_lo_minimo_y_el_cuit_solo_del_externo(
 ):
     e = escena
     # Un Consejo cargado con CUIT: el CUIT no sale, porque solo se muestra el del externo.
+    # Y con un nombre que no es el de la cuenta: sale el de la cuenta.
     con_cuit = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo",
                     persona=otra_persona(motor_migrate, e["cons"]), cuit=CUIT_X,
-                    origen="soporte")  # fmt: skip
+                    nombre="Juan Falso", origen="soporte")  # fmt: skip
     filas = {f["id"]: f for f in leer(motor_app, e["cons"], e["mc"], "mandatos_del_consorcio")}
     assert set(filas) == {e["m_mc"], e["m_ae"], con_cuit}
-    assert filas[con_cuit]["cuit"] is None
+    assert (filas[con_cuit]["cuit"], filas[con_cuit]["nombre"]) == (None, "Otra")
+    [detalle] = leer(motor_app, e["cons"], e["mc"], "mandato_detalle", con_cuit)
+    assert detalle["nombre"] == "Otra"
     assert all(set(f) == COLUMNAS_LISTA for f in filas.values())
     mc, ae = filas[e["m_mc"]], filas[e["m_ae"]]
     assert (mc["tipo"], mc["nombre"], mc["cuit"], mc["con_cuenta"], mc["estado"]) == (
@@ -200,6 +233,7 @@ def test_el_estado_sale_de_la_baja_y_de_las_fechas(escena, motor_migrate, motor_
         "terminado": {"hasta": hoy - timedelta(days=1)},
         "termina_hoy": {"hasta": hoy},  # A1: ese día ya no vale
         "vigente_ultimo_dia": {"hasta": hoy + timedelta(days=1)},
+        "vacio_futuro": {"desde": hoy + timedelta(days=10), "hasta": hoy + timedelta(days=10)},
     }.items():
         persona = otra_persona(motor_migrate, e["cons"])
         casos[estado] = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo",
@@ -214,8 +248,10 @@ def test_el_estado_sale_de_la_baja_y_de_las_fechas(escena, motor_migrate, motor_
     estados = {f["id"]: f["estado"]
                for f in leer(motor_app, e["cons"], e["mc"], "mandatos_del_consorcio")}  # fmt: skip
     assert (estados[casos["futuro"]], estados[casos["terminado"]], estados[casos["termina_hoy"]],
-            estados[casos["vigente_ultimo_dia"]], estados[con_baja], estados[error_carga]) == (
-        "futuro", "terminado", "terminado", "vigente", "dado_de_baja", "error_carga")  # fmt: skip
+            estados[casos["vigente_ultimo_dia"]], estados[con_baja], estados[error_carga],
+            estados[casos["vacio_futuro"]]) == (
+        "futuro", "terminado", "terminado", "vigente", "dado_de_baja", "error_carga",
+        "terminado")  # fmt: skip
 
 
 def test_el_detalle_suma_facultades_y_la_baja_y_lo_inexistente_no_sale(escena, motor_app):
@@ -265,6 +301,7 @@ def _vinculo(motor_migrate, cons, persona, *, confirmado=True, desde="2020-01-01
             ),
             {"c": cons, "u": unidad, "p": persona, "d": desde, "h": hasta, "k": confirma},
         )
+    return unidad
 
 
 def test_los_candidatos_son_los_vinculos_confirmados_vigentes_o_futuros(
@@ -275,6 +312,7 @@ def test_los_candidatos_son_los_vinculos_confirmados_vigentes_o_futuros(
     personas = {n: otra_persona(motor_migrate, e["cons"]) for n in
                 ("vigente", "futuro", "sin_confirmar", "terminado", "baja")}  # fmt: skip
     _vinculo(motor_migrate, e["cons"], personas["vigente"])
+    _vinculo(motor_migrate, e["cons"], e["mc"])  # quien pide no se ve a sí mismo (A4)
     _vinculo(motor_migrate, e["cons"], personas["futuro"], desde=hoy + timedelta(days=5))
     _vinculo(motor_migrate, e["cons"], personas["sin_confirmar"], confirmado=False)
     _vinculo(motor_migrate, e["cons"], personas["terminado"], hasta=hoy)
@@ -289,7 +327,7 @@ def test_los_candidatos_son_los_vinculos_confirmados_vigentes_o_futuros(
     ids = {f["persona_id"] for f in filas}
     assert {personas["vigente"], personas["futuro"]} <= ids
     assert ids.isdisjoint({personas["sin_confirmar"], personas["terminado"], personas["baja"],
-                           ajena, e["prop"]})  # fmt: skip
+                           ajena, e["prop"], e["mc"]})  # fmt: skip
     assert all(set(f) == {"persona_id", "nombre", "unidades"} for f in filas)
     assert "@" not in repr(filas)
 
@@ -308,8 +346,18 @@ def test_por_la_api_sin_vinculo_confirmado_no_hay_mandato(escena, motor_migrate,
     otro, _, _ = consorcio_con_persona(motor_migrate)
     de_otro = otra_persona(motor_migrate, otro)
     _vinculo(motor_migrate, otro, de_otro)
+    eliminada = otra_persona(motor_migrate, e["cons"])
+    _vinculo(motor_migrate, e["cons"], eliminada)
+    sin_unidad = otra_persona(motor_migrate, e["cons"])
+    unidad = _vinculo(motor_migrate, e["cons"], sin_unidad)
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.persona set eliminado_en = now() where id = :p"),
+                  {"p": eliminada})  # fmt: skip
+        c.execute(text("update nucleo.unidad set eliminado_en = now() where id = :u"),
+                  {"u": unidad})  # fmt: skip
     inexistente = "01a10000-0000-7000-8000-000000000001"
-    for persona in (sin_vinculo, sin_confirmar, terminado, de_otro, inexistente):
+    for persona in (sin_vinculo, sin_confirmar, terminado, de_otro, inexistente, eliminada,
+                    sin_unidad):  # fmt: skip
         with pytest.raises(DBAPIError) as error:
             _alta_api(motor_app, e["cons"], e["prop"], e["acta"], persona, tipo=tipo)
         assert _motivo(error) == "persona_sin_vinculo", persona
@@ -360,13 +408,52 @@ def test_el_origen_se_valida_antes_que_la_persona(escena, motor_app):
     assert _motivo(error) == "origen_invalido"
 
 
+# E15 con vigencia vacía ---------------------------------------------------------------------
+
+
+def test_una_vigencia_vacia_vencida_no_revoca_sesiones(escena, motor_migrate, motor_app):
+    """Decisión 4: un mandato que nunca dio privilegios no revoca. Con `desde = hasta` nunca
+    rigió, aunque se haya registrado antes de su fin."""
+    e = escena
+    persona = otra_persona(motor_migrate, e["cons"])
+    dia = date.today() - timedelta(days=2)
+    vacio = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=persona,
+                 desde=dia, hasta=dia, origen="soporte")  # fmt: skip
+    _registrado_antes(motor_migrate, vacio)
+    sesiones_abiertas(motor_migrate, persona, 1)
+    _procesar(motor_app)
+    assert _marca(motor_migrate, vacio) is None
+    assert sesiones_abiertas(motor_migrate, persona) == 1
+    # Control: el mismo mandato con una vigencia de verdad, sí revoca.
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.mandato set vigente_desde = vigente_hasta - 10"
+                       " where id = :m"), {"m": vacio})  # fmt: skip
+    _procesar(motor_app)
+    assert _marca(motor_migrate, vacio) is not None
+    assert sesiones_abiertas(motor_migrate, persona) == 0
+
+
 # Downgrade ----------------------------------------------------------------------------------
+
+
+def _definicion_alta(motor) -> tuple[str, str]:
+    """Las dos funciones que `0018` reemplaza: `alta_mandato` y la del vencimiento."""
+    with motor.connect() as c:
+        return tuple(
+            c.execute(text(f"select pg_get_functiondef('nucleo.{f}'::regproc)")).scalar_one()
+            for f in ("alta_mandato", "revocar_sesiones_por_vencimiento")
+        )
 
 
 def test_el_downgrade_de_0018_se_niega_con_facultades_de_lectura_otorgadas(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
+    command.upgrade(cfg, "0017")
+    antes = _definicion_alta(motor)
     command.upgrade(cfg, "0018")
+    despues = _definicion_alta(motor)
+    assert despues[0] != antes[0] and despues[1] != antes[1]  # control: 0018 cambia las dos
     command.downgrade(cfg, "0017")
+    assert _definicion_alta(motor) == antes  # la bajada las deja como en 0016 y 0017
     command.upgrade(cfg, "0018")  # ida y vuelta sin datos
     with motor.begin() as c:
         cons = c.execute(text("insert into nucleo.consorcio (nombre) values ('A') returning id"))

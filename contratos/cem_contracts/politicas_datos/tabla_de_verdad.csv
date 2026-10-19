@@ -345,3 +345,5 @@ caso 7,mandatos.ver_candidatos,MC,—,,vigente,no,,200,concedido_por_facultad,si
 2b-4c,decisiones.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la lectura de decisiones
 2b-4c,mandatos.ver,Fac(mandatos.ver),C,,vigente,si,,200,concedido_por_facultad,la facultad sola alcanza
 2b-4c,decisiones.ver,Fac(decisiones.ver),C,,vigente,si,,200,concedido_por_facultad,la facultad sola alcanza
+2b-4c,mandatos.ver,Fac(mandatos.ver@cuenta:X),C,,vigente,si,,403,recurso_tipo_inesperado,acotada a un recurso no da la lectura del consorcio
+2b-4c,decisiones.ver,Fac(decisiones.ver@cuenta:X),C,,vigente,si,,403,recurso_tipo_inesperado,acotada a un recurso no da la lectura del consorcio

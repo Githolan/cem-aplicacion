@@ -98,15 +98,17 @@ class MandatoNuevo(BaseModel):
     tipo: TipoMandato
     persona_id: UUID | None = Field(
         default=None,
-        description="La cuenta del mandatario. Obligatoria salvo para el administrador externo,"
-        " que puede cargarse sin cuenta y asociarla después (A7).",
+        description="La cuenta del mandatario, con un vínculo confirmado (vigente o futuro) en el"
+        " consorcio. Obligatoria para el Consejo y el administrador. El administrador externo"
+        " se carga sin cuenta: la cuenta se asocia por invitación (A7).",
     )
     nombre: str | None = Field(
         default=None,
         min_length=1,
         max_length=LARGO_MAXIMO_NOMBRE_MANDATARIO,
         pattern=FORMATO_REFERENCIA,
-        description="Obligatorio si no hay cuenta: razón social o nombre del mandatario.",
+        description="Obligatorio si no hay cuenta: razón social o nombre del mandatario. Del"
+        " Consejo y del administrador se muestra siempre el nombre de la cuenta.",
     )
     cuit: str | None = Field(
         default=None, pattern=FORMATO_CUIT, description="Obligatorio para el administrador externo."
