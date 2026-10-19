@@ -83,6 +83,74 @@
     "title": "AltaTotp",
     "type": "object"
   },
+  "BajaMandato": {
+    "$defs": {
+      "CausaBaja": {
+        "enum": [
+          "remocion",
+          "renuncia",
+          "fallecimiento_incapacidad",
+          "error_carga",
+          "otro"
+        ],
+        "title": "CausaBaja",
+        "type": "string"
+      }
+    },
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/baja`.",
+    "properties": {
+      "causa": {
+        "$ref": "#/$defs/CausaBaja"
+      },
+      "decision_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Solo para la remoción: una asamblea del mismo consorcio que no registró quien da la baja (C6, A15).",
+        "title": "Decision Id"
+      },
+      "descripcion": {
+        "description": "Por qué termina.",
+        "examples": [
+          "Renuncia presentada"
+        ],
+        "maxLength": 500,
+        "minLength": 1,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Descripcion",
+        "type": "string"
+      },
+      "instrumento": {
+        "anyOf": [
+          {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Para toda causa que no sea la remoción: la nota, el certificado u otro instrumento.",
+        "title": "Instrumento"
+      }
+    },
+    "required": [
+      "causa",
+      "descripcion"
+    ],
+    "title": "BajaMandato",
+    "type": "object"
+  },
   "CanjeCodigo": {
     "description": "`POST /api/v1/auth/codigo`: el correo y el código de seis dígitos que llegó en el mismo\ncorreo que el enlace. Sirve en cualquier dispositivo, no solo en el que pidió la entrada.\n\nVale 10 minutos y cinco intentos; solo el del último pedido. Usarlo gasta también el enlace\ndel mismo pedido, y al revés.",
     "properties": {
@@ -263,6 +331,90 @@
       "sesiones_cerradas"
     ],
     "title": "ContrasenaGuardada",
+    "type": "object"
+  },
+  "DecisionNueva": {
+    "$defs": {
+      "TipoDecision": {
+        "enum": [
+          "asamblea",
+          "consejo",
+          "contrato_administracion",
+          "inscripcion_rpa"
+        ],
+        "title": "TipoDecision",
+        "type": "string"
+      }
+    },
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/decisiones`.",
+    "properties": {
+      "descripcion": {
+        "description": "Qué se decidió.",
+        "examples": [
+          "Designa al Consejo"
+        ],
+        "maxLength": 500,
+        "minLength": 1,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Descripcion",
+        "type": "string"
+      },
+      "fecha": {
+        "description": "Fecha del acto (asamblea, reunión, contrato o inscripción).",
+        "format": "date",
+        "title": "Fecha",
+        "type": "string"
+      },
+      "referencia": {
+        "description": "Dónde consta: libro, acta y folio. Nunca se inventa (criterio 9).",
+        "examples": [
+          "Acta 12, libro 3, folio 40"
+        ],
+        "maxLength": 300,
+        "minLength": 1,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Referencia",
+        "type": "string"
+      },
+      "sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Huella del acta escaneada, si existe.",
+        "title": "Sha256"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoDecision"
+      }
+    },
+    "required": [
+      "tipo",
+      "fecha",
+      "descripcion",
+      "referencia"
+    ],
+    "title": "DecisionNueva",
+    "type": "object"
+  },
+  "DecisionRegistrada": {
+    "properties": {
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "title": "DecisionRegistrada",
     "type": "object"
   },
   "Desasociacion": {
@@ -1626,6 +1778,194 @@
       "elementos"
     ],
     "title": "ListaUnidades",
+    "type": "object"
+  },
+  "MandatoDadoDeBaja": {
+    "$defs": {
+      "CausaBaja": {
+        "enum": [
+          "remocion",
+          "renuncia",
+          "fallecimiento_incapacidad",
+          "error_carga",
+          "otro"
+        ],
+        "title": "CausaBaja",
+        "type": "string"
+      }
+    },
+    "properties": {
+      "causa": {
+        "$ref": "#/$defs/CausaBaja"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "vigente_hasta": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Exclusivo (A1).",
+        "title": "Vigente Hasta"
+      }
+    },
+    "required": [
+      "id",
+      "causa",
+      "vigente_hasta"
+    ],
+    "title": "MandatoDadoDeBaja",
+    "type": "object"
+  },
+  "MandatoNuevo": {
+    "$defs": {
+      "TipoMandato": {
+        "enum": [
+          "administrador",
+          "miembro_consejo",
+          "administrador_externo"
+        ],
+        "title": "TipoMandato",
+        "type": "string"
+      }
+    },
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos`.",
+    "properties": {
+      "cuit": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9]{11}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Obligatorio para el administrador externo.",
+        "title": "Cuit"
+      },
+      "decision_id": {
+        "description": "La decisión de respaldo, del mismo consorcio, que no registró quien da el alta (A15).",
+        "format": "uuid",
+        "title": "Decision Id",
+        "type": "string"
+      },
+      "desde": {
+        "format": "date",
+        "title": "Desde",
+        "type": "string"
+      },
+      "facultades": {
+        "anyOf": [
+          {
+            "items": {
+              "maxLength": 100,
+              "pattern": "^[a-z][a-z_]*(\\.[a-z_]+)+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Un subconjunto del paquete del tipo; sin lista, el paquete completo.",
+        "title": "Facultades"
+      },
+      "hasta": {
+        "anyOf": [
+          {
+            "format": "date",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Exclusivo (A1): el último día es el anterior.",
+        "title": "Hasta"
+      },
+      "matricula": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Matricula"
+      },
+      "nombre": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Obligatorio si no hay cuenta: razón social o nombre del mandatario.",
+        "title": "Nombre"
+      },
+      "persona_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "La cuenta del mandatario. Obligatoria salvo para el administrador externo, que puede cargarse sin cuenta y asociarla después (A7).",
+        "title": "Persona Id"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoMandato"
+      }
+    },
+    "required": [
+      "tipo",
+      "decision_id",
+      "desde"
+    ],
+    "title": "MandatoNuevo",
+    "type": "object"
+  },
+  "MandatoRegistrado": {
+    "properties": {
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "title": "MandatoRegistrado",
     "type": "object"
   },
   "NuevaContrasena": {

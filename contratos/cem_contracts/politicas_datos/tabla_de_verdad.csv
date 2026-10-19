@@ -312,3 +312,5 @@ A15,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,i
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=yo;respaldo=si,403,no_registro_la_decision,remoción con una asamblea que registró él (A15)
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,remoción con una asamblea que registró otra persona
 A15,mandatos.baja,MC,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por instrumento (renuncia): sin decisión A15 no aplica
+A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=equipo;respaldo=si,200,concedido_por_facultad,remoción con una asamblea que cargó el equipo
+A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,identidad_indeterminada,remoción con una decisión sin quién la registró ni marca: niega

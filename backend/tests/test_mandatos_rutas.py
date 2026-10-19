@@ -239,16 +239,74 @@ def test_a4_nadie_se_da_de_baja_a_si_mismo(escena, motor_app):
 
 def test_el_mandato_de_otro_consorcio_no_existe(escena, motor_migrate, motor_app):
     e = escena
-    otro, _, prop_otro = consorcio_con_persona(motor_migrate)
+    otro, _, _ = consorcio_con_persona(motor_migrate)
     ajeno = alta(motor_app, otro, None, decidir_equipo(motor_app, otro),
                  persona=otra_persona(motor_migrate, otro), tipo="miembro_consejo",
                  origen="soporte")  # fmt: skip
     r = baja_http(e["mc1"], e["cons"], ajeno)
     assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")
-    assert prop_otro is not None
 
 
 def test_la_remocion_con_instrumento_no_llega_a_la_base(escena):
     e = escena
     r = baja_http(e["mc2"], e["cons"], e["m_mc1"], causa="remocion", decision_id=str(e["acta"]))
     assert (r.status_code, r.json()["codigo"]) == (422, "peticion_invalida")
+
+
+# Cada motivo de la base que la persona puede provocar sale con su código, nunca 500 -------
+
+
+@pytest.mark.parametrize(
+    ("cuerpo", "estado", "codigo"),
+    [
+        ({"persona_id": "01a10000-0000-7000-8000-000000000001"}, 422, "persona_invalida"),
+        ({"tipo": "administrador", "nombre": "Sin cuenta"}, 422, "mandato_sin_cuenta"),
+        ({"persona_id": "VECINA", "facultades": []}, 422, "facultad_fuera_de_paquete"),
+        ({"persona_id": "VECINA", "facultades": ["pagos.autorizar"]}, 422,
+         "facultad_fuera_de_paquete"),
+    ],
+)  # fmt: skip
+def test_el_alta_traduce_cada_motivo(escena, cuerpo, estado, codigo):
+    e = escena
+    cuerpo = {k: (str(e["vecina"]) if v == "VECINA" else v) for k, v in cuerpo.items()}
+    r = alta_http(e["mc1"], e["cons"], e["acta"], **cuerpo)
+    assert (r.status_code, r.json()["codigo"]) == (estado, codigo), r.text
+
+
+def test_un_mandato_superpuesto_da_409(escena):
+    e = escena
+    assert alta_http(e["mc1"], e["cons"], e["acta"], persona_id=e["vecina"]).status_code == 201
+    r = alta_http(e["mc1"], e["cons"], e["acta"], persona_id=e["vecina"])
+    assert (r.status_code, r.json()["codigo"]) == (409, "mandato_superpuesto")
+
+
+def test_la_baja_de_un_mandato_que_ya_termino_da_409(escena, motor_app, motor_migrate):
+    e = escena
+    m = alta(motor_app, e["cons"], None, e["acta"], persona=e["vecina"], tipo="miembro_consejo",
+             hasta=date.today() - timedelta(days=2), origen="soporte")  # fmt: skip
+    r = baja_http(e["mc1"], e["cons"], m)
+    assert (r.status_code, r.json()["codigo"]) == (409, "mandato_terminado")
+
+
+def test_el_alta_se_repite_con_la_misma_clave(escena, motor_migrate):
+    e = escena
+    clave = clave_idempotencia()
+    r = alta_http(e["mc1"], e["cons"], e["acta"], clave, persona_id=e["vecina"])
+    assert r.status_code == 201, r.text
+    repetido = alta_http(e["mc1"], e["cons"], e["acta"], clave, persona_id=e["vecina"])
+    assert (repetido.status_code, repetido.json(), repetido.headers["Idempotent-Replayed"]) == (
+        201, r.json(), "true")  # fmt: skip
+    assert _mandatos_de(motor_migrate, e["cons"], e["vecina"]) == 1
+
+
+def test_sin_la_facultad_un_mandato_inexistente_da_el_mismo_403(escena, motor_app):
+    """Quien no puede dar de baja no distingue un id válido de uno que no existe (Codex)."""
+    e = escena
+    inexistente = "01a10000-0000-7000-8000-0000000000ff"
+    assert baja_http(e["prop"], e["cons"], e["m_mc1"]).status_code == 403
+    r = baja_http(e["prop"], e["cons"], inexistente)
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert _motivos(motor_app, e, e["prop"]) == [("mandatos.baja", "sin_concesion")] * 2
+    # Control: con la facultad, el inexistente sigue siendo 404.
+    r = baja_http(e["mc1"], e["cons"], inexistente)
+    assert (r.status_code, r.json()["codigo"]) == (404, "no_encontrado")

@@ -44,6 +44,9 @@ router = APIRouter(prefix="/api/v1", tags=["mandatos"], dependencies=[Depends(si
 log = logging.getLogger("cem.mandatos")
 
 ORIGEN_SOPORTE = "soporte"
+SIN_OBJETO = Entidad(objetivo_sin_cuenta=True, sin_decision=True, respaldo_presente=True)
+"""Una baja sin mandato que exista: los filtros de separación no tienen persona que comparar,
+así que decide solo la concesión (facultad, modo y ámbito)."""
 DATOS = (422, CodigoError.PETICION_INVALIDA)
 ERRORES = {
     # 404: lo que se nombra en la ruta.
@@ -254,6 +257,10 @@ def baja_mandato(
             {"m": mandato_id, "c": ctx.consorcio_id},
         ).one_or_none()
         if mandato is None:
+            # Sin mandato no hay a quién separar: se evalúa solo la concesión, para que quien no
+            # puede dar de baja reciba el mismo 403 auditado que con un mandato que existe y no
+            # distinga un id válido de uno inexistente (Codex).
+            permiso.verificar(SIN_OBJETO)
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         decision = _sobre_decision(conn, ctx.consorcio_id, baja.decision_id)
     permiso.verificar(
