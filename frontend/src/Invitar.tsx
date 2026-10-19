@@ -265,7 +265,10 @@ export function Invitar() {
                     id={`${id}-consorcio`}
                     value={consorcio}
                     onChange={(e) => {
+                      // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
                       setInvitaciones(null);
+                      setUnidades([]);
+                      setUnidad("");
                       cambiar(setConsorcio)(e.target.value);
                     }}
                   >

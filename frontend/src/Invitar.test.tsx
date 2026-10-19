@@ -289,6 +289,24 @@ describe("página /invitaciones", () => {
     expect(within(screen.getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z"]);
   });
 
+  it("al cambiar de edificio no queda elegida una unidad del anterior", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+        [`GET /api/v1/consorcios/${C2}/unidades`]: () => error("error_interno", 500),
+        [`GET /api/v1/consorcios/${C2}/invitaciones`]: () => Response.json({ elementos: [] }),
+      }),
+    );
+    abrir();
+    await completar();
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(within(screen.getByLabelText("Unidad")).queryAllByRole("option")).toHaveLength(0);
+    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("sin edificios lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
     abrir();
