@@ -89,12 +89,6 @@ const BAJA_SOBRE_ESTADO_VIEJO = ["mandato_ya_dado_de_baja", "mandato_terminado"]
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const fechaDe = (iso: string) => new Date(`${iso}T00:00:00Z`);
 const dia = (iso: string) => FORMATO_DIA.format(fechaDe(iso));
-/** El día siguiente: `hasta` es exclusivo (A1), así que el primero que tiene sentido es desde + 1. */
-function diaSiguiente(iso: string): string {
-  const fecha = fechaDe(iso);
-  fecha.setUTCDate(fecha.getUTCDate() + 1);
-  return fecha.toISOString().slice(0, 10);
-}
 const recortar = (texto: string) => (texto.length > LARGO_OPCION ? `${texto.slice(0, LARGO_OPCION - 1)}…` : texto);
 
 /** Qué se estaba haciendo cuando la API respondió con error. */
@@ -564,7 +558,10 @@ export function Mandatos() {
           setVuelta((v) => v + 1);
         } else setAviso({ texto: SIN_CONEXION, ok: false });
       })
-      .catch(atajar);
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (numero === pedidoDetalle.current) atajar(e);
+      });
   }
 
   function verDecision(decision: Decision) {
@@ -590,7 +587,10 @@ export function Mandatos() {
           setVuelta((v) => v + 1);
         } else setAviso({ texto: SIN_CONEXION, ok: false });
       })
-      .catch(atajar);
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (numero === pedidoDetalle.current) atajar(e);
+      });
   }
 
   function elegirEdificio(valor: string) {
@@ -800,6 +800,17 @@ export function Mandatos() {
                   <>
                     <dt>Motivo</dt>
                     <dd>{detalle.datos.motivo_fin}</dd>
+                  </>
+                )}
+                {detalle.datos.baja_decision_id && (
+                  <>
+                    <dt>Asamblea que lo removió</dt>
+                    <dd>
+                      {(() => {
+                        const d = listaDecisiones.find((x) => x.id === detalle.datos.baja_decision_id);
+                        return d ? textoDecision(d) : "No figura entre las decisiones que podés ver.";
+                      })()}
+                    </dd>
                   </>
                 )}
                 {detalle.datos.instrumento_referencia && (
@@ -1099,11 +1110,17 @@ export function Mandatos() {
                 <input
                   id={`${id}-hasta`}
                   type="date"
-                  min={desde === "" ? undefined : diaSiguiente(desde)}
+                  min={desde === "" ? undefined : desde}
                   disabled={enviando}
+                  aria-describedby={`${id}-vigencia-vacia`}
                   value={hasta}
                   onChange={(e) => cambiar(claveAlta, setHasta)(e.target.value)}
                 />
+                <p id={`${id}-vigencia-vacia`} aria-live="polite">
+                  {hasta !== "" &&
+                    hasta === desde &&
+                    "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
+                </p>
                 <button type="submit" disabled={enviando || (!externo && candidatos.elementos.length === 0)}>
                   Dar de alta
                 </button>

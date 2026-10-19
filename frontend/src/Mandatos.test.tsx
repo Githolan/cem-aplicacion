@@ -665,6 +665,62 @@ describe("página /mandatos", () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(screen.queryByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeNull();
     });
+
+    it("un rechazo tardío del detalle del edificio anterior no muestra un error en el nuevo", async () => {
+      let soltar: () => void = () => undefined;
+      const retenido = new Promise<void>((r) => {
+        soltar = r;
+      });
+      const base = conDos();
+      let fallos = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (pedido: Request) => {
+          if (new URL(pedido.url).pathname === `${RUTA_MANDATOS}/${M_AE}`) {
+            await retenido;
+            fallos += 1;
+            throw new TypeError("sin red");
+          }
+          return base(pedido);
+        }),
+      );
+      abrir();
+      await cargado();
+      fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      await screen.findByText("Eva Sosa, Consejo de propietarios");
+      soltar();
+      await waitFor(() => expect(fallos).toBe(1));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+    });
+  });
+
+  it("el detalle de una remoción muestra la asamblea que la respaldó", async () => {
+    const removido = { ...DETALLE_AE, estado: "dado_de_baja", causa_baja: "remocion", baja_decision_id: D_EQUIPO, motivo_fin: "Remoción" };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(removido) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+    const detalle = titulo.closest("section") as HTMLElement;
+    const etiqueta = within(detalle).getByText("Asamblea que lo removió");
+    expect(etiqueta.nextElementSibling?.textContent).toBe("Asamblea del 10 de enero de 2026: Designa al Consejo");
+  });
+
+  it("admite la vigencia vacía que acepta el dominio y avisa que nunca rige", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarAlta();
+    const hasta = screen.getByLabelText("Hasta (opcional; ese día ya no rige)");
+    expect(hasta.getAttribute("min")).toBe("2026-11-01");
+    fireEvent.change(hasta, { target: { value: "2026-11-01" } });
+    expect(screen.getByText(/el mandato nunca rige/)).toBeTruthy();
+    fireEvent.click(boton("Dar de alta"));
+    await screen.findByText("Listo: el mandato quedó dado de alta.");
+    const cuerpo = (await en(pedidos(simulado, "POST", RUTA_MANDATOS), 0).json()) as Record<string, unknown>;
+    expect([cuerpo.desde, cuerpo.hasta]).toEqual(["2026-11-01", "2026-11-01"]);
   });
 
   it("sin edificios lo dice", async () => {
