@@ -234,7 +234,10 @@ try {
     $tar = "$copia.tar"
     git -C $repo -c core.autocrlf=false -c core.eol=lf archive --format=tar -o $tar $shaCompleta
     if ($LASTEXITCODE -ne 0) { throw "git archive falló" }
-    tar -xf $tar -C $copia
+    # bsdtar de Windows por ruta completa: desde Git Bash el PATH pone primero el tar de Git, que lee 'C:' como host remoto.
+    $tarWindows = Join-Path $env:SystemRoot 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tarWindows)) { throw "no existe el tar de Windows en $tarWindows" }
+    & $tarWindows -xf $tar -C $copia
     if ($LASTEXITCODE -ne 0) { throw "tar no pudo extraer la copia" }
     Remove-Item $tar
     $shs = @(Get-ChildItem -Path $copia -Recurse -File -Filter '*.sh')
