@@ -2,11 +2,12 @@ import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
-import { RUTA_ENTRAR, RUTA_INVITACION } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
+import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { ModoLectura } from "./ModoLectura";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
@@ -76,6 +77,7 @@ export function App() {
           <Route path="/instalar" element={<Instalar />} />
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
+          <Route path={RUTA_INVITACION_MANDATO} element={<InvitacionMandato />} />
           <Route path={RUTA_CUENTA} element={<Cuenta />} />
           <Route path={RUTA_INVITACIONES} element={<Invitar />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />

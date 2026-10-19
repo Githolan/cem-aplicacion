@@ -41,6 +41,7 @@ cabecera /assets/no-existe.js cache-control | grep -q immutable && falla "un 404
 curl -s "$URL/sw.js" | grep -q 'importScripts("/sw-entrar.js")' || falla "sw.js no carga sw-entrar.js"
 curl -s "$URL/sw.js" | grep -q '\^\\/entrar' || falla "sw.js no excluye /entrar de navigateFallback"
 curl -s "$URL/sw.js" | grep -q '\^\\/invitacion' || falla "sw.js no excluye /invitacion de navigateFallback"
+curl -s "$URL/sw.js" | grep -q '\^\\/invitacion-mandato' || falla "sw.js no excluye /invitacion-mandato de navigateFallback"
 [ "$(codigo /sw-entrar.js)" = 200 ] || falla "/sw-entrar.js no da 200"
 [ "$(cabecera /sw-entrar.js cache-control)" = "no-cache" ] || falla "sw-entrar.js no lleva no-cache"
 cabecera /sw-entrar.js content-type | grep -q '^application/javascript' || falla "tipo de sw-entrar.js"

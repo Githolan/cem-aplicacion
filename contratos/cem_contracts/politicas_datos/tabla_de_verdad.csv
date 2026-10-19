@@ -269,3 +269,40 @@ caso 25,documentos.ver,I+Fac(documentos.ver),AA,,vigente,si,,200,concedido_por_f
 D6,padron.ver_propio,I,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,I ve su unidad y sus vínculos
 D6,padron.ver_propio,I,C,unidad:5B,sin_mandato,si,,403,sin_concesion,I no ve otra unidad
 D6,padron.ver_propio,MC,C,unidad:3A,vigente,si,,403,sin_concesion,padron.ver_propio no se concede por facultad
+A7,mandatos.asociar_persona,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,P no registra mandatos
+A7,mandatos.asociar_persona,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,I no registra mandatos
+A7,mandatos.asociar_persona,MC,C,,vigente,si,respaldo=si,200,concedido_por_facultad,MC emite la invitación de mandato (C2)
+A7,mandatos.asociar_persona,AD,C,,vigente,si,respaldo=si,200,concedido_por_facultad,AD emite la invitación de mandato (C2)
+A7,mandatos.asociar_persona,AE,C,,vigente,si,respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+A7,mandatos.asociar_persona,ninguna,C,,sin_mandato,si,respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+A7,mandatos.aprobar_asociacion,P,C,,sin_mandato,si,emitio=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+A7,mandatos.aprobar_asociacion,I,C,,sin_mandato,si,emitio=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+A7,mandatos.aprobar_asociacion,MC,C,,vigente,si,emitio=otro;respaldo=si,200,concedido_por_facultad,MC aprueba la que emitió otra persona (C2)
+A7,mandatos.aprobar_asociacion,AD,C,,vigente,si,emitio=otro;respaldo=si,200,concedido_por_facultad,AD aprueba la que emitió otra persona (C2)
+A7,mandatos.aprobar_asociacion,AE,C,,vigente,si,emitio=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+A7,mandatos.aprobar_asociacion,ninguna,C,,sin_mandato,si,emitio=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+A7,mandatos.revocar_asociacion,P,C,,sin_mandato,si,,403,sin_concesion,P no registra mandatos
+A7,mandatos.revocar_asociacion,I,C,,sin_mandato,si,,403,sin_concesion,I no registra mandatos
+A7,mandatos.revocar_asociacion,MC,C,,vigente,si,,200,concedido_por_facultad,MC retira una invitación de mandato (C2)
+A7,mandatos.revocar_asociacion,AD,C,,vigente,si,,200,concedido_por_facultad,AD retira una invitación de mandato (C2)
+A7,mandatos.revocar_asociacion,AE,C,,vigente,si,,403,sin_concesion,AE no recibe mandatos.registrar
+A7,mandatos.revocar_asociacion,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+A7,mandatos.desasociar_persona,P,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+A7,mandatos.desasociar_persona,I,C,,sin_mandato,si,objetivo=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+A7,mandatos.desasociar_persona,MC,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,MC desasocia la cuenta de otra persona (C2)
+A7,mandatos.desasociar_persona,AD,C,,vigente,si,objetivo=otro;respaldo=si,200,concedido_por_facultad,AD desasocia la cuenta de otra persona (C2)
+A7,mandatos.desasociar_persona,AE,C,,vigente,si,objetivo=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+A7,mandatos.desasociar_persona,ninguna,C,,sin_mandato,si,objetivo=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+A7,mandatos.asociar_persona,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,emitir sin la referencia del correo (P1-b)
+A7,mandatos.aprobar_asociacion,MC,C,,vigente,si,emitio=yo;respaldo=si,403,no_es_quien_emitio,quien emitió no aprueba (cuatro ojos de P1)
+A7,mandatos.aprobar_asociacion,AD,C,,vigente,si,emitio=yo;respaldo=si,403,no_es_quien_emitio,quien emitió no aprueba (cuatro ojos de P1)
+A7,mandatos.aprobar_asociacion,MC,C,,vigente,si,respaldo=si,403,identidad_indeterminada,sin saber quién emitió se niega
+A7,mandatos.aprobar_asociacion,MC,C,,vigente,si,emitio=otro;respaldo=no,403,sin_respaldo,aprobar sin ver la referencia
+A7,mandatos.desasociar_persona,MC,C,,vigente,si,objetivo=yo;respaldo=si,403,no_es_su_propio_mandato,nadie se desasocia a sí mismo (A4)
+A7,mandatos.desasociar_persona,MC,C,,vigente,si,objetivo=otro;respaldo=no,403,sin_respaldo,desasociar sin referencia (P1-c)
+A7,mandatos.ver_asociaciones,P,C,,sin_mandato,si,,403,sin_concesion,P no registra mandatos
+A7,mandatos.ver_asociaciones,I,C,,sin_mandato,si,,403,sin_concesion,I no registra mandatos
+A7,mandatos.ver_asociaciones,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee las invitaciones de un mandato (C2)
+A7,mandatos.ver_asociaciones,AD,C,,vigente,si,,200,concedido_por_facultad,AD lee las invitaciones de un mandato (C2)
+A7,mandatos.ver_asociaciones,AE,C,,vigente,si,,403,sin_concesion,AE no recibe mandatos.registrar
+A7,mandatos.ver_asociaciones,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato

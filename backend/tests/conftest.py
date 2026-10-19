@@ -87,9 +87,19 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     Lo mismo con 0014, que se niega a bajar si hay un vínculo confirmado y, al volver a subir,
     si algún vínculo no tiene su evento de aceptación (`vinculo_sin_procedencia`). Los datos de
     prueba cargan vínculos a mano: aquí se les da una invitación y un evento de aceptación
-    sintéticos (correo `.invalid`), solo en esta base.
+    sintéticos (correo `.invalid`), solo en esta base. Y con 0015, que se niega a bajar si hay
+    invitaciones o desasociaciones de mandato (si la base está en 0015 o más arriba).
     """
     with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "do $$ begin"
+                " if to_regclass('nucleo.invitacion_mandato') is not null then"
+                "   delete from nucleo.invitacion_mandato;"
+                "   delete from nucleo.desasociacion_mandato;"
+                " end if; end $$"
+            )
+        )
         c.execute(text("delete from nucleo.facultad_otorgada"))
         c.execute(text("delete from nucleo.mandato"))
         c.execute(

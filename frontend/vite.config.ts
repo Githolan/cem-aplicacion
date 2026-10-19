@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-import { NAVEGACION_ENTRAR, NAVEGACION_INVITACION } from "./src/enlace";
+import { NAVEGACION_ENTRAR, NAVEGACION_INVITACION, NAVEGACION_INVITACION_MANDATO } from "./src/enlace";
 import { manifiesto } from "./src/manifiesto";
 import { ARCHIVO_SW_ENTRAR, codigoSwEntrar } from "./src/swEntrar";
 
@@ -38,7 +38,7 @@ export default defineConfig({
         globIgnores: [ARCHIVO_SW_ENTRAR],
         importScripts: [`/${ARCHIVO_SW_ENTRAR}`],
         navigateFallback: "/index.html",
-        // /entrar e /invitacion van siempre a la red: el enlace del correo carga la versión
+        // /entrar, /invitacion e /invitacion-mandato van siempre a la red: el enlace del correo carga la versión
         // actual, nunca la que haya quedado en caché, que puede ser anterior a la página
         // (medido el 14-10-2026).
         navigateFallbackDenylist: [
@@ -46,6 +46,7 @@ export default defineConfig({
           /^\/health/,
           NAVEGACION_ENTRAR,
           NAVEGACION_INVITACION,
+          NAVEGACION_INVITACION_MANDATO,
         ],
         cleanupOutdatedCaches: true,
       },

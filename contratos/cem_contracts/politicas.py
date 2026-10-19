@@ -64,6 +64,8 @@ class CodigoSeparacion(StrEnum):
     NO_ES_QUIEN_REGISTRO = "no_es_quien_registro"
     """Quien registró el vínculo no lo confirma (P4-c, 2b-4). Un vínculo que registró el equipo
     (soporte) no tiene persona que separar y lo dice explícito `registrado_por_soporte`."""
+    NO_ES_QUIEN_EMITIO = "no_es_quien_emitio"
+    """Quien emitió la invitación de mandato no la aprueba: cuatro ojos (A7, P1, 2b-4)."""
 
 
 class _Estricto(BaseModel):

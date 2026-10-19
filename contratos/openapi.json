@@ -30,6 +30,35 @@
         "title": "AceptacionInvitacion",
         "type": "object"
       },
+      "AceptacionInvitacionMandato": {
+        "description": "`POST /api/v1/auth/invitacion-mandato/aceptar`.",
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo para una cuenta nueva: el nombre con que queda. Sin él, el del mandatario. Una cuenta que ya existe conserva el suyo.",
+            "title": "Nombre"
+          },
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "AceptacionInvitacionMandato",
+        "type": "object"
+      },
       "AltaTotp": {
         "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
         "properties": {
@@ -144,7 +173,13 @@
           "contrasena_actual_invalida",
           "contrasena_debil",
           "vinculo_ya_confirmado",
-          "vinculo_finalizado"
+          "vinculo_finalizado",
+          "mandato_ya_asociado",
+          "mandato_no_vigente",
+          "mandato_no_asociable",
+          "mandato_sin_persona",
+          "asociacion_incompatible_con_consejo",
+          "asociacion_de_si_mismo"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -255,6 +290,44 @@
           "sesiones_cerradas"
         ],
         "title": "ContrasenaGuardada",
+        "type": "object"
+      },
+      "Desasociacion": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/desasociar-persona`.",
+        "properties": {
+          "referencia": {
+            "description": "Por qué la cuenta asociada no es la del mandatario (P1-c). Queda en la fila de la desasociación, no en la auditoría.",
+            "maxLength": 300,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          }
+        },
+        "required": [
+          "referencia"
+        ],
+        "title": "Desasociacion",
+        "type": "object"
+      },
+      "DesasociacionHecha": {
+        "description": "Respuesta de desasociar: el mandato, su CUIT y su vigencia quedan como estaban.",
+        "properties": {
+          "mandato_id": {
+            "format": "uuid",
+            "title": "Mandato Id",
+            "type": "string"
+          },
+          "sesiones_revocadas": {
+            "description": "Sesiones de la persona que se cerraron (RN22).",
+            "title": "Sesiones Revocadas",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mandato_id",
+          "sesiones_revocadas"
+        ],
+        "title": "DesasociacionHecha",
         "type": "object"
       },
       "EnlacePedido": {
@@ -424,6 +497,17 @@
           "revocada"
         ],
         "title": "EstadoInvitacion",
+        "type": "string"
+      },
+      "EstadoInvitacionMandato": {
+        "enum": [
+          "por_aprobar",
+          "pendiente",
+          "vencida",
+          "aceptada",
+          "revocada"
+        ],
+        "title": "EstadoInvitacionMandato",
         "type": "string"
       },
       "EstadoSegundoFactor": {
@@ -691,6 +775,284 @@
         "title": "InvitacionAceptada",
         "type": "object"
       },
+      "InvitacionMandato": {
+        "description": "Una invitación de mandato, como la ve quien tiene `mandatos.registrar`.",
+        "properties": {
+          "aceptada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aceptada En"
+          },
+          "aprobada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aprobada En"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo mientras está por aprobar, para quien la emitió o tiene `mandatos.registrar`; nulo en cualquier otro estado.",
+            "title": "Correo"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "emitida_por_mi": {
+            "title": "Emitida Por Mi",
+            "type": "boolean"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoInvitacionMandato"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "origen": {
+            "description": "`api`, o `soporte` si la emitió el equipo en un paso.",
+            "title": "Origen",
+            "type": "string"
+          },
+          "referencia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Con la misma regla que el correo.",
+            "title": "Referencia"
+          },
+          "revocada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revocada En"
+          },
+          "vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vence En"
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "correo",
+          "referencia",
+          "origen",
+          "emitida_por_mi",
+          "creada_en"
+        ],
+        "title": "InvitacionMandato",
+        "type": "object"
+      },
+      "InvitacionMandatoAceptada": {
+        "description": "Respuesta de aceptar: el mandato quedó asociado a la persona.",
+        "properties": {
+          "consorcio_id": {
+            "format": "uuid",
+            "title": "Consorcio Id",
+            "type": "string"
+          },
+          "cuenta_nueva": {
+            "title": "Cuenta Nueva",
+            "type": "boolean"
+          },
+          "mandato_id": {
+            "format": "uuid",
+            "title": "Mandato Id",
+            "type": "string"
+          },
+          "persona_id": {
+            "format": "uuid",
+            "title": "Persona Id",
+            "type": "string"
+          },
+          "vigente_desde": {
+            "description": "Desde cuándo vale el mandato: si es futuro, el consorcio aparece en `/me/consorcios` recién desde esa fecha.",
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consorcio_id",
+          "persona_id",
+          "mandato_id",
+          "cuenta_nueva",
+          "vigente_desde"
+        ],
+        "title": "InvitacionMandatoAceptada",
+        "type": "object"
+      },
+      "InvitacionMandatoAprobada": {
+        "description": "Respuesta de aprobar: el correo con el enlace salió por la cola.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoInvitacionMandato",
+            "description": "Siempre `pendiente`."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "vence_en"
+        ],
+        "title": "InvitacionMandatoAprobada",
+        "type": "object"
+      },
+      "InvitacionMandatoEmitida": {
+        "description": "Respuesta de emitir: queda por aprobar, sin enlace ni correo enviado.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoInvitacionMandato",
+            "description": "Siempre `por_aprobar`."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mandato_id": {
+            "format": "uuid",
+            "title": "Mandato Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mandato_id",
+          "estado"
+        ],
+        "title": "InvitacionMandatoEmitida",
+        "type": "object"
+      },
+      "InvitacionMandatoNueva": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones`.",
+        "properties": {
+          "correo": {
+            "description": "El correo del mandatario que figura en el respaldo.",
+            "examples": [
+              "administracion@estudio.com"
+            ],
+            "maxLength": 254,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "title": "Correo",
+            "type": "string"
+          },
+          "referencia": {
+            "description": "De dónde sale ese correo: contrato de administración, nota del administrador u otro instrumento (P1-b). Queda en la invitación, no en la auditoría.",
+            "examples": [
+              "Contrato de administración del 01-10-2026, cláusula 12"
+            ],
+            "maxLength": 300,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Referencia",
+            "type": "string"
+          }
+        },
+        "required": [
+          "correo",
+          "referencia"
+        ],
+        "title": "InvitacionMandatoNueva",
+        "type": "object"
+      },
+      "InvitacionMandatoRecibida": {
+        "description": "Lo que ve quien abre el enlace, antes de aceptar. Sin CUIT.",
+        "properties": {
+          "consorcio": {
+            "title": "Consorcio",
+            "type": "string"
+          },
+          "invitada_por": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nombre de quien emitió; nulo si la emitió el equipo de la plataforma.",
+            "title": "Invitada Por"
+          },
+          "mandatario": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nombre del mandatario que figura en el mandato.",
+            "title": "Mandatario"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consorcio",
+          "mandatario",
+          "invitada_por",
+          "vence_en"
+        ],
+        "title": "InvitacionMandatoRecibida",
+        "type": "object"
+      },
       "InvitacionNueva": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/invitaciones`.",
         "properties": {
@@ -806,6 +1168,23 @@
           "elementos"
         ],
         "title": "ListaInvitaciones",
+        "type": "object"
+      },
+      "ListaInvitacionesMandato": {
+        "description": "`GET /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones`.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/InvitacionMandato"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaInvitacionesMandato",
         "type": "object"
       },
       "ListaSesiones": {
@@ -1160,6 +1539,21 @@
           "token"
         ],
         "title": "TokenInvitacion",
+        "type": "object"
+      },
+      "TokenInvitacionMandato": {
+        "description": "`POST /api/v1/auth/invitacion-mandato/consultar`: el token del fragmento del enlace.",
+        "properties": {
+          "token": {
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "TokenInvitacionMandato",
         "type": "object"
       },
       "Unidad": {
@@ -1615,6 +2009,113 @@
         "summary": "Pedir la entrada: enlace y código por correo",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/invitacion-mandato/aceptar": {
+      "post": {
+        "description": "Asocia la persona al mandato. Si el correo no tenía cuenta crea la persona y una sesión\n(deja sus cookies). Si la tenía, pide la sesión de esa persona (con su `X-CSRF-Token`).\nCon la sesión de quien ya la aceptó, responde que el mandato es suyo mientras lo siga\nsiendo; nunca reasocia ni abre otra sesión. Las mismas protecciones contra otro sitio que\n`POST /auth/invitacion/aceptar`.",
+        "operationId": "aceptar_api_v1_auth_invitacion_mandato_aceptar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AceptacionInvitacionMandato"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionMandatoAceptada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La invitación no sirve (todas las causas igual)."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Hace falta la sesión del correo invitado, o la persona no puede asociarse (Consejo superpuesto, o fue quien emitió o aprobó)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aceptar una invitación de mandato",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/auth/invitacion-mandato/consultar": {
+      "post": {
+        "description": "No la consume: abrirla no la acepta. Sin CUIT.",
+        "operationId": "consultar_api_v1_auth_invitacion_mandato_consultar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenInvitacionMandato"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionMandatoRecibida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La invitación no sirve (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver una invitación de mandato antes de aceptarla",
+        "tags": [
+          "mandatos"
         ]
       }
     },
@@ -2161,6 +2662,146 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/invitaciones-mandato/{invitacion_id}/aprobar": {
+      "post": {
+        "description": "Aprueba ESA invitación: si quien la emitió la reemplazó mientras tanto, responde 404 y\nnadie aprueba un correo que no vio. Fija el enlace, que vence en 7 días, y lo manda al\ncorreo invitado en la misma transacción.",
+        "operationId": "aprobar_api_v1_consorcios__consorcio_id__invitaciones_mandato__invitacion_id__aprobar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionMandatoAprobada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar`, o quien aprueba es quien la emitió."
+          },
+          "404": {
+            "description": "La invitación no existe aquí o ya no es la que está por aprobar."
+          },
+          "409": {
+            "description": "El mandato ya tiene cuenta, no está vigente o no es externo."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aprobar la invitación de un administrador externo (sale el correo)",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/invitaciones-mandato/{invitacion_id}/revocar": {
+      "post": {
+        "description": "Repetirlo responde lo mismo, con un solo evento: retirar es idempotente por sí mismo, así\nque la clave se exige como en toda escritura de A7 pero no se guarda respuesta.",
+        "operationId": "revocar_api_v1_consorcios__consorcio_id__invitaciones_mandato__invitacion_id__revocar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "La invitación no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ya se aceptó: para corregir la cuenta se desasocia."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar una invitación de mandato no aceptada",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar": {
       "post": {
         "description": "Repetirlo responde lo mismo. Una vencida también se puede retirar. Una invitación de una\nunidad que la persona no alcanza responde 404, igual que una que no existe.",
@@ -2211,6 +2852,234 @@
         "summary": "Retirar una invitación pendiente",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/desasociar-persona": {
+      "post": {
+        "description": "Corrige una cuenta asociada por error (P1-c): el mandato, su CUIT y su vigencia quedan\ncomo estaban; la persona pierde el acceso (se cierran sus sesiones) y la referencia queda en\nla fila de la desasociación, no en la auditoría.",
+        "operationId": "desasociar_api_v1_consorcios__consorcio_id__mandatos__mandato_id__desasociar_persona_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mandato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mandato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Desasociacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesasociacionHecha"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar`, o la cuenta es la de quien lo pide."
+          },
+          "404": {
+            "description": "El mandato no existe en este consorcio."
+          },
+          "409": {
+            "description": "El mandato no tiene cuenta o no es de un administrador externo."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Desasociar la cuenta de un administrador externo",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones": {
+      "get": {
+        "description": "La más reciente primero. El correo y la referencia salen solo de la que está por\naprobar: sin verlos, aprobar sería un sello de goma (P1). En cualquier otro estado, nulos.",
+        "operationId": "listar_api_v1_consorcios__consorcio_id__mandatos__mandato_id__invitaciones_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mandato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mandato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaInvitacionesMandato"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar` en el consorcio."
+          },
+          "404": {
+            "description": "El mandato no existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Invitaciones de un mandato",
+        "tags": [
+          "mandatos"
+        ]
+      },
+      "post": {
+        "description": "Al correo que figura en el respaldo, con la referencia de dónde sale (P1-b). No sale\nningún correo hasta que otra persona con `mandatos.registrar` la apruebe. Emitir de nuevo\nretira la anterior que no se aceptó.",
+        "operationId": "emitir_api_v1_consorcios__consorcio_id__mandatos__mandato_id__invitaciones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mandato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mandato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitacionMandatoNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionMandatoEmitida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar` en el consorcio."
+          },
+          "404": {
+            "description": "El mandato no existe en este consorcio."
+          },
+          "409": {
+            "description": "El mandato ya tiene cuenta, no está vigente o no es externo."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Emitir la invitación de un administrador externo (queda por aprobar)",
+        "tags": [
+          "mandatos"
         ]
       }
     },

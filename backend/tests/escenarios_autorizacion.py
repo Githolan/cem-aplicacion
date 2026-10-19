@@ -157,7 +157,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
     valores = dict(item.split("=", 1) for item in filter(None, texto.split(";")))
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
-        "respaldo", "actor",
+        "emitio", "respaldo", "actor",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -186,6 +186,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
         objetivo_sin_cuenta=valores.get("objetivo") == "sin_cuenta",
         registrado_por=persona("registrado"),
         registrado_por_soporte=valores.get("registrado") == "soporte",
+        emitido_por=persona("emitio"),
         respaldo_presente=valores.get("respaldo") == "si",
     )
     return entidad, valores.get("actor") == "nadie"
