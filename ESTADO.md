@@ -113,7 +113,17 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `18446f0`** (19-10-2026, H2b 2b-3 completo), base `0012`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+**Staging y producción en `175e77f`** (19-10-2026, defectos previos a 2b-4), base `0013`, contrato 0.11.0. Los dos entornos tienen los mismos nombres de variables en sus 4 apps.
+
+- **Defectos previos a 2b-4 (PR #69 y #70), 19-10. En staging y producción.** Encontrados al diseñar 2b-4 (CEM #48); no cambian producto.
+  - **PR #69, migración `0013` (issue #66, E21 del tracker de CEM):** `registrar_decision` y `cambiar_modo` atan el actor a la sesión como `alta_mandato` y `baja_mandato`: solo orígenes `api` (actor = `plataforma.persona_actual()`) y `soporte` (sin persona en la sesión y sin actor). `baja_mandato` deja de aceptar un actor con `soporte`. El downgrade restaura las definiciones anteriores sin tocar datos. 23 pruebas nuevas.
+  - **PR #70 (E25, E28 y E30):** invitar a una unidad que no existe o es de otro consorcio responde 404 `no_encontrado` (antes 403); `require_scope` no da ámbito en un consorcio dado de baja (404, como `/me/consorcios`); el listado de invitaciones no devuelve el correo de las aceptadas (`correo` es `null`; D6). 6 pruebas nuevas.
+  - CI con imágenes en verde sobre `175e77f`: 908 del backend, 58 de contratos, 134 del frontend y 103 de extremo a extremo. Revisión de Codex limpia en las cabezas exactas de los dos PR.
+  - Despliegue (Claude, mandato del propietario del 19-10): staging y después producción, con copia previa verificada en los dos. Validación en la base: las tres funciones con el control nuevo, `security definer`, dueño `cem_migrate` y `search_path` fijo; 9 casos que fallan antes de escribir con el motivo de `0013`, comparados con la misma corrida sobre `0012` antes del despliegue, donde ninguno daba esos motivos; nada escrito; cadena de auditoría intacta. Rutas sin sesión → 401. Registro en `doc/deploys/2026-10-19-175e77f.md` del repositorio CEM.
+  - **Producción sigue sin mandatos:** la barrera del primer mandato real no se cruzó. Desde el primero, `0013` y `0012` no se bajan sin el propietario.
+  - **Sin verificar en los entornos:** los flujos HTTP con sesión de E25, E28 y E30 (no hay cuentas de prueba; decisión P3 del diseño de 2b-4). Probados por las pruebas de integración de `ci.ps1`.
+
+Antes, **`18446f0`** (19-10-2026, H2b 2b-3 completo), base `0012`:
 
 - **H2b 2b-3, tabla de verdad, políticas y rutas (PR #65, #64 y #67), 19-10. En staging y producción.** Diseño: `doc/diseno/H2b_3_Tabla_de_verdad.md` y `H2b_3_Plan_de_implementacion.md` del repositorio CEM (#46).
   - **PR #65, políticas y evaluador puro:** `contratos/cem_contracts/politicas.py` (modelo `Politica` estricto, booleanos `StrictBool`, `fuente_normativa` obligatoria) y `politicas_datos/*.json` (10 módulos, 29 acciones, una por vista). `backend/app/autorizacion/evaluador.py`: `permitido = ámbito ∧ (vínculo ∨ ámbito declarado ∨ facultad) ∧ filtros`, negar por defecto, gramática de recursos A8. La tabla de verdad es un CSV de 267 filas que se prueba entera. Las 6 acciones económicas se niegan con `requiere_controles_2b6` hasta 2b-6.
@@ -122,7 +132,7 @@ Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.a
   - CI con imágenes en verde sobre `18446f0`: 879 del backend, 58 de contratos, 134 del frontend y 103 de extremo a extremo.
   - Despliegue (Claude, con la autorización del propietario del 18-10): `d41475d` (PR #65 y #64) en staging y producción, con copia previa verificada en los dos, y después `18446f0` (PR #67) en los dos, sin migración. Validación funcional en la base con `ROLLBACK` en los dos entornos; políticas verificadas dentro de la imagen desplegada; rutas sin sesión → 401. Registros en `doc/deploys/2026-10-19-d41475d.md` y `2026-10-19-18446f0.md` del repositorio CEM.
   - **Producción no tiene mandatos:** desde el primer mandato real, `0012` no se baja a `0011` (barrera del propietario).
-  - **Abierto:** E15 (un mandato que vence por fecha no revoca sesiones), el resto de E18, A7, A13, A15, los controles económicos de 2b-6 e issue #66 (`registrar_decision` y `cambiar_modo` confían en el `actor`).
+  - **Abierto:** E15 (un mandato que vence por fecha no revoca sesiones), el resto de E18, A7, A13, A15 y los controles económicos de 2b-6. El issue #66 se cerró con `0013` (arriba).
 
 
 - **H2b 2b-2, mandatos (`484f8ef`, PR #61), 18-10. En staging y producción como `f242295` (hoy reemplazada por `18446f0`).** El diseño suma los criterios 9 y 10 (CEM #43).
