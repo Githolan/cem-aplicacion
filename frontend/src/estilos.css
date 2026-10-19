@@ -131,6 +131,7 @@ button:focus-visible {
 /* Formularios (entrar con un código): etiqueta arriba, campo de 44 px de alto. */
 .formulario {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
   max-width: 24rem;
 }
@@ -141,6 +142,8 @@ button:focus-visible {
 
 .formulario input,
 .formulario select {
+  min-width: 0;
+  max-width: 100%;
   min-height: 44px;
   padding: 0.5rem 0.75rem;
   border: 1px solid #5a6573;
