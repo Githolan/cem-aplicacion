@@ -586,11 +586,17 @@ AS $function$
 
 DOWNGRADE = r"""
 -- Las confirmaciones no se pueden derivar de nada: con alguna, no se baja (como 0012 con los
--- mandatos). La procedencia sí se puede volver a derivar de los eventos de aceptación.
+-- mandatos). La procedencia de un vínculo que entró por invitación se vuelve a derivar de su
+-- evento de aceptación; la de cualquier otra fuente (importación, declaración, documento) no
+-- tiene de dónde salir: con alguno, tampoco se baja (Codex).
 do $guarda$
 begin
   if exists (select 1 from nucleo.vinculo where confirmado_en is not null) then
     raise exception 'hay vínculos confirmados: bajar a 0013 perdería las confirmaciones'
+      using errcode = 'P0001', hint = 'downgrade_con_datos';
+  end if;
+  if exists (select 1 from nucleo.vinculo where fuente <> 'invitacion') then
+    raise exception 'hay vínculos de otra fuente: bajar a 0013 perdería su procedencia'
       using errcode = 'P0001', hint = 'downgrade_con_datos';
   end if;
 end

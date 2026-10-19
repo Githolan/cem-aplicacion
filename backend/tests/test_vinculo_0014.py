@@ -865,3 +865,28 @@ def test_con_mandatos_y_sin_confirmaciones_baja_a_0012_pero_no_a_0011(base_apart
             "0012"
         )
         assert c.execute(text("select count(*) from nucleo.mandato")).scalar() == 1
+
+
+def test_downgrade_con_un_vinculo_que_no_entro_por_invitacion_se_niega(base_aparte):
+    """Su procedencia no sale de ningún evento: bajar la borraría para siempre (Codex)."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0014")
+    cons, uni = _consorcio_y_unidad(motor)
+    persona = _persona(motor, "Doc")
+    with motor.begin() as c:
+        v = c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde, fuente, origen) values (:c, :u, :p, 'propietario',"
+                " '2020-01-01', 'documento', 'soporte') returning id"
+            ),
+            {"c": cons, "u": uni, "p": persona},
+        ).scalar_one()
+    antes = _catalogo(motor)
+    with pytest.raises(DBAPIError) as error:
+        command.downgrade(cfg, "0013")
+    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    assert _catalogo(motor) == antes
+    with motor.begin() as c:  # control: sin ese vínculo, baja
+        c.execute(text("delete from nucleo.vinculo where id = :v"), {"v": v})
+    command.downgrade(cfg, "0013")

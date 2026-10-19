@@ -37,6 +37,9 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Annotated, Any
 
+import anyio
+import anyio.from_thread
+import anyio.to_thread
 from cem_contracts.errores import CodigoError
 from fastapi import Depends, Header, Request, Response
 from psycopg.errors import LockNotAvailable
@@ -198,13 +201,22 @@ async def responder_una_vez_con_cupo(
 ) -> Response:
     """Como `responder_una_vez`, pero gasta un cupo de tasa antes del efecto, con el bloqueo de
     la clave tomado: solo el pedido que hace el efecto gasta cupo. Un reintento, aunque llegue
-    mientras el primero sigue en curso, espera y recibe la respuesta guardada sin gastar nada."""
-    with _turno(motor, ctx, pedido) as (conn, claves, guardada):
-        if guardada is not None:
-            return guardada
-        await cupo()
-        estado, cuerpo = efecto(conn)
-        return _guardar(conn, claves, pedido, estado, cuerpo)
+    mientras el primero sigue en curso, espera y recibe la respuesta guardada sin gastar nada.
+
+    Todo el tramo con el bloqueo corre en un hilo: el bloqueo de PostgreSQL es sincrónico, y si
+    corriera en el bucle de eventos, un segundo pedido de la misma clave lo frenaría mientras
+    el primero espera a Redis, que ya no podría seguir para soltar el bloqueo (Codex). El cupo
+    se espera desde ese hilo, en el bucle."""
+
+    def en_hilo() -> Response:
+        with _turno(motor, ctx, pedido) as (conn, claves, guardada):
+            if guardada is not None:
+                return guardada
+            anyio.from_thread.run(cupo)
+            estado, cuerpo = efecto(conn)
+            return _guardar(conn, claves, pedido, estado, cuerpo)
+
+    return await anyio.to_thread.run_sync(en_hilo)
 
 
 def _esperar_turno(conn: Connection, claves: dict[str, Any]) -> None:
