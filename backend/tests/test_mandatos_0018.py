@@ -12,8 +12,9 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.test_mandatos import otra_persona, vinculo_confirmado
+from tests.test_mandatos import otra_persona, sesiones_abiertas, vinculo_confirmado
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
+from tests.test_mandatos_0017 import _marca, _procesar, _registrado_antes
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
@@ -407,14 +408,41 @@ def test_el_origen_se_valida_antes_que_la_persona(escena, motor_app):
     assert _motivo(error) == "origen_invalido"
 
 
+# E15 con vigencia vacía ---------------------------------------------------------------------
+
+
+def test_una_vigencia_vacia_vencida_no_revoca_sesiones(escena, motor_migrate, motor_app):
+    """Decisión 4: un mandato que nunca dio privilegios no revoca. Con `desde = hasta` nunca
+    rigió, aunque se haya registrado antes de su fin."""
+    e = escena
+    persona = otra_persona(motor_migrate, e["cons"])
+    dia = date.today() - timedelta(days=2)
+    vacio = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=persona,
+                 desde=dia, hasta=dia, origen="soporte")  # fmt: skip
+    _registrado_antes(motor_migrate, vacio)
+    sesiones_abiertas(motor_migrate, persona, 1)
+    _procesar(motor_app)
+    assert _marca(motor_migrate, vacio) is None
+    assert sesiones_abiertas(motor_migrate, persona) == 1
+    # Control: el mismo mandato con una vigencia de verdad, sí revoca.
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.mandato set vigente_desde = vigente_hasta - 10"
+                       " where id = :m"), {"m": vacio})  # fmt: skip
+    _procesar(motor_app)
+    assert _marca(motor_migrate, vacio) is not None
+    assert sesiones_abiertas(motor_migrate, persona) == 0
+
+
 # Downgrade ----------------------------------------------------------------------------------
 
 
-def _definicion_alta(motor) -> str:
+def _definicion_alta(motor) -> tuple[str, str]:
+    """Las dos funciones que `0018` reemplaza: `alta_mandato` y la del vencimiento."""
     with motor.connect() as c:
-        return c.execute(
-            text("select pg_get_functiondef('nucleo.alta_mandato'::regproc)")
-        ).scalar_one()
+        return tuple(
+            c.execute(text(f"select pg_get_functiondef('nucleo.{f}'::regproc)")).scalar_one()
+            for f in ("alta_mandato", "revocar_sesiones_por_vencimiento")
+        )
 
 
 def test_el_downgrade_de_0018_se_niega_con_facultades_de_lectura_otorgadas(base_aparte):  # noqa: F811
@@ -422,9 +450,10 @@ def test_el_downgrade_de_0018_se_niega_con_facultades_de_lectura_otorgadas(base_
     command.upgrade(cfg, "0017")
     antes = _definicion_alta(motor)
     command.upgrade(cfg, "0018")
-    assert _definicion_alta(motor) != antes  # control: 0018 la cambia
+    despues = _definicion_alta(motor)
+    assert despues[0] != antes[0] and despues[1] != antes[1]  # control: 0018 cambia las dos
     command.downgrade(cfg, "0017")
-    assert _definicion_alta(motor) == antes  # la bajada deja la de 0016 tal cual
+    assert _definicion_alta(motor) == antes  # la bajada las deja como en 0016 y 0017
     command.upgrade(cfg, "0018")  # ida y vuelta sin datos
     with motor.begin() as c:
         cons = c.execute(text("insert into nucleo.consorcio (nombre) values ('A') returning id"))

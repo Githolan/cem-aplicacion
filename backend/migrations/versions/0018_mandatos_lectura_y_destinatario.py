@@ -25,9 +25,14 @@ alta por la API sin cuenta (`externo_por_invitacion`); la cuenta se asocia por A
 del origen y del actor pasa ahora antes de mirar a la persona. Con origen `soporte` la función
 sigue como en `0016` (vía excepcional, auditada).
 
+**E15 con vigencia vacía.** `revocar_sesiones_por_vencimiento` (`0017`) deja afuera los
+mandatos con `vigente_hasta <= vigente_desde`: nunca rigieron ni concedieron nada, y la decisión
+4 del propietario dice que un mandato que nunca dio privilegios no revoca sesiones.
+
 Downgrade: se niega (`downgrade_con_datos`) si algún mandato tiene otorgada una de las dos
-facultades nuevas. Si no, vuelve a `alta_mandato` de `0016` (el mismo texto, leído de esa
-migración), quita las funciones y saca las facultades de los paquetes y del catálogo.
+facultades nuevas. Si no, vuelve a `alta_mandato` de `0016` y a
+`revocar_sesiones_por_vencimiento` de `0017` (los mismos textos, leídos de esas migraciones),
+quita las funciones y saca las facultades de los paquetes y del catálogo.
 
 Revisión: 0018
 Anterior: 0017
@@ -58,17 +63,46 @@ INTERNAS = (
 )
 
 
-def _alta_de_0016() -> str:
-    """El texto de `alta_mandato` que dejó `0016`: es la base del cambio y lo que restaura el
-    downgrade, sin copiarlo a mano."""
-    ruta = Path(__file__).with_name("0016_mandatos_a15_e26_r10.py")
-    spec = importlib.util.spec_from_file_location("migracion_0016", ruta)
+def _funcion_de(archivo: str, inicio: str) -> str:
+    """El texto de una función tal como la dejó una migración anterior: es la base del cambio y
+    lo que restaura el downgrade, sin copiarlo a mano."""
+    ruta = Path(__file__).with_name(archivo)
+    spec = importlib.util.spec_from_file_location(ruta.stem, ruta)
     assert spec is not None and spec.loader is not None
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
-    inicio = modulo.UPGRADE.index("create or replace function nucleo.alta_mandato(")
-    fin = modulo.UPGRADE.index("\n  $$;\n", inicio) + len("\n  $$;\n")
-    return modulo.UPGRADE[inicio:fin]
+    desde = modulo.UPGRADE.index(inicio)
+    fin = modulo.UPGRADE.index("\n  $$;\n", desde) + len("\n  $$;\n")
+    return modulo.UPGRADE[desde:fin]
+
+
+def _alta_de_0016() -> str:
+    return _funcion_de(
+        "0016_mandatos_a15_e26_r10.py", "create or replace function nucleo.alta_mandato("
+    )
+
+
+def _vencimiento_de_0017() -> str:
+    texto = _funcion_de(
+        "0017_mandatos_revocar_al_vencer.py",
+        "create function nucleo.revocar_sesiones_por_vencimiento(",
+    )
+    return texto.replace("create function", "create or replace function", 1)
+
+
+VIGENTE_DESPUES_DEL_ALTA = """\
+         and x.vigente_hasta > (x.creado_en at time zone co.zona_horaria)::date
+"""
+VIGENCIA_NO_VACIA = """\
+         -- 2b-4c (0018): una vigencia vacía nunca rigió ni concedió nada (decisión 4).
+         and x.vigente_hasta > x.vigente_desde
+"""
+
+
+def _vencimiento_0018() -> str:
+    texto = _vencimiento_de_0017()
+    assert texto.count(VIGENTE_DESPUES_DEL_ALTA) == 1
+    return texto.replace(VIGENTE_DESPUES_DEL_ALTA, VIGENTE_DESPUES_DEL_ALTA + VIGENCIA_NO_VACIA)
 
 
 EXISTE_PERSONA_0016 = """\
@@ -334,6 +368,7 @@ def upgrade() -> None:
     op.execute(FUNCIONES)
     op.execute(_privilegios())
     op.execute(_alta_0018())
+    op.execute(_vencimiento_0018())
 
 
 def downgrade() -> None:
@@ -351,6 +386,7 @@ $$;
 """
     )
     op.execute(_alta_de_0016())
+    op.execute(_vencimiento_de_0017())
     for f in LECTURAS + INTERNAS:
         op.execute(f"drop function {f};")
     op.execute(
