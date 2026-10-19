@@ -20,7 +20,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.db import transaccion
 from tests.conftest import ADMIN_URL, CLAVES, alembic_config
 from tests.test_mandatos import otra_persona
-from tests.test_mandatos_0012 import alta, baja
+from tests.test_mandatos_0012 import CUIT_X, _insertar_mandato, alta, baja
 from tests.test_modo_operacion import consorcio_con_persona, decidir
 
 pytestmark = pytest.mark.db
@@ -842,3 +842,26 @@ def test_downgrade_con_un_vinculo_confirmado_se_niega(base_aparte):
                  " confirmacion_referencia = null where id = :v"), {"v": v},
         )  # fmt: skip
     command.downgrade(cfg, "0013")
+
+
+def test_con_mandatos_y_sin_confirmaciones_baja_a_0012_pero_no_a_0011(base_aparte):
+    """La barrera de staging (P3) se mide guarda por guarda: un mandato frena por debajo de
+    `0012`, no `0014 -> 0012`. Una confirmación frena por debajo de `0014` (prueba anterior)."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0014")
+    _insertar_mandato(motor, mandatario_cuit=CUIT_X)
+    cons, uni = _consorcio_y_unidad(motor)
+    v = invitar_y_aceptar(motor, cons, uni, None)
+    command.downgrade(cfg, "0012")
+    command.upgrade(cfg, "0014")
+    assert vinculo(motor, v)["fuente"] == "invitacion"
+    command.downgrade(cfg, "0012")
+    antes = _catalogo(motor)
+    with pytest.raises(DBAPIError, match="downgrade de 0012 se niega"):
+        command.downgrade(cfg, "0011")
+    assert _catalogo(motor) == antes
+    with motor.connect() as c:
+        assert c.execute(text("select version_num from plataforma.alembic_version")).scalar() == (
+            "0012"
+        )
+        assert c.execute(text("select count(*) from nucleo.mandato")).scalar() == 1
