@@ -19,7 +19,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.db import transaccion
 from scripts import alta_mandato
 from tests.conftest import alembic_config, url_rol, vaciar_mandatos
-from tests.test_modo_operacion import consorcio_con_persona, decidir
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
 
@@ -119,7 +119,7 @@ def otra_persona(motor_migrate, cons) -> UUID:
 def test_alta_con_el_paquete_del_tipo_y_auditada(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     otra = otra_persona(motor_migrate, cons)
-    m = alta(motor_app, cons, per, decidir(motor_app, cons, per), persona=otra)
+    m = alta(motor_app, cons, per, decidir_equipo(motor_app, cons), persona=otra)
     assert facultades_de(motor_app, cons, per, m) == PAQUETE_CONSEJO
     with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
         accion, despues = c.execute(
@@ -132,7 +132,7 @@ def test_alta_con_el_paquete_del_tipo_y_auditada(motor_migrate, motor_app):
 
 def test_el_acta_puede_achicar_el_paquete_pero_no_ampliarlo(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, per)
+    acta = decidir_equipo(motor_app, cons)
     m = alta(motor_app, cons, per, acta, persona=otra_persona(motor_migrate, cons),
              facultades=["padron.ver"])  # fmt: skip
     assert facultades_de(motor_app, cons, per, m) == ["padron.ver"]
@@ -148,12 +148,12 @@ def test_el_acta_puede_achicar_el_paquete_pero_no_ampliarlo(motor_migrate, motor
 
 def test_administrador_externo_sin_cuenta_con_nombre(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, per, "contrato_administracion")
+    acta = decidir_equipo(motor_app, cons, "contrato_administracion")
     despues = DESDE + timedelta(days=30)
     m = alta(motor_app, cons, per, acta, tipo="administrador_externo", nombre="Administración X",
              cuit="20123456786", hasta=despues)  # fmt: skip
     assert facultades_de(motor_app, cons, per, m) == ["documentos.cargar"]
-    with pytest.raises(DBAPIError, match="mandato_check"):
+    with pytest.raises(DBAPIError, match="nombre_invalido"):
         alta(motor_app, cons, per, acta, tipo="administrador_externo", cuit="20123456786",
              desde=despues)  # fmt: skip
     with pytest.raises(DBAPIError, match="necesita su CUIT"):
@@ -172,7 +172,7 @@ def test_criterio_9_sin_decision_de_respaldo_no_hay_mandato(motor_migrate, motor
 
 def test_superposicion_del_mismo_tipo_y_persona_rechazada(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, per)
+    acta = decidir_equipo(motor_app, cons)
     otra = otra_persona(motor_migrate, cons)
     alta(motor_app, cons, per, acta, persona=otra, hasta=DESDE + timedelta(days=365))
     with pytest.raises(DBAPIError, match="ya hay un mandato de miembro_consejo"):
@@ -186,7 +186,7 @@ def test_rn22_la_baja_revoca_las_sesiones_y_no_borra_nada(motor_migrate, motor_a
     cons, _, per = consorcio_con_persona(motor_migrate)
     mandatario = otra_persona(motor_migrate, cons)
     ajena = otra_persona(motor_migrate, cons)
-    m = alta(motor_app, cons, per, decidir(motor_app, cons, per), persona=mandatario)
+    m = alta(motor_app, cons, per, decidir_equipo(motor_app, cons), persona=mandatario)
     assert sesiones_abiertas(motor_migrate, mandatario, 2) == 2
     assert sesiones_abiertas(motor_migrate, ajena, 1) == 1
 
@@ -228,7 +228,7 @@ def test_rn22_la_baja_revoca_las_sesiones_y_no_borra_nada(motor_migrate, motor_a
 def test_un_mandato_en_el_edificio_a_no_da_nada_en_el_b(motor_migrate, motor_app):
     cons_a, _, per_a = consorcio_con_persona(motor_migrate)
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
-    acta_a = decidir(motor_app, cons_a, per_a)
+    acta_a = decidir_equipo(motor_app, cons_a)
     m = alta(motor_app, cons_a, per_a, acta_a, persona=per_b)
 
     def visibles(cons, per) -> tuple[int, int]:
@@ -252,7 +252,7 @@ def test_un_mandato_en_el_edificio_a_no_da_nada_en_el_b(motor_migrate, motor_app
 
 def test_cem_app_no_escribe_mandatos_ni_facultades_directo(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    acta = decidir(motor_app, cons, per)
+    acta = decidir_equipo(motor_app, cons)
     m = alta(motor_app, cons, per, acta, persona=otra_persona(motor_migrate, cons))
     sentencias = [
         "update nucleo.mandato set vigente_hasta = null",
@@ -289,7 +289,7 @@ def test_la_decision_guarda_el_sha256_del_acta(motor_migrate, motor_app):
             ).scalar_one()
             == sha.lower()
         )
-    with pytest.raises(DBAPIError, match="sha256_acta_check"):
+    with pytest.raises(DBAPIError, match="sha256_invalido"):
         with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
             c.execute(
                 text(

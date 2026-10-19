@@ -159,7 +159,8 @@ def finalizado(motor_migrate, mandato) -> tuple[str | None, UUID | None]:
 
 def test_baja_mandato_por_soporte_no_acepta_un_actor(motor_migrate, motor_app):
     cons, p, otra = consorcio_con_dos_personas(motor_migrate)
-    decision = registrar(motor_app, cons, p, p, "api")
+    # La decisión la carga el equipo: A15 (0016) no deja que `p` use una que registró.
+    decision = registrar(motor_app, cons, None, None, "soporte")
     mandato = alta(motor_app, cons, p, decision, persona=otra, tipo="miembro_consejo")
     with pytest.raises(DBAPIError, match="origen_invalido"):
         dar_de_baja_por_soporte(motor_app, cons, mandato, p)

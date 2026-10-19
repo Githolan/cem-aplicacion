@@ -69,6 +69,18 @@ def decidir(motor_app, cons: UUID, per: UUID, tipo: str = "asamblea") -> UUID:
         ).scalar_one()
 
 
+def decidir_equipo(motor_app, cons: UUID, tipo: str = "asamblea") -> UUID:
+    """Una decisión que carga el equipo (`soporte`, sin persona): A15 no la frena al usarla."""
+    with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
+        return c.execute(
+            text(
+                "select nucleo.registrar_decision(:t, :f, 'Aprueba la plataforma',"
+                " 'Acta 12, libro 3, folio 40', null, 'soporte')"
+            ),
+            {"t": tipo, "f": DESDE},
+        ).scalar_one()
+
+
 def cambiar(
     motor_app, cons: UUID, per: UUID, modo: str, decision: UUID | None, desde: date = DESDE
 ):
@@ -197,7 +209,7 @@ def test_sin_consorcio_en_el_ambito_no_registra_nada(motor_migrate, motor_app):
 
 def test_la_decision_exige_referencia_del_acta(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    with pytest.raises(DBAPIError, match="decision_formal_referencia_acta_check"):
+    with pytest.raises(DBAPIError, match="referencia_invalida"):
         with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
             c.execute(
                 text(

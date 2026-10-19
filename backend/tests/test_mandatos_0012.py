@@ -19,7 +19,7 @@ from sqlalchemy.exc import DBAPIError
 from app.db import transaccion
 from tests.conftest import ADMIN_URL, CLAVES, alembic_config
 from tests.test_mandatos import facultades_de, otra_persona, sesiones_abiertas
-from tests.test_modo_operacion import consorcio_con_persona, decidir
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
 
@@ -131,7 +131,7 @@ def escena(motor_migrate, motor_app):
         "per": per,
         "p1": otra_persona(motor_migrate, cons),
         "p2": otra_persona(motor_migrate, cons),
-        "acta": decidir(motor_app, cons, per),
+        "acta": decidir_equipo(motor_app, cons),
     }
 
 
@@ -351,7 +351,7 @@ def test_a14_caso_9_mismo_ae_en_otro_consorcio_si(escena, motor_migrate, motor_a
     e = escena
     externo(motor_app, e["cons"], e["per"], e["acta"])
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
-    externo(motor_app, cons_b, per_b, decidir(motor_app, cons_b, per_b))
+    externo(motor_app, cons_b, per_b, decidir_equipo(motor_app, cons_b))
 
 
 def test_a14_futuros_y_rango_vacio(escena, motor_app):
@@ -514,10 +514,10 @@ def test_c6_respaldo_invalido_rechazado(escena, motor_migrate, motor_app, causa,
                                         instrumento, esperado):  # fmt: skip
     e = escena
     m = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"])
-    ids = {"asamblea": e["acta"], "consejo": decidir(motor_app, e["cons"], e["per"], "consejo")}
+    ids = {"asamblea": e["acta"], "consejo": decidir_equipo(motor_app, e["cons"], "consejo")}
     if decision == "otro_consorcio":
         cons_b, _, per_b = consorcio_con_persona(motor_migrate)
-        ids[decision] = decidir(motor_app, cons_b, per_b)
+        ids[decision] = decidir_equipo(motor_app, cons_b)
     with pytest.raises(DBAPIError, match=esperado):
         baja(motor_app, e["cons"], e["per"], m, causa, decision=ids.get(decision),
              instrumento=instrumento)  # fmt: skip
@@ -538,11 +538,11 @@ def test_c4_consorcios_con_mandato_vigente_y_sin_propios_en_la_rls(escena, motor
                                                                    motor_app):  # fmt: skip
     e = escena
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
-    acta_b = decidir(motor_app, cons_b, per_b)
+    acta_b = decidir_equipo(motor_app, cons_b)
     cons_c, _, per_c = consorcio_con_persona(motor_migrate)
     m_a = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"])
     m_b = alta(motor_app, cons_b, per_b, acta_b, tipo="miembro_consejo", persona=e["p1"])
-    m_c = alta(motor_app, cons_c, per_c, decidir(motor_app, cons_c, per_c),
+    m_c = alta(motor_app, cons_c, per_c, decidir_equipo(motor_app, cons_c),
                tipo="miembro_consejo", persona=e["p1"])  # fmt: skip
     baja(motor_app, cons_c, per_c, m_c, "error_carga", instrumento="Corrección")
     alta(motor_app, cons_b, per_b, acta_b, tipo="miembro_consejo", persona=e["p2"])
