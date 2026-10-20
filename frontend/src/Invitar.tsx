@@ -180,12 +180,15 @@ export function Invitar() {
         setInvitaciones(data.elementos);
       })
       .catch((e: unknown) => {
-        if (vigente) atajar(e);
+        if (!vigente) return;
+        if (e instanceof SinSesion) aEntrar();
+        // Tampoco un corte de red en la recarga pisa el aviso de un retiro hecho.
+        else setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, atajar]);
+  }, [consorcio, vuelta, aEntrar]);
 
   /** Cualquier cambio en los datos es otro intento: otra clave. */
   function cambiar<T>(fijar: (v: T) => void) {

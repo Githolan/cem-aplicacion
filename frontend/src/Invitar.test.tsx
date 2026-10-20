@@ -564,6 +564,28 @@ describe("página /invitaciones", () => {
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 
+  it("E35 (Codex): si la recarga que sigue a un retiro se corta, queda a la vista que el retiro se hizo", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    let listas = 0;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => {
+        listas += 1;
+        if (listas === 1) return Response.json(LISTA);
+        throw new TypeError("Failed to fetch");
+      },
+      [`POST ${ruta}`]: () => new Response(null, { status: 204 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    await waitFor(() => expect(listas).toBe(2));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
   it("E34: retirar con un 500 de la aplicación lo explica como servicio y deja la invitación pendiente", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("error_interno", 500) }));
