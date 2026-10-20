@@ -111,7 +111,7 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 20-10-2026 (despliegue de `96245d4`) por `cd.ps1` (imagen y digest leídos de cada contenedor, `/health` con la SHA), `docker ps` en la VM y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-96245d4.md`).
+Medido el 20-10-2026 (despliegue de `96245d4`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-96245d4.md`).
 
 **Staging y producción en `96245d4`** (20-10-2026), base `0019`, contrato 0.15.0.
 
@@ -121,7 +121,7 @@ Medido el 20-10-2026 (despliegue de `96245d4`) por `cd.ps1` (imagen y digest le�
   - `/invitaciones` deja de decir «Consultando…» cuando la lista no se pudo consultar.
   - Pruebas: 277 de Vitest y 161 de extremo a extremo. Mutación: sin la corrección fallan 17 pruebas. Dos revisiones independientes con subagente (Codex sin cuota).
   - Misma SHA en staging y producción, sin migración. Smoke de staging con salida 0; los textos nuevos aparecen en el bundle servido.
-- **Prueba en un teléfono real de la UI nueva: SIN VERIFICAR.** Staging está detrás de Access y entrar le corresponde al propietario. La lista de 11 pasos está en `doc/diseno/G3_Reevaluacion_2026-10-20.md` §4 del repositorio CEM.
+- **Prueba en un teléfono real de la UI nueva: SIN VERIFICAR.** Staging está detrás de Access y entrar le corresponde al propietario. La lista de 11 pasos está en `doc/diseno/G3_Reevaluacion_2026-10-20.md` §4 del repositorio CEM. Esa lista cubre E46 y no los avisos de E52 a E54.
 - **G3: no pasa todavía.**
   - PT02 se hizo como evaluación simulada, por decisión del propietario del 20-10 (CEM, `G3_Decisiones_y_Medicion_2026-10-20.md` §10).
   - Faltan la segunda medición de la velocidad, antes del 23-11, y el consorcio de Autogestión.
