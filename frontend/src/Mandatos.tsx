@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
 // registrar una decisión y dar de alta o de baja un mandato. El frontend nunca concede ni deduce
@@ -36,7 +37,6 @@ const ESTADO = {
   errorDelServidor: 500,
 } as const;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 const LARGO_DESCRIPCION = 500;
 const LARGO_REFERENCIA = 300;
 const LARGO_NOMBRE = 200;
@@ -150,7 +150,7 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
     return POR_CODIGO[codigo] as string;
   if (estado === ESTADO.conflicto) return "El pedido choca con el estado actual del edificio. Recargá la página y revisá los datos.";
   if (estado === ESTADO.invalido) return "Revisá los datos del formulario.";
-  return SIN_CONEXION;
+  return mensajeDeFalla(estado, codigo);
 }
 
 /**
@@ -204,10 +204,6 @@ function cadaUna<T>(pedido: Promise<Lectura<T>>): Promise<Lectura<T>> {
     if (e instanceof SinSesion) throw e;
     return SIN_SERVICIO;
   });
-}
-
-function codigoDe(error: unknown): string | undefined {
-  return (error as { codigo?: string } | undefined)?.codigo;
 }
 
 export function Mandatos() {
@@ -552,7 +548,7 @@ export function Mandatos() {
       .GET("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}", {
         params: { path: { consorcio_id: consorcio, mandato_id: mandato.id } },
       })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
@@ -566,7 +562,7 @@ export function Mandatos() {
         else if (response.status === ESTADO.noEncontrado) {
           setAviso({ texto: "Ese mandato ya no está en este edificio.", ok: false });
           setVuelta((v) => v + 1);
-        } else setAviso({ texto: SIN_CONEXION, ok: false });
+        } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
@@ -585,7 +581,7 @@ export function Mandatos() {
       .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
         params: { path: { consorcio_id: consorcio, decision_id: decision.id } },
       })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
@@ -597,7 +593,7 @@ export function Mandatos() {
         else if (response.status === ESTADO.noEncontrado) {
           setAviso({ texto: "Esa decisión ya no está en este edificio.", ok: false });
           setVuelta((v) => v + 1);
-        } else setAviso({ texto: SIN_CONEXION, ok: false });
+        } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();

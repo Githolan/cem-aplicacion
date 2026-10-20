@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
 // y retirar las que no se aceptaron. El frontend nunca concede ni deduce permisos: muestra todas
@@ -22,7 +23,6 @@ export const RUTA_INVITACIONES = "/invitaciones";
 
 const ESTADO_SIN_SESION = 401;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 const LARGO_MAXIMO_NOMBRE = 100;
 
 const TIPOS: { valor: TipoVinculo; texto: string }[] = [
@@ -57,7 +57,7 @@ export function mensajeAlInvitar(estado: number, codigo: string | undefined): st
   if (estado === 422 && codigo === "idempotencia_reutilizada")
     return "Cambiaste los datos de un intento anterior. Volvé a tocar «Invitar».";
   if (estado === 422) return "Revisá los datos: el correo tiene que ser válido y el nombre, de hasta 100 caracteres.";
-  return SIN_CONEXION;
+  return mensajeDeFalla(estado, codigo);
 }
 
 type Pantalla =
@@ -143,11 +143,11 @@ export function Invitar() {
     let vigente = true;
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/unidades", { params: { path: { consorcio_id: consorcio } } })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (!vigente) return;
         if (data === undefined) {
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
           return;
         }
         setUnidades(data.elementos);
@@ -167,11 +167,11 @@ export function Invitar() {
     let vigente = true;
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/invitaciones", { params: { path: { consorcio_id: consorcio } } })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (!vigente) return;
         if (data === undefined) {
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
           return;
         }
         setInvitaciones(data.elementos);
@@ -208,7 +208,7 @@ export function Invitar() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data === undefined) {
-          const codigo = (error as { codigo?: string } | undefined)?.codigo;
+          const codigo = codigoDe(error);
           // Un 5xx es ambiguo (un proxy puede responder después de que el backend guardó el
           // resultado): igual que con la red caída, el reintento lleva la misma clave para recibir
           // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
@@ -238,8 +238,11 @@ export function Invitar() {
       .then(({ error, response }) => {
         exigirSesion(response);
         setARetirar(null);
+        // E35: una lista pedida antes del retiro puede llegar después y mostrar el estado viejo.
+        // Cambiar `vuelta` la descarta (el efecto anterior queda no vigente) y pide la de ahora.
+        if (response.status === 409 || response.status === 404 || response.ok) setVuelta((v) => v + 1);
         if (response.status === 403) {
-          const codigo = (error as { codigo?: string } | undefined)?.codigo;
+          const codigo = codigoDe(error);
           setAviso({
             texto:
               codigo === "csrf_invalido"
@@ -264,7 +267,10 @@ export function Invitar() {
           setAviso({ texto: "No encontramos esa invitación.", ok: false });
           return;
         }
-        if (!response.ok) throw new Error(String(response.status));
+        if (!response.ok) {
+          setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
+          return;
+        }
         setInvitaciones((actual) =>
           (actual ?? []).map((i) => (i.id === invitacion.id ? { ...i, estado: "revocada" as const } : i)),
         );

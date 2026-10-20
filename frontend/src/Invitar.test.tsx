@@ -244,6 +244,36 @@ describe("página /invitaciones", () => {
     expect(claves[2]).not.toBe(claves[1]);
   });
 
+  it("E34: un 503 de la aplicación dice que el servicio no está disponible, no que revise la conexión", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("servicio_no_disponible", 503) }));
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
+  it("E34: sin respuesta, o con un 502 sin cuerpo de la aplicación, sí se habla de la conexión", async () => {
+    let caida = true;
+    const simulado = conConsorcio({
+      [`POST ${RUTA_LISTA}`]: () => {
+        if (caida) throw new TypeError("Failed to fetch");
+        return new Response("<html>Bad Gateway</html>", { status: 502 });
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    caida = false;
+    await waitFor(() => expect(invitarBoton()).not.toHaveProperty("disabled", true));
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
+    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
   it("un 5xx del proxy conserva la clave: el reintento recibe lo que el backend guardó", async () => {
     let respuesta = () => new Response("<html>Bad Gateway</html>", { status: 502 });
     const simulado = conConsorcio({ [`POST ${RUTA_LISTA}`]: () => respuesta() });
@@ -383,6 +413,55 @@ describe("página /invitaciones", () => {
     expect(within(fila).getByText("Aceptada")).toBeTruthy();
   });
 
+  it("E35: una lista pedida antes del retiro no vuelve a mostrar pendiente la invitación retirada", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    const RETIRADA = { elementos: [invitacion(PENDIENTE, "Beto Pérez", "revocada", null), en(LISTA.elementos, 1)] };
+    let soltarVieja: (r: Response) => void = () => undefined;
+    let listas = 0;
+    const simulado = conConsorcio({
+      [`POST ${RUTA_LISTA}`]: () =>
+        Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }),
+      [`POST ${ruta}`]: () => new Response(null, { status: 204 }),
+    });
+    const base = simulado.getMockImplementation() as (p: Request) => Promise<Response>;
+    simulado.mockImplementation(async (pedido: Request) => {
+      if (pedido.method !== "GET" || new URL(pedido.url).pathname !== RUTA_LISTA) return base(pedido);
+      listas += 1;
+      if (listas === 1) return Response.json(LISTA);
+      // La segunda (después de invitar) queda en vuelo con la foto de antes del retiro.
+      if (listas === 2) return new Promise<Response>((r) => (soltarVieja = r));
+      return Response.json(RETIRADA);
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await waitFor(() => expect(listas).toBe(2));
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    await screen.findByText(/Listo: retiramos la invitación de Beto Pérez/);
+    await waitFor(() => expect(listas).toBe(3));
+    soltarVieja(Response.json(LISTA));
+    await new Promise((r) => setTimeout(r, 0));
+    const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
+    await waitFor(() => expect(within(fila).getByText("Retirada")).toBeTruthy());
+    expect(within(fila).queryByText("Pendiente")).toBeNull();
+    expect(within(fila).queryByRole("button", { name: "Retirar" })).toBeNull();
+  });
+
+  it("E34: retirar con un 500 de la aplicación lo explica como servicio y deja la invitación pendiente", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("error_interno", 500) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
+    expect(within(fila).getByText("Pendiente")).toBeTruthy();
+  });
+
   it("con dos edificios se elige cuál, y cambia unidades e invitaciones", async () => {
     const simulado = conConsorcio({
       "GET /api/v1/me/consorcios": () =>
@@ -411,7 +490,7 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     expect(within(screen.getByLabelText("Unidad")).queryAllByRole("option")).toHaveLength(0);
     expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
   });
