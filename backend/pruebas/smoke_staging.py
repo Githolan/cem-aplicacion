@@ -13,7 +13,8 @@ estándar (`python -`), sin copiarlo al contenedor: no queda archivo que borrar 
 
     ssh oci 'docker exec -i -w /app -e PYTHONPATH=/app <contenedor> python - \\
         --consorcio <uuid> --base <host de cem-postgres-staging> \\
-        --url https://coolify-proxy --host cem-staging.holancloud.com --sin-verificar-certificado' \\
+        --url https://coolify-proxy --host cem-staging.holancloud.com \\
+        --sin-verificar-certificado' \\
         < backend/pruebas/smoke_staging.py
 
 (Es un comando de bash o Git Bash; en PowerShell, `Get-Content -Raw backend/pruebas/smoke_staging.py
