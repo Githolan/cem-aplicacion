@@ -165,6 +165,91 @@ describe("página /invitacion", () => {
   });
 });
 
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+const estado = () => screen.getByRole("status");
+
+describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras consulta dice «Buscando la invitación…» y lo saca al llegar la respuesta", async () => {
+    const { retenido, soltar } = retener(backend(() => Response.json(ACEPTADA)), "/api/v1/auth/invitacion/consultar");
+    vi.stubGlobal("fetch", retenido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(estado().textContent).toBe("Buscando la invitación…");
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    soltar();
+
+    expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect(screen.queryByText("Buscando la invitación…")).toBeNull();
+  });
+
+  it("carga: mientras acepta dice «Aceptando…» con el botón deshabilitado", async () => {
+    const { retenido, soltar } = retener(backend(() => Response.json(ACEPTADA)), "/api/v1/auth/invitacion/aceptar");
+    vi.stubGlobal("fetch", retenido);
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(estado().textContent).toBe("Aceptando…");
+    expect((screen.getByRole("button", { name: "Aceptar la invitación" }) as HTMLButtonElement).disabled).toBe(true);
+    soltar();
+
+    expect(await screen.findByText("Listo: ya sos parte de Edificio Alvear 100.")).toBeTruthy();
+    expect(screen.queryByText("Aceptando…")).toBeNull();
+  });
+
+  it("sin red al consultar: lo dice y no ofrece aceptar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(within(screen.getByRole("main")).queryByRole("button")).toBeNull();
+  });
+
+  it("sin red al aceptar: lo dice y no da la invitación por aceptada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend(() => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(screen.queryByText(/ya sos parte/)).toBeNull();
+  });
+
+  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): ante cualquier respuesta que no sea 200, 404
+  // o 409, la página pasa a "sin_servicio" (Invitacion.tsx:64 y :84) y dice "Revisá la conexión"
+  // (Invitacion.tsx:150-154). Un 403 `csrf_invalido` (el backend lo responde con Sec-Fetch-Site de
+  // otro sitio o sin el X-CSRF-Token de una sesión válida: backend/app/identidad/invitaciones.py,
+  // `aceptar` y `persona_de_la_sesion`) y un 503 de la aplicación no son de la conexión. La regla
+  // E34 (src/fallas.ts) pide no mandar a revisar la conexión en esos casos; /invitaciones y
+  // /mandatos ya la siguen. Queda pendiente hasta que se corrija.
+  it.todo("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+    vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByText(/No pudimos/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+});
+
 describe("encabezadoCsrf", () => {
   it("lee la cookie CSRF entre otras y no devuelve nada sin ella", () => {
     expect(encabezadoCsrf("a=1; __Host-cem_csrf=x=y; b=2")).toEqual({ "X-CSRF-Token": "x=y" });

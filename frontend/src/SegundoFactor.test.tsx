@@ -293,3 +293,112 @@ describe("formatos del segundo factor", () => {
     expect(trazoQr(URI.replace("ana", "beto")).trazo).not.toBe(qr.trazo);
   });
 });
+
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras consulta dice «Consultando…» y lo saca al llegar el estado", async () => {
+    const { retenido, soltar } = retener(
+      backend({ "GET /api/v1/auth/totp": () => Response.json(INACTIVO) }),
+      "/api/v1/auth/totp",
+    );
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(screen.queryByRole("button", { name: "Activar el segundo factor" })).toBeNull();
+    soltar();
+
+    expect(await screen.findByRole("button", { name: "Activar el segundo factor" })).toBeTruthy();
+    expect(screen.queryByText("Consultando…")).toBeNull();
+  });
+
+  it("sin red al empezar el alta: lo dice y deja reintentar desde el mismo lugar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
+    const boton = screen.getByRole("button", { name: "Activar el segundo factor" }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(false);
+    expect(screen.queryByRole("img", { name: /Código QR/ })).toBeNull();
+  });
+
+  it("sin red al verificar: lo dice y no marca la sesión como verificada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
+        "POST /api/v1/auth/totp/verificar": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    abrir();
+    await screen.findByRole("heading", { name: "Está activado" });
+    escribirCodigo("Código de la aplicación o de recuperación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+
+    expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
+    expect(screen.getByText("Todavía no")).toBeTruthy();
+  });
+
+  it("sesión vencida (401) al empezar el alta: manda a entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => error("no_autenticado", 401),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
+  });
+
+  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): si la sesión vence con la página abierta,
+  // solo `empezarAlta` atiende el 401 (SegundoFactor.tsx:133). `verificar`, `confirmar` y
+  // `desactivar` lo tratan como cualquier otra falla (avisoDeRechazo, SegundoFactor.tsx:113-121, y
+  // SegundoFactor.tsx:214) y dicen "Revisá la conexión", sin ofrecer entrar de nuevo. /cuenta, en
+  // cambio, manda a /entrar ante un 401 en cualquier acción (Cuenta.tsx:46-48). Queda pendiente
+  // hasta que se corrija.
+  it.todo("sesión vencida (401) al verificar: ofrece entrar y no habla de la conexión", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
+        "POST /api/v1/auth/totp/verificar": () => error("no_autenticado", 401),
+      }),
+    );
+    abrir();
+    await screen.findByRole("heading", { name: "Está activado" });
+    escribirCodigo("Código de la aplicación o de recuperación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+
+    expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+});

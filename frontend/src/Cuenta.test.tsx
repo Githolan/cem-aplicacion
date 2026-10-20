@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -526,5 +526,55 @@ describe("largoContrasena", () => {
     expect(largoContrasena("é")).toBe(1);
     // La ligadura «ﬁ» es un carácter; su NFKC son dos: el contrato mira el texto tal cual.
     expect(largoContrasena("ﬁ")).toBe(1);
+  });
+});
+
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras falta una de las cuatro consultas dice «Consultando…» y no muestra datos a medias", async () => {
+    const { retenido, soltar } = retener(conSesion(), "/api/v1/auth/contrasena");
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    const estado = screen.getByRole("status");
+    expect(estado.textContent).toBe("Consultando…");
+    // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
+    await waitFor(() => expect(retenido).toHaveBeenCalledTimes(4));
+    expect(screen.queryByText("Ana Pérez")).toBeNull();
+    soltar();
+
+    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(screen.queryByText("Consultando…")).toBeNull();
+  });
+
+  it("sin red al cerrar otra sesión: lo dice y la sesión sigue en la lista", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conSesion({
+        [`POST /api/v1/auth/sesiones/${OTRA}/revocar`]: () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    abrir();
+    fireEvent.click(await botonCerrar("Chrome en Android"));
+
+    expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
+    expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 });

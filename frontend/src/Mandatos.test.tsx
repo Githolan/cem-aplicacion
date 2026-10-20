@@ -928,3 +928,75 @@ describe("página /mandatos", () => {
     expect(mensajeDeError(422, "codigo_desconocido", "decision")).toBe("Revisá los datos del formulario.");
   });
 });
+
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+describe("página /mandatos: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras consulta los edificios dice «Consultando…» y no muestra las listas", async () => {
+    const { retenido, soltar } = retener(conConsejo(), "/api/v1/me/consorcios");
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(screen.queryByRole("region", { name: "Mandatos" })).toBeNull();
+    soltar();
+
+    await cargado();
+    expect(within(screen.getByRole("status")).queryByText("Consultando…")).toBeNull();
+  });
+
+  it("carga: las listas del edificio dicen «Consultando…» hasta que llegan las tres", async () => {
+    const { retenido, soltar } = retener(conConsejo(), RUTA_MANDATOS);
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    await screen.findByRole("region", { name: "Mandatos" });
+    // Las tres salen juntas (Promise.all en Mandatos.tsx): con una en vilo, ninguna se pinta.
+    await waitFor(() => expect(pedidos(retenido, "GET", RUTA_CANDIDATOS)).toHaveLength(1));
+    for (const nombre of ["Mandatos", "Decisiones", "Dar de alta un mandato"])
+      expect(within(seccion(nombre)).getByText("Consultando…")).toBeTruthy();
+    soltar();
+
+    await cargado();
+    for (const nombre of ["Mandatos", "Decisiones", "Dar de alta un mandato"])
+      expect(within(seccion(nombre)).queryByText("Consultando…")).toBeNull();
+  });
+
+  it("vacía: sin mandatos cargados lo dice", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => Response.json({ elementos: [] }) }));
+    abrir();
+
+    const mandatos = await screen.findByRole("region", { name: "Mandatos" });
+    expect(await within(mandatos).findByText("Todavía no hay mandatos cargados.")).toBeTruthy();
+    expect(within(mandatos).queryByRole("list")).toBeNull();
+  });
+
+  it("sin red en la primera carga: habla de la conexión", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    abrir();
+
+    expect(await screen.findByText("No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Mandatos" })).toBeNull();
+  });
+});

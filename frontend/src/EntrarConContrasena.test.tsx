@@ -281,3 +281,33 @@ describe("entrar con contraseña", () => {
     await sinFaltas(container);
   });
 });
+
+describe("entrar con contraseña: estado de carga (documento 08, §13.1)", () => {
+  it("mientras entra dice «Entrando…» con el botón deshabilitado, y lo saca al terminar", async () => {
+    let soltar: () => void = () => undefined;
+    const listo = new Promise<void>((r) => {
+      soltar = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [ENTRAR]: [
+          async () => {
+            await listo;
+            return Response.json(ABIERTA);
+          },
+        ],
+      }),
+    );
+    abrir();
+    escribirContrasena();
+
+    expect(await seccion().findByText("Entrando…")).toBeTruthy();
+    const boton = seccion().getByRole("button", { name: "Entrar con la contraseña" }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(true);
+    soltar();
+
+    expect(await seccion().findByText("Entraste.")).toBeTruthy();
+    expect(seccion().queryByText("Entrando…")).toBeNull();
+  });
+});

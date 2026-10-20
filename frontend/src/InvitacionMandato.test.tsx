@@ -156,3 +156,90 @@ describe("página /invitacion-mandato", () => {
     expect(resultado.violations).toEqual([]);
   });
 });
+
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+describe("página /invitacion-mandato: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras consulta dice «Buscando la invitación…» y lo saca al llegar la respuesta", async () => {
+    const { retenido, soltar } = retener(
+      backend(() => Response.json(aceptada("2026-01-01"))),
+      "/api/v1/auth/invitacion-mandato/consultar",
+    );
+    vi.stubGlobal("fetch", retenido);
+    abrir(`${RUTA}#token=${TOKEN}`);
+
+    expect(screen.getByRole("status").textContent).toBe("Buscando la invitación…");
+    expect(screen.queryByRole("button", { name: "Aceptar y asociar mi cuenta" })).toBeNull();
+    soltar();
+
+    expect(await aceptarBoton()).toBeTruthy();
+    expect(screen.queryByText("Buscando la invitación…")).toBeNull();
+  });
+
+  it("carga: mientras acepta dice «Aceptando…» con el botón deshabilitado", async () => {
+    const { retenido, soltar } = retener(
+      backend(() => Response.json(aceptada("2026-01-01"))),
+      "/api/v1/auth/invitacion-mandato/aceptar",
+    );
+    vi.stubGlobal("fetch", retenido);
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+
+    expect(screen.getByRole("status").textContent).toBe("Aceptando…");
+    expect(((await aceptarBoton()) as HTMLButtonElement).disabled).toBe(true);
+    soltar();
+
+    expect(await screen.findByText(/tu cuenta quedó asociada/)).toBeTruthy();
+    expect(screen.queryByText("Aceptando…")).toBeNull();
+  });
+
+  it("sin red al consultar: lo dice y no ofrece aceptar", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
+    abrir(`${RUTA}#token=${TOKEN}`);
+
+    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar y asociar mi cuenta" })).toBeNull();
+  });
+
+  it("sin red al aceptar: lo dice y no da la cuenta por asociada", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend(() => {
+        throw new TypeError("Failed to fetch");
+      }),
+    );
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+
+    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(screen.queryByText(/quedó asociada/)).toBeNull();
+  });
+
+  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): un 403 `csrf_invalido` al aceptar (el backend
+  // lo responde con Sec-Fetch-Site de otro sitio o sin el X-CSRF-Token de una sesión válida:
+  // backend/app/consorcios/mandatos_invitaciones.py, `aceptar`) cae en "sin_servicio"
+  // (InvitacionMandato.tsx:94) y la página dice "Revisá la conexión" (InvitacionMandato.tsx:177-181),
+  // contra la regla E34 de src/fallas.ts. Queda pendiente hasta que se corrija.
+  it.todo("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+    vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+
+    expect(await screen.findByText(/No pudimos/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+});
