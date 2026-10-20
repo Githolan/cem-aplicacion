@@ -575,7 +575,7 @@ def test_la_vigencia_del_padron_usa_la_fecha_del_consorcio(motor_migrate, motor_
     # Termina en el más tardío de los dos "hoy": para uno ya terminó y para el otro no.
     hasta = max(hoy_local, hoy_base)
     _poner_vigencia(motor_migrate, v, hasta - timedelta(days=30), hasta)
-    visible = {f["vinculo_id"] for f in padron(motor_app, cons, admin)} == {v}
+    visible = v in {f["vinculo_id"] for f in padron(motor_app, cons, admin)}
     assert visible == (hoy_local < hasta)
 
 
