@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { CodigoQr } from "./CodigoQr";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -24,7 +25,6 @@ const CODIGO_INVALIDO = "segundo_factor_invalido";
 const CODIGO_SIN_ALTA = "segundo_factor_sin_alta";
 const CODIGO_YA_ACTIVO = "segundo_factor_ya_activo";
 const CODIGO_REQUERIDO = "segundo_factor_requerido";
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 
 /** Agrupa el secreto en bloques de cuatro, para copiarlo a mano sin perderse. */
 export function secretoEnBloques(secreto: string): string {
@@ -117,7 +117,14 @@ export function SegundoFactor() {
       return fallo(
         "El código no sirve. Revisá que la hora del teléfono esté bien y usá el código nuevo.",
       );
-    return fallo(SIN_CONEXION);
+    // E53: un 5xx o un 503 no es de la conexión (regla E34 de fallas.ts).
+    return fallo(mensajeDeFalla(status, codigoDe(cuerpo)));
+  }
+
+  /** E53: con la sesión vencida, ofrecer entrar de nuevo en cualquier acción, como `empezarAlta`. */
+  function rechazar(status: number, cuerpo: unknown) {
+    if (status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+    else setAviso(avisoDeRechazo(status, cuerpo));
   }
 
   function empezarAlta() {
@@ -131,7 +138,7 @@ export function SegundoFactor() {
           setPantalla({ tipo: "alta", alta: data });
         } else if (codigoDe(error) === CODIGO_YA_ACTIVO) consultar();
         else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
-        else setAviso(fallo(SIN_CONEXION));
+        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -155,7 +162,7 @@ export function SegundoFactor() {
         } else if (codigoDe(error) === CODIGO_SIN_ALTA) {
           setPantalla({ tipo: "inactivo" });
           setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
-        } else setAviso(avisoDeRechazo(response.status, error));
+        } else rechazar(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -192,7 +199,7 @@ export function SegundoFactor() {
             ok: true,
           });
         } else if (codigoDe(error) === CODIGO_SIN_ALTA) consultar();
-        else setAviso(avisoDeRechazo(response.status, error));
+        else rechazar(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -211,7 +218,8 @@ export function SegundoFactor() {
               "Para desactivarla, primero escribí arriba un código de la aplicación (vale 10 minutos).",
             ),
           );
-        else setAviso(fallo(SIN_CONEXION));
+        else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));

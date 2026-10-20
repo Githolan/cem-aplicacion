@@ -25,6 +25,22 @@ export function mensajeDeFalla(estado: number, codigo: string | undefined): stri
   return RECARGAR;
 }
 
+/**
+ * Lo mismo para las páginas que se abren con el enlace de un correo (E52). El token sale de la
+ * dirección al abrirla, así que recargar no sirve: hay que volver a abrir el enlace.
+ */
+export const SIN_CONEXION_ENLACE =
+  "No pudimos completar el pedido. Revisá la conexión y volvé a abrir el enlace en un rato.";
+export const REABRIR_ENLACE =
+  "No pudimos completar el pedido. Volvé a abrir el enlace desde el correo y probá de nuevo.";
+
+export function mensajeDeFallaConEnlace(estado: number, codigo: string | undefined): string {
+  const mensaje = mensajeDeFalla(estado, codigo);
+  if (mensaje === SIN_CONEXION) return SIN_CONEXION_ENLACE;
+  if (mensaje === RECARGAR) return REABRIR_ENLACE;
+  return mensaje;
+}
+
 /** Si la falla fue de la red (sin respuesta de la aplicación) y no del servicio. */
 export function esDeConexion(estado: number, codigo: string | undefined): boolean {
   return mensajeDeFalla(estado, codigo) === SIN_CONEXION;

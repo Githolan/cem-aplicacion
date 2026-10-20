@@ -779,12 +779,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(within(lista).queryByRole("list")).toBeNull();
   });
 
-  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): si la lista de invitaciones no se puede
-  // consultar (5xx, 4xx salvo 401 (que lleva a /entrar) o sin red), la página pone el aviso de error (Invitar.tsx:178-193) pero deja
-  // `invitaciones` en null, y la sección sigue diciendo "Consultando…" para siempre
-  // (Invitar.tsx:398): el estado de carga no termina y contradice al aviso. Queda pendiente hasta
-  // que se corrija.
-  it.fails("error al consultar la lista: la sección deja de decir «Consultando…»", async () => {
+  it("error al consultar la lista: la sección deja de decir «Consultando…»", async () => {
     vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => error("servicio_no_disponible", 503) }));
     abrir();
 

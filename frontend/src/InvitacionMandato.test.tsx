@@ -229,17 +229,24 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     expect(screen.queryByText(/quedó asociada/)).toBeNull();
   });
 
-  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): un 403 `csrf_invalido` al aceptar (el backend
-  // lo responde con Sec-Fetch-Site de otro sitio o sin el X-CSRF-Token de una sesión válida:
-  // backend/app/consorcios/mandatos_invitaciones.py, `aceptar`) cae en "sin_servicio"
-  // (InvitacionMandato.tsx:94) y la página dice "Revisá la conexión" (InvitacionMandato.tsx:177-181),
-  // contra la regla E34 de src/fallas.ts. Queda pendiente hasta que se corrija.
-  it.fails("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+  it("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
     vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
     expect(await screen.findByText(/No pudimos/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+  it.each([
+    [503, "servicio_no_disponible", /El servicio no está disponible/],
+    [500, "error_interno", /El servicio no está disponible/],
+    [429, "limite_de_pedidos", /Llegaste al límite de pedidos/],
+    [403, "csrf_invalido", /Volvé a abrir el enlace desde el correo/],
+  ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
+    vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
+    abrir(`${RUTA}#token=${TOKEN}`);
+
+    expect(await screen.findByText(texto)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 });
