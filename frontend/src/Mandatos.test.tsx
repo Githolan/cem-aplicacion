@@ -675,6 +675,13 @@ describe("página /mandatos", () => {
     expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
   });
 
+  it("E34: la primera carga con un 503 de la aplicación dice servicio, no conexión", async () => {
+    vi.stubGlobal("fetch", conConsejo({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
   it("una lista que no se pudo consultar no arrastra a las otras", async () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => error("error_interno", 500) }));
     abrir();

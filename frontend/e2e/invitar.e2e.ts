@@ -33,7 +33,7 @@ function invitacion(id: string, unidad: string, nombre: string, correo: string |
     creada_en: "2026-10-18T12:00:00Z",
     vence_en: "2026-10-25T12:00:00Z",
     aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
-    revocada_en: null,
+    revocada_en: estado === "revocada" ? "2026-10-20T12:00:00Z" : null,
   };
 }
 
@@ -91,7 +91,11 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     }
     if (camino === `/api/v1/consorcios/${C1}/invitaciones/${PENDIENTE}/revocar`) {
       retiros.push(csrf);
-      return csrf === CSRF ? ruta.fulfill({ status: 204 }) : ruta.fulfill(error(403, "csrf_invalido"));
+      if (csrf !== CSRF) return ruta.fulfill(error(403, "csrf_invalido"));
+      // Como la API: la retirada queda en la lista (no se borra) y la recarga de E35 la ve así.
+      const i = lista.findIndex((x) => x.id === PENDIENTE);
+      lista[i] = invitacion(PENDIENTE, U1, "Beto Pérez", null, "revocada");
+      return ruta.fulfill({ status: 204 });
     }
     return ruta.abort();
   });

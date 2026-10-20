@@ -512,6 +512,58 @@ describe("página /invitaciones", () => {
     expect(within(fila).queryByRole("button", { name: "Retirar" })).toBeNull();
   });
 
+  it("E34: la primera carga con un 503 de la aplicación dice servicio; sin respuesta, conexión", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
+  it("E34: la primera carga sin respuesta habla de la conexión", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios. Revisá la conexión/)).toBeTruthy();
+  });
+
+  it("E34: retirar con un 429 dice que llegó al límite, no que el servicio cayó", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("demasiadas_peticiones", 429) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    expect(await screen.findByText(/Llegaste al límite de pedidos/)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
+  it("E35: si falla la recarga que sigue a un retiro, queda a la vista que el retiro se hizo", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    let listas = 0;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => {
+        listas += 1;
+        return listas === 1 ? Response.json(LISTA) : error("servicio_no_disponible", 503);
+      },
+      [`POST ${ruta}`]: () => new Response(null, { status: 204 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
+    await waitFor(() => expect(listas).toBe(2));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
   it("E34: retirar con un 500 de la aplicación lo explica como servicio y deja la invitación pendiente", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("error_interno", 500) }));

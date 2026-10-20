@@ -5,7 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
-import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
 // y retirar las que no se aceptaron. El frontend nunca concede ni deduce permisos: muestra todas
@@ -62,7 +62,7 @@ export function mensajeAlInvitar(estado: number, codigo: string | undefined): st
 
 type Pantalla =
   | { tipo: "cargando" }
-  | { tipo: "sin_servicio" }
+  | { tipo: "sin_servicio"; deConexion: boolean }
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
@@ -122,10 +122,11 @@ export function Invitar() {
     consultado.current = true;
     void api
       .GET("/api/v1/me/consorcios")
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         const primero = data?.[0];
-        if (data === undefined) setPantalla({ tipo: "sin_servicio" });
+        if (data === undefined)
+          setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
         else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
         else {
           setPantalla({ tipo: "lista", consorcios: data });
@@ -134,7 +135,7 @@ export function Invitar() {
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else setPantalla({ tipo: "sin_servicio" });
+        else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
 
@@ -171,7 +172,9 @@ export function Invitar() {
         exigirSesion(response);
         if (!vigente) return;
         if (data === undefined) {
-          setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
+          // Si falla la recarga que sigue a un retiro, queda a la vista lo que sí se hizo.
+          const texto = mensajeDeFalla(response.status, codigoDe(error));
+          setAviso((actual) => (actual?.ok ? actual : { texto, ok: false }));
           return;
         }
         setInvitaciones(data.elementos);
@@ -406,7 +409,11 @@ export function Invitar() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.</p>
+          <p className="aviso-error">
+            {pantalla.deConexion
+              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+          </p>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}

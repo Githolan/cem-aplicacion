@@ -16,6 +16,9 @@ estándar (`python -`), sin copiarlo al contenedor: no queda archivo que borrar 
         --url https://coolify-proxy --host cem-staging.holancloud.com --sin-verificar-certificado' \\
         < backend/pruebas/smoke_staging.py
 
+(Es un comando de bash o Git Bash; en PowerShell, `Get-Content -Raw backend/pruebas/smoke_staging.py
+| ssh oci '...'` en lugar de `<`.)
+
 **Guarda dura**, antes de escribir nada:
 - el `CEM_ORIGEN_PUBLICO` del contenedor tiene que ser el de staging (su primer nivel termina en
   `-staging`, como todo nombre de staging);
