@@ -111,16 +111,23 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 20-10-2026 (despliegue de `acf6705`) por `cd.ps1` (imagen y digest leídos de cada contenedor, `/health` con la SHA), `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-acf6705.md`).
+Medido el 20-10-2026 (despliegue de `96245d4`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-96245d4.md`).
 
-**Staging y producción en `acf6705`** (20-10-2026), base `0019`, contrato 0.15.0.
+**Staging y producción en `96245d4`** (20-10-2026), base `0019`, contrato 0.15.0.
 
-- **E46 (PR #89):** al retirar una invitación, el foco va al aviso del resultado, como en `/mandatos`; al invitar sigue volviendo al campo.
-  - Vitest 236/236 y e2e de invitar con el retiro por teclado. Mutaciones 5/5 en Vitest y 1/1 en e2e. Codex sin hallazgos.
-  - Misma SHA en staging y producción, sin migración. Smoke de staging con salida 0. Registro en `doc/deploys/2026-10-20-acf6705.md` del repositorio CEM.
-- **Prueba en un teléfono real de la UI nueva: SIN VERIFICAR.** Staging está detrás de Access y entrar le corresponde al propietario. Hay una lista de 11 pasos en `doc/diseno/G3_Reevaluacion_2026-10-20.md` §4 del repositorio CEM.
-- **G3 reevaluada el 20-10 (CEM #59): no pasó.** Sin prueba de uso con personas, sin velocidad de H1 medida y con los modos del piloto definidos en parte. Su hito es el 23-11. No se cambió la puerta.
-- **Abierto:** E27, E29, E33, E40 (cuando haya escala) y A13.
+- **E52 a E54 (PR #92):**
+  - `/invitacion` e `/invitacion-mandato` ya no explican un 403, un 429 o un 5xx como un problema de conexión; piden volver a abrir el enlace o hablan del servicio.
+  - `/cuenta/segundo-factor` ofrece entrar de nuevo ante un 401 en cualquier acción, y un 5xx habla del servicio, también en la consulta inicial.
+  - `/invitaciones` deja de decir «Consultando…» cuando la lista no se pudo consultar.
+  - Pruebas: 277 de Vitest y 161 de extremo a extremo. Mutación: sin la corrección fallan 17 pruebas. Dos revisiones independientes con subagente (Codex sin cuota).
+  - Misma SHA en staging y producción, sin migración. Smoke de staging con salida 0; los textos nuevos aparecen en el bundle servido.
+- **Prueba en un teléfono real de la UI nueva: SIN VERIFICAR.** Staging está detrás de Access y entrar le corresponde al propietario. La lista de 11 pasos está en `doc/diseno/G3_Reevaluacion_2026-10-20.md` §4 del repositorio CEM. Esa lista cubre E46 y no los avisos de E52 a E54.
+- **G3: no pasa todavía.**
+  - PT02 se hizo como evaluación simulada, por decisión del propietario del 20-10 (CEM, `G3_Decisiones_y_Medicion_2026-10-20.md` §10).
+  - Faltan la segunda medición de la velocidad, antes del 23-11, y el consorcio de Autogestión.
+- **Abierto:** E27, E29, E33, E40 (cuando haya escala), E55, E56 y A13.
+
+Antes, **`acf6705`** (20-10-2026), base `0019`: E46, el foco al retirar una invitación (PR #89). Lo abierto de ese bloque lo reemplaza el de `96245d4`.
 
 Antes, **`6486c05`** (20-10-2026), base `0019`, contrato 0.15.0. Lo abierto de ese bloque lo reemplaza el de `acf6705`.
 
