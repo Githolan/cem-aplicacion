@@ -234,7 +234,7 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
   // backend/app/consorcios/mandatos_invitaciones.py, `aceptar`) cae en "sin_servicio"
   // (InvitacionMandato.tsx:94) y la página dice "Revisá la conexión" (InvitacionMandato.tsx:177-181),
   // contra la regla E34 de src/fallas.ts. Queda pendiente hasta que se corrija.
-  it.todo("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+  it.fails("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
     vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());

@@ -385,7 +385,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
   // SegundoFactor.tsx:214) y dicen "Revisá la conexión", sin ofrecer entrar de nuevo. /cuenta, en
   // cambio, manda a /entrar ante un 401 en cualquier acción (Cuenta.tsx:46-48). Queda pendiente
   // hasta que se corrija.
-  it.todo("sesión vencida (401) al verificar: ofrece entrar y no habla de la conexión", async () => {
+  it.fails("sesión vencida (401) al verificar: ofrece entrar y no habla de la conexión", async () => {
     vi.stubGlobal(
       "fetch",
       backend({

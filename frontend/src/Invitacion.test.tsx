@@ -240,7 +240,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
   // `aceptar` y `persona_de_la_sesion`) y un 503 de la aplicación no son de la conexión. La regla
   // E34 (src/fallas.ts) pide no mandar a revisar la conexión en esos casos; /invitaciones y
   // /mandatos ya la siguen. Queda pendiente hasta que se corrija.
-  it.todo("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+  it.fails("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
     vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
