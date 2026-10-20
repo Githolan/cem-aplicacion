@@ -726,3 +726,70 @@ describe("página /invitaciones", () => {
     expect(mensajeAlInvitar(500, undefined)).toMatch(/No pudimos completar/);
   });
 });
+
+/**
+ * Deja en vilo los pedidos a `camino` hasta que la prueba llame a `soltar`: así se ve el estado de
+ * carga, que con un fetch simulado que responde al instante no llega a pintarse.
+ */
+function retener(simulado: (pedido: Request) => Promise<Response>, camino: string) {
+  let soltar: () => void = () => undefined;
+  const listo = new Promise<void>((r) => {
+    soltar = r;
+  });
+  const retenido = vi.fn(async (pedido: Request) => {
+    if (new URL(pedido.url).pathname === camino) await listo;
+    return simulado(pedido);
+  });
+  return { retenido, soltar: () => soltar() };
+}
+
+describe("página /invitaciones: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras consulta los edificios dice «Consultando…» y no muestra el formulario", async () => {
+    const { retenido, soltar } = retener(conConsorcio(), "/api/v1/me/consorcios");
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(screen.queryByRole("button", { name: "Invitar" })).toBeNull();
+    soltar();
+
+    expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(screen.queryByText("Consultando…")).toBeNull();
+  });
+
+  it("carga: mientras llega la lista, la sección «Invitaciones» dice «Consultando…»", async () => {
+    const { retenido, soltar } = retener(conConsorcio(), RUTA_LISTA);
+    vi.stubGlobal("fetch", retenido);
+    abrir();
+
+    const lista = await screen.findByRole("region", { name: "Invitaciones" });
+    expect(within(lista).getByText("Consultando…")).toBeTruthy();
+    soltar();
+
+    expect(await within(lista).findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(within(lista).queryByText("Consultando…")).toBeNull();
+  });
+
+  it("vacía: un edificio sin invitaciones lo dice", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => Response.json({ elementos: [] }) }));
+    abrir();
+
+    const lista = await screen.findByRole("region", { name: "Invitaciones" });
+    expect(await within(lista).findByText("Todavía no hay invitaciones que puedas ver.")).toBeTruthy();
+    expect(within(lista).queryByRole("list")).toBeNull();
+  });
+
+  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): si la lista de invitaciones no se puede
+  // consultar (5xx, 4xx salvo 401 (que lleva a /entrar) o sin red), la página pone el aviso de error (Invitar.tsx:178-193) pero deja
+  // `invitaciones` en null, y la sección sigue diciendo "Consultando…" para siempre
+  // (Invitar.tsx:398): el estado de carga no termina y contradice al aviso. Queda pendiente hasta
+  // que se corrija.
+  it.fails("error al consultar la lista: la sección deja de decir «Consultando…»", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => error("servicio_no_disponible", 503) }));
+    abrir();
+
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    const lista = screen.getByRole("region", { name: "Invitaciones" });
+    expect(within(lista).queryByText("Consultando…")).toBeNull();
+  });
+});

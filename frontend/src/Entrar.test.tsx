@@ -244,3 +244,27 @@ describe("tokenDelFragmento", () => {
     expect(tokenDelFragmento("#otra=1")).toBeNull();
   });
 });
+
+describe("página /entrar: estados de pantalla mínima (documento 08, §13.1)", () => {
+  it("carga: mientras canjea dice «Entrando…», sin formularios, y lo saca al terminar", async () => {
+    let soltar: () => void = () => undefined;
+    const listo = new Promise<void>((r) => {
+      soltar = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        await listo;
+        return Response.json(SESION);
+      }),
+    );
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(screen.getByRole("status").textContent).toBe("Entrando…");
+    expect(screen.queryByRole("region", { name: "Entrar con contraseña" })).toBeNull();
+    soltar();
+
+    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(screen.queryByText("Entrando…")).toBeNull();
+  });
+});

@@ -13,7 +13,7 @@ const ALTO_MINIMO_BOTON_PX = 48;
 // Ancho del teléfono más chico que se considera (WCAG 1.4.10 pide 320 px; 360 es el Android común).
 const ANCHO_TELEFONO_PX = 360;
 const ALTO_TELEFONO_PX = 780;
-// Páginas que se abren sin sesión. /segundo-factor pide sesión: se prueba cuando haya cuenta de prueba.
+// Páginas que se abren sin sesión. Las que piden sesión o un enlace, más abajo (PAGINAS_CON_DATOS).
 const PAGINAS = ["/", "/instalar", "/entrar", "/una/ruta/que/no/existe"];
 const ESQUEMAS = ["light", "dark"] as const;
 
@@ -130,4 +130,204 @@ test.describe("modo lectura ampliada", () => {
     await expect(page.locator("html")).not.toHaveClass(CLASE);
     await expect(boton(page)).toHaveAttribute("aria-pressed", "false");
   });
+});
+
+// Páginas que piden sesión o un enlace del correo (pantalla mínima, decisión del 20-10-2026). El
+// backend de la corrida no tiene base de datos: la API se simula desde el navegador con los datos
+// mínimos del contrato, para que la página se vea con sus datos (no el "Consultando…"); los
+// textos largos (correo, descripción) son los que más empujan el ancho. Qué decide cada respuesta
+// lo prueban Vitest y el backend; acá se mide el ancho a 360 px, AA y el contraste con letra grande.
+const C1 = "11111111-1111-4111-8111-111111111111";
+const DECISION = "77777777-7777-4777-8777-777777777777";
+const TOKEN_ENLACE = "L".repeat(21) + "_-" + "m".repeat(20);
+const CORREO_LARGO = "ana.perez.con.un.correo.largo@ejemplo.com";
+const TOTP_ACTIVO = {
+  activo: true,
+  activado_en: "2026-10-15T20:00:00Z",
+  codigos_recuperacion_restantes: 10,
+  verificado_en: null,
+};
+
+type Respuestas = Record<string, unknown>;
+
+interface PaginaConDatos {
+  ruta: string;
+  /** La URL que se abre (las invitaciones, con el token en el fragmento, como desde el correo). */
+  url: string;
+  /** Un texto que solo aparece con los datos ya cargados. */
+  cargada: string;
+  /** Respuesta por «MÉTODO camino»; lo que no está acá se corta y la prueba falla. */
+  api: Respuestas;
+}
+
+const PAGINAS_CON_DATOS: PaginaConDatos[] = [
+  {
+    ruta: "/cuenta",
+    url: "/cuenta",
+    cargada: "Dónde tenés la sesión abierta",
+    api: {
+      "GET /api/v1/auth/sesion": {
+        persona_id: "99999999-9999-4999-8999-999999999999",
+        nombre: "Ana Pérez",
+        correo: CORREO_LARGO,
+        sesion_id: "22222222-2222-4222-8222-222222222222",
+        vence_en: "2026-11-15T20:00:00Z",
+      },
+      "GET /api/v1/auth/sesiones": {
+        elementos: [
+          { id: "22222222-2222-4222-8222-222222222222", dispositivo: "Chrome en Android", actual: true },
+          { id: "33333333-3333-4333-8333-333333333333", dispositivo: "Firefox en Windows", actual: false },
+        ].map((s) => ({
+          ...s,
+          creada_en: "2026-10-01T12:00:00Z",
+          ultimo_uso_en: "2026-10-16T12:00:00Z",
+          vence_en: "2026-11-15T12:00:00Z",
+        })),
+      },
+      "GET /api/v1/auth/totp": TOTP_ACTIVO,
+      "GET /api/v1/auth/contrasena": { definida: true, cambiada_en: "2026-10-10T15:30:00Z" },
+    },
+  },
+  {
+    ruta: "/cuenta/segundo-factor",
+    url: "/cuenta/segundo-factor",
+    cargada: "Está activado",
+    api: { "GET /api/v1/auth/totp": TOTP_ACTIVO },
+  },
+  {
+    ruta: "/invitaciones",
+    url: "/invitaciones",
+    cargada: "Beto Pérez, 1° A",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/unidades`]: {
+        elementos: [{ id: "44444444-4444-4444-8444-444444444444", designacion: "1° A" }],
+      },
+      [`GET /api/v1/consorcios/${C1}/invitaciones`]: {
+        elementos: [
+          {
+            id: "55555555-5555-4555-8555-555555555555",
+            unidad_id: "44444444-4444-4444-8444-444444444444",
+            unidad: "1° A",
+            tipo: "inquilino",
+            correo: CORREO_LARGO,
+            nombre: "Beto Pérez",
+            estado: "pendiente",
+            creada_en: "2026-10-18T12:00:00Z",
+            vence_en: "2026-10-25T12:00:00Z",
+            aceptada_en: null,
+            revocada_en: null,
+          },
+        ],
+      },
+    },
+  },
+  {
+    ruta: "/mandatos",
+    url: "/mandatos",
+    cargada: "Estudio Sur, Administración externa",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/mandatos`]: {
+        elementos: [
+          {
+            id: "66666666-6666-4666-8666-666666666666",
+            tipo: "administrador_externo",
+            nombre: "Estudio Sur",
+            cuit: "20123456786",
+            vigente_desde: "2026-02-01",
+            vigente_hasta: null,
+            estado: "vigente",
+            con_cuenta: false,
+          },
+        ],
+      },
+      [`GET /api/v1/consorcios/${C1}/decisiones`]: {
+        // Del largo máximo (500): la opción del selector no puede ensanchar la página.
+        elementos: [{ id: DECISION, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500) }],
+      },
+      [`GET /api/v1/consorcios/${C1}/mandatos/candidatos`]: {
+        elementos: [{ persona_id: "88888888-8888-4888-8888-888888888888", nombre: "Beto Pérez", unidades: ["1° A"] }],
+      },
+      // El alta pregunta si quien mira registró la decisión elegida (A15).
+      [`GET /api/v1/consorcios/${C1}/decisiones/${DECISION}`]: {
+        id: DECISION,
+        tipo: "asamblea",
+        fecha: "2026-01-10",
+        descripcion: "Acta muy detallada",
+        referencia: "Acta 14",
+        sha256: null,
+        registrada_por_vos: false,
+        del_equipo: true,
+      },
+    },
+  },
+  {
+    ruta: "/invitacion",
+    url: `/invitacion#token=${TOKEN_ENLACE}`,
+    cargada: "Aceptar la invitación",
+    api: {
+      "POST /api/v1/auth/invitacion/consultar": {
+        consorcio: "Edificio Azul",
+        unidad: "1° A",
+        tipo: "inquilino",
+        correo: CORREO_LARGO,
+        nombre: "Beto Pérez",
+        invitada_por: "Ana",
+        vence_en: "2026-10-27T12:00:00Z",
+      },
+    },
+  },
+  {
+    ruta: "/invitacion-mandato",
+    url: `/invitacion-mandato#token=${TOKEN_ENLACE}`,
+    cargada: "Aceptar y asociar mi cuenta",
+    api: {
+      "POST /api/v1/auth/invitacion-mandato/consultar": {
+        consorcio: "Edificio Azul",
+        mandatario: "Estudio Sur",
+        invitada_por: "Ana",
+        vence_en: "2026-10-27T12:00:00Z",
+      },
+    },
+  },
+];
+
+/** Responde la API desde el navegador; lo no previsto se corta y se anota (la prueba lo exige vacío). */
+async function simular(pagina: Page, api: Respuestas): Promise<string[]> {
+  const imprevistos: string[] = [];
+  await pagina.route("**/api/v1/**", async (ruta) => {
+    const pedido = ruta.request();
+    const clave = `${pedido.method()} ${new URL(pedido.url()).pathname}`;
+    if (clave in api) return ruta.fulfill({ json: api[clave] });
+    imprevistos.push(clave);
+    return ruta.abort();
+  });
+  return imprevistos;
+}
+
+test.describe("modo lectura ampliada en las páginas con datos", () => {
+  for (const { ruta, url, cargada, api } of PAGINAS_CON_DATOS) {
+    for (const esquema of ESQUEMAS) {
+      test(`prendido, ${ruta} con datos (${esquema}) no se sale de 360 px y pasa AA y AAA`, async ({ page }) => {
+        await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
+        await page.emulateMedia({ colorScheme: esquema });
+        await page.goto("/");
+        await prender(page);
+        const imprevistos = await simular(page, api);
+        await page.goto(url);
+        await expect(page.getByText(cargada, { exact: true })).toBeVisible();
+        await expect(page.locator("html"), ruta).toHaveClass(CLASE);
+        const { ancho, visible } = await page.evaluate(() => ({
+          ancho: document.documentElement.scrollWidth,
+          visible: document.documentElement.clientWidth,
+        }));
+        expect(visible, `${ruta} (${esquema})`).toBe(ANCHO_TELEFONO_PX);
+        expect(ancho, `${ruta} (${esquema}): desplazamiento horizontal`).toBeLessThanOrEqual(visible);
+        await sinFaltasDeAccesibilidad(page);
+        await contrasteAAA(page);
+        expect(imprevistos).toEqual([]);
+      });
+    }
+  }
 });
