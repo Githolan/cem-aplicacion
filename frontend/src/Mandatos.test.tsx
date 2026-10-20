@@ -641,7 +641,7 @@ describe("página /mandatos", () => {
     abrir();
     await completarAlta();
     fireEvent.click(boton("Dar de alta"));
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     respuesta = () => error("idempotencia_reutilizada", 422);
     fireEvent.click(boton("Dar de alta"));
     expect(await screen.findByText(/Cambiaste los datos de un intento anterior/)).toBeTruthy();
@@ -651,6 +651,35 @@ describe("página /mandatos", () => {
     const [primera, segunda, tercera] = pedidos(simulado, "POST", RUTA_MANDATOS).map((p) => p.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
     expect(tercera).not.toBe(segunda);
+  });
+
+  it("E34: el detalle con un 503 dice que el servicio no está disponible; sin respuesta, la conexión", async () => {
+    let caida = false;
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => {
+          if (caida) throw new TypeError("Failed to fetch");
+          return error("servicio_no_disponible", 503);
+        },
+      }),
+    );
+    abrir();
+    await cargado();
+    const ver = screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" });
+    fireEvent.click(ver);
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    caida = true;
+    fireEvent.click(ver);
+    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+  });
+
+  it("E34: la primera carga con un 503 de la aplicación dice servicio, no conexión", async () => {
+    vi.stubGlobal("fetch", conConsejo({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 
   it("una lista que no se pudo consultar no arrastra a las otras", async () => {

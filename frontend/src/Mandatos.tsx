@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
@@ -37,7 +38,6 @@ const ESTADO = {
   errorDelServidor: 500,
 } as const;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 const LARGO_DESCRIPCION = 500;
 const LARGO_REFERENCIA = 300;
 /** Filas visibles de los textos largos en el celular (doc UX de invitaciones y formularios, §3). */
@@ -155,7 +155,7 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
     return POR_CODIGO[codigo] as string;
   if (estado === ESTADO.conflicto) return "El pedido choca con el estado actual del edificio. Recargá la página y revisá los datos.";
   if (estado === ESTADO.invalido) return "Revisá los datos del formulario.";
-  return SIN_CONEXION;
+  return mensajeDeFalla(estado, codigo);
 }
 
 /**
@@ -170,7 +170,7 @@ function renovarClave(estado: number, codigo: string | undefined): boolean {
 
 type Pantalla =
   | { tipo: "cargando" }
-  | { tipo: "sin_servicio" }
+  | { tipo: "sin_servicio"; deConexion: boolean }
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
@@ -209,10 +209,6 @@ function cadaUna<T>(pedido: Promise<Lectura<T>>): Promise<Lectura<T>> {
     if (e instanceof SinSesion) throw e;
     return SIN_SERVICIO;
   });
-}
-
-function codigoDe(error: unknown): string | undefined {
-  return (error as { codigo?: string } | undefined)?.codigo;
 }
 
 export function Mandatos() {
@@ -312,10 +308,11 @@ export function Mandatos() {
     consultado.current = true;
     void api
       .GET("/api/v1/me/consorcios")
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         const primero = data?.[0];
-        if (data === undefined) setPantalla({ tipo: "sin_servicio" });
+        if (data === undefined)
+          setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
         else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
         else {
           setPantalla({ tipo: "lista", consorcios: data });
@@ -324,7 +321,7 @@ export function Mandatos() {
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else setPantalla({ tipo: "sin_servicio" });
+        else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
 
@@ -557,7 +554,7 @@ export function Mandatos() {
       .GET("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}", {
         params: { path: { consorcio_id: consorcio, mandato_id: mandato.id } },
       })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
@@ -571,7 +568,7 @@ export function Mandatos() {
         else if (response.status === ESTADO.noEncontrado) {
           setAviso({ texto: "Ese mandato ya no está en este edificio.", ok: false });
           setVuelta((v) => v + 1);
-        } else setAviso({ texto: SIN_CONEXION, ok: false });
+        } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
@@ -590,7 +587,7 @@ export function Mandatos() {
       .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
         params: { path: { consorcio_id: consorcio, decision_id: decision.id } },
       })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
@@ -602,7 +599,7 @@ export function Mandatos() {
         else if (response.status === ESTADO.noEncontrado) {
           setAviso({ texto: "Esa decisión ya no está en este edificio.", ok: false });
           setVuelta((v) => v + 1);
-        } else setAviso({ texto: SIN_CONEXION, ok: false });
+        } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
@@ -1158,7 +1155,11 @@ export function Mandatos() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.</p>
+          <p className="aviso-error">
+            {pantalla.deConexion
+              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+          </p>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (
