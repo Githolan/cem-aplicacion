@@ -233,19 +233,24 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     expect(screen.queryByText(/ya sos parte/)).toBeNull();
   });
 
-  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): ante cualquier respuesta que no sea 200, 404
-  // o 409, la página pasa a "sin_servicio" (Invitacion.tsx:64 y :84) y dice "Revisá la conexión"
-  // (Invitacion.tsx:150-154). Un 403 `csrf_invalido` (el backend lo responde con Sec-Fetch-Site de
-  // otro sitio o sin el X-CSRF-Token de una sesión válida: backend/app/identidad/invitaciones.py,
-  // `aceptar` y `persona_de_la_sesion`) y un 503 de la aplicación no son de la conexión. La regla
-  // E34 (src/fallas.ts) pide no mandar a revisar la conexión en esos casos; /invitaciones y
-  // /mandatos ya la siguen. Queda pendiente hasta que se corrija.
-  it.fails("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
+  it("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {
     vi.stubGlobal("fetch", backend(() => error("csrf_invalido", 403)));
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/No pudimos/)).toBeTruthy();
+    expect(await screen.findByText(/Volvé a abrir el enlace desde el correo/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+  it.each([
+    [503, "servicio_no_disponible", /El servicio no está disponible/],
+    [500, "error_interno", /El servicio no está disponible/],
+    [429, "demasiadas_peticiones", /Llegaste al límite de pedidos/],
+    [422, "peticion_invalida", /Volvé a abrir el enlace desde el correo/],
+  ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
+    vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    expect(await screen.findByText(texto)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 });

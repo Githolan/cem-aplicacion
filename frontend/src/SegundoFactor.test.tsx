@@ -243,6 +243,14 @@ describe("página /cuenta/segundo-factor", () => {
     expect(await screen.findByText(/No pudimos consultar el segundo factor/)).toBeTruthy();
   });
 
+  it("un 503 al consultar habla del servicio y no de la conexión", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => error("servicio_no_disponible", 503) }));
+    abrir();
+
+    expect(await screen.findByText(/No pudimos consultar el segundo factor. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
   it.each([
     ["el alta", INACTIVO, "img"],
     ["el estado activo", ACTIVO, "heading"],
@@ -379,13 +387,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
   });
 
-  // DEFECTO (pruebas/pantallas-minimas, 20-10-2026): si la sesión vence con la página abierta,
-  // solo `empezarAlta` atiende el 401 (SegundoFactor.tsx:133). `verificar`, `confirmar` y
-  // `desactivar` lo tratan como cualquier otra falla (avisoDeRechazo, SegundoFactor.tsx:113-121, y
-  // SegundoFactor.tsx:214) y dicen "Revisá la conexión", sin ofrecer entrar de nuevo. /cuenta, en
-  // cambio, manda a /entrar ante un 401 en cualquier acción (Cuenta.tsx:46-48). Queda pendiente
-  // hasta que se corrija.
-  it.fails("sesión vencida (401) al verificar: ofrece entrar y no habla de la conexión", async () => {
+  it("sesión vencida (401) al verificar: ofrece entrar y no habla de la conexión", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
@@ -399,6 +401,57 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
 
     expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+  it("sesión vencida (401) al confirmar el alta: ofrece entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => error("no_autenticado", 401),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByRole("img", { name: /Código QR/ });
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+
+    expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
+  });
+
+  it("sesión vencida (401) al desactivar: ofrece entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
+        "POST /api/v1/auth/totp/baja": () => error("no_autenticado", 401),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+
+    expect((await screen.findByRole("link", { name: "entrá a tu cuenta" })).getAttribute("href")).toBe("/entrar");
+  });
+
+  it.each([
+    ["POST /api/v1/auth/totp/verificar", 503],
+    ["POST /api/v1/auth/totp/verificar", 500],
+    ["POST /api/v1/auth/totp/baja", 503],
+  ])("un %s con %i habla del servicio y no de la conexión", async (ruta, status) => {
+    vi.stubGlobal(
+      "fetch",
+      backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO), [ruta]: () => error("error_interno", status) }),
+    );
+    abrir();
+    await screen.findByRole("heading", { name: "Está activado" });
+    if (ruta.endsWith("verificar")) {
+      escribirCodigo("Código de la aplicación o de recuperación", "042917");
+      fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+    } else fireEvent.click(screen.getByRole("button", { name: "Desactivar el segundo factor" }));
+
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 });

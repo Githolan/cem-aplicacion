@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { codigoDe, mensajeDeFallaConEnlace, SIN_CONEXION_ENLACE } from "./fallas";
 import { RUTA_ENTRAR, RUTA_INVITACION_MANDATO, tokenDelFragmento } from "./enlace";
 
 // Página /invitacion-mandato: la que abre el enlace con que se asocia la cuenta del administrador
@@ -56,6 +57,7 @@ export function InvitacionMandato() {
   const [invitacion, setInvitacion] = useState<Recibida | null>(null);
   const [aceptada, setAceptada] = useState<Aceptada | null>(null);
   const [nombre, setNombre] = useState("");
+  const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
   const consultada = useRef(false);
 
   useEffect(() => {
@@ -64,14 +66,15 @@ export function InvitacionMandato() {
     window.history.replaceState(window.history.state, "", RUTA_INVITACION_MANDATO);
     void api
       .POST("/api/v1/auth/invitacion-mandato/consultar", { body: { token } })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         if (data !== undefined) {
           setInvitacion(data);
           setNombre(data.mandatario ?? "");
           setEstado("lista");
-        } else setEstado(response.status === ESTADO_INVALIDA ? "invalida" : "sin_servicio");
+        } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
+        else fallar(response.status, codigoDe(error));
       })
-      .catch(() => setEstado("sin_servicio"));
+      .catch(() => fallar(0, undefined));
   }, [token]);
 
   function aceptar(evento: FormEvent<HTMLFormElement>) {
@@ -91,9 +94,15 @@ export function InvitacionMandato() {
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else if (response.status === ESTADO_CONFLICTO && error && "codigo" in error && esRechazo(error.codigo))
           setEstado(error.codigo);
-        else setEstado("sin_servicio");
+        else fallar(response.status, codigoDe(error));
       })
-      .catch(() => setEstado("sin_servicio"));
+      .catch(() => fallar(0, undefined));
+  }
+
+  // E52: un 403, un 429 o un 5xx no son de la conexión (regla E34 de fallas.ts).
+  function fallar(estadoHttp: number, codigo: string | undefined) {
+    setFalla(mensajeDeFallaConEnlace(estadoHttp, codigo));
+    setEstado("sin_servicio");
   }
 
   // La fecha local, no la UTC: entre las 21 y las 24 de Argentina la UTC ya es mañana.
@@ -174,11 +183,7 @@ export function InvitacionMandato() {
         {estado === "asociacion_de_si_mismo" && (
           <p className="aviso-error">Quien emitió o aprobó la invitación no puede aceptarla para sí.</p>
         )}
-        {estado === "sin_servicio" && (
-          <p className="aviso-error">
-            No pudimos completar el pedido. Revisá la conexión y volvé a abrir el enlace en un rato.
-          </p>
-        )}
+        {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}
         {estado === "sin_enlace" && <p>Para asociar tu cuenta, abrí el enlace que te llegó por correo.</p>}
       </div>
     </>

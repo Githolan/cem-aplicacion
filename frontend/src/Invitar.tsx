@@ -82,6 +82,8 @@ export function Invitar() {
   const [consorcio, setConsorcio] = useState<string>("");
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [invitaciones, setInvitaciones] = useState<Invitacion[] | null>(null);
+  // E54: si la lista no se pudo consultar, la sección deja de decir «Consultando…».
+  const [listaFallida, setListaFallida] = useState(false);
   const [unidad, setUnidad] = useState("");
   const [tipo, setTipo] = useState<TipoVinculo>("inquilino");
   const [correo, setCorreo] = useState("");
@@ -180,15 +182,20 @@ export function Invitar() {
           // Si falla la recarga que sigue a un retiro, queda a la vista lo que sí se hizo.
           const texto = mensajeDeFalla(response.status, codigoDe(error));
           setAviso((actual) => (actual?.ok ? actual : { texto, ok: false }));
+          setListaFallida(true);
           return;
         }
+        setListaFallida(false);
         setInvitaciones(data.elementos);
       })
       .catch((e: unknown) => {
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
         // Tampoco un corte de red en la recarga pisa el aviso de un retiro hecho.
-        else setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
+        else {
+          setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
+          setListaFallida(true);
+        }
       });
     return () => {
       vigente = false;
@@ -326,6 +333,7 @@ export function Invitar() {
                     onChange={(e) => {
                       // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
                       setInvitaciones(null);
+                      setListaFallida(false);
                       setUnidades([]);
                       setUnidad("");
                       cambiar(setConsorcio)(e.target.value);
@@ -395,7 +403,8 @@ export function Invitar() {
 
           <section aria-labelledby={`${id}-lista`} className="tarjeta">
             <h2 id={`${id}-lista`}>Invitaciones</h2>
-            {invitaciones === null && <p>Consultando…</p>}
+            {invitaciones === null && !listaFallida && <p>Consultando…</p>}
+            {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
             {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
             {invitaciones !== null && invitaciones.length > 0 && (
               <>
