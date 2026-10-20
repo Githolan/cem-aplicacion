@@ -148,6 +148,21 @@ test.describe("mandatos", () => {
     await page.getByLabel("Causa").selectOption("remocion");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
 
+    // Formularios para el teléfono (UX móvil, CEM): textos largos en textarea, la huella en una
+    // línea y el botón de envío a todo el ancho, con 44 px de alto.
+    const decision = page.getByRole("region", { name: "Registrar una decisión" });
+    await expect(decision.locator("textarea")).toHaveCount(2);
+    await expect(decision.getByLabel("Qué se decidió")).toHaveAttribute("rows", "4");
+    await expect(decision.getByLabel("Dónde consta (libro, acta y folio)")).toHaveAttribute("rows", "2");
+    await expect(decision.getByLabel("Huella SHA-256 del acta escaneada (opcional)")).toHaveJSProperty("tagName", "INPUT");
+    await decision.getByLabel("Qué se decidió").fill("Designa al Consejo");
+    await decision.getByLabel("Qué se decidió").press("Enter");
+    await expect(decision.getByLabel("Qué se decidió")).toHaveValue("Designa al Consejo");
+    const registrar = await decision.getByRole("button", { name: "Registrar decisión" }).boundingBox();
+    const tipo = await decision.getByLabel("Tipo").boundingBox();
+    expect(registrar?.height).toBeGreaterThanOrEqual(44);
+    expect(Math.abs((registrar?.width ?? 0) - (tipo?.width ?? -1))).toBeLessThanOrEqual(1);
+
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_PROPIA);
     await expect(alta.getByText(/Esa decisión la registraste vos/)).toBeVisible();

@@ -18,6 +18,8 @@ const U2 = "44444444-4444-4444-8444-444444444444";
 const PENDIENTE = "55555555-5555-4555-8555-555555555555";
 const ACEPTADA = "66666666-6666-4666-8666-666666666666";
 const NUEVA = "77777777-7777-4777-8777-777777777777";
+const RETIRADA = "88888888-8888-4888-8888-888888888888";
+const VENCIDA = "99999999-9999-4999-8999-999999999999";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const CONSORCIOS = [{ id: C1, nombre: "Edificio Azul", vinculos: ["propietario"] }];
@@ -145,6 +147,49 @@ describe("página /invitaciones", () => {
     const aceptada = screen.getByText("Carla Gómez, 1° A").closest("li") as HTMLElement;
     expect(within(aceptada).queryByText("Correo")).toBeNull();
     expect(within(aceptada).queryByRole("button", { name: "Retirar" })).toBeNull();
+  });
+
+  it("a la vista solo las pendientes; aceptadas, retiradas y vencidas en el historial plegado", async () => {
+    const lista = {
+      elementos: [
+        invitacion(PENDIENTE, "Beto Pérez", "pendiente", "beto@ejemplo.com"),
+        invitacion(ACEPTADA, "Carla Gómez", "aceptada", null),
+        { ...invitacion(RETIRADA, "Dante Ríos", "revocada", null), revocada_en: "2026-10-19T15:00:00Z" },
+        invitacion(VENCIDA, "Elsa Sosa", "vencida", null),
+      ],
+    };
+    vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => Response.json(lista) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    const pendientes = screen.getByRole("list", { name: "Pendientes" });
+    expect(within(pendientes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Beto Pérez, 1° A"]);
+    const historial = document.querySelector("details.historial") as HTMLDetailsElement;
+    expect(historial).toBeTruthy();
+    expect(historial.open).toBe(false);
+    expect(historial.querySelector("summary")?.textContent).toBe("Historial: aceptadas, retiradas y vencidas (3)");
+    const enHistorial = [...historial.querySelectorAll("h3")].map((h) => h.textContent);
+    expect(enHistorial).toEqual(["Carla Gómez, 1° A", "Dante Ríos, 1° A", "Elsa Sosa, 1° A"]);
+    const retirada = within(historial).getByText("Dante Ríos, 1° A").closest("li") as HTMLElement;
+    expect(within(retirada).getByText("Retirada")).toBeTruthy();
+    expect(within(retirada).getByText("Retirada el")).toBeTruthy();
+    expect(within(retirada).queryByText("Vence")).toBeNull();
+    const aceptada = within(historial).getByText("Carla Gómez, 1° A").closest("li") as HTMLElement;
+    expect(within(aceptada).getByText("Aceptada el")).toBeTruthy();
+    // Una vencida se puede retirar desde el historial, como antes.
+    const vencida = within(historial).getByText("Elsa Sosa, 1° A").closest("li") as HTMLElement;
+    expect(within(vencida).getByText("Venció")).toBeTruthy();
+    expect(within(vencida).getByRole("button", { name: "Retirar" })).toBeTruthy();
+    fireEvent.click(historial.querySelector("summary") as HTMLElement);
+    expect(historial.open).toBe(true);
+  });
+
+  it("sin pendientes lo dice, y el historial sigue plegado", async () => {
+    const lista = { elementos: [invitacion(ACEPTADA, "Carla Gómez", "aceptada", null)] };
+    vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_LISTA}`]: () => Response.json(lista) }));
+    abrir();
+    expect(await screen.findByText("No hay invitaciones pendientes.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Pendientes" })).toBeNull();
+    expect((document.querySelector("details.historial") as HTMLDetailsElement).open).toBe(false);
   });
 
   it("invita con CSRF y una clave de reintento, y vuelve a pedir la lista", async () => {
@@ -427,6 +472,9 @@ describe("página /invitaciones", () => {
     const { container } = abrir();
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    // Con el historial abierto, para que axe revise también sus tarjetas.
+    fireEvent.click(screen.getByText(/^Historial:/));
+    expect((document.querySelector("details.historial") as HTMLDetailsElement).open).toBe(true);
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations.map((v) => v.id)).toEqual([]);
   });

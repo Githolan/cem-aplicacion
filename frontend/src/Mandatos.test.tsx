@@ -286,6 +286,45 @@ describe("página /mandatos", () => {
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_DECISIONES)).toHaveLength(2));
   });
 
+  it("en el celular, «Qué se decidió» y «Dónde consta» son textarea y la huella, una línea", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    const que = within(form).getByLabelText("Qué se decidió");
+    const donde = within(form).getByLabelText("Dónde consta (libro, acta y folio)");
+    const huella = within(form).getByLabelText("Huella SHA-256 del acta escaneada (opcional)");
+    expect(que.tagName).toBe("TEXTAREA");
+    expect(que.getAttribute("rows")).toBe("4");
+    expect(que.getAttribute("maxlength")).toBe("500");
+    expect(donde.tagName).toBe("TEXTAREA");
+    expect(donde.getAttribute("rows")).toBe("2");
+    expect(donde.getAttribute("maxlength")).toBe("300");
+    expect(huella.tagName).toBe("INPUT");
+    expect(huella.getAttribute("type")).toBe("text");
+    expect(within(form).getByRole("button", { name: "Registrar decisión" }).closest("form")?.className).toMatch(
+      /\bformulario-movil\b/,
+    );
+  });
+
+  it("los textarea no aceptan saltos de línea (la API los rechaza) ni un texto de solo espacios", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    const que = within(form).getByLabelText("Qué se decidió") as HTMLTextAreaElement;
+    fireEvent.change(que, { target: { value: "Designa\nal Consejo\r\npor dos años" } });
+    expect(que.value).toBe("Designa al Consejo por dos años");
+    expect(que.validity.valid).toBe(true);
+    const enter = fireEvent.keyDown(que, { key: "Enter" });
+    expect(enter).toBe(false);
+    fireEvent.change(que, { target: { value: "   " } });
+    expect(que.validity.customError).toBe(true);
+    expect(que.validationMessage).toBe("Escribí algo más que espacios.");
+    fireEvent.change(que, { target: { value: " Algo " } });
+    expect(que.validity.valid).toBe(true);
+  });
+
   it("da de alta al Consejo con la persona de los candidatos", async () => {
     const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
     vi.stubGlobal("fetch", simulado);
