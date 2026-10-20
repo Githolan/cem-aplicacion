@@ -98,12 +98,17 @@ export function Invitar() {
   // El campo con el foco al invitar: mientras el envío corre queda deshabilitado y el navegador
   // pierde el foco; al terminar vuelve ahí, para que el teclado no arranque de nuevo la página.
   const foco = useRef<HTMLElement | null>(null);
+  // E46: al retirar, la fila cambia de lugar (pasa al historial plegado) y el botón desaparece; el
+  // foco va al aviso del resultado, como en /mandatos, para que el teclado no vuelva al principio.
+  const alAviso = useRef(false);
+  const textoAviso = useRef<HTMLParagraphElement | null>(null);
 
   useEffect(() => {
     if (enviando || foco.current === null) return;
     // Solo si nadie tomó el foco en el medio (la persona pudo ir a otra parte de la página).
     const ahora = document.activeElement;
-    if (ahora === null || ahora === document.body || ahora === foco.current) foco.current.focus();
+    if (ahora === null || ahora === document.body || ahora === foco.current)
+      (alAviso.current ? (textoAviso.current ?? foco.current) : foco.current).focus();
     foco.current = null;
   }, [enviando]);
 
@@ -202,6 +207,7 @@ export function Invitar() {
     evento.preventDefault();
     const activo = document.activeElement;
     foco.current = activo instanceof HTMLElement && activo !== document.body ? activo : null;
+    alAviso.current = false;
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
@@ -234,6 +240,9 @@ export function Invitar() {
   }
 
   function retirar(invitacion: Invitacion) {
+    const activo = document.activeElement;
+    foco.current = activo instanceof HTMLElement && activo !== document.body ? activo : null;
+    alAviso.current = true;
     setEnviando(true);
     setAviso(null);
     void api
@@ -419,7 +428,11 @@ export function Invitar() {
           </p>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
-        {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
+        {aviso && (
+          <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
+            {aviso.texto}
+          </p>
+        )}
       </div>
     </>
   );
