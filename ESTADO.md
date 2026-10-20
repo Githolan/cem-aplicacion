@@ -111,9 +111,18 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 20-10-2026 (despliegue de `6486c05`) por `cd.ps1` (imagen y digest leídos de cada contenedor, `/health` con la SHA), `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-6486c05.md`).
+Medido el 20-10-2026 (despliegue de `acf6705`) por `cd.ps1` (imagen y digest leídos de cada contenedor, `/health` con la SHA), `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-acf6705.md`).
 
-**Staging y producción en `6486c05`** (20-10-2026), base `0019`, contrato 0.15.0.
+**Staging y producción en `acf6705`** (20-10-2026), base `0019`, contrato 0.15.0.
+
+- **E46 (PR #89):** al retirar una invitación, el foco va al aviso del resultado, como en `/mandatos`; al invitar sigue volviendo al campo.
+  - Vitest 236/236 y e2e de invitar con el retiro por teclado. Mutaciones 5/5 en Vitest y 1/1 en e2e. Codex sin hallazgos.
+  - Misma SHA en staging y producción, sin migración. Smoke de staging con salida 0. Registro en `doc/deploys/2026-10-20-acf6705.md` del repositorio CEM.
+- **Prueba en un teléfono real de la UI nueva: SIN VERIFICAR.** Staging está detrás de Access y entrar le corresponde al propietario. Hay una lista de 11 pasos en `doc/diseno/G3_Reevaluacion_2026-10-20.md` §4 del repositorio CEM.
+- **G3 reevaluada el 20-10 (CEM #59): no pasó.** Sin prueba de uso con personas, sin velocidad de H1 medida y con los modos del piloto definidos en parte. Su hito es el 23-11. No se cambió la puerta.
+- **Abierto:** E27, E29, E33, E40 (cuando haya escala) y A13.
+
+Antes, **`6486c05`** (20-10-2026), base `0019`, contrato 0.15.0. Lo abierto de ese bloque lo reemplaza el de `acf6705`.
 
 - **Punto 4 de §7 de 2b-4b: una decisión formal no tiene fecha futura (PR #85, migración `0019`). En staging y producción desde `e6576d5`.** Decisión del propietario del 19-10-2026 (CEM #55).
   - Con el día local del consorcio (`nucleo.hoy_del_consorcio`, no la fecha UTC), hasta hoy se admite y desde mañana se rechaza con `fecha_futura` (422). Vale para la API y para soporte, y no hay decisiones "programadas".
