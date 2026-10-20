@@ -4,7 +4,7 @@ Diseño: `doc/diseno/H2b_4c_Diseno.md` del repositorio CEM. Cada barrera se prue
 negado y su control (la misma lectura o el mismo alta, con lo que falta, pasa).
 """
 
-from datetime import date, timedelta
+from datetime import timedelta
 
 import pytest
 from alembic import command
@@ -16,6 +16,7 @@ from tests.test_mandatos import otra_persona, sesiones_abiertas, vinculo_confirm
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
 from tests.test_mandatos_0017 import _marca, _procesar, _registrado_antes
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
+from tests.test_vinculo_0014 import _hoy as hoy_en
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.db
@@ -151,7 +152,7 @@ def test_un_mandato_vencido_o_futuro_no_da_lectura(escena, motor_migrate, motor_
                                                    cuando):  # fmt: skip
     e = escena
     otro = otra_persona(motor_migrate, e["cons"])
-    hoy = date.today()
+    hoy = hoy_en(motor_migrate, escena["cons"])
     fechas = ({"hasta": hoy - timedelta(days=1)} if cuando == "vencido"
               else {"desde": hoy + timedelta(days=5)})  # fmt: skip
     alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=otro,
@@ -226,7 +227,7 @@ def test_la_lista_de_mandatos_trae_lo_minimo_y_el_cuit_solo_del_externo(
 
 def test_el_estado_sale_de_la_baja_y_de_las_fechas(escena, motor_migrate, motor_app):
     e = escena
-    hoy = date.today()
+    hoy = hoy_en(motor_migrate, escena["cons"])
     casos = {}
     for estado, kw in {
         "futuro": {"desde": hoy + timedelta(days=10)},
@@ -308,7 +309,7 @@ def test_los_candidatos_son_los_vinculos_confirmados_vigentes_o_futuros(
     escena, motor_migrate, motor_app
 ):
     e = escena
-    hoy = date.today()
+    hoy = hoy_en(motor_migrate, escena["cons"])
     personas = {n: otra_persona(motor_migrate, e["cons"]) for n in
                 ("vigente", "futuro", "sin_confirmar", "terminado", "baja")}  # fmt: skip
     _vinculo(motor_migrate, e["cons"], personas["vigente"])
@@ -342,7 +343,7 @@ def test_por_la_api_sin_vinculo_confirmado_no_hay_mandato(escena, motor_migrate,
     sin_confirmar = otra_persona(motor_migrate, e["cons"])
     _vinculo(motor_migrate, e["cons"], sin_confirmar, confirmado=False)
     terminado = otra_persona(motor_migrate, e["cons"])
-    _vinculo(motor_migrate, e["cons"], terminado, hasta=date.today())
+    _vinculo(motor_migrate, e["cons"], terminado, hasta=hoy_en(motor_migrate, escena["cons"]))
     otro, _, _ = consorcio_con_persona(motor_migrate)
     de_otro = otra_persona(motor_migrate, otro)
     _vinculo(motor_migrate, otro, de_otro)
@@ -363,7 +364,8 @@ def test_por_la_api_sin_vinculo_confirmado_no_hay_mandato(escena, motor_migrate,
         assert _motivo(error) == "persona_sin_vinculo", persona
     # Control: con un vínculo confirmado futuro, el alta pasa.
     futuro = otra_persona(motor_migrate, e["cons"])
-    _vinculo(motor_migrate, e["cons"], futuro, desde=date.today() + timedelta(days=5))
+    desde = hoy_en(motor_migrate, e["cons"]) + timedelta(days=5)
+    _vinculo(motor_migrate, e["cons"], futuro, desde=desde)
     if tipo == "administrador":  # A14: el AE de la escena ocupa la administración
         baja(motor_app, e["cons"], e["prop"], e["m_ae"], "error_carga", descripcion="Error")
     _alta_api(motor_app, e["cons"], e["prop"], e["acta"], futuro, tipo=tipo)
@@ -416,7 +418,7 @@ def test_una_vigencia_vacia_vencida_no_revoca_sesiones(escena, motor_migrate, mo
     rigió, aunque se haya registrado antes de su fin."""
     e = escena
     persona = otra_persona(motor_migrate, e["cons"])
-    dia = date.today() - timedelta(days=2)
+    dia = hoy_en(motor_migrate, escena["cons"]) - timedelta(days=2)
     vacio = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=persona,
                  desde=dia, hasta=dia, origen="soporte")  # fmt: skip
     _registrado_antes(motor_migrate, vacio)
