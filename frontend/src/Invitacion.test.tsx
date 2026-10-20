@@ -244,7 +244,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
   it.each([
     [503, "servicio_no_disponible", /El servicio no está disponible/],
     [500, "error_interno", /El servicio no está disponible/],
-    [429, "limite_de_pedidos", /Llegaste al límite de pedidos/],
+    [429, "demasiadas_peticiones", /Llegaste al límite de pedidos/],
     [422, "peticion_invalida", /Volvé a abrir el enlace desde el correo/],
   ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
     vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
