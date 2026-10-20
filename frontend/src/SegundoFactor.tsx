@@ -6,7 +6,7 @@ import type { components } from "./api/tipos";
 import { CodigoQr } from "./CodigoQr";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
-import { mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -63,7 +63,7 @@ const FORMATO_HORA = new Intl.DateTimeFormat("es-AR", {
 type Pantalla =
   | { tipo: "cargando" }
   | { tipo: "sin_sesion" }
-  | { tipo: "sin_servicio" }
+  | { tipo: "sin_servicio"; deConexion: boolean }
   | { tipo: "inactivo" }
   | { tipo: "alta"; alta: Alta }
   | { tipo: "codigos"; codigos: string[] }
@@ -93,13 +93,13 @@ export function SegundoFactor() {
     setAviso(null);
     void api
       .GET("/api/v1/auth/totp")
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         if (data !== undefined)
           setPantalla(data.activo ? { tipo: "activo", estado: data } : { tipo: "inactivo" });
-        else
-          setPantalla({ tipo: response.status === ESTADO_SIN_SESION ? "sin_sesion" : "sin_servicio" });
+        else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+        else setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
       })
-      .catch(() => setPantalla({ tipo: "sin_servicio" }));
+      .catch(() => setPantalla({ tipo: "sin_servicio", deConexion: true }));
   }, []);
 
   useEffect(() => {
@@ -117,7 +117,7 @@ export function SegundoFactor() {
       return fallo(
         "El código no sirve. Revisá que la hora del teléfono esté bien y usá el código nuevo.",
       );
-    // E53: un 5xx o un 503 no es de la conexión (regla E34 de fallas.ts).
+    // E53: un 5xx o un 429 no es de la conexión (regla E34 de fallas.ts).
     return fallo(mensajeDeFalla(status, codigoDe(cuerpo)));
   }
 
@@ -360,7 +360,9 @@ export function SegundoFactor() {
         )}
         {pantalla.tipo === "sin_servicio" && (
           <p className="aviso-error">
-            No pudimos consultar el segundo factor. Revisá la conexión y volvé en un rato.
+            {pantalla.deConexion
+              ? "No pudimos consultar el segundo factor. Revisá la conexión y volvé en un rato."
+              : `No pudimos consultar el segundo factor. ${SERVICIO_NO_DISPONIBLE}`}
           </p>
         )}
         {pantalla.tipo === "desactivado" && (

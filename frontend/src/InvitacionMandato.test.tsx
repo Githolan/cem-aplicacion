@@ -234,14 +234,14 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
-    expect(await screen.findByText(/No pudimos/)).toBeTruthy();
+    expect(await screen.findByText(/Volvé a abrir el enlace desde el correo/)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
   it.each([
     [503, "servicio_no_disponible", /El servicio no está disponible/],
     [500, "error_interno", /El servicio no está disponible/],
     [429, "limite_de_pedidos", /Llegaste al límite de pedidos/],
-    [403, "csrf_invalido", /Volvé a abrir el enlace desde el correo/],
+    [422, "peticion_invalida", /Volvé a abrir el enlace desde el correo/],
   ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
     vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
     abrir(`${RUTA}#token=${TOKEN}`);

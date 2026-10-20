@@ -786,5 +786,6 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     const lista = screen.getByRole("region", { name: "Invitaciones" });
     expect(within(lista).queryByText("Consultando…")).toBeNull();
+    expect(within(lista).getByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
   });
 });

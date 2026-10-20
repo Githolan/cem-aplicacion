@@ -243,6 +243,14 @@ describe("página /cuenta/segundo-factor", () => {
     expect(await screen.findByText(/No pudimos consultar el segundo factor/)).toBeTruthy();
   });
 
+  it("un 503 al consultar habla del servicio y no de la conexión", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => error("servicio_no_disponible", 503) }));
+    abrir();
+
+    expect(await screen.findByText(/No pudimos consultar el segundo factor. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
   it.each([
     ["el alta", INACTIVO, "img"],
     ["el estado activo", ACTIVO, "heading"],
