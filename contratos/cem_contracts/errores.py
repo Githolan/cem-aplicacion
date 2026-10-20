@@ -91,6 +91,9 @@ class CodigoError(StrEnum):
     EXTERNO_POR_INVITACION = "externo_por_invitacion"
     """El administrador externo se da de alta sin cuenta; la cuenta se asocia por invitación con
     cuatro ojos (A7)."""
+    FECHA_FUTURA = "fecha_futura"
+    """La fecha de la decisión es posterior a hoy en el consorcio (su día local): una decisión
+    formal registra un acto ya tomado (punto 4 de §7 de 2b-4b)."""
     MANDATO_SIN_CUENTA = "mandato_sin_cuenta"
     """Un miembro del Consejo o un administrador necesita su cuenta (A12)."""
     CUIT_INVALIDO = "cuit_invalido"

@@ -276,6 +276,7 @@
           "decision_invalida",
           "persona_sin_vinculo",
           "externo_por_invitacion",
+          "fecha_futura",
           "mandato_sin_cuenta",
           "cuit_invalido",
           "facultad_fuera_de_paquete",
@@ -469,7 +470,7 @@
             "type": "string"
           },
           "fecha": {
-            "description": "Fecha del acto (asamblea, reunión, contrato o inscripción).",
+            "description": "Fecha del acto (asamblea, reunión, contrato o inscripción). Hasta hoy en el consorcio (su día local): una fecha posterior responde 422 `fecha_futura`.",
             "format": "date",
             "title": "Fecha",
             "type": "string"
@@ -3368,7 +3369,7 @@
             "description": "Sin `decisiones.registrar` en el consorcio."
           },
           "422": {
-            "description": "Faltan datos o la referencia no es válida."
+            "description": "Faltan datos, la referencia no es válida o la fecha es posterior a hoy en el consorcio (`fecha_futura`)."
           }
         },
         "summary": "Registrar una decisión formal ya tomada, con la referencia del acta",

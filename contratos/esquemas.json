@@ -458,7 +458,7 @@
         "type": "string"
       },
       "fecha": {
-        "description": "Fecha del acto (asamblea, reunión, contrato o inscripción).",
+        "description": "Fecha del acto (asamblea, reunión, contrato o inscripción). Hasta hoy en el consorcio (su día local): una fecha posterior responde 422 `fecha_futura`.",
         "format": "date",
         "title": "Fecha",
         "type": "string"
@@ -684,6 +684,7 @@
           "decision_invalida",
           "persona_sin_vinculo",
           "externo_por_invitacion",
+          "fecha_futura",
           "mandato_sin_cuenta",
           "cuit_invalido",
           "facultad_fuera_de_paquete",
