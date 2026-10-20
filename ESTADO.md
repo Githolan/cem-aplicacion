@@ -113,7 +113,28 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 15-10-2026 por la API de Coolify, `docker ps` en la VM y `plataforma.alembic_version`. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (`2026-10-15-951114b.md` y `2026-10-15-3251caf.md`).
 
-**Staging y producción en `4aa71e7`** (19-10-2026, H2b 2b-4c completo), base `0018`, contrato 0.14.0.
+**Staging y producción en `6486c05`** (20-10-2026), base `0019`, contrato 0.15.0.
+
+- **Punto 4 de §7 de 2b-4b: una decisión formal no tiene fecha futura (PR #85, migración `0019`). En staging y producción desde `e6576d5`.** Decisión del propietario del 19-10-2026 (CEM #55).
+  - Con el día local del consorcio (`nucleo.hoy_del_consorcio`, no la fecha UTC), hasta hoy se admite y desde mañana se rechaza con `fecha_futura` (422). Vale para la API y para soporte, y no hay decisiones "programadas".
+  - La ruta lo niega con `ctx.hoy` antes de tocar la base. `registrar_decision` lo repite como segunda barrera.
+  - El upgrade se niega con `decisiones_futuras_previas` si ya hay una decisión futura; el downgrade vuelve a la función de `0016`.
+  - E45: cinco pruebas de `0018` y `0014` fallaban según la hora. Usaban `date.today()` (UTC) contra el día de Buenos Aires, y el padrón se comparaba por igualdad. Están corregidas en el mismo PR.
+  - Mutaciones 13/13. Validación de `0019` en la base con `ROLLBACK`: 11/11 en los dos entornos; antes del despliegue, en staging daba 6 MAL.
+- **UI para el celular (PR #86).** Decisión de UX en `doc/diseno/UX_Invitaciones_y_Formularios_Movil.md` del repositorio CEM (#56).
+  - `/invitaciones` muestra solo las pendientes; aceptadas, retiradas y vencidas van en un historial plegado, con tarjetas compactas. Nada se borra en la base.
+  - `/mandatos`: `textarea` para "Qué se decidió" y "Dónde consta", SHA-256 en una línea, botones a todo el ancho hasta 480 px y 44 px como mínimo.
+- **Deuda (PR #87):**
+  - E34: `fallas.ts` distingue servicio no disponible (503 o 5xx con código), límite de pedidos (429), recargar (otro 4xx con código) y conexión (sin respuesta), también en la primera carga;
+  - E35: la lista se recarga al retirar, y una recarga fallida no pisa el aviso del retiro;
+  - E39: el smoke de staging corre por la entrada estándar y no deja archivo.
+- **CI con imágenes** en verde sobre `e6576d5` y `6486c05`. En `6486c05`: 1239 del backend, 58 de contratos, 232 del frontend y 131 de extremo a extremo.
+- **Revisiones:** independientes en #85 y #87. Codex revisó #87: un P2, corregido, y la última cabeza sin hallazgos.
+- **Despliegues:** misma SHA en staging y producción, con copia previa verificada para `0019`. Smoke de staging con salida 0 y `/tmp` vacío en los dos. Registros en `doc/deploys/2026-10-20-e6576d5.md` y `2026-10-20-6486c05.md` del repositorio CEM.
+- **Producción:** base `0019`, 0 decisiones y 0 mandatos.
+- **Abierto:** E46 (el foco cae en `body` al retirar una invitación), E27, E29, E33, E40 (cuando haya escala) y A13. El diseño definitivo de las pantallas espera a G3.
+
+Antes, **`4aa71e7`** (19-10-2026, H2b 2b-4c completo), base `0018`, contrato 0.14.0. Lo abierto de ese bloque lo reemplaza el de `6486c05`.
 
 - **H2b 2b-4c: lectura de mandatos y decisiones, destinatario del mandato y pantalla `/mandatos` (PR #82 y #83), 19-10. En staging y producción.** Decisiones del propietario sobre §7 de 2b-4b (puntos 1, 2, 3, 5 y 6; el 4 sigue abierto). Diseño: `doc/diseno/H2b_4c_Diseno.md` del repositorio CEM (#53).
   - **PR #82, migración `0018`:**
