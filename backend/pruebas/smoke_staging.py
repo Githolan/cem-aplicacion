@@ -7,12 +7,14 @@ que da ámbito, la invitación de mandato con cuatro ojos (A7) y desasociar. Al 
 cadena de auditoría del consorcio y revoca todas las sesiones de prueba.
 
 **No va en la imagen de la aplicación** (emite sesiones de prueba: en producción sería una
-herramienta para entrar como cualquiera). Se copia a `cem-backend-staging` solo para correr:
+herramienta para entrar como cualquiera). Corre dentro de `cem-backend-staging` leído de la entrada
+estándar (`python -`), sin copiarlo al contenedor: no queda archivo que borrar (E39: una copia con
+`docker cp` queda de root y el proceso del contenedor no la puede borrar):
 
-    docker cp backend/pruebas/smoke_staging.py <contenedor>:/tmp/smoke_staging.py
-    docker exec -w /app -e PYTHONPATH=/app <contenedor> python /tmp/smoke_staging.py \\
+    ssh oci 'docker exec -i -w /app -e PYTHONPATH=/app <contenedor> python - \\
         --consorcio <uuid> --base <host de cem-postgres-staging> \\
-        --url https://coolify-proxy --host cem-staging.holancloud.com --sin-verificar-certificado
+        --url https://coolify-proxy --host cem-staging.holancloud.com --sin-verificar-certificado' \\
+        < backend/pruebas/smoke_staging.py
 
 **Guarda dura**, antes de escribir nada:
 - el `CEM_ORIGEN_PUBLICO` del contenedor tiene que ser el de staging (su primer nivel termina en
