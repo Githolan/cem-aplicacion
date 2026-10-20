@@ -141,7 +141,8 @@ button:focus-visible {
 }
 
 .formulario input,
-.formulario select {
+.formulario select,
+.formulario textarea {
   min-width: 0;
   max-width: 100%;
   min-height: 44px;
@@ -151,8 +152,14 @@ button:focus-visible {
   font: inherit;
 }
 
+/* Textos largos de una línea (mandatos): se agrandan solo hacia abajo. */
+.formulario textarea {
+  resize: vertical;
+}
+
 .formulario input:focus-visible,
-.formulario select:focus-visible {
+.formulario select:focus-visible,
+.formulario textarea:focus-visible {
   outline: 3px solid #f2a900;
   outline-offset: 2px;
 }
@@ -250,4 +257,51 @@ button:focus-visible {
   border: 1px solid var(--azul);
   background: transparent;
   color: var(--azul);
+}
+
+/* Invitaciones: el historial plegado (aceptadas, retiradas y vencidas) con un resumen de 44 px. */
+.historial {
+  margin-top: 1rem;
+}
+
+.historial summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 600;
+  color: var(--azul);
+  cursor: pointer;
+}
+
+.historial summary:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
+.historial[open] summary {
+  margin-bottom: 0.5rem;
+}
+
+.sesiones.compactas li {
+  padding: 0.5rem 0.75rem;
+}
+
+/* Móvil (≤ 480 px = 30em): tarjetas con menos relleno, nunca texto más chico, y el botón de envío
+   de los formularios de /invitaciones y /mandatos a todo el ancho. */
+@media (max-width: 30em) {
+  .tarjeta {
+    padding: 0.75rem;
+  }
+
+  .sesiones li {
+    padding: 0.625rem 0.75rem;
+  }
+
+  .formulario-movil {
+    max-width: none;
+  }
+
+  .formulario-movil > button[type="submit"] {
+    justify-self: stretch;
+  }
 }

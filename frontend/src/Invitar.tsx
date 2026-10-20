@@ -281,6 +281,10 @@ export function Invitar() {
   }
 
   const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  // Solo presentación (doc/diseno/UX_Invitaciones_y_Formularios_Movil.md del repositorio CEM): las
+  // pendientes a la vista y el resto plegado. La API devuelve todas y nada se borra.
+  const pendientes = (invitaciones ?? []).filter((i) => i.estado === "pendiente");
+  const historial = (invitaciones ?? []).filter((i) => i.estado !== "pendiente");
 
   return (
     <>
@@ -296,7 +300,7 @@ export function Invitar() {
 
           <section aria-labelledby={`${id}-nueva`} className="tarjeta">
             <h2 id={`${id}-nueva`}>Nueva invitación</h2>
-            <form className="formulario" onSubmit={invitar}>
+            <form className="formulario formulario-movil" onSubmit={invitar}>
               {pantalla.consorcios.length > 1 && (
                 <>
                   <label htmlFor={`${id}-consorcio`}>Edificio</label>
@@ -379,8 +383,41 @@ export function Invitar() {
             {invitaciones === null && <p>Consultando…</p>}
             {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
             {invitaciones !== null && invitaciones.length > 0 && (
-              <ul className="sesiones">
-                {invitaciones.map((i) => (
+              <>
+                {pendientes.length === 0 ? (
+                  <p>No hay invitaciones pendientes.</p>
+                ) : (
+                  <ul className="sesiones" aria-label="Pendientes">
+                    {pendientes.map(tarjeta)}
+                  </ul>
+                )}
+                {historial.length > 0 && (
+                  <details className="historial">
+                    <summary>Historial: aceptadas, retiradas y vencidas ({historial.length})</summary>
+                    <ul className="sesiones compactas">{historial.map(tarjeta)}</ul>
+                  </details>
+                )}
+              </>
+            )}
+          </section>
+        </>
+      )}
+
+      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
+        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
+        {pantalla.tipo === "sin_servicio" && (
+          <p className="aviso-error">No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.</p>
+        )}
+        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
+      </div>
+    </>
+  );
+
+  /** Una invitación: en la vista principal (pendiente) o en el historial (las demás). */
+  function tarjeta(i: Invitacion) {
+    const cierre = i.aceptada_en ?? i.revocada_en;
+    return (
                   <li key={i.id}>
                     <h3 id={`${id}-${i.id}`}>
                       {i.nombre}, {i.unidad}
@@ -402,6 +439,18 @@ export function Invitar() {
                         <>
                           <dt>Vence</dt>
                           <dd>{fecha(i.vence_en)}</dd>
+                        </>
+                      )}
+                      {i.estado === "vencida" && (
+                        <>
+                          <dt>Venció</dt>
+                          <dd>{fecha(i.vence_en)}</dd>
+                        </>
+                      )}
+                      {cierre && (
+                        <>
+                          <dt>{i.estado === "aceptada" ? "Aceptada el" : "Retirada el"}</dt>
+                          <dd>{fecha(cierre)}</dd>
                         </>
                       )}
                     </dl>
@@ -429,21 +478,6 @@ export function Invitar() {
                         </button>
                       ))}
                   </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        </>
-      )}
-
-      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
-        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
-        {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.</p>
-        )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
-        {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
-      </div>
-    </>
-  );
+    );
+  }
 }

@@ -133,10 +133,15 @@ ERRORES = {
     "referencia_invalida": (*DATOS, "La referencia del acta está vacía o es demasiado larga."),
     "sha256_invalido": (*DATOS, "La huella del acta no es un SHA-256."),
     "decision_incompleta": (*DATOS, "La decisión necesita tipo y fecha."),
+    "fecha_futura": (
+        422, CodigoError.FECHA_FUTURA,
+        "La fecha de la decisión no puede ser posterior a hoy en el consorcio.",
+    ),
 }  # fmt: skip
-"""Motivos de las funciones de `0014`, `0016` y `0018`. Los de separación (`alta_de_si_mismo`,
-`baja_de_si_mismo`, `decision_registrada_por_el_actor`) y los de actor u origen los niega antes
-el evaluador o los fija esta ruta: si llegan a la base, es una discrepancia (500)."""
+"""Motivos de las funciones de `0014`, `0016`, `0018` y `0019`. Los de separación
+(`alta_de_si_mismo`, `baja_de_si_mismo`, `decision_registrada_por_el_actor`) y los de actor u
+origen los niega antes el evaluador o los fija esta ruta: si llegan a la base, es una
+discrepancia (500)."""
 
 
 def _llamar(conn: Connection, sql: str, parametros: dict):
@@ -182,7 +187,10 @@ def _sobre_decision(conn: Connection, consorcio_id: UUID, decision_id: UUID | No
     summary="Registrar una decisión formal ya tomada, con la referencia del acta",
     responses={
         403: {"description": "Sin `decisiones.registrar` en el consorcio."},
-        422: {"description": "Faltan datos o la referencia no es válida."},
+        422: {
+            "description": "Faltan datos, la referencia no es válida o la fecha es posterior a"
+            " hoy en el consorcio (`fecha_futura`)."
+        },
     },
 )
 def registrar_decision(
@@ -195,6 +203,9 @@ def registrar_decision(
     queda en la fila, no en la auditoría (E31)."""
     ctx = permiso.ctx
     permiso.verificar(Entidad(respaldo_presente=True))  # el contrato exige la referencia
+    # Un acto ya tomado (2b-4b §7.4): hasta hoy en el consorcio. La base lo repite (`0019`).
+    if nueva.fecha > ctx.hoy:
+        raise ErrorApi(*ERRORES["fecha_futura"])
 
     def efecto(conn: Connection) -> tuple[int, DecisionRegistrada]:
         nueva_id = _llamar(

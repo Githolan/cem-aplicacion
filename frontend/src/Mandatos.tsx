@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
 // registrar una decisión y dar de alta o de baja un mandato. El frontend nunca concede ni deduce
@@ -39,6 +40,9 @@ const ESTADO = {
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 const LARGO_DESCRIPCION = 500;
 const LARGO_REFERENCIA = 300;
+/** Filas visibles de los textos largos en el celular (doc UX de invitaciones y formularios, §3). */
+const FILAS_DESCRIPCION = 4;
+const FILAS_REFERENCIA = 2;
 const LARGO_NOMBRE = 200;
 const LARGO_MATRICULA = 100;
 /** Cuánto de la descripción entra en una opción: el ancho de un `<select>` es el de su opción más larga. */
@@ -126,6 +130,7 @@ const POR_CODIGO: Record<string, string> = {
     "La persona administra este edificio como externa en esas fechas: el Consejo fiscaliza y no co-administra.",
   mandato_ya_dado_de_baja: "El mandato ya tiene una baja registrada.",
   mandato_terminado: "El mandato ya terminó por su fecha: solo admite una baja por error de carga.",
+  fecha_futura: "La fecha de la decisión no puede ser posterior a hoy: se registran actos ya tomados.",
   decision_invalida: "La decisión no existe en este edificio o no corresponde (la remoción pide una asamblea).",
   persona_sin_vinculo: "La persona no tiene un vínculo confirmado, vigente o futuro, en este edificio.",
   externo_por_invitacion:
@@ -840,7 +845,7 @@ export function Mandatos() {
               {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && (
                 <form
                   ref={formularioBaja}
-                  className="formulario"
+                  className="formulario formulario-movil"
                   onSubmit={(e) => {
                     e.preventDefault();
                     setConfirmarBaja(true);
@@ -938,7 +943,7 @@ export function Mandatos() {
 
           <section aria-labelledby={`${id}-nueva-decision`} className="tarjeta">
             <h2 id={`${id}-nueva-decision`}>Registrar una decisión</h2>
-            <form className="formulario" onSubmit={registrarDecision}>
+            <form className="formulario formulario-movil" onSubmit={registrarDecision}>
               <label htmlFor={`${id}-tipo-decision`}>Tipo</label>
               <select
                 id={`${id}-tipo-decision`}
@@ -962,28 +967,26 @@ export function Mandatos() {
                 onChange={(e) => cambiar(claveDecision, setFechaDecision)(e.target.value)}
               />
               <label htmlFor={`${id}-descripcion-decision`}>Qué se decidió</label>
-              <input
+              <TextoDeUnaLinea
                 id={`${id}-descripcion-decision`}
-                type="text"
+                rows={FILAS_DESCRIPCION}
                 autoComplete="off"
                 maxLength={LARGO_DESCRIPCION}
-                pattern={PATRON_TEXTO}
                 required
                 disabled={enviando}
                 value={descripcionDecision}
-                onChange={(e) => cambiar(claveDecision, setDescripcionDecision)(e.target.value)}
+                onValor={cambiar(claveDecision, setDescripcionDecision)}
               />
               <label htmlFor={`${id}-referencia`}>Dónde consta (libro, acta y folio)</label>
-              <input
+              <TextoDeUnaLinea
                 id={`${id}-referencia`}
-                type="text"
+                rows={FILAS_REFERENCIA}
                 autoComplete="off"
                 maxLength={LARGO_REFERENCIA}
-                pattern={PATRON_TEXTO}
                 required
                 disabled={enviando}
                 value={referencia}
-                onChange={(e) => cambiar(claveDecision, setReferencia)(e.target.value)}
+                onValor={cambiar(claveDecision, setReferencia)}
               />
               <label htmlFor={`${id}-sha256`}>Huella SHA-256 del acta escaneada (opcional)</label>
               <input
@@ -991,6 +994,8 @@ export function Mandatos() {
                 type="text"
                 autoComplete="off"
                 pattern={PATRON_SHA256}
+                spellCheck={false}
+                autoCapitalize="none"
                 disabled={enviando}
                 value={sha256}
                 onChange={(e) => cambiar(claveDecision, setSha256)(e.target.value)}
@@ -1013,7 +1018,7 @@ export function Mandatos() {
               <p>Para dar un alta hace falta elegir la decisión que la respalda, y no pudimos consultarlas.</p>
             )}
             {candidatos.tipo === "ok" && decisiones.tipo === "ok" && (
-              <form className="formulario" onSubmit={darDeAlta}>
+              <form className="formulario formulario-movil" onSubmit={darDeAlta}>
                 <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
                 <select
                   id={`${id}-tipo-mandato`}

@@ -15,12 +15,13 @@ const C1 = "11111111-1111-4111-8111-111111111111";
 const U1 = "33333333-3333-4333-8333-333333333333";
 const U2 = "44444444-4444-4444-8444-444444444444";
 const PENDIENTE = "55555555-5555-4555-8555-555555555555";
+const ACEPTADA = "66666666-6666-4666-8666-666666666666";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const UNIDADES = { elementos: [{ id: U1, designacion: "1° A" }, { id: U2, designacion: "2° B" }] };
 
 type Quien = "consejo" | "propietaria";
 
-function invitacion(id: string, unidad: string, nombre: string, correo: string | null) {
+function invitacion(id: string, unidad: string, nombre: string, correo: string | null, estado = "pendiente") {
   return {
     id,
     unidad_id: unidad,
@@ -28,10 +29,10 @@ function invitacion(id: string, unidad: string, nombre: string, correo: string |
     tipo: "inquilino",
     correo,
     nombre,
-    estado: "pendiente",
+    estado,
     creada_en: "2026-10-18T12:00:00Z",
     vence_en: "2026-10-25T12:00:00Z",
-    aceptada_en: null,
+    aceptada_en: estado === "aceptada" ? "2026-10-19T12:00:00Z" : null,
     revocada_en: null,
   };
 }
@@ -62,7 +63,10 @@ function vigilarErrores(pagina: Page): string[] {
 async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<{ envios: Envio[]; retiros: (string | null)[] }> {
   const envios: Envio[] = [];
   const retiros: (string | null)[] = [];
-  const lista = [invitacion(PENDIENTE, U1, "Beto Pérez", quien === "propietaria" ? "beto@ejemplo.com" : null)];
+  const lista = [
+    invitacion(PENDIENTE, U1, "Beto Pérez", quien === "propietaria" ? "beto@ejemplo.com" : null),
+    invitacion(ACEPTADA, U2, "Carla Gómez", null, "aceptada"),
+  ];
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
@@ -132,6 +136,20 @@ test.describe("invitar", () => {
     await expect(page.getByText("beto@ejemplo.com")).toHaveCount(0); // no la creó: P6
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
+
+    // Solo las pendientes a la vista; la aceptada, en el historial plegado (UX móvil, CEM).
+    await expect(page.getByText("Carla Gómez, 2° B")).toBeHidden();
+    const resumen = page.getByText("Historial: aceptadas, retiradas y vencidas (1)");
+    expect((await resumen.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await resumen.click();
+    await expect(page.getByText("Carla Gómez, 2° B")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    await sinFaltasDeAccesibilidad(page);
+    // El botón de envío ocupa todo el ancho del formulario en el teléfono, con 44 px de alto.
+    const boton = await page.getByRole("button", { name: "Invitar" }).boundingBox();
+    const campo = await page.getByLabel("Correo").boundingBox();
+    expect(boton?.height).toBeGreaterThanOrEqual(44);
+    expect(Math.abs((boton?.width ?? 0) - (campo?.width ?? -1))).toBeLessThanOrEqual(1);
 
     await invitar(page, "2° B", "Dora Ruiz", "dora@ejemplo.com");
     await expect(page.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeVisible();
@@ -219,7 +237,12 @@ test.describe("invitar", () => {
     await fila.getByRole("button", { name: "Retirar" }).click();
     await fila.getByRole("button", { name: "Sí, retirarla" }).click();
     await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeVisible();
-    await expect(fila.getByText("Retirada")).toBeVisible();
+    // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
+    await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
+    await expect(fila.getByText("Retirada", { exact: true })).toHaveCount(1);
+    await expect(fila.getByText("Retirada", { exact: true })).toBeHidden();
+    await page.getByText("Historial: aceptadas, retiradas y vencidas (2)").click();
+    await expect(fila.getByText("Retirada", { exact: true })).toBeVisible();
     expect(retiros).toEqual([CSRF]);
   });
 
