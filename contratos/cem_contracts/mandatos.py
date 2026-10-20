@@ -72,7 +72,10 @@ class DecisionNueva(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tipo: TipoDecision
-    fecha: date = Field(description="Fecha del acto (asamblea, reunión, contrato o inscripción).")
+    fecha: date = Field(
+        description="Fecha del acto (asamblea, reunión, contrato o inscripción). Hasta hoy en el"
+        " consorcio (su día local): una fecha posterior responde 422 `fecha_futura`."
+    )
     descripcion: str = _texto(LARGO_MAXIMO_DESCRIPCION, "Qué se decidió.", "Designa al Consejo")
     referencia: str = _texto(
         LARGO_MAXIMO_REFERENCIA,

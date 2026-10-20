@@ -441,6 +441,20 @@ describe("página /mandatos", () => {
     expect(tercera).not.toBe(segunda);
   });
 
+  it("una fecha posterior a hoy en el consorcio (422 fecha_futura) se explica", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_DECISIONES}`]: () => error("fecha_futura", 422) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "2099-01-01" } });
+    fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Algo" } });
+    fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 1" } });
+    fireEvent.click(boton("Registrar decisión"));
+    expect(await screen.findByText(/no puede ser posterior a hoy: se registran actos ya tomados/)).toBeTruthy();
+    expect(screen.queryByText("Listo: registramos la decisión.")).toBeNull();
+  });
+
   it("un pedido en curso (409) conserva la clave", async () => {
     let enCurso = true;
     const simulado = conConsejo({

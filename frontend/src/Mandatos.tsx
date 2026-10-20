@@ -130,6 +130,7 @@ const POR_CODIGO: Record<string, string> = {
     "La persona administra este edificio como externa en esas fechas: el Consejo fiscaliza y no co-administra.",
   mandato_ya_dado_de_baja: "El mandato ya tiene una baja registrada.",
   mandato_terminado: "El mandato ya terminó por su fecha: solo admite una baja por error de carga.",
+  fecha_futura: "La fecha de la decisión no puede ser posterior a hoy: se registran actos ya tomados.",
   decision_invalida: "La decisión no existe en este edificio o no corresponde (la remoción pide una asamblea).",
   persona_sin_vinculo: "La persona no tiene un vínculo confirmado, vigente o futuro, en este edificio.",
   externo_por_invitacion:
