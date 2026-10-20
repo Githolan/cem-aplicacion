@@ -162,6 +162,12 @@ test.describe("mandatos", () => {
     const tipo = await decision.getByLabel("Tipo").boundingBox();
     expect(registrar?.height).toBeGreaterThanOrEqual(44);
     expect(Math.abs((registrar?.width ?? 0) - (tipo?.width ?? -1))).toBeLessThanOrEqual(1);
+    // Desde 481 px el botón vuelve a su ancho natural.
+    await page.setViewportSize({ width: 800, height: 740 });
+    const registrarAncho = await decision.getByRole("button", { name: "Registrar decisión" }).boundingBox();
+    const tipoAncho = await decision.getByLabel("Tipo").boundingBox();
+    expect(registrarAncho?.width ?? Infinity).toBeLessThan((tipoAncho?.width ?? 0) - 1);
+    await page.setViewportSize({ width: 360, height: 740 });
 
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_PROPIA);

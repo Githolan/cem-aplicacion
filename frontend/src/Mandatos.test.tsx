@@ -286,7 +286,7 @@ describe("página /mandatos", () => {
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_DECISIONES)).toHaveLength(2));
   });
 
-  it("en el celular, «Qué se decidió» y «Dónde consta» son textarea y la huella, una línea", async () => {
+  it("«Qué se decidió» y «Dónde consta» son textarea y la huella, una línea", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
     await cargado();
@@ -307,13 +307,13 @@ describe("página /mandatos", () => {
     );
   });
 
-  it("los textarea no aceptan saltos de línea (la API los rechaza) ni un texto de solo espacios", async () => {
+  it("los textarea no aceptan caracteres de control (la API los rechaza) ni un texto de solo espacios", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
     await cargado();
     const form = seccion("Registrar una decisión");
     const que = within(form).getByLabelText("Qué se decidió") as HTMLTextAreaElement;
-    fireEvent.change(que, { target: { value: "Designa\nal Consejo\r\npor dos años" } });
+    fireEvent.change(que, { target: { value: "Designa\nal Consejo\tpor dos años" } });
     expect(que.value).toBe("Designa al Consejo por dos años");
     expect(que.validity.valid).toBe(true);
     const enter = fireEvent.keyDown(que, { key: "Enter" });
@@ -323,6 +323,22 @@ describe("página /mandatos", () => {
     expect(que.validationMessage).toBe("Escribí algo más que espacios.");
     fireEvent.change(que, { target: { value: " Algo " } });
     expect(que.validity.valid).toBe(true);
+  });
+
+  it("con un texto de solo espacios el formulario de decisión no se envía", async () => {
+    const simulado = conConsejo();
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "2026-10-01" } });
+    fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "   " } });
+    fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 1" } });
+    const formulario = within(form).getByRole("button", { name: "Registrar decisión" }).closest("form") as HTMLFormElement;
+    expect(formulario.checkValidity()).toBe(false);
+    fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Algo" } });
+    expect(formulario.checkValidity()).toBe(true);
+    expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toEqual([]);
   });
 
   it("da de alta al Consejo con la persona de los candidatos", async () => {

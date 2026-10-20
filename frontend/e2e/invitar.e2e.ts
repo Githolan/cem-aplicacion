@@ -239,6 +239,7 @@ test.describe("invitar", () => {
     await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeVisible();
     // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
     await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
+    await expect(fila.getByText("Retirada", { exact: true })).toHaveCount(1);
     await expect(fila.getByText("Retirada", { exact: true })).toBeHidden();
     await page.getByText("Historial: aceptadas, retiradas y vencidas (2)").click();
     await expect(fila.getByText("Retirada", { exact: true })).toBeVisible();
