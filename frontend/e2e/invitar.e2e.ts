@@ -239,8 +239,11 @@ test.describe("invitar", () => {
     expect(retiros).toEqual([]);
 
     await fila.getByRole("button", { name: "Retirar" }).click();
-    await fila.getByRole("button", { name: "Sí, retirarla" }).click();
+    // Con el teclado, como quien no usa el mouse (E46): el foco termina en el aviso del resultado.
+    await fila.getByRole("button", { name: "Sí, retirarla" }).focus();
+    await page.keyboard.press("Enter");
     await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeVisible();
+    await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeFocused();
     // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
     await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
     await expect(fila.getByText("Retirada", { exact: true })).toHaveCount(1);

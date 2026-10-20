@@ -475,6 +475,75 @@ describe("página /invitaciones", () => {
     expect(within(fila).getByText("Aceptada")).toBeTruthy();
   });
 
+  it("E46: al retirar, el foco va al aviso del resultado y no cae al principio de la página", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => new Response(null, { status: 204 }) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    const si = screen.getByRole("button", { name: "Sí, retirarla" });
+    si.focus();
+    fireEvent.click(si);
+    const aviso = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("E46: si el retiro falla, el foco también va al aviso", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("invitacion_no_pendiente", 409) }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    const si = screen.getByRole("button", { name: "Sí, retirarla" });
+    si.focus();
+    fireEvent.click(si);
+    const aviso = await screen.findByText(/ya se aceptó/);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+  });
+
+  it("E46: después de un retiro, invitar devuelve el foco al campo y no al aviso", async () => {
+    const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        [`POST ${ruta}`]: () => new Response(null, { status: 204 }),
+        [`POST ${RUTA_LISTA}`]: () =>
+          Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }),
+      }),
+    );
+    abrir();
+    await completar();
+    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    const si = screen.getByRole("button", { name: "Sí, retirarla" });
+    si.focus();
+    fireEvent.click(si);
+    const aviso = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    const correo = screen.getByLabelText("Correo");
+    correo.focus();
+    fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await waitFor(() => expect(document.activeElement).toBe(correo));
+  });
+
+  it("E46 (control): al invitar, el foco sigue volviendo al campo, no al aviso", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        [`POST ${RUTA_LISTA}`]: () =>
+          Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }),
+      }),
+    );
+    abrir();
+    await completar();
+    const correo = screen.getByLabelText("Correo");
+    correo.focus();
+    fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await waitFor(() => expect(document.activeElement).toBe(correo));
+  });
+
   it("E35: una lista pedida antes del retiro no vuelve a mostrar pendiente la invitación retirada", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     const RETIRADA = { elementos: [invitacion(PENDIENTE, "Beto Pérez", "revocada", null), en(LISTA.elementos, 1)] };
