@@ -675,6 +675,7 @@
           "contrasena_debil",
           "vinculo_ya_confirmado",
           "vinculo_finalizado",
+          "vinculo_no_iniciado",
           "mandato_ya_asociado",
           "mandato_no_vigente",
           "mandato_no_asociable",
@@ -946,6 +947,26 @@
       "confirmado"
     ],
     "title": "FilaPadron",
+    "type": "object"
+  },
+  "FinVinculo": {
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar` (PA17).",
+    "properties": {
+      "motivo": {
+        "description": "Por qué termina el vínculo (venta, fin de la locación, error de carga u otro). Queda en el vínculo, no en la auditoría.",
+        "examples": [
+          "Fin del contrato de locación del 01-03-2024"
+        ],
+        "maxLength": 300,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Motivo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "motivo"
+    ],
+    "title": "FinVinculo",
     "type": "object"
   },
   "Invitacion": {
@@ -3145,6 +3166,56 @@
       "confirmado_en"
     ],
     "title": "VinculoConfirmado",
+    "type": "object"
+  },
+  "VinculoFinalizado": {
+    "$defs": {
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "Respuesta del fin de vínculo. No dice si se cerraron sesiones: eso depende de otros\naccesos de la persona, que quien finaliza no tiene por qué conocer.",
+    "properties": {
+      "finalizado_en": {
+        "format": "date-time",
+        "title": "Finalizado En",
+        "type": "string"
+      },
+      "tipo": {
+        "$ref": "#/$defs/TipoVinculo"
+      },
+      "unidad_id": {
+        "format": "uuid",
+        "title": "Unidad Id",
+        "type": "string"
+      },
+      "vigente_hasta": {
+        "description": "Exclusivo: desde ese día el vínculo ya no vale.",
+        "format": "date",
+        "title": "Vigente Hasta",
+        "type": "string"
+      },
+      "vinculo_id": {
+        "format": "uuid",
+        "title": "Vinculo Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "vinculo_id",
+      "unidad_id",
+      "tipo",
+      "vigente_hasta",
+      "finalizado_en"
+    ],
+    "title": "VinculoFinalizado",
     "type": "object"
   }
 }

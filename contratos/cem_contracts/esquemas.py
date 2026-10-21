@@ -68,7 +68,14 @@ from cem_contracts.mandatos_invitaciones import (
     ListaInvitacionesMandato,
     TokenInvitacionMandato,
 )
-from cem_contracts.padron import ConfirmacionVinculo, FilaPadron, Padron, VinculoConfirmado
+from cem_contracts.padron import (
+    ConfirmacionVinculo,
+    FilaPadron,
+    FinVinculo,
+    Padron,
+    VinculoConfirmado,
+    VinculoFinalizado,
+)
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.segundo_factor import (
     AltaTotp,
@@ -108,6 +115,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     EstadoSegundoFactor,
     FaltaSegundoFactor,
     FilaPadron,
+    FinVinculo,
     Invitacion,
     InvitacionAceptada,
     InvitacionMandato,
@@ -146,6 +154,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     Unidad,
     VerificacionSegundoFactor,
     VinculoConfirmado,
+    VinculoFinalizado,
 )
 
 

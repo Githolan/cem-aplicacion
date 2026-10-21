@@ -267,6 +267,7 @@
           "contrasena_debil",
           "vinculo_ya_confirmado",
           "vinculo_finalizado",
+          "vinculo_no_iniciado",
           "mandato_ya_asociado",
           "mandato_no_vigente",
           "mandato_no_asociable",
@@ -917,6 +918,26 @@
           "confirmado"
         ],
         "title": "FilaPadron",
+        "type": "object"
+      },
+      "FinVinculo": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar` (PA17).",
+        "properties": {
+          "motivo": {
+            "description": "Por qué termina el vínculo (venta, fin de la locación, error de carga u otro). Queda en el vínculo, no en la auditoría.",
+            "examples": [
+              "Fin del contrato de locación del 01-03-2024"
+            ],
+            "maxLength": 300,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "FinVinculo",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2397,6 +2418,44 @@
           "confirmado_en"
         ],
         "title": "VinculoConfirmado",
+        "type": "object"
+      },
+      "VinculoFinalizado": {
+        "description": "Respuesta del fin de vínculo. No dice si se cerraron sesiones: eso depende de otros\naccesos de la persona, que quien finaliza no tiene por qué conocer.",
+        "properties": {
+          "finalizado_en": {
+            "format": "date-time",
+            "title": "Finalizado En",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "description": "Exclusivo: desde ese día el vínculo ya no vale.",
+            "format": "date",
+            "title": "Vigente Hasta",
+            "type": "string"
+          },
+          "vinculo_id": {
+            "format": "uuid",
+            "title": "Vinculo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vinculo_id",
+          "unidad_id",
+          "tipo",
+          "vigente_hasta",
+          "finalizado_en"
+        ],
+        "title": "VinculoFinalizado",
         "type": "object"
       }
     }
@@ -4437,6 +4496,91 @@
           }
         },
         "summary": "Confirmar un vínculo con el título que lo acredita",
+        "tags": [
+          "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar": {
+      "post": {
+        "description": "Cierra la vigencia hoy (día del consorcio) y conserva el vínculo con quién, cuándo y por\nqué. La persona pierde el acceso que le daba; si no le queda otro vínculo ni mandato vigente\nen el consorcio, se cierran sus sesiones. El motivo no sale en la respuesta ni en la\nauditoría.",
+        "operationId": "finalizar_api_v1_consorcios__consorcio_id__vinculos__vinculo_id__finalizar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vinculo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Vinculo Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FinVinculo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VinculoFinalizado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `padron.gestionar` sobre esa unidad."
+          },
+          "404": {
+            "description": "El vínculo no existe en este consorcio."
+          },
+          "409": {
+            "description": "El vínculo ya terminó o todavía no empezó."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Finalizar un vínculo (PA17)",
         "tags": [
           "consorcios"
         ]
