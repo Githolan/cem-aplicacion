@@ -47,8 +47,9 @@ def unidad(motor_migrate, cons: UUID, designacion: str) -> UUID:
 
 def vinculo(motor_migrate, cons: UUID, uni: UUID, persona: UUID, *, tipo="propietario",
             desde=date(2020, 1, 1), hasta=None, fuente="documento",
-            confirma: UUID | None = None) -> UUID:  # fmt: skip
-    """Un vínculo cargado por el equipo; con `confirma`, confirmado por esa persona."""
+            confirma: UUID | None = None, confirmado: date | None = None) -> UUID:  # fmt: skip
+    """Un vínculo cargado por el equipo; con `confirma`, confirmado por esa persona el día
+    `confirmado` (por omisión, el día en que empieza a regir)."""
     with motor_migrate.begin() as c:
         return c.execute(
             text(
@@ -56,7 +57,7 @@ def vinculo(motor_migrate, cons: UUID, uni: UUID, persona: UUID, *, tipo="propie
                 " vigente_desde, vigente_hasta, fuente, origen, confirmado_por, confirmado_en,"
                 " confirmacion_referencia)"
                 " values (:c, :u, :p, :t, :d, :h, :f, 'soporte', cast(:k as uuid),"
-                " case when cast(:k as uuid) is null then null else now() end,"
+                " case when cast(:k as uuid) is null then null else cast(:cf as timestamptz) end,"
                 " case when cast(:k as uuid) is null then null else :r end) returning id"
             ),
             {
@@ -69,6 +70,7 @@ def vinculo(motor_migrate, cons: UUID, uni: UUID, persona: UUID, *, tipo="propie
                 "f": fuente,
                 "k": confirma,
                 "r": ESCRITURA,
+                "cf": confirmado or desde,
             },  # fmt: skip
         ).scalar_one()
 
@@ -294,6 +296,62 @@ def test_un_mandato_nuevo_con_su_decision_resuelve_la_continuidad(
                  origen="soporte", con_vinculo=False)  # fmt: skip
     assert opera(motor_migrate, nuevo, e["hoy"])
     assert padron(e["mc"], e["cons"]) == 200
+
+
+def test_una_confirmacion_tardia_no_tapa_el_hueco(consejo, motor_migrate):
+    """Vende la 3° C el 01-03-2026; la 6° F rige desde ese día, pero se confirma el 01-06-2026.
+    Entre una y otra no tuvo ningún vínculo que habilitara: el mandato queda pendiente (Codex
+    en app #102). Control: confirmada el mismo día de la venta, no hay hueco."""
+    e = consejo
+    venta = date(2026, 3, 1)
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
+            {"h": venta, "v": e["v_prop"]},
+        )
+    tardio = vinculo(motor_migrate, e["cons"], unidad(motor_migrate, e["cons"], "6° F"), e["mc"],
+                     desde=venta, confirma=e["prop"], confirmado=date(2026, 6, 1))  # fmt: skip
+    assert not opera(motor_migrate, e["m"], e["hoy"])
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.vinculo set confirmado_en = :f where id = :v"),
+            {"f": venta, "v": tardio},
+        )
+    assert opera(motor_migrate, e["m"], e["hoy"])
+
+
+def test_una_aceptacion_que_reutiliza_el_vinculo_lo_habilita_desde_ese_dia(consejo, motor_migrate):
+    """`aceptar_invitacion` reutiliza un vínculo de la misma persona, unidad y carácter sin
+    cambiarle la fuente (Codex en app #102): la aceptación habilita desde su día. Sin la
+    invitación aceptada, el vínculo cargado por documento sin confirmar no cuenta."""
+    e = consejo
+    venta = date(2026, 3, 1)
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
+            {"h": venta, "v": e["v_prop"]},
+        )
+    uni = unidad(motor_migrate, e["cons"], "6° F")
+    vinculo(motor_migrate, e["cons"], uni, e["mc"], desde=venta)
+    assert not opera(motor_migrate, e["m"], e["hoy"])  # control: sin aceptar ni confirmar
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
+                " token_hash, creada_en, vence_en, aceptada_en, persona_id)"
+                " values (:c, :u, 'propietario', :correo, 'Consejo', sha256(gen_random_uuid()"
+                "::text::bytea), :a, cast(:a as timestamptz) + interval '1 day',"
+                " cast(:a as timestamptz) + interval '1 hour', :p)"
+            ),
+            {
+                "c": e["cons"],
+                "u": uni,
+                "correo": f"mc-{uni.hex[:8]}@ejemplo.com",
+                "a": "2026-03-01 12:00-03",
+                "p": e["mc"],
+            },  # fmt: skip
+        )
+    assert opera(motor_migrate, e["m"], e["hoy"])
 
 
 # Negar ante la duda -----------------------------------------------------------------------------

@@ -12,9 +12,12 @@ la baja del mandato con su causa y respaldo de C6 y, si corresponde, un alta nue
   que figure en `nucleo.condicion_habilitante_consejo`, y aceptado o confirmado. El código no
   nombra ningún carácter: el catálogo dice cuáles admite la norma, con su fuente. Hoy,
   `propietario` (CCyC, art. 2064). "Aceptado o confirmado" es la regla de la decisión 2: un
-  vínculo habilita recién con una aceptación (fuente `invitacion`, que nace de la persona al
-  aceptar) o una confirmación válida (`confirmado_en`). Uno importado, declarado o cargado por
-  documento, sin confirmar, no cuenta.
+  vínculo habilita recién con una aceptación o una confirmación válida, y **desde ese día**, no
+  desde su `vigente_desde` (Codex en app #102): una confirmación tardía no tapa un hueco. La
+  aceptación es la invitación que creó el vínculo (fuente `invitacion`) o la que lo reutilizó
+  (`aceptar_invitacion` busca uno de la misma persona, unidad y carácter y no le cambia la
+  fuente; queda en `nucleo.invitacion`). Uno importado, declarado o cargado por documento, sin
+  confirmar ni aceptar, no cuenta.
 - **Cómo se detecta la pérdida** (definición 2): se calcula en cada pedido a partir de los
   vínculos del padrón; no hay ninguna marca guardada. `nucleo.condicion_consejo_sin_interrupcion`
   une las vigencias de esos vínculos y la recorta a `[inicio del mandato, fecha]`: la condición
@@ -158,9 +161,10 @@ create function {CONDICION.replace("(uuid, date)", "(mandato uuid, fecha date)")
     select coalesce((
       select not isempty(t.cobertura)
              and t.cobertura = datemultirange(daterange(lower(t.cobertura), fecha + 1))
-        from (select range_agg(daterange(v.vigente_desde, v.vigente_hasta))
+        from (select range_agg(daterange(greatest(v.vigente_desde, a.desde), v.vigente_hasta))
                        * datemultirange(daterange(m.vigente_desde, fecha + 1)) as cobertura
                 from nucleo.mandato m
+                join nucleo.consorcio co on co.id = m.consorcio_id
                 join nucleo.vinculo v
                   on v.consorcio_id = m.consorcio_id and v.persona_id = m.persona_id
                 join nucleo.condicion_habilitante_consejo h on h.tipo = v.tipo
@@ -168,8 +172,25 @@ create function {CONDICION.replace("(uuid, date)", "(mandato uuid, fecha date)")
                   on u.consorcio_id = v.consorcio_id and u.id = v.unidad_id
                  and u.eliminado_en is null
                 join nucleo.persona pe on pe.id = v.persona_id and pe.eliminado_en is null
-               where m.id = mandato
-                 and (v.confirmado_en is not null or v.fuente = 'invitacion')
+                -- Desde qué día habilita el vínculo: el primero de su confirmación, de su
+                -- alta por una invitación aceptada o de una aceptación que lo reutilizó
+                -- (`aceptar_invitacion`, 0014, no le cambia la fuente). Antes, no cuenta.
+                cross join lateral (
+                  select least(
+                    (v.confirmado_en at time zone co.zona_horaria)::date,
+                    case when v.fuente = 'invitacion'
+                         then (v.creado_en at time zone co.zona_horaria)::date end,
+                    (select min((i.aceptada_en at time zone co.zona_horaria)::date)
+                       from nucleo.invitacion i
+                      where i.consorcio_id = v.consorcio_id and i.unidad_id = v.unidad_id
+                        and i.persona_id = v.persona_id and i.tipo = v.tipo
+                        and i.aceptada_en is not null
+                        and daterange(v.vigente_desde, v.vigente_hasta)
+                            && daterange((i.aceptada_en at time zone co.zona_horaria)::date,
+                                         null))) as desde) a
+               where m.id = mandato and a.desde is not null
+                 and (v.vigente_hasta is null
+                      or greatest(v.vigente_desde, a.desde) < v.vigente_hasta)
                group by m.vigente_desde) t), false)
   $$;
 
