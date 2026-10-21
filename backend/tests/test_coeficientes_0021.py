@@ -177,6 +177,25 @@ def test_un_esquema_de_otro_consorcio_no_se_reparte(edificio, motor_migrate, mot
     assert sum(reparto(motor_app, e["cons"], esquema, "100.00").values()) == D("100.00")  # control
 
 
+@pytest.mark.parametrize("cambio", ["unidad_nueva", "unidad_de_baja"])
+def test_pa02_si_el_esquema_no_coincide_con_las_unidades_el_reparto_se_bloquea(
+    edificio, motor_migrate, motor_app, cambio
+):
+    e = edificio
+    esquema = registrar(motor_app, e["cons"], porcentajes(e, *EXPENSAS), decision=e["acta"])
+    assert sum(reparto(motor_app, e["cons"], esquema, "100.00").values()) == D("100.00")  # control
+    if cambio == "unidad_nueva":
+        otra_unidad(motor_migrate, e["cons"], "6° A")
+        esperado = "sin coeficiente: 6° A"
+    else:
+        with motor_migrate.begin() as c:
+            c.execute(text("update nucleo.unidad set eliminado_en = now() where id = :u"),
+                      {"u": e["u"][4]})  # fmt: skip
+        esperado = "dadas de baja: 5° A"
+    with pytest.raises(RepartoBloqueado, match=esperado):
+        reparto(motor_app, e["cons"], esquema, "100.00")
+
+
 # Versiones ----------------------------------------------------------------------------------
 
 
