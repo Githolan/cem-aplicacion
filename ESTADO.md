@@ -111,9 +111,20 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 20-10-2026 (despliegue de `96245d4`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-20-96245d4.md`).
+Medido el 21-10-2026 (despliegue de `1e2b465`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-1e2b465.md`).
 
-**Staging y producción en `96245d4`** (20-10-2026), base `0019`, contrato 0.15.0.
+**Staging y producción en `1e2b465`** (21-10-2026), base `0020`, contrato 0.15.0.
+
+- **2b-5, corte 1: fin de vínculo (PA17, PR #94, migración `0020`).**
+  - `POST /api/v1/consorcios/{c}/vinculos/{v}/finalizar` con `padron.gestionar` sobre la unidad, idempotente y sin devolver el motivo.
+  - `nucleo.finalizar_vinculo` cierra la vigencia hoy (día del consorcio), conserva la fila y la confirmación, y revoca las sesiones solo si a la persona no le queda otro vínculo ni mandato vigente en el consorcio. Dos fines de la misma persona se serializan con un bloqueo por persona.
+  - Un fin registrado no se mueve (trigger `vinculo_fin_inalterable`): corregirlo es anularlo entero. La vigencia vacía exige un fin registrado. Un vínculo futuro no se finaliza (`vinculo_no_iniciado`).
+  - CI de `f2fcc37` y de la punta `1e2b465` en verde (1284 de backend, 58 de contratos, 277 de Vitest y las de extremo a extremo). Codex sin hallazgos sobre `f2fcc37`, después de corregir un P1 y un P2.
+  - Verificación: copia previa a la migración en los dos entornos, smoke de staging con salida 0, la ruta responde 401 sin sesión (control: 404) y 0 errores en los registros. Producción en `0020`, con 0 mandatos, 0 decisiones y 0 vínculos finalizados.
+- **E58 (intermitente):** `test_la_migracion_0010_baja_y_sube` dio rojo una vez sin causa reproducible. Está en el tracker de CEM.
+- **Abierto:** E27, E29, E33, E40 (cuando haya escala), E55, E56, E58 y A13.
+
+Antes, **`96245d4`** (20-10-2026), base `0019`, contrato 0.15.0. Lo abierto de ese bloque lo reemplaza el de `1e2b465`.
 
 - **E52 a E54 (PR #92):**
   - `/invitacion` e `/invitacion-mandato` ya no explican un 403, un 429 o un 5xx como un problema de conexión; piden volver a abrir el enlace o hablan del servicio.
