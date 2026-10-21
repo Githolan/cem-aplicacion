@@ -3,7 +3,9 @@
 Recorre por HTTP, contra el frontend de staging (nginx, cookies y CSRF reales), lo que las
 pruebas de la PC cubren por equivalencia y no por ejecución: un vínculo que entra, el padrón
 con su 403 auditado, confirmar un vínculo, crear, listar y revocar una invitación, un mandato
-que da ámbito, la invitación de mandato con cuatro ojos (A7) y desasociar. Al final comprueba la
+que da ámbito, la invitación de mandato con cuatro ojos (A7) y desasociar; y, desde 2b-5, un
+esquema de coeficientes cargado con `scripts.cargar_coeficientes` y repartido, con el bloqueo
+de PA02, y el fin de un vínculo por HTTP (PA17). Al final comprueba la
 cadena de auditoría del consorcio y revoca todas las sesiones de prueba.
 
 **No va en la imagen de la aplicación** (emite sesiones de prueba: en producción sería una
@@ -34,7 +36,10 @@ estándar (`python -`), sin copiarlo al contenedor: no queda archivo que borrar 
 mandatos de prueba por la vía de soporte que termina al final (con baja del mismo día, rango
 vacío: no ocupa la administración de corridas siguientes) y deja eventos de auditoría, que son
 de solo agregar. La primera invitación de mandato deja staging sin poder bajar de `0015`
-(barrera aceptada en P3): se registra en `REGISTRO_RECURSOS`. Nunca en producción.
+(barrera aceptada en P3): se registra en `REGISTRO_RECURSOS`. Cada corrida deja también un
+esquema de coeficientes de un grupo propio (`prueba_<corrida>`, inalterable) y un vínculo
+finalizado: desde la primera, staging no baja de `0021` ni de `0020`, que se niegan con datos
+(autorización del propietario del 21-10-2026). Nunca en producción.
 
 `--sin-verificar-certificado` existe porque dentro de la red de Docker el certificado de
 Traefik no es el del dominio (el TLS público lo termina Cloudflare); el tráfico no sale de la
@@ -43,13 +48,17 @@ y aun así revoca las sesiones y da de baja los mandatos que haya creado.
 """
 
 import argparse
+import contextlib
+import io
 import json
 import re
 import ssl
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from decimal import Decimal
 from http.cookies import SimpleCookie
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -58,12 +67,16 @@ from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from app import auditoria
 from app.config import cargar
 from app.db import crear_motor, transaccion
 from app.identidad import invitaciones, sesiones
+from app.liquidacion.esquemas import repartir_por_esquema
+from app.liquidacion.reparto import RepartoBloqueado
 from app.plataforma.idempotencia import ENCABEZADO, ENCABEZADO_REPETIDA
+from scripts import cargar_coeficientes
 
 NOMBRE_CONSORCIO = "CEM — prueba automatizada (staging)"
 DOMINIO = "cem-prueba.invalid"
@@ -281,6 +294,120 @@ def denegado(corrida: Corrida, persona: UUID, accion: str, motivo: str | None = 
         ).scalar_one()  # fmt: skip
 
 
+def una_unidad(corrida: Corrida, letra: str) -> UUID:
+    with corrida.tx() as conn:
+        designacion = f"Prueba {corrida.id} {letra}"
+        u = conn.execute(
+            text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, :d)"
+                 " returning id"), {"c": corrida.consorcio, "d": designacion},
+        ).scalar_one()  # fmt: skip
+        auditoria.registrar(conn, consorcio_id=corrida.consorcio, actor=None, origen=SOPORTE,
+                            accion="consorcios.unidad.crear", entidad="unidad",
+                            entidad_id=u, despues={"designacion": designacion})  # fmt: skip
+    return u
+
+
+def coeficientes(corrida: Corrida, decision: UUID, hoy, u: dict[str, UUID]) -> UUID:
+    """2b-5, corte 2 (D4, RF05): un esquema sintético cargado con el script del equipo, tal como
+    lo usa el piloto, y repartido. Las unidades A, B y C de la corrida suman 99,96 % (33,32 cada
+    una); las demás unidades activas del consorcio, de corridas anteriores, van con 0 %."""
+    with corrida.tx() as conn:
+        activas = conn.execute(
+            text("select designacion from nucleo.unidad where consorcio_id = :c"
+                 " and eliminado_en is null order by designacion"), {"c": corrida.consorcio},
+        ).scalars().all()  # fmt: skip
+    propias = {f"Prueba {corrida.id} {letra}" for letra in "ABC"}
+    filas = "\n".join(f"{d},{'33.32' if d in propias else '0'}" for d in activas)
+    grupo = f"prueba_{corrida.id}"
+    salida = io.StringIO()
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", encoding="utf-8") as planilla:
+        planilla.write(f"designacion,porcentaje\n{filas}\n")
+        planilla.flush()
+        with contextlib.redirect_stdout(salida):
+            codigo = cargar_coeficientes.main([
+                "--consorcio", str(corrida.consorcio), "--grupo", grupo, "--fuente", REFERENCIA,
+                "--desde", str(hoy), "--decision", str(decision), "--archivo", planilla.name,
+            ])  # fmt: skip
+    comprobar(codigo == 0, f"cargar_coeficientes salió con {codigo}: {salida.getvalue()}")
+    cargado = json.loads(salida.getvalue())
+    comprobar((cargado["grupo"], cargado["version"], cargado["suma"]) == (grupo, 1, "99.960000"),
+              f"esquema cargado tal como dice la fuente: {cargado}")  # fmt: skip
+    esquema = UUID(cargado["esquema_id"])
+    total = Decimal("1000.01")
+    with corrida.tx() as conn:
+        reparto = repartir_por_esquema(conn, esquema, total)
+    de_la_corrida = {u[letra] for letra in "ABC"}
+    propios = sorted(reparto[x] for x in de_la_corrida)
+    comprobar(sum(reparto.values()) == total
+              and propios == [Decimal("333.33"), Decimal("333.34"), Decimal("333.34")]
+              and all(v == 0 for k, v in reparto.items() if k not in de_la_corrida),
+              f"el reparto de {total} cierra exacto con restos mayores: {propios}")  # fmt: skip
+    corrida.ok(f"esquema de coeficientes por el script ({len(activas)} unidades, suma 99,96 %)"
+               f" y reparto de {total} exacto, centavos por restos mayores")  # fmt: skip
+    return esquema
+
+
+def fin_de_vinculo(corrida: Corrida, esquema: UUID, adm: Navegador, mc1: Navegador) -> None:
+    """2b-5, corte 1 (PA17) por HTTP, y el bloqueo de PA02 con la unidad nueva que trae."""
+    e = una_unidad(corrida, "E")
+    saliente = entra_por_invitacion(corrida, "saliente", e)
+    with corrida.tx() as conn:
+        try:
+            repartir_por_esquema(conn, esquema, Decimal("10.00"))
+            bloqueado = ""
+        except RepartoBloqueado as error:
+            bloqueado = str(error)
+    comprobar(
+        f"sin coeficiente: Prueba {corrida.id} E" in bloqueado,
+        f"PA02: una unidad nueva sin coeficiente bloquea el reparto: {bloqueado!r}",
+    )
+    corrida.ok("PA02: una unidad nueva sin coeficiente bloquea el reparto y se nombra")
+
+    r = adm.pedir("GET", corrida.c("/padron"))
+    [vs] = [x for x in r.cuerpo["elementos"] if x["unidad_id"] == str(e)]
+    ruta = corrida.c(f"/vinculos/{vs['vinculo_id']}/finalizar")
+    motivo = {"motivo": "Venta de la unidad (prueba automatizada)"}
+    r = mc1.pedir("POST", ruta, motivo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 403, f"el Consejo sin padron.gestionar no finaliza: {r.texto}")
+    comprobar(denegado(corrida, corrida.personas["consejo1"], "padron.gestionar"),
+              "el 403 del fin quedó auditado")  # fmt: skip
+    clave = str(uuid4())
+    r = adm.pedir("POST", ruta, motivo, csrf=True, clave=clave)
+    comprobar(r.estado == 200 and r.cuerpo["finalizado_en"] and "motivo" not in r.cuerpo,
+              f"finalizar: {r.texto}")  # fmt: skip
+    otra = adm.pedir("POST", ruta, motivo, csrf=True, clave=clave)
+    comprobar(otra.estado == 200 and otra.encabezados.get(ENCABEZADO_REPETIDA.lower()) == "true",
+              "el reintento con la misma clave repite la respuesta")  # fmt: skip
+    r = adm.pedir("POST", ruta, motivo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 409 and r.cuerpo["codigo"] == "vinculo_finalizado",
+              f"un segundo fin se rechaza: {r.texto}")  # fmt: skip
+    r = saliente.pedir("GET", "/api/v1/me/consorcios")
+    comprobar(r.estado == 401, f"sin otro acceso, la sesión de quien salió no vale: {r.texto}")
+    with corrida.tx() as conn:
+        fila = conn.execute(
+            text("select v.finalizado_en is not null as finalizado,"
+                 " (select count(*) from auditoria.eventos a where a.consorcio_id = :c"
+                 "   and a.accion = 'consorcio.vinculo.finalizar' and a.entidad_id = v.id"
+                 "   and a.despues::text not like '%Venta%') as eventos_sin_motivo"
+                 " from nucleo.vinculo v where v.id = :v"),
+            {"c": corrida.consorcio, "v": vs["vinculo_id"]},
+        ).one()  # fmt: skip
+        # El motivo queda en la fila, pero `cem_app` no puede leerlo (E31): solo el equipo.
+        try:
+            with conn.begin_nested():
+                conn.execute(text("select motivo_fin from nucleo.vinculo where id = :v"),
+                             {"v": vs["vinculo_id"]})  # fmt: skip
+            motivo_legible = True
+        except DBAPIError:
+            motivo_legible = False
+    comprobar(fila.finalizado and fila.eventos_sin_motivo == 1 and not motivo_legible,
+              f"fin registrado, auditoría sin el motivo y motivo ilegible para cem_app: {fila},"
+              f" legible={motivo_legible}")  # fmt: skip
+    corrida.ok("fin de un vínculo por HTTP (PA17): 403 auditado al Consejo, reintento"
+               " idempotente, 409 al repetir, la sesión de quien salió revocada y el motivo"
+               " fuera de la auditoría y del alcance de cem_app")  # fmt: skip
+
+
 def recorrer(corrida: Corrida) -> None:
     u = unidades(corrida)
     prop = entra_por_invitacion(corrida, "propietaria", u["A"])
@@ -308,6 +435,7 @@ def recorrer(corrida: Corrida) -> None:
                 text("select nucleo.cambiar_modo('administrador_aumentado', :d, :h, null,"
                      " 'soporte')"), {"d": decision, "h": hoy},
             )  # fmt: skip
+    esquema = coeficientes(corrida, decision, hoy, u)
     for rol in ("consejo1", "consejo2"):
         alta(corrida, rol, "miembro_consejo", decision, hoy, persona=corrida.personas[rol])
     alta(corrida, "administracion", "administrador", decision, hoy,
@@ -346,6 +474,8 @@ def recorrer(corrida: Corrida) -> None:
     [vp] = [x for x in r.cuerpo["elementos"] if x["unidad_id"] == str(u["A"])]
     comprobar(vp["confirmado"] is True, "el padrón muestra el vínculo confirmado")
     corrida.ok("confirmar un vínculo con CSRF y clave de reintento (control: sin CSRF, 403)")
+
+    fin_de_vinculo(corrida, esquema, adm, mc1)
 
     inquilino = corrida.correo("inquilino")
     r = mc1.pedir("POST", corrida.c("/invitaciones"),

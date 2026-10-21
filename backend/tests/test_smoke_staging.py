@@ -79,9 +79,9 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
     assert codigo == 0, error
     assert resumen["sesiones_abiertas_al_cerrar"] == 0
     assert resumen["navegadores_que_siguen_entrando"] == []
-    assert len(resumen["controles"]) == 11
+    assert len(resumen["controles"]) == 14
     assert set(resumen["personas"]) == {
-        "propietaria", "consejo1", "consejo2", "administracion", "externo",
+        "propietaria", "consejo1", "consejo2", "administracion", "externo", "saliente",
     }  # fmt: skip
     with motor_migrate.connect() as c:
         nombre = c.execute(
@@ -103,7 +103,15 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
     # El consorcio es permanente: una segunda corrida lo reusa.
     codigo, resumen, error = correr(servidor, entorno, consorcio, capsys)
     assert codigo == 0, error
-    assert contar(motor_migrate, consorcio) == (1, 8)
+    assert contar(motor_migrate, consorcio) == (1, 10)  # cinco unidades por corrida
+    with motor_migrate.connect() as c:
+        esquemas, finalizados = c.execute(
+            text("select (select count(*) from nucleo.esquema_coeficientes"
+                 "  where consorcio_id = :c),"
+                 " (select count(*) from nucleo.vinculo where consorcio_id = :c"
+                 "  and finalizado_en is not null)"), {"c": consorcio},
+        ).one()  # fmt: skip
+    assert (esquemas, finalizados) == (2, 2)  # un esquema y un fin por corrida
 
 
 def test_ante_una_excepcion_inesperada_igual_cierra(servidor, entorno, monkeypatch, motor_migrate):
