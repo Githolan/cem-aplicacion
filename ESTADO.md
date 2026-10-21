@@ -111,9 +111,19 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 21-10-2026 (despliegue de `a0b81da`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-a0b81da.md`).
+Medido el 21-10-2026 (despliegue de `ec056c7`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-ec056c7.md`).
 
-**Staging y producción en `a0b81da`** (21-10-2026), base `0021`, contrato 0.15.0.
+**Staging y producción en `ec056c7`** (21-10-2026), base `0022`, contrato 0.15.0.
+
+- **Control diario de los índices GiST (E58; PR #99, migración `0022`).** El trabajo `plataforma.verificar_indices` corre a las 04:15 UTC en `cem-trabajos`.
+  - Con `cem_backup`, en una sola foto `REPEATABLE READ`, compara el conteo secuencial contra el del índice, por cada GiST de `nucleo` y cada `consorcio_id`. El escaneo por índice se confirma con `EXPLAIN`.
+  - Si difieren, hace `REINDEX` con `cem_app` (`MAINTAIN`) y vuelve a comparar. No es `CONCURRENTLY`: PostgreSQL no lo admite en índices de exclusión.
+  - Avisa a Kuma por push (`CEM_INDICES_AVISO_URL`): `up` si estaba limpio, `down` si reparó o no pudo. Si no repara, el trabajo queda muerto.
+  - Corrido a mano en los dos entornos: staging, 4 índices y 5 valores sin diferencias; producción, 4 índices y 0 valores. Faltan los monitores Push de Kuma y la variable: los monitores los crea el propietario.
+  - Mutaciones: 5 de 5. CI de `70aafea` y de la punta `ec056c7` en verde (1348 de backend). Codex sin hallazgos.
+
+Antes, **`a0b81da`** (21-10-2026), base `0021`:
+
 
 - **2b-5, corte 2: coeficientes jurídicos y regla de reparto (D4, RF05, PA02; PR #95, migración `0021`).**
   - `nucleo.esquema_coeficientes`, `coeficiente_juridico` y `regla_reparto`, con RLS forzada; `cem_app` solo lee. Los porcentajes se guardan tal como dice la fuente (pueden sumar 99,96 %), y la regla `proporcional_a_coeficientes` reparte con los centavos por restos mayores.
