@@ -489,15 +489,17 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 3)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 4)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
-    # Sin las variables de las copias, la copia falla y lo dice; no se saltea en silencio.
+    # Sin las variables de las copias, la copia y el control de índices fallan y lo dicen; no
+    # se saltean en silencio.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
                         " 'consorcio.revocar_por_vencimiento')"
-                        " or error like '%faltan variables de las copias%'") == 3)  # fmt: skip
+                        " or error like '%faltan variables de las copias%'"
+                        " or error like '%falta CEM_DATABASE_URL_BACKUP%'") == 4)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -518,6 +520,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
             ("consorcio.revocar_por_vencimiento",),
             ("plataforma.copia_diaria",),
             ("plataforma.purgar_cola",),
+            ("plataforma.verificar_indices",),
         ]
 
 
