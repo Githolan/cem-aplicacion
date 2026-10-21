@@ -111,17 +111,30 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 21-10-2026 (despliegue de `1e2b465`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-1e2b465.md`).
+Medido el 21-10-2026 (despliegue de `a0b81da`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-a0b81da.md`).
 
-**Staging y producción en `1e2b465`** (21-10-2026), base `0020`, contrato 0.15.0.
+**Staging y producción en `a0b81da`** (21-10-2026), base `0021`, contrato 0.15.0.
 
+- **2b-5, corte 2: coeficientes jurídicos y regla de reparto (D4, RF05, PA02; PR #95, migración `0021`).**
+  - `nucleo.esquema_coeficientes`, `coeficiente_juridico` y `regla_reparto`, con RLS forzada; `cem_app` solo lee. Los porcentajes se guardan tal como dice la fuente (pueden sumar 99,96 %), y la regla `proporcional_a_coeficientes` reparte con los centavos por restos mayores.
+  - `nucleo.registrar_esquema_coeficientes` (solo soporte) exige la decisión de respaldo y todas las unidades activas. `scripts/cargar_coeficientes.py` carga un CSV dentro del contenedor de `cem-backend`. `app/liquidacion/esquemas.repartir_por_esquema` bloquea el reparto si el esquema no cubre exactamente las unidades activas (PA02).
+  - Proponer y aprobar por la API esperan las decisiones de 2b-6.
+- **E60 (PR #97):** `alta_mandato` y `cargar_coeficientes` no estaban en la imagen (`No module named`, visto al validar `85a3377` en staging, que no pasó a producción). Ahora están, y `tests/test_scripts_en_la_imagen.py` vigila el `COPY` del Dockerfile.
+- **E58 (PR #95):** el índice GiST de exclusión de `nucleo.vinculo` llegó a marcar como muerta la entrada de un vínculo vivo (PostgreSQL 18.4 y 18.6). La suite hace `REINDEX` antes de bajar y antes de subir. En producción, la misma versión: está en el tracker de CEM como riesgo abierto.
+- CI de las cabezas de #95 (`91efab5`) y #97 (`77210de`) y de la punta `a0b81da` en verde (1339 de backend, 58 de contratos, 277 de Vitest y las de extremo a extremo). Codex sin hallazgos sobre `91efab5` y `77210de`.
+- Verificación:
+  - staging: smoke con salida 0 (388 eventos de auditoría, 0 rotos);
+  - copia previa a la migración en los dos entornos;
+  - base en `0021` con la función, las 3 tablas y RLS forzada;
+  - el script corre dentro del contenedor, consulta la base y rechaza una unidad inexistente sin escribir nada;
+  - 0 errores en los registros.
+  - **SIN VERIFICAR:** cargar un esquema real. Exige registrar una decisión de respaldo, y eso no entra en la autorización.
 - **2b-5, corte 1: fin de vínculo (PA17, PR #94, migración `0020`).**
   - `POST /api/v1/consorcios/{c}/vinculos/{v}/finalizar` con `padron.gestionar` sobre la unidad, idempotente y sin devolver el motivo.
   - `nucleo.finalizar_vinculo` cierra la vigencia hoy (día del consorcio), conserva la fila y la confirmación, y revoca las sesiones solo si a la persona no le queda otro vínculo ni mandato vigente en el consorcio. Dos fines de la misma persona se serializan con un bloqueo por persona.
   - Un fin registrado no se mueve (trigger `vinculo_fin_inalterable`): corregirlo es anularlo entero. La vigencia vacía exige un fin registrado. Un vínculo futuro no se finaliza (`vinculo_no_iniciado`).
   - CI de `f2fcc37` y de la punta `1e2b465` en verde (1284 de backend, 58 de contratos, 277 de Vitest y las de extremo a extremo). Codex sin hallazgos sobre `f2fcc37`, después de corregir un P1 y un P2.
   - Verificación: copia previa a la migración en los dos entornos, smoke de staging con salida 0, la ruta responde 401 sin sesión (control: 404) y 0 errores en los registros. Producción en `0020`, con 0 mandatos, 0 decisiones y 0 vínculos finalizados.
-- **E58 (intermitente):** `test_la_migracion_0010_baja_y_sube` dio rojo una vez sin causa reproducible. Está en el tracker de CEM.
 - **Abierto:** E27, E29, E33, E40 (cuando haya escala), E55, E56, E58 y A13.
 
 Antes, **`96245d4`** (20-10-2026), base `0019`, contrato 0.15.0. Lo abierto de ese bloque lo reemplaza el de `1e2b465`.
