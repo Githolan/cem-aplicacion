@@ -21,6 +21,7 @@ from alembic.config import Config as AlembicConfig
 from redis import Redis
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 RAIZ = Path(__file__).resolve().parent.parent
 ADMIN_URL = os.environ.get(
@@ -235,7 +236,31 @@ def volver_a_subir(cfg, motor_migrate: Engine) -> None:
     dar_procedencia_sintetica(motor_migrate)
     faltan = sin_procedencia(motor_migrate)
     assert not faltan, f"vínculos sin procedencia antes de subir a 0014 (E58): {faltan}"
-    command.upgrade(cfg, "head")
+    try:
+        command.upgrade(cfg, "head")
+    except DBAPIError as e:
+        # E58: la comprobación de arriba no vio nada y la migración sí. Lo que queda después
+        # del rollback de 0014 dice si el estado cambió entre las dos lecturas.
+        with motor_migrate.connect() as c:
+            estado = dict(
+                c.execute(
+                    text(
+                        "select (select version_num from plataforma.alembic_version) as version,"
+                        " (select count(*) from nucleo.vinculo) as vinculos,"
+                        " (select count(*) from auditoria.eventos"
+                        "   where accion = 'identidad.invitacion.aceptar') as aceptaciones,"
+                        " (select count(*) from nucleo.invitacion) as invitaciones,"
+                        " (select max(creado_en) from nucleo.vinculo) as ultimo_vinculo,"
+                        " now() as ahora"
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        raise AssertionError(
+            f"E58 al subir: {e.orig}; estado {estado}; sin procedencia ahora:"
+            f" {sin_procedencia(motor_migrate)}"
+        ) from e
 
 
 @pytest.fixture
