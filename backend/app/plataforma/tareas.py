@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import Connection, text
 
 from app.identidad import sesiones
-from app.plataforma import cola, copias, correo, outbox
+from app.plataforma import cola, copias, correo, indices, outbox
 from app.plataforma.planificador import periodica
 
 CONSERVACION = timedelta(days=30)
@@ -53,6 +53,17 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 
 # Todos los días a las 03:30 UTC, después de la ventana de Coolify (§17.2).
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
+
+
+@cola.REGISTRO.tipo("plataforma.verificar_indices")
+def verificar_indices(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """E58: cada índice GiST contra su tabla, `REINDEX` si difieren y aviso a Kuma. Usa sus
+    propias conexiones (`cem_backup` para leer, `cem_app` en autocommit para reconstruir)."""
+    return indices.controlar(conn.engine.url)
+
+
+# Todos los días a las 04:15 UTC, después de la copia de las 03:30.
+periodica("plataforma.verificar_indices", timedelta(days=1), desfase=timedelta(hours=4, minutes=15))
 
 
 TOPE_VENCIMIENTOS = 200

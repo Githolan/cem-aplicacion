@@ -319,24 +319,35 @@ class _SinRedirecciones(urllib.request.HTTPRedirectHandler):
 _ABRIDOR_AVISO = urllib.request.build_opener(_SinRedirecciones)
 
 
-def url_aviso(url: str, resumen: Mapping[str, Any]) -> str:
-    """La URL del push con `status=up` y el resumen como mensaje (Kuma toma como caída
-    cualquier `status` distinto de `up`). Reemplaza la consulta que trae la URL copiada del
-    panel (`?status=up&msg=OK&ping=`)."""
+def url_push(url: str, variable: str, estado: str, mensaje: str) -> str:
+    """La URL del push de Kuma con `status` y `msg` (Kuma toma como caída cualquier `status`
+    distinto de `up`). Reemplaza la consulta que trae la URL copiada del panel
+    (`?status=up&msg=OK&ping=`). `variable` solo nombra de dónde vino la URL en el error."""
     partes = urllib.parse.urlsplit(url)
     if partes.scheme not in ("http", "https") or not partes.netloc:
-        raise ErrorAviso(f"{VARIABLE_AVISO} no es una URL http(s)")
+        raise ErrorAviso(f"{variable} no es una URL http(s)")
+    consulta = urllib.parse.urlencode({"status": estado, "msg": mensaje, "ping": ""})
+    return urllib.parse.urlunsplit(partes._replace(query=consulta, fragment=""))
+
+
+def url_aviso(url: str, resumen: Mapping[str, Any]) -> str:
+    """La URL del push de la copia, con `status=up` y el resumen como mensaje."""
     mensaje = (
         f"copia verificada: {resumen['tablas']} tablas, {resumen['filas']} filas,"
         f" {resumen['bytes']} bytes"
     )
-    consulta = urllib.parse.urlencode({"status": "up", "msg": mensaje, "ping": ""})
-    return urllib.parse.urlunsplit(partes._replace(query=consulta, fragment=""))
+    return url_push(url, VARIABLE_AVISO, "up", mensaje)
 
 
 def avisar(url: str, resumen: Mapping[str, Any], espera: float = TIEMPO_DE_ESPERA_AVISO) -> None:
-    """GET al push de Kuma. Sin un 200 con `{"ok": true}` → `ErrorAviso`."""
-    destino = url_aviso(url, resumen)
+    """GET al push de Kuma con el resumen de la copia. Sin un 200 con `{"ok": true}` →
+    `ErrorAviso`."""
+    empujar(url_aviso(url, resumen), espera)
+
+
+def empujar(destino: str, espera: float = TIEMPO_DE_ESPERA_AVISO) -> None:
+    """GET a una URL de push ya armada (`url_push`). Sin un 200 con `{"ok": true}` →
+    `ErrorAviso`."""
     try:
         with _ABRIDOR_AVISO.open(destino, timeout=espera) as respuesta:
             estado, cuerpo = respuesta.status, respuesta.read(4096)
