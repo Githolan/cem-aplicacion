@@ -21,7 +21,6 @@ from alembic.config import Config as AlembicConfig
 from redis import Redis
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError
 
 RAIZ = Path(__file__).resolve().parent.parent
 ADMIN_URL = os.environ.get(
@@ -94,6 +93,7 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     vigencia vacía, se le devuelve un día (solo en esta base). Y con 0021, que se niega a bajar
     si hay esquemas de coeficientes: se borran.
     """
+    reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
@@ -230,37 +230,46 @@ def sin_procedencia(motor_migrate: Engine) -> list[dict]:
         ]
 
 
+def reconstruir_indices_gist(motor_migrate: Engine) -> None:
+    """Reconstruye los índices GiST de `nucleo` en la base **descartable** de la sesión (E58).
+
+    Con PostgreSQL 18.4 y 18.6 la suite deja, de vez en cuando, la entrada GiST de un vínculo
+    vivo marcada como muerta (LP_DEAD): la búsqueda por `consorcio_id` se lo saltea, el
+    `UPDATE ... FROM` de 0014 lo deja sin procedencia y la subida se niega
+    (`vinculo_sin_procedencia`). Visto con `pageinspect` el 21-10-2026; un `REINDEX` lo corrige.
+    Coincide con el fallo de PostgreSQL "GiST: Invalidate killed items consistently" (GiST no
+    vaciaba `killedItems[]` al reescanear; la restricción de exclusión reescanea en cada alta),
+    arreglado el 19-08-2026 hasta la 14, después de 18.6. Que sea exactamente ese fallo NO está
+    verificado. Cuando `pruebas/compose.yml` y producción tengan la versión menor siguiente y la
+    suite pase sin esto, se borra.
+    """
+    with motor_migrate.connect() as c:
+        indices = (
+            c.execute(
+                text(
+                    "select format('%I.%I', n.nspname, i.relname) from pg_index x"
+                    " join pg_class i on i.oid = x.indexrelid"
+                    " join pg_namespace n on n.oid = i.relnamespace"
+                    " join pg_am a on a.oid = i.relam"
+                    " where n.nspname = 'nucleo' and a.amname = 'gist'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for indice in indices:
+            c.exec_driver_sql(f"reindex index {indice}")
+        c.commit()
+
+
 def volver_a_subir(cfg, motor_migrate: Engine) -> None:
     """Sube a `head` después de bajar por debajo de 0007, que se lleva las invitaciones."""
     command.upgrade(cfg, "0013")
+    reconstruir_indices_gist(motor_migrate)
     dar_procedencia_sintetica(motor_migrate)
     faltan = sin_procedencia(motor_migrate)
     assert not faltan, f"vínculos sin procedencia antes de subir a 0014 (E58): {faltan}"
-    try:
-        command.upgrade(cfg, "head")
-    except DBAPIError as e:
-        # E58: la comprobación de arriba no vio nada y la migración sí. Lo que queda después
-        # del rollback de 0014 dice si el estado cambió entre las dos lecturas.
-        with motor_migrate.connect() as c:
-            estado = dict(
-                c.execute(
-                    text(
-                        "select (select version_num from plataforma.alembic_version) as version,"
-                        " (select count(*) from nucleo.vinculo) as vinculos,"
-                        " (select count(*) from auditoria.eventos"
-                        "   where accion = 'identidad.invitacion.aceptar') as aceptaciones,"
-                        " (select count(*) from nucleo.invitacion) as invitaciones,"
-                        " (select max(creado_en) from nucleo.vinculo) as ultimo_vinculo,"
-                        " now() as ahora"
-                    )
-                )
-                .mappings()
-                .one()
-            )
-        raise AssertionError(
-            f"E58 al subir: {e.orig}; estado {estado}; sin procedencia ahora:"
-            f" {sin_procedencia(motor_migrate)}"
-        ) from e
+    command.upgrade(cfg, "head")
 
 
 @pytest.fixture
