@@ -90,12 +90,18 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     sintéticos (correo `.invalid`), solo en esta base. Y con 0015, que se niega a bajar si hay
     invitaciones o desasociaciones de mandato (si la base está en 0015 o más arriba). Y con
     0020, que se niega a bajar si hay un fin de vínculo registrado: se borra el fin y, si dejó la
-    vigencia vacía, se le devuelve un día (solo en esta base).
+    vigencia vacía, se le devuelve un día (solo en esta base). Y con 0021, que se niega a bajar
+    si hay esquemas de coeficientes: se borran.
     """
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('nucleo.esquema_coeficientes') is not null then"
+                "   delete from nucleo.regla_reparto;"
+                "   delete from nucleo.coeficiente_juridico;"
+                "   delete from nucleo.esquema_coeficientes;"
+                " end if;"
                 " if to_regclass('nucleo.invitacion_mandato') is not null then"
                 "   delete from nucleo.invitacion_mandato;"
                 "   delete from nucleo.desasociacion_mandato;"
