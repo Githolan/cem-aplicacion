@@ -61,9 +61,13 @@ FUNCIONES = {
 def alta(motor_app, cons, actor, decision, *, tipo="administrador", persona=None, nombre=None,
          cuit=None, desde=DESDE, hasta=None, facultades=None, origen="api",
          con_vinculo=True) -> UUID:  # fmt: skip
-    """Con origen `api` y `con_vinculo`, antes le da a la persona el vínculo confirmado que pide
-    `0018` para el Consejo y el administrador (2b-4c, decisión 3)."""
-    if con_vinculo and origen == "api" and persona is not None and tipo != "administrador_externo":
+    """Con `con_vinculo`, antes le da a la persona un vínculo de propietaria confirmado: el que
+    pide `0018` por la API para el Consejo y el administrador (2b-4c, decisión 3) y, para el
+    Consejo con cualquier origen, su condición habilitante (E62, `0023`): sin ella el mandato
+    no opera."""
+    consejo = tipo == "miembro_consejo"
+    por_api = origen == "api" and tipo != "administrador_externo"
+    if con_vinculo and persona is not None and (consejo or por_api):
         vinculo_confirmado(motor_app, cons, persona)
     with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
         return c.execute(

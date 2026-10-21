@@ -155,8 +155,8 @@ def escena(motor_migrate, motor_app):
     acta = decidir_equipo(motor_app, cons)
     admin = otra_persona(motor_migrate, cons)
     mc = otra_persona(motor_migrate, cons)
-    # Por soporte: el padrón no depende de cómo se cargó el mandato, y la vía de la API (0018)
-    # agregaría un vínculo confirmado que el padrón mostraría.
+    # Por soporte: el padrón no depende de cómo se cargó el mandato. El Consejo es propietario
+    # confirmado de otra unidad (`v_prop_mc`): sin esa condición su mandato no opera (E62).
     m_admin = alta(motor_app, cons, None, acta, tipo="administrador", persona=admin,
                    origen="soporte")  # fmt: skip
     m_mc = alta(motor_app, cons, None, acta, tipo="miembro_consejo", persona=mc, origen="soporte")
@@ -165,8 +165,13 @@ def escena(motor_migrate, motor_app):
         v_prop = c.execute(
             text("select id from nucleo.vinculo where persona_id = :p"), {"p": prop}
         ).scalar_one()
+        v_prop_mc = c.execute(
+            text("select id from nucleo.vinculo where persona_id = :p and tipo = 'propietario'"),
+            {"p": mc},
+        ).scalar_one()
     return {"cons": cons, "u1": u1, "prop": prop, "acta": acta, "admin": admin, "mc": mc,
-            "m_admin": m_admin, "m_mc": m_mc, "v_inq": inq, "v_prop": v_prop}  # fmt: skip
+            "m_admin": m_admin, "m_mc": m_mc, "v_inq": inq, "v_prop": v_prop,
+            "v_prop_mc": v_prop_mc}  # fmt: skip
 
 
 # Catálogo y permisos -------------------------------------------------------------------------
@@ -255,7 +260,7 @@ def test_cem_app_no_lee_la_referencia_del_titulo(escena, motor_app):
 def test_cem_app_no_escribe_el_vinculo_directo(escena, motor_app):
     e = escena
     with transaccion(motor_app, persona_id=e["admin"], consorcio_id=e["cons"]) as c:
-        assert c.execute(text("select count(*) from nucleo.vinculo")).scalar_one() == 2  # control
+        assert c.execute(text("select count(*) from nucleo.vinculo")).scalar_one() == 3  # control
     for sql in (
         "update nucleo.vinculo set confirmado_en = now() where id = :v",
         "delete from nucleo.vinculo where id = :v",
@@ -500,7 +505,7 @@ def test_el_padron_trae_solo_las_columnas_d6_sin_correo(escena, motor_app):
 
 def test_el_padron_lo_ven_administrador_y_consejo_y_no_la_propietaria(escena, motor_app):
     e = escena
-    esperados = {e["v_prop"], e["v_inq"]}
+    esperados = {e["v_prop"], e["v_inq"], e["v_prop_mc"]}
     assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])} == esperados
     assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["mc"])} == esperados
     with pytest.raises(DBAPIError, match="sin padron.ver"):
@@ -515,10 +520,10 @@ def test_el_padron_muestra_vigentes_y_futuros_y_no_terminados(escena, motor_migr
     _poner_vigencia(motor_migrate, e["v_inq"], hoy - timedelta(days=30), hoy)
     _poner_vigencia(motor_migrate, e["v_prop"], hoy + timedelta(days=3), None)
     ids = {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])}
-    assert ids == {e["v_prop"]}
+    assert ids == {e["v_prop"], e["v_prop_mc"]}
     _poner_vigencia(motor_migrate, e["v_inq"], hoy - timedelta(days=30), hoy + timedelta(days=1))
     assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])} == {
-        e["v_prop"], e["v_inq"]}  # fmt: skip
+        e["v_prop"], e["v_inq"], e["v_prop_mc"]}  # fmt: skip
 
 
 def test_el_padron_no_muestra_otro_consorcio(escena, motor_migrate, motor_app):
@@ -549,11 +554,13 @@ def test_el_padron_no_muestra_unidades_ni_personas_dadas_de_baja(escena, motor_m
         c.execute(text("update nucleo.persona set eliminado_en = now() where id = "
                        "(select persona_id from nucleo.vinculo where id = :v)"),
                   {"v": e["v_inq"]})  # fmt: skip
-    assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])} == {e["v_prop"]}
+    assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])} == {
+        e["v_prop"], e["v_prop_mc"]}  # fmt: skip
     with motor_migrate.begin() as c:
         c.execute(text("update nucleo.unidad set eliminado_en = now() where id = :u"),
                   {"u": e["u1"]})  # fmt: skip
-    assert padron(motor_app, e["cons"], e["admin"]) == []
+    # Queda solo el vínculo del Consejo, que es de otra unidad.
+    assert {f["vinculo_id"] for f in padron(motor_app, e["cons"], e["admin"])} == {e["v_prop_mc"]}
 
 
 def test_la_vigencia_del_padron_usa_la_fecha_del_consorcio(motor_migrate, motor_app):

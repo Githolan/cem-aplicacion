@@ -191,6 +191,10 @@ class EstadoMandato(StrEnum):
     """Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo)."""
 
     VIGENTE = "vigente"
+    PENDIENTE_REVISION = "pendiente_revision"
+    """Vigente por sus fechas, pero un mandato de Consejo cuya persona dejó de cumplir toda
+    condición habilitante para integrarlo (E62, migración 0023): conserva su historia, no
+    autoriza actos nuevos y espera la decisión competente. Volver a cumplirla no lo reactiva."""
     FUTURO = "futuro"
     TERMINADO = "terminado"
     """Terminó por su fecha, sin baja."""

@@ -779,6 +779,7 @@
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
           "vigente",
+          "pendiente_revision",
           "futuro",
           "terminado",
           "dado_de_baja",

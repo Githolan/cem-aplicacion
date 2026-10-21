@@ -550,6 +550,23 @@ describe("página /mandatos", () => {
     expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
   });
 
+  it("E62: un mandato pendiente de revisión lo dice y admite cualquier baja", async () => {
+    const pendiente = { ...DETALLE_AE, estado: "pendiente_revision" };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(pendiente) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
+    expect(screen.getByText("Pendiente de revisión: sin condición para integrar el Consejo")).toBeTruthy();
+    expect(within(screen.getByLabelText("Causa")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
+      "remocion",
+      "renuncia",
+      "fallecimiento_incapacidad",
+      "error_carga",
+      "otro",
+    ]);
+  });
+
   it("un error en la baja cierra la confirmación: el reintento se vuelve a confirmar", async () => {
     let respuesta = () => error("sin_permiso", 403);
     const simulado = conConsejo({
