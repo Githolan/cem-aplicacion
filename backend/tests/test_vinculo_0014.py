@@ -232,6 +232,7 @@ def test_cem_app_solo_lee_el_vinculo_y_ejecuta_las_funciones(motor_migrate):
     # Lee por columnas: todas menos la referencia del título.
     assert tabla == [False, False, False, False]
     assert columnas.pop("confirmacion_referencia") is False
+    assert columnas.pop("motivo_fin") is False  # 0020: el motivo del fin, tampoco
     assert columnas and all(columnas.values()), columnas
     camino = ["search_path=pg_catalog, pg_temp"]
     assert [tuple(f) for f in funciones] == [

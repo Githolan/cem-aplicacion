@@ -10,6 +10,10 @@ ruta falla fuerte (500), nunca devuelve una lista vacía.
 facultad, el recurso de la unidad, que no sea el propio vínculo y que no sea quien lo registró
 (P4-c). `nucleo.confirmar_vinculo` vuelve a garantizar la integridad en la base. Un motivo de la
 base que el evaluador ya tenía que haber negado es una discrepancia y responde 500.
+
+**Fin de vínculo (PA17, 2b-5).** La política `padron.gestionar` decide sobre el recurso de la
+unidad. `nucleo.finalizar_vinculo` (migración 0020) cierra la vigencia hoy, conserva la fila y
+revoca las sesiones de la persona solo si no le queda otro acceso al consorcio.
 """
 
 import logging
@@ -17,7 +21,14 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
-from cem_contracts.padron import ConfirmacionVinculo, FilaPadron, Padron, VinculoConfirmado
+from cem_contracts.padron import (
+    ConfirmacionVinculo,
+    FilaPadron,
+    FinVinculo,
+    Padron,
+    VinculoConfirmado,
+    VinculoFinalizado,
+)
 from cem_contracts.politicas import TipoRecurso
 from fastapi import APIRouter, Depends
 from fastapi.responses import Response
@@ -42,6 +53,14 @@ CONFLICTOS = {
 }
 """Motivos de `nucleo.confirmar_vinculo` que dependen del estado del vínculo (409). Los demás
 los niega antes el evaluador o el contrato: si llegan a la base, es una discrepancia."""
+CONFLICTOS_FIN = {
+    "vinculo_finalizado": (CodigoError.VINCULO_FINALIZADO, "El vínculo ya terminó."),
+    "vinculo_no_iniciado": (
+        CodigoError.VINCULO_NO_INICIADO,
+        "El vínculo todavía no empezó: no se puede finalizar.",
+    ),
+}
+"""Lo mismo para `nucleo.finalizar_vinculo`."""
 
 
 def sobre_unidad(unidad_id: UUID) -> Entidad:
@@ -89,18 +108,41 @@ def padron(permiso: Annotated[Permiso, Depends(requiere("padron.ver"))], motor: 
     )
 
 
-def _confirmar(conn: Connection, ctx, vinculo_id: UUID, referencia: str) -> VinculoConfirmado:
+def _ejecutar(conn: Connection, sql: str, parametros: dict, conflictos: dict) -> None:
+    """Corre la función de escritura y traduce a 409 los motivos que dependen del estado."""
     try:
-        conn.execute(
-            text("select nucleo.confirmar_vinculo(:v, :r, :a, 'api')"),
-            {"v": vinculo_id, "r": referencia, "a": ctx.persona_id},
-        )
+        conn.execute(text(sql), parametros)
     except DBAPIError as e:
         motivo = e.orig.diag.message_hint
-        if motivo in CONFLICTOS:
-            codigo, mensaje = CONFLICTOS[motivo]
+        if motivo in conflictos:
+            codigo, mensaje = conflictos[motivo]
             raise ErrorApi(409, codigo, mensaje) from e
         raise
+
+
+def _vinculo_del_consorcio(motor, ctx, vinculo_id: UUID):
+    """El vínculo, filtrado por el consorcio de la ruta: la RLS deja leer vínculos de otros
+    consorcios de la persona, y uno de otro consorcio responde igual que uno inexistente."""
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        v = conn.execute(
+            text(
+                "select unidad_id, persona_id, registrado_por, origen from nucleo.vinculo"
+                " where id = :v and consorcio_id = :c"
+            ),
+            {"v": vinculo_id, "c": ctx.consorcio_id},
+        ).one_or_none()
+    if v is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return v
+
+
+def _confirmar(conn: Connection, ctx, vinculo_id: UUID, referencia: str) -> VinculoConfirmado:
+    _ejecutar(
+        conn,
+        "select nucleo.confirmar_vinculo(:v, :r, :a, 'api')",
+        {"v": vinculo_id, "r": referencia, "a": ctx.persona_id},
+        CONFLICTOS,
+    )
     fila = (
         conn.execute(
             text(
@@ -139,18 +181,7 @@ def confirmar(
     identidad civil. Si el título no lo acredita, no se confirma: no hay estado "rechazado". La
     referencia queda en el vínculo y no sale en ninguna respuesta ni en la auditoría."""
     ctx = permiso.ctx
-    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
-        # Filtrada por el consorcio de la ruta: la RLS deja leer vínculos de otros consorcios
-        # de la persona, y uno de otro consorcio responde igual que uno inexistente.
-        v = conn.execute(
-            text(
-                "select unidad_id, persona_id, registrado_por, origen from nucleo.vinculo"
-                " where id = :v and consorcio_id = :c"
-            ),
-            {"v": vinculo_id, "c": ctx.consorcio_id},
-        ).one_or_none()
-    if v is None:
-        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    v = _vinculo_del_consorcio(motor, ctx, vinculo_id)
     permiso.verificar(
         Entidad(
             recursos={TipoRecurso.UNIDAD: str(v.unidad_id)},
@@ -168,6 +199,70 @@ def confirmar(
     )
     log.info(
         "confirmación de vínculo respondida",
+        extra={
+            "campos": {
+                "consorcio_id": str(ctx.consorcio_id),
+                "persona_id": str(ctx.persona_id),
+                "vinculo_id": str(vinculo_id),
+            }
+        },
+    )
+    return respuesta
+
+
+def _finalizar(conn: Connection, ctx, vinculo_id: UUID, motivo: str) -> VinculoFinalizado:
+    _ejecutar(
+        conn,
+        "select nucleo.finalizar_vinculo(:v, :m, :a, 'api')",
+        {"v": vinculo_id, "m": motivo, "a": ctx.persona_id},
+        CONFLICTOS_FIN,
+    )
+    fila = (
+        conn.execute(
+            text(
+                "select id as vinculo_id, unidad_id, tipo::text as tipo, vigente_hasta,"
+                " finalizado_en from nucleo.vinculo where id = :v"
+            ),
+            {"v": vinculo_id},
+        )
+        .mappings()
+        .one()
+    )
+    return VinculoFinalizado(**fila)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar",
+    response_model=VinculoFinalizado,
+    summary="Finalizar un vínculo (PA17)",
+    responses={
+        403: {"description": "Sin `padron.gestionar` sobre esa unidad."},
+        404: {"description": "El vínculo no existe en este consorcio."},
+        409: {"description": "El vínculo ya terminó o todavía no empezó."},
+    },
+)
+def finalizar(
+    vinculo_id: UUID,
+    pedido: FinVinculo,
+    permiso: Annotated[Permiso, Depends(requiere("padron.gestionar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Cierra la vigencia hoy (día del consorcio) y conserva el vínculo con quién, cuándo y por
+    qué. La persona pierde el acceso que le daba; si no le queda otro vínculo ni mandato vigente
+    en el consorcio, se cierran sus sesiones. El motivo no sale en la respuesta ni en la
+    auditoría."""
+    ctx = permiso.ctx
+    v = _vinculo_del_consorcio(motor, ctx, vinculo_id)
+    permiso.verificar(sobre_unidad(v.unidad_id))
+    respuesta = responder_una_vez(
+        motor,
+        ctx,
+        idempotencia,
+        lambda conn: (200, _finalizar(conn, ctx, vinculo_id, pedido.motivo)),
+    )
+    log.info(
+        "fin de vínculo respondido",
         extra={
             "campos": {
                 "consorcio_id": str(ctx.consorcio_id),

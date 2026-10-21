@@ -88,7 +88,9 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     si algún vínculo no tiene su evento de aceptación (`vinculo_sin_procedencia`). Los datos de
     prueba cargan vínculos a mano: aquí se les da una invitación y un evento de aceptación
     sintéticos (correo `.invalid`), solo en esta base. Y con 0015, que se niega a bajar si hay
-    invitaciones o desasociaciones de mandato (si la base está en 0015 o más arriba).
+    invitaciones o desasociaciones de mandato (si la base está en 0015 o más arriba). Y con
+    0020, que se niega a bajar si hay un fin de vínculo registrado: se borra el fin y, si dejó la
+    vigencia vacía, se le devuelve un día (solo en esta base).
     """
     with motor_migrate.begin() as c:
         c.execute(
@@ -97,6 +99,20 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " if to_regclass('nucleo.invitacion_mandato') is not null then"
                 "   delete from nucleo.invitacion_mandato;"
                 "   delete from nucleo.desasociacion_mandato;"
+                " end if; end $$"
+            )
+        )
+        c.execute(
+            text(
+                "do $$ begin"
+                " if exists (select 1 from information_schema.columns"
+                "            where table_schema = 'nucleo' and table_name = 'vinculo'"
+                "              and column_name = 'finalizado_en') then"
+                "   update nucleo.vinculo set finalizado_por = null, finalizado_en = null,"
+                "          motivo_fin = null,"
+                "          vigente_hasta = case when vigente_hasta = vigente_desde"
+                "                          then vigente_desde + 1 else vigente_hasta end"
+                "    where finalizado_en is not null;"
                 " end if; end $$"
             )
         )

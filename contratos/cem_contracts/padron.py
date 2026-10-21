@@ -7,6 +7,9 @@ futuros: los terminados no salen.
 Confirmar un vínculo acredita el carácter de la persona sobre la unidad según el título que se
 refiere (escritura, contrato de locación u otro), no su identidad civil. Si el título no lo
 acredita, el vínculo queda sin confirmar. Nadie confirma su propio vínculo ni el que registró.
+
+Finalizar un vínculo (PA17, 2b-5) cierra su vigencia hoy y conserva la fila: quién, cuándo y por
+qué. La persona pierde el acceso que le daba ese vínculo.
 """
 
 from datetime import date, datetime
@@ -69,3 +72,30 @@ class VinculoConfirmado(BaseModel):
     tipo: TipoVinculo
     confirmado: bool = Field(description="Siempre verdadero en esta respuesta.")
     confirmado_en: datetime
+
+
+class FinVinculo(BaseModel):
+    """`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar` (PA17)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    motivo: str = Field(
+        max_length=LARGO_MAXIMO_REFERENCIA,
+        pattern=FORMATO_REFERENCIA,
+        description="Por qué termina el vínculo (venta, fin de la locación, error de carga u"
+        " otro). Queda en el vínculo, no en la auditoría.",
+        examples=["Fin del contrato de locación del 01-03-2024"],
+    )
+
+
+class VinculoFinalizado(BaseModel):
+    """Respuesta del fin de vínculo. No dice si se cerraron sesiones: eso depende de otros
+    accesos de la persona, que quien finaliza no tiene por qué conocer."""
+
+    model_config = ConfigDict(frozen=True)
+
+    vinculo_id: UUID
+    unidad_id: UUID
+    tipo: TipoVinculo
+    vigente_hasta: date = Field(description="Exclusivo: desde ese día el vínculo ya no vale.")
+    finalizado_en: datetime
