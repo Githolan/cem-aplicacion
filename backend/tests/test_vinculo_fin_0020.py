@@ -218,16 +218,6 @@ def test_pa17_un_vinculo_terminado_o_futuro_no_se_finaliza(escena, motor_migrate
         finalizar(motor_app, e["cons"], e["admin"], e["v_inq_mc"], motivo="Otra vez")
     assert motivo_de(error) == "vinculo_finalizado"
     assert fila(motor_migrate, e["v_inq_mc"])["motivo_fin"] == MOTIVO
-    # Aunque el equipo corrija la vigencia hacia adelante, un fin registrado no se pisa.
-    with motor_migrate.begin() as c:
-        c.execute(
-            text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
-            {"h": hoy.replace(year=hoy.year + 1), "v": e["v_inq_mc"]},
-        )
-    with pytest.raises(DBAPIError) as error:
-        finalizar(motor_app, e["cons"], e["admin"], e["v_inq_mc"], motivo="Otra vez")
-    assert motivo_de(error) == "vinculo_finalizado"
-    assert fila(motor_migrate, e["v_inq_mc"])["motivo_fin"] == MOTIVO
     with motor_migrate.begin() as c:
         c.execute(
             text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
@@ -311,6 +301,49 @@ def test_un_vinculo_de_otro_consorcio_o_inexistente_es_invalido(escena, motor_mi
     with pytest.raises(DBAPIError) as error:  # sin consorcio en el ámbito
         finalizar(motor_app, None, e["admin"], e["v_inq_mc"])
     assert error.value.orig.sqlstate == "42501"
+
+
+@pytest.mark.parametrize(
+    "cambio",
+    [
+        "vigente_hasta = vigente_hasta + 365",
+        "vigente_hasta = null",
+        "motivo_fin = 'Otro motivo'",
+        "finalizado_en = now() - interval '1 day'",
+        "finalizado_por = null",
+    ],
+)
+def test_un_fin_registrado_no_se_mueve_aunque_escriba_el_duenio(
+    escena,  # noqa: F811
+    motor_migrate,
+    motor_app,
+    cambio,
+):
+    """Si la vigencia de un vínculo finalizado se pudiera correr hacia adelante, volvería a dar
+    acceso: `require_scope`, el padrón y `confirmar_vinculo` miran solo la vigencia (Codex)."""
+    e = escena
+    finalizar(motor_app, e["cons"], e["admin"], e["v_inq_mc"])
+    antes = fila(motor_migrate, e["v_inq_mc"])
+    with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
+        c.execute(text(f"update nucleo.vinculo set {cambio} where id = :v"), {"v": e["v_inq_mc"]})
+    assert motivo_de(error) == "fin_inalterable"
+    assert fila(motor_migrate, e["v_inq_mc"]) == antes
+
+
+def test_un_fin_equivocado_se_anula_entero(escena, motor_migrate, motor_app):  # noqa: F811
+    e = escena
+    inquilino = persona_de(motor_migrate, e["v_inq_mc"])
+    finalizar(motor_app, e["cons"], e["admin"], e["v_inq_mc"])
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.vinculo set vigente_hasta = null, finalizado_en = null,"
+                " finalizado_por = null, motivo_fin = null where id = :v"
+            ),
+            {"v": e["v_inq_mc"]},
+        )
+    with cliente(inquilino) as c:  # vuelve a regir: el control de que el trigger no frena esto
+        assert c.get(f"/api/v1/consorcios/{e['cons']}/unidades").status_code == 200
 
 
 def test_un_vinculo_finalizado_no_se_confirma(escena, motor_app):  # noqa: F811

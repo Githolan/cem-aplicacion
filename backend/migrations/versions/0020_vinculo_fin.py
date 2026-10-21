@@ -10,6 +10,11 @@ cierra su vigencia y revoca sesiones si a la persona no le queda otro acceso al 
   registrado**: un vínculo que empezó hoy y termina hoy no rigió ningún día. Una vigencia vacía
   no contiene ningún día ni se superpone con otra, y todo filtro de "vigente o futuro" usa
   `vigente_hasta > hoy`, que la deja afuera.
+- **Un fin registrado no se mueve** (trigger `vinculo_fin_inalterable`): mientras haya un fin, ni
+  la vigencia ni quién, cuándo y por qué cambian, aunque escriba el dueño de la tabla. Corregir
+  un fin equivocado es anularlo entero (las cuatro columnas a la vez). Así ningún lector necesita
+  mirar `finalizado_en`: la vigencia cerrada alcanza para `require_scope`, el padrón y
+  `confirmar_vinculo` (Codex en app #94).
 - `nucleo.finalizar_vinculo`: origen y actor como `baja_mandato` (0012, #66); motivo
   obligatorio; el vínculo terminado (`vinculo_finalizado`) o que todavía no empezó
   (`vinculo_no_iniciado`) no se finaliza. Cierra la vigencia hoy (día del consorcio), conserva
@@ -53,6 +58,24 @@ alter table nucleo.vinculo
     check (finalizado_en is null or vigente_hasta is not null);
 
 grant select (finalizado_por, finalizado_en) on nucleo.vinculo to cem_app;
+
+create function nucleo.vinculo_fin_inalterable() returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if old.finalizado_en is not null and new.finalizado_en is not null
+       and (new.vigente_hasta, new.finalizado_en, new.finalizado_por, new.motivo_fin)
+           is distinct from
+           (old.vigente_hasta, old.finalizado_en, old.finalizado_por, old.motivo_fin) then
+      raise exception 'un fin de vínculo registrado no se modifica: se anula entero'
+        using errcode = 'P0001', hint = 'fin_inalterable';
+    end if;
+    return new;
+  end
+  $$;
+create trigger vinculo_fin_inalterable before update on nucleo.vinculo
+  for each row execute function nucleo.vinculo_fin_inalterable();
 
 -- PA17. La facultad la decide la aplicación (`padron.gestionar` sobre la unidad); la base
 -- garantiza ámbito, actor, estado y que nada se borre.
@@ -106,7 +129,7 @@ create function nucleo.finalizar_vinculo(
     perform pg_advisory_xact_lock(hashtextextended('acceso:' || v.persona_id, 0));
     select * into v from nucleo.vinculo x where x.id = v.id for update;
     hoy := nucleo.hoy_del_consorcio(c);
-    if v.finalizado_en is not null or (v.vigente_hasta is not null and v.vigente_hasta <= hoy) then
+    if v.vigente_hasta is not null and v.vigente_hasta <= hoy then
       raise exception 'el vínculo ya terminó'
         using errcode = 'P0001', hint = 'vinculo_finalizado';
     end if;
@@ -162,6 +185,8 @@ end
 $guarda$;
 
 drop function nucleo.finalizar_vinculo(uuid, text, uuid, text);
+drop trigger vinculo_fin_inalterable on nucleo.vinculo;
+drop function nucleo.vinculo_fin_inalterable();
 
 revoke select (finalizado_por, finalizado_en) on nucleo.vinculo from cem_app;
 
