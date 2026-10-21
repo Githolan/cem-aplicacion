@@ -6,15 +6,20 @@ cierra su vigencia y revoca sesiones si a la persona no le queda otro acceso al 
 - `nucleo.vinculo` suma `finalizado_por`, `finalizado_en` y `motivo_fin`. Las tres van juntas
   (`finalizado_por` es nulo con origen soporte) y el motivo, de 1 a 300, queda en la fila: la
   auditoría no lo lleva (E31). `cem_app` lee quién y cuándo, no el motivo.
-- La vigencia admite quedar vacía (`vigente_hasta = vigente_desde`): un vínculo que empezó hoy y
-  termina hoy no rigió ningún día. Es lo que ya admite `mandato` desde 0011. Una vigencia vacía
+- La vigencia admite quedar vacía (`vigente_hasta = vigente_desde`) **solo con un fin
+  registrado**: un vínculo que empezó hoy y termina hoy no rigió ningún día. Una vigencia vacía
   no contiene ningún día ni se superpone con otra, y todo filtro de "vigente o futuro" usa
   `vigente_hasta > hoy`, que la deja afuera.
 - `nucleo.finalizar_vinculo`: origen y actor como `baja_mandato` (0012, #66); motivo
   obligatorio; el vínculo terminado (`vinculo_finalizado`) o que todavía no empezó
   (`vinculo_no_iniciado`) no se finaliza. Cierra la vigencia hoy (día del consorcio), conserva
   la confirmación y el resto de la fila, y revoca las sesiones de la persona **solo si no le
-  queda otro vínculo ni mandato vigente hoy en el consorcio**. Devuelve cuántas revocó.
+  queda otro vínculo ni mandato vigente hoy en el consorcio**. Devuelve cuántas revocó. Dos fines
+  simultáneos de la misma persona se serializan con un bloqueo por persona: si no, cada uno vería
+  vigente el otro vínculo y ninguno cerraría las sesiones. Un fin simultáneo con `baja_mandato`
+  o `aceptar_invitacion` no toma ese bloqueo (riesgo residual registrado en el diseño, §2.5): en
+  el peor caso quedan sesiones abiertas sin acceso, porque la autorización se recalcula en cada
+  pedido.
 
 Downgrade: se niega (`downgrade_con_datos`) si algún vínculo tiene fin registrado o vigencia
 vacía; si no, quita la función, las columnas y vuelve a la restricción estricta de 0001.
@@ -37,7 +42,8 @@ alter table nucleo.vinculo
   add column motivo_fin     text,
   drop constraint vinculo_check,
   add constraint vinculo_vigencia_valida
-    check (vigente_hasta is null or vigente_hasta >= vigente_desde),
+    check (vigente_hasta is null or vigente_hasta > vigente_desde
+           or (vigente_hasta = vigente_desde and finalizado_en is not null)),
   add constraint vinculo_fin_completo
     check ((finalizado_en is null) = (motivo_fin is null)
            and (finalizado_en is not null or finalizado_por is null)),
@@ -91,11 +97,14 @@ create function nucleo.finalizar_vinculo(
         using errcode = 'P0001', hint = 'motivo_requerido';
     end if;
     select * into v from nucleo.vinculo x
-     where x.consorcio_id = c and x.id = vinculo_a_finalizar for update;
+     where x.consorcio_id = c and x.id = vinculo_a_finalizar;
     if v.id is null then
       raise exception 'el vínculo no existe en este consorcio'
         using errcode = 'P0001', hint = 'vinculo_invalido';
     end if;
+    -- Serializa los fines de la misma persona antes de bloquear y releer el vínculo.
+    perform pg_advisory_xact_lock(hashtextextended('acceso:' || v.persona_id, 0));
+    select * into v from nucleo.vinculo x where x.id = v.id for update;
     hoy := nucleo.hoy_del_consorcio(c);
     if v.finalizado_en is not null or (v.vigente_hasta is not null and v.vigente_hasta <= hoy) then
       raise exception 'el vínculo ya terminó'
@@ -144,8 +153,8 @@ grant execute on function nucleo.finalizar_vinculo(uuid, text, uuid, text) to ce
 DOWNGRADE = r"""
 do $guarda$
 begin
-  if exists (select 1 from nucleo.vinculo
-              where finalizado_en is not null or vigente_hasta = vigente_desde) then
+  -- Una vigencia vacía exige un fin registrado (`vinculo_vigencia_valida`): basta con mirar esto.
+  if exists (select 1 from nucleo.vinculo where finalizado_en is not null) then
     raise exception 'hay vínculos finalizados: bajar a 0019 perdería quién, cuándo y por qué'
       using errcode = 'P0001', hint = 'downgrade_con_datos';
   end if;

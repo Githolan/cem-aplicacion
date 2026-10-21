@@ -25,7 +25,8 @@ from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     navegador,
 )
 from tests.test_mandatos import sesiones_abiertas
-from tests.test_padron_rutas import escena, padron_url  # noqa: F401  (`escena` es un fixture)
+from tests.test_padron_rutas import escena as escena_padron  # noqa: F401  (es un fixture)
+from tests.test_padron_rutas import padron_url
 from tests.test_vinculo_0014 import (  # noqa: F401  (`base_aparte` es un fixture)
     _catalogo,
     _consorcio_y_unidad,
@@ -42,6 +43,23 @@ pytestmark = pytest.mark.db
 MOTIVO = "Fin del contrato de locación del 01-03-2024"
 SESION = object()
 COLUMNAS_RESPUESTA = {"vinculo_id", "unidad_id", "tipo", "vigente_hasta", "finalizado_en"}
+
+
+@pytest.fixture
+def escena(escena_padron, motor_migrate):  # noqa: F811
+    """La escena del padrón, con todos los vínculos empezados hace 30 días: `aceptar_invitacion`
+    los crea con fecha de hoy, y así el fin habitual deja `vigente_hasta > vigente_desde`."""
+    e = escena_padron
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.vinculo set vigente_desde ="
+                " least(vigente_desde, nucleo.hoy_del_consorcio(consorcio_id) - 30)"
+                " where consorcio_id = :c"
+            ),
+            {"c": e["cons"]},
+        )
+    return e
 
 
 def finalizar(motor_app, cons, sesion, vinculo, *, motivo=MOTIVO, actor=SESION, origen="api"):
@@ -101,6 +119,7 @@ def test_pa17_cierra_la_vigencia_hoy_conserva_la_fila_y_audita_sin_el_motivo(
     despues = fila(motor_migrate, e["v_inq_mc"])
     hoy = _hoy(motor_migrate, e["cons"])
     assert despues["vigente_hasta"] == hoy and antes["vigente_hasta"] is None
+    assert despues["vigente_desde"] < hoy
     assert (despues["finalizado_por"], despues["motivo_fin"]) == (e["admin"], MOTIVO)
     assert despues["finalizado_en"] is not None
     # La confirmación y el resto de la fila quedan como estaban (historial permitido).
@@ -323,6 +342,7 @@ def test_cem_app_lee_quien_y_cuando_pero_no_el_motivo(escena, motor_app):  # noq
         ),
         ("finalizado_en = now(), motivo_fin = 'x'", "vinculo_finalizado_con_vigencia"),
         ("vigente_hasta = vigente_desde - 1", "vinculo_vigencia_valida"),
+        ("vigente_hasta = vigente_desde", "vinculo_vigencia_valida"),  # vacía sin fin registrado
     ],
 )
 def test_las_restricciones_valen_aunque_escriba_el_duenio_de_la_tabla(
