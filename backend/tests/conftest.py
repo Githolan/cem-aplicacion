@@ -145,6 +145,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 " end if; end $$"
             )
         )
+    faltan = sin_procedencia(motor_migrate)
+    assert not faltan, f"vínculos sin procedencia antes de bajar (E58): {faltan}"
 
 
 def dar_procedencia_sintetica(motor_migrate: Engine) -> None:
@@ -194,10 +196,45 @@ def dar_procedencia_sintetica(motor_migrate: Engine) -> None:
         )
 
 
+def sin_procedencia(motor_migrate: Engine) -> list[dict]:
+    """Los vínculos a los que el upgrade a 0014 no les encontraría procedencia, con la misma
+    consulta que esa migración (el primer evento de aceptación que nombra al vínculo, unido a su
+    invitación del mismo consorcio), y con lo que hace falta para entender por qué (E58)."""
+    with motor_migrate.connect() as c:
+        return [
+            dict(f)
+            for f in c.execute(
+                text(
+                    "with primera as ("
+                    "  select distinct on ((e.despues ->> 'vinculo_id')::uuid)"
+                    "    (e.despues ->> 'vinculo_id')::uuid as vinculo_id, e.consorcio_id,"
+                    "    e.entidad_id, e.entidad, e.secuencia"
+                    "   from auditoria.eventos e"
+                    "  where e.accion = 'identidad.invitacion.aceptar' and e.entidad = 'invitacion'"
+                    "    and (e.despues ->> 'vinculo_id') is not null"
+                    "  order by (e.despues ->> 'vinculo_id')::uuid, e.secuencia)"
+                    " select v.id, v.consorcio_id, v.creado_en, p.consorcio_id as consorcio_evento,"
+                    "   p.entidad_id as invitacion, p.secuencia,"
+                    "   (select count(*) from nucleo.invitacion i where i.id = p.entidad_id)"
+                    "     as invitaciones_con_ese_id,"
+                    "   (select count(*) from auditoria.eventos e"
+                    "     where e.despues ->> 'vinculo_id' = v.id::text) as eventos_que_lo_nombran"
+                    "  from nucleo.vinculo v left join primera p on p.vinculo_id = v.id"
+                    " where not exists (select 1 from primera p2"
+                    "   join nucleo.invitacion i on i.id = p2.entidad_id"
+                    "    and i.consorcio_id = p2.consorcio_id"
+                    "  where p2.vinculo_id = v.id and p2.consorcio_id = v.consorcio_id)"
+                )
+            ).mappings()
+        ]
+
+
 def volver_a_subir(cfg, motor_migrate: Engine) -> None:
     """Sube a `head` después de bajar por debajo de 0007, que se lleva las invitaciones."""
     command.upgrade(cfg, "0013")
     dar_procedencia_sintetica(motor_migrate)
+    faltan = sin_procedencia(motor_migrate)
+    assert not faltan, f"vínculos sin procedencia antes de subir a 0014 (E58): {faltan}"
     command.upgrade(cfg, "head")
 
 
