@@ -75,6 +75,11 @@ test.describe("PWA servida por la imagen", () => {
     // La respondió el service worker, pero yendo a buscarla a la red, no a su caché.
     expect(respuesta?.fromServiceWorker()).toBe(true);
     expect(deLaRed).toContain("/una-ruta-cualquiera");
+    // Ninguna navegación queda guardada: la única caché es la precaché de la versión instalada,
+    // que se reemplaza al actualizar (Codex en #103).
+    const cachés = await page.evaluate(() => caches.keys());
+    expect(cachés.length).toBeGreaterThan(0);
+    expect(cachés.every((nombre) => nombre.startsWith("workbox-precache"))).toBe(true);
   });
 
   test("una redirección de la navegación a otro origen llega al navegador (Cloudflare Access)", async ({

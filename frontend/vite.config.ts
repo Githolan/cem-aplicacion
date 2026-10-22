@@ -37,11 +37,12 @@ export default defineConfig({
         // La extensión se carga con importScripts; no hace falta además en la precaché.
         globIgnores: [ARCHIVO_SW_ENTRAR],
         importScripts: [`/${ARCHIVO_SW_ENTRAR}`],
-        // Las navegaciones van primero a la red, y la caché queda para cuando la red falla
-        // (src/swNavegacion.ts: por qué, y qué rutas quedan afuera). Sin conexión, una ruta que
-        // nunca se abrió recibe el index.html de la precaché. Sin `networkTimeoutSeconds`: una
-        // red lenta espera a la red. Solo se guardan respuestas 200 (por omisión de NetworkFirst):
-        // una redirección de Cloudflare Access pasa al navegador y no queda en caché.
+        // Las navegaciones van a la red (src/swNavegacion.ts: por qué, y qué rutas quedan afuera).
+        // Si la red falla, cualquier ruta recibe el index.html de la precaché, que es el de la
+        // versión instalada. No se guarda ninguna navegación: una caché propia sobreviviría a la
+        // actualización y, sin conexión, podría servir el HTML de una versión anterior (Codex en
+        // #103). Sin plazo de espera: una red lenta espera a la red. Una redirección de
+        // Cloudflare Access pasa al navegador.
         navigateFallback: null,
         // La precaché traduce "/" a "/index.html" y lo responde de la caché antes de llegar a la
         // regla de navegación: "/" (la entrada más común) quedaba igual que antes (medido con la
@@ -50,11 +51,8 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: esNavegacionDeLaApp,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "cem-navegacion",
-              precacheFallback: { fallbackURL: "/index.html" },
-            },
+            handler: "NetworkOnly",
+            options: { precacheFallback: { fallbackURL: "/index.html" } },
           },
         ],
         cleanupOutdatedCaches: true,

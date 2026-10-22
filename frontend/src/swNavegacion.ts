@@ -1,4 +1,4 @@
-// Qué navegaciones atiende el service worker con "primero la red" (vite.config.ts).
+// Qué navegaciones atiende el service worker yendo a la red (vite.config.ts).
 //
 // El problema (staging, 21-10-2026): con `navigateFallback`, el service worker respondía toda
 // navegación con el index.html de su caché, sin pasar por la red. Staging está detrás de
@@ -7,10 +7,10 @@
 // pudimos contactar al servicio". Recargar no lo arreglaba, porque la recarga también salía de la
 // caché y nunca llegaba a Access para renovar la sesión; tampoco llegaba la versión nueva.
 //
-// Ahora la navegación va primero a la red: con conexión responde el servidor (o la redirección
-// de Access, que el navegador sigue), y la caché queda solo para cuando la red falla. Sin plazo
-// de espera: una red lenta espera a la red, nunca sirve una versión vieja de la caché (el
-// problema de /entrar del 14-10-2026).
+// Ahora la navegación va a la red: con conexión responde el servidor (o la redirección de
+// Access, que el navegador sigue). Solo si la red falla se usa el index.html de la precaché, el
+// de la versión instalada. Sin plazo de espera: una red lenta espera a la red y nunca sirve una
+// versión vieja (el problema de /entrar del 14-10-2026).
 //
 // Workbox copia esta función como texto dentro de sw.js: no puede usar nada de afuera, ni
 // siquiera las constantes de enlace.ts. swNavegacion.test.ts comprueba que excluye exactamente
