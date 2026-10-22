@@ -286,7 +286,11 @@
           "mandato_superpuesto",
           "consejo_incompatible_con_administracion",
           "mandato_ya_dado_de_baja",
-          "mandato_terminado"
+          "mandato_terminado",
+          "mandato_no_pendiente",
+          "eficaz_desde_invalida",
+          "revision_duplicada",
+          "sin_condicion_habilitante"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1947,6 +1951,33 @@
         "title": "MandatoResumen",
         "type": "object"
       },
+      "MandatoRevisado": {
+        "properties": {
+          "eficaz_desde": {
+            "format": "date",
+            "title": "Eficaz Desde",
+            "type": "string"
+          },
+          "id": {
+            "description": "La revisión.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mandato_id": {
+            "format": "uuid",
+            "title": "Mandato Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mandato_id",
+          "eficaz_desde"
+        ],
+        "title": "MandatoRevisado",
+        "type": "object"
+      },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
         "properties": {
@@ -2013,6 +2044,29 @@
           "correo"
         ],
         "title": "PedidoEnlace",
+        "type": "object"
+      },
+      "RevisionMandato": {
+        "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1\ndel propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de\nrevisión. No toca el mandato ni cubre el período en que estuvo sin efecto.",
+        "properties": {
+          "decision_id": {
+            "description": "Una asamblea del mismo consorcio, con fecha hasta hoy, que no registró quien revisa (A15).",
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "eficaz_desde": {
+            "description": "Desde qué día vuelve a operar: no antes de la decisión ni de hoy en el consorcio, y dentro del mandato. Ese día la persona tiene que cumplir una condición habilitante.",
+            "format": "date",
+            "title": "Eficaz Desde",
+            "type": "string"
+          }
+        },
+        "required": [
+          "decision_id",
+          "eficaz_desde"
+        ],
+        "title": "RevisionMandato",
         "type": "object"
       },
       "Salud": {
@@ -4321,6 +4375,84 @@
           }
         },
         "summary": "Emitir la invitación de un administrador externo (queda por aprobar)",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision": {
+      "post": {
+        "description": "E62, alternativa 1 (`doc/diseno/Decisiones_Propietario_2026-10-21.md` de CEM, §2.3): un\nacto sobre el mismo mandato, hacia adelante. No toca la fila del mandato ni cubre el período\nsin efecto; lo valida `resolver_revision_mandato` (`0023`).",
+        "operationId": "revisar_mandato_api_v1_consorcios__consorcio_id__mandatos__mandato_id__revision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "mandato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Mandato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionMandato"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MandatoRevisado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `mandatos.registrar`, el propio (A4), o con una asamblea que registró la misma persona (A15)."
+          },
+          "404": {
+            "description": "El mandato no existe en este consorcio."
+          },
+          "409": {
+            "description": "No está pendiente de revisión (opera, no es del Consejo, tiene baja o terminó), o ya tiene una revisión desde ese día."
+          },
+          "422": {
+            "description": "La decisión no es una asamblea del consorcio con fecha hasta hoy, la fecha no sirve, o ese día la persona no cumple ninguna condición habilitante."
+          }
+        },
+        "summary": "Revisar un mandato del Consejo pendiente de revisión: vuelve a operar desde una fecha",
         "tags": [
           "mandatos"
         ]
