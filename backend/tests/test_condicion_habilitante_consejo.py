@@ -26,7 +26,7 @@ from sqlalchemy import text
 from app.db import transaccion
 from tests.test_contexto_mandatos import cliente
 from tests.test_mandatos import otra_persona, sesiones_abiertas
-from tests.test_mandatos_0012 import DESDE, alta, baja
+from tests.test_mandatos_0012 import DESDE, alta
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 from tests.test_vinculo_fin_0020 import finalizar
 
@@ -273,29 +273,6 @@ def test_recuperar_la_condicion_no_reactiva_el_mandato(
     assert padron(e["mc"], e["cons"]) == (200 if opera_hoy else 403)
     esperado = "vigente" if opera_hoy else "pendiente_revision"
     assert estado(e["adm"], e["cons"], e["m"]) == esperado
-
-
-def test_un_mandato_nuevo_con_su_decision_resuelve_la_continuidad(
-    consejo, motor_migrate, motor_app
-):
-    """La decisión competente resuelve: baja del mandato pendiente y alta nueva desde hoy."""
-    e = consejo
-    venta = date(2026, 3, 1)
-    with motor_migrate.begin() as c:
-        c.execute(
-            text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
-            {"h": venta, "v": e["v_prop"]},
-        )
-    vinculo(motor_migrate, e["cons"], unidad(motor_migrate, e["cons"], "6° F"), e["mc"],
-            desde=date(2026, 4, 1), confirma=e["prop"])  # fmt: skip
-    assert not opera(motor_migrate, e["m"], e["hoy"])
-    baja(motor_app, e["cons"], None, e["m"], "otro", instrumento="Nota de revisión del Consejo",
-         descripcion="Revisión por pérdida de la condición", origen="soporte")  # fmt: skip
-    nuevo = alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
-                 tipo="miembro_consejo", persona=e["mc"], desde=e["hoy"],
-                 origen="soporte", con_vinculo=False)  # fmt: skip
-    assert opera(motor_migrate, nuevo, e["hoy"])
-    assert padron(e["mc"], e["cons"]) == 200
 
 
 def test_una_confirmacion_tardia_no_tapa_el_hueco(consejo, motor_migrate):

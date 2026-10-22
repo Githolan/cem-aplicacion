@@ -187,6 +187,32 @@ class MandatoDadoDeBaja(BaseModel):
     vigente_hasta: date | None = Field(description="Exclusivo (A1).")
 
 
+class RevisionMandato(BaseModel):
+    """`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1
+    del propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de
+    revisión. No toca el mandato ni cubre el período en que estuvo sin efecto."""
+
+    model_config = ConfigDict(frozen=True)
+
+    decision_id: UUID = Field(
+        description="Una asamblea del mismo consorcio, con fecha hasta hoy, que no registró quien"
+        " revisa (A15)."
+    )
+    eficaz_desde: date = Field(
+        description="Desde qué día vuelve a operar: no antes de la decisión ni de hoy en el"
+        " consorcio, y dentro del mandato. Ese día la persona tiene que cumplir una condición"
+        " habilitante."
+    )
+
+
+class MandatoRevisado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID = Field(description="La revisión.")
+    mandato_id: UUID
+    eficaz_desde: date
+
+
 class EstadoMandato(StrEnum):
     """Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo)."""
 

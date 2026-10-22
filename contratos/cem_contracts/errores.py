@@ -115,6 +115,16 @@ class CodigoError(StrEnum):
     """El mandato ya tiene una baja registrada (A10, irreversible)."""
     MANDATO_TERMINADO = "mandato_terminado"
     """El mandato ya terminó por su fecha: solo admite una baja por error de carga."""
+    MANDATO_NO_PENDIENTE = "mandato_no_pendiente"
+    """La revisión solo vale para un mandato del Consejo pendiente de revisión hoy (E62)."""
+    EFICAZ_DESDE_INVALIDA = "eficaz_desde_invalida"
+    """La revisión rige desde hoy o después (y no antes de su decisión), dentro del mandato: nunca
+    cubre el período sin efecto (E62)."""
+    REVISION_DUPLICADA = "revision_duplicada"
+    """El mandato ya tiene una revisión desde ese día (E62)."""
+    SIN_CONDICION_HABILITANTE = "sin_condicion_habilitante"
+    """El día en que rige la revisión, la persona no cumple ninguna condición habilitante para
+    integrar el Consejo (E62)."""
 
 
 class Error(BaseModel):
