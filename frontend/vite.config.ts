@@ -3,9 +3,9 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-import { NAVEGACION_ENTRAR, NAVEGACION_INVITACION, NAVEGACION_INVITACION_MANDATO } from "./src/enlace";
 import { manifiesto } from "./src/manifiesto";
 import { ARCHIVO_SW_ENTRAR, codigoSwEntrar } from "./src/swEntrar";
+import { esNavegacionDeLaApp } from "./src/swNavegacion";
 
 // La extensión del service worker (src/swEntrar.ts) sale como archivo propio en dist/; el sw.js
 // de Workbox la carga con importScripts. nginx la sirve sin caché, como sw.js.
@@ -37,16 +37,23 @@ export default defineConfig({
         // La extensión se carga con importScripts; no hace falta además en la precaché.
         globIgnores: [ARCHIVO_SW_ENTRAR],
         importScripts: [`/${ARCHIVO_SW_ENTRAR}`],
-        navigateFallback: "/index.html",
-        // /entrar, /invitacion e /invitacion-mandato van siempre a la red: el enlace del correo carga la versión
-        // actual, nunca la que haya quedado en caché, que puede ser anterior a la página
-        // (medido el 14-10-2026).
-        navigateFallbackDenylist: [
-          /^\/api\//,
-          /^\/health/,
-          NAVEGACION_ENTRAR,
-          NAVEGACION_INVITACION,
-          NAVEGACION_INVITACION_MANDATO,
+        // Las navegaciones van a la red (src/swNavegacion.ts: por qué, y qué rutas quedan afuera).
+        // Si la red falla, cualquier ruta recibe el index.html de la precaché, que es el de la
+        // versión instalada. No se guarda ninguna navegación: una caché propia sobreviviría a la
+        // actualización y, sin conexión, podría servir el HTML de una versión anterior (Codex en
+        // #103). Sin plazo de espera: una red lenta espera a la red. Una redirección de
+        // Cloudflare Access pasa al navegador.
+        navigateFallback: null,
+        // La precaché traduce "/" a "/index.html" y lo responde de la caché antes de llegar a la
+        // regla de navegación: "/" (la entrada más común) quedaba igual que antes (medido con la
+        // prueba de Access de e2e/pwa.e2e.ts). Sin esa traducción, "/" va por la regla de abajo.
+        directoryIndex: null,
+        runtimeCaching: [
+          {
+            urlPattern: esNavegacionDeLaApp,
+            handler: "NetworkOnly",
+            options: { precacheFallback: { fallbackURL: "/index.html" } },
+          },
         ],
         cleanupOutdatedCaches: true,
       },
