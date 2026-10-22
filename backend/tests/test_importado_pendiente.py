@@ -171,6 +171,7 @@ def test_ve_solo_las_invitaciones_pendientes_dirigidas_a_su_correo(importada, mo
         r = c.get("/api/v1/me/invitaciones")
     assert r.status_code == 200, r.text
     assert [x["id"] for x in r.json()["elementos"]] == [str(mia)]
+    assert r.headers["cache-control"] == "no-store"
     assert r.json()["elementos"][0]["unidad"] == "2° B"
     # Control: la otra persona ve la suya, no la de la vecina.
     otra = otra_persona(motor_migrate, e["cons"])
@@ -196,6 +197,7 @@ def test_al_aceptar_recien_ahi_recibe_las_concesiones_normales(importada, motor_
         # Ya usada: responde como cualquier invitación que no sirve.
         otra_vez = c.post(f"/api/v1/me/invitaciones/{mia}/aceptar")
         assert (otra_vez.status_code, otra_vez.json()["codigo"]) == (404, "invitacion_invalida")
+        assert r.headers["cache-control"] == otra_vez.headers["cache-control"] == "no-store"
     opera_normal(motor_app, e["vecina"], e["cons"], e["uni"])
     # Reutilizó el vínculo importado (no creó otro) y el evento lo nombra.
     with motor_migrate.connect() as c:

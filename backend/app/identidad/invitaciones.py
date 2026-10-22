@@ -517,7 +517,9 @@ def aceptar(
     response_model=ListaInvitacionesPropias,
     summary="Mis invitaciones de vínculo pendientes",
 )
-def mis_invitaciones(identidad: IdentidadDep, motor: MotorDep) -> ListaInvitacionesPropias:
+def mis_invitaciones(
+    identidad: IdentidadDep, motor: MotorDep, response: Response
+) -> ListaInvitacionesPropias:
     """Las invitaciones de vínculo pendientes dirigidas a mi correo (las de mandato tienen su
     propio flujo). Ruta de la persona, sin consorcio: es lo único que puede hacer un importado
     pendiente, que todavía no tiene ámbito (decisión del propietario del 21-10-2026)."""
@@ -528,7 +530,10 @@ def mis_invitaciones(identidad: IdentidadDep, motor: MotorDep) -> ListaInvitacio
                 " from nucleo.mis_invitaciones()"
             )
         ).mappings()
-        return ListaInvitacionesPropias(elementos=[InvitacionPropia(**f) for f in filas])
+        lista = ListaInvitacionesPropias(elementos=[InvitacionPropia(**f) for f in filas])
+    # Datos de la persona: ni el navegador ni un intermediario los guardan (Codex en #104).
+    response.headers.update(SIN_CACHE)
+    return lista
 
 
 @router.post(
