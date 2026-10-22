@@ -39,9 +39,16 @@ cabecera /assets/no-existe.js cache-control | grep -q immutable && falla "un 404
 # Extensión del service worker para el enlace de entrada (src/swEntrar.ts): sw.js la carga, se
 # sirve como JavaScript, sin caché, y /entrar nunca sale de la caché del service worker.
 curl -s "$URL/sw.js" | grep -q 'importScripts("/sw-entrar.js")' || falla "sw.js no carga sw-entrar.js"
-curl -s "$URL/sw.js" | grep -q '\^\\/entrar' || falla "sw.js no excluye /entrar de navigateFallback"
-curl -s "$URL/sw.js" | grep -q '\^\\/invitacion' || falla "sw.js no excluye /invitacion de navigateFallback"
-curl -s "$URL/sw.js" | grep -q '\^\\/invitacion-mandato' || falla "sw.js no excluye /invitacion-mandato de navigateFallback"
+# Las navegaciones van primero a la red (src/swNavegacion.ts): una regla NetworkFirst con su
+# caché propia, sin la regla vieja que respondía todo de la caché (NavigationRoute) y sin que la
+# precaché traduzca "/" a "/index.html". /api, /health y los tres enlaces del correo quedan afuera.
+SW=$(curl -s "$URL/sw.js")
+echo "$SW" | grep -qF 'NetworkFirst({cacheName:"cem-navegacion"' || falla "sw.js sin la navegación primero a la red"
+echo "$SW" | grep -qF 'directoryIndex:null' || falla "la precaché de sw.js sigue traduciendo / a /index.html"
+if echo "$SW" | grep -qF 'NavigationRoute'; then falla "sw.js todavía responde las navegaciones de la caché"; fi
+for excluida in 'api\/' 'health' 'entrar(?:[/?]|$)' 'invitacion(?:[/?]|$)' 'invitacion-mandato(?:[/?]|$)'; do
+  echo "$SW" | grep -qF "$excluida" || falla "sw.js no deja fuera de la navegación: $excluida"
+done
 [ "$(codigo /sw-entrar.js)" = 200 ] || falla "/sw-entrar.js no da 200"
 [ "$(cabecera /sw-entrar.js cache-control)" = "no-cache" ] || falla "sw-entrar.js no lleva no-cache"
 cabecera /sw-entrar.js content-type | grep -q '^application/javascript' || falla "tipo de sw-entrar.js"
