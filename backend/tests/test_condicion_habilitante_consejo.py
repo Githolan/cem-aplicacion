@@ -297,6 +297,34 @@ def test_una_confirmacion_tardia_no_tapa_el_hueco(consejo, motor_migrate):
     assert opera(motor_migrate, e["m"], e["hoy"])
 
 
+def aceptar(motor_migrate, cons: UUID, uni: UUID, persona: UUID, vinculo_id: UUID,
+            momento: str) -> None:  # fmt: skip
+    """Lo que deja `aceptar_invitacion` (0014) al reutilizar un vínculo: la invitación aceptada
+    y su evento, que nombra a ese vínculo (`vinculo_id`)."""
+    with motor_migrate.begin() as c:
+        invitacion = c.execute(
+            text(
+                "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
+                " token_hash, creada_en, vence_en, aceptada_en, persona_id)"
+                " values (:c, :u, 'propietario', :correo, 'Consejo', sha256(gen_random_uuid()"
+                "::text::bytea), :a, cast(:a as timestamptz) + interval '1 day',"
+                " cast(:a as timestamptz) + interval '1 hour', :p) returning id"
+            ),
+            {"c": cons, "u": uni, "correo": f"mc-{vinculo_id.hex[:8]}@ejemplo.com", "a": momento,
+             "p": persona},
+        ).scalar_one()  # fmt: skip
+        c.execute(
+            text(
+                "insert into auditoria.eventos (consorcio_id, actor_persona_id, origen, accion,"
+                " entidad, entidad_id, despues, hash_previo, hash)"
+                " values (:c, :p, 'api', 'identidad.invitacion.aceptar', 'invitacion', :i,"
+                " jsonb_build_object('unidad_id', cast(:u as uuid), 'tipo', 'propietario',"
+                " 'vinculo_id', cast(:v as uuid), 'cuenta_nueva', false), '', '')"
+            ),
+            {"c": cons, "p": persona, "i": invitacion, "u": uni, "v": vinculo_id},
+        )
+
+
 def test_una_aceptacion_que_reutiliza_el_vinculo_lo_habilita_desde_ese_dia(consejo, motor_migrate):
     """`aceptar_invitacion` reutiliza un vínculo de la misma persona, unidad y carácter sin
     cambiarle la fuente (Codex en app #102): la aceptación habilita desde su día. Sin la
@@ -309,25 +337,30 @@ def test_una_aceptacion_que_reutiliza_el_vinculo_lo_habilita_desde_ese_dia(conse
             {"h": venta, "v": e["v_prop"]},
         )
     uni = unidad(motor_migrate, e["cons"], "6° F")
-    vinculo(motor_migrate, e["cons"], uni, e["mc"], desde=venta)
+    v = vinculo(motor_migrate, e["cons"], uni, e["mc"], desde=venta)
     assert not opera(motor_migrate, e["m"], e["hoy"])  # control: sin aceptar ni confirmar
+    aceptar(motor_migrate, e["cons"], uni, e["mc"], v, "2026-03-01 12:00-03")
+    assert opera(motor_migrate, e["m"], e["hoy"])
+
+
+def test_la_aceptacion_de_otro_periodo_no_habilita_un_vinculo_nuevo(consejo, motor_migrate):
+    """La invitación aceptada nombra al vínculo de 2025; otro período de la misma persona,
+    unidad y carácter, cargado por documento sin confirmar, no queda aceptado por ella (Codex en
+    app #102). Control: la aceptación de ese vínculo sí lo habilita."""
+    e = consejo
+    venta = date(2026, 3, 1)
     with motor_migrate.begin() as c:
         c.execute(
-            text(
-                "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
-                " token_hash, creada_en, vence_en, aceptada_en, persona_id)"
-                " values (:c, :u, 'propietario', :correo, 'Consejo', sha256(gen_random_uuid()"
-                "::text::bytea), :a, cast(:a as timestamptz) + interval '1 day',"
-                " cast(:a as timestamptz) + interval '1 hour', :p)"
-            ),
-            {
-                "c": e["cons"],
-                "u": uni,
-                "correo": f"mc-{uni.hex[:8]}@ejemplo.com",
-                "a": "2026-03-01 12:00-03",
-                "p": e["mc"],
-            },  # fmt: skip
+            text("update nucleo.vinculo set vigente_hasta = :h where id = :v"),
+            {"h": venta, "v": e["v_prop"]},
         )
+    uni = unidad(motor_migrate, e["cons"], "6° F")
+    viejo = vinculo(motor_migrate, e["cons"], uni, e["mc"], desde=date(2025, 1, 1),
+                    hasta=date(2025, 6, 1))  # fmt: skip
+    aceptar(motor_migrate, e["cons"], uni, e["mc"], viejo, "2025-01-02 12:00-03")
+    nuevo = vinculo(motor_migrate, e["cons"], uni, e["mc"], desde=venta)
+    assert not opera(motor_migrate, e["m"], e["hoy"])
+    aceptar(motor_migrate, e["cons"], uni, e["mc"], nuevo, "2026-03-01 12:00-03")
     assert opera(motor_migrate, e["m"], e["hoy"])
 
 

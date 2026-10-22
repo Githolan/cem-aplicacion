@@ -16,7 +16,9 @@ su historia y no autoriza actos nuevos. La continuidad la resuelve la decisión 
   desde su `vigente_desde` (Codex en app #102): una confirmación tardía no tapa un hueco. La
   aceptación es la invitación que creó el vínculo (fuente `invitacion`) o la que lo reutilizó
   (`aceptar_invitacion` busca uno de la misma persona, unidad y carácter y no le cambia la
-  fuente; queda en `nucleo.invitacion`). Uno importado, declarado o cargado por documento, sin
+  fuente). La reutilización se reconoce por el evento de la aceptación, que nombra a ese vínculo
+  (`vinculo_id`): no alcanza con otra invitación aceptada de la misma persona, unidad y carácter
+  para otro período (Codex en app #102). Uno importado, declarado o cargado por documento, sin
   confirmar ni aceptar, no cuenta.
 - **Cómo se detecta la pérdida** (definición 2): se calcula en cada pedido a partir de los
   vínculos del padrón; no hay ninguna marca guardada. `nucleo.condicion_consejo_sin_interrupcion`
@@ -208,20 +210,22 @@ create function {COBERTURA.replace("(uuid, date, date)", "(mandato uuid, desde d
         join nucleo.persona pe on pe.id = v.persona_id and pe.eliminado_en is null
         -- Desde qué día habilita el vínculo: el primero de su confirmación, de su alta por una
         -- invitación aceptada o de una aceptación que lo reutilizó (`aceptar_invitacion`, 0014,
-        -- no le cambia la fuente). Antes, no cuenta.
+        -- no le cambia la fuente). La aceptación es la que nombra a **este** vínculo en su
+        -- evento (`vinculo_id`): una invitación aceptada para otro período de la misma persona,
+        -- unidad y carácter no lo habilita (Codex en app #102). Antes, no cuenta.
         cross join lateral (
           select least(
             (v.confirmado_en at time zone co.zona_horaria)::date,
             case when v.fuente = 'invitacion'
                  then (v.creado_en at time zone co.zona_horaria)::date end,
             (select min((i.aceptada_en at time zone co.zona_horaria)::date)
-               from nucleo.invitacion i
-              where i.consorcio_id = v.consorcio_id and i.unidad_id = v.unidad_id
-                and i.persona_id = v.persona_id and i.tipo = v.tipo
-                and i.aceptada_en is not null
-                and daterange(v.vigente_desde, v.vigente_hasta)
-                    && daterange((i.aceptada_en at time zone co.zona_horaria)::date,
-                                 null))) as habilita) a
+               from auditoria.eventos e
+               join nucleo.invitacion i
+                 on i.id = e.entidad_id and i.consorcio_id = e.consorcio_id
+              where e.consorcio_id = v.consorcio_id
+                and e.accion = 'identidad.invitacion.aceptar' and e.entidad = 'invitacion'
+                and e.despues ->> 'vinculo_id' = v.id::text
+                and i.aceptada_en is not null)) as habilita) a
        where m.id = mandato and a.habilita is not null
          and (v.vigente_hasta is null or greatest(v.vigente_desde, a.habilita) < v.vigente_hasta)),
       '{{}}'::datemultirange)
