@@ -1395,6 +1395,81 @@
         "title": "InvitacionNueva",
         "type": "object"
       },
+      "InvitacionPropia": {
+        "description": "Una invitación de vínculo pendiente dirigida al correo de la persona de la sesión\n(`GET /api/v1/me/invitaciones`, RF02). Es lo único que puede hacer un importado pendiente:\nverla y aceptarla con su sesión.",
+        "properties": {
+          "consorcio": {
+            "description": "Nombre del consorcio.",
+            "examples": [
+              "Edificio Alvear 100"
+            ],
+            "title": "Consorcio",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "invitada_por": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nombre de quien invitó; nulo si la cargó el equipo de la plataforma.",
+            "title": "Invitada Por"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoVinculo"
+          },
+          "unidad": {
+            "examples": [
+              "3° B"
+            ],
+            "title": "Unidad",
+            "type": "string"
+          },
+          "vence_en": {
+            "format": "date-time",
+            "title": "Vence En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "consorcio",
+          "unidad",
+          "tipo",
+          "nombre",
+          "invitada_por",
+          "vence_en"
+        ],
+        "title": "InvitacionPropia",
+        "type": "object"
+      },
+      "InvitacionPropiaAceptada": {
+        "description": "Respuesta de `POST /api/v1/me/invitaciones/{id}/aceptar`: desde ahí, el vínculo sigue las\nreglas normales.",
+        "properties": {
+          "consorcio_id": {
+            "format": "uuid",
+            "title": "Consorcio Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "consorcio_id"
+        ],
+        "title": "InvitacionPropiaAceptada",
+        "type": "object"
+      },
       "InvitacionRecibida": {
         "description": "Lo que ve quien abre una invitación pendiente, antes de aceptarla.",
         "properties": {
@@ -1519,6 +1594,22 @@
           "elementos"
         ],
         "title": "ListaInvitacionesMandato",
+        "type": "object"
+      },
+      "ListaInvitacionesPropias": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/InvitacionPropia"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaInvitacionesPropias",
         "type": "object"
       },
       "ListaMandatos": {
@@ -4775,7 +4866,7 @@
     },
     "/api/v1/me/consorcios": {
       "get": {
-        "description": "Consorcios donde la persona tiene un vínculo vigente o un mandato vigente, con la fecha\nde cada consorcio.",
+        "description": "Consorcios donde la persona tiene un vínculo vigente o un mandato vigente, con la fecha\nde cada consorcio. Un vínculo importado pendiente no cuenta (RF02, `0024`): sin otro\nvínculo ni mandato, la lista queda vacía y el consorcio no entra en `consorcios_persona`.",
         "operationId": "mis_consorcios_api_v1_me_consorcios_get",
         "responses": {
           "200": {
@@ -4796,6 +4887,82 @@
         "summary": "Mis Consorcios",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/me/invitaciones": {
+      "get": {
+        "description": "Las invitaciones de vínculo pendientes dirigidas a mi correo (las de mandato tienen su\npropio flujo). Ruta de la persona, sin consorcio: es lo único que puede hacer un importado\npendiente, que todavía no tiene ámbito (decisión del propietario del 21-10-2026).",
+        "operationId": "mis_invitaciones_api_v1_me_invitaciones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaInvitacionesPropias"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mis invitaciones de vínculo pendientes",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/me/invitaciones/{invitacion_id}/aceptar": {
+      "post": {
+        "description": "La prueba es el control del correo, la misma que el token del enlace: la base acepta con\n`aceptar_invitacion` (0014), crea o reutiliza el vínculo y lo audita igual. Desde ahí, el\nvínculo deja de estar pendiente y sigue las reglas normales.",
+        "operationId": "aceptar_propia_api_v1_me_invitaciones__invitacion_id__aceptar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitacion Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitacionPropiaAceptada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No es una invitación pendiente dirigida a mi correo (todas las causas responden igual)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aceptar con mi sesión una invitación dirigida a mi correo",
+        "tags": [
+          "identidad"
         ]
       }
     },

@@ -267,7 +267,8 @@ def reconstruir_indices_gist(motor_migrate: Engine) -> None:
 
 
 def volver_a_subir(cfg, motor_migrate: Engine) -> None:
-    """Sube a `head` después de bajar por debajo de 0007, que se lleva las invitaciones."""
+    """Sube a `head` después de bajar por debajo de 0014: reconstruye los GiST (E58) y, si se bajó
+    por debajo de 0007, que se lleva las invitaciones, les devuelve su procedencia."""
     command.upgrade(cfg, "0013")
     reconstruir_indices_gist(motor_migrate)
     dar_procedencia_sintetica(motor_migrate)
