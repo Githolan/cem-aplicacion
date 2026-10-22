@@ -61,6 +61,60 @@ test.describe("PWA servida por la imagen", () => {
     expect((await page.goto("/entrarx"))?.fromServiceWorker()).toBe(true);
   });
 
+  test("con red, una navegación pasa por la red aunque el service worker esté al mando", async ({ page, context }) => {
+    await page.goto("/");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+
+    const deLaRed: string[] = [];
+    context.on("request", (pedido) => {
+      if (pedido.serviceWorker() !== null) deLaRed.push(new URL(pedido.url()).pathname);
+    });
+    const respuesta = await page.goto("/una-ruta-cualquiera");
+    // La respondió el service worker, pero yendo a buscarla a la red, no a su caché.
+    expect(respuesta?.fromServiceWorker()).toBe(true);
+    expect(deLaRed).toContain("/una-ruta-cualquiera");
+    // Ninguna navegación queda guardada: la única caché es la precaché de la versión instalada,
+    // que se reemplaza al actualizar (Codex en #103).
+    const cachés = await page.evaluate(() => caches.keys());
+    expect(cachés.length).toBeGreaterThan(0);
+    expect(cachés.every((nombre) => nombre.startsWith("workbox-precache"))).toBe(true);
+  });
+
+  test("una redirección de la navegación a otro origen llega al navegador (Cloudflare Access)", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+
+    // Como Access con la sesión vencida: la página responde una redirección a su login.
+    const login = "https://acceso.ejemplo.invalid/cdn-cgi/access/login";
+    await context.route(
+      (url) => url.pathname === "/" && url.origin === new URL(page.url()).origin,
+      (ruta) => ruta.fulfill({ status: 302, headers: { location: login } }),
+    );
+    await context.route(`${login}**`, (ruta) =>
+      ruta.fulfill({ status: 200, contentType: "text/html", body: "<h1>Login de Access</h1>" }),
+    );
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Login de Access");
+    expect(page.url()).toBe(login);
+  });
+
+  test("sin conexión, una ruta que nunca se abrió carga la aplicación de la precaché", async ({ page, context }) => {
+    await page.goto("/");
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.reload();
+
+    await context.setOffline(true);
+    await page.goto("/ruta-nunca-abierta");
+    await expect(page.getByRole("heading", { name: "No encontramos esa página" })).toBeVisible();
+  });
+
   test("sin conexión el shell carga desde caché y /health no sale de caché", async ({ page, context }) => {
     await page.goto("/");
     await page.evaluate(() => navigator.serviceWorker.ready);
