@@ -117,6 +117,8 @@ caso,accion,figura,modo,recurso,mandato,hay_administrador,entidad,esperado,motiv
 §2.3,mandatos.resolver_revision,ninguna,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
 §2.3,mandatos.resolver_revision,MC,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie revisa su propio mandato (A4)
 §2.3,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie revisa su propio mandato (A4)
+§2.3,mandatos.resolver_revision,AD,AA,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,en Administrador aumentado también corre
+§2.3,mandatos.resolver_revision,MC,AG,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,en Autogestión también corre
 §2.3,decisiones.registrar,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,P no registra decisiones
 §2.3,decisiones.registrar,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,I no registra decisiones
 §2.3,decisiones.registrar,MC,C,,vigente,si,respaldo=si,200,concedido_por_facultad,MC registra decisiones (C2)
@@ -218,6 +220,7 @@ R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,co
 R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
+R9,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,revisión sin decisión de respaldo
 R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión sin referencia del acta
 R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
 R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)

@@ -123,8 +123,8 @@ class CodigoError(StrEnum):
     REVISION_DUPLICADA = "revision_duplicada"
     """El mandato ya tiene una revisión desde ese día (E62)."""
     SIN_CONDICION_HABILITANTE = "sin_condicion_habilitante"
-    """El día en que rige la revisión, la persona no cumple ninguna condición habilitante para
-    integrar el Consejo (E62)."""
+    """Desde hoy hasta el día en que rige la revisión, la persona no cumple sin interrupción una
+    condición habilitante para integrar el Consejo (E62)."""
 
 
 class Error(BaseModel):

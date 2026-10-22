@@ -20,7 +20,9 @@ from datetime import date, timedelta
 from uuid import UUID
 
 import pytest
+from alembic import command
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
 from tests.conftest import clave_idempotencia
@@ -37,6 +39,11 @@ from tests.test_contexto_mandatos import cliente, denegaciones
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta, baja
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
+from tests.test_vinculo_0014 import (  # noqa: F401  (`base_aparte` es un fixture)
+    _consorcio_y_unidad,
+    _persona,
+    base_aparte,
+)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -422,3 +429,84 @@ def test_cem_app_solo_lee_las_revisiones(pendiente, motor_app, sentencia):
     with pytest.raises(Exception, match="permission denied"):
         with transaccion(motor_app, persona_id=e["adm"], consorcio_id=e["cons"]) as c:
             c.execute(text(sentencia), {"c": e["cons"], "m": e["m"], "d": e["acta"], "f": e["hoy"]})
+
+
+def test_una_perdida_entre_el_registro_y_la_eficacia_deja_la_revision_sin_efecto(
+    pendiente, motor_migrate
+):
+    """Revisión registrada hoy para dentro de 30 días; vende la 6° F en 10 y compra la 7° G en
+    20. Sin otra asamblea después de la pérdida, el día 30 el mandato sigue pendiente
+    (revisión independiente en app #102). Control: sin la venta, opera desde el día 30."""
+    e = pendiente
+    hoy, eficaz = e["hoy"], e["hoy"] + timedelta(days=30)
+    r = revisar_http(e["adm"], e["cons"], e["m"], e["acta"], eficaz)
+    assert r.status_code == 201, r.text
+    assert opera(motor_migrate, e["m"], eficaz)  # control
+    cortar(motor_migrate, e["v_nuevo"], hoy + timedelta(days=10))
+    vinculo(motor_migrate, e["cons"], unidad(motor_migrate, e["cons"], "7° G"), e["mc"],
+            desde=hoy + timedelta(days=20), confirma=e["prop"],
+            confirmado=hoy + timedelta(days=20))  # fmt: skip
+    assert not opera(motor_migrate, e["m"], eficaz)
+    assert not opera(motor_migrate, e["m"], eficaz + timedelta(days=30))
+
+
+def test_la_eficacia_tiene_que_caer_dentro_del_mandato(pendiente, motor_migrate):
+    e = pendiente
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.mandato set vigente_hasta = :h where id = :m"),
+            {"h": e["hoy"] + timedelta(days=5), "m": e["m"]},
+        )
+    r = revisar_http(e["adm"], e["cons"], e["m"], e["acta"], e["hoy"] + timedelta(days=5))
+    assert (r.status_code, r.json()["codigo"]) == (422, "eficaz_desde_invalida"), r.text
+    # Control: el último día del mandato.
+    r = revisar_http(e["adm"], e["cons"], e["m"], e["acta"], e["hoy"] + timedelta(days=4))
+    assert r.status_code == 201, r.text
+
+
+def test_downgrade_con_una_revision_se_niega_y_sin_ella_baja(base_aparte):  # noqa: F811
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0023")
+    cons, _ = _consorcio_y_unidad(motor)
+    persona = _persona(motor, "Consejo")
+    with motor.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(cons)})
+        acta = c.execute(
+            text("select nucleo.registrar_decision('asamblea', '2024-01-01', 'Designa',"
+                 " 'Acta 1', null, 'soporte')")
+        ).scalar_one()  # fmt: skip
+        mandato = c.execute(
+            text("select nucleo.alta_mandato('miembro_consejo', :p, null, null, null, :a,"
+                 " '2024-01-01', null, null, null, 'soporte')"),
+            {"p": persona, "a": acta},
+        ).scalar_one()  # fmt: skip
+        c.execute(
+            text("insert into nucleo.revision_mandato (consorcio_id, mandato_id, decision_id,"
+                 " eficaz_desde, origen) values (:c, :m, :a, '2024-06-01', 'soporte')"),
+            {"c": cons, "m": mandato, "a": acta},
+        )  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        command.downgrade(cfg, "0022")
+    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    with motor.begin() as c:  # control: sin revisiones, baja
+        c.execute(text("delete from nucleo.revision_mandato"))
+    command.downgrade(cfg, "0022")
+    with motor.connect() as c:
+        assert c.execute(text("select to_regclass('nucleo.revision_mandato')")).scalar() is None
+
+
+def test_un_hueco_conocido_entre_hoy_y_la_eficacia_se_rechaza_al_registrar(
+    pendiente, motor_migrate
+):
+    """La 6° F se vende dentro de 3 días y la 7° G se compra dentro de 5: el día 6 cumple, pero
+    no sin interrupción desde hoy. Control: desde el día 2, antes de la venta, sí."""
+    e = pendiente
+    hoy = e["hoy"]
+    cortar(motor_migrate, e["v_nuevo"], hoy + timedelta(days=3))
+    vinculo(motor_migrate, e["cons"], unidad(motor_migrate, e["cons"], "7° G"), e["mc"],
+            desde=hoy + timedelta(days=5), confirma=e["prop"],
+            confirmado=hoy + timedelta(days=5))  # fmt: skip
+    r = revisar_http(e["adm"], e["cons"], e["m"], e["acta"], hoy + timedelta(days=6))
+    assert (r.status_code, r.json()["codigo"]) == (422, "sin_condicion_habilitante"), r.text
+    r = revisar_http(e["adm"], e["cons"], e["m"], e["acta"], hoy + timedelta(days=2))
+    assert r.status_code == 201, r.text

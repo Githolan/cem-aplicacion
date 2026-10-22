@@ -200,8 +200,8 @@ class RevisionMandato(BaseModel):
     )
     eficaz_desde: date = Field(
         description="Desde qué día vuelve a operar: no antes de la decisión ni de hoy en el"
-        " consorcio, y dentro del mandato. Ese día la persona tiene que cumplir una condición"
-        " habilitante."
+        " consorcio, y dentro del mandato. De hoy a ese día la persona tiene que cumplir, sin"
+        " interrupción, una condición habilitante."
     )
 
 

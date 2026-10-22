@@ -48,10 +48,12 @@ su historia y no autoriza actos nuevos. La continuidad la resuelve la decisión 
   el mismo mandato, respaldado por una asamblea del mismo consorcio con fecha hasta hoy, que le da
   eficacia **desde `eficaz_desde`** hacia adelante. `eficaz_desde` no es anterior a la fecha de la
   decisión ni al día del registro, así que nunca cubre el período sin efecto. La condición tiene
-  que cumplirse ese día; si no, se rechaza (no queda una revisión en espera que active el mandato
-  sola). Solo la admite un mandato de Consejo `pendiente_revision` el día del registro.
+  que cumplirse sin interrupción desde el registro hasta ese día; si no, se rechaza (no queda una
+  revisión en espera que active el mandato sola). Solo la admite un mandato de Consejo
+  `pendiente_revision` el día del registro.
 - **Tramos.** La continuidad se mide desde la última revisión con `eficaz_desde` hasta la fecha
-  evaluada, y en ese tramo la condición tiene que cumplirse desde ese mismo día. Sin revisión, desde
+  evaluada, y en ese tramo la condición tiene que cumplirse desde el día de su registro: una
+  pérdida entre el registro y `eficaz_desde` la deja sin efecto. Sin revisión, desde
   el inicio del mandato con la regla indulgente: opera desde la primera vez que la cumple. Cada
   pérdida posterior deja el mandato pendiente otra vez y pide otra revisión, que abre otro tramo.
 - **Lo que no cambia:** la fila del mandato, sus facultades, sus bajas y los actos que registró
@@ -226,11 +228,13 @@ create function {COBERTURA.replace("(uuid, date, date)", "(mandato uuid, desde d
   $$;
 
 -- E62. ¿Cumple la persona del mandato, sin interrupción en el tramo que llega a `fecha`, alguna
--- condición habilitante? El tramo empieza en la última revisión con `eficaz_desde` hasta
--- `fecha`, y entonces la condición tiene que cumplirse desde ese mismo día. Sin revisión,
--- empieza con el mandato y vale la regla indulgente: desde la primera vez que la cumple. En los
--- dos casos la cobertura tiene que ser **un solo tramo que llega hasta la fecha**: un hueco deja
--- dos, y el mandato no se reactiva solo. Sin filas, falso.
+-- condición habilitante? El tramo lo abre la última revisión con `eficaz_desde` hasta `fecha`,
+-- y entonces la condición tiene que cumplirse desde el día en que se registró (o desde
+-- `eficaz_desde`, si es anterior): una pérdida entre el registro y la eficacia la deja sin
+-- efecto, y la revisión no espera a un vínculo nuevo (revisión independiente en app #102). Sin
+-- revisión, empieza con el mandato y vale la regla indulgente: desde la primera vez que la
+-- cumple. En los dos casos la cobertura tiene que ser **un solo tramo que llega hasta la
+-- fecha**: un hueco deja dos, y el mandato no se reactiva solo. Sin filas, falso.
 create function {CONDICION.replace("(uuid, date)", "(mandato uuid, fecha date)")}
   returns boolean
   language sql stable security definer
@@ -241,9 +245,14 @@ create function {CONDICION.replace("(uuid, date)", "(mandato uuid, fecha date)")
              and c.cobertura = datemultirange(daterange(lower(c.cobertura), fecha + 1))
              and (t.revision is null or lower(c.cobertura) = t.revision)
         from (select m.vigente_desde,
-                     (select max(r.eficaz_desde) from nucleo.revision_mandato r
-                       where r.mandato_id = m.id and r.eficaz_desde <= fecha) as revision
-                from nucleo.mandato m where m.id = mandato) t
+                     (select least((r.creada_en at time zone co.zona_horaria)::date,
+                                   r.eficaz_desde)
+                        from nucleo.revision_mandato r
+                       where r.mandato_id = m.id and r.eficaz_desde <= fecha
+                       order by r.eficaz_desde desc limit 1) as revision
+                from nucleo.mandato m
+                join nucleo.consorcio co on co.id = m.consorcio_id
+               where m.id = mandato) t
        cross join lateral (
          select nucleo.cobertura_consejo(mandato, coalesce(t.revision, t.vigente_desde), fecha)
                 as cobertura) c), false)
@@ -339,9 +348,12 @@ create function {
       raise exception 'el mandato ya tiene una revisión desde ese día'
         using errcode = 'P0001', hint = 'revision_duplicada';
     end if;
-    -- La condición tiene que cumplirse el día en que empieza a regir.
-    if isempty(nucleo.cobertura_consejo(m.id, eficaz_desde, eficaz_desde)) then
-      raise exception 'la persona no cumple ninguna condición habilitante ese día'
+    -- La condición tiene que cumplirse sin interrupción desde hoy hasta el día en que empieza a
+    -- regir, con lo que se sabe hoy del padrón; después, la condición la vuelve a medir desde
+    -- hoy en cada pedido (una pérdida en el medio deja la revisión sin efecto).
+    if nucleo.cobertura_consejo(m.id, hoy, eficaz_desde)
+       <> datemultirange(daterange(hoy, eficaz_desde + 1)) then
+      raise exception 'la persona no cumple una condición habilitante de hoy a ese día'
         using errcode = 'P0001', hint = 'sin_condicion_habilitante';
     end if;
 

@@ -112,7 +112,8 @@ ERRORES = {
     ),
     "sin_condicion_habilitante": (
         422, CodigoError.SIN_CONDICION_HABILITANTE,
-        "Ese día la persona no cumple ninguna condición para integrar el Consejo.",
+        "De hoy a ese día, la persona no cumple sin interrupción una condición para integrar"
+        " el Consejo.",
     ),
     "persona_sin_vinculo": (
         422, CodigoError.PERSONA_SIN_VINCULO,
