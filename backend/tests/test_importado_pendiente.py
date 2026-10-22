@@ -30,7 +30,8 @@ from app.errores import ErrorApi
 from tests.test_condicion_habilitante_consejo import aceptar, unidad, vinculo
 from tests.test_contexto_mandatos import cliente
 from tests.test_mandatos import otra_persona
-from tests.test_modo_operacion import consorcio_con_persona
+from tests.test_mandatos_0012 import alta
+from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -281,3 +282,72 @@ def test_las_funciones_solo_responden_por_la_persona_de_la_sesion(importada, mot
         assert c.execute(consulta).scalar_one() == 0
     with transaccion(motor_app, persona_id=None) as c:
         assert c.execute(consulta).scalar_one() == 0
+
+
+def test_una_invitacion_retirada_no_se_lista_ni_se_acepta(importada, motor_migrate, motor_app):
+    e = importada
+    inv = invitar(motor_migrate, e["cons"], e["uni"], correo_de(motor_migrate, e["vecina"]))
+    with cliente(e["vecina"]) as c:  # control: antes de retirarla, la ve
+        assert [x["id"] for x in c.get("/api/v1/me/invitaciones").json()["elementos"]] == [str(inv)]
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.invitacion set revocada_en = now() where id = :i"), {"i": inv}
+        )
+    with cliente(e["vecina"]) as c:
+        assert c.get("/api/v1/me/invitaciones").json()["elementos"] == []
+        r = c.post(f"/api/v1/me/invitaciones/{inv}/aceptar")
+    assert (r.status_code, r.json()["codigo"]) == (404, "invitacion_invalida")
+    neutro(motor_app, e["vecina"], e["cons"])
+
+
+def test_con_un_mandato_entra_por_el_mandato_y_el_importado_sigue_afuera(importada, motor_app):
+    e = importada
+    alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]), persona=e["vecina"],
+         origen="soporte", con_vinculo=False)  # fmt: skip
+    assert str(e["cons"]) in mis_consorcios(e["vecina"])
+    ctx = require_scope(e["cons"], Identidad(e["vecina"]), motor_app)
+    assert ctx.vinculos == () and len(ctx.mandatos) == 1
+
+
+def test_la_aceptacion_se_busca_por_indice_y_no_recorriendo_la_auditoria(motor_migrate):
+    """El índice parcial existe, es válido y la consulta de la aceptación lo puede usar."""
+    with motor_migrate.connect() as c, c.begin():
+        assert c.execute(
+            text(
+                "select i.indisvalid from pg_index i join pg_class x on x.oid = i.indexrelid"
+                " where x.relname = 'eventos_aceptacion_por_vinculo'"
+            )
+        ).scalar_one()
+        # La auditoría está particionada: el índice se propaga a cada partición con su nombre.
+        hijos = set(
+            c.execute(
+                text(
+                    "select x.relname from pg_inherits h join pg_class x on x.oid = h.inhrelid"
+                    " where h.inhparent = 'auditoria.eventos_aceptacion_por_vinculo'::regclass"
+                )
+            ).scalars()
+        )
+        assert hijos
+        c.execute(text("set local enable_seqscan = off"))
+        plan = "\n".join(
+            c.execute(
+                text(
+                    "explain select 1 from auditoria.eventos e"
+                    " where e.accion = 'identidad.invitacion.aceptar' and e.entidad = 'invitacion'"
+                    " and e.despues ->> 'vinculo_id' = :v"
+                ),
+                {"v": "01a10000-0000-7000-8000-0000000000ff"},
+            ).scalars()
+        )
+        assert any(h in plan for h in hijos), plan
+        # Control: sin el filtro por `accion`, el índice parcial no sirve.
+        plan_sin = "\n".join(
+            c.execute(
+                text(
+                    "explain select 1 from auditoria.eventos e"
+                    " where e.despues ->> 'vinculo_id' = :v"
+                ),
+                {"v": "01a10000-0000-7000-8000-0000000000ff"},
+            ).scalars()
+        )
+        assert not any(h in plan_sin for h in hijos), plan_sin

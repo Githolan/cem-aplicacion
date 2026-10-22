@@ -24,7 +24,10 @@ su correo. Los vínculos `documento`, `declaracion` e `invitacion` sin confirmar
   reutiliza el vínculo, marca la invitación y audita igual que el enlace. Una invitación de
   otro correo responde igual que una que no existe.
 
-Downgrade: borra las tres funciones. No hay datos nuevos.
+- Índice parcial `eventos_aceptacion_por_vinculo` para encontrar esa aceptación sin recorrer la
+  auditoría del consorcio.
+
+Downgrade: borra el índice y las tres funciones. No hay datos nuevos.
 
 Revisión: 0024
 Anterior: 0023
@@ -42,6 +45,12 @@ MIS_INVITACIONES = "nucleo.mis_invitaciones()"
 ACEPTAR = "nucleo.aceptar_invitacion_propia(uuid, inet)"
 
 UPGRADE = f"""
+-- La aceptación que nombra a un vínculo, por su `vinculo_id`: la buscan la condición del Consejo
+-- (0023) y el importado pendiente en cada pedido. Sin índice recorrerían la auditoría entera
+-- del consorcio (revisión independiente en app #104).
+create index eventos_aceptacion_por_vinculo on auditoria.eventos ((despues ->> 'vinculo_id'))
+  where accion = 'identidad.invitacion.aceptar' and entidad = 'invitacion';
+
 create function {PENDIENTES}
   returns setof uuid
   language sql stable security definer
@@ -110,6 +119,7 @@ grant execute on function {PENDIENTES}, {MIS_INVITACIONES}, {ACEPTAR} to cem_app
 """
 
 DOWNGRADE = f"""
+drop index auditoria.eventos_aceptacion_por_vinculo;
 drop function {ACEPTAR};
 drop function {MIS_INVITACIONES};
 drop function {PENDIENTES};

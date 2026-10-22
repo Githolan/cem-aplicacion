@@ -566,4 +566,10 @@ def aceptar_propia(
         # `otra_persona` o `requiere_sesion`: la base eligió la invitación por mi correo, así que
         # no pueden pasar. Si pasan, es un defecto (500), no una invitación que no sirve.
         raise RuntimeError(f"aceptar_invitacion_propia respondió {r.resultado}")
+    log.info(
+        "invitación propia aceptada",
+        extra={
+            "campos": {"consorcio_id": str(r.consorcio), "persona_id": str(identidad.persona_id)}
+        },
+    )
     return InvitacionPropiaAceptada(consorcio_id=r.consorcio)
