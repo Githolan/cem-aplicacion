@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `5f00c5b`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación), las correcciones de Codex en app #105 y la tanda única de correcciones sobre `4b978a1`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `2430829`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación), las correcciones de Codex en app #105, la tanda única sobre `4b978a1` y los dos P2 de Codex sobre `69f1f77`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -118,13 +118,13 @@ Rama `rf02-importacion-corte3`, líneas en `5f00c5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1518 passed sobre `5f00c5b`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1520 passed sobre `2430829`; `ci.ps1` dio verde sobre `69f1f77` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 30 de 30 detectadas |
+| Mutaciones | 32 de 32 detectadas |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
-| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
+| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. Revisó `69f1f77`: dos P2, corregidos en `2430829`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
 
 **Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
 - Python 3.12-slim;
@@ -167,8 +167,10 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | correo sin `FORMATO_CORREO` | 5 |
 | CSV no estricto | 2 |
 | el informe compara contra unidades fuera de su alcance | 2 |
+| encabezados repetidos con `columnas.count` (O(n²)) | 1 |
+| `encode("utf-8")` sin rechazar el surrogate | 1 |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3` y las 5 últimas sobre `5f00c5b`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b` y las 2 últimas sobre `2430829`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -182,6 +184,12 @@ Corregidos en `e1667f2`, cada uno con su prueba:
   - el informe de coeficientes nombraba unidades fuera del alcance.
 
 Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y están en `1e1b504`.
+
+**Dos P2 de Codex sobre `69f1f77`** (decisión del propietario del 23-10), corregidos en `2430829`, cada uno con su prueba y su mutación. La revisión independiente final sobre `69f1f77` no encontró P1 ni P2 y dejó 13 P3, que quedan **pendientes, sin cambios de código**.
+1. **Encabezados repetidos:** se cuentan en una sola pasada (`collections.Counter`), con la misma validación y la misma respuesta. La prueba lee 50 000 columnas en menos de un segundo; con `columnas.count` (la mutación) tarda más y falla.
+2. **Surrogate suelto (`"\ud800"`):** `leer_planilla` lo rechaza como `fila_mal_formada`, antes del CSV y de cualquier consulta.
+   - **Cómo es determinista el hash:** es el SHA-256 de `archivo.encode("utf-8", "surrogatepass")`. Da siempre los mismos bytes para el mismo texto y coincide con el SHA-256 UTF-8 de siempre cuando no hay surrogates (la prueba lo controla).
+   - **Hallazgo:** por la API el 500 no se reproduce. El contrato (Pydantic) rechaza ese JSON antes del importador con 422 `peticion_invalida`, y ya lo hacía sobre `69f1f77`: lo comprobé corriendo la misma prueba con el `importacion.py` de ese head. La corrección protege la función, que antes lanzaba `UnicodeEncodeError` llamada con ese texto.
 
 **Tanda única sobre `4b978a1`** (decisión del propietario del 23-10), corregida en `5f00c5b`, cada corrección con su prueba y su mutación:
 1. **P2 de la revisión independiente:** una invitación pendiente que nombra otro vínculo es bloqueante aunque haya vencido (D4.2). Lo marca el informe y lo defiende `crear_invitacion_importada`. Solo se reemplaza una manual vencida, o la vencida del mismo vínculo en la renovación.
