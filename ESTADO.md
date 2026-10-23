@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 20-10-2026.
+**Actualizado:** 23-10-2026.
 
 ## Qué existe
 
@@ -406,3 +406,13 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - poner la marca en la pantalla de entrada (*Custom pages → Access login page*), después de confirmar que el plan gratuito la incluye;
    - alargar la sesión de Access a un mes.
    - Producción no lleva Access y queda como está: la sesión de la aplicación dura 30 días.
+9. **RF02, corte 3 de 2b-5 (23-10-2026):** rama `rf02-importacion-corte3`, desde `94a2114`, empujada, **sin PR, sin fusionar y sin desplegar**.
+   - **Qué trae:** migración `0025` (importación con informe, la invitación nombra su vínculo, anulación de un vínculo no iniciado), contrato 0.17.0 y `scripts.anular_vinculo`.
+   - **Decisiones e informe:** D1 a D4, las inferencias y tres preguntas para el propietario están en `doc/rf02_corte3_informe.md`.
+   - **Pruebas:** 1496 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube.
+   - **Revisión independiente:** hecha sobre `129730f`, con P1, P2 y cuatro P3 corregidos.
+   - **Falta:**
+     - Codex;
+     - `ci.ps1` con la imagen oficial;
+     - las respuestas a las preguntas del informe;
+     - pasar las decisiones D1, D3 y D4 al documento de decisiones de CEM.
