@@ -409,8 +409,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 9. **RF02, corte 3 de 2b-5 (23-10-2026):** rama `rf02-importacion-corte3`, desde `94a2114`, empujada, **sin PR, sin fusionar y sin desplegar**.
    - **Qué trae:** migración `0025` (importación con informe, la invitación nombra su vínculo, anulación de un vínculo no iniciado), contrato 0.17.0 y `scripts.anular_vinculo`.
    - **Decisiones e informe:** D1 a D4, las inferencias y tres preguntas para el propietario están en `doc/rf02_corte3_informe.md`.
-   - **Respuestas del propietario del 23-10** a las tres preguntas (`1e1b504`) y a la renovación de una invitación importada vencida, opción 3 (`2ceef5d`): aplicadas. Hallazgos de Codex en app #105 (un P1 y dos P2): corregidos en `1acb5c3`. Tanda única sobre `4b978a1` (dos P2 de Codex y un P2 más alcance y privacidad de la revisión independiente): corregida en `5f00c5b`. Los P3 de esa revisión quedan pendientes, sin código.
-   - **Pruebas:** 1518 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube.
+   - **Respuestas del propietario del 23-10** a las tres preguntas (`1e1b504`) y a la renovación de una invitación importada vencida, opción 3 (`2ceef5d`): aplicadas. Hallazgos de Codex en app #105 (un P1 y dos P2): corregidos en `1acb5c3`. Tanda única sobre `4b978a1` (dos P2 de Codex y un P2 más alcance y privacidad de la revisión independiente): corregida en `5f00c5b`. Dos P2 de Codex sobre `69f1f77` (encabezados repetidos en una pasada y surrogate suelto): corregidos en `2430829`. Los P3 de las revisiones independientes (13 sobre `69f1f77`) quedan pendientes, sin código. `ci.ps1` dio verde sobre `69f1f77`.
+   - **Pruebas:** 1520 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube.
    - **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código.
    - **Falta:**
      - la revisión independiente final y Codex sobre el SHA final;
