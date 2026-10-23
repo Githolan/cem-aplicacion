@@ -414,12 +414,17 @@
         "description": "Lo que dice la planilla de un grupo de gasto. Se informa, no se escribe ni se corrige.",
         "properties": {
           "distintos_del_vigente": {
-            "description": "Unidades cuyo porcentaje difiere del esquema vigente de ese grupo.",
+            "description": "Hasta 20 ejemplos, en orden, de las unidades cuyo porcentaje difiere del esquema vigente de ese grupo.",
             "items": {
               "type": "string"
             },
             "title": "Distintos Del Vigente",
             "type": "array"
+          },
+          "distintos_del_vigente_total": {
+            "description": "Cuántas unidades difieren del esquema vigente.",
+            "title": "Distintos Del Vigente Total",
+            "type": "integer"
           },
           "grupo": {
             "title": "Grupo",
@@ -430,12 +435,17 @@
             "type": "boolean"
           },
           "sin_coeficiente": {
-            "description": "Unidades (de la planilla o del consorcio) sin porcentaje en este grupo.",
+            "description": "Hasta 20 ejemplos, en orden, de las unidades (de la planilla o del consorcio) sin porcentaje en este grupo.",
             "items": {
               "type": "string"
             },
             "title": "Sin Coeficiente",
             "type": "array"
+          },
+          "sin_coeficiente_total": {
+            "description": "Cuántas unidades no tienen porcentaje.",
+            "title": "Sin Coeficiente Total",
+            "type": "integer"
           },
           "suma": {
             "description": "Suma tal cual, como texto decimal (D4).",
@@ -450,7 +460,9 @@
           "grupo",
           "suma",
           "sin_coeficiente",
+          "sin_coeficiente_total",
           "distintos_del_vigente",
+          "distintos_del_vigente_total",
           "hay_esquema_vigente"
         ],
         "title": "CoeficientesGrupo",

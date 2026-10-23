@@ -38,6 +38,7 @@ import hashlib
 import io
 import logging
 import re
+from bisect import bisect_left
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -94,6 +95,11 @@ creada con otro correo no podría entrar ni recibir una invitación válida."""
 LARGO_MAXIMO_NOMBRE = 100
 """El tope de `nucleo.invitacion.nombre` (0007)."""
 CIEN = Decimal(100)
+EJEMPLOS = 20
+"""Cuántas unidades se nombran como ejemplo en cada lista del informe de coeficientes."""
+MAXIMO_GRUPOS = 20
+"""Grupos de coeficientes por planilla. Cada grupo recorre todas las unidades: sin tope, un
+encabezado con miles de columnas `coeficiente_*` hacía el informe cuadrático."""
 ULTIMO_ANIO = 9998
 """`ultimo_dia + 1` tiene que seguir siendo una fecha (`date.max` es el 31-12-9999)."""
 CAMBIO_DURANTE_LA_APLICACION = frozenset(
@@ -192,6 +198,14 @@ def _encabezado(columnas: list[str]) -> tuple[tuple[str, ...], list[Problema]]:
             )
         )
     grupos = []
+    if sum(c.startswith(PREFIJO_COEFICIENTE) for c in columnas) > MAXIMO_GRUPOS:
+        problemas.append(
+            Problema(
+                codigo=CodigoProblema.ENCABEZADO_INVALIDO,
+                mensaje=f"La planilla admite hasta {MAXIMO_GRUPOS} grupos de coeficientes.",
+            )
+        )
+        columnas = [c for c in columnas if not c.startswith(PREFIJO_COEFICIENTE)]
     for c in columnas:
         if c.startswith(PREFIJO_COEFICIENTE):
             grupo = c.removeprefix(PREFIJO_COEFICIENTE)
@@ -394,10 +408,12 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
         mismas = visibles[clave]
         escrituras = en_planilla[clave] | {x for _, x in mismas}
         if len(escrituras) > 1 or len(mismas) > 1:
+            # Un ejemplo, no todas las escrituras: con todas, el tamaño era cuadrático.
+            otra = min((x for x in escrituras if x != d), default=d)
             p.fila.problema(
                 CodigoProblema.DESIGNACION_AMBIGUA,
-                f"«{d}» es la misma unidad que «{'», «'.join(sorted(escrituras - {d}) or [d])}»"
-                " escrita de otra forma: no se crea una unidad duplicada (PA01).",
+                f"«{d}» es la misma unidad que «{otra}» escrita de otra forma: no se crea una"
+                " unidad duplicada (PA01).",
             )
             continue
         if mismas:
@@ -434,6 +450,17 @@ def _marcar_solapes(grupo: list[Plan]) -> None:
             fin_mayor, quien = fin, p
 
 
+def _se_superpone_con_alguno(
+    ordenados: list[tuple[date, date | None]], inicios: list[date], rango: tuple[date, date | None]
+) -> bool:
+    """`ordenados`: rangos no vacíos que no se superponen entre sí, por inicio (`inicios`). El
+    único candidato es el último que empieza antes del fin de `rango`, que es el que termina más
+    tarde de esos."""
+    hasta = rango[1]
+    i = len(ordenados) if hasta is None else bisect_left(inicios, hasta)
+    return i > 0 and _se_superponen(ordenados[i - 1], rango)
+
+
 def _vinculos(conn: Connection, planes: list[Plan]) -> None:
     con_relacion = [
         p for p in planes if p.fila.relacion and p.unidad and p.negada_gestionar is None
@@ -454,6 +481,13 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             v.vinculo_id,
             v.importado_pendiente,
         )
+    # Los vínculos existentes de una misma persona, unidad y carácter no se superponen (EXCLUDE):
+    # ordenados por inicio, alcanza una búsqueda binaria. Una vigencia vacía no se superpone con
+    # nada y queda afuera (sigue contando como igual, por `detalle`).
+    ordenados: dict[tuple, tuple[list[tuple[date, date | None]], list[date]]] = {}
+    for k, v in existentes.items():
+        rs = sorted((x for x in v if x[1] is None or x[1] > x[0]), key=lambda x: x[0])
+        ordenados[k] = (rs, [x[0] for x in rs])
     rangos: dict[tuple, set[tuple[date, date | None]]] = defaultdict(set)
     grupos: dict[tuple, list[Plan]] = defaultdict(list)
     for p in con_relacion:
@@ -467,13 +501,13 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             continue
         rangos[clave].add(rango)
         grupos[clave].append(p)
-        actuales = existentes[(p.unidad_id, r.correo, r.tipo)] if p.unidad_id else []
-        if rango in actuales:
+        clave_existente = (p.unidad_id, r.correo, r.tipo)
+        if p.unidad_id and (*clave_existente, *rango) in detalle:
             p.vinculo = AccionVinculo.EXISTENTE
-            p.vinculo_existente, p.importado_pendiente = detalle[
-                (p.unidad_id, r.correo, r.tipo, *rango)
-            ]
-        elif any(_se_superponen(e, rango) for e in actuales):
+            p.vinculo_existente, p.importado_pendiente = detalle[(*clave_existente, *rango)]
+        elif p.unidad_id and _se_superpone_con_alguno(
+            *ordenados.get(clave_existente, ([], [])), rango
+        ):
             p.fila.problema(
                 CodigoProblema.CORRIGE_EXISTENTE,
                 "Se superpone con un vínculo que ya existe y no es igual: no se corrige por"
@@ -556,12 +590,15 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
         _exigir_invitar(p, invitar)
     for grupo in nuevas.values():
         if len(grupo) > 1:
+            # Un ejemplo y el total, no todas las líneas: con todas, el tamaño de la respuesta
+            # era cuadrático (Codex en app #105).
             for p in grupo:
+                otra = grupo[1] if p is grupo[0] else grupo[0]
                 p.fila.problema(
                     CodigoProblema.INVITACIONES_SIMULTANEAS,
-                    "Hay más de un vínculo vigente o futuro nuevo de esta persona, unidad y"
-                    f" carácter (líneas {', '.join(str(x.fila.linea) for x in grupo)}): solo"
-                    " puede haber una invitación pendiente.",
+                    f"Hay {len(grupo)} vínculos vigentes o futuros nuevos de esta persona, unidad"
+                    f" y carácter (por ejemplo, la línea {otra.fila.linea}): solo puede haber una"
+                    " invitación pendiente.",
                 )
 
 
@@ -615,16 +652,22 @@ def _coeficientes_informe(
                 )
             }
         valores = {d: g[grupo] for d, g in por_unidad.items() if grupo in g}
+        sin = [d for d in designaciones if d not in valores]
+        distintos = [
+            d
+            for d, v in sorted(valores.items())
+            if grupo in vigentes and d in activas and guardados.get(activas[d]) != v
+        ]
+        # Las listas son ejemplos acotados, con su total: el tamaño de la respuesta no crece
+        # con grupos por unidades (barrido de diagnósticos, app #105).
         informe.append(
             CoeficientesGrupo(
                 grupo=grupo,
                 suma=str(sum(valores.values(), Decimal(0))),
-                sin_coeficiente=[d for d in designaciones if d not in valores],
-                distintos_del_vigente=[
-                    d
-                    for d, v in sorted(valores.items())
-                    if grupo in vigentes and d in activas and guardados.get(activas[d]) != v
-                ],
+                sin_coeficiente=sin[:EJEMPLOS],
+                sin_coeficiente_total=len(sin),
+                distintos_del_vigente=distintos[:EJEMPLOS],
+                distintos_del_vigente_total=len(distintos),
                 hay_esquema_vigente=grupo in vigentes,
             )
         )
@@ -710,6 +753,37 @@ def _verificar_alcance(analisis: Analisis, gestionar: Permiso, invitar: Permiso)
 # Aplicación ------------------------------------------------------------------------------------
 
 
+def _bloquear_invitaciones_y_personas(conn: Connection, ctx: Contexto, planilla: Planilla) -> None:
+    """El orden único de bloqueos: invitación, persona, vínculo y, al final, la cadena de
+    auditoría (`auditoria:<consorcio>`). Es el de `aceptar_invitacion`, `revocar`, la invitación
+    manual y `anular_vinculo`. La importación toma acá, antes de leer el estado y de escribir el
+    primer evento, todo lo que después pueden tocar `crear_invitacion_importada` (las invitaciones
+    pendientes de esos correos, también la vencida que se reemplaza o se renueva) e
+    `importar_vinculo` (`persona:<correo>`). Si tomara la auditoría antes, una aceptación, un
+    retiro o una invitación manual del mismo correo la podían trabar (Codex en app #105).
+
+    Es un superconjunto: todos los correos de la planilla, en orden y con la misma expresión que
+    la base (`lower(btrim(correo))`)."""
+    correos = sorted({f.relacion.correo for f in planilla.filas if f.relacion})
+    if not correos:
+        return
+    conn.execute(
+        text(
+            "select 1 from nucleo.invitacion where consorcio_id = :c"
+            " and correo = any(select lower(btrim(x)) from unnest(cast(:cs as text[])) x)"
+            " and aceptada_en is null and revocada_en is null order by id for update"
+        ),
+        {"c": ctx.consorcio_id, "cs": correos},
+    )
+    for correo in correos:
+        conn.execute(
+            text(
+                "select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"
+            ),
+            {"c": correo},
+        )
+
+
 def _aplicar(
     conn: Connection,
     ctx: Contexto,
@@ -724,6 +798,7 @@ def _aplicar(
         text("select pg_advisory_xact_lock(hashtextextended('importacion:' || :c, 0))"),
         {"c": str(ctx.consorcio_id)},
     )
+    _bloquear_invitaciones_y_personas(conn, ctx, planilla)
     analisis = analizar(conn, ctx, planilla, gestionar, invitar)
     _verificar_alcance(analisis, gestionar, invitar)
     if not analisis.informe.aplicable:
@@ -741,20 +816,6 @@ def _aplicar(
             vinculos_creados=0,
             invitaciones_creadas=0,
             invitaciones_reemplazadas=0,
-        )
-    # Orden de bloqueos (Codex en app #105): persona antes que la cadena de auditoría, como
-    # `aceptar_invitacion`. `importar_vinculo` toma `persona:<correo>` y el primer evento toma
-    # `auditoria:<consorcio>`; si la importación ya tuviera la auditoría al pedir una persona, una
-    # aceptación del mismo correo (persona y después auditoría) la trabaría. Se toman todos, en
-    # orden y con la misma expresión que la base, antes de escribir nada.
-    for correo in sorted(
-        {p.fila.relacion.correo for p in analisis.planes if p.vinculo == AccionVinculo.CREAR}
-    ):
-        conn.execute(
-            text(
-                "select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"
-            ),
-            {"c": correo},
         )
     try:
         return _escribir(conn, ctx, planilla, analisis, ip)

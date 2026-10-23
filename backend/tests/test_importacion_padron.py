@@ -870,7 +870,9 @@ def test_los_coeficientes_se_informan_contra_el_esquema_vigente_y_no_se_escriben
         "grupo": "expensas_comunes",
         "suma": "99.95",
         "sin_coeficiente": [],
+        "sin_coeficiente_total": 0,
         "distintos_del_vigente": ["2° B"],
+        "distintos_del_vigente_total": 1,
         "hay_esquema_vigente": True,
     }
     assert r.json()["esquemas_a_revisar"] == []
@@ -1891,3 +1893,147 @@ def test_una_anulacion_y_una_aceptacion_del_mismo_vinculo_no_se_traban(escena, m
     hilo.join(60)
     assert "error" not in resultado, resultado.get("error")
     assert resultado["respuesta"].status_code == 200, resultado["respuesta"].text
+
+
+# Barrido de bloqueos y de diagnósticos sobre 7e28cd5 (decisión del propietario del 23-10-2026) ---
+
+
+def test_una_renovacion_y_un_retiro_de_la_misma_invitacion_no_se_traban(escena, motor_migrate):
+    """Codex en app #105. `revocar` bloquea la invitación y después audita; la renovación
+    auditaba (la importación) antes de bloquear la invitación vencida en
+    `crear_invitacion_importada`. Dos conexiones reales, la primera en el orden de `revocar`."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Ivo,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [vieja] = invitaciones_de(motor_migrate, correo)
+    vencer(motor_migrate, vieja["id"])
+    with motor_migrate.connect() as retiro:
+        with retiro.begin():
+            pid = retiro.execute(text("select pg_backend_pid()")).scalar_one()
+            retiro.execute(
+                text("select 1 from nucleo.invitacion where id = :i for update"),
+                {"i": vieja["id"]},
+            )
+            hilo, resultado = en_un_hilo(lambda: pedir_aplicar(e["admin"], e["cons"], archivo))
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            retiro.execute(
+                text(
+                    "insert into auditoria.eventos (consorcio_id, origen, accion, entidad,"
+                    " hash_previo, hash) values (:c, 'soporte', 'prueba.orden_de_bloqueos',"
+                    " 'prueba', '', '')"
+                ),
+                {"c": e["cons"]},
+            )
+    hilo.join(60)
+    assert "error" not in resultado, resultado.get("error")
+    assert resultado["respuesta"].status_code == 200, resultado["respuesta"].text
+    assert resultado["respuesta"].json()["invitaciones_reemplazadas"] == 1
+
+
+def largo_de_los_diagnosticos(cuerpo: dict) -> int:
+    return sum(len(p["mensaje"]) for x in cuerpo["filas"] for p in x["problemas"])
+
+
+def test_las_invitaciones_simultaneas_se_informan_con_un_ejemplo_por_fila(escena, motor_migrate):
+    """Codex en app #105: cada fila nombraba todas las demás (2000 filas, 22 millones de
+    caracteres). Ahora, un ejemplo y el total."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    filas = [
+        f"2° B,Lu,{correo},ocupante,{f(hoy + timedelta(days=2 * i))},"
+        f"{f(hoy + timedelta(days=2 * i))}"
+        for i in range(400)
+    ]
+    cuerpo = pedir_informe(e["admin"], e["cons"], planilla(*filas)).json()
+    assert cuerpo["aplicable"] is False
+    assert {p["codigo"] for x in cuerpo["filas"] for p in x["problemas"]} == {
+        "invitaciones_simultaneas"
+    }
+    assert max(len(x["problemas"]) for x in cuerpo["filas"]) == 1
+    assert max(len(p["mensaje"]) for x in cuerpo["filas"] for p in x["problemas"]) < 200
+    assert "Hay 400 vínculos" in cuerpo["filas"][0]["problemas"][0]["mensaje"]
+
+
+def test_una_designacion_con_muchas_escrituras_se_informa_con_un_ejemplo(escena):
+    e = escena
+    escrituras = [f"23°{' ' * (i + 1)}A" for i in range(300)]
+    archivo = planilla(*(f"{d},,,,," for d in escrituras))
+    cuerpo = pedir_informe(e["admin"], e["cons"], archivo).json()
+    assert {p["codigo"] for x in cuerpo["filas"] for p in x["problemas"]} == {"designacion_ambigua"}
+    # Cada mensaje nombra su designación y un ejemplo: lineal en el tamaño de la planilla. Antes,
+    # cada fila nombraba las otras 299 (unas 150 veces el tamaño de la planilla).
+    assert largo_de_los_diagnosticos(cuerpo) < 4 * len(archivo)
+
+
+def test_las_listas_de_coeficientes_son_ejemplos_con_su_total(escena, motor_migrate):
+    e = escena
+    with motor_migrate.connect() as c:
+        existentes = c.execute(
+            text(
+                "select count(*) from nucleo.unidad where consorcio_id = :c"
+                " and eliminado_en is null"
+            ),
+            {"c": e["cons"]},
+        ).scalar_one()
+    filas = [f"24-{i},," for i in range(50)]
+    encabezado = "unidad,coeficiente_agua,coeficiente_gas"
+    cuerpo = pedir_informe(e["admin"], e["cons"], planilla(*filas, encabezado=encabezado)).json()
+    for grupo in cuerpo["coeficientes"]:
+        assert len(grupo["sin_coeficiente"]) == 20
+        assert grupo["sin_coeficiente_total"] == 50 + existentes
+        assert grupo["sin_coeficiente"] == sorted(grupo["sin_coeficiente"])
+
+
+def test_la_planilla_admite_hasta_20_grupos_de_coeficientes():
+    encabezado = "unidad," + ",".join(f"coeficiente_g{i:02d}" for i in range(21))
+    p = leer_planilla(encabezado + "\n" + "1° A" + "," * 21 + "\n")
+    assert "encabezado_invalido" in {x.codigo for x in p.problemas}
+    assert p.grupos == ()
+    # Control: 20 se aceptan.
+    encabezado = "unidad," + ",".join(f"coeficiente_g{i:02d}" for i in range(20))
+    p = leer_planilla(encabezado + "\n" + "1° A" + "," * 20 + "\n")
+    assert p.problemas == [] and len(p.grupos) == 20
+
+
+def test_un_vinculo_existente_se_encuentra_entre_varios_sin_recorrerlos_todos(
+    escena, motor_migrate
+):
+    """La búsqueda binaria sobre los vínculos existentes de la misma persona, unidad y carácter:
+    igual, superpuesto con el del medio (también con una vigencia vacía adentro), entre dos y
+    después del último."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+
+    def fila(desde: int, ultimo: int | None) -> str:
+        fin = f(hoy + timedelta(days=ultimo)) if ultimo is not None else ""
+        return f"2° B,Ro,{correo},ocupante,{f(hoy + timedelta(days=desde))},{fin}"
+
+    # Ya terminados: así no llevan invitación (tres vigentes o futuros serían simultáneos).
+    aplicada = planilla(fila(-100, -97), fila(-90, -81), fila(-70, -61))
+    r = pedir_aplicar(e["admin"], e["cons"], aplicada)
+    assert r.status_code == 200, r.text
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde, vigente_hasta, fuente, origen, finalizado_en, motivo_fin)"
+                " select consorcio_id, unidad_id, persona_id, tipo, :d, :d, 'documento',"
+                " 'soporte', now(), 'Prueba' from nucleo.vinculo where id = :v"
+            ),
+            {"d": hoy - timedelta(days=85), "v": vinculos_de(motor_migrate, correo)[0]["id"]},
+        )
+    casos = {
+        fila(-90, -81): ("existente", set()),
+        fila(-84, -84): (None, {"corrige_existente"}),  # dentro del del medio, tras la vacía
+        fila(-88, -88): (None, {"corrige_existente"}),
+        fila(-79, -72): ("crear", set()),  # entre dos
+        fila(-65, None): (None, {"corrige_existente"}),
+        fila(-50, None): ("crear", set()),  # después del último
+    }
+    for renglon, (vinculo, codigos) in casos.items():
+        [x] = pedir_informe(e["admin"], e["cons"], planilla(renglon)).json()["filas"]
+        assert (x["vinculo"], {p["codigo"] for p in x["problemas"]}) == (vinculo, codigos), renglon
