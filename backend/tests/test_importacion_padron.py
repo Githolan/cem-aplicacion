@@ -28,14 +28,14 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from cem_contracts.importacion import CodigoProblema, Problema
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app.consorcios.importacion import leer_planilla
 from app.db import transaccion
 from scripts import anular_vinculo as script_anular
 from scripts import invitar as script_invitar
-from tests.conftest import clave_idempotencia, url_rol
+from tests.conftest import ADMIN_URL, BASE, clave_idempotencia, url_rol
 from tests.test_coeficientes_0021 import registrar
 from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixture)
     cliente,
@@ -1782,3 +1782,112 @@ def test_un_surrogate_suelto_es_una_planilla_invalida_y_no_un_500(escena, motor_
     # Control: sin surrogates, el hash es el SHA-256 de siempre (UTF-8).
     limpio = planilla("3° C,,,,,")
     assert leer_planilla(limpio).sha256 == hashlib.sha256(limpio.encode("utf-8")).digest()
+
+
+# Dos P2 de Codex sobre 70e889c y el P3 4 de la revisión sobre 69f1f77 ----------------------------
+
+
+def test_muchos_solapes_dan_a_lo_sumo_un_diagnostico_por_fila(escena, motor_migrate):
+    """400 filas de la misma persona, unidad y carácter que se superponen todas entre sí: antes,
+    un diagnóstico por cada par (159 600)."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    filas = [f"2° B,Ema,{correo},ocupante,{f(hoy + timedelta(days=i))}," for i in range(400)]
+    r = pedir_informe(e["admin"], e["cons"], planilla(*filas))
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    assert cuerpo["aplicable"] is False
+    por_fila = [len(x["problemas"]) for x in cuerpo["filas"]]
+    assert max(por_fila) == 1
+    assert {p["codigo"] for x in cuerpo["filas"] for p in x["problemas"]} == {"vinculo_solapado"}
+    assert sum(por_fila) == 400  # todas se superponen con otra: todas quedan marcadas
+
+
+def esperar_que_alguien_espere_un_bloqueo(salvo_pid: int) -> None:
+    """Con el rol administrador: `cem_migrate` no ve en qué espera un proceso de `cem_app`."""
+    admin = create_engine(ADMIN_URL)
+    try:
+        for _ in range(400):
+            with admin.connect() as c:
+                if c.execute(
+                    text(
+                        "select count(*) from pg_stat_activity where datname = :base"
+                        " and wait_event_type = 'Lock' and pid <> :p"
+                    ),
+                    {"base": BASE, "p": salvo_pid},
+                ).scalar_one():
+                    return
+            time.sleep(0.05)
+    finally:
+        admin.dispose()
+    raise AssertionError("la otra operación nunca quedó esperando un bloqueo")
+
+
+def en_un_hilo(funcion) -> tuple[threading.Thread, dict]:
+    resultado: dict = {}
+
+    def correr():
+        try:
+            resultado["respuesta"] = funcion()
+        except Exception as error:  # noqa: BLE001  (la prueba lo muestra si falla)
+            resultado["error"] = error
+
+    hilo = threading.Thread(target=correr)
+    hilo.start()
+    return hilo, resultado
+
+
+def test_una_importacion_y_una_aceptacion_del_mismo_correo_no_se_traban(escena, motor_migrate):
+    """Dos conexiones reales. La primera toma los bloqueos en el orden de `aceptar_invitacion`
+    (persona y después la cadena de auditoría del consorcio) y la importación corre en otra. Si
+    la importación tomara la auditoría antes que la persona, PostgreSQL detectaría un deadlock y
+    abortaría una de las dos."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla("22° A,,,,,", f"2° B,Abi,{correo},ocupante,{f(hoy)},")
+    with motor_migrate.connect() as aceptacion:
+        with aceptacion.begin():
+            pid = aceptacion.execute(text("select pg_backend_pid()")).scalar_one()
+            aceptacion.execute(
+                text("select pg_advisory_xact_lock(hashtextextended('persona:' || :c, 0))"),
+                {"c": correo},
+            )
+            hilo, resultado = en_un_hilo(lambda: pedir_aplicar(e["admin"], e["cons"], archivo))
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            aceptacion.execute(
+                text(
+                    "insert into auditoria.eventos (consorcio_id, origen, accion, entidad,"
+                    " hash_previo, hash) values (:c, 'soporte', 'prueba.orden_de_bloqueos',"
+                    " 'prueba', '', '')"
+                ),
+                {"c": e["cons"]},
+            )
+    hilo.join(60)
+    assert "error" not in resultado, resultado.get("error")
+    assert resultado["respuesta"].status_code == 200, resultado["respuesta"].text
+    assert resultado["respuesta"].json()["vinculos_creados"] == 1
+
+
+def test_una_anulacion_y_una_aceptacion_del_mismo_vinculo_no_se_traban(escena, motor_migrate):
+    """P3 4 de la revisión sobre 69f1f77. `aceptar_invitacion` bloquea la invitación y después
+    el vínculo; la anulación hacía lo contrario. Dos conexiones reales, la primera en el orden de
+    la aceptación."""
+    e = escena
+    v = futuro_importado(e, motor_migrate)
+    [inv] = invitaciones_de(motor_migrate, vinculos_correo(motor_migrate, v["id"]))
+    with motor_migrate.connect() as aceptacion:
+        with aceptacion.begin():
+            pid = aceptacion.execute(text("select pg_backend_pid()")).scalar_one()
+            aceptacion.execute(
+                text("select 1 from nucleo.invitacion where id = :i for update"), {"i": inv["id"]}
+            )
+            hilo, resultado = en_un_hilo(lambda: anular(e["admin"], e["cons"], v["id"]))
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            aceptacion.execute(
+                text("select 1 from nucleo.vinculo where id = :v for update"), {"v": v["id"]}
+            )
+    hilo.join(60)
+    assert "error" not in resultado, resultado.get("error")
+    assert resultado["respuesta"].status_code == 200, resultado["respuesta"].text

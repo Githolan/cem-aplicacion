@@ -24,6 +24,10 @@ repositorio.
   importado pendiente, `padron_del_consorcio` muestra ese nombre y no el de la persona: si el
   correo ya tenía cuenta (en otro consorcio), el padrón no lo delata ni muestra su nombre real
   (revisión independiente del corte 3, P1). `cem_app` no lee la columna, como `motivo_fin`.
+- **Orden de los bloqueos**, el mismo en todo el código: invitación, persona (`persona:<correo>`),
+  vínculo y, al final, la cadena de auditoría (`auditoria:<consorcio>`). La importación toma los
+  de persona de toda la planilla antes de escribir el primer evento, y la anulación bloquea las
+  invitaciones antes que el vínculo (Codex en app #105 y P3 4 de la revisión sobre 69f1f77).
 - `nucleo.anular_vinculo`: borra un vínculo que todavía no empezó (`vigente_desde > hoy`) y deja
   un evento con los identificadores, sin el motivo (E31). Por la API, solo sin confirmar; uno
   confirmado lo anula el equipo por soporte con la referencia del respaldo, que queda en el
@@ -385,6 +389,15 @@ create function nucleo.anular_vinculo(
       raise exception 'la referencia del respaldo es solo del equipo'
         using errcode = 'P0001', hint = 'origen_invalido';
     end if;
+    -- Orden de bloqueos: primero las invitaciones que lo nombran y después el vínculo, como
+    -- `aceptar_invitacion` (invitación, persona, vínculo, auditoría). Al revés, una anulación y
+    -- una aceptación del mismo vínculo podían trabarse entre sí (P3 4 de la revisión sobre
+    -- 69f1f77).
+    perform 1 from nucleo.invitacion i
+     where i.consorcio_id = c and i.vinculo_id = vinculo_a_anular
+       and i.aceptada_en is null and i.revocada_en is null
+     order by i.id
+       for update;
     select * into v from nucleo.vinculo x
      where x.consorcio_id = c and x.id = vinculo_a_anular for update;
     if v.id is null then

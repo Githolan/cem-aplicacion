@@ -412,6 +412,28 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
             )
 
 
+def _marcar_solapes(grupo: list[Plan]) -> None:
+    """Las filas de la misma persona, unidad y carácter que se superponen, con un barrido por
+    fecha de inicio: a lo sumo un diagnóstico por fila, sin recorrer todos los pares (Codex en
+    app #105: 800 filas daban 639 200 diagnósticos). Si hay algún solape, al menos una fila queda
+    marcada y el archivo se rechaza con el mismo código."""
+    fin_mayor: date | None = None  # el fin más lejano visto; `date.max` si alguno no termina
+    quien: Plan | None = None
+    for p in sorted(grupo, key=lambda x: (x.fila.relacion.desde, x.fila.linea)):
+        r = p.fila.relacion
+        if quien is not None and r.desde < fin_mayor:
+            for x, otra in ((p, quien), (quien, p)):
+                if not any(y.codigo == CodigoProblema.VINCULO_SOLAPADO for y in x.fila.problemas):
+                    x.fila.problema(
+                        CodigoProblema.VINCULO_SOLAPADO,
+                        "Otra fila da a la misma persona, unidad y carácter fechas superpuestas"
+                        f" (por ejemplo, la línea {otra.fila.linea}).",
+                    )
+        fin = r.hasta or date.max
+        if quien is None or fin > fin_mayor:
+            fin_mayor, quien = fin, p
+
+
 def _vinculos(conn: Connection, planes: list[Plan]) -> None:
     con_relacion = [
         p for p in planes if p.fila.relacion and p.unidad and p.negada_gestionar is None
@@ -432,26 +454,19 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             v.vinculo_id,
             v.importado_pendiente,
         )
-    vistas: dict[tuple, list[Plan]] = defaultdict(list)
+    rangos: dict[tuple, set[tuple[date, date | None]]] = defaultdict(set)
+    grupos: dict[tuple, list[Plan]] = defaultdict(list)
     for p in con_relacion:
         r = p.fila.relacion
         clave = (clave_designacion(p.fila.designacion), r.correo, r.tipo)
         rango = (r.desde, r.hasta)
-        anteriores = vistas[clave]
-        if any((a.fila.relacion.desde, a.fila.relacion.hasta) == rango for a in anteriores):
+        if rango in rangos[clave]:
             p.fila.problema(
                 CodigoProblema.RELACION_DUPLICADA, "La misma relación ya está en otra fila."
             )
             continue
-        for a in anteriores:
-            if _se_superponen((a.fila.relacion.desde, a.fila.relacion.hasta), rango):
-                for x in (a, p):
-                    x.fila.problema(
-                        CodigoProblema.VINCULO_SOLAPADO,
-                        "Otra fila da a la misma persona, unidad y carácter fechas superpuestas"
-                        f" (líneas {a.fila.linea} y {p.fila.linea}).",
-                    )
-        anteriores.append(p)
+        rangos[clave].add(rango)
+        grupos[clave].append(p)
         actuales = existentes[(p.unidad_id, r.correo, r.tipo)] if p.unidad_id else []
         if rango in actuales:
             p.vinculo = AccionVinculo.EXISTENTE
@@ -466,6 +481,8 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             )
         else:
             p.vinculo = AccionVinculo.CREAR
+    for grupo in grupos.values():
+        _marcar_solapes(grupo)
     for p in con_relacion:
         if p.vinculo is not None and any(
             x.codigo == CodigoProblema.VINCULO_SOLAPADO for x in p.fila.problemas
@@ -724,6 +741,20 @@ def _aplicar(
             vinculos_creados=0,
             invitaciones_creadas=0,
             invitaciones_reemplazadas=0,
+        )
+    # Orden de bloqueos (Codex en app #105): persona antes que la cadena de auditoría, como
+    # `aceptar_invitacion`. `importar_vinculo` toma `persona:<correo>` y el primer evento toma
+    # `auditoria:<consorcio>`; si la importación ya tuviera la auditoría al pedir una persona, una
+    # aceptación del mismo correo (persona y después auditoría) la trabaría. Se toman todos, en
+    # orden y con la misma expresión que la base, antes de escribir nada.
+    for correo in sorted(
+        {p.fila.relacion.correo for p in analisis.planes if p.vinculo == AccionVinculo.CREAR}
+    ):
+        conn.execute(
+            text(
+                "select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"
+            ),
+            {"c": correo},
         )
     try:
         return _escribir(conn, ctx, planilla, analisis, ip)
