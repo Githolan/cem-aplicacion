@@ -66,8 +66,8 @@ def escena(motor_migrate, motor_app, edificio):  # noqa: F811
     cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
     e["admin"] = otra_persona(motor_migrate, e["cons"])
     e["mc"] = otra_persona(motor_migrate, e["cons"])
-    # Por soporte: el padrón no depende de cómo se cargó el mandato (la vía de la API, desde
-    # 0018, agregaría un vínculo confirmado que el padrón mostraría).
+    # Por soporte: el padrón no depende de cómo se cargó el mandato. El Consejo es propietario
+    # confirmado de otra unidad (`v_prop_mc`): sin esa condición su mandato no opera (E62).
     e["m_admin"] = alta(motor_app, e["cons"], None, e["acta"], persona=e["admin"], origen="soporte")
     alta(motor_app, e["cons"], None, e["acta"], persona=e["mc"], tipo="miembro_consejo",
          origen="soporte")  # fmt: skip
@@ -76,6 +76,10 @@ def escena(motor_migrate, motor_app, edificio):  # noqa: F811
     with motor_migrate.connect() as c:
         e["v_prop1"] = c.execute(
             text("select id from nucleo.vinculo where persona_id = :p"), {"p": e["prop1"]}
+        ).scalar_one()
+        e["v_prop_mc"] = c.execute(
+            text("select id from nucleo.vinculo where persona_id = :p and tipo = 'propietario'"),
+            {"p": e["mc"]},
         ).scalar_one()
     return e
 
@@ -141,7 +145,7 @@ def test_el_padron_trae_solo_d6_de_vigentes_y_futuros(motor_migrate, escena):
     assert r.headers["cache-control"] == "no-store"
     filas = r.json()["elementos"]
     assert {f["vinculo_id"] for f in filas} == {
-        str(e["v_prop1"]), str(e["v_inq_mc"]), str(e["v_inq_admin"]),
+        str(e["v_prop1"]), str(e["v_inq_mc"]), str(e["v_inq_admin"]), str(e["v_prop_mc"]),
         *(str(v) for v in vinculos_de(motor_migrate, e["prop2"])),
     }  # fmt: skip
     assert all(set(f) == COLUMNAS_D6 for f in filas)

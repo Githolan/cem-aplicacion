@@ -694,7 +694,11 @@
           "mandato_superpuesto",
           "consejo_incompatible_con_administracion",
           "mandato_ya_dado_de_baja",
-          "mandato_terminado"
+          "mandato_terminado",
+          "mandato_no_pendiente",
+          "eficaz_desde_invalida",
+          "revision_duplicada",
+          "sin_condicion_habilitante"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1945,6 +1949,7 @@
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
           "vigente",
+          "pendiente_revision",
           "futuro",
           "terminado",
           "dado_de_baja",
@@ -2217,6 +2222,7 @@
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
           "vigente",
+          "pendiente_revision",
           "futuro",
           "terminado",
           "dado_de_baja",
@@ -2538,6 +2544,7 @@
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
           "vigente",
+          "pendiente_revision",
           "futuro",
           "terminado",
           "dado_de_baja",

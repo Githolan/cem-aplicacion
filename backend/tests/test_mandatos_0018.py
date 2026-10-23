@@ -388,10 +388,11 @@ def test_soporte_conserva_la_via_excepcional(escena, motor_migrate, motor_app):
     e = escena
     sin_vinculo = otra_persona(motor_migrate, e["cons"])
     alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo", persona=sin_vinculo,
-         origen="soporte")  # fmt: skip
+         origen="soporte", con_vinculo=False)  # fmt: skip
     with pytest.raises(DBAPIError) as error:
         alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo",
-             persona="01a10000-0000-7000-8000-000000000001", origen="soporte")  # fmt: skip
+             persona="01a10000-0000-7000-8000-000000000001", origen="soporte",
+             con_vinculo=False)  # fmt: skip
     assert _motivo(error) == "persona_invalida"
 
 

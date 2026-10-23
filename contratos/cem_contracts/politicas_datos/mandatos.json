@@ -85,6 +85,20 @@
       "fuente_normativa": "D2 (mandatos.registrar); C2; C6; A4; A15 (P2); RN22"
     },
     {
+      "accion": "mandatos.resolver_revision",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "mandatos.registrar",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": ["no_es_su_propio_mandato", "no_registro_la_decision"],
+      "respaldo": "una decisión de asamblea del mismo consorcio con fecha hasta hoy (la base la exige), eficacia desde hoy o después y la condición habilitante ese día; queda auditada",
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "E62; alternativa 1 del propietario (21-10-2026, Decisiones_Propietario_2026-10-21 §2.3); D2 (mandatos.registrar); A4; A15 (P2); CCyC art. 2064"
+    },
+    {
       "accion": "mandatos.asociar_persona",
       "concede_por_vinculo": null,
       "concede_por_ambito": false,

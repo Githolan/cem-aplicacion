@@ -5,8 +5,8 @@ la aplicación"; A15, decisión P2 del propietario).
 
 **Quién.** Las tres acciones piden una facultad (`decisiones.registrar` o `mandatos.registrar`,
 MC o AD por C2), en todos los modos y sin modo. La política decide antes de cualquier efecto:
-- nadie se da un mandato ni se da de baja a sí mismo (A4);
-- quien registró una decisión no la usa para dar de alta ni para remover (A15);
+- nadie se da un mandato, se da de baja ni revisa su propio mandato (A4);
+- quien registró una decisión no la usa para dar de alta, remover ni revisar (A15);
 - el respaldo es obligatorio (criterio 9, C6).
 
 Las funciones de la base (`0014`, `0016`) vuelven a garantizarlo. Un motivo de separación que
@@ -46,6 +46,8 @@ from cem_contracts.mandatos import (
     MandatoNuevo,
     MandatoRegistrado,
     MandatoResumen,
+    MandatoRevisado,
+    RevisionMandato,
 )
 from fastapi import APIRouter, Depends, Response
 from psycopg.errors import InsufficientPrivilege
@@ -91,11 +93,27 @@ ERRORES = {
         409, CodigoError.MANDATO_TERMINADO,
         "El mandato ya terminó por su fecha: solo admite una baja por error de carga.",
     ),
+    "mandato_no_pendiente": (
+        409, CodigoError.MANDATO_NO_PENDIENTE,
+        "La revisión solo vale para un mandato del Consejo pendiente de revisión.",
+    ),
+    "revision_duplicada": (
+        409, CodigoError.REVISION_DUPLICADA, "El mandato ya tiene una revisión desde ese día.",
+    ),
     # 422: lo que se envió.
     "decision_invalida": (
         422, CodigoError.DECISION_INVALIDA,
-        "La decisión no existe en este consorcio o no corresponde (la remoción pide una"
-        " asamblea).",
+        "La decisión no existe en este consorcio o no corresponde (la remoción y la revisión"
+        " piden una asamblea).",
+    ),
+    "eficaz_desde_invalida": (
+        422, CodigoError.EFICAZ_DESDE_INVALIDA,
+        "La revisión rige desde hoy o después, no antes de su decisión, y dentro del mandato.",
+    ),
+    "sin_condicion_habilitante": (
+        422, CodigoError.SIN_CONDICION_HABILITANTE,
+        "De hoy a ese día, la persona no cumple sin interrupción una condición para integrar"
+        " el Consejo.",
     ),
     "persona_sin_vinculo": (
         422, CodigoError.PERSONA_SIN_VINCULO,
@@ -138,8 +156,9 @@ ERRORES = {
         "La fecha de la decisión no puede ser posterior a hoy en el consorcio.",
     ),
 }  # fmt: skip
-"""Motivos de las funciones de `0014`, `0016`, `0018` y `0019`. Los de separación
-(`alta_de_si_mismo`, `baja_de_si_mismo`, `decision_registrada_por_el_actor`) y los de actor u
+"""Motivos de las funciones de `0014`, `0016`, `0018`, `0019` y `0023`. Los de separación
+(`alta_de_si_mismo`, `baja_de_si_mismo`, `revision_de_si_mismo`,
+`decision_registrada_por_el_actor`) y los de actor u
 origen los niega antes el evaluador o los fija esta ruta: si llegan a la base, es una
 discrepancia (500)."""
 
@@ -320,6 +339,71 @@ def baja_mandato(
             text("select vigente_hasta from nucleo.mandato where id = :m"), {"m": mandato_id}
         ).scalar_one()
         return 200, MandatoDadoDeBaja(id=mandato_id, causa=baja.causa, vigente_hasta=hasta)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision",
+    status_code=201,
+    response_model=MandatoRevisado,
+    summary="Revisar un mandato del Consejo pendiente de revisión: vuelve a operar desde una fecha",
+    responses={
+        403: {
+            "description": "Sin `mandatos.registrar`, el propio (A4), o con una asamblea que"
+            " registró la misma persona (A15)."
+        },
+        404: {"description": "El mandato no existe en este consorcio."},
+        409: {
+            "description": "No está pendiente de revisión (opera, no es del Consejo, tiene baja o"
+            " terminó), o ya tiene una revisión desde ese día."
+        },
+        422: {
+            "description": "La decisión no es una asamblea del consorcio con fecha hasta hoy, la"
+            " fecha no sirve, o ese día la persona no cumple ninguna condición habilitante."
+        },
+    },
+)
+def revisar_mandato(
+    mandato_id: UUID,
+    revision: RevisionMandato,
+    permiso: Annotated[Permiso, Depends(requiere("mandatos.resolver_revision"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """E62, alternativa 1 (`doc/diseno/Decisiones_Propietario_2026-10-21.md` de CEM, §2.3): un
+    acto sobre el mismo mandato, hacia adelante. No toca la fila del mandato ni cubre el período
+    sin efecto; lo valida `resolver_revision_mandato` (`0023`)."""
+    ctx = permiso.ctx
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        mandato = conn.execute(
+            text("select persona_id from nucleo.mandato where id = :m and consorcio_id = :c"),
+            {"m": mandato_id, "c": ctx.consorcio_id},
+        ).one_or_none()
+        if mandato is None:
+            # Como en la baja: el mismo 403 auditado para quien no puede, exista o no.
+            permiso.verificar(SIN_OBJETO)
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        decision = _sobre_decision(conn, ctx.consorcio_id, revision.decision_id)
+    permiso.verificar(
+        Entidad(
+            persona_objetivo=mandato.persona_id,
+            objetivo_sin_cuenta=mandato.persona_id is None,
+            respaldo_presente=True,  # el contrato exige la decisión
+            **decision,
+        )
+    )
+
+    def efecto(conn: Connection) -> tuple[int, MandatoRevisado]:
+        nueva_id = _llamar(
+            conn,
+            "select nucleo.resolver_revision_mandato(:m, :d, :e, :a, 'api')",
+            {"m": mandato_id, "d": revision.decision_id, "e": revision.eficaz_desde,
+             "a": ctx.persona_id},
+        ).scalar_one()  # fmt: skip
+        return 201, MandatoRevisado(
+            id=nueva_id, mandato_id=mandato_id, eficaz_desde=revision.eficaz_desde
+        )
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)
 

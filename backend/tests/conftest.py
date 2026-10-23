@@ -91,13 +91,17 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     invitaciones o desasociaciones de mandato (si la base está en 0015 o más arriba). Y con
     0020, que se niega a bajar si hay un fin de vínculo registrado: se borra el fin y, si dejó la
     vigencia vacía, se le devuelve un día (solo en esta base). Y con 0021, que se niega a bajar
-    si hay esquemas de coeficientes: se borran.
+    si hay esquemas de coeficientes: se borran. Y con 0023, que se niega a bajar si hay
+    revisiones de mandatos: se borran.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('nucleo.revision_mandato') is not null then"
+                "   delete from nucleo.revision_mandato;"
+                " end if;"
                 " if to_regclass('nucleo.esquema_coeficientes') is not null then"
                 "   delete from nucleo.regla_reparto;"
                 "   delete from nucleo.coeficiente_juridico;"

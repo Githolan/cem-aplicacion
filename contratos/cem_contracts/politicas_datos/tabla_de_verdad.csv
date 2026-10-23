@@ -109,6 +109,16 @@ caso,accion,figura,modo,recurso,mandato,hay_administrador,entidad,esperado,motiv
 §2.3,mandatos.baja,AD,C,,vigente,si,objetivo=yo;decision=ninguna;respaldo=si,403,no_es_su_propio_mandato,la renuncia la registra otro (A4)
 §2.3,mandatos.baja,AE,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
 §2.3,mandatos.baja,ninguna,C,,sin_mandato,si,objetivo=yo;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.resolver_revision,P,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,P no registra mandatos
+§2.3,mandatos.resolver_revision,I,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,I no registra mandatos
+§2.3,mandatos.resolver_revision,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,MC revisa el mandato de otra persona con una asamblea
+§2.3,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,AD revisa el mandato de otra persona con una asamblea
+§2.3,mandatos.resolver_revision,AE,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,403,sin_concesion,AE no recibe mandatos.registrar
+§2.3,mandatos.resolver_revision,ninguna,C,,sin_mandato,si,objetivo=otro;decision=otro;respaldo=si,404,fuera_de_ambito,sin vínculo ni mandato
+§2.3,mandatos.resolver_revision,MC,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie revisa su propio mandato (A4)
+§2.3,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=yo;decision=otro;respaldo=si,403,no_es_su_propio_mandato,nadie revisa su propio mandato (A4)
+§2.3,mandatos.resolver_revision,AD,AA,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,en Administrador aumentado también corre
+§2.3,mandatos.resolver_revision,MC,AG,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,en Autogestión también corre
 §2.3,decisiones.registrar,P,C,,sin_mandato,si,respaldo=si,403,sin_concesion,P no registra decisiones
 §2.3,decisiones.registrar,I,C,,sin_mandato,si,respaldo=si,403,sin_concesion,I no registra decisiones
 §2.3,decisiones.registrar,MC,C,,vigente,si,respaldo=si,200,concedido_por_facultad,MC registra decisiones (C2)
@@ -210,6 +220,7 @@ R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,co
 R9,mandatos.alta,MC,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,alta sin decisión (la base también la rechaza)
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por renuncia con la referencia a la nota
 R9,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,baja sin respaldo
+R9,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=no,403,sin_respaldo,revisión sin decisión de respaldo
 R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión sin referencia del acta
 R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
 R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)
@@ -241,6 +252,7 @@ caso 7,padron.ver,MC,—,unidad:3A,vigente,no,,200,concedido_por_facultad,sin mo
 caso 7,decisiones.registrar,MC,—,,vigente,no,respaldo=si,200,concedido_por_facultad,sin modo: decisiones.registrar corre
 caso 7,mandatos.alta,MC,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.alta corre
 caso 7,mandatos.baja,AD,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.baja corre
+caso 7,mandatos.resolver_revision,AD,—,,vigente,no,objetivo=otro;decision=otro;respaldo=si,200,concedido_por_facultad,sin modo: mandatos.resolver_revision corre
 caso 7,padron.gestionar,AD,—,unidad:3A,vigente,no,,403,sin_modo_registrado,sin modo: padron.gestionar no corre
 caso 7,fiscalizacion.ver_resumen,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: el resumen no corre
 caso 7,documentos.ver,P,—,,sin_mandato,no,,403,sin_modo_registrado,sin modo: los documentos no corren
@@ -314,6 +326,10 @@ A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=otro;respaldo=si,200,c
 A15,mandatos.baja,MC,C,,vigente,si,objetivo=otro;decision=ninguna;respaldo=si,200,concedido_por_facultad,baja por instrumento (renuncia): sin decisión A15 no aplica
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=equipo;respaldo=si,200,concedido_por_facultad,remoción con una asamblea que cargó el equipo
 A15,mandatos.baja,AD,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,identidad_indeterminada,remoción con una decisión sin quién la registró ni marca: niega
+A15,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=yo;respaldo=si,403,no_registro_la_decision,revisión con una asamblea que registró él (A15)
+A15,mandatos.resolver_revision,MC,C,,vigente,si,objetivo=otro;decision=yo;respaldo=si,403,no_registro_la_decision,revisión con una asamblea que registró él (A15)
+A15,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=equipo;respaldo=si,200,concedido_por_facultad,revisión con una asamblea que cargó el equipo
+A15,mandatos.resolver_revision,AD,C,,vigente,si,objetivo=otro;decision=nula;respaldo=si,403,identidad_indeterminada,revisión con una decisión sin quién la registró ni marca: niega
 §2.3,mandatos.ver,P,C,,sin_mandato,si,,403,sin_concesion,P no lee los mandatos (decisión 1 de 2b-4c)
 §2.3,mandatos.ver,I,C,,sin_mandato,si,,403,sin_concesion,I no lee los mandatos
 §2.3,mandatos.ver,O,C,,sin_mandato,si,,403,sin_concesion,O no lee los mandatos

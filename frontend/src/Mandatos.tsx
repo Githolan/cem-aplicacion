@@ -61,6 +61,7 @@ const TIPOS_MANDATO = Object.keys(TEXTO_TIPO_MANDATO) as TipoMandato[];
 
 const TEXTO_ESTADO_MANDATO: Record<EstadoMandato, string> = {
   vigente: "Vigente",
+  pendiente_revision: "Pendiente de revisión: sin condición para integrar el Consejo",
   futuro: "Empieza más adelante",
   terminado: "Terminado por su fecha",
   dado_de_baja: "Dado de baja",
@@ -85,7 +86,7 @@ const TEXTO_CAUSA: Record<CausaBaja, string> = {
 const CAUSAS = Object.keys(TEXTO_CAUSA) as CausaBaja[];
 /** Un mandato que ya terminó por su fecha solo admite la baja por error de carga. */
 const CAUSAS_TERMINADO: CausaBaja[] = ["error_carga"];
-const ESTADOS_CON_BAJA: EstadoMandato[] = ["vigente", "futuro", "terminado"];
+const ESTADOS_CON_BAJA: EstadoMandato[] = ["vigente", "pendiente_revision", "futuro", "terminado"];
 /** Respuestas de la baja que dicen que el detalle quedó viejo: se cierra y se vuelve a pedir la lista. */
 const BAJA_SOBRE_ESTADO_VIEJO = ["mandato_ya_dado_de_baja", "mandato_terminado"];
 

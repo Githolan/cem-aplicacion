@@ -49,8 +49,9 @@ _MOTORES_DUENIO: dict[str, Engine] = {}
 def vinculo_confirmado(motor_app, cons, persona) -> None:
     """Escena: la persona con un vínculo confirmado y vigente en el consorcio, en una unidad
     propia y confirmado por otra persona. Es lo que pide `0018` (2b-4c, decisión 3) para darle
-    por la API un mandato de Consejo o de administración. Escribe como `cem_migrate` en la misma
-    base que `motor_app`."""
+    por la API un mandato de Consejo o de administración. Confirmado desde que rige: el Consejo
+    cuenta su condición habilitante desde la confirmación (E62, `0023`). Escribe como
+    `cem_migrate` en la misma base que `motor_app`."""
     url = motor_app.url.set(username="cem_migrate", password=CLAVES["migrate"])
     clave = url.render_as_string(hide_password=False)
     motor = _MOTORES_DUENIO.setdefault(clave, create_engine(url))
@@ -74,7 +75,7 @@ def vinculo_confirmado(motor_app, cons, persona) -> None:
                 " vigente_desde, fuente, origen, confirmado_por, confirmado_en,"
                 " confirmacion_referencia)"
                 " values (:c, :u, :p, 'propietario', '2020-01-01', 'documento', 'soporte', :k,"
-                " now(), 'Escritura de prueba')"
+                " '2020-01-01', 'Escritura de prueba')"
             ),
             {"c": cons, "u": unidad, "p": persona, "k": confirma},
         )
