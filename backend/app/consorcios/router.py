@@ -16,7 +16,8 @@ router = APIRouter(prefix="/api/v1", tags=["consorcios"])
 @router.get("/me/consorcios", response_model=list[ConsorcioResumen])
 def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioResumen]:
     """Consorcios donde la persona tiene un vínculo vigente o un mandato vigente, con la fecha
-    de cada consorcio."""
+    de cada consorcio. Un vínculo importado pendiente no cuenta (RF02, `0024`): sin otro
+    vínculo ni mandato, la lista queda vacía y el consorcio no entra en `consorcios_persona`."""
     # Ruta de la persona (alcance `propia`, fuera de la matriz; C4). "Vigente" es con la fecha de
     # **cada** consorcio (`nucleo.hoy_del_consorcio`), que solo se puede leer con el consorcio en
     # el ámbito: la primera consulta junta candidatos (vínculos propios de cualquier fecha y los
@@ -26,7 +27,10 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
     with transaccion(motor, persona_id=p) as conn:
         por_vinculo = set(
             conn.execute(
-                text("select distinct consorcio_id from nucleo.vinculo where persona_id = :p"),
+                text(
+                    "select distinct consorcio_id from nucleo.vinculo where persona_id = :p"
+                    " and id not in (select nucleo.vinculos_importados_pendientes())"
+                ),
                 {"p": p},
             ).scalars()
         )
@@ -47,6 +51,7 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
                 " left join nucleo.vinculo v on v.consorcio_id = c.id and v.persona_id = :p"
                 "  and daterange(v.vigente_desde, v.vigente_hasta)"
                 "      @> nucleo.hoy_del_consorcio(c.id)"
+                "  and v.id not in (select nucleo.vinculos_importados_pendientes())"
                 " where c.id = any(:ids) and c.eliminado_en is null"
                 " group by c.id, c.nombre"
                 " having count(v.tipo) > 0 or c.id = any(:mandatos)"

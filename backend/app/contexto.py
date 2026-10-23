@@ -100,7 +100,8 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
 
     El ámbito es un vínculo vigente **o** un mandato vigente con cuenta (R2). "Vigente" es con
     la fecha del consorcio (`nucleo.hoy_del_consorcio`), no con la de la base, que corre en GMT.
-    Sin ninguno de los dos responde 404, igual que si el consorcio no existiera.
+    Sin ninguno de los dos responde 404, igual que si el consorcio no existiera. Un vínculo
+    importado pendiente (RF02, `0024`) no cuenta: no da ámbito ni ninguna concesión por vínculo.
     """
     p = identidad.persona_id
     with transaccion(motor, persona_id=p, consorcio_id=consorcio_id) as conn:
@@ -120,6 +121,8 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
                     "select tipo::text as tipo, unidad_id from nucleo.vinculo"
                     " where consorcio_id = :c and persona_id = :p"
                     " and daterange(vigente_desde, vigente_hasta) @> :hoy"
+                    # RF02: el importado pendiente no da ámbito ni concesiones (0024).
+                    " and id not in (select nucleo.vinculos_importados_pendientes())"
                     " order by tipo, unidad_id"
                 ),
                 {"c": consorcio_id, "p": p, "hoy": hoy},

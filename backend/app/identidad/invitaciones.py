@@ -35,8 +35,11 @@ from cem_contracts.invitaciones import (
     Invitacion,
     InvitacionAceptada,
     InvitacionNueva,
+    InvitacionPropia,
+    InvitacionPropiaAceptada,
     InvitacionRecibida,
     ListaInvitaciones,
+    ListaInvitacionesPropias,
     TokenInvitacion,
 )
 from cem_contracts.politicas import TipoRecurso
@@ -46,7 +49,7 @@ from sqlalchemy import Connection, text
 from app import auditoria, limite
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import Permiso, requiere
-from app.contexto import MotorDep
+from app.contexto import IdentidadDep, MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.identidad import eventos, sesiones
@@ -61,6 +64,10 @@ RUTA_INVITACION = "/invitacion"
 """Página del frontend que abre el enlace del correo; lee el token del fragmento."""
 LIMITE_INVITAR = "invitar"
 SIN_CACHE = {"Cache-Control": "no-store"}
+MOTIVOS_INVALIDA = frozenset(
+    {"inexistente", "aceptada", "revocada", "vencida", "consorcio_eliminado", "unidad_eliminada"}
+)
+"""Los de `motivo_invitacion_invalida` (0007): todos responden igual (404)."""
 ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
   when i.revocada_en is not null then 'revocada'
   when i.vence_en <= now() then 'vencida' else 'pendiente' end"""
@@ -500,3 +507,74 @@ def aceptar(
     return InvitacionAceptada(
         consorcio_id=r.consorcio, persona_id=r.persona, cuenta_nueva=r.cuenta_nueva
     )
+
+
+# Las invitaciones de la persona (RF02, `0024`) ------------------------------------------------
+
+
+@router.get(
+    "/me/invitaciones",
+    response_model=ListaInvitacionesPropias,
+    summary="Mis invitaciones de vínculo pendientes",
+)
+def mis_invitaciones(
+    identidad: IdentidadDep, motor: MotorDep, response: Response
+) -> ListaInvitacionesPropias:
+    """Las invitaciones de vínculo pendientes dirigidas a mi correo (las de mandato tienen su
+    propio flujo). Ruta de la persona, sin consorcio: es lo único que puede hacer un importado
+    pendiente, que todavía no tiene ámbito (decisión del propietario del 21-10-2026)."""
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        filas = conn.execute(
+            text(
+                "select id, consorcio, unidad, tipo, nombre, invitada_por, vence_en"
+                " from nucleo.mis_invitaciones()"
+            )
+        ).mappings()
+        lista = ListaInvitacionesPropias(elementos=[InvitacionPropia(**f) for f in filas])
+    # Datos de la persona: ni el navegador ni un intermediario los guardan (Codex en #104).
+    response.headers.update(SIN_CACHE)
+    return lista
+
+
+@router.post(
+    "/me/invitaciones/{invitacion_id}/aceptar",
+    response_model=InvitacionPropiaAceptada,
+    summary="Aceptar con mi sesión una invitación dirigida a mi correo",
+    responses={
+        404: {
+            "model": Error,
+            "description": "No es una invitación pendiente dirigida a mi correo (todas las causas"
+            " responden igual).",
+        },
+    },
+)
+def aceptar_propia(
+    invitacion_id: UUID, request: Request, response: Response, identidad: IdentidadDep,
+    motor: MotorDep,
+) -> InvitacionPropiaAceptada:  # fmt: skip
+    """La prueba es el control del correo, la misma que el token del enlace: la base acepta con
+    `aceptar_invitacion` (0014), crea o reutiliza el vínculo y lo audita igual. Desde ahí, el
+    vínculo deja de estar pendiente y sigue las reglas normales."""
+    response.headers.update(SIN_CACHE)
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        r = conn.execute(
+            text(
+                "select resultado, consorcio"
+                " from nucleo.aceptar_invitacion_propia(:i, cast(:ip as inet))"
+            ),
+            {"i": invitacion_id, "ip": sesiones.ip_cliente(request)},
+        ).one()
+    if r.resultado in MOTIVOS_INVALIDA:
+        log.info("invitación propia sin servir: %s", r.resultado)
+        raise _invitacion_invalida()
+    if r.resultado != "ok":
+        # `otra_persona` o `requiere_sesion`: la base eligió la invitación por mi correo, así que
+        # no pueden pasar. Si pasan, es un defecto (500), no una invitación que no sirve.
+        raise RuntimeError(f"aceptar_invitacion_propia respondió {r.resultado}")
+    log.info(
+        "invitación propia aceptada",
+        extra={
+            "campos": {"consorcio_id": str(r.consorcio), "persona_id": str(identidad.persona_id)}
+        },
+    )
+    return InvitacionPropiaAceptada(consorcio_id=r.consorcio)

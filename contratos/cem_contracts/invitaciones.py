@@ -129,3 +129,36 @@ class InvitacionAceptada(BaseModel):
         description="Se creó la persona y una sesión (llegan sus cookies). Si es falso, la"
         " persona ya tenía cuenta y aceptó con su sesión."
     )
+
+
+class InvitacionPropia(BaseModel):
+    """Una invitación de vínculo pendiente dirigida al correo de la persona de la sesión
+    (`GET /api/v1/me/invitaciones`, RF02). Es lo único que puede hacer un importado pendiente:
+    verla y aceptarla con su sesión."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    consorcio: str = Field(description="Nombre del consorcio.", examples=["Edificio Alvear 100"])
+    unidad: str = Field(examples=["3° B"])
+    tipo: TipoVinculo
+    nombre: str
+    invitada_por: str | None = Field(
+        description="Nombre de quien invitó; nulo si la cargó el equipo de la plataforma."
+    )
+    vence_en: datetime
+
+
+class ListaInvitacionesPropias(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[InvitacionPropia]
+
+
+class InvitacionPropiaAceptada(BaseModel):
+    """Respuesta de `POST /api/v1/me/invitaciones/{id}/aceptar`: desde ahí, el vínculo sigue las
+    reglas normales."""
+
+    model_config = ConfigDict(frozen=True)
+
+    consorcio_id: UUID

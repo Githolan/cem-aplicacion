@@ -19,7 +19,7 @@ from app.config import Config
 from app.contexto import Identidad, obtener_identidad, require_scope
 from app.db import transaccion
 from app.main import crear_app
-from tests.conftest import alembic_config, url_rol, vaciar_mandatos
+from tests.conftest import alembic_config, url_rol, vaciar_mandatos, volver_a_subir
 
 pytestmark = pytest.mark.db
 
@@ -298,5 +298,7 @@ def test_la_migracion_0010_baja_y_sube(base_de_prueba, motor_migrate):
     cfg = alembic_config()
     command.downgrade(cfg, "0009")
     assert existe() == (False, False, True)  # la 0009 queda
-    command.upgrade(cfg, "head")
+    # Con los índices GiST reconstruidos antes de 0014, como todas las que bajan (E58): sin
+    # eso, un vínculo vivo con su entrada LP_DEAD se queda sin procedencia y el upgrade se niega.
+    volver_a_subir(cfg, motor_migrate)
     assert existe() == (True, True, True)
