@@ -406,4 +406,4 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - poner la marca en la pantalla de entrada (*Custom pages → Access login page*), después de confirmar que el plan gratuito la incluye;
    - alargar la sesión de Access a un mes.
    - Producción no lleva Access y queda como está: la sesión de la aplicación dura 30 días.
-9. **RF02, corte 3 de 2b-5 (23-10-2026):** el informe previo está en `doc/rf02_corte3_informe.md`, sobre `94a2114`. D2 (la invitación nombra su vínculo) está decidida por el propietario el 22-10 (CEM PR #69, `64aea50`). Queda frenado a la espera de D1 (reimportación y trazabilidad), D3 (coeficientes en el CSV) y D4 (facultad, la pendiente previa y el vencimiento de la invitación). No hay código ni rama `rf02-importacion-corte3`.
+9. **RF02, corte 3 de 2b-5 (23-10-2026):** el informe está en `doc/rf02_corte3_informe.md`. Con las decisiones D1 a D4 del propietario, el código quedó en la rama `rf02-importacion-corte3`, sin PR. El estado detallado está en el `ESTADO.md` de esa rama.

@@ -1,141 +1,162 @@
-# RF02, corte 3 (H2b 2b-5): informe previo
+# RF02, corte 3 (H2b 2b-5): informe previo y resultado
 
-**Fecha:** 23-10-2026. **Bases leídas:** `cem-aplicacion` `main` = `94a2114ec5c2c2ba4ba6ac0090ab4bfb43bf05bc`; `CEM` `main` = `bc799d6114f3548d7407c951157e05399e36013c`. Las dos coinciden con lo pedido.
+**Fecha:** 23-10-2026.
 
-**Actualización del 23-10:** D2 queda resuelta por la decisión del propietario del 22-10, «La invitación nombra su vínculo». Está en `doc/diseno/Decisiones_Propietario_2026-10-21.md` §2.4 (l. 170) de la rama `decisiones/propietario-2026-10-21` de CEM (PR #69, head `64aea50`), que todavía no está en `main`. La misma sección (l. 169) acota D4.2.
+**Bases leídas:**
+- `cem-aplicacion` `main` = `94a2114ec5c2c2ba4ba6ac0090ab4bfb43bf05bc`;
+- `CEM` `main` = `bc799d6114f3548d7407c951157e05399e36013c`;
+- decisiones en `CEM`, rama `decisiones/propietario-2026-10-21` (PR #69) = `64aea50`.
 
-**Resultado:** siguen sin definir D1, D3, D4.1, D4.2 y D4.3. **No hubo Fase 2:** no se creó la rama `rf02-importacion-corte3` ni se escribió código.
+**Historia de este informe:**
+1. **Primera versión:** frenó con D1 a D4 abiertas.
+2. **D2:** la resolvió el propietario el 22-10.
+3. **D1, D3 y D4:** las respuestas del propietario llegaron el 23-10, transmitidas por el Hilo principal de trabajo. **No figuran todavía en CEM `64aea50`**: quedan registradas acá, en §3.
+
+Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
+
+**Código final:** `76a0b5b`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
-- **Diseño** (`CEM/doc/diseno/H2b_5_Diseno.md` §4, líneas 118-144). Define:
-  - la entrada CSV (l. 120) y `ultimo_dia` inclusivo → `vigente_hasta = ultimo_dia + 1` (l. 121);
-  - el correo obligatorio como identidad (l. 122);
-  - el informe sin escritura y la aplicación todo o nada con `padron.gestionar`, alcance por unidad y alcance general para crear unidades (l. 123-136);
-  - PA01 (l. 137) y la anulación de un vínculo no iniciado (l. 138-144).
-- **No define:** la reimportación, la idempotencia de un segundo archivo, la trazabilidad archivo → importación → vínculo, ni qué pasa con una fila existente frente a una corregida.
-- **Especificación** (`CEM/doc/08_Especificacion_App_v2.md`): RF02 en la l. 232 ("informe de duplicados, fechas solapadas y coeficientes incompletos") y PA01 en la l. 1127 ("rechazo o revisión explícita sin sobrescribir").
-- **Base, 0001 a 0024:**
-  - `vinculo` tiene un `EXCLUDE` por persona, unidad, tipo y rango (`0001` l. 114-117) y `fuente` con el valor `importacion` (`0014` l. 36).
-  - `nucleo.persona` es global, con el correo único (`0001` l. 82-87). Su política `propia` (l. 184) no deja que `cem_app` vea a otras personas: buscar o crear por correo exige una función `security definer`.
-  - Invitación: dura 7 días como máximo, impuesto por la base (`0007` l. 54); el índice `invitacion_pendiente_unica` está en `0007` l. 60-61.
-  - Coeficientes: solo con origen `soporte` y con una decisión (`0021` l. 131-132).
-- **#104:**
-  - `nucleo.vinculos_importados_pendientes()` (`0024` l. 54-70) deja afuera al importado pendiente en `app/contexto.py:125` y `app/consorcios/router.py:32` y `:54`;
-  - `/me/invitaciones` y su aceptación: `app/identidad/invitaciones.py:515-560`;
-  - las pruebas: `backend/tests/test_importado_pendiente.py`, que crean el vínculo importado a mano (l. 70). **Todavía no hay ninguna vía que cree vínculos `importacion`.**
-- **Cómo acepta hoy:** `nucleo.aceptar_invitacion` (`0014` l. 102-185) reutiliza **cualquier** vínculo de la misma persona, unidad y tipo que se superponga con `[hoy, ∞)`, con `limit 1` (l. 154-158). Si no encuentra ninguno, crea uno nuevo desde hoy con `fuente = invitacion` (l. 159-165).
+**Diseño** (`CEM/doc/diseno/H2b_5_Diseno.md` §4, l. 118-144). Define:
+- la entrada CSV (l. 120) y `ultimo_dia` → `vigente_hasta = ultimo_dia + 1` (l. 121);
+- el correo como identidad (l. 122);
+- el informe sin escritura y la aplicación todo o nada con alcance (l. 123-136);
+- PA01 (l. 137) y la anulación (l. 138-144).
+
+**No definía** la reimportación, la idempotencia, la trazabilidad ni la fila corregida: es D1.
+
+**Especificación** (`CEM/doc/08_Especificacion_App_v2.md`): RF02 en la l. 232 y PA01 en la l. 1127.
+
+**Base, hasta 0024:**
+- `vinculo` tiene un `EXCLUDE` por persona, unidad, tipo y rango (`0001` l. 114-117);
+- `persona` es global, con correo único y la política `propia` (`0001` l. 82-87 y 184);
+- invitación: 7 días como máximo (`0007` l. 54); el índice `invitacion_pendiente_unica` está en `0007` l. 60-61;
+- coeficientes: solo los carga soporte (`0021` l. 131);
+- plazo de las invitaciones manuales: `VIGENCIA_INVITACION = timedelta(days=7)` (`app/identidad/invitaciones.py:61`).
+
+**#104:**
+- `vinculos_importados_pendientes()` (`0024` l. 54-70) excluye al importado en `app/contexto.py:125` y en `app/consorcios/router.py:32` y `:54`;
+- antes de este corte, **ninguna vía creaba vínculos `importacion`**.
+
+**`aceptar_invitacion` en 0014** (l. 154-165): reutiliza cualquier vínculo que se superponga con `[hoy, ∞)` (`limit 1`) o crea uno desde hoy.
+
+**`padron_del_consorcio`** (`0014` l. 263-298): muestra `persona.nombre`, el nombre global de la persona.
 
 ## 2. Desvío respecto del diseño
 
-- **Ya decidido y no se reabre:** `H2b_5_Diseno.md` l. 122 sigue presentando como abierto qué ve un importado. #104 lo implementó así:
-  - se autentica, pero no tiene ámbito;
-  - no aparece en Contexto ni en `/me/consorcios`;
-  - ve y acepta sus invitaciones;
-  - lo habilita la aceptación que nombra su vínculo (E62).
+- **Ya decidido, no se reabre:** `H2b_5_Diseno.md` l. 122 sigue presentando como abierto qué ve un importado. #104 lo resolvió. El documento de CEM necesita esa corrección; no la hice, porque está fuera de este frente.
+- **Documental:** `0024` y `test_importado_pendiente.py` citan `Decisiones_Propietario_2026-10-21.md`, que está en el PR #69 de CEM y todavía no en `main`.
+- **Coeficientes:** el CSV los admite (l. 120) pero no se escriben (D3).
+- **Fecha futura:** §2.3 (l. 57) suponía que no había alta con fecha futura. La importación la habilita, así que la anulación entró en este corte.
+- **Motivo de la anulación:** se exige y **no se guarda**, porque la fila se borra y el evento no lleva el motivo (§4 y E31). Conservarlo pediría una tabla.
+- **Nombre de una persona nueva:** §4 dice que se crea "con su correo y nombre", así que el nombre de la planilla pasa a ser su nombre global. Con 0014, en cambio, la persona elegía el nombre al aceptar. Lo implementé como dice §4.
 
-  El documento de diseño necesita esa corrección en CEM. No la hice: está fuera de este frente.
-- **Documental:** `0024` (docstring, l. 3) y `test_importado_pendiente.py` (l. 4) citan `doc/diseno/Decisiones_Propietario_2026-10-21.md`. Ese archivo **no está** en CEM `main` `bc799d6`; está solo en la rama del PR #69 (`64aea50`).
-- **Coeficientes:** el diseño admite "opcionalmente, los coeficientes por grupo" en el CSV (l. 120). Por la API, en cambio, los coeficientes son de solo lectura (§3, `0021` l. 131). Ver D3.
-- **Fecha futura:** el diseño (§2.3, l. 57) dice que hasta el corte 3 no hay alta con fecha futura. La importación la habilita, así que la anulación (§4, l. 138-144) **tiene que** entrar en este corte.
+## 3. Decisiones
 
-## 3. Decisiones pendientes
+| | Decisión del propietario | Cómo quedó |
+|---|---|---|
+| D1 | `importacion_padron` con RLS. Reimportar contenido idéntico es un no-op idempotente. Un archivo que pretende corregir relaciones ya aplicadas se rechaza entero | Tabla con RLS forzada y `vinculo.importacion_id`. Una fila igual a lo existente no escribe nada, y un archivo sin cambios no registra ni una importación. Superponerse con un vínculo existente sin ser igual es `corrige_existente` y bloquea el archivo |
+| D2 | La invitación lleva `vinculo_id` opcional, que completa solo el importador; la aceptación toma exactamente ese vínculo o falla explícitamente; las manuales siguen como en 0014 (22-10, PR #69 de CEM) | `invitacion.vinculo_id`. `cem_app` no puede insertarlo: solo lo hace `crear_invitacion_importada`. Si el vínculo ya no corresponde, 409 `invitacion_vinculo_no_corresponde`. **Ver la pregunta 1** |
+| D3 | Los coeficientes se leen, validan e informan, sin escribirse | Informe por grupo: suma tal cual, unidades sin coeficiente y diferencias con el esquema vigente. Un valor inválido o contradictorio es un problema |
+| D4.1 | Una importación que crea invitaciones exige `padron.gestionar` + `invitaciones.crear`; si falta alguna, se rechaza todo antes de escribir | Se evalúa por fila contra su unidad (general, si la unidad es nueva). Si falta, 403 auditado |
+| D4.2 | Una pendiente del mismo vínculo se conserva; una manual o de otro vínculo es un error bloqueante; una vencida se anuncia y se reemplaza al aplicar, de forma atómica | Una fila igual no toca nada. Una pendiente vigente da `invitacion_pendiente`. Una vencida sale como `reemplazar_vencida` y al aplicar se retira, auditada, en la misma transacción. La base lo vuelve a garantizar |
+| D4.3 | El mismo plazo de las manuales | `VIGENCIA_INVITACION`, 7 días, que es el tope de `0007` |
 
-### D1. Reimportación, fila existente y fila corregida (PA01), con su trazabilidad
+**Inferencias tomadas sin preguntar.** Se pueden revisar; ninguna cambia el modelo.
+1. **Corrección frente a relación nueva:** "corregir" quiere decir superponerse con un vínculo existente de la misma persona, unidad y carácter sin ser igual. En fechas que no se superponen, es una relación nueva. Una fila que falta en el archivo no da de baja nada.
+2. **Unidad duplicada (PA01):** dos designaciones que solo difieren en mayúsculas o espacios son la misma unidad (`designacion_ambigua`).
+3. **Vínculo ya terminado:** no lleva invitación. Dos vínculos nuevos vigentes o futuros de la misma persona, unidad y carácter son un error (`invitaciones_simultaneas`), porque el índice admite una sola pendiente.
+4. **Coeficientes incompletos:** se informan sin bloquear, porque no se escriben. Un valor inválido o contradictorio sí bloquea.
+5. **Privacidad:**
+   - el informe no devuelve correos ni nombres y no distingue si un correo tiene cuenta en otro consorcio;
+   - el padrón muestra el nombre de la planilla mientras el vínculo está pendiente (P1 de la revisión);
+   - una persona existente se reutiliza sin cambiarle el nombre.
+6. **Renovar una invitación vencida:** reimportar un vínculo ya aplicado no la renueva, porque una fila igual es un no-op. La renovación es por invitación manual, que se envía, como hoy.
 
-- **Hecho:**
-  - §4 solo dice que una unidad duplicada no sobrescribe (l. 137);
-  - el reintento del mismo pedido ya lo cubre `Idempotency-Key` (`app/plataforma/idempotencia.py`);
-  - no hay ninguna tabla que registre una importación (archivo, hash, quién, cuándo), ni ninguna columna que ate un vínculo a su importación.
-- **Inferencia:** un segundo archivo con otra clave no está definido. El documento 13 (l. 428) usa, para los extractos, "el archivo completo se registra con su hash". Es un patrón ya usado, pero para otro dominio.
-- **Alternativas:**
-  1. Si algo del archivo ya existe, se rechaza el archivo entero.
-  2. Una fila idéntica a lo existente queda "ya existe, sin cambios" (no-op) y se aplica lo nuevo. Una fila que difiere de lo existente es un error que bloquea el archivo: se corrige con fin o anulación y después se reimporta.
-  3. Lo mismo que la 2, pero la fila corregida queda como advertencia y se omite.
-- **Trazabilidad:**
-  - **(a)** una tabla `nucleo.importacion_padron` (consorcio, SHA-256 del archivo, quién, cuándo, conteos) con RLS forzada y `vinculo.importacion_id`, más los eventos de auditoría;
-  - **(b)** solo auditoría, con un evento por importación que lleve el hash y la lista de ids.
-- **Recomendación:** la 2, con (a). "Idéntica" quiere decir la misma unidad, el mismo correo, el mismo tipo y las mismas fechas. Un mismo hash ya aplicado se informa como "este archivo ya se aplicó el dd-mm" y no escribe nada.
-- **Pregunta D1:** ¿2 + (a)? Respondé 1, 2 o 3, y (a) o (b).
+**Preguntas para el propietario.** Ninguna bloqueó el corte.
+1. **Anulación (sí/no):** la anulación retira, auditadas, las invitaciones pendientes que nombran al vínculo (P2 de la revisión). Sin eso, la invitación seguía vigente 7 días y bloqueaba volver a cargarlo corregido (`invitacion_pendiente`). Consecuencia: después de una anulación, aceptar responde 404 `invitacion_invalida`, no el 409 explícito. El 409 queda para un vínculo que ya no existe con la invitación viva, o que es de otra persona, unidad o carácter. ¿Te sirve así?
+2. **Invitación manual sobre una importada (sí/no):** una invitación manual al mismo correo, unidad y carácter retira la importada (`app/identidad/invitaciones.py:118-135`, sin cambios), y la nueva no tiene `vinculo_id`. ¿La ruta manual debería responder 409 ante una pendiente con `vinculo_id`?
+3. **Vínculo finalizado antes de aceptar (sí/no):** si el vínculo importado se finalizó antes de que la persona acepte, la aceptación lo nombra igual. No da nada, pero sale del estado pendiente. ¿Debería responder `vinculo_no_corresponde`?
+4. **Siguen abiertas, sin tocar:**
+   - la observación de la revisión de #104 sobre invitarse a sí mismo (`Decisiones_Propietario` l. 181);
+   - el envío de las invitaciones creadas.
 
-### D2. La invitación nombra su vínculo — RESUELTA (propietario, 22-10-2026)
+## 4. Plan mínimo, implementado
 
-- **Decisión** (`Decisiones_Propietario_2026-10-21.md` §2.4, l. 170, PR #69 de CEM):
-  - `invitacion.vinculo_id` es opcional y lo completa solo el importador;
-  - si viene, `aceptar_invitacion` toma **exactamente** ese vínculo y falla con un error explícito si ya no corresponde: anulado, otra persona, otra unidad u otro carácter;
-  - sin `vinculo_id`, la invitación sigue como en `0014` (l. 154-165);
-  - se implementa en el corte 3, en `0025`.
-- **Lo que resuelve:** dos vínculos sucesivos de la misma persona, unidad y tipo dejan de elegirse al azar (`limit 1`, `0014` l. 158), y una invitación de un vínculo terminado o anulado ya no crea un vínculo nuevo desde hoy.
-- **Inferencia, sin pregunta:** para un vínculo ya terminado (`vigente_hasta <= hoy`) la importación **no** crea invitación. No le daría acceso a nadie y ocuparía `invitacion_pendiente_unica`. Lo cuento como parte de "crearla válidamente" (§2.4, l. 165).
-- **Sigue abierto, sin tocarlo:** la observación de la revisión independiente (l. 181): ¿quien acepta debería ser otra persona que quien invita?
+Rama `rf02-importacion-corte3`, líneas en `76a0b5b`:
 
-### D3. Coeficientes en el CSV
+- **Migración `backend/migrations/versions/0025_importacion_padron.py`:**
+  - `importacion_padron` (l. 183);
+  - `vinculo.importacion_id` (l. 200) y `nombre_declarado` (l. 203);
+  - `invitacion.vinculo_id` (l. 215);
+  - `aceptar_invitacion` (rama nueva en la l. 118) y `padron_del_consorcio` (nombre declarado en la l. 155), las dos derivadas de 0014 con reemplazos verificados;
+  - `registrar_importacion_padron` (l. 225), `importar_vinculo` (l. 255), `anular_vinculo` (l. 335), `crear_invitacion_importada` (l. 432) y `vinculos_de_correos` (l. 497);
+  - el downgrade se niega con datos (l. 538) y, sin datos, vuelve exacto.
+- **`backend/app/consorcios/importacion.py`:**
+  - `leer_planilla` (l. 271), `analizar` (l. 549), `_aplicar` (l. 624) y `_escribir` (l. 672);
+  - las rutas `informe` (l. 760) y `aplicar` (l. 786).
+- **`backend/app/consorcios/padron.py:305`:** `POST …/vinculos/{v}/anular`.
+- **`backend/scripts/anular_vinculo.py`:** anulación por soporte, agregada al `Dockerfile`.
+- **`backend/app/identidad/invitaciones.py:370`:** el 409 explícito.
+- **Contrato 0.17.0:** `contratos/cem_contracts/importacion.py` y cuatro códigos de error; `openapi.json` y `esquemas.json` regenerados.
+- **Pruebas:** `backend/tests/test_importacion_padron.py`, con 52 funciones y 74 casos. `conftest.py` (`vaciar_mandatos`) y `test_vinculo_0014.py` quedaron al día.
 
-- **Hecho:** `registrar_esquema_coeficientes` rechaza todo origen que no sea `soporte` y exige `decision_id` (`0021` l. 110-136). `coeficientes.aprobar` está fuera de alcance.
-- **Alternativas:**
-  1. Por la API, los coeficientes solo se informan: incompletos, la suma tal cual y la diferencia con el esquema vigente. No se escriben. El equipo los carga con `scripts.cargar_coeficientes`.
-  2. Un script de soporte que importe el CSV entero, coeficientes incluidos, con la decisión.
-  3. Abrir la escritura por la API, lo que pide `coeficientes.aprobar`: descartada por la consigna.
-- **Recomendación:** la 1.
-- **Pregunta D3:** ¿la 1? (sí/no)
+## 5. Criterio exacto de terminado, y dónde está
 
-### D4. La invitación que crea la importación: vencimiento, facultad y la pendiente previa
+| Criterio | Estado |
+|---|---|
+| D1 a D4 respondidas | Hecho (§3) |
+| Rama desde `94a2114`, empujada, sin PR | Hecho |
+| Suite en verde | 1496 passed sobre `76a0b5b`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
+| Mutaciones | 18 de 18 detectadas |
+| `ruff` y `openapi.json` | Limpio y regenerado |
+| `ESTADO.md` | Hecho |
+| Revisión independiente | Hecha sobre `129730f` (ver abajo) |
+| Codex | **SIN VERIFICAR:** no hay Codex en esta sesión |
 
-- **Hecho:**
-  - la invitación dura 7 días como máximo, impuesto por la base (`0007` l. 54);
-  - la importación no la envía (decisión vigente);
-  - crear invitaciones es la acción `invitaciones.crear`, distinta de `padron.gestionar`;
-  - la política de inserción exige `invitada_por = persona del ámbito` (`0007` l. 71-72).
-- **Inferencia:**
-  - si nadie avisa, la invitación vence sin que la persona la vea, salvo que entre por su cuenta dentro de esos 7 días;
-  - con solo `padron.gestionar`, la importación crearía invitaciones sin tener la facultad de invitar.
-- **Preguntas** (numeradas):
-  1. ¿La importación exige además `invitaciones.crear` sobre la unidad de cada fila que crea una invitación? **Recomiendo que sí**: si falta, es un error del informe y se rechaza el archivo.
-  2. Si ya hay una invitación pendiente al mismo correo, unidad y tipo. El propietario ya fijó que una reimportación respeta el índice **sin retirar en silencio una invitación vigente** (§2.4, l. 169). Eso descarta retirar como hace la ruta de invitar (`app/identidad/invitaciones.py:121`). Quedan:
-     - **(b)** si la vigente nombra **el mismo** vínculo, se conserva y la fila queda "ya existe";
-     - **(c)** si es manual (sin `vinculo_id`) o nombra otro vínculo, es un error del informe que bloquea el archivo;
-     - **(d)** una vencida que no se retiró ocupa igual el índice: se retira **y el informe lo dice** antes de aplicar.
+**Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
+- Python 3.12-slim;
+- PostgreSQL 18.6, sacado de la imagen oficial `postgres:18`;
+- `age` 1.2.1.
 
-     **Recomiendo (b) + (c) + (d).** ¿Sí o no?
-  3. ¿Aceptás que la invitación sin enviar venza a los 7 días, y que para renovarla haya que reimportar o invitar a mano? La alternativa es cambiar el tope de la base, que es otra decisión. **Recomiendo que sí.**
+La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_staging.py`, que necesita staging.
 
-### Sin pregunta (se sigue el diseño o una regla existente)
+**Mutaciones** (cada una aplicada sola; la columna dice cuántas pruebas fallan):
 
-- **El informe no revela si un correo ya tiene cuenta** en otro consorcio. "Ya existe" se informa solo dentro del consorcio: unidades, vínculos e invitaciones. Así no se pueden enumerar personas entre consorcios, con la misma regla del 202 de `/auth/enlace`.
-- **Anulación:** como en §4, l. 138-144.
+| Mutación | Fallan |
+|---|---|
+| `ultimo_dia` sin + 1 | 3 |
+| aplica con problemas | 4 |
+| commit a mitad de la escritura | 28 |
+| sin alcance de `padron.gestionar` | 2 |
+| sin `invitaciones.crear` | 1 |
+| reimportar escribe | 1 |
+| corrección ignorada | 1 |
+| la aceptación ignora `vinculo_id` | 4 |
+| la base retira una pendiente vigente | 1 |
+| la pendiente vigente no bloquea | 1 |
+| anula un vínculo ya iniciado | 1 |
+| anula uno confirmado por la API | 1 |
+| designación exacta | 2 |
+| invitación para un vínculo terminado | 3 |
+| relación sin correo aceptada | 1 |
+| el padrón muestra el nombre global | 1 |
+| anular no retira la invitación | 1 |
+| acepta el año 9999 | 1 |
 
-## 4. Plan mínimo de implementación (con las recomendaciones; cambia según las respuestas)
+Las 15 primeras se corrieron sobre `129730f`; las 3 últimas, sobre `e1667f2`.
 
-1. **Migración `0025`:**
-   - `nucleo.importacion_padron`, con RLS habilitada y forzada, y `vinculo.importacion_id` (D1-a);
-   - `nucleo.importar_padron(...)`, `security definer`: busca o crea la persona por correo con el bloqueo `persona:<correo>` de `aceptar_invitacion`, crea las unidades y los vínculos `importacion` sin confirmar con `registrado_por`, y las invitaciones con su `vinculo_id` (D4);
-   - `nucleo.invitacion.vinculo_id` opcional, con una FK compuesta por consorcio; `aceptar_invitacion` con la rama que, cuando viene `vinculo_id`, toma exactamente ese vínculo y responde, por ejemplo, `vinculo_no_corresponde`; la ruta lo mapea a un 409 explícito (D2, decidida);
-   - `nucleo.anular_vinculo(vinculo, motivo, actor, origen, referencia)`: la API solo anula un vínculo sin confirmar; `soporte`, con la referencia del respaldo. Audita sin el motivo;
-   - downgrade con su guarda.
-2. **`contratos/`:** modelos del informe y del resultado, y regenerar `openapi.json`.
-3. **`app/consorcios/importacion.py`:**
-   - parseo del CSV: se rechaza la columna `vigente_hasta` y se convierte `ultimo_dia`;
-   - el informe: `POST …/padron/importacion/informe`, que no escribe;
-   - la aplicación: `POST …/padron/importacion`, con `Idempotency-Key`, en una transacción;
-   - el alcance fila por fila con `padron.gestionar` (más `invitaciones.crear`), y el alcance general para crear unidades;
-   - `POST …/vinculos/{v}/anular`.
-4. **Un script de soporte** para anular un vínculo confirmado.
-5. **Pruebas contra PostgreSQL real**, en `test_importacion_padron.py`:
-   - errores sembrados: duplicados, solapes, fechas inválidas, coeficientes incompletos y elementos existentes;
-   - atomicidad, con una fila mala al final;
-   - alcance: por unidad, general y una fila fuera del mandato;
-   - el importado sigue sin ámbito;
-   - reintento con la misma clave y reimportación (idéntica, corregida y el mismo hash);
-   - `invitacion_pendiente_unica`;
-   - `vinculo_id`: la aceptación nombra exactamente el vínculo, aun con otro sucesivo de la misma persona; error explícito si fue anulado, o si es de otra persona, unidad o carácter; control: una invitación manual sin `vinculo_id` se comporta igual que en `0014`;
-   - RLS de la tabla nueva contra otro consorcio;
-   - anulación: API y soporte, un vínculo ya iniciado (rechazada) y uno confirmado por la API (rechazada).
+**Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
-## 5. Criterio exacto de terminado
+Corregidos en `e1667f2`, cada uno con su prueba:
+- **P1:** el padrón delataba que un correo tenía cuenta en otro consorcio, y mostraba su nombre real. Ahora muestra `nombre_declarado`.
+- **P2:** anular dejaba la invitación pendiente y bloqueaba la recarga.
+- **P3:**
+  - el año 9999, un byte nulo o un campo enorme daban 500;
+  - una carrera con otra ruta daba 500; ahora da 409 sin escribir nada;
+  - `vinculos_de_correos` no tenía su barrera en la base;
+  - el informe de coeficientes nombraba unidades fuera del alcance.
 
-- D1, D3 y D4 respondidas (D2 ya decidida).
-- La rama `rf02-importacion-corte3`, desde `94a2114`, empujada y sin PR.
-- La suite oficial en verde con `docker compose -f pruebas/compose.yml run --rm -T cem-backend-pruebas sh -c 'pytest ...'`, incluida la prueba de cierre del corte (§1, l. 18): un informe sobre un padrón con duplicados, solapes y coeficientes incompletos sembrados nombra cada error y no escribe nada. Como control, el mismo padrón limpio se aplica.
-- Una mutación por regla clave detectada: la conversión de `ultimo_dia`, la atomicidad y el alcance.
-- `ruff` limpio en los `.py` tocados; `openapi.json` regenerado.
-- `ESTADO.md` actualizado; Codex y una revisión independiente sobre el head final.
+No corregidos: los dos P3 restantes, que son las preguntas 2 y 3. Corresponde una sola revisión, así que **no hubo una segunda revisión** sobre `76a0b5b`.
