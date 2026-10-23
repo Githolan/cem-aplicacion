@@ -275,9 +275,16 @@ def _coeficientes(fila: FilaLeida, valores: dict[str, str], grupos: tuple[str, .
 def leer_planilla(archivo: str) -> Planilla:
     """Lee la planilla sin tocar la base. Cada fila trae sus problemas de forma."""
     sha256 = hashlib.sha256(archivo.encode("utf-8")).digest()
+    # `csv.reader` acepta un byte nulo, pero PostgreSQL no lo admite en un texto: se rechaza
+    # antes de cualquier consulta (Codex en app #105).
+    if "\x00" in archivo:
+        nulo = Problema(
+            codigo=CodigoProblema.FILA_MAL_FORMADA, mensaje="La planilla tiene un byte nulo."
+        )
+        return Planilla(sha256, (), [], [nulo])
     try:
         renglones = list(csv.reader(io.StringIO(archivo.removeprefix("\ufeff"))))
-    except csv.Error as e:  # un byte nulo, un campo enorme, comillas sin cerrar
+    except csv.Error as e:  # un campo enorme, comillas sin cerrar
         malformada = Problema(
             codigo=CodigoProblema.FILA_MAL_FORMADA, mensaje=f"La planilla no es un CSV válido: {e}."
         )

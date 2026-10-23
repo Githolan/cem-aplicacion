@@ -313,20 +313,25 @@ def anular(
     carácter y sus fechas. El motivo no sale en la respuesta ni en la auditoría. Uno que ya
     empezó se finaliza; uno confirmado lo anula el equipo."""
     ctx = permiso.ctx
-    v = _vinculo_del_consorcio(motor, ctx, vinculo_id)
-    permiso.verificar(sobre_unidad(v.unidad_id))
 
+    # La anulación borra el vínculo: buscarlo antes de `responder_una_vez` haría que un reintento
+    # con la misma clave respondiera 404 en vez de repetir el 200 (Codex en app #105). Por eso la
+    # búsqueda y la facultad van dentro del efecto, que un reintento no vuelve a correr.
     def efecto(conn: Connection) -> tuple[int, VinculoAnulado]:
         fila = (
             conn.execute(
-                text("select unidad_id, tipo::text as tipo from nucleo.vinculo where id = :v"),
-                {"v": vinculo_id},
+                text(
+                    "select unidad_id, tipo::text as tipo from nucleo.vinculo"
+                    " where id = :v and consorcio_id = :c"
+                ),
+                {"v": vinculo_id, "c": ctx.consorcio_id},
             )
             .mappings()
             .one_or_none()
         )
-        if fila is None:  # otra anulación lo borró mientras tanto
+        if fila is None:  # no existe, es de otro consorcio u otra anulación lo borró
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        permiso.verificar(sobre_unidad(fila["unidad_id"]))
         _ejecutar(
             conn,
             "select nucleo.anular_vinculo(:v, :m, null, :a, 'api')",

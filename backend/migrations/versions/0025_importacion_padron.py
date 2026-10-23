@@ -547,7 +547,10 @@ create function nucleo.vinculos_de_correos(correos text[])
                   and i.aceptada_en is not null)
         from nucleo.vinculo v
         join nucleo.persona p on p.id = v.persona_id
-       where v.consorcio_id = c and p.correo = any (correos);
+       where v.consorcio_id = c and p.correo = any (correos)
+         -- Como `importar_vinculo`: una cuenta borrada no es la persona de ese correo (Codex
+         -- en app #105).
+         and p.eliminado_en is null;
   end
   $$;
 

@@ -1181,10 +1181,13 @@ def test_anular_retira_su_invitacion_y_se_puede_volver_a_cargar_corregido(escena
     "archivo",
     [
         planilla("3° C,Ana,ana@ejemplo.com,inquilino,01-03-2026,31-12-9999"),
-        ENCABEZADO + "\n3° C,Ana,ana@ejemplo.com,inquilino,01-03-2026,\x00\n",
+        # El byte nulo en un campo que no es fecha: en `ultimo_dia` lo frenaba la fecha inválida
+        # y la prueba pasaba por otra razón (Codex en app #105).
+        planilla("3° \x00C,,,,,"),
+        planilla("3° C,A\x00na,ana@ejemplo.com,inquilino,01-03-2026,"),
         ENCABEZADO + "\n" + "x" * 140_000 + ",,,,,\n",
     ],
-    ids=["anio_9999", "byte_nulo", "campo_enorme"],
+    ids=["anio_9999", "byte_nulo_en_la_unidad", "byte_nulo_en_el_nombre", "campo_enorme"],
 )
 def test_una_planilla_patologica_es_un_problema_y_no_un_500(escena, archivo):
     e = escena
@@ -1536,3 +1539,62 @@ def test_la_base_no_crea_otra_invitacion_para_un_vinculo_que_ya_no_esta_pendient
                 text("select nucleo.crear_invitacion_importada(:v, 'Uri', :h, :p, :a)"),
                 {"v": v["id"], "h": uuid4().bytes * 2, "p": timedelta(days=7), "a": e["admin"]},
             )
+
+
+# Revisión de Codex en app #105 -----------------------------------------------------------------
+
+
+def test_un_reintento_de_la_anulacion_repite_el_200_aunque_el_vinculo_ya_no_exista(
+    escena, motor_migrate
+):
+    e = escena
+    v = futuro_importado(e, motor_migrate)
+    clave = clave_idempotencia()
+    with cliente(e["admin"]) as c:
+        url = f"/api/v1/consorcios/{e['cons']}/vinculos/{v['id']}/anular"
+        primera = c.post(url, json={"motivo": "Cargado por error"}, headers=clave)
+        segunda = c.post(url, json={"motivo": "Cargado por error"}, headers=clave)
+        otra_clave = c.post(url, json={"motivo": "Cargado por error"}, headers=clave_idempotencia())
+    assert primera.status_code == segunda.status_code == 200, segunda.text
+    assert segunda.json() == primera.json()
+    assert segunda.headers["idempotent-replayed"] == "true"
+    # Control: con otra clave ya no es un reintento, y el vínculo no existe.
+    assert otra_clave.status_code == 404
+    anulaciones = eventos(motor_migrate, e["cons"], "consorcio.vinculo.anular")
+    assert [x["entidad_id"] for x in anulaciones].count(v["id"]) == 1
+
+
+def test_una_cuenta_borrada_no_es_la_persona_de_su_correo_en_el_informe(escena, motor_migrate):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Vale,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [vieja] = vinculos_de(motor_migrate, correo)
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.persona set eliminado_en = now() where correo = :c"),
+            {"c": correo},
+        )
+        # Su invitación también se retira: si no, la regla D4.2 bloquearía la fila por otra razón.
+        c.execute(
+            text("update nucleo.invitacion set revocada_en = now() where correo = :c"),
+            {"c": correo},
+        )
+    # La misma fila no es un vínculo existente: la cuenta borrada no cuenta.
+    [fila] = pedir_informe(e["admin"], e["cons"], archivo).json()["filas"]
+    assert (fila["vinculo"], fila["problemas"]) == ("crear", [])
+    r = pedir_aplicar(e["admin"], e["cons"], archivo)
+    assert r.status_code == 200 and r.json()["vinculos_creados"] == 1
+    personas = {v["id"] for v in vinculos_de(motor_migrate, correo)} - {vieja["id"]}
+    assert len(personas) == 1  # un vínculo nuevo, de la persona nueva con ese correo
+    with motor_migrate.connect() as c:
+        assert (
+            c.execute(
+                text(
+                    "select count(*) from nucleo.persona where correo = :c and eliminado_en is null"
+                ),
+                {"c": correo},
+            ).scalar_one()
+            == 1
+        )
