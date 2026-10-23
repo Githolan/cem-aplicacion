@@ -14,6 +14,12 @@ base que el evaluador ya tenía que haber negado es una discrepancia y responde 
 **Fin de vínculo (PA17, 2b-5).** La política `padron.gestionar` decide sobre el recurso de la
 unidad. `nucleo.finalizar_vinculo` (migración 0020) cierra la vigencia hoy, conserva la fila y
 revoca las sesiones de la persona solo si no le queda otro acceso al consorcio.
+
+**Anulación (2b-5, corte 3).** Un vínculo que todavía no empezó no se finaliza: si se cargó por
+error, se anula. `nucleo.anular_vinculo` (0025) lo borra y deja un evento con sus datos, sin el
+motivo (E31). Por la API, con `padron.gestionar` sobre su unidad y solo sin confirmar; uno
+confirmado lo anula el equipo por soporte, con la referencia del respaldo
+(`scripts.anular_vinculo`).
 """
 
 import logging
@@ -21,6 +27,7 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
+from cem_contracts.importacion import AnulacionVinculo, VinculoAnulado
 from cem_contracts.padron import (
     ConfirmacionVinculo,
     FilaPadron,
@@ -61,6 +68,17 @@ CONFLICTOS_FIN = {
     ),
 }
 """Lo mismo para `nucleo.finalizar_vinculo`."""
+CONFLICTOS_ANULAR = {
+    "vinculo_iniciado": (
+        CodigoError.VINCULO_INICIADO,
+        "El vínculo ya empezó: no se anula, se finaliza.",
+    ),
+    "vinculo_confirmado": (
+        CodigoError.VINCULO_CONFIRMADO,
+        "El vínculo está confirmado: lo anula el equipo, con el respaldo.",
+    ),
+}
+"""Lo mismo para `nucleo.anular_vinculo`."""
 
 
 def sobre_unidad(unidad_id: UUID) -> Entidad:
@@ -263,6 +281,63 @@ def finalizar(
     )
     log.info(
         "fin de vínculo respondido",
+        extra={
+            "campos": {
+                "consorcio_id": str(ctx.consorcio_id),
+                "persona_id": str(ctx.persona_id),
+                "vinculo_id": str(vinculo_id),
+            }
+        },
+    )
+    return respuesta
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/vinculos/{vinculo_id}/anular",
+    response_model=VinculoAnulado,
+    summary="Anular un vínculo que todavía no empezó (carga errónea)",
+    responses={
+        403: {"description": "Sin `padron.gestionar` sobre esa unidad."},
+        404: {"description": "El vínculo no existe en este consorcio."},
+        409: {"description": "El vínculo ya empezó o está confirmado."},
+    },
+)
+def anular(
+    vinculo_id: UUID,
+    pedido: AnulacionVinculo,
+    permiso: Annotated[Permiso, Depends(requiere("padron.gestionar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Borra un vínculo sin confirmar que todavía no empezó y deja un evento con su unidad, su
+    carácter y sus fechas. El motivo no sale en la respuesta ni en la auditoría. Uno que ya
+    empezó se finaliza; uno confirmado lo anula el equipo."""
+    ctx = permiso.ctx
+    v = _vinculo_del_consorcio(motor, ctx, vinculo_id)
+    permiso.verificar(sobre_unidad(v.unidad_id))
+
+    def efecto(conn: Connection) -> tuple[int, VinculoAnulado]:
+        fila = (
+            conn.execute(
+                text("select unidad_id, tipo::text as tipo from nucleo.vinculo where id = :v"),
+                {"v": vinculo_id},
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if fila is None:  # otra anulación lo borró mientras tanto
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        _ejecutar(
+            conn,
+            "select nucleo.anular_vinculo(:v, :m, null, :a, 'api')",
+            {"v": vinculo_id, "m": pedido.motivo, "a": ctx.persona_id},
+            CONFLICTOS_ANULAR,
+        )
+        return 200, VinculoAnulado(vinculo_id=vinculo_id, **fila)
+
+    respuesta = responder_una_vez(motor, ctx, idempotencia, efecto)
+    log.info(
+        "anulación de vínculo respondida",
         extra={
             "campos": {
                 "consorcio_id": str(ctx.consorcio_id),

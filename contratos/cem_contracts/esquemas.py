@@ -30,6 +30,13 @@ from cem_contracts.identidad import (
     SesionDispositivo,
     SesionesRevocadas,
 )
+from cem_contracts.importacion import (
+    AnulacionVinculo,
+    ImportacionAplicada,
+    InformeImportacion,
+    PlanillaPadron,
+    VinculoAnulado,
+)
 from cem_contracts.invitaciones import (
     AceptacionInvitacion,
     Invitacion,
@@ -91,6 +98,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     AceptacionInvitacion,
     AceptacionInvitacionMandato,
     AltaTotp,
+    AnulacionVinculo,
     BajaMandato,
     CandidatoMandato,
     CanjeCodigo,
@@ -116,6 +124,8 @@ MODELOS: tuple[type[BaseModel], ...] = (
     FaltaSegundoFactor,
     FilaPadron,
     FinVinculo,
+    ImportacionAplicada,
+    InformeImportacion,
     Invitacion,
     InvitacionAceptada,
     InvitacionMandato,
@@ -140,6 +150,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     MandatoResumen,
     NuevaContrasena,
     Padron,
+    PlanillaPadron,
     PedidoEnlace,
     Salud,
     SaludDependencias,
@@ -153,6 +164,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     TokenInvitacionMandato,
     Unidad,
     VerificacionSegundoFactor,
+    VinculoAnulado,
     VinculoConfirmado,
     VinculoFinalizado,
 )

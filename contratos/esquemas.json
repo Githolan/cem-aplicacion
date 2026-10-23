@@ -83,6 +83,26 @@
     "title": "AltaTotp",
     "type": "object"
   },
+  "AnulacionVinculo": {
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/anular`.",
+    "properties": {
+      "motivo": {
+        "description": "Por qué se anula (carga errónea). No queda en la auditoría (E31).",
+        "examples": [
+          "Fecha de inicio cargada por error"
+        ],
+        "maxLength": 300,
+        "pattern": "^[^\\x00-\\x1f\\x7f]*\\S[^\\x00-\\x1f\\x7f]*$",
+        "title": "Motivo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "motivo"
+    ],
+    "title": "AnulacionVinculo",
+    "type": "object"
+  },
   "BajaMandato": {
     "$defs": {
       "CausaBaja": {
@@ -676,6 +696,10 @@
           "vinculo_ya_confirmado",
           "vinculo_finalizado",
           "vinculo_no_iniciado",
+          "vinculo_iniciado",
+          "vinculo_confirmado",
+          "invitacion_vinculo_no_corresponde",
+          "importacion_con_problemas",
           "mandato_ya_asociado",
           "mandato_no_vigente",
           "mandato_no_asociable",
@@ -971,6 +995,356 @@
       "motivo"
     ],
     "title": "FinVinculo",
+    "type": "object"
+  },
+  "ImportacionAplicada": {
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/padron/importacion`.",
+    "properties": {
+      "archivo_sha256": {
+        "title": "Archivo Sha256",
+        "type": "string"
+      },
+      "importacion_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Nulo si no había nada que escribir.",
+        "title": "Importacion Id"
+      },
+      "invitaciones_creadas": {
+        "title": "Invitaciones Creadas",
+        "type": "integer"
+      },
+      "invitaciones_reemplazadas": {
+        "title": "Invitaciones Reemplazadas",
+        "type": "integer"
+      },
+      "unidades_creadas": {
+        "title": "Unidades Creadas",
+        "type": "integer"
+      },
+      "vinculos_creados": {
+        "title": "Vinculos Creados",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "importacion_id",
+      "archivo_sha256",
+      "unidades_creadas",
+      "vinculos_creados",
+      "invitaciones_creadas",
+      "invitaciones_reemplazadas"
+    ],
+    "title": "ImportacionAplicada",
+    "type": "object"
+  },
+  "InformeImportacion": {
+    "$defs": {
+      "AccionInvitacion": {
+        "enum": [
+          "crear",
+          "reemplazar_vencida",
+          "ninguna"
+        ],
+        "title": "AccionInvitacion",
+        "type": "string"
+      },
+      "AccionUnidad": {
+        "enum": [
+          "crear",
+          "existente"
+        ],
+        "title": "AccionUnidad",
+        "type": "string"
+      },
+      "AccionVinculo": {
+        "enum": [
+          "crear",
+          "existente"
+        ],
+        "title": "AccionVinculo",
+        "type": "string"
+      },
+      "CodigoProblema": {
+        "description": "Por qué una fila (o el archivo) no se puede aplicar. Uno solo bloquea todo el archivo.",
+        "enum": [
+          "archivo_vacio",
+          "encabezado_invalido",
+          "columna_vigente_hasta",
+          "fila_mal_formada",
+          "unidad_vacia",
+          "designacion_ambigua",
+          "relacion_incompleta",
+          "relacion_sin_correo",
+          "correo_invalido",
+          "nombre_invalido",
+          "caracter_invalido",
+          "fecha_invalida",
+          "relacion_duplicada",
+          "vinculo_solapado",
+          "corrige_existente",
+          "invitaciones_simultaneas",
+          "invitacion_pendiente",
+          "coeficiente_invalido",
+          "coeficiente_contradictorio",
+          "fuera_de_alcance",
+          "sin_facultad_invitar"
+        ],
+        "title": "CodigoProblema",
+        "type": "string"
+      },
+      "CoeficientesGrupo": {
+        "description": "Lo que dice la planilla de un grupo de gasto. Se informa, no se escribe ni se corrige.",
+        "properties": {
+          "distintos_del_vigente": {
+            "description": "Unidades cuyo porcentaje difiere del esquema vigente de ese grupo.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Distintos Del Vigente",
+            "type": "array"
+          },
+          "grupo": {
+            "title": "Grupo",
+            "type": "string"
+          },
+          "hay_esquema_vigente": {
+            "title": "Hay Esquema Vigente",
+            "type": "boolean"
+          },
+          "sin_coeficiente": {
+            "description": "Unidades (de la planilla o del consorcio) sin porcentaje en este grupo.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sin Coeficiente",
+            "type": "array"
+          },
+          "suma": {
+            "description": "Suma tal cual, como texto decimal (D4).",
+            "examples": [
+              "99.96"
+            ],
+            "title": "Suma",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo",
+          "suma",
+          "sin_coeficiente",
+          "distintos_del_vigente",
+          "hay_esquema_vigente"
+        ],
+        "title": "CoeficientesGrupo",
+        "type": "object"
+      },
+      "FilaInforme": {
+        "description": "Lo que haría una fila. Sin correo ni nombre.",
+        "properties": {
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "invitacion": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AccionInvitacion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "linea": {
+            "description": "Línea de la planilla (el encabezado es la 1).",
+            "title": "Linea",
+            "type": "integer"
+          },
+          "problemas": {
+            "items": {
+              "$ref": "#/$defs/Problema"
+            },
+            "title": "Problemas",
+            "type": "array"
+          },
+          "tipo": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TipoVinculo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ultimo_dia": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Inclusivo, como en la planilla. Nulo: sin fin.",
+            "title": "Ultimo Dia"
+          },
+          "unidad": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AccionUnidad"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo si la fila tiene un problema de unidad."
+          },
+          "vigente_desde": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Vigente Desde"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Exclusivo, como lo guarda la base: `ultimo_dia + 1`.",
+            "title": "Vigente Hasta"
+          },
+          "vinculo": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AccionVinculo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Nulo si la fila no trae relación o la relación tiene problemas."
+          }
+        },
+        "required": [
+          "linea",
+          "designacion",
+          "unidad",
+          "problemas"
+        ],
+        "title": "FilaInforme",
+        "type": "object"
+      },
+      "Problema": {
+        "properties": {
+          "codigo": {
+            "$ref": "#/$defs/CodigoProblema"
+          },
+          "mensaje": {
+            "title": "Mensaje",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo",
+          "mensaje"
+        ],
+        "title": "Problema",
+        "type": "object"
+      },
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "`POST /api/v1/consorcios/{consorcio_id}/padron/importacion/informe`. No escribe nada.",
+    "properties": {
+      "aplicable": {
+        "description": "Sin ningún problema: se puede aplicar entera.",
+        "title": "Aplicable",
+        "type": "boolean"
+      },
+      "archivo_sha256": {
+        "title": "Archivo Sha256",
+        "type": "string"
+      },
+      "coeficientes": {
+        "items": {
+          "$ref": "#/$defs/CoeficientesGrupo"
+        },
+        "title": "Coeficientes",
+        "type": "array"
+      },
+      "esquemas_a_revisar": {
+        "description": "Grupos con esquema vigente que no incluirán las unidades nuevas: el reparto se bloquea hasta cargar una versión nueva (PA02).",
+        "items": {
+          "type": "string"
+        },
+        "title": "Esquemas A Revisar",
+        "type": "array"
+      },
+      "filas": {
+        "items": {
+          "$ref": "#/$defs/FilaInforme"
+        },
+        "title": "Filas",
+        "type": "array"
+      },
+      "problemas_archivo": {
+        "items": {
+          "$ref": "#/$defs/Problema"
+        },
+        "title": "Problemas Archivo",
+        "type": "array"
+      },
+      "sin_cambios": {
+        "description": "Todo ya existe: aplicarla no escribiría nada.",
+        "title": "Sin Cambios",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "archivo_sha256",
+      "aplicable",
+      "sin_cambios",
+      "problemas_archivo",
+      "filas",
+      "coeficientes",
+      "esquemas_a_revisar"
+    ],
+    "title": "InformeImportacion",
     "type": "object"
   },
   "Invitacion": {
@@ -2776,6 +3150,22 @@
     "title": "PedidoEnlace",
     "type": "object"
   },
+  "PlanillaPadron": {
+    "description": "El cuerpo de los dos pasos: la planilla CSV como texto UTF-8.",
+    "properties": {
+      "archivo": {
+        "maxLength": 1000000,
+        "minLength": 1,
+        "title": "Archivo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "archivo"
+    ],
+    "title": "PlanillaPadron",
+    "type": "object"
+  },
   "Salud": {
     "description": "`GET /health`: el proceso vive. No consulta ninguna dependencia.",
     "properties": {
@@ -3124,6 +3514,43 @@
       "codigo"
     ],
     "title": "VerificacionSegundoFactor",
+    "type": "object"
+  },
+  "VinculoAnulado": {
+    "$defs": {
+      "TipoVinculo": {
+        "description": "Relación de una persona con una unidad funcional.",
+        "enum": [
+          "propietario",
+          "inquilino",
+          "ocupante"
+        ],
+        "title": "TipoVinculo",
+        "type": "string"
+      }
+    },
+    "description": "Respuesta de la anulación: el vínculo ya no existe.",
+    "properties": {
+      "tipo": {
+        "$ref": "#/$defs/TipoVinculo"
+      },
+      "unidad_id": {
+        "format": "uuid",
+        "title": "Unidad Id",
+        "type": "string"
+      },
+      "vinculo_id": {
+        "format": "uuid",
+        "title": "Vinculo Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "vinculo_id",
+      "unidad_id",
+      "tipo"
+    ],
+    "title": "VinculoAnulado",
     "type": "object"
   },
   "VinculoConfirmado": {

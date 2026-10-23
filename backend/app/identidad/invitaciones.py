@@ -367,6 +367,19 @@ def revocar(
 # Bajo /api/v1/auth/: comparten el cupo por IP de la familia de autenticación (§10.6).
 
 
+def _vinculo_no_corresponde() -> ErrorApi:
+    """La invitación que creó la importación nombra su vínculo (0025) y ese vínculo ya no le
+    corresponde: no se reutiliza otro ni se crea uno."""
+    log.info("aceptación de invitación rechazada: vinculo_no_corresponde")
+    return ErrorApi(
+        409,
+        CodigoError.INVITACION_VINCULO_NO_CORRESPONDE,
+        "El vínculo de esta invitación ya no está en el padrón. Consultá a quien administra el"
+        " consorcio.",
+        encabezados=SIN_CACHE,
+    )
+
+
 def _invitacion_invalida() -> ErrorApi:
     return ErrorApi(
         404,
@@ -433,7 +446,8 @@ def persona_de_la_sesion(request: Request, motor) -> UUID | None:
         },
         409: {
             "model": Error,
-            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay.",
+            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay; o"
+            " la invitación nombra un vínculo que ya no le corresponde.",
         },
     },
 )
@@ -489,6 +503,8 @@ def aceptar(
             "La invitación es para otro correo. Salí de esta cuenta y abrila de nuevo.",
             encabezados=SIN_CACHE,
         )
+    if r.resultado == "vinculo_no_corresponde":
+        raise _vinculo_no_corresponde()
     if r.resultado != "ok":
         log.info("aceptación de invitación rechazada: %s", r.resultado)
         raise _invitacion_invalida()
@@ -546,6 +562,11 @@ def mis_invitaciones(
             "description": "No es una invitación pendiente dirigida a mi correo (todas las causas"
             " responden igual).",
         },
+        409: {
+            "model": Error,
+            "description": "La invitación nombra un vínculo que ya no le corresponde (anulado, o"
+            " de otra persona, unidad o carácter).",
+        },
     },
 )
 def aceptar_propia(
@@ -567,6 +588,8 @@ def aceptar_propia(
     if r.resultado in MOTIVOS_INVALIDA:
         log.info("invitación propia sin servir: %s", r.resultado)
         raise _invitacion_invalida()
+    if r.resultado == "vinculo_no_corresponde":
+        raise _vinculo_no_corresponde()
     if r.resultado != "ok":
         # `otra_persona` o `requiere_sesion`: la base eligió la invitación por mi correo, así que
         # no pueden pasar. Si pasan, es un defecto (500), no una invitación que no sirve.
