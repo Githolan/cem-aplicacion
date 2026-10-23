@@ -2017,15 +2017,15 @@ def test_un_vinculo_existente_se_encuentra_entre_varios_sin_recorrerlos_todos(
     r = pedir_aplicar(e["admin"], e["cons"], aplicada)
     assert r.status_code == 200, r.text
     with motor_migrate.begin() as c:
-        c.execute(
+        vacia = c.execute(
             text(
                 "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
                 " vigente_desde, vigente_hasta, fuente, origen, finalizado_en, motivo_fin)"
                 " select consorcio_id, unidad_id, persona_id, tipo, :d, :d, 'documento',"
-                " 'soporte', now(), 'Prueba' from nucleo.vinculo where id = :v"
+                " 'soporte', now(), 'Prueba' from nucleo.vinculo where id = :v returning id"
             ),
             {"d": hoy - timedelta(days=85), "v": vinculos_de(motor_migrate, correo)[0]["id"]},
-        )
+        ).scalar_one()
     casos = {
         fila(-90, -81): ("existente", set()),
         fila(-84, -84): (None, {"corrige_existente"}),  # dentro del del medio, tras la vacía
@@ -2034,6 +2034,15 @@ def test_un_vinculo_existente_se_encuentra_entre_varios_sin_recorrerlos_todos(
         fila(-65, None): (None, {"corrige_existente"}),
         fila(-50, None): ("crear", set()),  # después del último
     }
-    for renglon, (vinculo, codigos) in casos.items():
-        [x] = pedir_informe(e["admin"], e["cons"], planilla(renglon)).json()["filas"]
-        assert (x["vinculo"], {p["codigo"] for p in x["problemas"]}) == (vinculo, codigos), renglon
+    try:
+        for renglon, (vinculo, codigos) in casos.items():
+            [x] = pedir_informe(e["admin"], e["cons"], planilla(renglon)).json()["filas"]
+            assert (x["vinculo"], {p["codigo"] for p in x["problemas"]}) == (
+                vinculo,
+                codigos,
+            ), renglon
+    finally:
+        # La vigencia vacía dentro de otro vínculo es solo de esta prueba: `vaciar_mandatos`
+        # (las pruebas que bajan migraciones) la convertiría en un día que se superpone.
+        with motor_migrate.begin() as c:
+            c.execute(text("delete from nucleo.vinculo where id = :v"), {"v": vacia})
