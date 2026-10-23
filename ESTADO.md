@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 20-10-2026.
+**Actualizado:** 23-10-2026.
 
 ## Qué existe
 
@@ -406,3 +406,4 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - poner la marca en la pantalla de entrada (*Custom pages → Access login page*), después de confirmar que el plan gratuito la incluye;
    - alargar la sesión de Access a un mes.
    - Producción no lleva Access y queda como está: la sesión de la aplicación dura 30 días.
+9. **RF02, corte 3 de 2b-5 (23-10-2026):** el informe previo está en `doc/rf02_corte3_informe.md`, sobre `94a2114`. Queda frenado a la espera de las respuestas del propietario a D1-D4: reimportación y trazabilidad, si la invitación nombra su vínculo, coeficientes en el CSV, y vencimiento y facultad de la invitación. No hay código ni rama `rf02-importacion-corte3`.
