@@ -18,10 +18,12 @@ facultad sobre su unidad; cada fila que crea una invitación, además `invitacio
 su unidad (general, si es nueva). Si una sola fila queda afuera, se rechaza el archivo entero
 (403, auditado) y el informe la nombra.
 
-**Invitaciones (decisiones del 22-10-2026).** Cada vínculo nuevo vigente o futuro lleva su
-invitación, que lo nombra (`vinculo_id`) y **no se envía**. Vence como las manuales
+**Invitaciones (decisiones del 22 y del 23-10-2026).** Cada vínculo nuevo vigente o futuro lleva
+su invitación, que lo nombra (`vinculo_id`) y **no se envía**. Vence como las manuales
 (`VIGENCIA_INVITACION`). Una pendiente vencida de la misma persona, unidad y carácter se
-reemplaza al aplicar, y el informe lo anuncia; una vigente bloquea (D4.2).
+reemplaza al aplicar, y el informe lo anuncia; una vigente bloquea (D4.2). Reimportar la misma
+fila de un vínculo que sigue importado pendiente y cuya invitación venció la renueva: es la única
+escritura de una fila igual, y el informe también la anuncia.
 
 **Coeficientes (D3).** Se leen, se validan y se informan: la suma tal cual, las unidades sin
 porcentaje y las diferencias con el esquema vigente. No se escriben: los carga el equipo
@@ -91,7 +93,9 @@ LARGO_MAXIMO_CORREO = 254
 CIEN = Decimal(100)
 ULTIMO_ANIO = 9998
 """`ultimo_dia + 1` tiene que seguir siendo una fecha (`date.max` es el 31-12-9999)."""
-CAMBIO_DURANTE_LA_APLICACION = frozenset({"vinculo_solapado", "invitacion_pendiente"})
+CAMBIO_DURANTE_LA_APLICACION = frozenset(
+    {"vinculo_solapado", "invitacion_pendiente", "vinculo_no_pendiente"}
+)
 """Motivos de la base que solo aparecen si el padrón cambió entre el informe recalculado y la
 escritura (otra ruta, no otra importación: esas se ordenan con el bloqueo)."""
 
@@ -320,6 +324,8 @@ class Plan:
     unidad_id: UUID | None = None
     unidad: AccionUnidad | None = None
     vinculo: AccionVinculo | None = None
+    vinculo_existente: UUID | None = None
+    importado_pendiente: bool = False
     invitacion: AccionInvitacion | None = None
     negada_gestionar: Entidad | None = None
     negada_invitar: Entidad | None = None
@@ -386,15 +392,19 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
     ]
     correos = sorted({p.fila.relacion.correo for p in con_relacion})
     existentes: dict[tuple, list[tuple[date, date | None]]] = defaultdict(list)
+    detalle: dict[tuple, tuple[UUID, bool]] = {}
     for v in conn.execute(
         text(
-            "select correo, unidad_id, tipo::text as tipo, vigente_desde, vigente_hasta"
-            " from nucleo.vinculos_de_correos(:c)"
+            "select correo, unidad_id, tipo::text as tipo, vigente_desde, vigente_hasta,"
+            " vinculo_id, importado_pendiente from nucleo.vinculos_de_correos(:c)"
         ),
         {"c": correos},
     ):
-        existentes[(v.unidad_id, v.correo, TipoVinculo(v.tipo))].append(
-            (v.vigente_desde, v.vigente_hasta)
+        clave = (v.unidad_id, v.correo, TipoVinculo(v.tipo))
+        existentes[clave].append((v.vigente_desde, v.vigente_hasta))
+        detalle[(*clave, v.vigente_desde, v.vigente_hasta)] = (
+            v.vinculo_id,
+            v.importado_pendiente,
         )
     vistas: dict[tuple, list[Plan]] = defaultdict(list)
     for p in con_relacion:
@@ -419,6 +429,9 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
         actuales = existentes[(p.unidad_id, r.correo, r.tipo)] if p.unidad_id else []
         if rango in actuales:
             p.vinculo = AccionVinculo.EXISTENTE
+            p.vinculo_existente, p.importado_pendiente = detalle[
+                (p.unidad_id, r.correo, r.tipo, *rango)
+            ]
         elif any(_se_superponen(e, rango) for e in actuales):
             p.fila.problema(
                 CodigoProblema.CORRIGE_EXISTENTE,
@@ -434,22 +447,51 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             p.vinculo = None
 
 
+def _exigir_invitar(p: Plan, invitar: Permiso) -> None:
+    """D4.1: la fila que crea o renueva una invitación necesita `invitaciones.crear`."""
+    if not invitar.decidir(sobre_unidad(p.unidad_id)).permitido:
+        p.negada_invitar = sobre_unidad(p.unidad_id)
+        p.fila.problema(
+            CodigoProblema.SIN_FACULTAD_INVITAR,
+            "La fila crea una invitación y falta `invitaciones.crear` sobre esta unidad"
+            + ("." if p.unidad_id else " (general: la unidad es nueva)."),
+        )
+
+
 def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Permiso) -> None:
     pendientes: dict[tuple, list[bool]] = defaultdict(list)
+    vencidas_de: set[UUID] = set()
     for i in conn.execute(
         text(
-            "select unidad_id, tipo::text as tipo, correo, vence_en > now() as vigente"
+            "select unidad_id, tipo::text as tipo, correo, vinculo_id, vence_en > now() as vigente"
             " from nucleo.invitacion where aceptada_en is null and revocada_en is null"
         )
     ):
         pendientes[(i.unidad_id, TipoVinculo(i.tipo), i.correo)].append(i.vigente)
+        if i.vinculo_id is not None and not i.vigente:
+            vencidas_de.add(i.vinculo_id)
     nuevas: dict[tuple, list[Plan]] = defaultdict(list)
     for p in planes:
         if p.vinculo is None:
             continue
         r = p.fila.relacion
-        if p.vinculo == AccionVinculo.EXISTENTE or (r.hasta is not None and r.hasta <= hoy):
+        if r.hasta is not None and r.hasta <= hoy:
             p.invitacion = AccionInvitacion.NINGUNA
+            continue
+        if p.vinculo == AccionVinculo.EXISTENTE:
+            # Una fila igual no escribe nada, salvo un caso (decisión del 23-10-2026): el vínculo
+            # sigue importado pendiente y la invitación que lo nombra venció. Entonces se renueva,
+            # si no hay otra pendiente vigente para esa persona, unidad y carácter.
+            renovar = (
+                p.importado_pendiente
+                and p.vinculo_existente in vencidas_de
+                and not any(pendientes[(p.unidad_id, r.tipo, r.correo)])
+            )
+            p.invitacion = (
+                AccionInvitacion.REEMPLAZAR_VENCIDA if renovar else AccionInvitacion.NINGUNA
+            )
+            if renovar:
+                _exigir_invitar(p, invitar)
             continue
         nuevas[(clave_designacion(p.fila.designacion), r.tipo, r.correo)].append(p)
         previas = pendientes[(p.unidad_id, r.tipo, r.correo)] if p.unidad_id else []
@@ -461,13 +503,7 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
             )
             continue
         p.invitacion = AccionInvitacion.REEMPLAZAR_VENCIDA if previas else AccionInvitacion.CREAR
-        if not invitar.decidir(sobre_unidad(p.unidad_id)).permitido:
-            p.negada_invitar = sobre_unidad(p.unidad_id)
-            p.fila.problema(
-                CodigoProblema.SIN_FACULTAD_INVITAR,
-                "La fila crea una invitación y falta `invitaciones.crear` sobre esta unidad"
-                + ("." if p.unidad_id else " (general: la unidad es nueva)."),
-            )
+        _exigir_invitar(p, invitar)
     for grupo in nuevas.values():
         if len(grupo) > 1:
             for p in grupo:
@@ -581,7 +617,10 @@ def analizar(
         aplicable=not hay_problemas,
         sin_cambios=not hay_problemas
         and not any(
-            p.unidad == AccionUnidad.CREAR or p.vinculo == AccionVinculo.CREAR for p in planes
+            p.unidad == AccionUnidad.CREAR
+            or p.vinculo == AccionVinculo.CREAR
+            or p.invitacion == AccionInvitacion.REEMPLAZAR_VENCIDA
+            for p in planes
         ),
         problemas_archivo=planilla.problemas,
         filas=filas,
@@ -700,9 +739,15 @@ def _escribir(
         )
     vinculos = invitaciones = reemplazadas = 0
     for p in analisis.planes:
+        r = p.fila.relacion
+        if p.vinculo == AccionVinculo.EXISTENTE:
+            if p.invitacion == AccionInvitacion.REEMPLAZAR_VENCIDA:  # renovación (23-10-2026)
+                _invitar(conn, ctx, p.vinculo_existente, r.nombre)
+                invitaciones += 1
+                reemplazadas += 1
+            continue
         if p.vinculo != AccionVinculo.CREAR:
             continue
-        r = p.fila.relacion
         vinculo = conn.execute(
             text(
                 "select nucleo.importar_vinculo(:i, :u, :c, :n, cast(:t as nucleo.tipo_vinculo),"
@@ -721,18 +766,7 @@ def _escribir(
         ).scalar_one()
         vinculos += 1
         if p.invitacion in (AccionInvitacion.CREAR, AccionInvitacion.REEMPLAZAR_VENCIDA):
-            # El token no viaja a ningún lado: la invitación no se envía. La persona la ve y la
-            # acepta con su sesión (`/me/invitaciones`).
-            conn.execute(
-                text("select nucleo.crear_invitacion_importada(:v, :n, :h, :p, :a)"),
-                {
-                    "v": vinculo,
-                    "n": r.nombre,
-                    "h": sesiones.hash_token(sesiones.nuevo_token()),
-                    "p": VIGENCIA_INVITACION,
-                    "a": ctx.persona_id,
-                },
-            )
+            _invitar(conn, ctx, vinculo, r.nombre)
             invitaciones += 1
             reemplazadas += p.invitacion == AccionInvitacion.REEMPLAZAR_VENCIDA
     return ImportacionAplicada(
@@ -742,6 +776,21 @@ def _escribir(
         vinculos_creados=vinculos,
         invitaciones_creadas=invitaciones,
         invitaciones_reemplazadas=reemplazadas,
+    )
+
+
+def _invitar(conn: Connection, ctx: Contexto, vinculo: UUID, nombre: str) -> None:
+    """Crea (o renueva) la invitación que nombra al vínculo. El token no viaja a ningún lado: la
+    invitación no se envía. La persona la ve y la acepta con su sesión (`/me/invitaciones`)."""
+    conn.execute(
+        text("select nucleo.crear_invitacion_importada(:v, :n, :h, :p, :a)"),
+        {
+            "v": vinculo,
+            "n": nombre,
+            "h": sesiones.hash_token(sesiones.nuevo_token()),
+            "p": VIGENCIA_INVITACION,
+            "a": ctx.persona_id,
+        },
     )
 
 

@@ -30,8 +30,12 @@ repositorio.
   evento. Un vínculo que ya empezó no se anula: se finaliza (0020). Las invitaciones pendientes
   que lo nombran se retiran en la misma transacción, auditadas: si no, ocuparían
   `invitacion_pendiente_unica` y bloquearían volver a cargarlo corregido (revisión, P2).
-- `nucleo.vinculos_de_correos`: los vínculos del consorcio de esos correos, para el informe;
-  exige un mandato vigente con `padron.gestionar`, como `padron_del_consorcio` exige `padron.ver`.
+- `nucleo.vinculos_de_correos`: los vínculos del consorcio de esos correos, con si siguen
+  importados pendientes, para el informe; exige un mandato vigente con `padron.gestionar`, como
+  `padron_del_consorcio` exige `padron.ver`.
+- Renovación (decisión del propietario del 23-10-2026): reimportar la misma fila de un vínculo
+  importado pendiente cuya invitación venció la renueva. Es la única escritura de una fila igual:
+  `crear_invitacion_importada` retira la vencida y crea otra que nombra el mismo vínculo.
 
 Downgrade: se niega (`downgrade_con_datos`) si hay alguna importación o alguna invitación con
 vínculo; si no, restaura `aceptar_invitacion` y `padron_del_consorcio` de 0014 y quita todo lo
@@ -427,7 +431,9 @@ create function nucleo.anular_vinculo(
   $$;
 
 -- La invitación de un vínculo importado (decisiones del propietario del 22-10-2026): la crea,
--- no la envía. Nombra su vínculo; unidad, carácter y correo salen del vínculo y de su persona.
+-- no la envía. Reimportar la misma fila de un importado pendiente cuya invitación venció la
+-- renueva con esta misma función (decisión del 23-10-2026). Nombra su vínculo; unidad, carácter
+-- y correo salen del vínculo y de su persona.
 -- Una pendiente igual (consorcio, unidad, carácter y correo) que ya venció se retira acá, en la
 -- misma transacción y auditada; una pendiente vigente no se retira nunca: es
 -- `invitacion_pendiente` (D4.2).
@@ -459,6 +465,17 @@ create function nucleo.crear_invitacion_importada(
     if v.vigente_hasta is not null and v.vigente_hasta <= nucleo.hoy_del_consorcio(c) then
       raise exception 'el vínculo ya terminó: su invitación no daría nada'
         using errcode = 'P0001', hint = 'vinculo_finalizado';
+    end if;
+    -- Solo un importado pendiente (0024) lleva o renueva su invitación: uno confirmado o ya
+    -- aceptado no la necesita (renovación por reimportación, decisión del 23-10-2026).
+    if v.confirmado_en is not null or exists (
+         select 1 from auditoria.eventos e
+           join nucleo.invitacion i on i.id = e.entidad_id and i.consorcio_id = e.consorcio_id
+          where e.consorcio_id = c and e.accion = 'identidad.invitacion.aceptar'
+            and e.entidad = 'invitacion' and e.despues ->> 'vinculo_id' = v.id::text
+            and i.aceptada_en is not null) then
+      raise exception 'el vínculo ya no está pendiente: no lleva otra invitación'
+        using errcode = 'P0001', hint = 'vinculo_no_pendiente';
     end if;
     select p.correo into correo_persona from nucleo.persona p where p.id = v.persona_id;
     for anterior in
@@ -498,7 +515,7 @@ create function nucleo.crear_invitacion_importada(
 -- correo tiene cuenta.
 create function nucleo.vinculos_de_correos(correos text[])
   returns table (correo text, vinculo_id uuid, unidad_id uuid, tipo nucleo.tipo_vinculo,
-                 vigente_desde date, vigente_hasta date)
+                 vigente_desde date, vigente_hasta date, importado_pendiente boolean)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -519,7 +536,15 @@ create function nucleo.vinculos_de_correos(correos text[])
       raise exception 'sin padron.gestionar en este consorcio' using errcode = '42501';
     end if;
     return query
-      select p.correo, v.id, v.unidad_id, v.tipo, v.vigente_desde, v.vigente_hasta
+      select p.correo, v.id, v.unidad_id, v.tipo, v.vigente_desde, v.vigente_hasta,
+             -- El criterio de 0024: importado, sin confirmar y sin una aceptación que lo nombre.
+             v.fuente = 'importacion' and v.confirmado_en is null and not exists (
+               select 1 from auditoria.eventos e
+                 join nucleo.invitacion i
+                   on i.id = e.entidad_id and i.consorcio_id = e.consorcio_id
+                where e.consorcio_id = c and e.accion = 'identidad.invitacion.aceptar'
+                  and e.entidad = 'invitacion' and e.despues ->> 'vinculo_id' = v.id::text
+                  and i.aceptada_en is not null)
         from nucleo.vinculo v
         join nucleo.persona p on p.id = v.persona_id
        where v.consorcio_id = c and p.correo = any (correos);

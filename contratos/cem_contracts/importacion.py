@@ -102,7 +102,8 @@ class AccionUnidad(StrEnum):
 class AccionVinculo(StrEnum):
     CREAR = "crear"
     EXISTENTE = "existente"
-    """Igual a uno que ya existe: no se escribe nada (reimportar es idempotente)."""
+    """Igual a uno que ya existe: no se escribe el vínculo (reimportar es idempotente). Solo
+    puede renovarse su invitación vencida (`reemplazar_vencida`)."""
 
 
 class AccionInvitacion(StrEnum):
@@ -110,9 +111,10 @@ class AccionInvitacion(StrEnum):
     """Se crea, sin enviarla. La persona la ve y la acepta con su sesión."""
     REEMPLAZAR_VENCIDA = "reemplazar_vencida"
     """Había una pendiente vencida para esa persona, unidad y carácter: se retira y se crea la
-    nueva, al aplicar y en la misma transacción."""
+    nueva, al aplicar y en la misma transacción. Con un vínculo `existente`, es la renovación:
+    el vínculo sigue importado pendiente y su invitación venció."""
     NINGUNA = "ninguna"
-    """El vínculo ya terminó, o ya existía."""
+    """El vínculo ya terminó, o ya existía y su invitación no hace falta renovarla."""
 
 
 class FilaInforme(BaseModel):

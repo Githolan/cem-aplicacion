@@ -1408,3 +1408,131 @@ def test_la_invitacion_de_un_vinculo_finalizado_quedo_obsoleta(escena, motor_mig
         )
     neutro(motor_app, nina, e["cons"])
     assert len(vinculos_de(motor_migrate, correo)) == 1
+
+
+# Renovación por reimportación (decisión del propietario del 23-10-2026, opción 3) ----------------
+
+
+def vencer(motor_migrate, invitacion) -> None:
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.invitacion set creada_en = now() - interval '8 days',"
+                " vence_en = now() - interval '1 day' where id = :i"
+            ),
+            {"i": invitacion},
+        )
+
+
+def test_reimportar_la_misma_fila_renueva_la_invitacion_vencida_de_un_importado_pendiente(
+    escena, motor_migrate, motor_app
+):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Rosa,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [v] = vinculos_de(motor_migrate, correo)
+    [vieja] = invitaciones_de(motor_migrate, correo)
+    vencer(motor_migrate, vieja["id"])
+    r = pedir_informe(e["admin"], e["cons"], archivo)
+    [fila] = r.json()["filas"]
+    assert (fila["vinculo"], fila["invitacion"]) == ("existente", "reemplazar_vencida")
+    assert r.json()["sin_cambios"] is False
+    vinculos = conteos(motor_migrate)["nucleo.vinculo"]
+    r = pedir_aplicar(e["admin"], e["cons"], archivo)
+    assert r.status_code == 200, r.text
+    assert {k: r.json()[k] for k in ("vinculos_creados", "invitaciones_creadas",
+                                       "invitaciones_reemplazadas")} == {
+        "vinculos_creados": 0,
+        "invitaciones_creadas": 1,
+        "invitaciones_reemplazadas": 1,
+    }  # fmt: skip
+    assert conteos(motor_migrate)["nucleo.vinculo"] == vinculos  # el vínculo no se tocó
+    anterior, nueva = invitaciones_de(motor_migrate, correo)
+    assert anterior["id"] == vieja["id"] and anterior["revocada_en"] is not None
+    assert (nueva["vinculo_id"], nueva["revocada_en"]) == (v["id"], None)
+    # Idempotente: con la invitación renovada y vigente, la misma planilla no escribe nada.
+    assert pedir_informe(e["admin"], e["cons"], archivo).json()["sin_cambios"] is True
+    # Y la renovada se acepta y nombra el mismo vínculo.
+    with cliente(persona_de(motor_migrate, correo)) as c:
+        assert c.post(f"/api/v1/me/invitaciones/{nueva['id']}/aceptar").status_code == 200
+    [ev] = [x for x in eventos(motor_migrate, e["cons"], "identidad.invitacion.aceptar")
+            if x["entidad_id"] == nueva["id"]]  # fmt: skip
+    assert ev["despues"]["vinculo_id"] == str(v["id"])
+
+
+@pytest.mark.parametrize("caso", ["confirmado", "terminado"])
+def test_no_se_renueva_si_el_vinculo_ya_no_esta_pendiente_o_termino(escena, motor_migrate, caso):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Sol,{correo},ocupante,{f(hoy - timedelta(days=5))},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [v] = vinculos_de(motor_migrate, correo)
+    [inv] = invitaciones_de(motor_migrate, correo)
+    vencer(motor_migrate, inv["id"])
+    if caso == "confirmado":
+        with motor_migrate.begin() as c:
+            c.execute(
+                text(
+                    "update nucleo.vinculo set confirmado_por = :p, confirmado_en = now(),"
+                    " confirmacion_referencia = 'Escritura 2' where id = :v"
+                ),
+                {"p": e["prop2"], "v": v["id"]},
+            )
+    else:
+        with cliente(e["admin"]) as c:
+            assert (
+                c.post(
+                    f"/api/v1/consorcios/{e['cons']}/vinculos/{v['id']}/finalizar",
+                    json={"motivo": "Fin"},
+                    headers=clave_idempotencia(),
+                ).status_code
+                == 200
+            )
+        hasta = _hoy(motor_migrate, e["cons"])
+        archivo = planilla(
+            f"2° B,Sol,{correo},ocupante,{f(hoy - timedelta(days=5))},"
+            f"{f(hasta - timedelta(days=1))}"
+        )
+    r = pedir_informe(e["admin"], e["cons"], archivo)
+    assert r.json()["filas"][0]["invitacion"] == "ninguna"
+    assert r.json()["sin_cambios"] is True
+    antes = conteos(motor_migrate)
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).json()["importacion_id"] is None
+    assert conteos(motor_migrate) == antes
+
+
+def test_renovar_tambien_exige_invitaciones_crear(escena, motor_migrate):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Tea,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    vencer(motor_migrate, invitaciones_de(motor_migrate, correo)[0]["id"])
+    restringir(motor_migrate, e["m_admin"], "invitaciones.crear", e["u1"])
+    assert problemas(pedir_informe(e["admin"], e["cons"], archivo).json()) == {
+        2: {"sin_facultad_invitar"}
+    }
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 403
+
+
+def test_la_base_no_crea_otra_invitacion_para_un_vinculo_que_ya_no_esta_pendiente(
+    escena, motor_migrate, motor_app
+):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Uri,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [v] = vinculos_de(motor_migrate, correo)
+    [inv] = invitaciones_de(motor_migrate, correo)
+    with cliente(persona_de(motor_migrate, correo)) as c:
+        assert c.post(f"/api/v1/me/invitaciones/{inv['id']}/aceptar").status_code == 200
+    with pytest.raises(DBAPIError, match="vinculo_no_pendiente"):
+        with transaccion(motor_app, persona_id=e["admin"], consorcio_id=e["cons"]) as c:
+            c.execute(
+                text("select nucleo.crear_invitacion_importada(:v, 'Uri', :h, :p, :a)"),
+                {"v": v["id"], "h": uuid4().bytes * 2, "p": timedelta(days=7), "a": e["admin"]},
+            )
