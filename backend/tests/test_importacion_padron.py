@@ -17,13 +17,17 @@ decisiones del propietario del 22-10-2026 (D1 a D4 en `doc/rf02_corte3_informe.m
 - RLS de `importacion_padron` y la ida y vuelta 0024 ⇄ 0025.
 """
 
+import hashlib
+import json
 import threading
+import time
 from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from alembic import command
+from cem_contracts.importacion import CodigoProblema, Problema
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -1729,3 +1733,52 @@ def restringir_general(motor_migrate, mandato, facultad: str) -> None:
             ),
             {"m": mandato, "f": facultad},
         )
+
+
+# Dos P2 de Codex sobre 69f1f77 (decisión del propietario del 23-10-2026) --------------------------
+
+
+def test_un_encabezado_enorme_de_columnas_repetidas_se_valida_en_una_sola_pasada():
+    """Con `columnas.count` por columna, 50 000 columnas tardaban segundos (y el tope de un
+    millón de caracteres admite cientos de miles). La validación y la respuesta no cambian."""
+    encabezado = "unidad," + ",".join(["x"] * 50_000)
+    inicio = time.perf_counter()
+    p = leer_planilla(encabezado + "\n")
+    assert time.perf_counter() - inicio < 1
+    assert (
+        Problema(codigo=CodigoProblema.ENCABEZADO_INVALIDO, mensaje="Columnas repetidas: x.")
+        in p.problemas
+    )
+
+
+def test_un_surrogate_suelto_es_una_planilla_invalida_y_no_un_500(escena, motor_migrate):
+    """`"\\ud800"` en el JSON. Por la API, el contrato (Pydantic) ya lo rechaza antes del
+    importador: 422 `peticion_invalida`, sin escribir nada (pasaba igual sobre 69f1f77; el 500 que
+    señaló Codex no se reproduce por la ruta). `leer_planilla`, en cambio, fallaba con
+    `UnicodeEncodeError` si se la llamaba con ese texto: ahora lo rechaza con un hash
+    determinista."""
+    e = escena
+    archivo = planilla("3° \ud800C,,,,,")
+    # `json.dumps` escribe el surrogate como `\ud800`, que es como llega en un JSON real (httpx
+    # con `json=` no puede codificarlo).
+    cuerpo = json.dumps({"archivo": archivo})
+    assert "\\ud800" in cuerpo
+    antes = conteos(motor_migrate)
+    with cliente(e["admin"]) as c:
+        for url in (informe_url(e["cons"]), aplicar_url(e["cons"])):
+            r = c.post(
+                url,
+                content=cuerpo,
+                headers={"content-type": "application/json", **clave_idempotencia()},
+            )
+            assert (r.status_code, r.json()["codigo"]) == (422, "peticion_invalida")
+    assert conteos(motor_migrate) == antes
+    # La función: un problema de la planilla, sin filas, con el hash de los bytes
+    # `surrogatepass` (el mismo en cada llamada).
+    p = leer_planilla(archivo)
+    assert [x.codigo for x in p.problemas] == ["fila_mal_formada"] and p.filas == []
+    esperado = hashlib.sha256(archivo.encode("utf-8", "surrogatepass")).digest()
+    assert p.sha256 == leer_planilla(archivo).sha256 == esperado
+    # Control: sin surrogates, el hash es el SHA-256 de siempre (UTF-8).
+    limpio = planilla("3° C,,,,,")
+    assert leer_planilla(limpio).sha256 == hashlib.sha256(limpio.encode("utf-8")).digest()

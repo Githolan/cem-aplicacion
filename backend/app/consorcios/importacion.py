@@ -38,7 +38,7 @@ import hashlib
 import io
 import logging
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -87,6 +87,7 @@ GRUPO = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 """El mismo formato de grupo que exige 0021."""
 PORCENTAJE = re.compile(r"^\d{1,3}(\.\d{1,6})?$")
 FECHA = re.compile(r"^\d{2}-\d{2}-\d{4}$")
+SURROGATE = re.compile("[\ud800-\udfff]")
 CORREO = re.compile(FORMATO_CORREO)
 """El mismo formato que el enlace, el código y las invitaciones (Codex en app #105): una persona
 creada con otro correo no podría entrar ni recibir una invitación válida."""
@@ -165,7 +166,9 @@ def _encabezado(columnas: list[str]) -> tuple[tuple[str, ...], list[Problema]]:
                 " con vigencia (inclusivo).",
             )
         )
-    repetidas = sorted({c for c in columnas if columnas.count(c) > 1})
+    # Una sola pasada (Codex en app #105): con `columnas.count` por columna, un encabezado de
+    # cientos de miles de columnas trababa el proceso varios minutos.
+    repetidas = sorted(c for c, n in Counter(columnas).items() if n > 1)
     if repetidas:
         problemas.append(
             Problema(
@@ -272,7 +275,18 @@ def _coeficientes(fila: FilaLeida, valores: dict[str, str], grupos: tuple[str, .
 
 def leer_planilla(archivo: str) -> Planilla:
     """Lee la planilla sin tocar la base. Cada fila trae sus problemas de forma."""
-    sha256 = hashlib.sha256(archivo.encode("utf-8")).digest()
+    # Un surrogate suelto (`"\ud800"`) es texto que no se puede pasar a UTF-8 (Codex en app
+    # #105). Por la API lo rechaza antes el contrato (422), pero esta función no depende de eso.
+    # El hash se calcula con `surrogatepass`, que da siempre los mismos bytes para el mismo texto
+    # y coincide con UTF-8 cuando no hay surrogates; la planilla se rechaza antes del CSV y de
+    # cualquier consulta.
+    sha256 = hashlib.sha256(archivo.encode("utf-8", "surrogatepass")).digest()
+    if SURROGATE.search(archivo):
+        suelto = Problema(
+            codigo=CodigoProblema.FILA_MAL_FORMADA,
+            mensaje="La planilla tiene un carácter Unicode inválido (un surrogate suelto).",
+        )
+        return Planilla(sha256, (), [], [suelto])
     # `csv.reader` acepta un byte nulo, pero PostgreSQL no lo admite en un texto: se rechaza
     # antes de cualquier consulta (Codex en app #105).
     if "\x00" in archivo:
