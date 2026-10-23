@@ -316,6 +316,7 @@
           "vinculo_iniciado",
           "vinculo_confirmado",
           "invitacion_vinculo_no_corresponde",
+          "invitacion_importada_pendiente",
           "importacion_con_problemas",
           "mandato_ya_asociado",
           "mandato_no_vigente",
@@ -4136,6 +4137,9 @@
           },
           "404": {
             "description": "La unidad no existe en este consorcio."
+          },
+          "409": {
+            "description": "Hay una invitación de la importación pendiente para ese correo, unidad y carácter: no se reemplaza."
           },
           "422": {
             "content": {

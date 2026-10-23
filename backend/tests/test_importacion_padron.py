@@ -30,6 +30,7 @@ from sqlalchemy.exc import DBAPIError
 from app.consorcios.importacion import leer_planilla
 from app.db import transaccion
 from scripts import anular_vinculo as script_anular
+from scripts import invitar as script_invitar
 from tests.conftest import clave_idempotencia, url_rol
 from tests.test_coeficientes_0021 import registrar
 from tests.test_contexto_mandatos import (  # noqa: F401  (`edificio` es un fixture)
@@ -1318,3 +1319,92 @@ def test_los_coeficientes_no_listan_unidades_fuera_de_su_alcance(escena, motor_m
         e["admin"], e["cons"], planilla("2° B,10", encabezado="unidad,coeficiente_agua")
     )
     assert r.json()["coeficientes"][0]["sin_coeficiente"] == []  # no nombra la 1° A
+
+
+# Decisiones del propietario del 23-10-2026 ------------------------------------------------------
+
+
+def invitar_manual(persona, cons, unidad, correo, tipo="ocupante"):
+    with cliente(persona) as c:
+        return c.post(
+            f"/api/v1/consorcios/{cons}/invitaciones",
+            json={"unidad_id": str(unidad), "tipo": tipo, "correo": correo, "nombre": "Manual"},
+            headers=clave_idempotencia(),
+        )
+
+
+@pytest.mark.parametrize("vencida", [False, True], ids=["vigente", "vencida"])
+def test_una_invitacion_manual_no_reemplaza_la_importada(escena, motor_migrate, vencida):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Lola,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [importada] = invitaciones_de(motor_migrate, correo)
+    if vencida:
+        with motor_migrate.begin() as c:
+            c.execute(
+                text(
+                    "update nucleo.invitacion set creada_en = now() - interval '8 days',"
+                    " vence_en = now() - interval '1 day' where id = :i"
+                ),
+                {"i": importada["id"]},
+            )
+    outbox = conteos(motor_migrate)["plataforma.outbox"]
+    r = invitar_manual(e["admin"], e["cons"], e["u2"], correo)
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_importada_pendiente")
+    [sigue] = invitaciones_de(motor_migrate, correo)  # no se creó otra
+    assert (sigue["id"], sigue["revocada_en"], sigue["vinculo_id"]) == (
+        importada["id"],
+        None,
+        importada["vinculo_id"],
+    )
+    assert conteos(motor_migrate)["plataforma.outbox"] == outbox
+    # Control: otro carácter no es incompatible y se invita como siempre.
+    assert (
+        invitar_manual(e["admin"], e["cons"], e["u2"], correo, tipo="inquilino").status_code == 201
+    )
+
+
+def test_el_script_del_equipo_tampoco_reemplaza_la_importada(escena, motor_migrate, monkeypatch):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Mora,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", "https://cem.ejemplo.com")
+    argumentos = ["--consorcio", str(e["cons"]), "--unidad", str(e["u2"]), "--tipo", "ocupante"]
+    assert script_invitar.main([*argumentos, "--correo", correo, "--nombre", "Mora"]) == 1
+    assert len(invitaciones_de(motor_migrate, correo)) == 1
+
+
+def test_la_invitacion_de_un_vinculo_finalizado_quedo_obsoleta(escena, motor_migrate, motor_app):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Nina,{correo},ocupante,{f(hoy - timedelta(days=10))},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [v] = vinculos_de(motor_migrate, correo)
+    [inv] = invitaciones_de(motor_migrate, correo)
+    with cliente(e["admin"]) as c:
+        r = c.post(
+            f"/api/v1/consorcios/{e['cons']}/vinculos/{v['id']}/finalizar",
+            json={"motivo": "Fin de la ocupación"},
+            headers=clave_idempotencia(),
+        )
+    assert r.status_code == 200, r.text
+    nina = persona_de(motor_migrate, correo)
+    with cliente(nina) as c:
+        r = c.post(f"/api/v1/me/invitaciones/{inv['id']}/aceptar")
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_vinculo_no_corresponde")
+    assert invitaciones_de(motor_migrate, correo)[0]["aceptada_en"] is None
+    aceptaciones = eventos(motor_migrate, e["cons"], "identidad.invitacion.aceptar")
+    assert inv["id"] not in [x["entidad_id"] for x in aceptaciones]
+    with transaccion(motor_app, persona_id=nina) as c:  # sigue pendiente: ninguna aceptación
+        assert (
+            v["id"]
+            in c.execute(text("select nucleo.vinculos_importados_pendientes()")).scalars().all()
+        )
+    neutro(motor_app, nina, e["cons"])
+    assert len(vinculos_de(motor_migrate, correo)) == 1

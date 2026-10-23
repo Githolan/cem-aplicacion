@@ -699,6 +699,7 @@
           "vinculo_iniciado",
           "vinculo_confirmado",
           "invitacion_vinculo_no_corresponde",
+          "invitacion_importada_pendiente",
           "importacion_con_problemas",
           "mandato_ya_asociado",
           "mandato_no_vigente",

@@ -117,10 +117,12 @@ VINCULO_0014 = """\
 VINCULO_0025 = f"""\
     if i.vinculo_id is not null then
       -- 0025: exactamente el vínculo que nombra (decisión del propietario, 22-10-2026). Si fue
-      -- anulado o es de otra persona, unidad o carácter, no se reutiliza otro ni se crea uno.
+      -- anulado, ya terminó o es de otra persona, unidad o carácter, la invitación quedó
+      -- obsoleta: no se acepta, no se reutiliza otro ni se crea uno (decisión del 23-10-2026).
       select v2.id into vinculo from nucleo.vinculo v2
        where v2.id = i.vinculo_id and v2.consorcio_id = i.consorcio_id
          and v2.unidad_id = i.unidad_id and v2.persona_id = p and v2.tipo = i.tipo
+         and (v2.vigente_hasta is null or v2.vigente_hasta > hoy)
        for update;
       if vinculo is null then
 {NO_CORRESPONDE}      end if;

@@ -108,7 +108,8 @@ def crear(
 ) -> Creada | None:
     """Registra la invitación, retira la pendiente igual y publica el correo, todo en la
     transacción de `conn` (con el consorcio en el ámbito). None si la unidad no está en el
-    consorcio o está dada de baja."""
+    consorcio o está dada de baja. 409 si la pendiente igual es de la importación (nombra su
+    vínculo): esa no se retira."""
     unidad = conn.execute(
         text("select designacion from nucleo.unidad where id = :u and eliminado_en is null"),
         {"u": nueva.unidad_id},
@@ -116,6 +117,23 @@ def crear(
     if unidad is None:
         return None
     correo = nueva.correo.lower()
+    # La invitación que creó la importación nombra su vínculo (0025): una manual no la reemplaza,
+    # ni vencida, porque la nueva no tendría ese vínculo (decisión del propietario, 23-10-2026).
+    if conn.execute(
+        text(
+            "select 1 from nucleo.invitacion"
+            " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
+            " and aceptada_en is null and revocada_en is null and vinculo_id is not null"
+            " for update"
+        ),
+        {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo},
+    ).first():
+        raise ErrorApi(
+            409,
+            CodigoError.INVITACION_IMPORTADA_PENDIENTE,
+            "Esa persona ya tiene una invitación del padrón importado para esta unidad y carácter."
+            " No se reemplaza con una invitación manual.",
+        )
     for (anterior,) in conn.execute(
         text(
             "update nucleo.invitacion set revocada_en = now()"
@@ -218,6 +236,10 @@ def origen_publico(request: Request) -> str:
             " `invitaciones.crear` sobre ella."
         },
         404: {"description": "La unidad no existe en este consorcio."},
+        409: {
+            "description": "Hay una invitación de la importación pendiente para ese correo,"
+            " unidad y carácter: no se reemplaza."
+        },
     },
 )
 async def invitar(

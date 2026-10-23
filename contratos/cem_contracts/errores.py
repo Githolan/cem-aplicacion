@@ -78,6 +78,10 @@ class CodigoError(StrEnum):
     INVITACION_VINCULO_NO_CORRESPONDE = "invitacion_vinculo_no_corresponde"
     """La invitación nombra un vínculo que ya no le corresponde: fue anulado, o es de otra
     persona, otra unidad u otro carácter. No se reutiliza otro ni se crea uno."""
+    INVITACION_IMPORTADA_PENDIENTE = "invitacion_importada_pendiente"
+    """Hay una invitación de la importación pendiente para ese correo, unidad y carácter, que
+    nombra su vínculo: una invitación manual no la reemplaza (decisión del propietario,
+    23-10-2026)."""
     IMPORTACION_CON_PROBLEMAS = "importacion_con_problemas"
     """La planilla tiene al menos un problema (422), o el padrón cambió por otra vía mientras se
     aplicaba (409): no se escribió nada. El informe dice cuáles."""
