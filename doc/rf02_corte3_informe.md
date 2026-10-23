@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `76a0b5b`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `1e1b504`, con las respuestas del propietario del 23-10 a las tres preguntas. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -74,33 +74,52 @@ Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importaci
    - una persona existente se reutiliza sin cambiarle el nombre.
 6. **Renovar una invitación vencida:** reimportar un vínculo ya aplicado no la renueva, porque una fila igual es un no-op. La renovación es por invitación manual, que se envía, como hoy.
 
-**Preguntas para el propietario.** Ninguna bloqueó el corte.
-1. **Anulación (sí/no):** la anulación retira, auditadas, las invitaciones pendientes que nombran al vínculo (P2 de la revisión). Sin eso, la invitación seguía vigente 7 días y bloqueaba volver a cargarlo corregido (`invitacion_pendiente`). Consecuencia: después de una anulación, aceptar responde 404 `invitacion_invalida`, no el 409 explícito. El 409 queda para un vínculo que ya no existe con la invitación viva, o que es de otra persona, unidad o carácter. ¿Te sirve así?
-2. **Invitación manual sobre una importada (sí/no):** una invitación manual al mismo correo, unidad y carácter retira la importada (`app/identidad/invitaciones.py:118-135`, sin cambios), y la nueva no tiene `vinculo_id`. ¿La ruta manual debería responder 409 ante una pendiente con `vinculo_id`?
-3. **Vínculo finalizado antes de aceptar (sí/no):** si el vínculo importado se finalizó antes de que la persona acepte, la aceptación lo nombra igual. No da nada, pero sale del estado pendiente. ¿Debería responder `vinculo_no_corresponde`?
-4. **Siguen abiertas, sin tocar:**
-   - la observación de la revisión de #104 sobre invitarse a sí mismo (`Decisiones_Propietario` l. 181);
-   - el envío de las invitaciones creadas.
+**Respuestas del propietario del 23-10** a las tres preguntas (transmitidas por el Hilo principal; no figuran todavía en CEM):
+
+| | Decisión | Cómo quedó |
+|---|---|---|
+| 1 | Al anular, se retira la invitación pendiente; aceptarla después puede dar 404; nunca se confirma ni se crea otro vínculo | Ya estaba así desde `e1667f2` (`anular_vinculo` la retira, auditada) |
+| 2 | Una invitación manual no reemplaza en silencio una importada pendiente con `vinculo_id`: 409 mientras exista | `app/identidad/invitaciones.py:99` (`crear`): 409 `invitacion_importada_pendiente` mientras la importada no esté aceptada ni retirada, **también si venció**. Vale para la ruta y para `scripts.invitar` (sale con código 1). No crea ni envía nada |
+| 3 | Aceptar la invitación de un vínculo importado finalizado da 409: no la marca aceptada, no lo saca de pendiente, no da acceso | `0025`: la rama de `vinculo_id` exige `vigente_hasta is null or vigente_hasta > hoy`; si no, `vinculo_no_corresponde` → 409 |
+
+**Decisión material pendiente, no bloquea el código: ¿cómo se renueva una invitación importada vencida?** Al juntar D1 con la respuesta 2 no queda una vía simple:
+- reimportar la misma fila no escribe nada (D1);
+- una invitación manual da 409, aunque la importada esté vencida (respuesta 2).
+
+Hoy el vínculo deja de estar pendiente por dos caminos:
+- **la confirmación** (`padron.confirmar_vinculo`, con el título);
+- **finalizarlo y volver a importarlo**: el vínculo nuevo empieza hoy, y la invitación vencida se reemplaza según D4.2.
+
+Alternativas:
+- **(a)** se queda así;
+- **(b)** la ruta manual renueva una importada **vencida** conservando su `vinculo_id`;
+- **(c)** la reimportación de una fila igual renueva la invitación vencida, como única escritura, anunciada en el informe.
+
+Recomiendo la (c): mantiene la renovación dentro de la importación y nunca pierde el vínculo. ¿1, 2 o 3?
+
+**Siguen abiertas, sin tocar:**
+- la observación de la revisión de #104 sobre invitarse a sí mismo (`Decisiones_Propietario` l. 181);
+- el envío de las invitaciones creadas.
 
 ## 4. Plan mínimo, implementado
 
-Rama `rf02-importacion-corte3`, líneas en `76a0b5b`:
+Rama `rf02-importacion-corte3`, líneas en `1e1b504`:
 
 - **Migración `backend/migrations/versions/0025_importacion_padron.py`:**
-  - `importacion_padron` (l. 183);
-  - `vinculo.importacion_id` (l. 200) y `nombre_declarado` (l. 203);
-  - `invitacion.vinculo_id` (l. 215);
-  - `aceptar_invitacion` (rama nueva en la l. 118) y `padron_del_consorcio` (nombre declarado en la l. 155), las dos derivadas de 0014 con reemplazos verificados;
-  - `registrar_importacion_padron` (l. 225), `importar_vinculo` (l. 255), `anular_vinculo` (l. 335), `crear_invitacion_importada` (l. 432) y `vinculos_de_correos` (l. 497);
-  - el downgrade se niega con datos (l. 538) y, sin datos, vuelve exacto.
+  - `importacion_padron` (l. 185);
+  - `vinculo.importacion_id` (l. 202) y `nombre_declarado` (l. 205);
+  - `invitacion.vinculo_id` (l. 217);
+  - `aceptar_invitacion` (rama nueva en la l. 118) y `padron_del_consorcio` (nombre declarado en la l. 157), las dos derivadas de 0014 con reemplazos verificados;
+  - `registrar_importacion_padron` (l. 227), `importar_vinculo` (l. 257), `anular_vinculo` (l. 337), `crear_invitacion_importada` (l. 434) y `vinculos_de_correos` (l. 499);
+  - el downgrade se niega con datos (l. 540) y, sin datos, vuelve exacto.
 - **`backend/app/consorcios/importacion.py`:**
   - `leer_planilla` (l. 271), `analizar` (l. 549), `_aplicar` (l. 624) y `_escribir` (l. 672);
   - las rutas `informe` (l. 760) y `aplicar` (l. 786).
 - **`backend/app/consorcios/padron.py:305`:** `POST …/vinculos/{v}/anular`.
 - **`backend/scripts/anular_vinculo.py`:** anulación por soporte, agregada al `Dockerfile`.
-- **`backend/app/identidad/invitaciones.py:370`:** el 409 explícito.
+- **`backend/app/identidad/invitaciones.py`:** el 409 explícito al aceptar (`_vinculo_no_corresponde`, l. 392) y el 409 de la invitación manual (`crear`, l. 99).
 - **Contrato 0.17.0:** `contratos/cem_contracts/importacion.py` y cuatro códigos de error; `openapi.json` y `esquemas.json` regenerados.
-- **Pruebas:** `backend/tests/test_importacion_padron.py`, con 52 funciones y 74 casos. `conftest.py` (`vaciar_mandatos`) y `test_vinculo_0014.py` quedaron al día.
+- **Pruebas:** `backend/tests/test_importacion_padron.py`, con 55 funciones y 78 casos. `conftest.py` (`vaciar_mandatos`) y `test_vinculo_0014.py` quedaron al día.
 
 ## 5. Criterio exacto de terminado, y dónde está
 
@@ -108,12 +127,12 @@ Rama `rf02-importacion-corte3`, líneas en `76a0b5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1496 passed sobre `76a0b5b`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1500 passed sobre `1e1b504`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 18 de 18 detectadas |
+| Mutaciones | 20 de 20 detectadas |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
-| Revisión independiente | Hecha sobre `129730f` (ver abajo) |
+| Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
 | Codex | **SIN VERIFICAR:** no hay Codex en esta sesión |
 
 **Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
@@ -145,8 +164,10 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | el padrón muestra el nombre global | 1 |
 | anular no retira la invitación | 1 |
 | acepta el año 9999 | 1 |
+| la invitación manual reemplaza la importada | 3 |
+| acepta un vínculo finalizado | 1 |
 
-Las 15 primeras se corrieron sobre `129730f`; las 3 últimas, sobre `e1667f2`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2` y las 2 últimas sobre `1e1b504`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -159,4 +180,6 @@ Corregidos en `e1667f2`, cada uno con su prueba:
   - `vinculos_de_correos` no tenía su barrera en la base;
   - el informe de coeficientes nombraba unidades fuera del alcance.
 
-No corregidos: los dos P3 restantes, que son las preguntas 2 y 3. Corresponde una sola revisión, así que **no hubo una segunda revisión** sobre `76a0b5b`.
+Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y están en `1e1b504`.
+
+**Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.**
