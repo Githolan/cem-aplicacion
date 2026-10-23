@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `2430829`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación), las correcciones de Codex en app #105, la tanda única sobre `4b978a1` y los dos P2 de Codex sobre `69f1f77`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `65ee21f`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` y los P2 de Codex sobre `69f1f77` y sobre `70e889c`, más el P3 4 de la revisión sobre `69f1f77`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -118,13 +118,13 @@ Rama `rf02-importacion-corte3`, líneas en `5f00c5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1520 passed sobre `2430829`; `ci.ps1` dio verde sobre `69f1f77` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1523 passed sobre `65ee21f`; `ci.ps1` dio verde sobre `69f1f77` y `70e889c` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 32 de 32 detectadas |
+| Mutaciones | 35 de 35 detectadas |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
-| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. Revisó `69f1f77`: dos P2, corregidos en `2430829`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
+| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. Revisó `69f1f77`: dos P2, corregidos en `2430829`. Revisó `70e889c`: dos P2, corregidos en `65ee21f`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
 
 **Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
 - Python 3.12-slim;
@@ -169,8 +169,11 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | el informe compara contra unidades fuera de su alcance | 2 |
 | encabezados repetidos con `columnas.count` (O(n²)) | 1 |
 | `encode("utf-8")` sin rechazar el surrogate | 1 |
+| solapes por pares (un diagnóstico por par) | 1 |
+| la importación no toma la persona antes de la auditoría | 1 (deadlock detectado) |
+| la anulación bloquea el vínculo antes que la invitación | 1 (deadlock detectado) |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b` y las 2 últimas sobre `2430829`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829` y las 3 últimas sobre `65ee21f`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -184,6 +187,17 @@ Corregidos en `e1667f2`, cada uno con su prueba:
   - el informe de coeficientes nombraba unidades fuera del alcance.
 
 Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y están en `1e1b504`.
+
+**Dos P2 de Codex sobre `70e889c` y el P3 4 de la revisión sobre `69f1f77`** (decisión del propietario del 23-10), corregidos en `65ee21f`, cada uno con su prueba y su mutación:
+1. **Solapes:**
+   - **Detección:** un barrido por fecha de inicio para cada persona, unidad y carácter, con a lo sumo un diagnóstico por fila y sin recorrer todos los pares. Los duplicados se buscan en un conjunto.
+   - **Resultado:** el archivo se sigue rechazando con `vinculo_solapado`. La prueba usa 400 filas que se superponen todas: cada fila tiene un diagnóstico, y antes eran 159 600 en total.
+2. **Orden de bloqueos:** invitación, persona (`persona:<correo>`), vínculo y, al final, la cadena de auditoría. Es el orden que ya seguían `aceptar_invitacion` (0014 y 0015) y el alta de mandato (0016).
+   - **Cambio:** la importación toma, antes de escribir el primer evento, los bloqueos de persona de todos los vínculos que va a crear, en orden y con la misma expresión que la base (`lower(btrim(correo))`).
+   - **Riesgo residual, que ya existía:** cada correo distinto es un bloqueo consultivo hasta el final de la transacción, y antes también lo era (lo tomaba `importar_vinculo`). Una planilla con miles de correos distintos ocupa la tabla de bloqueos compartida (`max_locks_per_transaction`).
+3. **P3 4 (aceptar frente a anular): era real.** `aceptar_invitacion` bloquea la invitación y después el vínculo; `anular_vinculo` bloqueaba el vínculo y después, al retirarla, la invitación. Ahora `anular_vinculo` bloquea primero las invitaciones pendientes que nombran al vínculo.
+
+**Cómo se controló el deadlock:** con dos conexiones reales a PostgreSQL. Una toma los bloqueos en el orden de `aceptar_invitacion`, es decir, persona y después un evento de auditoría (o invitación y después vínculo). La otra corre la importación (o la anulación) por la API, y la prueba espera, con el rol administrador, a que quede esperando un bloqueo. Con la corrección, las dos terminan bien; con la mutación, PostgreSQL responde `deadlock detected`.
 
 **Dos P2 de Codex sobre `69f1f77`** (decisión del propietario del 23-10), corregidos en `2430829`, cada uno con su prueba y su mutación. La revisión independiente final sobre `69f1f77` no encontró P1 ni P2 y dejó 13 P3, que quedan **pendientes, sin cambios de código**.
 1. **Encabezados repetidos:** se cuentan en una sola pasada (`collections.Counter`), con la misma validación y la misma respuesta. La prueba lee 50 000 columnas en menos de un segundo; con `columnas.count` (la mutación) tarda más y falla.
