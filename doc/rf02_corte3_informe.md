@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `65ee21f`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` y los P2 de Codex sobre `69f1f77` y sobre `70e889c`, más el P3 4 de la revisión sobre `69f1f77`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `76a103a`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77` y el barrido de bloqueos y diagnósticos. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -118,13 +118,13 @@ Rama `rf02-importacion-corte3`, líneas en `5f00c5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1523 passed sobre `65ee21f`; `ci.ps1` dio verde sobre `69f1f77` y `70e889c` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1529 passed sobre `76a103a`; `ci.ps1` dio verde sobre `69f1f77`, `70e889c` y `7e28cd5` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 35 de 35 detectadas |
+| Mutaciones | 41 de 41 detectadas |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
-| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. Revisó `69f1f77`: dos P2, corregidos en `2430829`. Revisó `70e889c`: dos P2, corregidos en `65ee21f`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
+| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. Revisó `4b978a1`: dos P2, corregidos en `5f00c5b`. Revisó `69f1f77`: dos P2, corregidos en `2430829`. Revisó `70e889c`: dos P2, corregidos en `65ee21f`. Revisó `7e28cd5`: dos P2, corregidos con el barrido en `7366be4`. **Codex sobre el SHA final: PENDIENTE** (lo repite el Hilo principal) |
 
 **Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
 - Python 3.12-slim;
@@ -172,8 +172,14 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | solapes por pares (un diagnóstico por par) | 1 |
 | la importación no toma la persona antes de la auditoría | 1 (deadlock detectado) |
 | la anulación bloquea el vínculo antes que la invitación | 1 (deadlock detectado) |
+| la importación no bloquea invitaciones ni personas antes de leer y auditar | 2 (deadlock detectado) |
+| invitaciones simultáneas con todas las líneas | 1 |
+| designación ambigua con todas las escrituras | 1 |
+| listas de coeficientes sin tope | 1 |
+| sin tope de grupos de coeficientes | 1 |
+| búsqueda de vínculos existentes con el candidato equivocado | 1 |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829` y las 3 últimas sobre `65ee21f`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829`, 3 sobre `65ee21f` y las 6 últimas sobre `7366be4` (la última, repetida sobre `76a103a`).
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -187,6 +193,39 @@ Corregidos en `e1667f2`, cada uno con su prueba:
   - el informe de coeficientes nombraba unidades fuera del alcance.
 
 Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y están en `1e1b504`.
+
+**Barrido sobre `7e28cd5`** (dos P2 de Codex y la clase completa, decisión del propietario del 23-10), corregido en `7366be4` y `76a103a`. Cada corrección tiene su prueba y su mutación.
+
+*A. Bloqueos.* El orden único es invitación → persona → vínculo → auditoría (`auditoria:<consorcio>`).
+
+| Ruta | Orden | Estado |
+|---|---|---|
+| Importación (aplicación, renovación, reemplazo de vencidas, creación de invitaciones) | Antes de leer el estado y antes del primer evento: las invitaciones pendientes de todos los correos de la planilla (`for update`, en orden de id), después `persona:<correo>` de esos correos (en orden y con `lower(btrim())`), después los vínculos (los inserta) y la auditoría al final | **Corregida.** Antes la renovación auditaba antes de bloquear la invitación vencida (Codex) |
+| Informe | No bloquea nada: solo lee | Cubierta |
+| `aceptar_invitacion` (0014/0025) y `aceptar_invitacion_propia` | Invitación → persona → vínculo (rama `vinculo_id`) → auditoría | Cubierta, sin cambios |
+| `anular_vinculo` | Invitaciones que lo nombran → vínculo → auditoría | Cubierta (`65ee21f`) |
+| `revocar` (`app/identidad/invitaciones.py`) | Invitación → auditoría | Cubierta, sin cambios |
+| Invitación manual (`crear()`, la ruta y `scripts.invitar`) | Invitaciones pendientes de esa clave → auditoría | Cubierta, sin cambios |
+
+Pruebas con dos conexiones reales (la primera conexión toma los bloqueos en el orden de la otra operación; la mutación produce `deadlock detected`):
+- importación frente a aceptación;
+- renovación frente a `revocar` (nueva);
+- anulación frente a aceptación.
+
+*B. Diagnósticos*, ahora lineales en la cantidad de filas:
+
+| Diagnóstico | Antes | Ahora |
+|---|---|---|
+| `relacion_duplicada` | Mensaje fijo, pero la búsqueda recorría las anteriores | Un conjunto por clave (`65ee21f`) |
+| `vinculo_solapado` | Un diagnóstico por par | Barrido ordenado, uno por fila con un ejemplo (`65ee21f`) |
+| `invitaciones_simultaneas` | Cada fila nombraba todas las demás | Un ejemplo y el total (Codex) |
+| `designacion_ambigua` | Cada fila nombraba todas las escrituras | Un ejemplo |
+| `coeficiente_contradictorio` | Mensaje fijo por fila | Sin cambios |
+| `sin_coeficiente` y `distintos_del_vigente` | Listas completas por grupo (grupos × unidades) | Hasta 20 ejemplos y los totales `sin_coeficiente_total` y `distintos_del_vigente_total` (contrato); además, **hasta 20 grupos** de coeficientes por planilla (`encabezado_invalido`) |
+| `corrige_existente` | Recorría todos los vínculos existentes de la clave | Búsqueda binaria: no se superponen entre sí (EXCLUDE); las vigencias vacías quedan afuera |
+| Encabezado (repetidas, desconocidas) | Una pasada (`2430829`); un problema por columna desconocida | Sin cambios: lineal |
+
+**Riesgo residual, que ya existía:** se toma un bloqueo por cada invitación pendiente y por cada correo de la planilla, y todos se mantienen hasta el final de la transacción. Una planilla con miles de correos distintos ocupa la tabla de bloqueos compartida (`max_locks_per_transaction`).
 
 **Dos P2 de Codex sobre `70e889c` y el P3 4 de la revisión sobre `69f1f77`** (decisión del propietario del 23-10), corregidos en `65ee21f`, cada uno con su prueba y su mutación:
 1. **Solapes:**
