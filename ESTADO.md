@@ -409,10 +409,10 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 9. **RF02, corte 3 de 2b-5 (23-10-2026):** rama `rf02-importacion-corte3`, desde `94a2114`, empujada, **sin PR, sin fusionar y sin desplegar**.
    - **Qué trae:** migración `0025` (importación con informe, la invitación nombra su vínculo, anulación de un vínculo no iniciado), contrato 0.17.0 y `scripts.anular_vinculo`.
    - **Decisiones e informe:** D1 a D4, las inferencias y tres preguntas para el propietario están en `doc/rf02_corte3_informe.md`.
-   - **Respuestas del propietario del 23-10** a las tres preguntas (`1e1b504`) y a la renovación de una invitación importada vencida, opción 3 (`2ceef5d`): aplicadas.
-   - **Pruebas:** 1505 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube.
+   - **Respuestas del propietario del 23-10** a las tres preguntas (`1e1b504`) y a la renovación de una invitación importada vencida, opción 3 (`2ceef5d`): aplicadas. Hallazgos de Codex en app #105 (un P1 y dos P2): corregidos en `1acb5c3`.
+   - **Pruebas:** 1508 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube.
    - **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código.
    - **Falta:**
-     - la revisión independiente final y Codex;
+     - la revisión independiente final y Codex sobre el SHA final;
      - `ci.ps1` con la imagen oficial;
      - pasar las decisiones D1, D3, D4 y las del 23-10 al documento de decisiones de CEM.
