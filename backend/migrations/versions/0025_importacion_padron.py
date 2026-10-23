@@ -23,7 +23,7 @@ repositorio.
 - `nucleo.vinculo.nombre_declarado`: el nombre de la planilla. Mientras el vínculo está
   importado pendiente, `padron_del_consorcio` muestra ese nombre y no el de la persona: si el
   correo ya tenía cuenta (en otro consorcio), el padrón no lo delata ni muestra su nombre real
-  (revisión independiente del corte 3, P1).
+  (revisión independiente del corte 3, P1). `cem_app` no lee la columna, como `motivo_fin`.
 - `nucleo.anular_vinculo`: borra un vínculo que todavía no empezó (`vigente_desde > hoy`) y deja
   un evento con los identificadores, sin el motivo (E31). Por la API, solo sin confirmar; uno
   confirmado lo anula el equipo por soporte con la referencia del respaldo, que queda en el
