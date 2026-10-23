@@ -289,7 +289,8 @@ create function nucleo.importar_vinculo(
       raise exception 'la unidad no existe en este consorcio'
         using errcode = 'P0001', hint = 'unidad_invalida';
     end if;
-    if correo_normal is null or position('@' in correo_normal) <= 1
+    -- El formato de `cem_contracts.identidad.FORMATO_CORREO` y el tope de la invitación.
+    if correo_normal is null or correo_normal !~ '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$'
        or length(correo_normal) > 254 then
       raise exception 'el vínculo importado necesita el correo de la persona'
         using errcode = 'P0001', hint = 'correo_invalido';
@@ -479,12 +480,15 @@ create function nucleo.crear_invitacion_importada(
     end if;
     select p.correo into correo_persona from nucleo.persona p where p.id = v.persona_id;
     for anterior in
-      select i.id, i.vence_en from nucleo.invitacion i
+      select i.id, i.vence_en, i.vinculo_id from nucleo.invitacion i
        where i.consorcio_id = c and i.unidad_id = v.unidad_id and i.tipo = v.tipo
          and i.correo = correo_persona and i.aceptada_en is null and i.revocada_en is null
        for update
     loop
-      if anterior.vence_en > now() then
+      -- Una vigente no se retira; una que nombra otro vínculo tampoco, aunque haya vencido
+      -- (D4.2). Solo se reemplaza una vencida manual o la vencida de este mismo vínculo.
+      if anterior.vence_en > now() or anterior.vinculo_id is distinct from v.id
+                                      and anterior.vinculo_id is not null then
         raise exception 'hay una invitación vigente para esa persona, unidad y carácter'
           using errcode = 'P0001', hint = 'invitacion_pendiente';
       end if;

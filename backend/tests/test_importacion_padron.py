@@ -1598,3 +1598,134 @@ def test_una_cuenta_borrada_no_es_la_persona_de_su_correo_en_el_informe(escena, 
             ).scalar_one()
             == 1
         )
+
+
+# Tanda única de correcciones sobre 4b978a1 (decisión del propietario del 23-10-2026) -------------
+
+
+def test_una_invitacion_vencida_de_otro_vinculo_bloquea_y_no_se_reemplaza(
+    escena, motor_migrate, motor_app
+):
+    """D4.2: la que nombra otro vínculo es un error bloqueante aunque haya vencido."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    primero = planilla(f"2° B,Ali,{correo},ocupante,{f(hoy)},{f(hoy + timedelta(days=9))}")
+    assert pedir_aplicar(e["admin"], e["cons"], primero).status_code == 200
+    [a] = vinculos_de(motor_migrate, correo)
+    [inv_a] = invitaciones_de(motor_migrate, correo)
+    vencer(motor_migrate, inv_a["id"])
+    segundo = planilla(f"2° B,Ali,{correo},ocupante,{f(hoy + timedelta(days=20))},")
+    assert problemas(pedir_informe(e["admin"], e["cons"], segundo).json()) == {
+        2: {"invitacion_pendiente"}
+    }
+    antes = conteos(motor_migrate)
+    assert pedir_aplicar(e["admin"], e["cons"], segundo).status_code == 422
+    assert conteos(motor_migrate) == antes
+    assert invitaciones_de(motor_migrate, correo)[0]["revocada_en"] is None  # no se retiró
+    # La base defiende la misma regla: un vínculo B de la misma persona, unidad y carácter no
+    # retira la invitación vencida que nombra a A.
+    with motor_migrate.begin() as c:
+        b = c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde, fuente, origen, registrado_por, importacion_id,"
+                " nombre_declarado) select consorcio_id, unidad_id, persona_id, tipo, :d,"
+                " fuente, origen, registrado_por, importacion_id, 'Ali' from nucleo.vinculo"
+                " where id = :a returning id"
+            ),
+            {"a": a["id"], "d": hoy + timedelta(days=20)},
+        ).scalar_one()
+    with pytest.raises(DBAPIError, match="invitacion_pendiente"):
+        with transaccion(motor_app, persona_id=e["admin"], consorcio_id=e["cons"]) as c:
+            c.execute(
+                text("select nucleo.crear_invitacion_importada(:v, 'Ali', :h, :p, :a)"),
+                {"v": b, "h": uuid4().bytes * 2, "p": timedelta(days=7), "a": e["admin"]},
+            )
+
+
+@pytest.mark.parametrize(
+    "correo", ["ana@@ejemplo.com", "ana@ejemplo", "@ejemplo.com", "ana@ejemplo.com@x.com"]
+)
+def test_el_correo_tiene_el_formato_de_identidad(correo):
+    [leida] = leer_planilla(planilla(f"3° C,Ana,{correo},inquilino,01-03-2026,")).filas
+    assert "correo_invalido" in {x.codigo for x in leida.problemas}
+
+
+def test_la_base_tampoco_crea_una_persona_con_un_correo_mal_formado(
+    escena, motor_migrate, motor_app
+):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    importacion = pedir_aplicar(e["admin"], e["cons"], planilla("20° A,,,,,")).json()[
+        "importacion_id"
+    ]
+    sql = text("select nucleo.importar_vinculo(:i, :u, :c, 'Ana', 'ocupante', :d, null, :a)")
+    for correo in ("ana@@ejemplo.com", "ana@ejemplo"):
+        with pytest.raises(DBAPIError, match="correo_invalido"):
+            with transaccion(motor_app, persona_id=e["admin"], consorcio_id=e["cons"]) as c:
+                c.execute(sql, {"i": importacion, "u": e["u2"], "c": correo, "d": hoy,
+                                "a": e["admin"]})  # fmt: skip
+    with motor_migrate.connect() as c:
+        assert (
+            c.execute(
+                text(
+                    "select count(*) from nucleo.persona where correo in ('ana@@ejemplo.com',"
+                    " 'ana@ejemplo')"
+                )  # fmt: skip
+            ).scalar_one()
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    "renglon",
+    ['"3° C"xyz,,,,,', '3° C,"Ana,ana@ejemplo.com,inquilino,01-03-2026,\n4° D,,,,,'],
+    ids=["texto_despues_de_las_comillas", "comillas_sin_cerrar"],
+)
+def test_comillas_mal_formadas_son_un_problema_y_no_un_campo_alterado(renglon):
+    p = leer_planilla(planilla(renglon))
+    assert [x.codigo for x in p.problemas] == ["fila_mal_formada"]
+    assert p.filas == []
+
+
+def test_control_las_comillas_bien_formadas_se_leen():
+    [leida] = leer_planilla(planilla('"3° C","Ana, la de arriba",ana@ejemplo.com,inquilino,'
+                                     "01-03-2026,")).filas  # fmt: skip
+    assert leida.problemas == [] and leida.relacion.nombre == "Ana, la de arriba"
+
+
+def test_fuera_de_su_alcance_no_se_infiere_si_una_unidad_existe_ni_como_se_llama(
+    escena, motor_migrate
+):
+    e = escena
+    restringir(motor_migrate, e["m_admin"], "padron.gestionar", e["u2"])
+    # Con una fila de su unidad (2° B), para que haya informe: una planilla solo con unidades
+    # ajenas se niega entera (403), igual exista o no la unidad.
+    respuestas = {
+        d: pedir_informe(e["admin"], e["cons"], planilla("2° B,,,,,", f"{d},,,,,")).json()
+        for d in ("1° A", "1°  a", "21° Z")  # existe fuera de su alcance, ambigua, no existe
+    }
+    filas = {d: r["filas"][1] for d, r in respuestas.items()}
+    assert {
+        (f["unidad"], tuple((x["codigo"], x["mensaje"]) for x in f["problemas"]))
+        for f in filas.values()
+    } == {(None, (("fuera_de_alcance", filas["21° Z"]["problemas"][0]["mensaje"]),))}
+    assert "1° A" not in str(respuestas["1°  a"])  # no nombra la unidad que no ve
+    for d in ("1° A", "1°  a", "21° Z"):  # y una planilla solo con la ajena: el mismo 403
+        assert pedir_informe(e["admin"], e["cons"], planilla(f"{d},,,,,")).status_code == 403
+    # Control: con alcance general, la ambigüedad sí se informa y nombra la existente.
+    restringir_general(motor_migrate, e["m_admin"], "padron.gestionar")
+    r = pedir_informe(e["admin"], e["cons"], planilla("1°  a,,,,,")).json()
+    assert problemas(r) == {2: {"designacion_ambigua"}} and "«1° A»" in str(r)
+
+
+def restringir_general(motor_migrate, mandato, facultad: str) -> None:
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.facultad_otorgada set recurso = null"
+                " where mandato_id = :m and facultad = :f"
+            ),
+            {"m": mandato, "f": facultad},
+        )

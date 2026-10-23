@@ -47,6 +47,7 @@ from uuid import UUID
 
 from cem_contracts.errores import CodigoError
 from cem_contracts.estados import TipoVinculo
+from cem_contracts.identidad import FORMATO_CORREO, LARGO_MAXIMO_CORREO
 from cem_contracts.importacion import (
     AccionInvitacion,
     AccionUnidad,
@@ -86,10 +87,11 @@ GRUPO = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 """El mismo formato de grupo que exige 0021."""
 PORCENTAJE = re.compile(r"^\d{1,3}(\.\d{1,6})?$")
 FECHA = re.compile(r"^\d{2}-\d{2}-\d{4}$")
+CORREO = re.compile(FORMATO_CORREO)
+"""El mismo formato que el enlace, el código y las invitaciones (Codex en app #105): una persona
+creada con otro correo no podría entrar ni recibir una invitación válida."""
 LARGO_MAXIMO_NOMBRE = 100
 """El tope de `nucleo.invitacion.nombre` (0007)."""
-LARGO_MAXIMO_CORREO = 254
-"""El tope de `nucleo.invitacion.correo` (0007)."""
 CIEN = Decimal(100)
 ULTIMO_ANIO = 9998
 """`ultimo_dia + 1` tiene que seguir siendo una fecha (`date.max` es el 31-12-9999)."""
@@ -226,11 +228,7 @@ def _relacion(fila: FilaLeida, valores: dict[str, str]) -> None:
             "La relación necesita nombre, correo, carácter y `vigente_desde`.",
         )
     correo = correo.lower()
-    if correo and (
-        correo.find("@") < 1
-        or len(correo) > LARGO_MAXIMO_CORREO
-        or any(c.isspace() for c in correo)
-    ):
+    if correo and (len(correo) > LARGO_MAXIMO_CORREO or not CORREO.match(correo)):
         fila.problema(CodigoProblema.CORREO_INVALIDO, "El correo no es válido.")
     if nombre and len(nombre) > LARGO_MAXIMO_NOMBRE:
         fila.problema(
@@ -283,8 +281,10 @@ def leer_planilla(archivo: str) -> Planilla:
         )
         return Planilla(sha256, (), [], [nulo])
     try:
-        renglones = list(csv.reader(io.StringIO(archivo.removeprefix("\ufeff"))))
-    except csv.Error as e:  # un campo enorme, comillas sin cerrar
+        # Estricto (Codex en app #105): `"Ana"xyz` o unas comillas sin cerrar son un error, no un
+        # campo leído de otra forma.
+        renglones = list(csv.reader(io.StringIO(archivo.removeprefix("\ufeff")), strict=True))
+    except csv.Error as e:  # comillas mal formadas o sin cerrar, un campo enorme
         malformada = Problema(
             codigo=CodigoProblema.FILA_MAL_FORMADA, mensaje=f"La planilla no es un CSV válido: {e}."
         )
@@ -356,11 +356,18 @@ def _se_superponen(a: tuple[date, date | None], b: tuple[date, date | None]) -> 
 
 
 def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
-    existentes: dict[str, list[tuple[UUID, str]]] = defaultdict(list)
+    """Encuentra o crea la unidad de cada fila. Con `padron.gestionar` acotado, solo cuentan las
+    unidades que la persona gestiona: una designación fuera de su alcance, exista o no, esté
+    escrita igual o distinto, da el mismo `fuera_de_alcance` con el mismo mensaje, y el informe
+    nunca nombra una unidad que no ve (revisión independiente sobre 4b978a1, como los
+    coeficientes)."""
+    general = gestionar.decidir(Entidad()).permitido
+    visibles: dict[str, list[tuple[UUID, str]]] = defaultdict(list)
     for u in conn.execute(
         text("select id, designacion from nucleo.unidad where eliminado_en is null")
     ):
-        existentes[clave_designacion(u.designacion)].append((u.id, u.designacion))
+        if general or gestionar.decidir(sobre_unidad(u.id)).permitido:
+            visibles[clave_designacion(u.designacion)].append((u.id, u.designacion))
     en_planilla: dict[str, set[str]] = defaultdict(set)
     for p in planes:
         if p.fila.designacion:
@@ -370,7 +377,7 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
         if not d:
             continue
         clave = clave_designacion(d)
-        mismas = existentes[clave]
+        mismas = visibles[clave]
         escrituras = en_planilla[clave] | {x for _, x in mismas}
         if len(escrituras) > 1 or len(mismas) > 1:
             p.fila.problema(
@@ -381,15 +388,13 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
             continue
         if mismas:
             p.unidad_id, p.unidad = mismas[0][0], AccionUnidad.EXISTENTE
-        else:
+        elif general:
             p.unidad = AccionUnidad.CREAR
-        if not gestionar.decidir(sobre_unidad(p.unidad_id)).permitido:
-            p.negada_gestionar = sobre_unidad(p.unidad_id)
+        else:
+            p.negada_gestionar = Entidad()
             p.fila.problema(
                 CodigoProblema.FUERA_DE_ALCANCE,
-                "Sin `padron.gestionar` sobre esta unidad."
-                if p.unidad_id
-                else "Crear una unidad exige `padron.gestionar` con alcance general.",
+                "Esta unidad está fuera de tu alcance de `padron.gestionar`.",
             )
 
 
@@ -467,6 +472,7 @@ def _exigir_invitar(p: Plan, invitar: Permiso) -> None:
 
 def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Permiso) -> None:
     pendientes: dict[tuple, list[bool]] = defaultdict(list)
+    de_otro_vinculo: set[tuple] = set()
     vencidas_de: set[UUID] = set()
     for i in conn.execute(
         text(
@@ -474,9 +480,12 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
             " from nucleo.invitacion where aceptada_en is null and revocada_en is null"
         )
     ):
-        pendientes[(i.unidad_id, TipoVinculo(i.tipo), i.correo)].append(i.vigente)
-        if i.vinculo_id is not None and not i.vigente:
-            vencidas_de.add(i.vinculo_id)
+        clave = (i.unidad_id, TipoVinculo(i.tipo), i.correo)
+        pendientes[clave].append(i.vigente)
+        if i.vinculo_id is not None:
+            de_otro_vinculo.add(clave)
+            if not i.vigente:
+                vencidas_de.add(i.vinculo_id)
     nuevas: dict[tuple, list[Plan]] = defaultdict(list)
     for p in planes:
         if p.vinculo is None:
@@ -502,11 +511,14 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
             continue
         nuevas[(clave_designacion(p.fila.designacion), r.tipo, r.correo)].append(p)
         previas = pendientes[(p.unidad_id, r.tipo, r.correo)] if p.unidad_id else []
-        if any(previas):
+        # D4.2: una vigente bloquea, y una que nombra otro vínculo también, aunque haya vencido
+        # (revisión independiente sobre 4b978a1): solo una manual vencida se reemplaza.
+        if any(previas) or (p.unidad_id, r.tipo, r.correo) in de_otro_vinculo:
             p.fila.problema(
                 CodigoProblema.INVITACION_PENDIENTE,
-                "Ya hay una invitación vigente para esta persona, unidad y carácter que no nombra"
-                " este vínculo: no se retira (D4.2).",
+                "Ya hay una invitación pendiente para esta persona, unidad y carácter que no"
+                " nombra este vínculo (vigente, o de otro vínculo importado): no se retira"
+                " (D4.2).",
             )
             continue
         p.invitacion = AccionInvitacion.REEMPLAZAR_VENCIDA if previas else AccionInvitacion.CREAR

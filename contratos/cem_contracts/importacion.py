@@ -73,8 +73,9 @@ class CodigoProblema(StrEnum):
     """Dos vínculos vigentes o futuros nuevos de la misma persona, unidad y carácter: solo puede
     haber una invitación pendiente para ellos."""
     INVITACION_PENDIENTE = "invitacion_pendiente"
-    """Ya hay una invitación vigente para esa persona, unidad y carácter que no nombra este
-    vínculo (manual o de otro): no se retira (D4.2)."""
+    """Ya hay una invitación pendiente para esa persona, unidad y carácter que no nombra este
+    vínculo: una vigente (manual o de otro vínculo), o una de otro vínculo importado aunque haya
+    vencido. No se retira (D4.2)."""
     COEFICIENTE_INVALIDO = "coeficiente_invalido"
     """El porcentaje no es un número entre 0 y 100 con punto decimal y hasta 6 decimales, o el
     grupo no es válido."""
@@ -110,8 +111,8 @@ class AccionInvitacion(StrEnum):
     CREAR = "crear"
     """Se crea, sin enviarla. La persona la ve y la acepta con su sesión."""
     REEMPLAZAR_VENCIDA = "reemplazar_vencida"
-    """Había una pendiente vencida para esa persona, unidad y carácter: se retira y se crea la
-    nueva, al aplicar y en la misma transacción. Con un vínculo `existente`, es la renovación:
+    """Había una pendiente manual vencida para esa persona, unidad y carácter: se retira y se crea
+    la nueva, al aplicar y en la misma transacción. Con un vínculo `existente`, es la renovación:
     el vínculo sigue importado pendiente y su invitación venció."""
     NINGUNA = "ninguna"
     """El vínculo ya terminó, o ya existía y su invitación no hace falta renovarla."""
