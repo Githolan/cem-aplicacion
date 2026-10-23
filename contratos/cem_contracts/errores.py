@@ -79,7 +79,8 @@ class CodigoError(StrEnum):
     """La invitación nombra un vínculo que ya no le corresponde: fue anulado, o es de otra
     persona, otra unidad u otro carácter. No se reutiliza otro ni se crea uno."""
     IMPORTACION_CON_PROBLEMAS = "importacion_con_problemas"
-    """La planilla tiene al menos un problema: no se escribió nada. El informe dice cuáles."""
+    """La planilla tiene al menos un problema (422), o el padrón cambió por otra vía mientras se
+    aplicaba (409): no se escribió nada. El informe dice cuáles."""
     MANDATO_YA_ASOCIADO = "mandato_ya_asociado"
     """El mandato ya tiene una cuenta: para cambiarla, primero se desasocia (A7)."""
     MANDATO_NO_VIGENTE = "mandato_no_vigente"

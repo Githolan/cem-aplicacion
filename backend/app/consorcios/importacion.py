@@ -60,7 +60,9 @@ from cem_contracts.importacion import (
 from cem_contracts.politicas import TipoRecurso
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
+from psycopg.errors import UniqueViolation
 from sqlalchemy import Connection, text
+from sqlalchemy.exc import DBAPIError
 
 from app import auditoria
 from app.autorizacion.evaluador import Entidad
@@ -87,6 +89,11 @@ LARGO_MAXIMO_NOMBRE = 100
 LARGO_MAXIMO_CORREO = 254
 """El tope de `nucleo.invitacion.correo` (0007)."""
 CIEN = Decimal(100)
+ULTIMO_ANIO = 9998
+"""`ultimo_dia + 1` tiene que seguir siendo una fecha (`date.max` es el 31-12-9999)."""
+CAMBIO_DURANTE_LA_APLICACION = frozenset({"vinculo_solapado", "invitacion_pendiente"})
+"""Motivos de la base que solo aparecen si el padrón cambió entre el informe recalculado y la
+escritura (otra ruta, no otra importación: esas se ordenan con el bloqueo)."""
 
 
 # Lectura de la planilla -----------------------------------------------------------------------
@@ -135,9 +142,10 @@ def _fecha(valor: str) -> date | None:
     if not FECHA.match(valor):
         return None
     try:
-        return datetime.strptime(valor, "%d-%m-%Y").date()
+        fecha = datetime.strptime(valor, "%d-%m-%Y").date()
     except ValueError:
         return None
+    return fecha if fecha.year <= ULTIMO_ANIO else None
 
 
 def _encabezado(columnas: list[str]) -> tuple[tuple[str, ...], list[Problema]]:
@@ -263,7 +271,13 @@ def _coeficientes(fila: FilaLeida, valores: dict[str, str], grupos: tuple[str, .
 def leer_planilla(archivo: str) -> Planilla:
     """Lee la planilla sin tocar la base. Cada fila trae sus problemas de forma."""
     sha256 = hashlib.sha256(archivo.encode("utf-8")).digest()
-    renglones = list(csv.reader(io.StringIO(archivo.removeprefix("﻿"))))
+    try:
+        renglones = list(csv.reader(io.StringIO(archivo.removeprefix("\ufeff"))))
+    except csv.Error as e:  # un byte nulo, un campo enorme, comillas sin cerrar
+        malformada = Problema(
+            codigo=CodigoProblema.FILA_MAL_FORMADA, mensaje=f"La planilla no es un CSV válido: {e}."
+        )
+        return Planilla(sha256, (), [], [malformada])
     if not renglones or not any(c.strip() for c in renglones[0]):
         vacio = Problema(codigo=CodigoProblema.ARCHIVO_VACIO, mensaje="La planilla está vacía.")
         return Planilla(sha256, (), [], [vacio])
@@ -466,7 +480,7 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
 
 
 def _coeficientes_informe(
-    conn: Connection, planilla: Planilla, planes: list[Plan], hoy: date
+    conn: Connection, planilla: Planilla, planes: list[Plan], hoy: date, gestionar: Permiso
 ) -> tuple[list[CoeficientesGrupo], list[str]]:
     por_unidad: dict[str, dict[str, Decimal]] = defaultdict(dict)
     for p in planes:
@@ -479,11 +493,13 @@ def _coeficientes_informe(
                     f"Otra fila de «{d}» da otro porcentaje para `{grupo}`.",
                 )
             por_unidad[d].setdefault(grupo, valor)
+    # Solo las unidades que quien importa gestiona: con un alcance acotado no ve el resto.
     activas = {
         u.designacion: u.id
         for u in conn.execute(
             text("select id, designacion from nucleo.unidad where eliminado_en is null")
         )
+        if gestionar.decidir(sobre_unidad(u.id)).permitido
     }
     designaciones = sorted(
         {p.fila.designacion for p in planes if p.fila.designacion} | set(activas)
@@ -541,7 +557,7 @@ def analizar(
     _unidades(conn, planes, gestionar)
     _vinculos(conn, planes)
     _invitaciones(conn, planes, hoy, invitar)
-    coeficientes, esquemas = _coeficientes_informe(conn, planilla, planes, hoy)
+    coeficientes, esquemas = _coeficientes_informe(conn, planilla, planes, hoy, gestionar)
     hay_problemas = bool(planilla.problemas) or any(p.fila.problemas for p in planes)
     filas = []
     for p in planes:
@@ -637,6 +653,25 @@ def _aplicar(
             invitaciones_creadas=0,
             invitaciones_reemplazadas=0,
         )
+    try:
+        return _escribir(conn, ctx, planilla, analisis, ip)
+    except DBAPIError as e:
+        if (
+            isinstance(e.orig, UniqueViolation)
+            or e.orig.diag.message_hint in CAMBIO_DURANTE_LA_APLICACION
+        ):
+            raise ErrorApi(
+                409,
+                CodigoError.IMPORTACION_CON_PROBLEMAS,
+                "El padrón cambió mientras se aplicaba la planilla: no se escribió nada. Pedí el"
+                " informe de nuevo.",
+            ) from e
+        raise
+
+
+def _escribir(
+    conn: Connection, ctx: Contexto, planilla: Planilla, analisis: Analisis, ip: str | None
+) -> ImportacionAplicada:
     importacion = conn.execute(
         text("select nucleo.registrar_importacion_padron(:h, :a)"),
         {"h": planilla.sha256, "a": ctx.persona_id},
@@ -702,7 +737,7 @@ def _aplicar(
             reemplazadas += p.invitacion == AccionInvitacion.REEMPLAZAR_VENCIDA
     return ImportacionAplicada(
         importacion_id=importacion,
-        archivo_sha256=sha,
+        archivo_sha256=planilla.sha256.hex(),
         unidades_creadas=len(creadas),
         vinculos_creados=vinculos,
         invitaciones_creadas=invitaciones,
@@ -744,6 +779,7 @@ def informe(
             "description": "Una fila queda fuera de `padron.gestionar` (o de `invitaciones.crear`"
             " si crea una invitación), o crea una unidad sin alcance general."
         },
+        409: {"description": "El padrón cambió mientras se aplicaba: no se escribió nada."},
         422: {"description": "La planilla tiene problemas: no se escribió nada."},
     },
 )

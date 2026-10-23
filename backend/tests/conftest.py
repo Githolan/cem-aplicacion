@@ -101,7 +101,7 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
             text(
                 "do $$ begin"
                 " if to_regclass('nucleo.importacion_padron') is not null then"
-                "   update nucleo.vinculo set importacion_id = null"
+                "   update nucleo.vinculo set importacion_id = null, nombre_declarado = null"
                 "    where importacion_id is not null;"
                 "   update nucleo.invitacion set vinculo_id = null where vinculo_id is not null;"
                 "   delete from nucleo.importacion_padron;"

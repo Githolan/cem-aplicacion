@@ -5045,6 +5045,9 @@
           "403": {
             "description": "Una fila queda fuera de `padron.gestionar` (o de `invitaciones.crear` si crea una invitación), o crea una unidad sin alcance general."
           },
+          "409": {
+            "description": "El padrón cambió mientras se aplicaba: no se escribió nada."
+          },
           "422": {
             "description": "La planilla tiene problemas: no se escribió nada."
           }

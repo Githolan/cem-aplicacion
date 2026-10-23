@@ -17,6 +17,7 @@ decisiones del propietario del 22-10-2026 (D1 a D4 en `doc/rf02_corte3_informe.m
 - RLS de `importacion_padron` y la ida y vuelta 0024 ⇄ 0025.
 """
 
+import threading
 from datetime import date, timedelta
 from decimal import Decimal
 from uuid import uuid4
@@ -613,7 +614,7 @@ def test_la_invitacion_acepta_exactamente_su_vinculo_aunque_haya_otro(escena, mo
     assert ev["despues"]["vinculo_id"] == str(importado)
 
 
-@pytest.mark.parametrize("caso", ["anulado", "otro_caracter", "otra_unidad"])
+@pytest.mark.parametrize("caso", ["borrado", "otro_caracter", "otra_unidad"])
 def test_si_su_vinculo_ya_no_corresponde_la_aceptacion_falla_explicita(escena, motor_migrate, caso):
     e = escena
     hoy = _hoy(motor_migrate, e["cons"])
@@ -623,14 +624,12 @@ def test_si_su_vinculo_ya_no_corresponde_la_aceptacion_falla_explicita(escena, m
     assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
     [v] = vinculos_de(motor_migrate, correo)
     [inv] = invitaciones_de(motor_migrate, correo)
-    if caso == "anulado":
-        with cliente(e["admin"]) as c:
-            r = c.post(
-                f"/api/v1/consorcios/{e['cons']}/vinculos/{v['id']}/anular",
-                json={"motivo": "Cargado por error"},
-                headers=clave_idempotencia(),
-            )
-        assert r.status_code == 200, r.text
+    if caso == "borrado":
+        # El vínculo ya no existe y su invitación sigue pendiente. La anulación de la API la
+        # retira (ver la prueba de anular y recargar); acá se borra como dueño de la tabla, para
+        # probar la barrera de `aceptar_invitacion` sola.
+        with motor_migrate.begin() as c:
+            c.execute(text("delete from nucleo.vinculo where id = :v"), {"v": v["id"]})
     else:
         columna = {"otro_caracter": "tipo = 'inquilino'", "otra_unidad": "unidad_id = :u1"}[caso]
         with motor_migrate.begin() as c:
@@ -1111,3 +1110,211 @@ def test_downgrade_con_una_importacion_se_niega_y_sin_ella_vuelve_exacto(base_ap
         )
         assert c.execute(text(privilegios)).scalar_one() == columnas_antes
     command.upgrade(cfg, "head")
+
+
+# Revisión independiente del corte 3 ------------------------------------------------------------
+
+
+def nombres_del_padron(persona, cons) -> set[str]:
+    with cliente(persona) as c:
+        r = c.get(f"/api/v1/consorcios/{cons}/padron")
+    assert r.status_code == 200, r.text
+    return {x["nombre"] for x in r.json()["elementos"]}
+
+
+def test_el_padron_no_delata_ni_muestra_el_nombre_de_una_cuenta_de_otro_consorcio(
+    escena, motor_migrate, motor_app
+):
+    """P1: si el padrón mostrara el nombre de la persona, importar un correo serviría para saber
+    si tiene cuenta en otro consorcio y cómo se llama."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    cons_b, _ = segundo_consorcio_con_mandato(motor_migrate, motor_app, e["mc"])
+    with motor_migrate.begin() as c:
+        ajena, correo = c.execute(
+            text(
+                "select p.id, p.correo from nucleo.vinculo v"
+                " join nucleo.persona p on p.id = v.persona_id where v.consorcio_id = :c limit 1"
+            ),
+            {"c": cons_b},
+        ).one()
+        c.execute(
+            text("update nucleo.persona set nombre = 'Nombre Real' where id = :p"), {"p": ajena}
+        )
+    archivo = planilla(f"2° B,Sonda,{correo},ocupante,{f(hoy + timedelta(days=30))},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    nombres = nombres_del_padron(e["admin"], e["cons"])
+    assert "Sonda" in nombres and "Nombre Real" not in nombres
+    # Control: aceptada su invitación, el vínculo deja de estar pendiente y muestra su nombre.
+    [inv] = invitaciones_de(motor_migrate, correo)
+    with cliente(ajena) as c:
+        assert c.post(f"/api/v1/me/invitaciones/{inv['id']}/aceptar").status_code == 200
+    nombres = nombres_del_padron(e["admin"], e["cons"])
+    assert "Nombre Real" in nombres and "Sonda" not in nombres
+
+
+def test_anular_retira_su_invitacion_y_se_puede_volver_a_cargar_corregido(escena, motor_migrate):
+    """P2: la invitación del vínculo anulado no queda pendiente bloqueando la recarga."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    errado = planilla(f"2° B,Ivo,{correo},ocupante,{f(hoy + timedelta(days=15))},")
+    assert pedir_aplicar(e["admin"], e["cons"], errado).status_code == 200
+    [v] = vinculos_de(motor_migrate, correo)
+    [inv] = invitaciones_de(motor_migrate, correo)
+    assert anular(e["admin"], e["cons"], v["id"]).status_code == 200
+    assert invitaciones_de(motor_migrate, correo)[0]["revocada_en"] is not None
+    with cliente(persona_de(motor_migrate, correo)) as c:  # ya no la ve ni la acepta
+        assert c.get("/api/v1/me/invitaciones").json()["elementos"] == []
+        r = c.post(f"/api/v1/me/invitaciones/{inv['id']}/aceptar")
+    assert (r.status_code, r.json()["codigo"]) == (404, "invitacion_invalida")
+    revocadas = eventos(motor_migrate, e["cons"], "identidad.invitacion.revocar")
+    assert inv["id"] in [x["entidad_id"] for x in revocadas]
+    corregido = planilla(f"2° B,Ivo,{correo},ocupante,{f(hoy + timedelta(days=45))},")
+    r = pedir_aplicar(e["admin"], e["cons"], corregido)
+    assert r.status_code == 200, r.text
+    assert r.json()["invitaciones_creadas"] == 1
+
+
+@pytest.mark.parametrize(
+    "archivo",
+    [
+        planilla("3° C,Ana,ana@ejemplo.com,inquilino,01-03-2026,31-12-9999"),
+        ENCABEZADO + "\n3° C,Ana,ana@ejemplo.com,inquilino,01-03-2026,\x00\n",
+        ENCABEZADO + "\n" + "x" * 140_000 + ",,,,,\n",
+    ],
+    ids=["anio_9999", "byte_nulo", "campo_enorme"],
+)
+def test_una_planilla_patologica_es_un_problema_y_no_un_500(escena, archivo):
+    e = escena
+    r = pedir_informe(e["admin"], e["cons"], archivo)
+    assert r.status_code == 200, r.text
+    assert r.json()["aplicable"] is False
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 422
+
+
+def test_vinculos_de_correos_exige_padron_gestionar_en_la_base(escena, motor_app):
+    e = escena
+    consulta = text("select count(*) from nucleo.vinculos_de_correos(array['x@ejemplo.com'])")
+    with pytest.raises(DBAPIError, match="sin padron.gestionar"):
+        with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
+            c.execute(consulta)
+    with transaccion(motor_app, persona_id=e["admin"], consorcio_id=e["cons"]) as c:
+        assert c.execute(consulta).scalar_one() == 0  # control
+
+
+def test_si_el_padron_cambia_durante_la_escritura_responde_409_y_no_deja_nada(
+    escena, motor_migrate
+):
+    """Otra ruta escribe entre el informe recalculado y la escritura (aquí, un disparador que
+    responde lo mismo que la base ante un solape)."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    archivo = planilla("17° A,,,,,", f"2° B,Ema,{correo_nuevo()},ocupante,{f(hoy)},")
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "create function solape_sembrado_en_prueba() returns trigger language plpgsql"
+                " as $$ begin raise exception 'solape' using errcode = 'P0001',"
+                " hint = 'vinculo_solapado'; end $$"
+            )
+        )
+        c.execute(
+            text(
+                "create trigger solape_sembrado before insert on nucleo.vinculo"
+                " for each row execute function solape_sembrado_en_prueba()"
+            )
+        )
+    try:
+        antes = conteos(motor_migrate)
+        r = pedir_aplicar(e["admin"], e["cons"], archivo)
+        assert (r.status_code, r.json()["codigo"]) == (409, "importacion_con_problemas")
+        assert conteos(motor_migrate) == antes
+    finally:
+        with motor_migrate.begin() as c:
+            c.execute(text("drop trigger solape_sembrado on nucleo.vinculo"))
+            c.execute(text("drop function solape_sembrado_en_prueba()"))
+
+
+def test_bordes_de_fecha_un_solo_dia_y_terminado_ayer(escena, motor_migrate):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    un_dia, ayer = correo_nuevo(), correo_nuevo()
+    archivo = planilla(
+        f"2° B,Uno,{un_dia},ocupante,{f(hoy + timedelta(days=3))},{f(hoy + timedelta(days=3))}",
+        f"2° B,Dos,{ayer},ocupante,{f(hoy - timedelta(days=10))},{f(hoy - timedelta(days=1))}",
+    )
+    filas = pedir_informe(e["admin"], e["cons"], archivo).json()["filas"]
+    assert [x["invitacion"] for x in filas] == ["crear", "ninguna"]
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    [v] = vinculos_de(motor_migrate, un_dia)
+    assert (v["vigente_desde"], v["vigente_hasta"]) == (
+        hoy + timedelta(days=3),
+        hoy + timedelta(days=4),
+    )
+    assert vinculos_de(motor_migrate, ayer)[0]["vigente_hasta"] == hoy  # ya no vale hoy
+    assert invitaciones_de(motor_migrate, ayer) == []
+
+
+def test_si_la_invitacion_llega_a_otra_persona_la_aceptacion_falla_explicita(escena, motor_migrate):
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    assert (
+        pedir_aplicar(
+            e["admin"], e["cons"], planilla(f"2° B,Ada,{correo},ocupante,{f(hoy)},")
+        ).status_code
+        == 200
+    )
+    [inv] = invitaciones_de(motor_migrate, correo)
+    otra = otra_persona(motor_migrate, e["cons"])
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.invitacion set correo = (select correo from nucleo.persona"
+                " where id = :p) where id = :i"
+            ),
+            {"p": otra, "i": inv["id"]},
+        )
+    with cliente(otra) as c:
+        r = c.post(f"/api/v1/me/invitaciones/{inv['id']}/aceptar")
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_vinculo_no_corresponde")
+
+
+def test_dos_importaciones_iguales_a_la_vez_crean_una_sola_vez(escena, motor_migrate):
+    e = escena
+    archivo = planilla("18° A,,,,,", "19° A,,,,,")
+    barrera = threading.Barrier(2)
+    respuestas = []
+
+    def importar():
+        barrera.wait()
+        respuestas.append(pedir_aplicar(e["admin"], e["cons"], archivo))
+
+    hilos = [threading.Thread(target=importar) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    assert [r.status_code for r in respuestas] == [200, 200]
+    assert sorted(r.json()["unidades_creadas"] for r in respuestas) == [0, 2]
+    with motor_migrate.connect() as c:
+        assert (
+            c.execute(
+                text(
+                    "select count(*) from nucleo.unidad where consorcio_id = :c"
+                    " and designacion in ('18° A', '19° A')"
+                ),
+                {"c": e["cons"]},
+            ).scalar_one()
+            == 2
+        )
+
+
+def test_los_coeficientes_no_listan_unidades_fuera_de_su_alcance(escena, motor_migrate):
+    e = escena
+    restringir(motor_migrate, e["m_admin"], "padron.gestionar", e["u2"])
+    r = pedir_informe(
+        e["admin"], e["cons"], planilla("2° B,10", encabezado="unidad,coeficiente_agua")
+    )
+    assert r.json()["coeficientes"][0]["sin_coeficiente"] == []  # no nombra la 1° A
