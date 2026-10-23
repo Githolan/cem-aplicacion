@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `2ceef5d`, con las respuestas del propietario del 23-10 a las tres preguntas y a la de la renovación. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `1acb5c3`, con las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de Codex en app #105. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -94,7 +94,7 @@ Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importaci
 
 ## 4. Plan mínimo, implementado
 
-Rama `rf02-importacion-corte3`, líneas en `2ceef5d`:
+Rama `rf02-importacion-corte3`, líneas en `1acb5c3`:
 
 - **Migración `backend/migrations/versions/0025_importacion_padron.py`:**
   - `importacion_padron` (l. 189);
@@ -102,15 +102,15 @@ Rama `rf02-importacion-corte3`, líneas en `2ceef5d`:
   - `invitacion.vinculo_id` (l. 221);
   - `aceptar_invitacion` (rama nueva en la l. 122) y `padron_del_consorcio` (nombre declarado en la l. 161), las dos derivadas de 0014 con reemplazos verificados;
   - `registrar_importacion_padron` (l. 231), `importar_vinculo` (l. 261), `anular_vinculo` (l. 341), `crear_invitacion_importada` (l. 440) y `vinculos_de_correos` (l. 516);
-  - el downgrade se niega con datos (l. 565) y, sin datos, vuelve exacto.
+  - el downgrade se niega con datos (l. 568) y, sin datos, vuelve exacto.
 - **`backend/app/consorcios/importacion.py`:**
-  - `leer_planilla` (l. 275), `_invitaciones` (l. 461, con la renovación), `analizar` (l. 585), `_aplicar` (l. 663) y `_escribir` (l. 711);
-  - las rutas `informe` (l. 809) y `aplicar` (l. 835).
+  - `leer_planilla` (l. 275), `_invitaciones` (l. 468, con la renovación), `analizar` (l. 592), `_aplicar` (l. 670) y `_escribir` (l. 718);
+  - las rutas `informe` (l. 816) y `aplicar` (l. 842).
 - **`backend/app/consorcios/padron.py:305`:** `POST …/vinculos/{v}/anular`.
 - **`backend/scripts/anular_vinculo.py`:** anulación por soporte, agregada al `Dockerfile`.
 - **`backend/app/identidad/invitaciones.py`:** el 409 explícito al aceptar (`_vinculo_no_corresponde`, l. 392) y el 409 de la invitación manual (`crear`, l. 99).
 - **Contrato 0.17.0:** `contratos/cem_contracts/importacion.py` y cuatro códigos de error; `openapi.json` y `esquemas.json` regenerados.
-- **Pruebas:** `backend/tests/test_importacion_padron.py`, con 59 funciones y 83 casos. `conftest.py` (`vaciar_mandatos`) y `test_vinculo_0014.py` quedaron al día.
+- **Pruebas:** `backend/tests/test_importacion_padron.py`, con 61 funciones y 86 casos. `conftest.py` (`vaciar_mandatos`) y `test_vinculo_0014.py` quedaron al día.
 
 ## 5. Criterio exacto de terminado, y dónde está
 
@@ -118,13 +118,13 @@ Rama `rf02-importacion-corte3`, líneas en `2ceef5d`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1505 passed sobre `2ceef5d`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1508 passed sobre `1acb5c3`; la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 22 de 22 detectadas |
+| Mutaciones | 25 de 25 detectadas |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
-| Codex | **SIN VERIFICAR:** no hay Codex en esta sesión |
+| Codex | Revisó `6a4bb7e` en app #105 (PR en borrador, lo abrió el Hilo principal): un P1 y dos P2, corregidos en `1acb5c3`. **Codex sobre el SHA final: PENDIENTE** |
 
 **Entorno.** La imagen `backend/pruebas/Dockerfile` no se construye acá: el proxy de la sesión rechaza `deb.debian.org` y `apt.postgresql.org` con un 403. La misma suite corrió con los servicios del compose (PostgreSQL 18, Redis 7, Versity y Mailpit) sobre una imagen local con:
 - Python 3.12-slim;
@@ -159,8 +159,11 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | acepta un vínculo finalizado | 1 |
 | reimportar no renueva la vencida | 2 |
 | la base da otra invitación a un vínculo no pendiente | 1 |
+| la anulación busca el vínculo antes del efecto idempotente | 1 |
+| el informe cuenta los vínculos de una cuenta borrada | 1 |
+| acepta un byte nulo | 2 |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504` y las 2 últimas sobre `2ceef5d`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d` y las 3 últimas sobre `1acb5c3`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -168,11 +171,16 @@ Corregidos en `e1667f2`, cada uno con su prueba:
 - **P1:** el padrón delataba que un correo tenía cuenta en otro consorcio, y mostraba su nombre real. Ahora muestra `nombre_declarado`.
 - **P2:** anular dejaba la invitación pendiente y bloqueaba la recarga.
 - **P3:**
-  - el año 9999, un byte nulo o un campo enorme daban 500;
+  - el año 9999, un byte nulo o un campo enorme daban 500 (el byte nulo quedó bien recién en `1acb5c3`: la prueba lo ponía en una fecha y pasaba por la fecha inválida; lo encontró Codex);
   - una carrera con otra ruta daba 500; ahora da 409 sin escribir nada;
   - `vinculos_de_correos` no tenía su barrera en la base;
   - el informe de coeficientes nombraba unidades fuera del alcance.
 
 Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y están en `1e1b504`.
+
+**Codex en app #105** (sobre `6a4bb7e`), corregido en `1acb5c3`, cada hallazgo con su prueba y su mutación:
+- **P1:** un reintento de la anulación con la misma clave respondía 404, porque el vínculo se buscaba antes de `responder_una_vez`. Ahora la búsqueda y la facultad van dentro del efecto, y el reintento repite el 200.
+- **P2:** `vinculos_de_correos` contaba vínculos de una persona borrada lógicamente. Ahora filtra `eliminado_en is null`, como `importar_vinculo`.
+- **P2:** `csv.reader` acepta un byte nulo, que llegaba a PostgreSQL desde la unidad o el nombre. Ahora se rechaza antes de cualquier consulta.
 
 **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.**
