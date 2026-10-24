@@ -117,17 +117,28 @@ def crear(
     if unidad is None:
         return None
     correo = nueva.correo.lower()
+    # Orden de bloqueos de RF02 (invitación, persona, vínculo, auditoría; ver 0025): primero las
+    # pendientes de esta clave y después `persona:<correo>`, antes de retirar, insertar o
+    # auditar. Sin la persona, una importación del mismo correo, unidad y carácter sin pendiente
+    # previa se trababa con esta ruta: cada una esperaba la invitación nueva o la auditoría de
+    # la otra (Codex en app #105).
+    clave = {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo}
+    de_la_clave = text(
+        "select vinculo_id from nucleo.invitacion"
+        " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
+        " and aceptada_en is null and revocada_en is null order by id for update"
+    )
+    conn.execute(de_la_clave, clave)
+    conn.execute(
+        text("select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"),
+        {"c": correo},
+    )
+    # Se vuelve a leer con la persona tomada: mientras se esperaba, una importación pudo crear
+    # (y confirmar) la invitación de esta clave.
+    pendientes = conn.execute(de_la_clave, clave).all()
     # La invitación que creó la importación nombra su vínculo (0025): una manual no la reemplaza,
     # ni vencida, porque la nueva no tendría ese vínculo (decisión del propietario, 23-10-2026).
-    if conn.execute(
-        text(
-            "select 1 from nucleo.invitacion"
-            " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
-            " and aceptada_en is null and revocada_en is null and vinculo_id is not null"
-            " for update"
-        ),
-        {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo},
-    ).first():
+    if any(f.vinculo_id is not None for f in pendientes):
         raise ErrorApi(
             409,
             CodigoError.INVITACION_IMPORTADA_PENDIENTE,

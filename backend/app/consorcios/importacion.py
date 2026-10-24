@@ -35,6 +35,7 @@ Importar no crea ámbito ni facultad: el vínculo entra sin confirmar y queda im
 
 import csv
 import hashlib
+import heapq
 import io
 import logging
 import re
@@ -387,16 +388,26 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
     for p in planes:
         if p.fila.designacion:
             en_planilla[clave_designacion(p.fila.designacion)].add(p.fila.designacion)
+    # Una sola pasada por designación normalizada (Codex en app #105): si es ambigua y sus dos
+    # primeras grafías, para dar a cada fila un ejemplo distinto de la suya sin volver a recorrer
+    # el grupo por cada fila.
+    ambiguas: dict[str, tuple[str, str]] = {}
+    for clave, grafias in en_planilla.items():
+        mismas = visibles[clave]
+        todas = grafias | {x for _, x in mismas}
+        if len(todas) > 1 or len(mismas) > 1:
+            primeras = heapq.nsmallest(2, todas)
+            ambiguas[clave] = (primeras[0], primeras[-1])
     for p in planes:
         d = p.fila.designacion
         if not d:
             continue
         clave = clave_designacion(d)
         mismas = visibles[clave]
-        escrituras = en_planilla[clave] | {x for _, x in mismas}
-        if len(escrituras) > 1 or len(mismas) > 1:
+        if clave in ambiguas:
             # Un ejemplo, no todas las escrituras: con todas, el tamaño era cuadrático.
-            otra = min((x for x in escrituras if x != d), default=d)
+            primera, segunda = ambiguas[clave]
+            otra = segunda if d == primera else primera
             p.fila.problema(
                 CodigoProblema.DESIGNACION_AMBIGUA,
                 f"«{d}» es la misma unidad que «{otra}» escrita de otra forma: no se crea una"

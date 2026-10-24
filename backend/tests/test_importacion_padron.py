@@ -1804,19 +1804,22 @@ def test_muchos_solapes_dan_a_lo_sumo_un_diagnostico_por_fila(escena, motor_migr
     assert sum(por_fila) == 400  # todas se superponen con otra: todas quedan marcadas
 
 
-def esperar_que_alguien_espere_un_bloqueo(salvo_pid: int) -> None:
+def esperar_que_alguien_espere_un_bloqueo(salvo_pid: int, cuantos: int = 1) -> None:
     """Con el rol administrador: `cem_migrate` no ve en qué espera un proceso de `cem_app`."""
     admin = create_engine(ADMIN_URL)
     try:
         for _ in range(400):
             with admin.connect() as c:
-                if c.execute(
-                    text(
-                        "select count(*) from pg_stat_activity where datname = :base"
-                        " and wait_event_type = 'Lock' and pid <> :p"
-                    ),
-                    {"base": BASE, "p": salvo_pid},
-                ).scalar_one():
+                if (
+                    c.execute(
+                        text(
+                            "select count(*) from pg_stat_activity where datname = :base"
+                            " and wait_event_type = 'Lock' and pid <> :p"
+                        ),
+                        {"base": BASE, "p": salvo_pid},
+                    ).scalar_one()
+                    >= cuantos
+                ):
                     return
             time.sleep(0.05)
     finally:
@@ -2083,3 +2086,65 @@ def test_cada_grupo_se_compara_con_su_propio_esquema_vigente(
         False,
         [],
     )
+
+
+# Dos P2 de Codex sobre 3735371 (barrido de la clase) --------------------------------------------
+
+
+def test_muchas_variantes_de_una_designacion_se_validan_en_una_pasada_por_grupo(escena):
+    """Codex en app #105: 8000 variantes de mayúsculas de la misma designación tardaban unos 8
+    segundos, porque cada fila copiaba y recorría el grupo entero."""
+    e = escena
+    base = "abcdefghijklm"
+    variantes = [
+        "".join(c.upper() if (i >> k) & 1 else c for k, c in enumerate(base)) for i in range(8000)
+    ]
+    archivo = planilla(*(f"{d},,,,," for d in variantes))
+    inicio = time.perf_counter()
+    cuerpo = pedir_informe(e["admin"], e["cons"], archivo).json()
+    assert time.perf_counter() - inicio < 3
+    assert {p["codigo"] for x in cuerpo["filas"] for p in x["problemas"]} == {"designacion_ambigua"}
+    # Cada fila tiene un ejemplo distinto de su propia grafía.
+    for x in cuerpo["filas"]:
+        assert f"«{x['designacion']}» es la misma unidad que «" in x["problemas"][0]["mensaje"]
+        assert x["problemas"][0]["mensaje"].count(f"«{x['designacion']}»") == 1
+
+
+def test_una_importacion_y_una_invitacion_manual_nueva_del_mismo_correo_no_se_traban(
+    escena, motor_migrate
+):
+    """Codex en app #105. Sin pendiente previa, el bloqueo de filas no toma nada: la manual
+    insertaba y después auditaba, la importación auditaba y después insertaba, y se esperaban
+    por `invitacion_pendiente_unica` y por la cadena de auditoría. Ahora las dos toman
+    `persona:<correo>` antes de insertar o auditar.
+
+    Tres conexiones reales y un orden determinista: la primera retiene la cadena de auditoría del
+    consorcio; la importación llega primera a esperarla y la invitación manual después. Al
+    soltarla, la importación sigue primero."""
+    e = escena
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Noa,{correo},ocupante,{f(hoy)},")
+    with motor_migrate.connect() as cadena:
+        with cadena.begin():
+            pid = cadena.execute(text("select pg_backend_pid()")).scalar_one()
+            cadena.execute(
+                text("select pg_advisory_xact_lock(hashtextextended('auditoria:' || :c, 0))"),
+                {"c": str(e["cons"])},
+            )
+            hilo_i, importacion = en_un_hilo(lambda: pedir_aplicar(e["admin"], e["cons"], archivo))
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            hilo_m, manual = en_un_hilo(
+                lambda: invitar_manual(e["admin"], e["cons"], e["u2"], correo)
+            )
+            esperar_que_alguien_espere_un_bloqueo(pid, cuantos=2)
+    hilo_i.join(60)
+    hilo_m.join(60)
+    assert "error" not in importacion, importacion.get("error")
+    assert "error" not in manual, manual.get("error")
+    assert importacion["respuesta"].status_code == 200, importacion["respuesta"].text
+    assert importacion["respuesta"].json()["invitaciones_creadas"] == 1
+    r = manual["respuesta"]
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_importada_pendiente")
+    [inv] = invitaciones_de(motor_migrate, correo)
+    assert inv["vinculo_id"] is not None
