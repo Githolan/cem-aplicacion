@@ -30,13 +30,15 @@ COPY --chown=cem backend/migrations migrations
 COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
 # Herramientas del equipo que corren dentro del contenedor (`docker exec … python -m scripts.…`):
 # alta de un consorcio, invitación de sus primeras personas, arranque con sus primeros mandatos
-# (D3), asociación por soporte de la cuenta de un administrador externo (A7, P1-e) y carga de un
-# esquema de coeficientes (D4). Las demás (roles, OpenAPI, cobertura de PA) y el smoke de staging
+# (D3), asociación por soporte de la cuenta de un administrador externo (A7, P1-e), carga de un
+# esquema de coeficientes (D4) y anulación por soporte de un vínculo confirmado no iniciado
+# (RF02). Las demás (roles, OpenAPI, cobertura de PA) y el smoke de staging
 # (`backend/pruebas/`) corren fuera de la imagen. `tests/test_scripts_en_la_imagen.py` falla si
 # un script que dice correr dentro del contenedor no está en esta lista.
 COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
      backend/scripts/invitar.py backend/scripts/alta_mandato.py \
-     backend/scripts/mandato_soporte.py backend/scripts/cargar_coeficientes.py scripts/
+     backend/scripts/mandato_soporte.py backend/scripts/cargar_coeficientes.py \
+     backend/scripts/anular_vinculo.py scripts/
 USER cem
 EXPOSE 8000
 # La misma imagen corre cem-backend, cem-trabajos o cem-planificador según CEM_PROCESO

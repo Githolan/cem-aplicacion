@@ -92,13 +92,20 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     0020, que se niega a bajar si hay un fin de vínculo registrado: se borra el fin y, si dejó la
     vigencia vacía, se le devuelve un día (solo en esta base). Y con 0021, que se niega a bajar
     si hay esquemas de coeficientes: se borran. Y con 0023, que se niega a bajar si hay
-    revisiones de mandatos: se borran.
+    revisiones de mandatos: se borran. Y con 0025, que se niega a bajar si hay importaciones de
+    padrón o invitaciones que nombran su vínculo: se les quita y se borran.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('nucleo.importacion_padron') is not null then"
+                "   update nucleo.vinculo set importacion_id = null, nombre_declarado = null"
+                "    where importacion_id is not null;"
+                "   update nucleo.invitacion set vinculo_id = null where vinculo_id is not null;"
+                "   delete from nucleo.importacion_padron;"
+                " end if;"
                 " if to_regclass('nucleo.revision_mandato') is not null then"
                 "   delete from nucleo.revision_mandato;"
                 " end if;"

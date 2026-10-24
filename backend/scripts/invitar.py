@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from app.config import cargar
 from app.db import crear_motor, transaccion
+from app.errores import ErrorApi
 from app.identidad import invitaciones
 from app.identidad.router import validar_origen
 
@@ -57,6 +58,9 @@ def main(argumentos: list[str] | None = None) -> int:
                 origen_publico=config.origen_publico,
                 origen="soporte",
             )
+    except ErrorApi as e:  # la pendiente igual es de la importación: no se reemplaza
+        print(e.mensaje, file=sys.stderr)
+        return 1
     finally:
         motor.dispose()
     if creada is None:

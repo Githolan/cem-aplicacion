@@ -108,7 +108,8 @@ def crear(
 ) -> Creada | None:
     """Registra la invitación, retira la pendiente igual y publica el correo, todo en la
     transacción de `conn` (con el consorcio en el ámbito). None si la unidad no está en el
-    consorcio o está dada de baja."""
+    consorcio o está dada de baja. 409 si la pendiente igual es de la importación (nombra su
+    vínculo): esa no se retira."""
     unidad = conn.execute(
         text("select designacion from nucleo.unidad where id = :u and eliminado_en is null"),
         {"u": nueva.unidad_id},
@@ -116,13 +117,52 @@ def crear(
     if unidad is None:
         return None
     correo = nueva.correo.lower()
+    # Orden de bloqueos de RF02 (invitación, persona, vínculo, auditoría; ver 0025): primero las
+    # pendientes de esta clave y después `persona:<correo>`, antes de retirar, insertar o
+    # auditar. Sin la persona, una importación del mismo correo, unidad y carácter sin pendiente
+    # previa se trababa con esta ruta: cada una esperaba la invitación nueva o la auditoría de
+    # la otra (Codex en app #105).
+    clave = {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo}
+    de_la_clave = (
+        "select id, vinculo_id from nucleo.invitacion"
+        " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
+        " and aceptada_en is null and revocada_en is null order by id"
+    )
+    bloqueadas = {f.id for f in conn.execute(text(de_la_clave + " for update"), clave)}
+    conn.execute(
+        text("select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"),
+        {"c": correo},
+    )
+    # Se vuelve a leer con la persona tomada, **sin bloquear**: mientras se esperaba, otra ruta
+    # pudo crear (y confirmar) una invitación de esta clave. Bloquearla ahora invertiría el orden
+    # (una aceptación de esa invitación la tiene y espera la persona: tres transacciones
+    # trabadas, Codex en app #105). Lo que apareció se responde sin tocarlo.
+    pendientes = conn.execute(text(de_la_clave), clave).all()
+    # La invitación que creó la importación nombra su vínculo (0025): una manual no la reemplaza,
+    # ni vencida, porque la nueva no tendría ese vínculo (decisión del propietario, 23-10-2026).
+    if any(f.vinculo_id is not None for f in pendientes):
+        raise ErrorApi(
+            409,
+            CodigoError.INVITACION_IMPORTADA_PENDIENTE,
+            "Esa persona ya tiene una invitación del padrón importado para esta unidad y carácter."
+            " No se reemplaza con una invitación manual.",
+        )
+    if any(f.id not in bloqueadas for f in pendientes):
+        # Otra invitación manual de esta clave se registró mientras se esperaba: retirarla
+        # obligaría a bloquearla fuera de orden. No se escribe nada; el pedido se repite.
+        raise ErrorApi(
+            409,
+            CodigoError.IDEMPOTENCIA_EN_CURSO,
+            "Otra invitación para esta persona, unidad y carácter se registró recién. Probá de"
+            " nuevo en unos segundos.",
+        )
+    # Se retiran solo las que se bloquearon al principio (las mismas, por lo de arriba).
     for (anterior,) in conn.execute(
         text(
             "update nucleo.invitacion set revocada_en = now()"
-            " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
-            " and aceptada_en is null and revocada_en is null returning id"
+            " where id = any(:ids) and aceptada_en is null and revocada_en is null returning id"
         ),
-        {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo},
+        {"ids": list(bloqueadas)},
     ).all():
         auditoria.registrar(
             conn,
@@ -218,6 +258,10 @@ def origen_publico(request: Request) -> str:
             " `invitaciones.crear` sobre ella."
         },
         404: {"description": "La unidad no existe en este consorcio."},
+        409: {
+            "description": "Hay una invitación de la importación pendiente para ese correo,"
+            " unidad y carácter: no se reemplaza."
+        },
     },
 )
 async def invitar(
@@ -367,6 +411,19 @@ def revocar(
 # Bajo /api/v1/auth/: comparten el cupo por IP de la familia de autenticación (§10.6).
 
 
+def _vinculo_no_corresponde() -> ErrorApi:
+    """La invitación que creó la importación nombra su vínculo (0025) y ese vínculo ya no le
+    corresponde: no se reutiliza otro ni se crea uno."""
+    log.info("aceptación de invitación rechazada: vinculo_no_corresponde")
+    return ErrorApi(
+        409,
+        CodigoError.INVITACION_VINCULO_NO_CORRESPONDE,
+        "El vínculo de esta invitación ya no está en el padrón. Consultá a quien administra el"
+        " consorcio.",
+        encabezados=SIN_CACHE,
+    )
+
+
 def _invitacion_invalida() -> ErrorApi:
     return ErrorApi(
         404,
@@ -433,7 +490,8 @@ def persona_de_la_sesion(request: Request, motor) -> UUID | None:
         },
         409: {
             "model": Error,
-            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay.",
+            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay; o"
+            " la invitación nombra un vínculo que ya no le corresponde.",
         },
     },
 )
@@ -489,6 +547,8 @@ def aceptar(
             "La invitación es para otro correo. Salí de esta cuenta y abrila de nuevo.",
             encabezados=SIN_CACHE,
         )
+    if r.resultado == "vinculo_no_corresponde":
+        raise _vinculo_no_corresponde()
     if r.resultado != "ok":
         log.info("aceptación de invitación rechazada: %s", r.resultado)
         raise _invitacion_invalida()
@@ -546,6 +606,11 @@ def mis_invitaciones(
             "description": "No es una invitación pendiente dirigida a mi correo (todas las causas"
             " responden igual).",
         },
+        409: {
+            "model": Error,
+            "description": "La invitación nombra un vínculo que ya no le corresponde (anulado, o"
+            " de otra persona, unidad o carácter).",
+        },
     },
 )
 def aceptar_propia(
@@ -567,6 +632,8 @@ def aceptar_propia(
     if r.resultado in MOTIVOS_INVALIDA:
         log.info("invitación propia sin servir: %s", r.resultado)
         raise _invitacion_invalida()
+    if r.resultado == "vinculo_no_corresponde":
+        raise _vinculo_no_corresponde()
     if r.resultado != "ok":
         # `otra_persona` o `requiere_sesion`: la base eligió la invitación por mi correo, así que
         # no pueden pasar. Si pasan, es un defecto (500), no una invitación que no sirve.
