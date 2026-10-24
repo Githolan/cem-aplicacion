@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 23-10-2026.
+**Actualizado:** 24-10-2026.
 
 ## Qué existe
 
@@ -111,9 +111,19 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 21-10-2026 (despliegue de `ec056c7`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `plataforma.alembic_version` (lectura en transacción de solo lectura). Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-21-ec056c7.md`).
+Medido el 24-10-2026 (despliegue de `93f9a29`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-24-93f9a29.md`).
 
-**Staging y producción en `ec056c7`** (21-10-2026), base `0022`, contrato 0.15.0.
+**Staging y producción en `93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
+
+- **Incluye tres PR fusionados desde `aab4481`:** #102 (E62, el mandato del Consejo opera solo con su condición habilitante, `0023`), #104 (RF02, el importado pendiente no da ámbito y ve sus invitaciones, `0024`) y #105 (RF02 corte 3, importación del padrón con informe previo, `0025`).
+- **RF02 corte 3 (PR #105, migración `0025`).** `POST …/padron/importacion/informe` (no escribe), `POST …/padron/importacion` (todo o nada, idempotente; `padron.gestionar` con alcance e `invitaciones.crear`), `POST …/vinculos/{v}/anular` y `scripts.anular_vinculo`. Tabla `importacion_padron` con RLS forzada; `invitacion.vinculo_id` opcional que completa el importador. Decisiones del propietario en CEM `doc/diseno/Decisiones_Propietario_2026-10-21.md` §2.4 (CEM #69). Deuda conocida (P3 1-20 y el riesgo G × D del informe de coeficientes) en la descripción de #105.
+- **Controles.** Sobre el head `492f531`: `ci.ps1` verde, Codex sin hallazgos y revisión independiente final sin P1 ni P2. Sobre el commit de fusión `93f9a29`: `ci.ps1` verde con imágenes (backend 1538, contratos 58, frontend 298, e2e 167). Imágenes: `cem-backend` `sha256:a2eea02e…b3ef`, `cem-frontend` `sha256:2bcfb3e8…18e2`.
+- **Despliegue (Claude, con la autorización del propietario del 24-10).** Staging 12:46-12:48 UTC y producción 12:55-12:58 UTC, cada uno con copia previa verificada (migraciones pendientes `0023`-`0025` sobre `0022`). Producción anterior: `aab4481`. Después: los 4 servicios `running healthy` con la imagen y el digest validados, `/health` con `sha_imagen` `93f9a29` y contrato 0.17.0, deps y cola en `ok`, `alembic current` = `0025 (head)` en los dos entornos. Smoke de RF02 sin escribir: las dos rutas de importación responden 401 sin sesión y una ruta inexistente 404 (control).
+- **SIN VERIFICAR:** el uso real de la importación en producción (no se cargó ninguna planilla) y la cadena de auditoría (no hay un procedimiento de verificación).
+
+Antes, **`aab4481`** (22-10-2026, PR #103: la PWA navega primero a la red), base `0022`, sin entrada propia en este archivo; registro en `doc/deploys/2026-10-22-aab4481.md` del repositorio CEM.
+
+Antes, **`ec056c7`** (21-10-2026), base `0022`:
 
 - **Control diario de los índices GiST (E58; PR #99, migración `0022`).** El trabajo `plataforma.verificar_indices` corre a las 04:15 UTC en `cem-trabajos`.
   - Con `cem_backup`, en una sola foto `REPEATABLE READ`, compara el conteo secuencial contra el del índice, por cada GiST de `nucleo` y cada `consorcio_id`. El escaneo por índice se confirma con `EXPLAIN`.
