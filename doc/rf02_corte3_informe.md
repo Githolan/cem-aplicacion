@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `a9c4d11`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77`, el barrido de bloqueos y diagnósticos, la vuelta del contrato de coeficientes a `7e28cd5` (decisión del 23-10 sobre `7030b62`) y los dos P2 de Codex sobre `3735371`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `67e0000`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77`, el barrido de bloqueos y diagnósticos, la vuelta del contrato de coeficientes a `7e28cd5` (decisión del 23-10 sobre `7030b62`) los dos P2 de Codex sobre `3735371` y el P2 sobre `3f9c49b`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -118,9 +118,9 @@ Rama `rf02-importacion-corte3`, líneas en `5f00c5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1532 passed sobre `a9c4d11`; `ci.ps1` dio verde sobre `69f1f77`, `70e889c`, `7e28cd5` y `3735371` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1534 passed sobre `67e0000`; `ci.ps1` dio verde sobre `69f1f77`, `70e889c`, `7e28cd5`, `3735371` y `3f9c49b` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 44 de 44 detectadas (dos del barrido se retiraron con el tope y el recorte de coeficientes) |
+| Mutaciones | 46 de 46 detectadas (dos del barrido se retiraron con el tope y el recorte de coeficientes) |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
@@ -180,9 +180,11 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | designación ambigua recorriendo el grupo por fila | 1 |
 | la invitación manual no toma `persona:<correo>` | 1 (deadlock detectado) |
 | la invitación manual no vuelve a leer con la persona tomada | 1 |
+| la segunda lectura de la manual bloquea (`for update`) | 1 (deadlock de tres transacciones detectado) |
+| la manual no controla las invitaciones aparecidas durante la espera | 1 |
 | búsqueda de vínculos existentes con el candidato equivocado | 1 |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829`, 3 sobre `65ee21f` 4 sobre `7366be4` (repetidas sobre `a47778a`), 2 sobre `a47778a` y las 3 últimas sobre `a9c4d11`.
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829`, 3 sobre `65ee21f` 4 sobre `7366be4` (repetidas sobre `a47778a`), 2 sobre `a47778a`, 3 sobre `a9c4d11` y las 2 últimas sobre `67e0000`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -208,7 +210,7 @@ Los dos P3 restantes los resolvió el propietario el 23-10 (respuestas 2 y 3) y 
 | `aceptar_invitacion` (0014/0025) y `aceptar_invitacion_propia` | Invitación → persona → vínculo (rama `vinculo_id`) → auditoría | Cubierta, sin cambios |
 | `anular_vinculo` | Invitaciones que lo nombran → vínculo → auditoría | Cubierta (`65ee21f`) |
 | `revocar` (`app/identidad/invitaciones.py`) | Invitación → auditoría | Cubierta, sin cambios |
-| Invitación manual (`crear()`, la ruta y `scripts.invitar`) | Pendientes de esa clave (`for update`) → `persona:<correo>` → se vuelven a leer → retiro, inserción y auditoría | **Corregida en `a9c4d11`** (Codex sobre `3735371`): sin pendiente previa no tomaba nada, y una importación del mismo correo, unidad y carácter se trababa con ella |
+| Invitación manual (`crear()`, la ruta y `scripts.invitar`) | Pendientes de esa clave (`for update`) → `persona:<correo>` → se vuelven a leer **sin bloquear** → retiro de las bloqueadas al principio, inserción y auditoría | **Corregida en `a9c4d11` y `67e0000`.** En `a9c4d11` (Codex sobre `3735371`): sin pendiente previa no tomaba nada, y una importación del mismo correo, unidad y carácter se trababa con ella. En `67e0000` (Codex sobre `3f9c49b`): la segunda lectura bloqueaba después de la persona |
 
 Pruebas con dos conexiones reales (la primera conexión toma los bloqueos en el orden de la otra operación; la mutación produce `deadlock detected`):
 - importación frente a aceptación;
@@ -227,6 +229,20 @@ Pruebas con dos conexiones reales (la primera conexión toma los bloqueos en el 
 | `sin_coeficiente` y `distintos_del_vigente` | Listas completas por grupo | **Siguen completas** (contrato de `7e28cd5`, decisión del 23-10): sin recortes, sin totales y sin tope de grupos. El cálculo quedó sin factores de más (ver «Riesgo residual G × D») |
 | `corrige_existente` | Recorría todos los vínculos existentes de la clave | Búsqueda binaria: no se superponen entre sí (EXCLUDE); las vigencias vacías quedan afuera |
 | Encabezado (repetidas, desconocidas) | Una pasada (`2430829`); un problema por columna desconocida | Sin cambios: lineal |
+
+**P2 de Codex sobre `3f9c49b`**, en `67e0000`, con el contrato sin cambios. La segunda lectura de la invitación manual, con `for update` y ya con `persona:<correo>` tomada, invertía el orden invitación → persona. Una aceptación que bloqueaba la invitación nueva de una importación y esperaba la persona trababa tres transacciones.
+- **La segunda lectura ya no bloquea.** Lo que apareció durante la espera se responde sin tocarlo:
+  - si nombra un vínculo importado, 409 `invitacion_importada_pendiente`;
+  - si es otra manual, 409 `idempotencia_en_curso`: el pedido se repite, sin escribir nada.
+  - **Inferencia:** el código existente más cercano; el contrato no se toca. La descripción del 409 de la ruta en el OpenAPI sigue nombrando solo la invitación importada.
+- **Solo se retiran las bloqueadas al principio.**
+- **Prueba con tres transacciones intercaladas y conexiones reales:** una conexión retiene la persona; la manual (la ruta) espera; una importación confirma la invitación nueva; la aceptación real (`aceptar_invitacion_propia`) la bloquea y espera la persona. Termina con la manual en 409 y la aceptación en `ok`. Con la mutación, `deadlock detected`.
+- **Otra prueba:** una manual aparecida durante la espera no se retira, y el pedido repetido sí la reemplaza.
+- **Revisión de las demás rutas: ninguna hace una segunda lectura con bloqueo de invitaciones después de la persona.**
+  - La importación bloquea invitaciones antes que personas. Lo que aparece mientras espera lo ve el análisis, sin bloquear, y una pendiente vigente nueva rechaza la planilla antes de escribir.
+  - `crear_invitacion_importada` solo encuentra las ya bloqueadas al principio.
+  - `aceptar_invitacion` bloquea su invitación antes de la persona.
+  - `anular_vinculo` y `revocar` no toman la persona.
 
 **Dos P2 de Codex sobre `3735371` y barrido de la clase**, en `a9c4d11`, con el contrato sin cambios (`git diff 7e28cd5 -- contratos/` vacío):
 1. **`designacion_ambigua`:** las grafías combinadas y los dos primeros ejemplos se calculan **una sola vez por designación normalizada**. Antes, cada fila copiaba y recorría su grupo: con 8000 variantes de mayúsculas, unos 8 segundos. La prueba usa esas 8000 variantes, exige menos de 3 segundos y que cada fila nombre un ejemplo distinto de su grafía.
