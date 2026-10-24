@@ -57,4 +57,4 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Pendiente
 
-De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), 12 h para roles de dinero y passkeys; el código por WhatsApp (con opt-in) espera a la integración de WhatsApp. Además: partición mensual de auditoría por el planificador. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
+De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), segundo factor obligatorio y 12 h para roles de dinero, y passkeys; el código por WhatsApp (con opt-in) espera a la integración de WhatsApp. Además: partición mensual de auditoría por el planificador. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
