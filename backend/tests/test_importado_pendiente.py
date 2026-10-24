@@ -27,6 +27,7 @@ from app.autorizacion.evaluador import Entidad, evaluar
 from app.contexto import Identidad, require_scope
 from app.db import transaccion
 from app.errores import ErrorApi
+from tests.conftest import clave_idempotencia
 from tests.test_condicion_habilitante_consejo import aceptar, unidad, vinculo
 from tests.test_contexto_mandatos import cliente
 from tests.test_mandatos import otra_persona
@@ -353,3 +354,33 @@ def test_la_aceptacion_se_busca_por_indice_y_no_recorriendo_la_auditoria(motor_m
             ).scalars()
         )
         assert not any(h in plan_sin for h in hijos), plan_sin
+
+
+# Corte 4 de 2b-5: la pantalla de padrón no abre otra puerta -------------------------------------
+
+
+def test_corte4_el_importado_pendiente_no_usa_el_padron_ni_sus_acciones(importada, motor_migrate):
+    """La pantalla de padrón consume `GET …/padron`, `…/confirmar` y `…/finalizar`. Sin ámbito,
+    la importada recibe 404 en las tres, también sobre su propio vínculo: no puede confirmarse ni
+    salir de pendiente por esa vía. Control: la propietaria, con ámbito y sin `padron.ver`, recibe
+    403 (el 404 de la importada es por el ámbito, no por la facultad)."""
+    e = importada
+    base = f"/api/v1/consorcios/{e['cons']}"
+    with cliente(e["vecina"]) as c:
+        assert c.get(f"{base}/padron").status_code == 404
+        for accion, cuerpo in (
+            ("confirmar", {"referencia": "Escritura 1234"}),
+            ("finalizar", {"motivo": "Venta de la unidad"}),
+        ):
+            r = c.post(
+                f"{base}/vinculos/{e['v']}/{accion}", json=cuerpo, headers=clave_idempotencia()
+            )
+            assert r.status_code == 404, (accion, r.text)
+    with cliente(e["prop"]) as c:
+        assert c.get(f"{base}/padron").status_code == 403
+    with motor_migrate.connect() as c:
+        confirmado_en, finalizado_en = c.execute(
+            text("select confirmado_en, finalizado_en from nucleo.vinculo where id = :v"),
+            {"v": e["v"]},
+        ).one()
+    assert confirmado_en is None and finalizado_en is None
