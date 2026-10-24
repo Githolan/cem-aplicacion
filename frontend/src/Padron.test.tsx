@@ -216,7 +216,7 @@ describe("página /padron", () => {
     expect(within(actualizada).queryByRole("button", { name: "Confirmar" })).toBeNull();
   });
 
-  it("si falla la recarga después de confirmar, la fila muestra lo hecho y el aviso de éxito queda", async () => {
+  it("si falla la recarga después de confirmar, el aviso de éxito queda junto al error de la recarga", async () => {
     const confirmado = { vinculo_id: V_INQ, unidad_id: U1, tipo: "inquilino", confirmado: true, confirmado_en: "2026-10-24T12:00:00Z" };
     let vueltas = 0;
     vi.stubGlobal(

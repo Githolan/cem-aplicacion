@@ -51,7 +51,8 @@ function vigilarErrores(pagina: Page): string[] {
 /**
  * Responde la API del padrón desde el navegador. La vecina sin `padron.ver` recibe 403. Las filas
  * llevan además correo y teléfono, que la API real no manda: la página no tiene que mostrarlos.
- * Sin CSRF, 403; sin clave, 422; finalizar el vínculo propio lo rechaza la política (403).
+ * Sin CSRF, 403; sin clave, 422. El 403 al finalizar el primer vínculo lo inventa el simulador para
+ * ver cómo la página muestra un rechazo de la API (la política real decide en el backend).
  */
 async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vecina"): Promise<Envio[]> {
   const envios: Envio[] = [];
@@ -77,7 +78,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vec
       return ruta.fulfill({ json: { vinculo_id: V_INQ, unidad_id: U1, tipo: "inquilino", confirmado: true, confirmado_en: "2026-10-24T12:00:00Z" } });
     if (camino === `${BASE}/vinculos/${V_PROP}/finalizar`) return ruta.fulfill(error(403, "sin_permiso"));
     if (camino === `${BASE}/vinculos/${V_INQ}/finalizar`)
-      return ruta.fulfill({ json: { vinculo_id: V_INQ, unidad_id: U1, tipo: "inquilino", vigente_hasta: "2026-10-25", finalizado_en: "2026-10-24T12:00:00Z" } });
+      return ruta.fulfill({ json: { vinculo_id: V_INQ, unidad_id: U1, tipo: "inquilino", vigente_hasta: "2026-10-24", finalizado_en: "2026-10-24T12:00:00Z" } });
     return ruta.abort();
   });
   await pagina.context().addCookies([
@@ -136,7 +137,7 @@ test.describe("padrón", () => {
     expect(errores).toEqual([]);
   });
 
-  test("finalizar pide la confirmación; un rechazo de la API se muestra y otro intento usa otra clave", async ({ page, baseURL }) => {
+  test("finalizar pide la confirmación; un rechazo de la API se muestra con foco y otro vínculo se finaliza", async ({ page, baseURL }) => {
     const envios = await simularApi(page, baseURL!, "consejo");
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/padron");
@@ -156,9 +157,8 @@ test.describe("padrón", () => {
     await page.getByLabel("Motivo").fill("Fin del contrato");
     await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
     await page.getByRole("button", { name: "Sí, finalizar" }).click();
-    await expect(page.getByText(/^Listo: finalizamos el vínculo de Beto Pérez con la unidad 1° A\./)).toBeFocused();
+    await expect(page.getByText("Listo: finalizamos el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale.")).toBeFocused();
     expect(envios.map((e) => e.camino)).toEqual([`${BASE}/vinculos/${V_PROP}/finalizar`, `${BASE}/vinculos/${V_INQ}/finalizar`]);
-    expect(envios[1]?.clave).not.toBe(envios[0]?.clave);
     expect(envios[1]?.cuerpo).toEqual({ motivo: "Fin del contrato" });
   });
 
