@@ -41,8 +41,7 @@ class CodigoProblema(StrEnum):
     ARCHIVO_VACIO = "archivo_vacio"
     """La planilla no tiene encabezado o no tiene filas."""
     ENCABEZADO_INVALIDO = "encabezado_invalido"
-    """Falta una columna obligatoria, hay una desconocida o una repetida, o hay más de 20 grupos
-    de coeficientes."""
+    """Falta una columna obligatoria, hay una desconocida o una repetida."""
     COLUMNA_VIGENTE_HASTA = "columna_vigente_hasta"
     """La planilla trae `vigente_hasta`: se carga `ultimo_dia`, inclusivo."""
     FILA_MAL_FORMADA = "fila_mal_formada"
@@ -150,16 +149,10 @@ class CoeficientesGrupo(BaseModel):
     grupo: str
     suma: str = Field(description="Suma tal cual, como texto decimal (D4).", examples=["99.96"])
     sin_coeficiente: list[str] = Field(
-        description="Hasta 20 ejemplos, en orden, de las unidades (de la planilla o del"
-        " consorcio) sin porcentaje en este grupo."
+        description="Unidades (de la planilla o del consorcio) sin porcentaje en este grupo."
     )
-    sin_coeficiente_total: int = Field(description="Cuántas unidades no tienen porcentaje.")
     distintos_del_vigente: list[str] = Field(
-        description="Hasta 20 ejemplos, en orden, de las unidades cuyo porcentaje difiere del"
-        " esquema vigente de ese grupo."
-    )
-    distintos_del_vigente_total: int = Field(
-        description="Cuántas unidades difieren del esquema vigente."
+        description="Unidades cuyo porcentaje difiere del esquema vigente de ese grupo."
     )
     hay_esquema_vigente: bool
 

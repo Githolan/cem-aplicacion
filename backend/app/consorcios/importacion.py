@@ -95,11 +95,6 @@ creada con otro correo no podría entrar ni recibir una invitación válida."""
 LARGO_MAXIMO_NOMBRE = 100
 """El tope de `nucleo.invitacion.nombre` (0007)."""
 CIEN = Decimal(100)
-EJEMPLOS = 20
-"""Cuántas unidades se nombran como ejemplo en cada lista del informe de coeficientes."""
-MAXIMO_GRUPOS = 20
-"""Grupos de coeficientes por planilla. Cada grupo recorre todas las unidades: sin tope, un
-encabezado con miles de columnas `coeficiente_*` hacía el informe cuadrático."""
 ULTIMO_ANIO = 9998
 """`ultimo_dia + 1` tiene que seguir siendo una fecha (`date.max` es el 31-12-9999)."""
 CAMBIO_DURANTE_LA_APLICACION = frozenset(
@@ -198,14 +193,6 @@ def _encabezado(columnas: list[str]) -> tuple[tuple[str, ...], list[Problema]]:
             )
         )
     grupos = []
-    if sum(c.startswith(PREFIJO_COEFICIENTE) for c in columnas) > MAXIMO_GRUPOS:
-        problemas.append(
-            Problema(
-                codigo=CodigoProblema.ENCABEZADO_INVALIDO,
-                mensaje=f"La planilla admite hasta {MAXIMO_GRUPOS} grupos de coeficientes.",
-            )
-        )
-        columnas = [c for c in columnas if not c.startswith(PREFIJO_COEFICIENTE)]
     for c in columnas:
         if c.startswith(PREFIJO_COEFICIENTE):
             grupo = c.removeprefix(PREFIJO_COEFICIENTE)
@@ -605,17 +592,23 @@ def _invitaciones(conn: Connection, planes: list[Plan], hoy: date, invitar: Perm
 def _coeficientes_informe(
     conn: Connection, planilla: Planilla, planes: list[Plan], hoy: date, gestionar: Permiso
 ) -> tuple[list[CoeficientesGrupo], list[str]]:
-    por_unidad: dict[str, dict[str, Decimal]] = defaultdict(dict)
+    """Por grupo: la suma tal cual, las unidades sin porcentaje y las que difieren del esquema
+    vigente (D3). Sin factores de más: cada valor de la planilla se agrega una sola vez a su
+    grupo, cada grupo se emite una sola vez y los coeficientes guardados se leen en una sola
+    consulta, solo para los grupos con esquema vigente. Lo que queda es el tamaño de la
+    respuesta, que por el contrato es G × D en el peor caso (G grupos, D unidades de la planilla
+    y del consorcio dentro del alcance): `sin_coeficiente` lista completa por grupo."""
+    por_grupo: dict[str, dict[str, Decimal]] = defaultdict(dict)
     for p in planes:
         d = p.fila.designacion
         for grupo, valor in p.fila.coeficientes.items():
-            previo = por_unidad[d].get(grupo)
+            previo = por_grupo[grupo].get(d)
             if previo is not None and previo != valor:
                 p.fila.problema(
                     CodigoProblema.COEFICIENTE_CONTRADICTORIO,
                     f"Otra fila de «{d}» da otro porcentaje para `{grupo}`.",
                 )
-            por_unidad[d].setdefault(grupo, valor)
+            por_grupo[grupo].setdefault(d, valor)
     # Solo las unidades que quien importa gestiona: con un alcance acotado no ve el resto.
     activas = {
         u.designacion: u.id
@@ -637,38 +630,34 @@ def _coeficientes_informe(
             {"hoy": hoy},
         )
     }
+    con_esquema = [vigentes[g] for g in planilla.grupos if g in vigentes]
+    guardados: dict[UUID, dict[UUID, Decimal]] = defaultdict(dict)
+    if con_esquema:
+        for c in conn.execute(
+            text(
+                "select esquema_id, unidad_id, porcentaje from nucleo.coeficiente_juridico"
+                " where esquema_id = any(:e)"
+            ),
+            {"e": con_esquema},
+        ):
+            guardados[c.esquema_id][c.unidad_id] = c.porcentaje
     informe = []
     for grupo in planilla.grupos:
-        guardados = {}
-        if grupo in vigentes:
-            guardados = {
-                c.unidad_id: c.porcentaje
-                for c in conn.execute(
-                    text(
-                        "select unidad_id, porcentaje from nucleo.coeficiente_juridico"
-                        " where esquema_id = :e"
-                    ),
-                    {"e": vigentes[grupo]},
-                )
-            }
-        valores = {d: g[grupo] for d, g in por_unidad.items() if grupo in g}
-        sin = [d for d in designaciones if d not in valores]
-        distintos = [
-            d
-            for d, v in sorted(valores.items())
-            if grupo in vigentes and d in activas and guardados.get(activas[d]) != v
-        ]
-        # Las listas son ejemplos acotados, con su total: el tamaño de la respuesta no crece
-        # con grupos por unidades (barrido de diagnósticos, app #105).
+        valores = por_grupo.get(grupo, {})
+        esquema = vigentes.get(grupo)
         informe.append(
             CoeficientesGrupo(
                 grupo=grupo,
                 suma=str(sum(valores.values(), Decimal(0))),
-                sin_coeficiente=sin[:EJEMPLOS],
-                sin_coeficiente_total=len(sin),
-                distintos_del_vigente=distintos[:EJEMPLOS],
-                distintos_del_vigente_total=len(distintos),
-                hay_esquema_vigente=grupo in vigentes,
+                sin_coeficiente=[d for d in designaciones if d not in valores],
+                distintos_del_vigente=[
+                    d
+                    for d, v in sorted(valores.items())
+                    if esquema is not None
+                    and d in activas
+                    and guardados[esquema].get(activas[d]) != v
+                ],
+                hay_esquema_vigente=esquema is not None,
             )
         )
     nuevas = any(p.unidad == AccionUnidad.CREAR for p in planes)

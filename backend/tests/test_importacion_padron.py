@@ -870,9 +870,7 @@ def test_los_coeficientes_se_informan_contra_el_esquema_vigente_y_no_se_escriben
         "grupo": "expensas_comunes",
         "suma": "99.95",
         "sin_coeficiente": [],
-        "sin_coeficiente_total": 0,
         "distintos_del_vigente": ["2° B"],
-        "distintos_del_vigente_total": 1,
         "hay_esquema_vigente": True,
     }
     assert r.json()["esquemas_a_revisar"] == []
@@ -1968,7 +1966,9 @@ def test_una_designacion_con_muchas_escrituras_se_informa_con_un_ejemplo(escena)
     assert largo_de_los_diagnosticos(cuerpo) < 4 * len(archivo)
 
 
-def test_las_listas_de_coeficientes_son_ejemplos_con_su_total(escena, motor_migrate):
+def test_las_listas_de_coeficientes_son_completas(escena, motor_migrate):
+    """El contrato de 7e28cd5: cada lista nombra todas las unidades (decisión del propietario
+    del 23-10-2026, sin recortes ni totales)."""
     e = escena
     with motor_migrate.connect() as c:
         existentes = c.execute(
@@ -1981,21 +1981,30 @@ def test_las_listas_de_coeficientes_son_ejemplos_con_su_total(escena, motor_migr
     filas = [f"24-{i},," for i in range(50)]
     encabezado = "unidad,coeficiente_agua,coeficiente_gas"
     cuerpo = pedir_informe(e["admin"], e["cons"], planilla(*filas, encabezado=encabezado)).json()
+    assert [g["grupo"] for g in cuerpo["coeficientes"]] == ["agua", "gas"]
     for grupo in cuerpo["coeficientes"]:
-        assert len(grupo["sin_coeficiente"]) == 20
-        assert grupo["sin_coeficiente_total"] == 50 + existentes
+        assert len(grupo["sin_coeficiente"]) == 50 + existentes
         assert grupo["sin_coeficiente"] == sorted(grupo["sin_coeficiente"])
 
 
-def test_la_planilla_admite_hasta_20_grupos_de_coeficientes():
-    encabezado = "unidad," + ",".join(f"coeficiente_g{i:02d}" for i in range(21))
-    p = leer_planilla(encabezado + "\n" + "1° A" + "," * 21 + "\n")
-    assert "encabezado_invalido" in {x.codigo for x in p.problemas}
-    assert p.grupos == ()
-    # Control: 20 se aceptan.
-    encabezado = "unidad," + ",".join(f"coeficiente_g{i:02d}" for i in range(20))
-    p = leer_planilla(encabezado + "\n" + "1° A" + "," * 20 + "\n")
-    assert p.problemas == [] and len(p.grupos) == 20
+def test_una_planilla_con_25_grupos_de_coeficientes_se_informa_y_se_aplica(escena):
+    """Más de 20 grupos no es causa de rechazo (decisión del propietario del 23-10-2026)."""
+    e = escena
+    grupos = [f"g{i:02d}" for i in range(25)]
+    encabezado = "unidad," + ",".join(f"coeficiente_{g}" for g in grupos)
+    archivo = planilla(
+        "25° A," + ",".join("1.5" for _ in grupos),
+        "25° B," + ",".join("" for _ in grupos),
+        encabezado=encabezado,
+    )
+    cuerpo = pedir_informe(e["admin"], e["cons"], archivo).json()
+    assert cuerpo["aplicable"] is True and cuerpo["problemas_archivo"] == []
+    assert [g["grupo"] for g in cuerpo["coeficientes"]] == grupos
+    for g in cuerpo["coeficientes"]:
+        assert g["suma"] == "1.5" and "25° B" in g["sin_coeficiente"]
+    r = pedir_aplicar(e["admin"], e["cons"], archivo)
+    assert r.status_code == 200, r.text
+    assert r.json()["unidades_creadas"] == 2
 
 
 def test_un_vinculo_existente_se_encuentra_entre_varios_sin_recorrerlos_todos(
@@ -2046,3 +2055,31 @@ def test_un_vinculo_existente_se_encuentra_entre_varios_sin_recorrerlos_todos(
         # (las pruebas que bajan migraciones) la convertiría en un día que se superpone.
         with motor_migrate.begin() as c:
             c.execute(text("delete from nucleo.vinculo where id = :v"), {"v": vacia})
+
+
+def test_cada_grupo_se_compara_con_su_propio_esquema_vigente(
+    edificio,  # noqa: F811
+    motor_migrate,
+    motor_app,
+):
+    """Los coeficientes guardados se leen en una sola consulta para todos los grupos con
+    esquema vigente: cada grupo tiene que compararse con el suyo."""
+    e = edificio
+    admin = otra_persona(motor_migrate, e["cons"])
+    cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
+    alta(motor_app, e["cons"], None, e["acta"], persona=admin, origen="soporte")
+    registrar(motor_app, e["cons"], {str(e["u1"]): "60.000000", str(e["u2"]): "40.000000"},
+              decision=e["acta"], grupo="expensas_comunes")  # fmt: skip
+    registrar(motor_app, e["cons"], {str(e["u1"]): "30.000000", str(e["u2"]): "70.000000"},
+              decision=e["acta"], grupo="agua")  # fmt: skip
+    encabezado = "unidad,coeficiente_expensas_comunes,coeficiente_agua,coeficiente_gas"
+    archivo = planilla("1° A,60,70,1", "2° B,40,70,2", encabezado=encabezado)
+    grupos = {
+        g["grupo"]: g for g in pedir_informe(admin, e["cons"], archivo).json()["coeficientes"]
+    }
+    assert grupos["expensas_comunes"]["distintos_del_vigente"] == []
+    assert grupos["agua"]["distintos_del_vigente"] == ["1° A"]
+    assert (grupos["gas"]["hay_esquema_vigente"], grupos["gas"]["distintos_del_vigente"]) == (
+        False,
+        [],
+    )
