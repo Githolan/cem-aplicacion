@@ -105,9 +105,13 @@ def padron(permiso: Annotated[Permiso, Depends(requiere("padron.ver"))], motor: 
                 conn.execute(
                     text(
                         "select vinculo_id, unidad_id, designacion, nombre, tipo::text as tipo,"
-                        " vigente_desde, vigente_hasta, confirmado"
+                        " vigente_desde, vigente_hasta, confirmado,"
+                        # La misma fecha y la misma regla que nucleo.finalizar_vinculo (0020):
+                        # now() es el de la transacción, el mismo que usa padron_del_consorcio.
+                        " vigente_desde <= nucleo.hoy_del_consorcio(:c) as iniciado"
                         " from nucleo.padron_del_consorcio()"
-                    )
+                    ),
+                    {"c": ctx.consorcio_id},
                 )
                 .mappings()
                 .all()

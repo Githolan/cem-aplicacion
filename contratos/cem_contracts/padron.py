@@ -38,6 +38,13 @@ class FilaPadron(BaseModel):
     vigente_desde: date
     vigente_hasta: date | None = Field(description="Exclusivo: ese día ya no vale.")
     confirmado: bool
+    iniciado: bool = Field(
+        description=(
+            "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona"
+            " horaria), con la misma regla con la que el backend decide si se puede finalizar. No"
+            " concede ningún permiso."
+        )
+    )
 
 
 class Padron(BaseModel):

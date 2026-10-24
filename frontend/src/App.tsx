@@ -11,6 +11,7 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
+import { Padron, RUTA_PADRON } from "./Padron";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
@@ -30,6 +31,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_MANDATOS}>Mandatos y decisiones</Link>
+      </p>
+      <p>
+        <Link to={RUTA_PADRON}>Padrón del edificio</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -85,6 +89,7 @@ export function App() {
           <Route path={RUTA_CUENTA} element={<Cuenta />} />
           <Route path={RUTA_INVITACIONES} element={<Invitar />} />
           <Route path={RUTA_MANDATOS} element={<Mandatos />} />
+          <Route path={RUTA_PADRON} element={<Padron />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

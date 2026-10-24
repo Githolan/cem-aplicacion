@@ -5,6 +5,7 @@ su negativo y una mutación anotada en el PR que demuestra que la prueba la dete
 de ida y vuelta corre en la base aparte de `test_vinculo_0014`.
 """
 
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -24,13 +25,16 @@ from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     app,
     navegador,
 )
-from tests.test_mandatos import sesiones_abiertas
+from tests.test_mandatos import otra_persona, sesiones_abiertas
+from tests.test_mandatos_0012 import alta
+from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo
 from tests.test_padron_rutas import escena as escena_padron  # noqa: F401  (es un fixture)
 from tests.test_padron_rutas import padron_url
 from tests.test_vinculo_0014 import (  # noqa: F401  (`base_aparte` es un fixture)
     _catalogo,
     _consorcio_y_unidad,
     _hoy,
+    _poner_vigencia,
     base_aparte,
     cadena_rota,
     confirmar,
@@ -508,3 +512,62 @@ def test_downgrade_con_un_vinculo_finalizado_se_niega_y_sin_el_vuelve_exacto(bas
         c.execute(text("delete from nucleo.vinculo where id = :v"), {"v": v})
     command.downgrade(cfg, "0019")
     assert _catalogo(motor) == en_0019
+
+
+def test_iniciado_y_el_fin_usan_la_fecha_del_consorcio_y_no_la_de_buenos_aires(
+    motor_migrate, motor_app
+):
+    """El padrón dice `iniciado` con la misma fecha y regla que `finalizar_vinculo` (Codex en app
+    #108): un consorcio en otra zona horaria puede estar en otro día que Buenos Aires.
+
+    La base elige la zona que en este momento está en otro día que Buenos Aires: Kiritimati
+    (GMT+14) desde las 10 hasta las 3 GMT, con Buenos Aires en X y el consorcio ya en X+1; el
+    resto del día, Etc/GMT+12, con el consorcio todavía en X-1 (el caso inverso: la regla de
+    Buenos Aires daría por empezado lo que la API no deja finalizar). El caso adelantado no se
+    puede ejercitar a toda hora sin fijar now(). No depende de la zona horaria de la PC: las
+    fechas las calcula la base."""
+    with motor_migrate.connect() as c:
+        zona = c.execute(
+            text(
+                "select z from unnest(array['Pacific/Kiritimati', 'Etc/GMT+12'])"
+                " with ordinality as t(z, n)"
+                " where (now() at time zone z)::date"
+                " <> (now() at time zone 'America/Argentina/Buenos_Aires')::date"
+                " order by n limit 1"
+            )
+        ).scalar_one()
+    cons, u1, prop = consorcio_con_persona(motor_migrate, zona)
+    acta = decidir_equipo(motor_app, cons)
+    cambiar(motor_app, cons, prop, "administrador_aumentado", acta)
+    admin = otra_persona(motor_migrate, cons)
+    alta(motor_app, cons, None, acta, persona=admin, origen="soporte")
+    borde = invitar_y_aceptar(motor_migrate, cons, u1, None)
+    futuro = invitar_y_aceptar(motor_migrate, cons, u1, None)
+    with motor_migrate.connect() as c:
+        hoy_consorcio, hoy_buenos_aires = c.execute(
+            text(
+                "select nucleo.hoy_del_consorcio(:c),"
+                " (now() at time zone 'America/Argentina/Buenos_Aires')::date"
+            ),
+            {"c": cons},
+        ).one()
+    assert hoy_consorcio != hoy_buenos_aires  # control: la zona elegida está en otro día
+    adelantado = hoy_consorcio > hoy_buenos_aires
+    # Empieza el más tardío de los dos "hoy": para una fecha ya empezó y para la otra no.
+    _poner_vigencia(motor_migrate, borde, max(hoy_consorcio, hoy_buenos_aires), None)
+    _poner_vigencia(motor_migrate, futuro, hoy_consorcio + timedelta(days=1), None)
+
+    with cliente(admin) as c:
+        r = c.get(padron_url(cons))
+        assert r.status_code == 200, r.text
+        filas = {f["vinculo_id"]: f for f in r.json()["elementos"]}
+        assert filas[str(borde)]["iniciado"] is adelantado
+        assert filas[str(futuro)]["iniciado"] is False  # control inverso
+        # El fin decide con la misma regla: lo que el padrón da por empezado se puede finalizar.
+        fin = pedir_fin(c, cons, borde)
+        if adelantado:
+            assert fin.status_code == 200, fin.text
+        else:
+            assert (fin.status_code, fin.json()["codigo"]) == (409, "vinculo_no_iniciado")
+        fin = pedir_fin(c, cons, futuro)
+        assert (fin.status_code, fin.json()["codigo"]) == (409, "vinculo_no_iniciado")
