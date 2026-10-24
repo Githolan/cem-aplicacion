@@ -113,9 +113,9 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 24-10-2026 (despliegue de `93f9a29`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-24-93f9a29.md`).
 
-**Staging y producción en `93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
-
 **En `main` sin desplegar (24-10-2026, 23:11 UTC):** `84d50e7`, con el corte 4 de 2b-5 (PR #108): pantalla `/padron` y contrato 0.18.0, sin migración nueva (la base sigue en `0025`). Detalle en «Próximo paso», punto 10.
+
+**Staging y producción en `93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
 
 - **Incluye tres PR fusionados desde `aab4481`:** #102 (E62, el mandato del Consejo opera solo con su condición habilitante, `0023`), #104 (RF02, el importado pendiente no da ámbito y ve sus invitaciones, `0024`) y #105 (RF02 corte 3, importación del padrón con informe previo, `0025`).
 - **RF02 corte 3 (PR #105, migración `0025`).** `POST …/padron/importacion/informe` (no escribe), `POST …/padron/importacion` (todo o nada, idempotente; `padron.gestionar` con alcance e `invitaciones.crear`), `POST …/vinculos/{v}/anular` y `scripts.anular_vinculo`. Tabla `importacion_padron` con RLS forzada; `invitacion.vinculo_id` opcional que completa el importador. Decisiones del propietario en CEM `doc/diseno/Decisiones_Propietario_2026-10-21.md` §2.4 (CEM #69). Deuda conocida (P3 1-20 y el riesgo G × D del informe de coeficientes) en la descripción de #105.
@@ -434,4 +434,4 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - dos P2 de la revisión independiente: finales de línea CRLF y la misma prueba entre las 0 y las 3 UTC;
      - un defecto de foco que encontró la e2e.
    - **Deuda conocida (P3, sin código):** un rechazo seguido de una recarga fallida reemplaza el aviso de negocio; el 403 al confirmar enumera causas sin mencionar la falta de modo; el patrón del campo deja pasar un tabulador, que la API rechaza con 422; faltan pruebas de la clave conservada ante `idempotencia_en_curso` o un corte de red; la prueba de `iniciado` tiene una carrera de segundos a las 03:00 UTC; y `InvitacionMandato.tsx` todavía compara fechas en el cliente (anterior a este corte).
-   - **Para desplegarlo** hace falta la autorización del propietario: primero staging y después producción, con la misma SHA.
+   - **Para desplegarlo** hace falta la autorización del propietario: primero staging y después producción, con la misma SHA. `cd.ps1` despliega solo la punta de `main` con `ci.ps1` en verde: después de los PR de documentación, la punta ya no es `84d50e7` y hay que correr `ci.ps1` sobre ella.
