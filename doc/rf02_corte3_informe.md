@@ -14,6 +14,8 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
+**Después de este informe (24-10-2026):** PR #105 fusionado en `93f9a29` (head `492f531`: `ci.ps1` verde, Codex sin hallazgos y revisión independiente final sin P1 ni P2) y desplegado en staging y producción. Las decisiones quedaron en CEM, `doc/diseno/Decisiones_Propietario_2026-10-21.md` §2.4 (CEM #69). Lo que sigue describe el estado al 23-10.
+
 **Código final:** `67e0000`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77`, el barrido de bloqueos y diagnósticos, la vuelta del contrato de coeficientes a `7e28cd5` (decisión del 23-10 sobre `7030b62`) los dos P2 de Codex sobre `3735371` y el P2 sobre `3f9c49b`. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado

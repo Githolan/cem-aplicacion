@@ -2,7 +2,7 @@
 
 Aplicación web instalable (PWA) de **Consorcio en Mano**, servida por nginx del mismo origen. Diseño: documento 13 del repositorio `CEM`, §6.3 (imagen), §14 (PWA y nginx) y AD-05/AD-06.
 
-Hoy es el esqueleto de H1: una página de inicio que muestra el estado del backend leído de `/health`, instalable y con el shell disponible sin conexión.
+PWA instalable, con el shell disponible sin conexión. Rutas: inicio (estado del backend leído de `/health`), `/instalar`, `/entrar`, `/invitacion`, `/invitacion-mandato`, `/cuenta`, `/cuenta/segundo-factor`, `/invitaciones` y `/mandatos`.
 
 ## Qué hay
 
@@ -11,7 +11,7 @@ Hoy es el esqueleto de H1: una página de inicio que muestra el estado del backe
 | `src/api/cliente.ts` | Cliente tipado (`openapi-fetch`) del mismo origen; sin URL de backend |
 | `src/api/tipos.ts` | **Generado** desde `../contratos/openapi.json` en cada `dev`, `test`, `tipos` y `build`; no se compromete ni se edita (AD-06) |
 | `src/EstadoServicio.tsx` | Consulta `/health` con TanStack Query y muestra versión, contrato y SHA |
-| `src/App.tsx` | Rutas (React Router 7): inicio y "No encontramos esa página" para cualquier otra |
+| `src/App.tsx` | Rutas (React Router 7): las de la lista de arriba y "No encontramos esa página" para cualquier otra |
 | `src/Entrar.tsx` | Página `/entrar` que abre el enlace del correo: lee el token del fragmento (`#token=`, nunca llega al servidor), lo guarda en `sessionStorage` de la pestaña (vence a los 15 minutos del enlace), lo borra de la URL y lo canjea con `POST /api/v1/auth/canje`; muestra "Entraste." o un error genérico. Una recarga o una actualización a mitad de camino usa el guardado; se borra apenas termina el canje, salga bien o mal. Diseño provisorio hasta G3 |
 | `src/enlace.ts` | Ruta `/entrar`, parámetro `token` y vigencia del enlace: una sola fuente para la página, `vite.config.ts` y la extensión del service worker |
 | `src/swEntrar.ts` | Extensión del service worker (`sw-entrar.js`, la carga `sw.js` con `importScripts`): si una ventana abre un enlace de entrada que nadie leyó (versión anterior en caché), la versión nueva se activa sin esperar el aviso y esa ventana vuelve a abrir su URL completa |
@@ -81,4 +81,4 @@ El nombre del backend es su **alias de red** en Coolify (`custom_network_aliases
 
 ## Pendiente
 
-Rutas por rol y modo, borradores en IndexedDB, push, `/soporte` detrás de Access, `pnpm e2e` en la canalización (`cem-despliegue`) y `VITE_PUBLIC_BASE_URL` como secreto de construcción cuando haga falta (§6.3).
+Rutas por rol y modo, borradores en IndexedDB, push, `/soporte` detrás de Access y `VITE_PUBLIC_BASE_URL` como secreto de construcción cuando haga falta (§6.3).

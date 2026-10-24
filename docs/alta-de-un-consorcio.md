@@ -32,8 +32,10 @@ Un JSON en UTF-8, por ejemplo `edificio.json`:
 - `cuit`: 11 dígitos sin guiones; si no lo tenés a mano, sacá la línea (queda vacío).
 - `designacion`: como la escriben las liquidaciones (`PB`, `1° A`, `Cochera 3`…), una por
   unidad funcional, sin repetir.
-- No agregues otros campos (domicilio, coeficientes, modo): la base todavía no los guarda y el
-  script rechaza el archivo para que nada se pierda en silencio. Llegan con 2b.
+- No agregues otros campos (domicilio, coeficientes, modo): este script no los acepta y
+  rechaza el archivo para que nada se pierda en silencio. El modo inicial y los mandatos se cargan
+  con `scripts.alta_mandato`, y los coeficientes con `scripts.cargar_coeficientes`; el domicilio
+  la base todavía no lo guarda.
 - Falta el `id` a propósito: el primer `--simular` (paso b) propone uno. Pegalo en
   `consorcio` (`"id": "…",`) y **usá el mismo archivo, con el mismo `id`, en staging y en
   producción**. Es lo que hace que correrlo de nuevo no duplique nada.
