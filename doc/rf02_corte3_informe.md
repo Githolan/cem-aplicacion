@@ -14,7 +14,7 @@
 
 Sin decisiones materiales abiertas, se hizo la Fase 2 en la rama `rf02-importacion-corte3`, desde `94a2114`.
 
-**Código final:** `76a103a`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77` y el barrido de bloqueos y diagnósticos. El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
+**Código final:** `a47778a`. Trae las respuestas del propietario del 23-10 (las tres preguntas y la renovación) y las correcciones de app #105: Codex, la tanda única sobre `4b978a1` los P2 de Codex sobre `69f1f77`, `70e889c` y `7e28cd5`, el P3 4 de la revisión sobre `69f1f77`, el barrido de bloqueos y diagnósticos, y la vuelta del contrato de coeficientes a `7e28cd5` (decisión del 23-10 sobre `7030b62`). El commit siguiente de la rama solo trae este informe y `ESTADO.md`.
 
 ## 1. Estado real encontrado
 
@@ -118,9 +118,9 @@ Rama `rf02-importacion-corte3`, líneas en `5f00c5b`:
 |---|---|
 | D1 a D4 respondidas | Hecho (§3) |
 | Rama desde `94a2114`, empujada, sin PR | Hecho |
-| Suite en verde | 1529 passed sobre `76a103a`; `ci.ps1` dio verde sobre `69f1f77`, `70e889c` y `7e28cd5` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
+| Suite en verde | 1530 passed sobre `a47778a`; `ci.ps1` dio verde sobre `69f1f77`, `70e889c` y `7e28cd5` (lo corrió el Hilo principal); la base `94a2114`, en el mismo entorno, da 1422 passed (ver «Entorno») |
 | Prueba de cierre del corte | `test_cierre_informe_con_errores_sembrados_no_escribe_nada_y_limpio_se_aplica` |
-| Mutaciones | 41 de 41 detectadas |
+| Mutaciones | 41 de 41 detectadas (dos del barrido se retiraron con el tope y el recorte de coeficientes; se sumaron dos) |
 | `ruff` y `openapi.json` | Limpio y regenerado |
 | `ESTADO.md` | Hecho |
 | Revisión independiente | **Revisión independiente final: PENDIENTE sobre el SHA final después de estas correcciones.** La de `129730f` no vale como final: sus P1 y P2 cambiaron el código |
@@ -175,11 +175,11 @@ La imagen oficial y `ci.ps1` quedan **SIN VERIFICAR**. Se excluyó `test_smoke_s
 | la importación no bloquea invitaciones ni personas antes de leer y auditar | 2 (deadlock detectado) |
 | invitaciones simultáneas con todas las líneas | 1 |
 | designación ambigua con todas las escrituras | 1 |
-| listas de coeficientes sin tope | 1 |
-| sin tope de grupos de coeficientes | 1 |
+| se repone el tope de 20 grupos | 1 |
+| la consulta única mezcla los esquemas de los grupos | 1 |
 | búsqueda de vínculos existentes con el candidato equivocado | 1 |
 
-Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829`, 3 sobre `65ee21f` y las 6 últimas sobre `7366be4` (la última, repetida sobre `76a103a`).
+Las 15 primeras se corrieron sobre `129730f`, las 3 siguientes sobre `e1667f2`, 2 sobre `1e1b504`, 2 sobre `2ceef5d`, 3 sobre `1acb5c3`, 5 sobre `5f00c5b`, 2 sobre `2430829`, 3 sobre `65ee21f` 4 sobre `7366be4` (repetidas sobre `a47778a`) y las 2 últimas sobre `a47778a`.
 
 **Revisión independiente** (un subagente sin mi conclusión, sobre `129730f`): un P1, un P2 y cinco P3.
 
@@ -221,9 +221,38 @@ Pruebas con dos conexiones reales (la primera conexión toma los bloqueos en el 
 | `invitaciones_simultaneas` | Cada fila nombraba todas las demás | Un ejemplo y el total (Codex) |
 | `designacion_ambigua` | Cada fila nombraba todas las escrituras | Un ejemplo |
 | `coeficiente_contradictorio` | Mensaje fijo por fila | Sin cambios |
-| `sin_coeficiente` y `distintos_del_vigente` | Listas completas por grupo (grupos × unidades) | Hasta 20 ejemplos y los totales `sin_coeficiente_total` y `distintos_del_vigente_total` (contrato); además, **hasta 20 grupos** de coeficientes por planilla (`encabezado_invalido`) |
+| `sin_coeficiente` y `distintos_del_vigente` | Listas completas por grupo | **Siguen completas** (contrato de `7e28cd5`, decisión del 23-10): sin recortes, sin totales y sin tope de grupos. El cálculo quedó sin factores de más (ver «Riesgo residual G × D») |
 | `corrige_existente` | Recorría todos los vínculos existentes de la clave | Búsqueda binaria: no se superponen entre sí (EXCLUDE); las vigencias vacías quedan afuera |
 | Encabezado (repetidas, desconocidas) | Una pasada (`2430829`); un problema por columna desconocida | Sin cambios: lineal |
+
+**Decisión del propietario del 23-10 sobre `7030b62`**, en `a47778a`:
+- se revierten `sin_coeficiente_total`, `distintos_del_vigente_total` y el recorte a 20 ejemplos: `git diff 7e28cd5 -- contratos/` sale vacío;
+- se saca el tope de 20 grupos: una planilla con 25 grupos se informa y se aplica (prueba y mutación);
+- se conservan las correcciones de bloqueos y de complejidad del barrido, con sus pruebas, y sus mutaciones se repitieron sobre `a47778a`.
+
+`_coeficientes_informe` quedó sin factores de más:
+- cada valor de la planilla se agrega una sola vez a su grupo;
+- cada grupo se emite una sola vez;
+- los coeficientes guardados se leen en **una sola consulta**, solo para los grupos con esquema vigente (antes, una por grupo). La prueba con dos esquemas confirma que cada grupo se compara con el suyo.
+
+**Riesgo residual G × D (no resuelto, a decisión del propietario).** Con listas completas y sin tope, `sin_coeficiente` nombra, en cada grupo, cada unidad sin porcentaje. La respuesta es G × D por definición:
+- G son los grupos;
+- D son las unidades de la planilla más las del consorcio dentro del alcance.
+
+Una planilla con decenas de miles de columnas de grupo vacías da G × U, siendo U las unidades del consorcio. Medido sobre `a47778a` (TestClient, PostgreSQL 18; U = 503 unidades del consorcio, R = filas de la planilla, D = R + U):
+
+| G | R | D | G × D | Entrada | Respuesta | Bytes por celda G × D | Tiempo |
+|---|---|---|---|---|---|---|---|
+| 1 | 100 | 603 | 603 | 612 B | 22 KB | 36,5 | 0,08 s |
+| 10 | 100 | 603 | 6 030 | 1,6 KB | 64 KB | 10,7 | 0,07 s |
+| 100 | 100 | 603 | 60 300 | 12 KB | 488 KB | 8,1 | 0,12 s |
+| 10 | 1 000 | 1 503 | 15 030 | 16 KB | 292 KB | 19,4 | 0,08 s |
+| 100 | 1 000 | 1 503 | 150 300 | 107 KB | 1,4 MB | 9,1 | 0,10 s |
+| 1 000 | 100 | 603 | 603 000 | 117 KB | 4,7 MB | 7,8 | 0,12 s |
+| 2 000 | 1 | 504 | 1 008 000 | 37 KB | 8,1 MB | 8,0 | 0,16 s |
+| 10 000 | 1 | 504 | 5 040 000 | 189 KB | 40,3 MB | 8,0 | 0,98 s |
+
+La respuesta es de unos 8 bytes por celda G × D, más una parte fija. Con el millón de caracteres permitido caben unos 50 000 grupos vacíos. Con 500 unidades en el consorcio, eso son unos 200 MB de respuesta. No inventé un límite: cualquier solución pasa por cambiar el contrato o por rechazar, y eso lo decide el propietario.
 
 **Riesgo residual, que ya existía:** se toma un bloqueo por cada invitación pendiente y por cada correo de la planilla, y todos se mantienen hasta el final de la transacción. Una planilla con miles de correos distintos ocupa la tabla de bloqueos compartida (`max_locks_per_transaction`).
 
