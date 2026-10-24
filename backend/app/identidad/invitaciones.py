@@ -123,19 +123,21 @@ def crear(
     # previa se trababa con esta ruta: cada una esperaba la invitación nueva o la auditoría de
     # la otra (Codex en app #105).
     clave = {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo}
-    de_la_clave = text(
-        "select vinculo_id from nucleo.invitacion"
+    de_la_clave = (
+        "select id, vinculo_id from nucleo.invitacion"
         " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
-        " and aceptada_en is null and revocada_en is null order by id for update"
+        " and aceptada_en is null and revocada_en is null order by id"
     )
-    conn.execute(de_la_clave, clave)
+    bloqueadas = {f.id for f in conn.execute(text(de_la_clave + " for update"), clave)}
     conn.execute(
         text("select pg_advisory_xact_lock(hashtextextended('persona:' || lower(btrim(:c)), 0))"),
         {"c": correo},
     )
-    # Se vuelve a leer con la persona tomada: mientras se esperaba, una importación pudo crear
-    # (y confirmar) la invitación de esta clave.
-    pendientes = conn.execute(de_la_clave, clave).all()
+    # Se vuelve a leer con la persona tomada, **sin bloquear**: mientras se esperaba, otra ruta
+    # pudo crear (y confirmar) una invitación de esta clave. Bloquearla ahora invertiría el orden
+    # (una aceptación de esa invitación la tiene y espera la persona: tres transacciones
+    # trabadas, Codex en app #105). Lo que apareció se responde sin tocarlo.
+    pendientes = conn.execute(text(de_la_clave), clave).all()
     # La invitación que creó la importación nombra su vínculo (0025): una manual no la reemplaza,
     # ni vencida, porque la nueva no tendría ese vínculo (decisión del propietario, 23-10-2026).
     if any(f.vinculo_id is not None for f in pendientes):
@@ -145,13 +147,22 @@ def crear(
             "Esa persona ya tiene una invitación del padrón importado para esta unidad y carácter."
             " No se reemplaza con una invitación manual.",
         )
+    if any(f.id not in bloqueadas for f in pendientes):
+        # Otra invitación manual de esta clave se registró mientras se esperaba: retirarla
+        # obligaría a bloquearla fuera de orden. No se escribe nada; el pedido se repite.
+        raise ErrorApi(
+            409,
+            CodigoError.IDEMPOTENCIA_EN_CURSO,
+            "Otra invitación para esta persona, unidad y carácter se registró recién. Probá de"
+            " nuevo en unos segundos.",
+        )
+    # Se retiran solo las que se bloquearon al principio (las mismas, por lo de arriba).
     for (anterior,) in conn.execute(
         text(
             "update nucleo.invitacion set revocada_en = now()"
-            " where unidad_id = :u and tipo = cast(:t as nucleo.tipo_vinculo) and correo = :c"
-            " and aceptada_en is null and revocada_en is null returning id"
+            " where id = any(:ids) and aceptada_en is null and revocada_en is null returning id"
         ),
-        {"u": nueva.unidad_id, "t": nueva.tipo.value, "c": correo},
+        {"ids": list(bloqueadas)},
     ).all():
         auditoria.registrar(
             conn,

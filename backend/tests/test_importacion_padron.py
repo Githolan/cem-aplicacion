@@ -2148,3 +2148,110 @@ def test_una_importacion_y_una_invitacion_manual_nueva_del_mismo_correo_no_se_tr
     assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_importada_pendiente")
     [inv] = invitaciones_de(motor_migrate, correo)
     assert inv["vinculo_id"] is not None
+
+
+# P2 de Codex sobre 3f9c49b: la segunda lectura de la invitación manual no bloquea ---------------
+
+
+def importado_sin_invitacion(e, motor_migrate) -> tuple[str, dict]:
+    """Un vínculo importado vigente cuya invitación se retiró: la clave queda sin pendientes."""
+    hoy = _hoy(motor_migrate, e["cons"])
+    correo = correo_nuevo()
+    archivo = planilla(f"2° B,Paz,{correo},ocupante,{f(hoy)},")
+    assert pedir_aplicar(e["admin"], e["cons"], archivo).status_code == 200
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.invitacion set revocada_en = now() where correo = :c"),
+            {"c": correo},
+        )
+    return correo, vinculos_de(motor_migrate, correo)[0]
+
+
+def test_una_invitacion_manual_una_importada_nueva_y_su_aceptacion_no_se_traban(
+    escena, motor_migrate, motor_app
+):
+    """Tres transacciones intercaladas, con conexiones reales y un orden determinista:
+    - una conexión retiene `persona:<correo>`;
+    - la invitación manual (la ruta) lee sus pendientes (ninguna) y espera la persona;
+    - una importación confirma una invitación nueva de la misma clave que nombra su vínculo;
+    - la aceptación real (`aceptar_invitacion_propia`) bloquea esa invitación y espera la
+      persona.
+    Al soltar la persona, la manual sigue primero. Si su segunda lectura bloqueara la invitación
+    nueva, esperaría a la aceptación, que espera a la manual: deadlock."""
+    e = escena
+    correo, v = importado_sin_invitacion(e, motor_migrate)
+    persona = persona_de(motor_migrate, correo)
+    with motor_migrate.connect() as retencion:
+        with retencion.begin():
+            pid = retencion.execute(text("select pg_backend_pid()")).scalar_one()
+            retencion.execute(
+                text("select pg_advisory_xact_lock(hashtextextended('persona:' || :c, 0))"),
+                {"c": correo},
+            )
+            hilo_m, manual = en_un_hilo(
+                lambda: invitar_manual(e["admin"], e["cons"], e["u2"], correo)
+            )
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            with motor_migrate.begin() as c:  # la importación, ya confirmada
+                nueva = c.execute(
+                    text(
+                        "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo,"
+                        " nombre, token_hash, invitada_por, vence_en, vinculo_id) values (:co, :u,"
+                        " 'ocupante', :c, 'Paz', :h, :p, now() + interval '7 days', :v)"
+                        " returning id"
+                    ),
+                    {
+                        "co": e["cons"],
+                        "u": e["u2"],
+                        "c": correo,
+                        "h": uuid4().bytes * 2,
+                        "p": e["admin"],
+                        "v": v["id"],
+                    },  # fmt: skip
+                ).scalar_one()
+
+            def aceptar():
+                with transaccion(motor_app, persona_id=persona) as c:
+                    return c.execute(
+                        text("select resultado from nucleo.aceptar_invitacion_propia(:i, null)"),
+                        {"i": nueva},
+                    ).scalar_one()
+
+            hilo_a, aceptacion = en_un_hilo(aceptar)
+            esperar_que_alguien_espere_un_bloqueo(pid, cuantos=2)
+    hilo_m.join(60)
+    hilo_a.join(60)
+    assert "error" not in manual, manual.get("error")
+    assert "error" not in aceptacion, aceptacion.get("error")
+    r = manual["respuesta"]
+    assert (r.status_code, r.json()["codigo"]) == (409, "invitacion_importada_pendiente")
+    assert aceptacion["respuesta"] == "ok"
+
+
+def test_una_invitacion_manual_que_aparece_durante_la_espera_no_se_retira_fuera_de_orden(
+    escena, motor_migrate
+):
+    """Si mientras se espera la persona otra invitación manual de la misma clave se registra, no
+    se la bloquea ni se la retira: 409 para que el pedido se repita, sin escribir nada."""
+    e = escena
+    correo = correo_nuevo()
+    with motor_migrate.connect() as retencion:
+        with retencion.begin():
+            pid = retencion.execute(text("select pg_backend_pid()")).scalar_one()
+            retencion.execute(
+                text("select pg_advisory_xact_lock(hashtextextended('persona:' || :c, 0))"),
+                {"c": correo},
+            )
+            hilo, manual = en_un_hilo(
+                lambda: invitar_manual(e["admin"], e["cons"], e["u2"], correo)
+            )
+            esperar_que_alguien_espere_un_bloqueo(pid)
+            otra = invitar_a_mano(motor_migrate, e["cons"], e["u2"], correo, vencida=False)
+    hilo.join(60)
+    assert "error" not in manual, manual.get("error")
+    r = manual["respuesta"]
+    assert (r.status_code, r.json()["codigo"]) == (409, "idempotencia_en_curso")
+    [inv] = invitaciones_de(motor_migrate, correo)
+    assert (inv["id"], inv["revocada_en"]) == (otra, None)
+    # Control: repetido, ya bloquea la otra en orden y la reemplaza.
+    assert invitar_manual(e["admin"], e["cons"], e["u2"], correo).status_code == 201
