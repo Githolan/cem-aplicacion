@@ -520,12 +520,22 @@ def test_iniciado_y_el_fin_usan_la_fecha_del_consorcio_y_no_la_de_buenos_aires(
     """El padrón dice `iniciado` con la misma fecha y regla que `finalizar_vinculo` (Codex en app
     #108): un consorcio en otra zona horaria puede estar en otro día que Buenos Aires.
 
-    Desde las 10 GMT (las 7 de Buenos Aires) Kiritimati (GMT+14) ya está en el día siguiente:
-    Buenos Aires en X, el consorcio en X+1. Antes, Etc/GMT+12 sigue en el día anterior. No depende
-    de la zona horaria de la PC: las fechas las calcula la base, que corre en GMT."""
+    La base elige la zona que en este momento está en otro día que Buenos Aires: Kiritimati
+    (GMT+14) desde las 10 hasta las 3 GMT, con Buenos Aires en X y el consorcio ya en X+1; el
+    resto del día, Etc/GMT+12, con el consorcio todavía en X-1 (el caso inverso: la regla de
+    Buenos Aires daría por empezado lo que la API no deja finalizar). El caso adelantado no se
+    puede ejercitar a toda hora sin fijar now(). No depende de la zona horaria de la PC: las
+    fechas las calcula la base."""
     with motor_migrate.connect() as c:
-        hora_gmt = c.execute(text("select extract(hour from now() at time zone 'UTC')")).scalar()
-    zona = "Pacific/Kiritimati" if hora_gmt >= 10 else "Etc/GMT+12"
+        zona = c.execute(
+            text(
+                "select z from unnest(array['Pacific/Kiritimati', 'Etc/GMT+12'])"
+                " with ordinality as t(z, n)"
+                " where (now() at time zone z)::date"
+                " <> (now() at time zone 'America/Argentina/Buenos_Aires')::date"
+                " order by n limit 1"
+            )
+        ).scalar_one()
     cons, u1, prop = consorcio_con_persona(motor_migrate, zona)
     acta = decidir_equipo(motor_app, cons)
     cambiar(motor_app, cons, prop, "administrador_aumentado", acta)

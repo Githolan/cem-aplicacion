@@ -114,6 +114,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -196,7 +197,6 @@ describe("página /padron", () => {
     const carla = await tarjeta("2° B: Carla Gómez");
     expect(within(carla).getByText(/todavía no empezó/)).toBeTruthy();
     expect(within(carla).queryByRole("button", { name: "Finalizar" })).toBeNull();
-    vi.useRealTimers();
   });
 
   it("un vínculo futuro y confirmado no tiene acciones", async () => {
