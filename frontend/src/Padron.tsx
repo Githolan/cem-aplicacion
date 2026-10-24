@@ -35,7 +35,6 @@ const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 const LARGO_TEXTO = 300;
 /** Un texto con algo más que espacios (la API rechaza el vacío y los caracteres de control). */
 const PATRON_TEXTO = ".*\\S.*";
-const ZONA = "America/Argentina/Buenos_Aires";
 
 const TEXTO_TIPO: Record<TipoVinculo, string> = {
   propietario: "Propietario o propietaria",
@@ -50,11 +49,6 @@ const MS_POR_DIA = 86_400_000;
 /** Una fecha del contrato (AAAA-MM-DD) como «1 de marzo de 2026», sin correrse por la zona. */
 const dia = (iso: string, corrimiento = 0) =>
   FORMATO_DIA.format(new Date(Date.parse(`${iso}T00:00:00Z`) + corrimiento * MS_POR_DIA));
-
-/** El día de hoy en Buenos Aires, como AAAA-MM-DD (solo para ofrecer o no «Finalizar»). */
-function hoy(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: ZONA }).format(new Date());
-}
 
 /** La vigencia en palabras. `vigente_hasta` es exclusivo: el último día es el anterior. */
 function vigencia(f: Fila): string {
@@ -303,7 +297,6 @@ export function Padron() {
   }
 
   const conMensaje = aviso !== null || pantalla.tipo !== "lista";
-  const hoyBa = hoy();
 
   return (
     <>
@@ -349,7 +342,7 @@ export function Padron() {
             {lectura.tipo === "ok" && lectura.filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {lectura.tipo === "ok" && lectura.filas.length > 0 && (
               <ul className="sesiones" aria-label="Padrón">
-                {lectura.filas.map((f) => tarjeta(f, hoyBa))}
+                {lectura.filas.map((f) => tarjeta(f))}
               </ul>
             )}
           </section>
@@ -376,9 +369,10 @@ export function Padron() {
   );
 
   /** Un vínculo del padrón, con sus acciones según el estado (la API decide si se puede). */
-  function tarjeta(f: Fila, hoyBa: string) {
+  function tarjeta(f: Fila) {
     const titulo = `${id}-${f.vinculo_id}`;
-    const futuro = f.vigente_desde > hoyBa;
+    // Si ya empezó lo dice la API con la fecha del consorcio, la misma con la que decide el fin.
+    const futuro = !f.iniciado;
     const esteAbierto = abierto?.fila.vinculo_id === f.vinculo_id ? abierto.accion : null;
     return (
       <li key={f.vinculo_id}>

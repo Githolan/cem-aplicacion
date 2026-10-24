@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
+import type { components } from "./api/tipos";
 import { App } from "./App";
 import { mensajeDeError } from "./Padron";
 import { ContextoVersion } from "./version";
@@ -27,7 +28,10 @@ const RUTA_PADRON = `${BASE}/padron`;
 const confirmarRuta = (v: string) => `${BASE}/vinculos/${v}/confirmar`;
 const finalizarRuta = (v: string) => `${BASE}/vinculos/${v}/finalizar`;
 
-function fila(vinculo_id: string, nombre: string, extra: Record<string, unknown> = {}) {
+type Fila = components["schemas"]["FilaPadron"];
+
+/** Una fila del contrato: si le falta un campo, el tipo no compila. */
+function fila(vinculo_id: string, nombre: string, extra: Partial<Fila> = {}): Fila {
   return {
     vinculo_id,
     unidad_id: U1,
@@ -37,6 +41,7 @@ function fila(vinculo_id: string, nombre: string, extra: Record<string, unknown>
     vigente_desde: "2024-03-01",
     vigente_hasta: null,
     confirmado: false,
+    iniciado: true,
     ...extra,
   };
 }
@@ -45,7 +50,7 @@ const PADRON = {
   elementos: [
     fila(V_PROP, "Ana Ruiz", { confirmado: true }),
     fila(V_INQ, "Beto Pérez", { tipo: "inquilino", vigente_hasta: "2027-01-01" }),
-    fila(V_FUT, "Carla Gómez", { unidad_id: U2, designacion: "2° B", vigente_desde: "2099-01-01" }),
+    fila(V_FUT, "Carla Gómez", { unidad_id: U2, designacion: "2° B", vigente_desde: "2099-01-01", iniciado: false }),
   ],
 };
 
@@ -171,8 +176,31 @@ describe("página /padron", () => {
     expect(within(carla).queryByRole("button", { name: "Finalizar" })).toBeNull();
   });
 
+  it("si el vínculo empezó lo dice la API con la fecha del consorcio, no Buenos Aires ni el reloj", async () => {
+    // 24-10 a las 20 GMT: en Buenos Aires es el 24 (17 h) y en un consorcio de Kiritimati
+    // (GMT+14) ya es el 25. Un instante fijo en GMT: no depende de la zona de la PC.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-24T20:00:00Z"));
+    const padron = {
+      elementos: [
+        fila(V_INQ, "Beto Pérez", { vigente_desde: "2026-10-25", iniciado: true }),
+        fila(V_FUT, "Carla Gómez", { unidad_id: U2, designacion: "2° B", vigente_desde: "2026-10-26", iniciado: false }),
+      ],
+    };
+    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
+    abrir();
+    const beto = await tarjeta("1° A: Beto Pérez");
+    expect(within(beto).queryByText(/todavía no empezó/)).toBeNull();
+    expect(within(beto).getByRole("button", { name: "Finalizar" })).toBeTruthy();
+    // Control inverso: todavía futuro en la fecha del consorcio.
+    const carla = await tarjeta("2° B: Carla Gómez");
+    expect(within(carla).getByText(/todavía no empezó/)).toBeTruthy();
+    expect(within(carla).queryByRole("button", { name: "Finalizar" })).toBeNull();
+    vi.useRealTimers();
+  });
+
   it("un vínculo futuro y confirmado no tiene acciones", async () => {
-    const padron = { elementos: [fila(V_FUT, "Carla Gómez", { vigente_desde: "2099-01-01", confirmado: true })] };
+    const padron = { elementos: [fila(V_FUT, "Carla Gómez", { vigente_desde: "2099-01-01", confirmado: true, iniciado: false })] };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
     abrir();
     const carla = await tarjeta("1° A: Carla Gómez");
@@ -457,7 +485,7 @@ describe("página /padron", () => {
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
-      ["confirmado", "designacion", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
+      ["confirmado", "designacion", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);

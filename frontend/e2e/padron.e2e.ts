@@ -24,9 +24,9 @@ const NOMBRE_LARGO = "Anahí Florencia de los Santos Echeverría Bustamante";
 
 const PADRON = {
   elementos: [
-    { vinculo_id: V_PROP, unidad_id: U1, designacion: "1° A", nombre: NOMBRE_LARGO, tipo: "propietario", vigente_desde: "2025-03-01", vigente_hasta: null, confirmado: true },
-    { vinculo_id: V_INQ, unidad_id: U1, designacion: "1° A", nombre: "Beto Pérez", tipo: "inquilino", vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", confirmado: false },
-    { vinculo_id: V_FUTURO, unidad_id: U2, designacion: "2° B", nombre: "Carla Gómez", tipo: "propietario", vigente_desde: "2099-01-01", vigente_hasta: null, confirmado: false },
+    { vinculo_id: V_PROP, unidad_id: U1, designacion: "1° A", nombre: NOMBRE_LARGO, tipo: "propietario", vigente_desde: "2025-03-01", vigente_hasta: null, confirmado: true, iniciado: true },
+    { vinculo_id: V_INQ, unidad_id: U1, designacion: "1° A", nombre: "Beto Pérez", tipo: "inquilino", vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", confirmado: false, iniciado: true },
+    { vinculo_id: V_FUTURO, unidad_id: U2, designacion: "2° B", nombre: "Carla Gómez", tipo: "propietario", vigente_desde: "2099-01-01", vigente_hasta: null, confirmado: false, iniciado: false },
   ],
 };
 

@@ -41,8 +41,9 @@ from tests.test_vinculo_0014 import invitar_y_aceptar
 pytestmark = pytest.mark.db
 
 REFERENCIA = "Escritura 1234, registro notarial 56"
+# Los datos de D6 y `iniciado` (corte 4, contrato 0.18.0), que no es un dato de la persona.
 COLUMNAS_D6 = {"vinculo_id", "unidad_id", "designacion", "nombre", "tipo", "vigente_desde",
-               "vigente_hasta", "confirmado"}  # fmt: skip
+               "vigente_hasta", "confirmado", "iniciado"}  # fmt: skip
 COLUMNAS_CONFIRMADO = {"vinculo_id", "unidad_id", "tipo", "confirmado", "confirmado_en"}
 
 

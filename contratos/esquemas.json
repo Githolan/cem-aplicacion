@@ -928,6 +928,11 @@
         "title": "Designacion",
         "type": "string"
       },
+      "iniciado": {
+        "description": "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona horaria), con la misma regla con la que el backend decide si se puede finalizar. No concede ningún permiso.",
+        "title": "Iniciado",
+        "type": "boolean"
+      },
       "nombre": {
         "description": "Nombre de la persona del vínculo.",
         "title": "Nombre",
@@ -973,7 +978,8 @@
       "tipo",
       "vigente_desde",
       "vigente_hasta",
-      "confirmado"
+      "confirmado",
+      "iniciado"
     ],
     "title": "FilaPadron",
     "type": "object"
@@ -3055,6 +3061,11 @@
             "title": "Designacion",
             "type": "string"
           },
+          "iniciado": {
+            "description": "Si el vínculo ya empezó en la fecha del consorcio (`vigente_desde` <= hoy en su zona horaria), con la misma regla con la que el backend decide si se puede finalizar. No concede ningún permiso.",
+            "title": "Iniciado",
+            "type": "boolean"
+          },
           "nombre": {
             "description": "Nombre de la persona del vínculo.",
             "title": "Nombre",
@@ -3100,7 +3111,8 @@
           "tipo",
           "vigente_desde",
           "vigente_hasta",
-          "confirmado"
+          "confirmado",
+          "iniciado"
         ],
         "title": "FilaPadron",
         "type": "object"
