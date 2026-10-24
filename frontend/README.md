@@ -2,7 +2,7 @@
 
 Aplicación web instalable (PWA) de **Consorcio en Mano**, servida por nginx del mismo origen. Diseño: documento 13 del repositorio `CEM`, §6.3 (imagen), §14 (PWA y nginx) y AD-05/AD-06.
 
-PWA instalable, con el shell disponible sin conexión. Rutas: inicio (estado del backend leído de `/health`), `/instalar`, `/entrar`, `/invitacion`, `/invitacion-mandato`, `/cuenta`, `/cuenta/segundo-factor`, `/invitaciones` y `/mandatos`.
+PWA instalable, con el shell disponible sin conexión. Rutas: inicio (estado del backend leído de `/health`), `/instalar`, `/entrar`, `/invitacion`, `/invitacion-mandato`, `/cuenta`, `/cuenta/segundo-factor`, `/invitaciones`, `/mandatos` y `/padron`.
 
 ## Qué hay
 

@@ -113,6 +113,8 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido el 24-10-2026 (despliegue de `93f9a29`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-24-93f9a29.md`).
 
+**En `main` sin desplegar (24-10-2026, 23:11 UTC):** `84d50e7`, con el corte 4 de 2b-5 (PR #108): pantalla `/padron` y contrato 0.18.0, sin migración nueva (la base sigue en `0025`). Detalle en «Próximo paso», punto 10.
+
 **Staging y producción en `93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
 
 - **Incluye tres PR fusionados desde `aab4481`:** #102 (E62, el mandato del Consejo opera solo con su condición habilitante, `0023`), #104 (RF02, el importado pendiente no da ámbito y ve sus invitaciones, `0024`) y #105 (RF02 corte 3, importación del padrón con informe previo, `0025`).
@@ -423,3 +425,13 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Pruebas:** 1534 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube. Después, `ci.ps1` con la imagen oficial dio verde sobre `492f531` y sobre `93f9a29`.
    - **Revisión independiente final sobre `492f531`: sin P1 ni P2**, con Codex sin hallazgos sobre el mismo SHA. La de `129730f` no valía como final: sus P1 y P2 cambiaron el código.
    - **Hecho después (24-10):** la revisión independiente final y Codex sobre `492f531`, `ci.ps1` con la imagen oficial y las decisiones D1, D3, D4 y las del 23-10 en el documento de decisiones de CEM (§2.4, CEM #69).
+10. **Corte 4 de 2b-5, pantalla del padrón (24-10-2026):** PR #108 (rama `padron-corte4`, desde `3ec895f`), fusionado el 24-10-2026 a las 23:11 UTC en `84d50e7` (head `36365c7`). **Sin desplegar:** staging y producción siguen en `93f9a29`.
+   - **Qué trae:** página `/padron` (enlace «Padrón del edificio» en el inicio). Lista los vínculos vigentes y futuros con unidad, nombre, carácter, vigencia y confirmación, sin correo ni teléfono. **Confirmar** pide la referencia del título (`padron.confirmar_vinculo`) y **finalizar** pide el motivo y una segunda confirmación (`padron.gestionar`). La interfaz no concede nada: decide la API. Lleva CSRF, `Idempotency-Key` por intento y descarte de respuestas viejas (E35).
+   - **Contrato 0.18.0** (autorizado por el propietario el 24-10): `FilaPadron.iniciado`. El backend lo calcula como `vigente_desde <= nucleo.hoy_del_consorcio(c)`, la misma regla con que `finalizar_vinculo` (0020) decide si el vínculo empezó. La pantalla lo usa para «todavía no empezó» y para ofrecer «Finalizar», en vez de calcular la fecha de Buenos Aires (P2 de Codex sobre `c64ce9e`). No concede permisos; sin migración.
+   - **Pruebas:** 31 unitarias de la pantalla y su e2e en un teléfono de 360 px con la CSP real. En el backend: el importado pendiente sigue sin usar el padrón ni sus acciones, y `iniciado` y el fin coinciden con la fecha del consorcio cuando está en otro día que Buenos Aires.
+   - **Controles sobre `36365c7`:** `ci.ps1` verde (backend 1540, contratos 58, frontend 329, e2e 177; imágenes `cem-backend` `sha256:ab2ebb2b…b1ef` y `cem-frontend` `sha256:36ae1ea5…1952`), Codex sin hallazgos y revisión independiente sin P1 ni P2. Durante el PR se corrigieron:
+     - dos P2 de Codex: la zona horaria y la elección de zona de la prueba;
+     - dos P2 de la revisión independiente: finales de línea CRLF y la misma prueba entre las 0 y las 3 UTC;
+     - un defecto de foco que encontró la e2e.
+   - **Deuda conocida (P3, sin código):** un rechazo seguido de una recarga fallida reemplaza el aviso de negocio; el 403 al confirmar enumera causas sin mencionar la falta de modo; el patrón del campo deja pasar un tabulador, que la API rechaza con 422; faltan pruebas de la clave conservada ante `idempotencia_en_curso` o un corte de red; la prueba de `iniciado` tiene una carrera de segundos a las 03:00 UTC; y `InvitacionMandato.tsx` todavía compara fechas en el cliente (anterior a este corte).
+   - **Para desplegarlo** hace falta la autorización del propietario: primero staging y después producción, con la misma SHA. `cd.ps1` despliega solo la punta de `main` con `ci.ps1` en verde: después de los PR de documentación, la punta ya no es `84d50e7` y hay que correr `ci.ps1` sobre ella.
