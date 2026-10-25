@@ -111,7 +111,7 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 25-10-2026 (despliegue de `5b289ba`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (los últimos, `2026-10-24-5b289ba.md` para staging y `2026-10-25-5b289ba.md` para producción: `cd.ps1` escribe uno por día UTC).
+Medido en el despliegue de `5b289ba` (staging el 24-10-2026 a las 23:58 UTC y producción el 25-10 a las 00:02 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (los últimos, `2026-10-24-5b289ba.md` para staging y `2026-10-25-5b289ba.md` para producción: `cd.ps1` escribe uno por día UTC).
 
 **Staging y producción en `5b289ba`** (staging el 24-10-2026 de 23:56 a 23:58 UTC, producción el 25-10 de 00:00 a 00:02 UTC), base `0025`, contrato 0.18.0.
 
@@ -121,7 +121,7 @@ Medido el 25-10-2026 (despliegue de `5b289ba`) por `cd.ps1` (estado, imagen y di
   - los 4 servicios `running healthy`, con la imagen y el digest validados;
   - `/health` con `5b289ba` y contrato 0.18.0;
   - deps y cola en `ok`;
-  - `alembic current` = `0025 (head)`;
+  - base en `0025 (head)` (`alembic current`, y en staging también `plataforma.alembic_version`);
   - ninguna instancia vieja y 0 errores en los registros.
   - **Staging:** smoke `35aa6bc5` con 15 controles (incluido `iniciado`) y la cadena de auditoría con 529 eventos, 0 rotos.
   - **Producción:** el navegador sin sesión lleva de `/padron` a `/entrar` a 375 px. La CSP bloquea el beacon que inyecta Cloudflare Web Analytics; es externo y no una regresión.
@@ -438,7 +438,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Pruebas:** 1534 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube. Después, `ci.ps1` con la imagen oficial dio verde sobre `492f531` y sobre `93f9a29`.
    - **Revisión independiente final sobre `492f531`: sin P1 ni P2**, con Codex sin hallazgos sobre el mismo SHA. La de `129730f` no valía como final: sus P1 y P2 cambiaron el código.
    - **Hecho después (24-10):** la revisión independiente final y Codex sobre `492f531`, `ci.ps1` con la imagen oficial y las decisiones D1, D3, D4 y las del 23-10 en el documento de decisiones de CEM (§2.4, CEM #69).
-10. **Corte 4 de 2b-5, pantalla del padrón (24-10-2026):** PR #108 (rama `padron-corte4`, desde `3ec895f`), fusionado el 24-10-2026 a las 23:11 UTC en `84d50e7` (head `36365c7`). **Desplegado** en staging y producción el 25-10 (UTC) en `5b289ba` (ver «Desplegado»).
+10. **Corte 4 de 2b-5, pantalla del padrón (24-10-2026):** PR #108 (rama `padron-corte4`, desde `3ec895f`), fusionado el 24-10-2026 a las 23:11 UTC en `84d50e7` (head `36365c7`). **Desplegado** en `5b289ba`: staging el 24-10 a las 23:56 UTC y producción el 25-10 a las 00:00 UTC (ver «Desplegado»).
    - **Qué trae:** página `/padron` (enlace «Padrón del edificio» en el inicio). Lista los vínculos vigentes y futuros con unidad, nombre, carácter, vigencia y confirmación, sin correo ni teléfono. **Confirmar** pide la referencia del título (`padron.confirmar_vinculo`) y **finalizar** pide el motivo y una segunda confirmación (`padron.gestionar`). La interfaz no concede nada: decide la API. Lleva CSRF, `Idempotency-Key` por intento y descarte de respuestas viejas (E35).
    - **Contrato 0.18.0** (autorizado por el propietario el 24-10): `FilaPadron.iniciado`. El backend lo calcula como `vigente_desde <= nucleo.hoy_del_consorcio(c)`, la misma regla con que `finalizar_vinculo` (0020) decide si el vínculo empezó. La pantalla lo usa para «todavía no empezó» y para ofrecer «Finalizar», en vez de calcular la fecha de Buenos Aires (P2 de Codex sobre `c64ce9e`). No concede permisos; sin migración.
    - **Pruebas:** 31 unitarias de la pantalla y su e2e en un teléfono de 360 px con la CSP real. En el backend: el importado pendiente sigue sin usar el padrón ni sus acciones, y `iniciado` y el fin coinciden con la fecha del consorcio cuando está en otro día que Buenos Aires.
