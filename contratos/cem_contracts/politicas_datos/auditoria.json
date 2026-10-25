@@ -1,0 +1,32 @@
+{
+  "politicas": [
+    {
+      "accion": "auditoria.mis_eventos",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": true,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF35-B (decisión del propietario del 24-10-2026, 2b-6c): cada persona lee la proyección funcional mínima de sus propios eventos, sin datos técnicos ni negaciones"
+    },
+    {
+      "accion": "auditoria.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "auditoria.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF35-B (decisión del propietario del 24-10-2026, 2b-6c, opción 1): auditoria.ver en los paquetes de MC y AD, no AE; proyección funcional, el nombre del actor solo con padron.ver, sin exportación (E0)"
+    }
+  ]
+}

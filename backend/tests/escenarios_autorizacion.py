@@ -4,7 +4,7 @@ El CSV es legible para el propietario; acá se traduce cada fila a tipos puros:
 
 - **figura:** términos unidos por `+`. `P`, `I` y `O` son vínculos vigentes en 3-A (`P@5B`, en
   otra unidad). `MC`, `AD` y `AE` son mandatos con el paquete completo (D2 de `0011` más las
-  filas de `0012` de la tabla, §5.2: C2 y A2, y las de `0018`); `MC[f1|f2]`, con el paquete
+  filas de `0012` de la tabla, §5.2: C2 y A2, y las de `0018` y `0028`); `MC[f1|f2]`, con el paquete
   achicado por el acta.
   `Fac(codigo)` o `Fac(codigo@recurso)` es un mandato con esa sola facultad. `ninguna`, nada.
 - **modo:** `C`, `AA`, `AG` o `—` (sin modo registrado).
@@ -116,8 +116,18 @@ ADICIONES_0018 = {
     "administrador": ["mandatos.ver", "decisiones.ver"],
     "administrador_externo": [],
 }
+# `0028` (2b-6c, RF35-B): lectura de la auditoría del consorcio, para MC y AD, no AE.
+CATALOGO |= {"auditoria.ver": False}
+ADICIONES_0028 = {
+    "miembro_consejo": ["auditoria.ver"],
+    "administrador": ["auditoria.ver"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
-    tipo: list(_M0011.PAQUETES[tipo]) + ADICIONES_0012[tipo] + ADICIONES_0018[tipo]
+    tipo: list(_M0011.PAQUETES[tipo])
+    + ADICIONES_0012[tipo]
+    + ADICIONES_0018[tipo]
+    + ADICIONES_0028[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 
