@@ -117,17 +117,17 @@ Medido en el despliegue de `fc1dd62` (25-10-2026: staging a las 19:35 UTC y prod
 
 - **Qué es:** 2b-6 entero: 2b-6a (PR #111, `0026`), 2b-6b (PR #113, `0027`) y 2b-6c (PR #115, `0028`), más la documentación de PR #114 y #116. La SHA es la punta de `main`. Detalle de los cortes en «Próximo paso», puntos 11 a 13.
 - **Clave nueva:** `CEM_IDENTIDAD_CLAVES`, versión 1, en `cem-backend-staging` y `cem-backend`, distinta en cada entorno, creada antes del despliegue sin imprimir ningún valor. Dentro de cada contenedor, el llavero carga con la versión 1 (control: una clave corta se rechaza).
-- **Controles.** `ci.ps1` verde sobre `fc1dd62` (e2e 177). Imágenes: `cem-backend` `sha256:1b3dcbfc…3317` y `cem-frontend` `sha256:31fc53a5…994a`, las mismas en los dos entornos.
+- **Controles.** `ci.ps1` verde sobre `fc1dd62`: backend 1696, contratos 58, frontend 330 y e2e 177. Imágenes: `cem-backend` `sha256:1b3dcbfc…3317` y `cem-frontend` `sha256:31fc53a5…994a`, las mismas en los dos entornos.
 - **Despliegue (Claude, con el mandato autónomo del propietario del 25-10).** Copia previa verificada en los dos entornos (había tres migraciones). En los dos:
   - los 4 servicios `running healthy`, con la imagen y el digest validados;
   - `/health` con `fc1dd62` y contrato 0.21.0, deps y cola en `ok`;
   - base en `0028 (head)` (`alembic current`);
-  - una instancia por servicio y 0 errores en los registros.
+  - una instancia por servicio (4 contenedores) y 0 errores en los registros.
   - **Staging:** smoke `7b7507f2` con 20 controles: los del smoke, más A13-C con la clave real, F9, RF41-C y RF35-B (corridos desde una copia local), y la cadena de auditoría con 634 eventos, 0 rotos.
-  - **Producción:** Kuma en verde y `…/auditoria` sin sesión da 401 JSON. No se creó ningún dato real.
+  - **Producción:** Kuma en verde y `…/auditoria` sin sesión da 401 JSON. No se creó ningún dato real: leído en solo lectura, 0 consorcios, 0 mandatos y 0 identidades.
   - Producción previa: `5b289ba`. No hizo falta volver atrás; la base no se baja de forma automática.
-- **SIN VERIFICAR:** R10 en una ruta real (todavía no hay rutas económicas); la continuidad del Consejo con una autoinvitación vieja y el importado pendiente sin derechos (los cubre `ci.ps1`); todo recorrido con datos reales en producción.
-- **Después del despliegue:** las altas de mandato por la API se niegan hasta que soporte verifique identidades; los cambios de modo, solo por soporte; los mandatos anteriores a `0028` no tienen `auditoria.ver`. Staging no baja de `0026` ni de `0028`.
+- **SIN VERIFICAR:** R10 en una ruta real (todavía no hay rutas económicas); la continuidad del Consejo con una autoinvitación vieja y el importado pendiente sin derechos (los cubre `ci.ps1`); todo recorrido con datos reales en producción; que `5b289ba` funcione sobre una base en `0028`.
+- **Después del despliegue:** las altas de mandato por la API se niegan hasta que soporte verifique identidades; los cambios de modo, solo por soporte; los mandatos anteriores a `0028` no tienen `auditoria.ver`. Staging no baja de `0026` ni de `0028` (por la regla de las migraciones; no probado con una bajada).
 
 Antes, **`5b289ba`** (staging el 24-10-2026 de 23:56 a 23:58 UTC, producción el 25-10 de 00:00 a 00:02 UTC), base `0025`, contrato 0.18.0.
 
