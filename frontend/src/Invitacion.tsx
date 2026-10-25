@@ -27,6 +27,7 @@ type Estado =
   | "invalida"
   | "requiere_sesion"
   | "otra_persona"
+  | "propia"
   | "sin_servicio";
 
 const TIPOS: Record<Recibida["tipo"], string> = {
@@ -37,6 +38,11 @@ const TIPOS: Record<Recibida["tipo"], string> = {
 
 const ESTADO_INVALIDA = 404;
 const ESTADO_CONFLICTO = 409;
+/** Los 409 de la aceptación; cualquier otro conflicto se muestra como el de otra cuenta. */
+const CONFLICTOS: Record<string, Estado> = {
+  invitacion_requiere_sesion: "requiere_sesion",
+  invitacion_propia: "propia",
+};
 
 function leerToken(): string | null {
   return tokenDelFragmento(window.location.hash);
@@ -83,7 +89,7 @@ export function Invitacion() {
         if (error === undefined) setEstado("aceptada");
         else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else if (response.status === ESTADO_CONFLICTO && "codigo" in error)
-          setEstado(error.codigo === "invitacion_requiere_sesion" ? "requiere_sesion" : "otra_persona");
+          setEstado(CONFLICTOS[error.codigo] ?? "otra_persona");
         else fallar(response.status, codigoDe(error));
       })
       .catch(() => fallar(0, undefined));
@@ -154,6 +160,12 @@ export function Invitacion() {
           <p className="aviso-error">
             Estás con una cuenta que no es la del correo invitado. Salí de esa cuenta y volvé a
             abrir el enlace de la invitación.
+          </p>
+        )}
+        {estado === "propia" && (
+          <p className="aviso-error">
+            Esta invitación la creaste vos: la tiene que aceptar la persona invitada, con su
+            propia cuenta.
           </p>
         )}
         {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}

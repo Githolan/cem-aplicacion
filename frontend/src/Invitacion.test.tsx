@@ -137,6 +137,16 @@ describe("página /invitacion", () => {
     expect(await screen.findByText(/no es la del correo invitado/)).toBeTruthy();
   });
 
+  it("si la creó quien la acepta, lo dice (F9)", async () => {
+    vi.stubGlobal("fetch", backend(() => error("invitacion_propia", 409)));
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByText(/Esta invitación la creaste vos/)).toBeTruthy();
+    expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
+  });
+
   it("una invitación que no sirve muestra un error genérico", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => error("invitacion_invalida", 404)));
     abrir(`/invitacion#token=${TOKEN}`);

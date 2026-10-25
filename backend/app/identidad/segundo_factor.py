@@ -27,7 +27,7 @@ import logging
 import secrets
 import struct
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote, urlencode
 from uuid import UUID
@@ -68,8 +68,8 @@ EMISOR = "Consorcio en Mano"
 CANTIDAD_RECUPERACION = 10
 ALFABETO_RECUPERACION = "abcdefghijkmnpqrstuvwxyz23456789"
 """32 símbolos sin 0, 1, o ni l: 50 bits por código de diez."""
-VIGENCIA_VERIFICACION = timedelta(minutes=10)
-"""TB-CEM-3: cuánto cuenta como reciente una verificación."""
+VIGENCIA_VERIFICACION = sesiones.VIGENCIA_SEGUNDO_FACTOR_RECIENTE
+"""TB-CEM-3: cuánto cuenta como reciente una verificación (la misma que mira R10)."""
 LIMITES_INTENTOS: tuple[RateLimitItem, ...] = (parse("5/minute"), parse("20/day"))
 """Intentos de código (alta, verificación o baja) por persona. Con ±1 paso hay 3 códigos
 válidos en 10⁶: 20 por día dan 0,006 % de acertar al azar en un día."""

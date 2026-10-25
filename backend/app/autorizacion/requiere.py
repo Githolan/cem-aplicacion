@@ -14,14 +14,16 @@ importar la ruta, no en el pedido.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated
+from uuid import UUID
 
 from cem_contracts.errores import CodigoError
 from fastapi import Depends, Request
+from sqlalchemy import text
 
 from app import auditoria
-from app.autorizacion.evaluador import Decision, Entidad, evaluar
+from app.autorizacion.evaluador import Decision, Entidad, evaluar, separa_seres_humanos
 from app.autorizacion.politicas import POLITICAS
 from app.contexto import Contexto, MotorDep, require_scope
 from app.db import transaccion
@@ -43,7 +45,30 @@ class Permiso:
 
     def decidir(self, entidad: Entidad | None = None) -> Decision:
         """Solo evalúa, sin efectos (p. ej. para filtrar una lista fila por fila)."""
-        return evaluar(self.accion, self.ctx.autorizacion, entidad or Entidad())
+        entidad = entidad or Entidad()
+        return evaluar(self.accion, self._con_identidades(entidad).autorizacion, entidad)
+
+    def _con_identidades(self, entidad: Entidad) -> Contexto:
+        """Si la acción separa seres humanos (A13-C), agrega las identidades verificadas en el
+        consorcio de las personas de la entidad. Las de quien actúa ya vienen en el contexto."""
+        if not any(separa_seres_humanos(self.accion, c) for c in POLITICAS[self.accion].separacion):
+            return self.ctx
+        personas = _personas(entidad) - {self.ctx.persona_id}
+        if not personas:
+            return self.ctx
+        with transaccion(
+            self.motor, persona_id=self.ctx.persona_id, consorcio_id=self.ctx.consorcio_id
+        ) as conn:
+            filas = conn.execute(
+                text(
+                    "select persona_id, identidad_id from nucleo.identidad_persona"
+                    " where consorcio_id = :c and persona_id = any(:p)"
+                    " and desvinculada_en is null"
+                ),
+                {"c": self.ctx.consorcio_id, "p": list(personas)},
+            )
+            identidades = {f.persona_id: f.identidad_id for f in filas}
+        return replace(self.ctx, identidades=identidades)
 
     def verificar(self, entidad: Entidad | None = None, *, estado_negado: int = 403) -> Decision:
         """Evalúa y, si se niega, audita el motivo y responde el error genérico.
@@ -86,6 +111,16 @@ class Permiso:
                 }
             },
         )
+
+
+def _personas(entidad: Entidad) -> set[UUID]:
+    """Las personas que la entidad pone en algún lugar de una separación."""
+    candidatas = (
+        entidad.preparado_por, entidad.solicitado_por, entidad.propuesto_por,
+        entidad.persona_objetivo, entidad.registrado_por, entidad.emitido_por,
+        entidad.decision_registrada_por, *entidad.aprobado_por, *entidad.firmas,
+    )  # fmt: skip
+    return {p for p in candidatas if p is not None}
 
 
 class Requiere:

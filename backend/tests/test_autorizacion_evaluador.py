@@ -3,6 +3,9 @@
 Complementa la tabla de verdad (`test_tabla_de_verdad.py`) con las propiedades que la tabla
 no puede expresar fila por fila: que ningún filtro concede, que toda económica se niega, que
 la carga de políticas falla fuerte, y los controles de cada regla.
+
+Por omisión `YO` y `OTRO` son dos seres humanos verificados en el consorcio (A13-C) y la
+sesión tiene el segundo factor reciente y menos de 12 horas (R10).
 """
 
 import json
@@ -30,6 +33,7 @@ YO = UUID("0192f0c4-0000-7000-8000-000000000001")
 OTRO = UUID("0192f0c4-0000-7000-8000-000000000002")
 U3A = UUID(SIMBOLOS["3A"])
 MANDATO = UUID(int=1)
+IDENTIDADES = {YO: UUID(int=101), OTRO: UUID(int=102)}
 
 
 def mandato(consorcio: UUID = CONSORCIO) -> Mandato:
@@ -44,6 +48,9 @@ def contexto(
     consorcio_mandato: UUID = CONSORCIO,
     administrador: bool = True,
     persona: UUID | None = YO,
+    identidades: dict[UUID, UUID] = IDENTIDADES,
+    segundo_factor_reciente: bool = True,
+    sesion_reciente: bool = True,
 ) -> ContextoAutorizacion:
     """`facultades=None`: sin mandato; `()`: un mandato vigente sin ninguna facultad."""
     mandatos = () if facultades is None else (mandato(consorcio_mandato),)
@@ -56,6 +63,9 @@ def contexto(
         mandatos=mandatos,
         facultades=tuple(Facultad(c, None, MANDATO) for c in facultades or ()),
         hay_administrador_vigente=administrador,
+        identidades=identidades,
+        segundo_factor_reciente=segundo_factor_reciente,
+        sesion_reciente=sesion_reciente,
     )
 
 
@@ -114,15 +124,40 @@ def test_control_con_su_facultad_la_concesion_pasa(accion):
     # Control de la prueba anterior: con la facultad exacta, lo que decide son los filtros.
     p = POLITICAS[accion]
     d = evaluar(accion, contexto(facultades=(p.facultad,), modo=modo_que_pasa(p)), TODO_PASA)
-    esperado = "requiere_controles_2b6" if p.economica else "concedido_por_facultad"
-    assert d.motivo_interno == esperado
+    assert d.motivo_interno == "concedido_por_facultad"
 
 
 @pytest.mark.parametrize("accion", sorted(a for a, p in POLITICAS.items() if p.economica))
-def test_toda_economica_se_niega_aunque_todo_pase(accion):
+def test_toda_economica_exige_identidad_y_los_controles_de_r10(accion):
     todas = tuple(CATALOGO)
-    d = evaluar(accion, contexto(facultades=todas, modo=ModoOperacion.AUTOGESTION), TODO_PASA)
-    assert (d.estado, d.motivo_interno) == (403, "requiere_controles_2b6")
+    modo = ModoOperacion.AUTOGESTION
+    casos = {
+        "identidad_no_verificada": contexto(
+            facultades=todas, modo=modo, identidades={OTRO: IDENTIDADES[OTRO]}
+        ),
+        "requiere_segundo_factor_reciente": contexto(
+            facultades=todas, modo=modo, segundo_factor_reciente=False
+        ),
+        "requiere_sesion_reciente": contexto(facultades=todas, modo=modo, sesion_reciente=False),
+    }
+    for motivo, ctx in casos.items():
+        d = evaluar(accion, ctx, TODO_PASA)
+        assert (d.estado, d.motivo_interno) == (403, motivo)
+    # Control: con todo, pasa.
+    d = evaluar(accion, contexto(facultades=todas, modo=modo), TODO_PASA)
+    assert (d.estado, d.motivo_interno) == (200, "concedido_por_facultad")
+
+
+def test_r10_no_alcanza_a_las_que_no_son_economicas():
+    p = POLITICAS["fondo_reserva.solicitar"]
+    assert not p.economica
+    ctx = contexto(
+        facultades=(p.facultad,), modo=modo_que_pasa(p), identidades={},
+        segundo_factor_reciente=False, sesion_reciente=False,
+    )  # fmt: skip
+    assert evaluar("fondo_reserva.solicitar", ctx, TODO_PASA).motivo_interno == (
+        "concedido_por_facultad"
+    )
 
 
 def test_modo_cambiar_no_lo_concede_nadie():

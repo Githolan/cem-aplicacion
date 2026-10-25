@@ -7,7 +7,8 @@ deslizante y, si la petición modifica estado, exige el token CSRF. Sin sesión 
 prueban la autenticación la reemplazan con `app.dependency_overrides`.
 """
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Annotated
 from uuid import UUID
@@ -54,9 +55,20 @@ class Contexto:
     facultades: tuple[Facultad, ...] = ()
     hay_administrador_vigente: bool = False
     """Si existe el único mandato vigente de administración del consorcio (A14)."""
+    identidad_humana: UUID | None = None
+    """La identidad humana verificada de la persona en este consorcio (A13-C, 0026)."""
+    segundo_factor_reciente: bool = False
+    """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
+    sesion_reciente: bool = False
+    """La sesión empezó hace menos de 12 horas (R10)."""
+    identidades: Mapping[UUID, UUID] = field(default_factory=dict)
+    """Las identidades de otras personas que necesita la acción; las agrega `Permiso`."""
 
     @property
     def autorizacion(self) -> ContextoAutorizacion:
+        identidades = dict(self.identidades)
+        if self.identidad_humana is not None:
+            identidades[self.persona_id] = self.identidad_humana
         return ContextoAutorizacion(
             persona_id=self.persona_id,
             consorcio_id=self.consorcio_id,
@@ -66,6 +78,9 @@ class Contexto:
             mandatos=self.mandatos,
             facultades=self.facultades,
             hay_administrador_vigente=self.hay_administrador_vigente,
+            identidades=identidades,
+            segundo_factor_reciente=self.segundo_factor_reciente,
+            sesion_reciente=self.sesion_reciente,
         )
 
 
@@ -174,6 +189,27 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
             ),
             {"c": consorcio_id, "hoy": hoy},
         ).scalar_one_or_none()
+        identidad_humana = conn.execute(
+            text(
+                "select identidad_id from nucleo.identidad_persona where consorcio_id = :c"
+                " and persona_id = :p and desvinculada_en is null"
+            ),
+            {"c": consorcio_id, "p": p},
+        ).scalar_one_or_none()
+        # R10: sin la sesión de la petición (solo en pruebas) no hay controles económicos.
+        controles = None
+        if identidad.sesion_id is not None:
+            controles = conn.execute(
+                text(
+                    "select coalesce(segundo_factor_en > now() - :v, false) as segundo_factor,"
+                    " creada_en > now() - :d as reciente from nucleo.sesion where id = :s"
+                ),
+                {
+                    "s": identidad.sesion_id,
+                    "v": sesiones.VIGENCIA_SEGUNDO_FACTOR_RECIENTE,
+                    "d": sesiones.VIGENCIA_SESION_ECONOMICA,
+                },
+            ).one()
     return Contexto(
         persona_id=p,
         consorcio_id=consorcio_id,
@@ -183,6 +219,9 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         mandatos=mandatos,
         facultades=facultades,
         hay_administrador_vigente=hay_administrador,
+        identidad_humana=identidad_humana,
+        segundo_factor_reciente=controles is not None and controles.segundo_factor,
+        sesion_reciente=controles is not None and controles.reciente,
     )
 
 

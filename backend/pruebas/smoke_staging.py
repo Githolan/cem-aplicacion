@@ -39,7 +39,10 @@ de solo agregar. La primera invitación de mandato deja staging sin poder bajar 
 (barrera aceptada en P3): se registra en `REGISTRO_RECURSOS`. Cada corrida deja también un
 esquema de coeficientes de un grupo propio (`prueba_<corrida>`, inalterable) y un vínculo
 finalizado: desde la primera, staging no baja de `0021` ni de `0020`, que se niegan con datos
-(autorización del propietario del 21-10-2026). Nunca en producción.
+(autorización del propietario del 21-10-2026). Desde 2b-6a, soporte verifica la identidad
+humana de las cuentas de la corrida (A13-C) con huellas al azar, porque son cuentas `.invalid`
+sin documento, y la referencia lo dice: staging no baja de `0026`, que se niega con identidades.
+Nunca en producción.
 
 `--sin-verificar-certificado` existe porque dentro de la red de Docker el certificado de
 Traefik no es el del dominio (el TLS público lo termina Cloudflare); el tráfico no sale de la
@@ -51,6 +54,7 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import re
 import ssl
 import sys
@@ -280,6 +284,19 @@ def baja(corrida: Corrida, rol: str) -> None:
             {"m": corrida.mandatos[rol], "r": REFERENCIA},
         )  # fmt: skip
     corrida.terminados.add(rol)
+
+
+def verificar_identidades(corrida: Corrida, *roles: str) -> None:
+    """A13-C: soporte verifica a las personas de la corrida. Son cuentas `.invalid` sin
+    documento, así que la huella es al azar (ningún documento la da) y la referencia lo dice."""
+    with corrida.tx() as conn:
+        for rol in roles:
+            conn.execute(
+                text("select nucleo.verificar_identidad_humana(:p, array[1]::smallint[],"
+                     " array[:h]::bytea[], 'documento_presencial', :r, 'Smoke de staging')"),
+                {"p": corrida.personas[rol], "h": os.urandom(32),
+                 "r": REFERENCIA + "; cuenta sin documento, huella al azar"},
+            )  # fmt: skip
 
 
 def denegado(corrida: Corrida, persona: UUID, accion: str, motivo: str | None = None) -> bool:
@@ -513,6 +530,13 @@ def recorrer(corrida: Corrida) -> None:
     acta = r.cuerpo["id"]
     nuevo = {"tipo": "miembro_consejo", "persona_id": str(corrida.personas["propietaria"]),
              "decision_id": acta, "desde": str(hoy)}  # fmt: skip
+    # 2b-6a (A13-C): sin la identidad humana verificada de las dos personas no hay alta.
+    r = mc2.pedir("POST", corrida.c("/mandatos"), nuevo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 403, f"A13-C: sin identidades verificadas no hay alta: {r.texto}")
+    comprobar(denegado(corrida, corrida.personas["consejo2"], "mandatos.alta",
+                       "identidad_no_verificada"),
+              "el 403 de A13-C en el alta quedó auditado")  # fmt: skip
+    verificar_identidades(corrida, "consejo1", "consejo2", "propietaria")
     r = mc1.pedir("POST", corrida.c("/mandatos"), nuevo, csrf=True, clave=str(uuid4()))
     comprobar(r.estado == 403, f"A15: quien registró la decisión no da el alta: {r.texto}")
     comprobar(denegado(corrida, corrida.personas["consejo1"], "mandatos.alta",
@@ -532,7 +556,7 @@ def recorrer(corrida: Corrida) -> None:
     r = mc2.pedir("POST", ruta, remocion, csrf=True, clave=str(uuid4()))
     comprobar(r.estado == 200 and r.cuerpo["causa"] == "remocion", f"remoción: {r.texto}")
     corrida.terminados.add("consejo_http")
-    corrida.ok("decisión, alta y remoción por HTTP, con A15 (403 auditado al que registró)")
+    corrida.ok("decisión, alta y remoción por HTTP, con A13-C y A15 (403 auditados)")
 
     # 2b-4c: lectura minimizada. El Consejo lee lo mínimo y el detalle.
     r = mc2.pedir("GET", corrida.c("/mandatos"))

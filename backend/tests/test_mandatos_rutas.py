@@ -263,8 +263,9 @@ def test_la_remocion_con_instrumento_no_llega_a_la_base(escena):
 @pytest.mark.parametrize(
     ("cuerpo", "estado", "codigo"),
     [
-        # Una cuenta que no existe da el mismo motivo que una sin vínculo (sin oráculo, 2b-4c).
-        ({"persona_id": "01a10000-0000-7000-8000-000000000001"}, 422, "persona_sin_vinculo"),
+        # Una cuenta que no existe no tiene identidad verificada en el consorcio: la autorización
+        # niega antes, igual que a una sin verificar (A13-C, sin oráculo).
+        ({"persona_id": "01a10000-0000-7000-8000-000000000001"}, 403, "sin_permiso"),
         ({"tipo": "administrador", "nombre": "Sin cuenta"}, 422, "mandato_sin_cuenta"),
         ({"persona_id": "VECINA", "facultades": []}, 422, "facultad_fuera_de_paquete"),
         ({"persona_id": "VECINA", "facultades": ["pagos.autorizar"]}, 422,

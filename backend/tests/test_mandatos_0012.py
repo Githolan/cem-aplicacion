@@ -17,7 +17,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.conftest import ADMIN_URL, CLAVES, alembic_config
+from tests.conftest import ADMIN_URL, CLAVES, alembic_config, verificar_en_el_consorcio
 from tests.test_mandatos import (
     facultades_de,
     otra_persona,
@@ -555,6 +555,9 @@ def test_c4_consorcios_con_mandato_vigente_y_sin_propios_en_la_rls(escena, motor
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
     acta_b = decidir_equipo(motor_app, cons_b)
     cons_c, _, per_c = consorcio_con_persona(motor_migrate)
+    for otro in (cons_b, cons_c):  # la identidad humana es por consorcio (A13-C)
+        verificar_en_el_consorcio(motor_migrate, otro, e["p1"])
+    verificar_en_el_consorcio(motor_migrate, cons_b, e["p2"])
     m_a = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"])
     m_b = alta(motor_app, cons_b, per_b, acta_b, tipo="miembro_consejo", persona=e["p1"])
     m_c = alta(motor_app, cons_c, per_c, decidir_equipo(motor_app, cons_c),

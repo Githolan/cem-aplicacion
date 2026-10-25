@@ -411,6 +411,18 @@ def revocar(
 # Bajo /api/v1/auth/: comparten el cupo por IP de la familia de autenticación (§10.6).
 
 
+def _invitacion_propia() -> ErrorApi:
+    """F9 (0026): quien creó la invitación no la acepta para sí, ni con otra cuenta de la misma
+    identidad humana verificada en el consorcio."""
+    log.info("aceptación de invitación rechazada: invitacion_propia")
+    return ErrorApi(
+        409,
+        CodigoError.INVITACION_PROPIA,
+        "Esta invitación la creaste vos: la tiene que aceptar la persona invitada.",
+        encabezados=SIN_CACHE,
+    )
+
+
 def _vinculo_no_corresponde() -> ErrorApi:
     """La invitación que creó la importación nombra su vínculo (0025) y ese vínculo ya no le
     corresponde: no se reutiliza otro ni se crea uno."""
@@ -490,8 +502,9 @@ def persona_de_la_sesion(request: Request, motor) -> UUID | None:
         },
         409: {
             "model": Error,
-            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay; o"
-            " la invitación nombra un vínculo que ya no le corresponde.",
+            "description": "El correo ya tiene cuenta y la sesión no es la suya, o no hay; la"
+            " invitación nombra un vínculo que ya no le corresponde; o la creó quien la acepta"
+            " (`invitacion_propia`, F9).",
         },
     },
 )
@@ -549,6 +562,8 @@ def aceptar(
         )
     if r.resultado == "vinculo_no_corresponde":
         raise _vinculo_no_corresponde()
+    if r.resultado == "invitacion_propia":
+        raise _invitacion_propia()
     if r.resultado != "ok":
         log.info("aceptación de invitación rechazada: %s", r.resultado)
         raise _invitacion_invalida()
@@ -609,7 +624,8 @@ def mis_invitaciones(
         409: {
             "model": Error,
             "description": "La invitación nombra un vínculo que ya no le corresponde (anulado, o"
-            " de otra persona, unidad o carácter).",
+            " de otra persona, unidad o carácter), o la creó quien la acepta"
+            " (`invitacion_propia`, F9).",
         },
     },
 )
@@ -634,6 +650,8 @@ def aceptar_propia(
         raise _invitacion_invalida()
     if r.resultado == "vinculo_no_corresponde":
         raise _vinculo_no_corresponde()
+    if r.resultado == "invitacion_propia":
+        raise _invitacion_propia()
     if r.resultado != "ok":
         # `otra_persona` o `requiere_sesion`: la base eligió la invitación por mi correo, así que
         # no pueden pasar. Si pasan, es un defecto (500), no una invitación que no sirve.
