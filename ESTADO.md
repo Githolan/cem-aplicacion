@@ -111,9 +111,24 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `fc1dd62` (25-10-2026: staging a las 19:35 UTC y producción a las 19:40 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-25-fc1dd62.md`, con los dos entornos: `cd.ps1` escribe uno por día UTC).
+Medido en el despliegue de `dbebf79` (25-10-2026: staging a las 21:16 UTC y producción a las 21:20 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-25-dbebf79.md`, con los dos entornos: `cd.ps1` escribe uno por día UTC).
 
-**Staging y producción en `fc1dd62`** (25-10-2026: staging de 19:32 a 19:35 UTC, producción de 19:37 a 19:40 UTC), base `0028`, contrato 0.21.0.
+**Staging y producción en `dbebf79`** (25-10-2026: staging de 21:14 a 21:16 UTC, producción de 21:17 a 21:20 UTC), base `0029`, contrato 0.22.0.
+
+- **Qué es:** RF05, la lectura de coeficientes por la API (PR #118, `0029`). La SHA es la punta de `main`, el merge de #118. Detalle en «Próximo paso», punto 14.
+- **Sin variables nuevas.**
+- **Controles.** `ci.ps1` verde sobre `dbebf79`: backend 1727, contratos 58, frontend 330 y e2e 177. Imágenes: `cem-backend` `sha256:e4f6d5f4…51ce` y `cem-frontend` `sha256:d51e62b8…4873`, las mismas en los dos entornos.
+- **Despliegue (Claude, con el mandato autónomo del propietario del 25-10).** Copia previa verificada en los dos entornos, porque `0029` estaba pendiente. En los dos:
+  - los 4 servicios `running healthy`, con la imagen y el digest validados;
+  - `/health` con `dbebf79` y contrato 0.22.0;
+  - base en `0029 (head)`;
+  - 4 contenedores, 0 reinicios y 0 errores en los registros.
+  - **Staging:** smoke `931fc1e7` con 21 controles: los de `fc1dd62` más RF05 (el Consejo lee los coeficientes tal como se guardaron; una propietaria sin mandato recibe 403 auditado). La cadena de auditoría tiene 694 eventos y 0 rotos.
+  - **Producción:** Kuma con 14 monitores en verde; `…/coeficientes` sin sesión da 401 JSON.
+  - Producción previa: `fc1dd62`.
+- **SIN VERIFICAR:** la lectura con datos reales en producción, porque no hay consorcios; que `fc1dd62` funcione sobre una base en `0029` (la bajada solo quita funciones).
+
+Antes, **`fc1dd62`** (25-10-2026: staging de 19:32 a 19:35 UTC, producción de 19:37 a 19:40 UTC), base `0028`, contrato 0.21.0.
 
 - **Qué es:** 2b-6 entero: 2b-6a (PR #111, `0026`), 2b-6b (PR #113, `0027`) y 2b-6c (PR #115, `0028`), más la documentación de PR #114 y #116. La SHA es la punta de `main`. Detalle de los cortes en «Próximo paso», puntos 11 a 13.
 - **Clave nueva:** `CEM_IDENTIDAD_CLAVES`, versión 1, en `cem-backend-staging` y `cem-backend`, distinta en cada entorno, creada antes del despliegue sin imprimir ningún valor. Dentro de cada contenedor, el llavero carga con la versión 1 (control: una clave corta se rechaza).
@@ -526,3 +541,15 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - «eventos propios» = los que hizo quien lee, no los que lo nombran;
      - faltan la prueba del downgrade de `0028` y la del mandato anterior a `0028`.
    - **Para desplegar (hecho el 25-10):** sin variables nuevas. `0028` crea dos índices sobre `auditoria.eventos` (no concurrentes). Desde `0028`, ninguna base con `auditoria.ver` otorgada baja de esa revisión.
+14. **RF05, lectura de coeficientes por la API (25-10-2026; diseño en H2b_5 §3 del repositorio CEM):** PR #118 (rama `coeficientes-lectura-rf05`), fusionado el 25-10-2026 a las 20:52 UTC en `dbebf79` (head `b2be268`). **Desplegado** en `dbebf79` el 25-10, en staging y en producción (ver «Desplegado»).
+   - **Qué trae:**
+     - migración `0029`, que agrega `nucleo.coeficientes_del_consorcio()` y `nucleo.reglas_de_reparto_del_consorcio()`:
+       - las dos son `security definer`;
+       - la segunda barrera es un mandato vigente con `padron.ver` o `coeficientes.proponer`;
+       - el porcentaje sale como texto, tal como se guardó (D4);
+       - no salen la fuente, la decisión ni quién registró;
+     - `GET /api/v1/consorcios/{consorcio_id}/coeficientes`. Deciden dos políticas de lectura derivadas de esas facultades: `coeficientes.ver_por_unidad` (`padron.ver` sobre la unidad) y `coeficientes.ver_por_grupo` (`coeficientes.proponer` sobre el grupo, sin respaldo). Filtra fila por fila;
+     - contrato 0.22.0.
+   - **Controles sobre `b2be268`:** `ci.ps1` verde; Codex sin hallazgos; revisión independiente sin P1 ni P2. Antes, la revisión encontró dos P2: la lista vacía sin auditar con `proponer` sin modo y acotado a un grupo. Ahora una negación por filtro da 403 auditado, y cada caso tiene una prueba que falla con la ruta anterior.
+   - **Lo elegido por defecto** (que `proponer` también lee, que no sale la fuente, los porcentajes sin redondear) espera la confirmación del propietario: está en el paquete de decisiones de H2 del repositorio CEM, §3.
+   - **Para desplegar (hecho el 25-10):** sin variables nuevas. `0029` solo agrega funciones.
