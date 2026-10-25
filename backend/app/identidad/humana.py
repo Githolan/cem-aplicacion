@@ -13,8 +13,9 @@ solo su huella: `HMAC-SHA256(clave, etiqueta || consorcio || documento canónico
   como `CEM_CODIGO_CLAVE` (`secrets.token_urlsafe(32)`), distinta en cada entorno y solo en
   `cem-backend`. La de versión más alta firma lo nuevo; las anteriores siguen reconociendo los
   documentos verificados con ellas. Retirar una versión exige volver a ver esos documentos
-  (`corregir`): sin el número, una huella no se recalcula. Es una variable de entorno más, igual
-  que las demás claves; no hay otro mecanismo de secretos.
+  (`corregir`): sin el número, una huella no se recalcula. Mientras quede una identidad firmada
+  con una versión que el llavero no tiene, la base niega verificar, vincular y corregir. Es una
+  variable de entorno más, igual que las demás claves; no hay otro mecanismo de secretos.
 
 El número en claro de un DNI es chico (unos 10⁸ valores): sin la clave la huella no se puede
 probar, pero con la clave sí. Por eso la clave nunca está en la base ni en sus copias.

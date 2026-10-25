@@ -15,7 +15,9 @@ respaldo. Corre dentro del contenedor de `cem-backend`, con su `CEM_DATABASE_URL
 **El número del documento** se lee de la entrada estándar (sin eco si es una terminal), nunca de
 un argumento ni de un archivo: así no queda en el historial, en `ps` ni en el disco. El script
 calcula su huella con cada clave del llavero y manda solo las huellas; el número no se imprime,
-no se registra y no llega a la base. La referencia y el motivo se rechazan si lo contienen.
+no se registra y no llega a la base. La referencia, el motivo y el operador se rechazan si lo
+contienen. Las versiones retiradas del llavero no pueden tener identidades: antes de retirar
+una, `corregir` las que firmó (la base se niega con `clave_retirada_con_identidades`).
 
 - `verificar`: la cuenta no tiene identidad y el documento no es de ninguna del consorcio.
 - `vincular`: la cuenta no tiene identidad y el documento ya es de una: es otra cuenta del mismo
@@ -94,8 +96,10 @@ def main(lista: list[str] | None = None) -> int:
         except (RuntimeError, humana.DocumentoInvalido) as e:
             print(f"no se hizo nada: {e}", file=sys.stderr)
             return 2
-        if any(humana.contiene_documento(t, documento) for t in (a.referencia, a.motivo or "")):
-            print("no se hizo nada: la referencia o el motivo contienen el número", file=sys.stderr)
+        textos = (a.referencia, a.motivo or "", a.operador)
+        if any(humana.contiene_documento(t, documento) for t in textos):
+            print("no se hizo nada: la referencia, el motivo o el operador contienen el número",
+                  file=sys.stderr)  # fmt: skip
             return 2
         parametros["v"], parametros["h"] = humana.huellas(llavero, a.consorcio, documento)
         del documento

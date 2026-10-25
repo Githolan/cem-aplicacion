@@ -7,14 +7,12 @@ pedido no pase por el evaluador. A4 al quitar (baja, desasociar) sigue por cuent
 presentado al propietario, porque la regla fuerte bloquearía sacar una cuenta sin verificar.
 """
 
-from uuid import UUID
-
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.conftest import verificar_en_el_consorcio
+from tests.conftest import misma_identidad, verificar_en_el_consorcio
 from tests.test_contexto_mandatos import denegaciones
 from tests.test_mandatos import otra_persona, vinculo_confirmado
 from tests.test_mandatos_0012 import alta, baja
@@ -22,20 +20,6 @@ from tests.test_mandatos_rutas import alta_http, escena  # noqa: F401  (`escena`
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
-
-
-def misma_identidad(motor_migrate, cons: UUID, de: UUID, cuenta: UUID) -> None:
-    """Datos de prueba: `cuenta` es otra cuenta del mismo ser humano que `de` (lo que hace
-    `vincular` de soporte)."""
-    with motor_migrate.begin() as c:
-        c.execute(
-            text(
-                "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
-                " select consorcio_id, :p, identidad_id from nucleo.identidad_persona"
-                " where consorcio_id = :c and persona_id = :de and desvinculada_en is null"
-            ),
-            {"c": cons, "p": cuenta, "de": de},
-        )
 
 
 def ultimo_motivo(motor_app, e, persona) -> str:
@@ -114,6 +98,47 @@ def test_la_base_niega_usar_la_decision_que_registro_otra_cuenta_suya(motor_migr
     # Control: la usa un tercero.
     tercera = otra_persona(motor_migrate, cons)
     assert alta(motor_app, cons, tercera, acta, persona=otra, tipo="miembro_consejo")
+
+
+def test_la_base_niega_remover_con_la_asamblea_que_registro_otra_cuenta_suya(
+    motor_migrate, motor_app
+):
+    """A15 de la baja (remoción) entre seres humanos, sin el evaluador."""
+    cons, _, prop = consorcio_con_persona(motor_migrate)
+    registradora = otra_persona(motor_migrate, cons, verificada=False)
+    misma_identidad(motor_migrate, cons, prop, registradora)
+    with transaccion(motor_app, persona_id=registradora, consorcio_id=cons) as c:
+        acta = c.execute(
+            text(
+                "select nucleo.registrar_decision('asamblea', '2026-01-01', 'Remueve',"
+                " 'Acta 4, folio 9', :a, 'api')"
+            ),
+            {"a": registradora},
+        ).scalar_one()
+    otra = otra_persona(motor_migrate, cons)
+    m = alta(motor_app, cons, None, acta, persona=otra, tipo="miembro_consejo", origen="soporte")
+    with pytest.raises(DBAPIError) as err:
+        baja(motor_app, cons, prop, m, "remocion", decision=acta, instrumento=None,
+             descripcion="Remoción")  # fmt: skip
+    assert _hint(err) == "decision_registrada_por_el_actor"
+    # Sin verificar quien la registró, tampoco.
+    sin = otra_persona(motor_migrate, cons, verificada=False)
+    with transaccion(motor_app, persona_id=sin, consorcio_id=cons) as c:
+        acta_sin = c.execute(
+            text(
+                "select nucleo.registrar_decision('asamblea', '2026-01-02', 'Remueve',"
+                " 'Acta 5, folio 2', :a, 'api')"
+            ),
+            {"a": sin},
+        ).scalar_one()
+    with pytest.raises(DBAPIError) as err:
+        baja(motor_app, cons, prop, m, "remocion", decision=acta_sin, instrumento=None,
+             descripcion="Remoción")  # fmt: skip
+    assert _hint(err) == "identidad_no_verificada"
+    # Control: un tercero verificado remueve con esa asamblea.
+    tercera = otra_persona(motor_migrate, cons)
+    baja(motor_app, cons, tercera, m, "remocion", decision=acta, instrumento=None,
+         descripcion="Remoción")  # fmt: skip
 
 
 def test_a4_al_quitar_sigue_por_cuenta(motor_migrate, motor_app):

@@ -226,7 +226,9 @@ create function nucleo.exigir_soporte()
   $$;
 
 -- Una huella por cada versión de la clave que tiene el script: así un documento verificado con
--- una clave anterior se sigue reconociendo. La primera es la de la versión vigente.
+-- una clave anterior se sigue reconociendo. La primera es la de la versión vigente. Si el
+-- llavero ya no tiene una versión con la que hay identidades en el consorcio, se niega: ese
+-- documento no se reconocería y el mismo ser humano quedaría con dos identidades.
 create function nucleo.identidad_por_huellas(c uuid, versiones smallint[], huellas bytea[])
   returns uuid
   language plpgsql stable security definer
@@ -241,6 +243,11 @@ create function nucleo.identidad_por_huellas(c uuid, versiones smallint[], huell
        or array_position(huellas, null) is not null then
       raise exception 'faltan las huellas del documento' using errcode = 'P0001',
         hint = 'huellas_invalidas';
+    end if;
+    if exists (select 1 from nucleo.identidad_humana h
+                where h.consorcio_id = c and h.clave_version <> all (versiones)) then
+      raise exception 'el llavero no tiene una versión con la que hay identidades verificadas'
+        using errcode = 'P0001', hint = 'clave_retirada_con_identidades';
     end if;
     select h.id into encontrada from nucleo.identidad_humana h
       join unnest(versiones, huellas) as x(version, huella)
@@ -461,7 +468,7 @@ CAMBIOS = {
             "        using errcode = 'P0001', hint = 'revision_de_si_mismo';\n    end if;\n",
             "        using errcode = 'P0001', hint = 'revision_de_si_mismo';\n    end if;\n"
             + SEPARACION
-            + "    if origen_pedido = 'api' then\n"
+            + "    if origen_pedido = 'api' and m.persona_id is not null then\n"
             "      perform nucleo.exigir_separacion_humana(c, actor, m.persona_id,"
             " 'revision_de_si_mismo');\n"
             "    end if;\n",

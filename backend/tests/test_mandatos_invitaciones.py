@@ -3,6 +3,7 @@
 Diseño: `doc/diseno/H2b_4_Diseno.md` de CEM, §7, §10 y §17 (casos 1 a 10 sexies, 27 a 30).
 """
 
+import os
 import re
 import threading
 from datetime import timedelta
@@ -15,7 +16,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.db import transaccion
 from scripts import mandato_soporte
-from tests.conftest import clave_idempotencia, url_rol
+from tests.conftest import clave_idempotencia, misma_identidad, url_rol
 from tests.test_contexto_mandatos import cliente, denegaciones, otra_unidad
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     app,
@@ -213,6 +214,32 @@ def test_cuatro_ojos_y_cuenta_nueva_asocian_el_mandato(app, motor_migrate, escen
     ]
     todo = " ".join(x["todo"] for x in eventos(motor_migrate, e["cons"]))
     assert correo not in todo and REFERENCIA not in todo
+
+
+def _aprobar_en_la_base(motor_app, cons, invitacion, actor) -> None:
+    with transaccion(motor_app, persona_id=actor, consorcio_id=cons) as c:
+        c.execute(
+            text("select * from nucleo.aprobar_invitacion_mandato(:i, :h, now() + interval"
+                 " '1 day', :a, 'api')"),
+            {"i": invitacion, "h": os.urandom(32), "a": actor},
+        )  # fmt: skip
+
+
+def test_la_base_niega_aprobar_la_que_emitio_otra_cuenta_suya(motor_migrate, motor_app, escena):
+    """A7 entre seres humanos (0026), sin el evaluador: misma identidad o sin verificar."""
+    e = escena
+    i = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    segunda = otra_persona(motor_migrate, e["cons"], verificada=False)
+    misma_identidad(motor_migrate, e["cons"], e["mc1"], segunda)
+    with pytest.raises(DBAPIError) as error:
+        _aprobar_en_la_base(motor_app, e["cons"], i, segunda)
+    assert error.value.orig.diag.message_hint == "aprobacion_de_si_mismo"
+    sin = otra_persona(motor_migrate, e["cons"], verificada=False)
+    with pytest.raises(DBAPIError) as error:
+        _aprobar_en_la_base(motor_app, e["cons"], i, sin)
+    assert error.value.orig.diag.message_hint == "identidad_no_verificada"
+    # Control: otra persona verificada la aprueba.
+    _aprobar_en_la_base(motor_app, e["cons"], i, e["mc2"])
 
 
 def test_quien_emitio_no_aprueba(motor_migrate, motor_app, escena):

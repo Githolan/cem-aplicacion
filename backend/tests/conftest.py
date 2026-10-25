@@ -390,6 +390,20 @@ def verificar_en_el_consorcio(motor_migrate: Engine, consorcio: UUID, persona: U
     return identidad
 
 
+def misma_identidad(motor_migrate: Engine, consorcio: UUID, de: UUID, cuenta: UUID) -> None:
+    """Datos de prueba: `cuenta` es otra cuenta del mismo ser humano que `de`, que tiene que
+    estar verificada en el consorcio (lo que hace `vincular` de soporte)."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
+                " select consorcio_id, :p, identidad_id from nucleo.identidad_persona"
+                " where consorcio_id = :c and persona_id = :de and desvinculada_en is null"
+            ),
+            {"c": consorcio, "p": cuenta, "de": de},
+        )
+
+
 def clave_idempotencia() -> dict[str, str]:
     """Encabezado `Idempotency-Key` nuevo: un intento lógico distinto por llamada."""
     return {"Idempotency-Key": str(uuid4())}

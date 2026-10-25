@@ -404,6 +404,39 @@ def test_el_script_sin_llavero_no_hace_nada(motor_migrate, motor_app, monkeypatc
     assert (codigo, "CEM_IDENTIDAD_CLAVES" in salida) == (2, True)
 
 
+@pytest.mark.db
+def test_retirar_una_clave_con_identidades_se_niega(
+    motor_migrate, motor_app, monkeypatch, capsys, url_app
+):
+    """Sin la clave 1, un documento verificado con ella no se reconoce: el mismo ser humano
+    quedaría con dos identidades. La base se niega hasta que `corregir` las pase a la 2."""
+    cons, _, ana = consorcio_con_persona(motor_migrate, verificada=False)
+    otra = otra_persona(motor_migrate, cons, verificada=False)
+    assert correr_script(monkeypatch, capsys, _argumentos("verificar", cons, ana), DNI,
+                         f"1:{CLAVE_1}")[0] == 0  # fmt: skip
+    codigo, salida = correr_script(
+        monkeypatch, capsys, _argumentos("verificar", cons, otra), "40.111.222", f"2:{CLAVE_2}"
+    )
+    assert (codigo, "clave_retirada_con_identidades" in salida) == (1, True)
+    # Control: con las dos claves, el documento nuevo se verifica.
+    codigo, salida = correr_script(
+        monkeypatch, capsys, _argumentos("verificar", cons, otra), "40.111.222",
+        f"2:{CLAVE_2},1:{CLAVE_1}",
+    )  # fmt: skip
+    assert codigo == 0, salida
+
+
+@pytest.mark.db
+def test_el_script_rechaza_el_operador_con_el_numero(
+    motor_migrate, motor_app, monkeypatch, capsys, url_app
+):
+    cons, _, ana = consorcio_con_persona(motor_migrate, verificada=False)
+    argumentos = _argumentos("verificar", cons, ana)
+    argumentos[argumentos.index("--operador") + 1] = "Juan 30123456"
+    codigo, salida = correr_script(monkeypatch, capsys, argumentos, DNI, f"1:{CLAVE_1}")
+    assert (codigo, "operador" in salida, "30123456" in salida) == (2, True, False)
+
+
 # R10 en el contexto de la petición ----------------------------------------------------------
 
 

@@ -25,7 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.conftest import clave_idempotencia
+from tests.conftest import clave_idempotencia, misma_identidad
 from tests.test_condicion_habilitante_consejo import (
     consejo,  # noqa: F401 (fixture)
     estado,
@@ -37,7 +37,7 @@ from tests.test_condicion_habilitante_consejo import (
 )
 from tests.test_contexto_mandatos import cliente, denegaciones
 from tests.test_mandatos import otra_persona
-from tests.test_mandatos_0012 import alta, baja
+from tests.test_mandatos_0012 import CUIT_X, alta, baja
 from tests.test_modo_operacion import consorcio_con_persona, decidir, decidir_equipo
 from tests.test_vinculo_0014 import (  # noqa: F401  (`base_aparte` es un fixture)
     _consorcio_y_unidad,
@@ -249,6 +249,43 @@ def test_a4_nadie_revisa_su_propio_mandato(pendiente, motor_app, motor_migrate):
     assert revisar_http(e["adm"], e["cons"], e["m"], e["acta"], e["hoy"]).status_code == 201
 
 
+def _revisar_en_la_base(motor_app, e, decision, actor) -> None:
+    with transaccion(motor_app, persona_id=actor, consorcio_id=e["cons"]) as c:
+        c.execute(
+            text("select nucleo.resolver_revision_mandato(:m, :d, :e, :a, 'api')"),
+            {"m": e["m"], "d": decision, "e": e["hoy"], "a": actor},
+        )
+
+
+def test_la_base_niega_revisar_entre_cuentas_del_mismo_ser_humano(
+    pendiente, motor_app, motor_migrate
+):
+    """A4 y A15 de la revisión entre seres humanos (0026), sin el evaluador."""
+    e = pendiente
+    # A4: otra cuenta de quien tiene el mandato.
+    segunda = otra_persona(motor_migrate, e["cons"], verificada=False)
+    misma_identidad(motor_migrate, e["cons"], e["mc"], segunda)
+    with pytest.raises(DBAPIError) as error:
+        _revisar_en_la_base(motor_app, e, e["acta"], segunda)
+    assert error.value.orig.diag.message_hint == "revision_de_si_mismo"
+    # A15: la asamblea la registró otra cuenta de quien revisa.
+    propia = decidir(motor_app, e["cons"], e["adm"])
+    otra_del_adm = otra_persona(motor_migrate, e["cons"], verificada=False)
+    misma_identidad(motor_migrate, e["cons"], e["adm"], otra_del_adm)
+    with pytest.raises(DBAPIError) as error:
+        _revisar_en_la_base(motor_app, e, propia, otra_del_adm)
+    assert error.value.orig.diag.message_hint == "decision_registrada_por_el_actor"
+    # Sin verificar quien revisa, tampoco.
+    sin = otra_persona(motor_migrate, e["cons"], verificada=False)
+    with pytest.raises(DBAPIError) as error:
+        _revisar_en_la_base(motor_app, e, e["acta"], sin)
+    assert error.value.orig.diag.message_hint == "identidad_no_verificada"
+    assert revisiones(motor_migrate, e["m"]) == []
+    # Control: otra integrante del Consejo, verificada, revisa con esa asamblea.
+    _revisar_en_la_base(motor_app, e, propia, e["mc2"])
+    assert revisiones(motor_migrate, e["m"]) == [e["hoy"]]
+
+
 def test_sin_la_condicion_el_dia_de_eficacia_se_rechaza(pendiente, motor_migrate):
     """La 6° F se vende dentro de 5 días: la revisión desde el día 6 no queda en espera."""
     e = pendiente
@@ -261,7 +298,9 @@ def test_sin_la_condicion_el_dia_de_eficacia_se_rechaza(pendiente, motor_migrate
     assert r.status_code == 201, r.text
 
 
-@pytest.mark.parametrize("caso", ["opera", "administrador", "terminado", "dado-de-baja"])
+@pytest.mark.parametrize(
+    "caso", ["opera", "administrador", "externo-sin-cuenta", "terminado", "dado-de-baja"]
+)
 def test_solo_un_mandato_del_consejo_pendiente_admite_la_revision(
     pendiente, motor_migrate, motor_app, caso
 ):
@@ -275,6 +314,18 @@ def test_solo_un_mandato_del_consejo_pendiente_admite_la_revision(
             ).scalar_one()
         esperado = (409, "mandato_no_pendiente")
         r = revisar_http(e["mc2"], e["cons"], mandato, e["acta"], e["hoy"])
+    elif caso == "externo-sin-cuenta":
+        # Sin cuenta no hay identidad que comparar: la base no puede pedirla (revisión de 0026).
+        with motor_migrate.connect() as c:
+            del_adm = c.execute(
+                text("select id from nucleo.mandato where persona_id = :p"), {"p": e["adm"]}
+            ).scalar_one()
+        baja(motor_app, e["cons"], None, del_adm, "error_carga", instrumento="Corrección",
+             descripcion="Se cargó mal", origen="soporte")  # fmt: skip
+        mandato = alta(motor_app, e["cons"], None, e["acta"], tipo="administrador_externo",
+                       nombre="Estudio de prueba", cuit=CUIT_X, origen="soporte")  # fmt: skip
+        esperado = (409, "mandato_no_pendiente")
+        r = revisar_http(e["mc2"], e["cons"], mandato, e["acta"], e["hoy"])
     elif caso == "terminado":
         otra = otra_persona(motor_migrate, e["cons"])
         mandato = alta(motor_app, e["cons"], None, e["acta"], tipo="miembro_consejo",
@@ -284,7 +335,7 @@ def test_solo_un_mandato_del_consejo_pendiente_admite_la_revision(
         baja(motor_app, e["cons"], None, e["m"], "renuncia", instrumento="Nota de renuncia",
              descripcion="Renuncia", origen="soporte")  # fmt: skip
         mandato, esperado = e["m"], (409, "mandato_ya_dado_de_baja")
-    if caso != "administrador":
+    if caso not in ("administrador", "externo-sin-cuenta"):
         r = revisar_http(e["adm"], e["cons"], mandato, e["acta"], e["hoy"])
     assert (r.status_code, r.json()["codigo"]) == esperado, r.text
     assert revisiones(motor_migrate, mandato) == []
