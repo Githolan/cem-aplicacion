@@ -13,9 +13,10 @@ facultades. Si la base niega y el evaluador concede alguna, no coinciden: la rut
 (500), nunca devuelve una lista vacía. Si niegan las dos, la negación queda auditada con
 `coeficientes.ver_por_unidad` (la lectura que el diseño nombra primero) y responde 403.
 
-Si la base deja leer pero ninguna política concede nada, la lista vacía solo vale cuando alguna
-negación es por el alcance (una facultad acotada que no cubre ningún esquema). Con otro motivo
-(sin modo, un recurso inválido) se audita la negación más informativa y responde 403.
+Si la base deja leer pero ninguna política concede nada, una negación por filtro (sin modo, un
+recurso inválido) se audita y responde 403, aunque haya también negaciones por alcance. La lista
+vacía solo vale si lo único que faltó fue el alcance (una facultad acotada que no cubre ningún
+esquema).
 """
 
 from typing import Annotated
@@ -40,6 +41,8 @@ from app.consorcios.padron import Discrepancia, sobre_unidad
 from app.contexto import MotorDep
 from app.db import transaccion
 from app.errores import sin_cache
+
+NO_ALCANZA = MotivoRecurso.NO_ALCANZA
 
 router = APIRouter(prefix="/api/v1", tags=["coeficientes"], dependencies=[Depends(sin_cache)])
 
@@ -149,14 +152,17 @@ def listar_coeficientes(
         if e["por_grupo"] or e["coeficientes"]
     ]
     if not elementos and not concedio:
-        # La base dejó leer, pero ninguna política concedió. Una lista vacía es legítima solo si
-        # alguna negación fue por el alcance: una facultad acotada que no cubre ningún esquema.
-        # Si no (sin modo, un recurso inválido), es una negación: se audita y responde 403.
+        # La base dejó leer, pero ninguna política concedió. El evaluador mira el alcance antes
+        # que los filtros: una negación por filtro (sin modo, un recurso inválido) gana sobre una
+        # por alcance y se audita con 403. La lista vacía solo vale si lo único que faltó fue el
+        # alcance (una facultad acotada que no cubre ningún esquema).
         for permiso in (por_unidad, por_grupo):
             permite(permiso, Entidad())
-        motivos = {motivo for _, _, motivo in negadas}
-        if not concedio and MotivoRecurso.NO_ALCANZA not in motivos:
-            permiso, entidad, _ = min(negadas, key=lambda n: n[2] == Motivo.SIN_CONCESION)
-            permiso.verificar(entidad)  # niega, audita y responde 403
-            raise Discrepancia("el evaluador niega y después concede la lectura")
+        if not concedio:
+            por_filtro = [n for n in negadas if n[2] not in (NO_ALCANZA, Motivo.SIN_CONCESION)]
+            alcance = any(n[2] == NO_ALCANZA for n in negadas)
+            if por_filtro or not alcance:
+                permiso, entidad, _ = (por_filtro or negadas)[0]
+                permiso.verificar(entidad)  # niega, audita y responde 403
+                raise Discrepancia("el evaluador niega y después concede la lectura")
     return ListaEsquemasCoeficientes(elementos=elementos)

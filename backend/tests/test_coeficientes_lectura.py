@@ -255,6 +255,23 @@ def test_sin_modo_proponer_no_lee_y_la_negacion_queda_auditada(motor_migrate, mo
 
 
 @pytest.mark.redis
+def test_sin_modo_proponer_acotado_a_un_grupo_tampoco_lee(motor_migrate, motor_app):
+    """El evaluador niega primero por el alcance: las filas de otros grupos dan `recurso_no_alcanza`
+    y las del grupo propio, `sin_modo_registrado`. Gana la negación por filtro: 403 auditado."""
+    cons, u1, _ = consorcio_con_persona(motor_migrate)
+    acta = decidir_equipo(motor_app, cons)
+    registrar(motor_app, cons, {str(u1): "100.000000"}, decision=acta)
+    registrar(motor_app, cons, {str(u1): "100.000000"}, grupo="agua", decision=acta)
+    quien = otra_persona(motor_migrate, cons)
+    otorgar(motor_migrate, motor_app, {"cons": cons, "acta": acta}, quien,
+            "coeficientes.proponer", "grupo:agua")  # fmt: skip
+    r = leer(quien, cons)
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    [d] = denegaciones(motor_app, cons, quien, quien)
+    assert (d["accion"], d["motivo"]) == ("coeficientes.ver_por_grupo", "sin_modo_registrado")
+
+
+@pytest.mark.redis
 def test_una_unidad_que_no_esta_en_un_esquema_lo_deja_afuera(edificio, motor_migrate, motor_app):
     e = edificio
     nueva, _ = otra_unidad(motor_migrate, e["cons"], "7° A")
