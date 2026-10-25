@@ -27,6 +27,34 @@
       "economica": true,
       "destinatario_unico": false,
       "fuente_normativa": "D2 (coeficientes.aprobar, económica); D4; R10"
+    },
+    {
+      "accion": "coeficientes.ver_por_unidad",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "padron.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": {"tipos": ["unidad"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF05; D4; H2b_5 §3: por la API, solo lectura, para quien tiene padron.ver o coeficientes.proponer. Con padron.ver, el coeficiente de cada unidad que el padrón le deja ver"
+    },
+    {
+      "accion": "coeficientes.ver_por_grupo",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "coeficientes.proponer",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["grupo"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF05; D4; H2b_5 §3: por la API, solo lectura, para quien tiene padron.ver o coeficientes.proponer. Con coeficientes.proponer, los esquemas del grupo en el que puede proponer"
     }
   ]
 }

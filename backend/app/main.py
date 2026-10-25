@@ -5,6 +5,7 @@ from app import errores, limite, registros
 from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.auditoria import router as auditoria
+from app.consorcios.coeficientes import router as coeficientes
 from app.consorcios.importacion import router as importacion
 from app.consorcios.mandatos import router as mandatos
 from app.consorcios.mandatos_invitaciones import router as mandatos_invitaciones
@@ -58,6 +59,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(contrasena)
     app.include_router(consorcios)
     app.include_router(padron)
+    app.include_router(coeficientes)
     app.include_router(importacion)
     app.include_router(mandatos)
     app.include_router(auditoria)
