@@ -92,14 +92,19 @@ def decidir_equipo(motor_app, cons: UUID, tipo: str = "asamblea") -> UUID:
         ).scalar_one()
 
 
-def cambiar(
-    motor_app, cons: UUID, per: UUID, modo: str, decision: UUID | None, desde: date = DESDE
-):
-    with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
+def cambiar(motor_app, cons: UUID, modo: str, decision: UUID | None, desde: date = DESDE):
+    """El modo lo registra el equipo (C7; desde 0027 la base rechaza `api`)."""
+    with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
         return c.execute(
-            text("select nucleo.cambiar_modo(:m, :d, :desde, :p, 'api')"),
-            {"m": modo, "d": decision, "desde": desde, "p": per},
+            text("select nucleo.cambiar_modo(:m, :d, :desde, null, 'soporte')"),
+            {"m": modo, "d": decision, "desde": desde},
         ).scalar_one()
+
+
+def hoy_de(motor_app, cons: UUID) -> date:
+    """Hoy en la fecha del consorcio (la fila del consorcio solo se ve en su ámbito)."""
+    with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
+        return c.execute(text("select nucleo.hoy_del_consorcio(:c)"), {"c": cons}).scalar_one()
 
 
 def historial(motor_app, cons: UUID, per: UUID) -> list[tuple[str, date, date | None]]:
@@ -126,13 +131,14 @@ def test_el_enum_de_la_base_es_el_del_contrato(motor_app):
 def test_cambio_valido_cierra_el_anterior_y_audita(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)
-    cambiar(motor_app, cons, per, "consejo", acta)
+    cambiar(motor_app, cons, "consejo", acta)
     otra = decidir(motor_app, cons, per)
-    cambiar(motor_app, cons, per, "autogestion", otra, DESDE + timedelta(days=90))
+    hoy = hoy_de(motor_app, cons)
+    cambiar(motor_app, cons, "administrador_aumentado", otra, hoy)
 
     assert historial(motor_app, cons, per) == [
-        ("consejo", DESDE, DESDE + timedelta(days=90)),
-        ("autogestion", DESDE + timedelta(days=90), None),
+        ("consejo", DESDE, hoy),
+        ("administrador_aumentado", hoy, None),
     ]
     with transaccion(motor_app, persona_id=per, consorcio_id=cons) as c:
         acciones = c.execute(
@@ -150,30 +156,30 @@ def test_cambio_valido_cierra_el_anterior_y_audita(motor_migrate, motor_app):
 @pytest.mark.parametrize("tipo", ["consejo", "contrato_administracion", "inscripcion_rpa"])
 def test_pa31_sin_decision_de_asamblea_el_modo_no_cambia(motor_migrate, motor_app, tipo):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    cambiar(motor_app, cons, per, "consejo", decidir(motor_app, cons, per))
+    cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per))
     respaldo = decidir(motor_app, cons, per, tipo)
 
     with pytest.raises(DBAPIError, match="solo cambia con una decisión de asamblea"):
-        cambiar(motor_app, cons, per, "autogestion", respaldo, DESDE + timedelta(days=30))
+        cambiar(motor_app, cons, "administrador_aumentado", respaldo, hoy_de(motor_app, cons))
     assert historial(motor_app, cons, per) == [("consejo", DESDE, None)]
 
 
 def test_pa31_sin_decision_o_con_la_de_otro_consorcio_no_cambia(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     otro, _, per_otro = consorcio_con_persona(motor_migrate)
-    cambiar(motor_app, cons, per, "consejo", decidir(motor_app, cons, per))
+    cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per))
     ajena = decidir(motor_app, otro, per_otro)
 
     for respaldo in (None, ajena):
         with pytest.raises(DBAPIError, match="solo cambia con una decisión de asamblea"):
-            cambiar(motor_app, cons, per, "autogestion", respaldo, DESDE + timedelta(days=30))
+            cambiar(motor_app, cons, "administrador_aumentado", respaldo, hoy_de(motor_app, cons))
     assert historial(motor_app, cons, per) == [("consejo", DESDE, None)]
 
 
 def test_pa31_cem_app_no_escribe_el_modo_ni_las_decisiones_directo(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)
-    cambiar(motor_app, cons, per, "consejo", acta)
+    cambiar(motor_app, cons, "consejo", acta)
     sentencias = [
         "update nucleo.modo_operacion set modo = 'autogestion'",
         "delete from nucleo.modo_operacion",
@@ -191,18 +197,12 @@ def test_pa31_cem_app_no_escribe_el_modo_ni_las_decisiones_directo(motor_migrate
 
 def test_mismo_modo_o_fecha_anterior_se_rechazan(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
-    cambiar(motor_app, cons, per, "consejo", decidir(motor_app, cons, per))
+    cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per))
+    hoy = hoy_de(motor_app, cons)
     with pytest.raises(DBAPIError, match="ya está en ese modo"):
-        cambiar(
-            motor_app,
-            cons,
-            per,
-            "consejo",
-            decidir(motor_app, cons, per),
-            DESDE + timedelta(days=1),
-        )
-    with pytest.raises(DBAPIError, match="después del vigente"):
-        cambiar(motor_app, cons, per, "autogestion", decidir(motor_app, cons, per), DESDE)
+        cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per), hoy)
+    with pytest.raises(DBAPIError, match="rige desde hoy"):
+        cambiar(motor_app, cons, "administrador_aumentado", decidir(motor_app, cons, per), DESDE)
 
 
 def test_sin_consorcio_en_el_ambito_no_registra_nada(motor_migrate, motor_app):
@@ -287,7 +287,7 @@ def test_la_vigencia_usa_la_fecha_del_consorcio_y_no_la_de_la_base(motor_migrate
 def test_el_contexto_lleva_el_modo_vigente(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     assert require_scope(cons, Identidad(per), motor_app).modo is None
-    cambiar(motor_app, cons, per, "consejo", decidir(motor_app, cons, per))
+    cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per))
     assert require_scope(cons, Identidad(per), motor_app).modo is ModoOperacion.CONSEJO
 
 

@@ -538,7 +538,7 @@ def test_iniciado_y_el_fin_usan_la_fecha_del_consorcio_y_no_la_de_buenos_aires(
         ).scalar_one()
     cons, u1, prop = consorcio_con_persona(motor_migrate, zona)
     acta = decidir_equipo(motor_app, cons)
-    cambiar(motor_app, cons, prop, "administrador_aumentado", acta)
+    cambiar(motor_app, cons, "administrador_aumentado", acta)
     admin = otra_persona(motor_migrate, cons)
     alta(motor_app, cons, None, acta, persona=admin, origen="soporte")
     borde = invitar_y_aceptar(motor_migrate, cons, u1, None)

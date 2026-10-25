@@ -23,6 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from cem_contracts.estados import ModoOperacion
 from cem_contracts.mandatos_invitaciones import FORMATO_REFERENCIA, LARGO_MAXIMO_REFERENCIA
 
 LARGO_MAXIMO_DESCRIPCION = 500
@@ -280,6 +281,27 @@ class ListaDecisiones(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[DecisionResumen]
+
+
+class PeriodoModo(BaseModel):
+    """Un período de la historia de modos (RF41-C, 2b-6b): lo mínimo. Quién lo registró no sale
+    (lo registra siempre el equipo) y la decisión se lee con `decisiones.ver`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    modo: ModoOperacion
+    vigente_desde: date
+    vigente_hasta: date | None = Field(description="Sin fecha: es el modo vigente.")
+    decision_id: UUID
+
+
+class ListaModos(BaseModel):
+    """La historia completa, del más reciente al más antiguo. Vacía: el consorcio todavía no
+    tiene modo registrado."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[PeriodoModo]
 
 
 class DecisionDetalle(DecisionResumen):

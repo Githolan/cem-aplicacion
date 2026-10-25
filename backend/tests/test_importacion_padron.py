@@ -858,7 +858,7 @@ def test_los_coeficientes_se_informan_contra_el_esquema_vigente_y_no_se_escriben
 ):
     e = edificio  # 1° A y 2° B, con una decisión del equipo
     admin = otra_persona(motor_migrate, e["cons"])
-    cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
+    cambiar(motor_app, e["cons"], "administrador_aumentado", e["acta"])
     alta(motor_app, e["cons"], None, e["acta"], persona=admin, origen="soporte")
     registrar(motor_app, e["cons"], {str(e["u1"]): "60.000000", str(e["u2"]): "39.960000"},
               decision=e["acta"])  # fmt: skip
@@ -2069,7 +2069,7 @@ def test_cada_grupo_se_compara_con_su_propio_esquema_vigente(
     esquema vigente: cada grupo tiene que compararse con el suyo."""
     e = edificio
     admin = otra_persona(motor_migrate, e["cons"])
-    cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
+    cambiar(motor_app, e["cons"], "administrador_aumentado", e["acta"])
     alta(motor_app, e["cons"], None, e["acta"], persona=admin, origen="soporte")
     registrar(motor_app, e["cons"], {str(e["u1"]): "60.000000", str(e["u2"]): "40.000000"},
               decision=e["acta"], grupo="expensas_comunes")  # fmt: skip

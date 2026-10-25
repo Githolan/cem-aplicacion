@@ -381,3 +381,12 @@ A13,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=otro;misma_identidad=otro,
 A13,egresos.aprobar_orden,Fac(egresos.aprobar_orden),AA,cuenta:X,vigente,si,preparo=otro;misma_identidad=otro,403,no_es_quien_preparo,aprobar la O que preparó otra cuenta suya
 A13,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=si;sin_identidad=otro,200,concedido_por_facultad,P4-c sigue por cuenta: A13-C no se aplicó (pendiente del propietario)
 A13,unidades.listar,P,C,,sin_mandato,si,sin_identidad=yo,200,concedido_por_ambito,sin separación A13-C no se pide
+RF41-C,modos.ver,P,C,,sin_mandato,si,,403,sin_concesion,P no lee la historia de modos
+RF41-C,modos.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee la historia de modos (con decisiones.ver)
+RF41-C,modos.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD lee la historia de modos
+RF41-C,modos.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee la historia de modos: sin decisiones.ver
+RF41-C,modos.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la historia de modos
+RF41-C,modos.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: la historia vacía se lee igual
+RF41-C,modos.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF41-C,modo.cambiar,MC,C,,vigente,si,respaldo=si,403,sin_concesion,nadie cambia el modo por la API: solo el equipo (C7)
+RF41-C,modo.cambiar,AD,AA,,vigente,si,respaldo=si,403,sin_concesion,tampoco el administrador
