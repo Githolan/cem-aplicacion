@@ -16,16 +16,19 @@ con una decisión de asamblea (C7). `nucleo.cambiar_modo` se reescribe entera:
 - **Mandatos al salir de un modo.** Cada transición del diagrama reemplaza a quien administra
   (sus rótulos: «el administrador acepta operar», «designa administrador propietario», «no
   renueva o remueve el mandato», «contrata un administrador profesional», «deja de operar»).
-  Si al salir queda vigente el mandato de administración del modo que se deja (`administrador`
-  en AA y AG, `administrador_externo` en Consejo), se niega
-  (`transicion_requiere_fin_de_mandato`). Nunca se infiere ni se ejecuta una baja.
+  Si al salir queda vigente o futuro un mandato de administración (al salir de AA o AG,
+  `administrador` o `administrador_externo`, que comparten el lugar único de 0012; al salir de
+  Consejo, `administrador_externo`), se niega (`transicion_requiere_fin_de_mandato`). Nunca se
+  infiere ni se ejecuta una baja.
   - Una baja que la misma decisión diga de forma expresa y verificable revoca accesos.
   - Por la regla 4 del documento 08 §5, esa salida necesita el paquete de transferencia (RF52),
-    que no existe: queda bloqueada sin excepciones.
+    que no existe: queda bloqueada sin excepciones. Tampoco se puede partir en dos llamadas:
+    si la decisión que cambia el modo dio de baja a la administración (`baja_decision_id`), se
+    niega (`transicion_requiere_paquete_de_transferencia`).
 - **Historia completa:** solo se cierra el período vigente; nada se borra. Un historial sin
   período abierto es un estado ambiguo y se niega (`modo_ambiguo`).
-- **Frenado y presentado al propietario:** el primer modo de un consorcio sigue como antes
-  (cualquiera de los tres, con cualquier fecha desde la decisión). El diagrama solo dibuja la
+- **Frenado y presentado al propietario:** el primer modo de un consorcio sigue admitiendo los
+  tres (desde la fecha de la decisión y hasta hoy, nunca anticipado). El diagrama solo dibuja la
   entrada a Consejo, pero el alta de consorcios y el smoke de staging registran AA. La decisión 11
   (Autogestión real) sigue siendo del propietario: no se activa nada.
 
@@ -76,6 +79,9 @@ create or replace function nucleo.cambiar_modo(
       raise exception 'el origen soporte no lleva actor: lo registra el equipo'
         using errcode = 'P0001', hint = 'origen_invalido';
     end if;
+    if modo_nuevo is null then
+      raise exception 'falta el modo' using errcode = 'P0001', hint = 'modo_invalido';
+    end if;
     -- Serializa los cambios de modo del consorcio.
     perform 1 from nucleo.consorcio x where x.id = c for update;
 
@@ -91,8 +97,9 @@ create or replace function nucleo.cambiar_modo(
       raise exception 'esa decisión ya respaldó un modo de este consorcio'
         using errcode = 'P0001', hint = 'decision_ya_usada';
     end if;
-    if desde is null or desde < dec.fecha then
-      raise exception 'el modo no puede empezar antes de la decisión que lo respalda'
+    hoy := nucleo.hoy_del_consorcio(c);
+    if desde is null or desde < dec.fecha or desde > hoy then
+      raise exception 'el modo empieza entre la fecha de su decisión y hoy, nunca después'
         using errcode = 'P0001', hint = 'fecha_invalida';
     end if;
 
@@ -110,7 +117,6 @@ create or replace function nucleo.cambiar_modo(
           using errcode = 'P0001', hint = 'mismo_modo';
       end if;
       -- E29 (0027): ni retroactivo ni anticipado; rige desde hoy, en la fecha del consorcio.
-      hoy := nucleo.hoy_del_consorcio(c);
       if desde <> hoy or anterior.vigente_desde >= hoy then
         raise exception 'un cambio de modo rige desde hoy y después del modo vigente'
           using errcode = 'P0001', hint = 'fecha_invalida';
@@ -125,16 +131,28 @@ create or replace function nucleo.cambiar_modo(
           using errcode = 'P0001', hint = 'transicion_no_admitida';
       end if;
       -- Quien administra en el modo que se deja tiene que haber terminado: la baja no se
-      -- infiere, y una baja con la transición necesita el paquete de transferencia (RF52).
+      -- infiere. Al salir de AA o AG cuenta cualquier administración (comparten el lugar único,
+      -- 0012); al salir de Consejo, el administrador externo. Vigente o futuro: una baja antes
+      -- de empezar deja un rango vacío, que no se superpone con nada.
       if exists (select 1 from nucleo.mandato m
                   where m.consorcio_id = c
-                    and m.tipo = case anterior.modo
-                                   when 'consejo' then 'administrador_externo'::nucleo.tipo_mandato
-                                   else 'administrador'::nucleo.tipo_mandato end
+                    and (m.tipo = 'administrador_externo'
+                         or (m.tipo = 'administrador' and anterior.modo <> 'consejo'))
                     and m.causa_baja is distinct from 'error_carga'
-                    and (m.vigente_hasta is null or m.vigente_hasta > desde)) then
+                    and daterange(m.vigente_desde, m.vigente_hasta) && daterange(desde, null))
+      then
         raise exception 'la transición necesita que termine el mandato de administración'
           using errcode = 'P0001', hint = 'transicion_requiere_fin_de_mandato';
+      end if;
+      -- RF52 (regla 4 del documento 08 §5): una baja de la administración con la misma decisión
+      -- que cambia el modo es una salida con la transición, y necesita el paquete de
+      -- transferencia, que no existe. Partirla en dos llamadas no la habilita.
+      if exists (select 1 from nucleo.mandato m
+                  where m.consorcio_id = c
+                    and m.tipo in ('administrador', 'administrador_externo')
+                    and m.baja_decision_id = decision) then
+        raise exception 'la decisión que dio de baja a la administración no cambia el modo'
+          using errcode = 'P0001', hint = 'transicion_requiere_paquete_de_transferencia';
       end if;
       update nucleo.modo_operacion set vigente_hasta = desde where id = anterior.id;
     end if;

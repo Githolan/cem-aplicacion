@@ -91,21 +91,27 @@ def test_un_cambio_no_es_retroactivo_ni_anticipado(en_consejo, motor_migrate, mo
     cambiar(motor_app, e["cons"], "administrador_aumentado", nueva, e["hoy"])
 
 
-def test_dos_cambios_el_mismo_dia_no(en_consejo, motor_app):
+def test_dos_cambios_el_mismo_dia_no(en_consejo, motor_migrate, motor_app):
     e = en_consejo
     primera = decidir(motor_app, e["cons"], e["per"])
     cambiar(motor_app, e["cons"], "administrador_aumentado", primera, e["hoy"])
     with pytest.raises(DBAPIError) as err:
         cambiar(motor_app, e["cons"], "consejo", decidir(motor_app, e["cons"], e["per"]), e["hoy"])
     assert _hint(err) == "fecha_invalida"
+    # Control: el primer cambio del día quedó y el modo vigente es el nuevo.
+    assert periodos(motor_migrate, e["cons"])[-1] == ("administrador_aumentado", e["hoy"], None)
 
 
-def test_el_primer_modo_no_empieza_antes_de_su_decision(motor_migrate, motor_app):
+def test_el_primer_modo_va_de_su_decision_a_hoy(motor_migrate, motor_app):
     cons, _, per = consorcio_con_persona(motor_migrate)
     acta = decidir(motor_app, cons, per)  # del 01-01-2026
+    for desde in (DESDE - timedelta(days=1), hoy_de(motor_app, cons) + timedelta(days=1)):
+        with pytest.raises(DBAPIError) as err:
+            cambiar(motor_app, cons, "consejo", acta, desde)
+        assert _hint(err) == "fecha_invalida"
     with pytest.raises(DBAPIError) as err:
-        cambiar(motor_app, cons, "consejo", acta, DESDE - timedelta(days=1))
-    assert _hint(err) == "fecha_invalida"
+        cambiar(motor_app, cons, None, acta, DESDE)
+    assert _hint(err) == "modo_invalido"
     # Control: desde la fecha de la decisión. El primer modo puede ser cualquiera (frenado).
     cambiar(motor_app, cons, "administrador_aumentado", acta, DESDE)
     assert periodos(motor_migrate, cons) == [("administrador_aumentado", DESDE, None)]
@@ -147,6 +153,8 @@ def mandatos_terminados(motor_migrate, cons: UUID) -> int:
         ("autogestion", "administrador", "administrador_aumentado"),
         ("consejo", "administrador_externo", "administrador_aumentado"),
         ("consejo", "administrador_externo", "autogestion"),
+        # Comparten el lugar único de la administración (0012): también el externo en AA.
+        ("administrador_aumentado", "administrador_externo", "consejo"),
     ],
 )
 def test_salir_con_el_mandato_de_administracion_vigente_se_bloquea(
@@ -179,13 +187,47 @@ def test_salir_con_el_mandato_de_administracion_vigente_se_bloquea(
 
 def test_un_mandato_de_administracion_futuro_tambien_bloquea(en_consejo, motor_migrate, motor_app):
     e = en_consejo
-    alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
+    m = alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]),
          tipo="administrador_externo", nombre="Estudio que asume", cuit=CUIT_X,
          desde=e["hoy"] + timedelta(days=10), origen="soporte")  # fmt: skip
+    nueva = decidir(motor_app, e["cons"], e["per"])
     with pytest.raises(DBAPIError) as err:
-        cambiar(motor_app, e["cons"], "administrador_aumentado",
-                decidir(motor_app, e["cons"], e["per"]), e["hoy"])  # fmt: skip
+        cambiar(motor_app, e["cons"], "administrador_aumentado", nueva, e["hoy"])
     assert _hint(err) == "transicion_requiere_fin_de_mandato"
+    return e, m, nueva
+
+
+def test_un_mandato_futuro_dado_de_baja_antes_de_empezar_no_bloquea(en_consejo, motor_migrate,
+                                                                    motor_app):  # fmt: skip
+    """Revisión de 0027 (P2): la baja antes de empezar deja un rango vacío; ya terminó."""
+    e, m, nueva = test_un_mandato_de_administracion_futuro_tambien_bloquea(
+        en_consejo, motor_migrate, motor_app
+    )
+    baja(motor_app, e["cons"], None, m, "renuncia", instrumento="Nota de renuncia",
+         descripcion="Renuncia", origen="soporte")  # fmt: skip
+    cambiar(motor_app, e["cons"], "administrador_aumentado", nueva, e["hoy"])
+    assert periodos(motor_migrate, e["cons"])[-1] == ("administrador_aumentado", e["hoy"], None)
+
+
+def test_la_decision_que_dio_de_baja_a_la_administracion_no_cambia_el_modo(motor_migrate,
+                                                                           motor_app):  # fmt: skip
+    """Revisión de 0027 (P2, RF52): la remoción y el cambio con la misma asamblea, en dos
+    llamadas, son la salida con la transición que espera al paquete de transferencia."""
+    cons, _, per = consorcio_con_persona(motor_migrate)
+    cambiar(motor_app, cons, "administrador_aumentado", decidir(motor_app, cons, per))
+    m = alta(motor_app, cons, None, decidir_equipo(motor_app, cons),
+             persona=otra_persona(motor_migrate, cons), origen="soporte")  # fmt: skip
+    asamblea = decidir_equipo(motor_app, cons)
+    baja(motor_app, cons, None, m, "remocion", decision=asamblea, instrumento=None,
+         descripcion="Remoción y cambio de modo", origen="soporte")  # fmt: skip
+    hoy = hoy_de(motor_app, cons)
+    with pytest.raises(DBAPIError) as err:
+        cambiar(motor_app, cons, "consejo", asamblea, hoy)
+    assert _hint(err) == "transicion_requiere_paquete_de_transferencia"
+    assert periodos(motor_migrate, cons) == [("administrador_aumentado", DESDE, None)]
+    # Control: con otra decisión de asamblea (la baja ya está registrada), el cambio pasa.
+    cambiar(motor_app, cons, "consejo", decidir(motor_app, cons, per), hoy)
+    assert periodos(motor_migrate, cons)[-1] == ("consejo", hoy, None)
 
 
 def test_un_historial_sin_periodo_abierto_es_ambiguo(en_consejo, motor_migrate, motor_app):
@@ -212,6 +254,8 @@ def test_un_pedido_api_no_cambia_el_modo(en_consejo, motor_migrate, motor_app):
             )
     assert _hint(err) == "origen_invalido"
     assert periodos(motor_migrate, e["cons"]) == [("consejo", DESDE, None)]
+    # Control: el mismo cambio, por el equipo, se registra.
+    cambiar(motor_app, e["cons"], "administrador_aumentado", nueva, e["hoy"])
 
 
 # GET …/modos --------------------------------------------------------------------------------------
@@ -247,8 +291,16 @@ def test_el_consejo_lee_la_historia_minima_y_la_propietaria_no(en_consejo, motor
         assert c.post(url, json={}).status_code == 405
 
 
-def test_la_base_niega_la_historia_a_quien_no_lee_decisiones(en_consejo, motor_app):
+def test_la_base_niega_la_historia_a_quien_no_lee_decisiones(en_consejo, motor_migrate,
+                                                             motor_app):  # fmt: skip
     e = en_consejo
     with pytest.raises(DBAPIError, match="sin decisiones.ver"):
         with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
             c.execute(text("select * from nucleo.modos_del_consorcio()")).all()
+    # Control: un miembro del Consejo la lee directo en la base.
+    mc = otra_persona(motor_migrate, e["cons"])
+    alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]), tipo="miembro_consejo",
+         persona=mc, origen="soporte")  # fmt: skip
+    with transaccion(motor_app, persona_id=mc, consorcio_id=e["cons"]) as c:
+        filas = c.execute(text("select modo::text from nucleo.modos_del_consorcio()")).all()
+    assert [f[0] for f in filas] == ["consejo"]
