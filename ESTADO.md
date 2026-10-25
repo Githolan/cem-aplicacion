@@ -489,3 +489,24 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - un bloqueo mutuo intermitente en `test_la_migracion_0005_baja_y_sube` (1 de 2 corridas completas; no se repitió sola ni al relanzar). Causa **SIN VERIFICAR**.
    - **Pendiente del propietario, fuera de RF41-C:** la baja general de la administración por `baja_mandato` no exige el paquete de RF52.
    - **Para desplegar, cuando se autorice:** sin variables nuevas. Desde `0027`, los cambios de modo por la API (`origen` distinto de soporte) se niegan con `origen_invalido`.
+13. **2b-6c, lectura de la auditoría (RF35-B; decisiones del propietario del 24-10-2026):** PR #115 (rama `auditoria-propia-rf35b`, desde `2701067`), fusionado el 25-10-2026 a las 05:48 UTC en `7bce236` (head `02f4515`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+   - **Qué trae:**
+     - migración `0028`: `auditoria.proyeccion` (lista blanca: por acción, el texto traducido, el recurso funcional y los campos visibles), `auditoria.eventos_propios` (solo los eventos cuyo actor es quien lee) y `auditoria.eventos_del_consorcio` (segunda barrera `auditoria.ver`), índices de lectura;
+     - `auditoria.ver` en los paquetes de MC y AD, no AE; los mandatos que ya existen no la reciben (decisión 1);
+     - `GET /api/v1/consorcios/{consorcio_id}/auditoria/mis-eventos` (por ámbito) y `GET …/auditoria` (`auditoria.ver`), con la política al entrar y paginación por cursor opaco (solo la fecha del último evento y cuántos de esa fecha ya salieron);
+     - el nombre del actor solo si quien lee tiene `padron.ver` y el padrón muestra hoy a esa persona con su nombre;
+     - nunca IP, hashes, secuencia, identificadores, texto libre, negaciones (`autorizacion.denegada`) ni identidad humana; sin exportación (E0);
+     - contrato 0.21.0.
+   - **Controles sobre `02f4515`:**
+     - `ci.ps1` verde: backend 1696, contratos 58, frontend 330, e2e 177;
+     - Codex sin hallazgos (su único P2 sobre `1ad36b8`, acotar el cursor, quedó resuelto en `d9171b1`);
+     - revisión independiente sin P1 ni P2.
+     Antes, tres rondas: sobre `1ad36b8` un P2 (el nombre de quien ya no figura en el padrón) y 8 P3; sobre `d9171b1` un P2 (el importado pendiente mostraba el nombre de la cuenta en vez del de la planilla) y 4 P3; `ci.ps1` sobre `1ad36b8` dio rojo por la lista de módulos de políticas. Todo corregido, con un control negativo por regla.
+   - **Deuda conocida (P3, sin código):**
+     - el criterio del importado pendiente está copiado en `0024`, `0025` y `0028`;
+     - con `padron.ver` limitada a un recurso no salen nombres (más estricto que el padrón);
+     - una fila que se confirma tarde puede repetirse u omitirse al paginar (cursor por fecha);
+     - `cem_app` todavía puede leer `auditoria.eventos` directo bajo RLS (la ruta no lo usa);
+     - «eventos propios» = los que hizo quien lee, no los que lo nombran;
+     - faltan la prueba del downgrade de `0028` y la del mandato anterior a `0028`.
+   - **Para desplegar, cuando se autorice:** sin variables nuevas. `0028` crea dos índices sobre `auditoria.eventos` (no concurrentes). Desde `0028`, ninguna base con `auditoria.ver` otorgada baja de esa revisión.
