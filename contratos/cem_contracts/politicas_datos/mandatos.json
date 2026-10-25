@@ -1,6 +1,20 @@
 {
   "politicas": [
     {
+      "accion": "modos.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "decisiones.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF41-C (decisión del propietario del 24-10-2026, 2b-6b): la historia de modos con exposición mínima (modo, vigencia y decisión), para quien ya lee las decisiones que la respaldan"
+    },
+    {
       "accion": "decisiones.ver",
       "concede_por_vinculo": null,
       "concede_por_ambito": false,
@@ -180,7 +194,7 @@
       "respaldo": "decisión de asamblea (RN26, PA31)",
       "economica": false,
       "destinatario_unico": false,
-      "fuente_normativa": "Documento 08 §4, Permisos base (última fila: No para todos); C7; RN26; PA31"
+      "fuente_normativa": "Documento 08 §4, Permisos base (última fila: No para todos); C7; RN26; PA31; RF41-C (24-10-2026): sin ruta de escritura, solo soporte por script (0027)"
     }
   ]
 }

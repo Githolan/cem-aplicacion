@@ -96,10 +96,12 @@ def test_registrar_decision_rechaza_actor_u_origen_ajeno(
 def test_cambiar_modo_rechaza_actor_u_origen_ajeno(
     motor_migrate, motor_app, caso, sesion, actor, origen, motivo
 ):
+    """Desde 0027 (RF41-C, C7) el modo lo registra solo el equipo: todo lo que no es soporte
+    sin sesión ni actor es `origen_invalido`, también un pedido `api` bien formado."""
     cons, p, otra = consorcio_con_dos_personas(motor_migrate)
     decision = registrar(motor_app, cons, None, None, "soporte")
     quien = {"p": p, "otra": otra, None: None}
-    with pytest.raises(DBAPIError, match=motivo):
+    with pytest.raises(DBAPIError, match="origen_invalido"):
         cambiar(motor_app, cons, quien[sesion], decision, quien[actor], origen)
     assert contar(motor_migrate, "nucleo.modo_operacion", cons) == 0, caso
 
@@ -121,10 +123,14 @@ def eventos(motor_migrate, cons) -> list[tuple[str, str, UUID | None]]:
 def test_api_con_la_persona_de_la_sesion_sigue_funcionando(motor_migrate, motor_app):
     cons, p, _ = consorcio_con_dos_personas(motor_migrate)
     decision = registrar(motor_app, cons, p, p, "api")
-    cambiar(motor_app, cons, p, decision, p, "api")
+    # El modo, en cambio, ya no por la API (0027): ni con la persona de la sesión.
+    with pytest.raises(DBAPIError, match="origen_invalido"):
+        cambiar(motor_app, cons, p, decision, p, "api")
+    # Control: el equipo lo registra con esa decisión.
+    cambiar(motor_app, cons, None, decision, None, "soporte")
     assert eventos(motor_migrate, cons) == [
         ("consorcio.decision.registrar", "api", p),
-        ("consorcio.modo.cambiar", "api", p),
+        ("consorcio.modo.cambiar", "soporte", None),
     ]
 
 

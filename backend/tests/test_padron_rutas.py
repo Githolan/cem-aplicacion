@@ -64,7 +64,7 @@ def escena(motor_migrate, motor_app, edificio):  # noqa: F811
     """El edificio con modo, un administrador y un miembro del Consejo. El inquilino de u1 lo
     invitó el Consejo; el de u2, el administrador."""
     e = dict(edificio)
-    cambiar(motor_app, e["cons"], e["prop1"], "administrador_aumentado", e["acta"])
+    cambiar(motor_app, e["cons"], "administrador_aumentado", e["acta"])
     e["admin"] = otra_persona(motor_migrate, e["cons"])
     e["mc"] = otra_persona(motor_migrate, e["cons"])
     # Por soporte: el padrón no depende de cómo se cargó el mandato. El Consejo es propietario

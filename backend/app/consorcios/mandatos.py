@@ -20,6 +20,10 @@ segunda barrera. Si la base niega lo que el evaluador concedió, es una discrepa
 una lista vacía. Un detalle inexistente responde 404 solo a quien tiene la facultad: quien no la
 tiene recibe el mismo 403 auditado exista o no (sin oráculo).
 
+**Modos (RF41-C, 2b-6b).** `GET …/modos` lee la historia con `modos.ver`, que exige
+`decisiones.ver` (MC y AD): modo, vigencia y decisión, nada más. No hay ruta para cambiar el modo:
+lo registra el equipo por script con la decisión de asamblea (C7, `nucleo.cambiar_modo`, 0027).
+
 **Destinatario (decisión 3).** Por la API, el Consejo y el administrador se dan solo a personas
 con un vínculo confirmado, vigente o futuro, en el consorcio, y el administrador externo entra
 sin cuenta (la asocia A7). Lo garantiza `alta_mandato` (`0018`), después de la política: un
@@ -41,12 +45,14 @@ from cem_contracts.mandatos import (
     ListaCandidatos,
     ListaDecisiones,
     ListaMandatos,
+    ListaModos,
     MandatoDadoDeBaja,
     MandatoDetalle,
     MandatoNuevo,
     MandatoRegistrado,
     MandatoResumen,
     MandatoRevisado,
+    PeriodoModo,
     RevisionMandato,
 )
 from fastapi import APIRouter, Depends, Response
@@ -507,6 +513,25 @@ def listar_decisiones(
         {},
     )
     return ListaDecisiones(elementos=[DecisionResumen(**f) for f in filas])
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/modos",
+    response_model=ListaModos,
+    summary="Historia de los modos de operación del consorcio, con lo mínimo",
+    responses={403: {"description": "Sin `decisiones.ver` en el consorcio."}},
+)
+def listar_modos(
+    permiso: Annotated[Permiso, Depends(requiere("modos.ver"))], motor: MotorDep
+) -> ListaModos:
+    filas = _leer(
+        permiso,
+        motor,
+        "select modo::text as modo, vigente_desde, vigente_hasta, decision_id"
+        " from nucleo.modos_del_consorcio()",
+        {},
+    )
+    return ListaModos(elementos=[PeriodoModo(**f) for f in filas])
 
 
 @router.get(

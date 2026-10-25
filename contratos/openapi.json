@@ -1975,6 +1975,23 @@
         "title": "ListaMandatos",
         "type": "object"
       },
+      "ListaModos": {
+        "description": "La historia completa, del más reciente al más antiguo. Vacía: el consorcio todavía no\ntiene modo registrado.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PeriodoModo"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaModos",
+        "type": "object"
+      },
       "ListaSesiones": {
         "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
         "properties": {
@@ -2416,6 +2433,16 @@
         "title": "MandatoRevisado",
         "type": "object"
       },
+      "ModoOperacion": {
+        "description": "Modo de operación del consorcio (documento 08, §5; `nucleo.tipo_modo`, 0010).",
+        "enum": [
+          "consejo",
+          "administrador_aumentado",
+          "autogestion"
+        ],
+        "title": "ModoOperacion",
+        "type": "string"
+      },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
         "properties": {
@@ -2482,6 +2509,45 @@
           "correo"
         ],
         "title": "PedidoEnlace",
+        "type": "object"
+      },
+      "PeriodoModo": {
+        "description": "Un período de la historia de modos (RF41-C, 2b-6b): lo mínimo. Quién lo registró no sale\n(lo registra siempre el equipo) y la decisión se lee con `decisiones.ver`.",
+        "properties": {
+          "decision_id": {
+            "format": "uuid",
+            "title": "Decision Id",
+            "type": "string"
+          },
+          "modo": {
+            "$ref": "#/components/schemas/ModoOperacion"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sin fecha: es el modo vigente.",
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "modo",
+          "vigente_desde",
+          "vigente_hasta",
+          "decision_id"
+        ],
+        "title": "PeriodoModo",
         "type": "object"
       },
       "PlanillaPadron": {
@@ -4952,6 +5018,52 @@
           }
         },
         "summary": "Revisar un mandato del Consejo pendiente de revisión: vuelve a operar desde una fecha",
+        "tags": [
+          "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/modos": {
+      "get": {
+        "operationId": "listar_modos_api_v1_consorcios__consorcio_id__modos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaModos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `decisiones.ver` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Historia de los modos de operación del consorcio, con lo mínimo",
         "tags": [
           "mandatos"
         ]
