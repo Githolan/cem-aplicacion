@@ -111,9 +111,25 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `5b289ba` (staging el 24-10-2026 a las 23:58 UTC y producción el 25-10 a las 00:02 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (los últimos, `2026-10-24-5b289ba.md` para staging y `2026-10-25-5b289ba.md` para producción: `cd.ps1` escribe uno por día UTC).
+Medido en el despliegue de `fc1dd62` (25-10-2026: staging a las 19:35 UTC y producción a las 19:40 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-25-fc1dd62.md`, con los dos entornos: `cd.ps1` escribe uno por día UTC).
 
-**Staging y producción en `5b289ba`** (staging el 24-10-2026 de 23:56 a 23:58 UTC, producción el 25-10 de 00:00 a 00:02 UTC), base `0025`, contrato 0.18.0.
+**Staging y producción en `fc1dd62`** (25-10-2026: staging de 19:32 a 19:35 UTC, producción de 19:37 a 19:40 UTC), base `0028`, contrato 0.21.0.
+
+- **Qué es:** 2b-6 entero: 2b-6a (PR #111, `0026`), 2b-6b (PR #113, `0027`) y 2b-6c (PR #115, `0028`), más la documentación de PR #114 y #116. La SHA es la punta de `main`. Detalle de los cortes en «Próximo paso», puntos 11 a 13.
+- **Clave nueva:** `CEM_IDENTIDAD_CLAVES`, versión 1, en `cem-backend-staging` y `cem-backend`, distinta en cada entorno, creada antes del despliegue sin imprimir ningún valor. Dentro de cada contenedor, el llavero carga con la versión 1 (control: una clave corta se rechaza).
+- **Controles.** `ci.ps1` verde sobre `fc1dd62` (e2e 177). Imágenes: `cem-backend` `sha256:1b3dcbfc…3317` y `cem-frontend` `sha256:31fc53a5…994a`, las mismas en los dos entornos.
+- **Despliegue (Claude, con el mandato autónomo del propietario del 25-10).** Copia previa verificada en los dos entornos (había tres migraciones). En los dos:
+  - los 4 servicios `running healthy`, con la imagen y el digest validados;
+  - `/health` con `fc1dd62` y contrato 0.21.0, deps y cola en `ok`;
+  - base en `0028 (head)` (`alembic current`);
+  - una instancia por servicio y 0 errores en los registros.
+  - **Staging:** smoke `7b7507f2` con 20 controles: los del smoke, más A13-C con la clave real, F9, RF41-C y RF35-B (corridos desde una copia local), y la cadena de auditoría con 634 eventos, 0 rotos.
+  - **Producción:** Kuma en verde y `…/auditoria` sin sesión da 401 JSON. No se creó ningún dato real.
+  - Producción previa: `5b289ba`. No hizo falta volver atrás; la base no se baja de forma automática.
+- **SIN VERIFICAR:** R10 en una ruta real (todavía no hay rutas económicas); la continuidad del Consejo con una autoinvitación vieja y el importado pendiente sin derechos (los cubre `ci.ps1`); todo recorrido con datos reales en producción.
+- **Después del despliegue:** las altas de mandato por la API se niegan hasta que soporte verifique identidades; los cambios de modo, solo por soporte; los mandatos anteriores a `0028` no tienen `auditoria.ver`. Staging no baja de `0026` ni de `0028`.
+
+Antes, **`5b289ba`** (staging el 24-10-2026 de 23:56 a 23:58 UTC, producción el 25-10 de 00:00 a 00:02 UTC), base `0025`, contrato 0.18.0.
 
 - **Qué es:** el corte 4 de 2b-5. La SHA es la punta de `main`, `5b289ba`: el merge funcional de PR #108 (`84d50e7`: página `/padron` y `FilaPadron.iniciado`) más el cierre documental de PR #109. `/health` informa `sha_imagen` `5b289ba` porque `ci.ps1` construye y etiqueta la punta. Detalle del corte en «Próximo paso», punto 10.
 - **Controles.** `ci.ps1` verde sobre `5b289ba`: backend 1540, contratos 58, frontend 329 y e2e 177. Imágenes: `cem-backend` `sha256:d4c87f69…8728` y `cem-frontend` `sha256:79597adb…1ca4`, las mismas en los dos entornos.
@@ -448,7 +464,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - un defecto de foco que encontró la e2e.
    - **Deuda conocida (P3, sin código):** un rechazo seguido de una recarga fallida reemplaza el aviso de negocio; el 403 al confirmar enumera causas sin mencionar la falta de modo; el patrón del campo deja pasar un tabulador, que la API rechaza con 422; faltan pruebas de la clave conservada ante `idempotencia_en_curso` o un corte de red; la prueba de `iniciado` tiene una carrera de segundos a las 03:00 UTC; y `InvitacionMandato.tsx` todavía compara fechas en el cliente (anterior a este corte).
    - **Despliegue (autorizado por el propietario el 24-10):** `ci.ps1` sobre la punta `5b289ba` (`cd.ps1` despliega solo la punta de `main`), primero staging y después producción con la misma SHA.
-11. **2b-6a, identidad humana (A13-C), R10 y F9 (decisiones del propietario del 24-10-2026):** PR #111 (rama `identidad-humana-r10-autoinvitacion`, desde `1017a64`), fusionado el 25-10-2026 en `13d190a` (head `bedb60f`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+11. **2b-6a, identidad humana (A13-C), R10 y F9 (decisiones del propietario del 24-10-2026):** PR #111 (rama `identidad-humana-r10-autoinvitacion`, desde `1017a64`), fusionado el 25-10-2026 en `13d190a` (head `bedb60f`). **Desplegado** en `fc1dd62` el 25-10, en staging y en producción (ver «Desplegado»).
    - **Qué trae:**
      - migración `0026`: identidad humana por consorcio con la huella HMAC del documento (`CEM_IDENTIDAD_CLAVES`), verificaciones de soporte y la regla fuerte como segunda barrera en la base;
      - `scripts.identidad_humana` (solo soporte, el número por stdin);
@@ -466,11 +482,11 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - revisión independiente sin P1 ni P2.
      Sobre `bccbe71`, la revisión había dado un P2 (500 al revisar un administrador externo sin cuenta) y tres P3, corregidos en `bedb60f` con un control de que la prueba falla sin el arreglo.
    - **Deuda conocida (P3, sin código):** una identidad huérfana firmada con una versión de clave que se quiere retirar bloquea `verificar`, `vincular` y `corregir` del consorcio hasta volver a poner esa clave. El bloqueo es seguro (niega).
-   - **Para desplegar, cuando se autorice:**
+   - **Para desplegar (hecho el 25-10):**
      - crear `CEM_IDENTIDAD_CLAVES` en `cem-backend-staging` y `cem-backend`, con claves distintas;
      - tener en cuenta que, sin verificar a las personas, las altas de mandato por la API se niegan;
      - desde `0026`, ninguna base con identidades baja de esa revisión.
-12. **2b-6b, cambio de modo (RF41-C, cierra E29; decisiones del propietario del 24-10-2026):** PR #113 (rama `modos-rf41c`, desde `13d190a`), fusionado el 25-10-2026 a las 04:12 UTC en `03a81e8` (head `4127430`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+12. **2b-6b, cambio de modo (RF41-C, cierra E29; decisiones del propietario del 24-10-2026):** PR #113 (rama `modos-rf41c`, desde `13d190a`), fusionado el 25-10-2026 a las 04:12 UTC en `03a81e8` (head `4127430`). **Desplegado** en `fc1dd62` el 25-10, en staging y en producción (ver «Desplegado»).
    - **Qué trae:**
      - migración `0027`: `cambiar_modo` solo por soporte (sin POST público), con decisión de asamblea no reutilizada, sin cambios retroactivos ni anticipados (la transición rige desde hoy, en la fecha del consorcio, y una por día), solo las transiciones del diagrama 12 (no AG→Consejo) y niega los estados ambiguos;
      - la transición se niega si queda un mandato de administración vigente o futuro (`transicion_requiere_fin_de_mandato`): la baja nunca se infiere;
@@ -488,8 +504,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - la misma acta cargada como dos decisiones distintas esquiva el control de RF52;
      - un bloqueo mutuo intermitente en `test_la_migracion_0005_baja_y_sube` (1 de 2 corridas completas; no se repitió sola ni al relanzar). Causa **SIN VERIFICAR**.
    - **Pendiente del propietario, fuera de RF41-C:** la baja general de la administración por `baja_mandato` no exige el paquete de RF52.
-   - **Para desplegar, cuando se autorice:** sin variables nuevas. Desde `0027`, los cambios de modo por la API (`origen` distinto de soporte) se niegan con `origen_invalido`.
-13. **2b-6c, lectura de la auditoría (RF35-B; decisiones del propietario del 24-10-2026):** PR #115 (rama `auditoria-propia-rf35b`, desde `2701067`), fusionado el 25-10-2026 a las 05:48 UTC en `7bce236` (head `02f4515`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+   - **Para desplegar (hecho el 25-10):** sin variables nuevas. Desde `0027`, los cambios de modo por la API (`origen` distinto de soporte) se niegan con `origen_invalido`.
+13. **2b-6c, lectura de la auditoría (RF35-B; decisiones del propietario del 24-10-2026):** PR #115 (rama `auditoria-propia-rf35b`, desde `2701067`), fusionado el 25-10-2026 a las 05:48 UTC en `7bce236` (head `02f4515`). **Desplegado** en `fc1dd62` el 25-10, en staging y en producción (ver «Desplegado»).
    - **Qué trae:**
      - migración `0028`: `auditoria.proyeccion` (lista blanca: por acción, el texto traducido, el recurso funcional y los campos visibles), `auditoria.eventos_propios` (solo los eventos cuyo actor es quien lee) y `auditoria.eventos_del_consorcio` (segunda barrera `auditoria.ver`), índices de lectura;
      - `auditoria.ver` en los paquetes de MC y AD, no AE; los mandatos que ya existen no la reciben (decisión 1);
@@ -509,4 +525,4 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - `cem_app` todavía puede leer `auditoria.eventos` directo bajo RLS (la ruta no lo usa);
      - «eventos propios» = los que hizo quien lee, no los que lo nombran;
      - faltan la prueba del downgrade de `0028` y la del mandato anterior a `0028`.
-   - **Para desplegar, cuando se autorice:** sin variables nuevas. `0028` crea dos índices sobre `auditoria.eventos` (no concurrentes). Desde `0028`, ninguna base con `auditoria.ver` otorgada baja de esa revisión.
+   - **Para desplegar (hecho el 25-10):** sin variables nuevas. `0028` crea dos índices sobre `auditoria.eventos` (no concurrentes). Desde `0028`, ninguna base con `auditoria.ver` otorgada baja de esa revisión.
