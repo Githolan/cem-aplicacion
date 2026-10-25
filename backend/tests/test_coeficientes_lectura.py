@@ -12,9 +12,13 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.autorizacion.evaluador import Decision
+from app.autorizacion.requiere import Permiso
+from app.consorcios.padron import Discrepancia
 from app.db import transaccion
 from tests.test_coeficientes_0021 import AGUA, EXPENSAS, porcentajes, registrar
 from tests.test_contexto_mandatos import cliente, denegaciones, otra_unidad
+from tests.test_identidad import app, navegador  # noqa: F401  (`app` es un fixture)
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
 from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo
@@ -81,8 +85,11 @@ def test_la_administracion_lee_todo_tal_como_esta_guardado(edificio, motor_migra
         for x in cuerpo["elementos"]
     )
     # Lo mínimo: sin la referencia de la fuente, la decisión ni quién registró.
-    for prohibido in ("fuente", "Reglamento", "decision", "registrado", "origen", "esquema_id"):
-        assert prohibido not in r.text
+    assert all(set(x) == {"grupo", "version", "vigente_desde", "vigente_hasta", "reglas",
+                          "coeficientes"} for x in cuerpo["elementos"])  # fmt: skip
+    assert all(set(c) == {"unidad_id", "designacion", "porcentaje"}
+               for x in cuerpo["elementos"] for c in x["coeficientes"])  # fmt: skip
+    assert "Reglamento" not in r.text
 
 
 @pytest.mark.redis
@@ -225,3 +232,50 @@ def test_un_mandato_vencido_no_da_lectura(edificio, motor_migrate, motor_app):
     alta(motor_app, e["cons"], None, decidir_equipo(motor_app, e["cons"]), persona=quien,
          origen="soporte")  # fmt: skip
     assert leer(quien, e["cons"]).status_code == 200
+
+
+@pytest.mark.redis
+def test_sin_modo_proponer_no_lee_y_la_negacion_queda_auditada(motor_migrate, motor_app):
+    """La base deja leer a quien tiene `coeficientes.proponer`, pero sin modo la política lo
+    niega (como a proponer): no es una lista vacía, es un 403 auditado."""
+    cons, u1, _ = consorcio_con_persona(motor_migrate)
+    e = {"cons": cons, "u": [u1]}
+    registrar(motor_app, cons, {str(u1): "100.000000"}, decision=decidir_equipo(motor_app, cons))
+    quien = lector(motor_migrate, motor_app, e, facultades=["coeficientes.proponer"])
+    r = leer(quien, cons)
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    [d] = denegaciones(motor_app, cons, quien, quien)
+    assert (d["accion"], d["motivo"]) == ("coeficientes.ver_por_grupo", "sin_modo_registrado")
+    # Control: el Consejo, con `padron.ver`, que corre sin modo, lee el esquema.
+    otro = lector(motor_migrate, motor_app, e, tipo="miembro_consejo")
+    r = leer(otro, cons)
+    assert r.status_code == 200 and coeficientes_de(r.json(), "expensas_comunes", 1) == {
+        str(u1): "100.000000"
+    }
+
+
+@pytest.mark.redis
+def test_una_unidad_que_no_esta_en_un_esquema_lo_deja_afuera(edificio, motor_migrate, motor_app):
+    e = edificio
+    nueva, _ = otra_unidad(motor_migrate, e["cons"], "7° A")
+    quien = otra_persona(motor_migrate, e["cons"])
+    otorgar(motor_migrate, motor_app, e, quien, "padron.ver", f"unidad:{nueva}")
+    r = leer(quien, e["cons"])
+    # Acotada a una unidad sin coeficientes: ningún esquema, y no es una negación.
+    assert (r.status_code, r.json()) == (200, {"elementos": []})
+    assert denegaciones(motor_app, e["cons"], quien, quien) == []
+
+
+def test_si_la_base_niega_y_el_evaluador_concede_falla_fuerte(edificio, monkeypatch):
+    e = edificio
+    monkeypatch.setattr(
+        Permiso, "decidir", lambda self, entidad=None: Decision(True, 200, "concedido_por_facultad")
+    )
+    with cliente(e["per"]) as c, pytest.raises(Discrepancia):
+        c.get(f"/api/v1/consorcios/{e['cons']}/coeficientes")
+
+
+def test_coeficientes_sin_sesion_responde_401(app, edificio):  # noqa: F811
+    assert (
+        navegador(app).get(f"/api/v1/consorcios/{edificio['cons']}/coeficientes").status_code == 401
+    )

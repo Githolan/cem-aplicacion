@@ -908,7 +908,7 @@
         "description": "Una versión del esquema de un grupo de gasto, inalterable.",
         "properties": {
           "coeficientes": {
-            "description": "Solo los que quien lee puede ver, por designación de la unidad.",
+            "description": "Solo los que quien lee puede ver, por designación de la unidad. Una versión muestra lo que se guardó: también una unidad borrada después.",
             "items": {
               "$ref": "#/components/schemas/CoeficienteUnidad"
             },

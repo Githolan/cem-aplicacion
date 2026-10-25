@@ -65,7 +65,8 @@ class EsquemaCoeficientes(BaseModel):
     )
     reglas: list[ReglaReparto] = Field(description="De la más vieja a la más nueva.")
     coeficientes: list[CoeficienteUnidad] = Field(
-        description="Solo los que quien lee puede ver, por designación de la unidad."
+        description="Solo los que quien lee puede ver, por designación de la unidad. Una versión"
+        " muestra lo que se guardó: también una unidad borrada después."
     )
 
 

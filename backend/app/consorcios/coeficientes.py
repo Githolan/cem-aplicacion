@@ -12,6 +12,10 @@ Las funciones de `0029` exigen, como segunda barrera, un mandato vigente con alg
 facultades. Si la base niega y el evaluador concede alguna, no coinciden: la ruta falla fuerte
 (500), nunca devuelve una lista vacía. Si niegan las dos, la negación queda auditada con
 `coeficientes.ver_por_unidad` (la lectura que el diseño nombra primero) y responde 403.
+
+Si la base deja leer pero ninguna política concede nada, la lista vacía solo vale cuando alguna
+negación es por el alcance (una facultad acotada que no cubre ningún esquema). Con otro motivo
+(sin modo, un recurso inválido) se audita la negación más informativa y responde 403.
 """
 
 from typing import Annotated
@@ -29,7 +33,8 @@ from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from app.autorizacion.evaluador import Entidad
+from app.autorizacion.evaluador import Entidad, Motivo
+from app.autorizacion.recursos import MotivoRecurso
 from app.autorizacion.requiere import Permiso, requiere
 from app.consorcios.padron import Discrepancia, sobre_unidad
 from app.contexto import MotorDep
@@ -92,6 +97,18 @@ def listar_coeficientes(
         por_unidad.verificar(Entidad())  # niega, audita y responde 403
         raise Discrepancia("el evaluador niega y después concede la lectura") from e
 
+    negadas: list[tuple[Permiso, Entidad, str]] = []
+    concedio = False
+
+    def permite(permiso: Permiso, entidad: Entidad) -> bool:
+        nonlocal concedio
+        decision = permiso.decidir(entidad)
+        if decision.permitido:
+            concedio = True
+        else:
+            negadas.append((permiso, entidad, decision.motivo_interno))
+        return decision.permitido
+
     reglas_por_esquema: dict[UUID, list[ReglaReparto]] = {}
     for r in reglas:
         reglas_por_esquema.setdefault(r["esquema_id"], []).append(
@@ -99,20 +116,19 @@ def listar_coeficientes(
         )
     esquemas: dict[UUID, dict] = {}
     for f in filas:
-        e = esquemas.setdefault(
-            f["esquema_id"],
-            {
+        e = esquemas.get(f["esquema_id"])
+        if e is None:
+            e = esquemas[f["esquema_id"]] = {
                 "grupo": f["grupo"],
                 "version": f["version"],
                 "vigente_desde": f["vigente_desde"],
                 "vigente_hasta": f["vigente_hasta"],
-                "por_grupo": por_grupo.decidir(sobre_grupo(f["grupo"])).permitido,
+                "por_grupo": permite(por_grupo, sobre_grupo(f["grupo"])),
                 "coeficientes": [],
-            },
-        )
+            }
         if f["unidad_id"] is None:
             continue
-        if e["por_grupo"] or por_unidad.decidir(sobre_unidad(f["unidad_id"])).permitido:
+        if e["por_grupo"] or permite(por_unidad, sobre_unidad(f["unidad_id"])):
             e["coeficientes"].append(
                 CoeficienteUnidad(
                     unidad_id=f["unidad_id"],
@@ -120,17 +136,27 @@ def listar_coeficientes(
                     porcentaje=f["porcentaje"],
                 )
             )
-    return ListaEsquemasCoeficientes(
-        elementos=[
-            EsquemaCoeficientes(
-                grupo=e["grupo"],
-                version=e["version"],
-                vigente_desde=e["vigente_desde"],
-                vigente_hasta=e["vigente_hasta"],
-                reglas=reglas_por_esquema.get(esquema_id, []),
-                coeficientes=e["coeficientes"],
-            )
-            for esquema_id, e in esquemas.items()
-            if e["por_grupo"] or e["coeficientes"]
-        ]
-    )
+    elementos = [
+        EsquemaCoeficientes(
+            grupo=e["grupo"],
+            version=e["version"],
+            vigente_desde=e["vigente_desde"],
+            vigente_hasta=e["vigente_hasta"],
+            reglas=reglas_por_esquema.get(esquema_id, []),
+            coeficientes=e["coeficientes"],
+        )
+        for esquema_id, e in esquemas.items()
+        if e["por_grupo"] or e["coeficientes"]
+    ]
+    if not elementos and not concedio:
+        # La base dejó leer, pero ninguna política concedió. Una lista vacía es legítima solo si
+        # alguna negación fue por el alcance: una facultad acotada que no cubre ningún esquema.
+        # Si no (sin modo, un recurso inválido), es una negación: se audita y responde 403.
+        for permiso in (por_unidad, por_grupo):
+            permite(permiso, Entidad())
+        motivos = {motivo for _, _, motivo in negadas}
+        if not concedio and MotivoRecurso.NO_ALCANZA not in motivos:
+            permiso, entidad, _ = min(negadas, key=lambda n: n[2] == Motivo.SIN_CONCESION)
+            permiso.verificar(entidad)  # niega, audita y responde 403
+            raise Discrepancia("el evaluador niega y después concede la lectura")
+    return ListaEsquemasCoeficientes(elementos=elementos)
