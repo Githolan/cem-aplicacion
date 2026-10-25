@@ -39,6 +39,9 @@ class CodigoError(StrEnum):
     """El correo invitado ya tiene cuenta: hay que entrar con él y volver a abrir la invitación."""
     INVITACION_DE_OTRA_PERSONA = "invitacion_de_otra_persona"
     """La sesión abierta es de otra persona que la del correo invitado."""
+    INVITACION_PROPIA = "invitacion_propia"
+    """Quien creó la invitación no puede aceptarla para sí (F9), ni con otra cuenta de la misma
+    identidad humana verificada en el consorcio."""
     INVITACION_NO_PENDIENTE = "invitacion_no_pendiente"
     """Se pidió retirar una invitación que ya se aceptó: para quitar el acceso se termina el
     vínculo."""

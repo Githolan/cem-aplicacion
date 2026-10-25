@@ -19,7 +19,7 @@ from app.contexto import Identidad, obtener_identidad, require_scope
 from app.db import transaccion
 from app.errores import ErrorApi
 from app.main import crear_app
-from tests.conftest import clave_idempotencia, url_rol
+from tests.conftest import clave_idempotencia, url_rol, verificar_en_el_consorcio
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta, baja
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
@@ -111,8 +111,10 @@ def edificio(motor_migrate, motor_app):
 
 
 def segundo_consorcio_con_mandato(motor_migrate, motor_app, persona: UUID) -> tuple[UUID, UUID]:
-    """Otro consorcio donde `persona` es miembro del consejo."""
+    """Otro consorcio donde `persona` es miembro del consejo. La identidad humana es por
+    consorcio (A13-C): se la verifica también en este."""
     cons_b, _, prop_b = consorcio_con_persona(motor_migrate)
+    verificar_en_el_consorcio(motor_migrate, cons_b, persona)
     m_b = alta(motor_app, cons_b, prop_b, decidir_equipo(motor_app, cons_b), persona=persona,
                tipo="miembro_consejo")  # fmt: skip
     return cons_b, m_b

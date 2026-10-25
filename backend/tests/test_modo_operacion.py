@@ -19,15 +19,24 @@ from app.config import Config
 from app.contexto import Identidad, obtener_identidad, require_scope
 from app.db import transaccion
 from app.main import crear_app
-from tests.conftest import alembic_config, url_rol, vaciar_mandatos, volver_a_subir
+from tests.conftest import (
+    alembic_config,
+    url_rol,
+    vaciar_mandatos,
+    verificar_en_el_consorcio,
+    volver_a_subir,
+)
 
 pytestmark = pytest.mark.db
 
 DESDE = date(2026, 1, 1)
 
 
-def consorcio_con_persona(motor_migrate, zona: str = "America/Argentina/Buenos_Aires"):
-    """Un consorcio propio de la prueba, con una unidad y su propietaria desde 2020."""
+def consorcio_con_persona(
+    motor_migrate, zona: str = "America/Argentina/Buenos_Aires", verificada: bool = True
+):
+    """Un consorcio propio de la prueba, con una unidad y su propietaria desde 2020. Por omisión
+    la propietaria tiene la identidad humana verificada en el consorcio (A13-C)."""
     with motor_migrate.begin() as c:
         cons = c.execute(
             text(
@@ -55,6 +64,8 @@ def consorcio_con_persona(motor_migrate, zona: str = "America/Argentina/Buenos_A
             ),
             {"c": cons, "u": uni, "p": per},
         )
+    if verificada:
+        verificar_en_el_consorcio(motor_migrate, cons, per)
     return cons, uni, per
 
 

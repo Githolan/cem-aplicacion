@@ -50,9 +50,13 @@ INTENTOS_CODIGO = 5
 DIGITOS_CODIGO = 6
 FORMATO_CODIGO = re.compile(rf"^[0-9]{{{DIGITOS_CODIGO}}}$")
 VIGENCIA_SESION = timedelta(days=30)
-"""Vencimiento deslizante para vecinos (§10.4). Las 12 h de los roles con facultades de dinero
-llegan con los roles (H2 2b, pendiente): la vigencia pasará a depender de la persona y
-`nucleo.validar_sesion` ya la recibe como parámetro."""
+"""Vencimiento deslizante (§10.4)."""
+VIGENCIA_SESION_ECONOMICA = timedelta(hours=12)
+"""R10 (D2, decisión del propietario del 24-10-2026): una acción económica pide una sesión que
+empezó hace menos de 12 horas, sin importar cuánto se usó. La sesión sigue sirviendo para lo
+demás; para lo económico hay que volver a entrar."""
+VIGENCIA_SEGUNDO_FACTOR_RECIENTE = timedelta(minutes=10)
+"""TB-CEM-3: el segundo factor verificado en la sesión en los últimos 10 minutos."""
 RETENCION_ACCESO = timedelta(days=90)
 """Cuánto se conservan una sesión y un enlace después de dejar de servir (vencer, revocarse o
 usarse): son registros de acceso técnico, 90 días (§15.6). Los borra la purga diaria."""

@@ -38,7 +38,7 @@ COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
 COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
      backend/scripts/invitar.py backend/scripts/alta_mandato.py \
      backend/scripts/mandato_soporte.py backend/scripts/cargar_coeficientes.py \
-     backend/scripts/anular_vinculo.py scripts/
+     backend/scripts/anular_vinculo.py backend/scripts/identidad_humana.py scripts/
 USER cem
 EXPOSE 8000
 # La misma imagen corre cem-backend, cem-trabajos o cem-planificador según CEM_PROCESO

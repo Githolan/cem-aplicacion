@@ -19,7 +19,13 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.db import transaccion
 from scripts import alta_mandato
-from tests.conftest import CLAVES, alembic_config, url_rol, vaciar_mandatos
+from tests.conftest import (
+    CLAVES,
+    alembic_config,
+    url_rol,
+    vaciar_mandatos,
+    verificar_en_el_consorcio,
+)
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = pytest.mark.db
@@ -154,12 +160,16 @@ def sesiones_abiertas(motor_migrate, persona, n: int = 0) -> int:
         ).scalar_one()
 
 
-def otra_persona(motor_migrate, cons) -> UUID:
+def otra_persona(motor_migrate, cons, verificada: bool = True) -> UUID:
+    """Una cuenta nueva; por omisión, verificada en el consorcio (A13-C)."""
     with motor_migrate.begin() as c:
-        return c.execute(
+        persona = c.execute(
             text("insert into nucleo.persona (correo, nombre) values (:c, 'Otra') returning id"),
             {"c": f"otra-{os.urandom(6).hex()}-{cons}@ejemplo.com"},
         ).scalar_one()
+    if verificada:
+        verificar_en_el_consorcio(motor_migrate, cons, persona)
+    return persona
 
 
 def test_alta_con_el_paquete_del_tipo_y_auditada(motor_migrate, motor_app):
@@ -275,6 +285,7 @@ def test_un_mandato_en_el_edificio_a_no_da_nada_en_el_b(motor_migrate, motor_app
     cons_a, _, per_a = consorcio_con_persona(motor_migrate)
     cons_b, _, per_b = consorcio_con_persona(motor_migrate)
     acta_a = decidir_equipo(motor_app, cons_a)
+    verificar_en_el_consorcio(motor_migrate, cons_a, per_b)  # la identidad es por consorcio
     m = alta(motor_app, cons_a, per_a, acta_a, persona=per_b)
 
     def visibles(cons, per) -> tuple[int, int]:

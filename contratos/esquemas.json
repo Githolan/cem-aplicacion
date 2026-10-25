@@ -684,6 +684,7 @@
           "invitacion_invalida",
           "invitacion_requiere_sesion",
           "invitacion_de_otra_persona",
+          "invitacion_propia",
           "invitacion_no_pendiente",
           "segundo_factor_requerido",
           "segundo_factor_invalido",

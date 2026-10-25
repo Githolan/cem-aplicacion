@@ -99,6 +99,13 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
     assert nombre == smoke_staging.NOMBRE_CONSORCIO
     assert vigentes == 0  # todos los mandatos de la corrida terminaron (rango vacío)
     assert correos == [smoke_staging.DOMINIO]
+    with motor_migrate.connect() as c:
+        verificadas = c.execute(
+            text("select count(*) from nucleo.verificacion_identidad where consorcio_id = :c"
+                 " and accion = 'verificar' and referencia like :r"),
+            {"c": consorcio, "r": smoke_staging.REFERENCIA + "%"},
+        ).scalar_one()  # fmt: skip
+    assert verificadas == 3  # A13-C: el Consejo y la propietaria, con la referencia de la prueba
 
     # El consorcio es permanente: una segunda corrida lo reusa.
     codigo, resumen, error = correr(servidor, entorno, consorcio, capsys)

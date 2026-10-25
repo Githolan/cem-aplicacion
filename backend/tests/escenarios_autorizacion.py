@@ -12,6 +12,11 @@ El CSV es legible para el propietario; acá se traduce cada fila a tipos puros:
 - **mandato:** la situación de todos los mandatos de la figura (vigente, vencido, futuro…).
 - **entidad:** `clave=valor` separados por `;`; las listas con `|`. Personas: `yo`, `otro`,
   `otro2` y `nula` (sin persona identificable). `actor=nadie` deja el contexto sin persona.
+  Identidad humana (A13-C): por omisión `yo`, `otro` y `otro2` son tres seres humanos
+  verificados en el consorcio; `sin_identidad=otro|yo` les quita la verificación y
+  `misma_identidad=otro` hace a `otro` el mismo ser humano que `yo` (otra cuenta). Controles
+  económicos (R10): por omisión la sesión tiene el segundo factor reciente y menos de 12 horas;
+  `controles=sin_segundo_factor`, `sesion_vieja` o `ninguno` los quitan.
 
 Los símbolos (`3A`, `5B`, `X`, `X2`…) se reemplazan por UUID canónicos fijos.
 """
@@ -42,6 +47,19 @@ MIGRACION_0011 = VERSIONES / "0011_mandatos.py"
 CONSORCIO = UUID("0192f0c4-0000-7000-8000-00000000000a")
 OTRO_CONSORCIO = UUID("0192f0c4-0000-7000-8000-00000000000b")
 HOY = date(2026, 6, 15)
+
+IDENTIDADES: dict[str, UUID] = {
+    "yo": UUID("0192f0c4-0000-7000-8000-0000000000e1"),
+    "otro": UUID("0192f0c4-0000-7000-8000-0000000000e2"),
+    "otro2": UUID("0192f0c4-0000-7000-8000-0000000000e3"),
+}
+CONTROLES = {
+    None: (True, True),
+    "sin_segundo_factor": (False, True),
+    "sesion_vieja": (True, False),
+    "ninguno": (False, False),
+}
+"""`controles` → (segundo factor reciente, sesión de menos de 12 horas)."""
 
 PERSONAS: dict[str, UUID | None] = {
     "yo": UUID("0192f0c4-0000-7000-8000-000000000001"),
@@ -162,11 +180,12 @@ def _recursos(texto: str) -> dict[TipoRecurso, str]:
     return recursos
 
 
-def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, bool]:
+def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dict[str, str]]:
     valores = dict(item.split("=", 1) for item in filter(None, texto.split(";")))
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
-        "emitio", "decision", "respaldo", "actor",
+        "emitio", "decision", "respaldo", "actor", "sin_identidad", "misma_identidad",
+        "controles",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -184,10 +203,15 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
     def personas(clave: str) -> tuple[UUID | None, ...]:
         return tuple(PERSONAS[p] for p in valores[clave].split("|")) if clave in valores else ()
 
-    if valores.get("respaldo", "no") not in {"si", "no"} or valores.get("actor", "") not in {
-        "",
-        "nadie",
-    }:
+    humanas = valores.get("sin_identidad", "").split("|") + valores.get(
+        "misma_identidad", ""
+    ).split("|")
+    if (
+        valores.get("respaldo", "no") not in {"si", "no"}
+        or valores.get("actor", "") not in {"", "nadie"}
+        or valores.get("controles") not in CONTROLES
+        or not set(filter(None, humanas)) <= set(IDENTIDADES)
+    ):
         raise ValueError(f"entidad mal escrita: {texto!r}")
     entidad = Entidad(
         recursos=recursos,
@@ -206,7 +230,17 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, boo
         sin_decision=valores.get("decision") == "ninguna",
         respaldo_presente=valores.get("respaldo") == "si",
     )
-    return entidad, valores.get("actor") == "nadie"
+    return entidad, valores
+
+
+def _identidades(valores: dict[str, str]) -> dict[UUID, UUID]:
+    sin = set(valores.get("sin_identidad", "").split("|"))
+    misma = set(valores.get("misma_identidad", "").split("|"))
+    return {
+        PERSONAS[nombre]: IDENTIDADES["yo" if nombre in misma else nombre]
+        for nombre in IDENTIDADES
+        if nombre not in sin
+    }
 
 
 def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
@@ -255,9 +289,10 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
     if fila.hay_administrador not in {"si", "no"}:
         raise ValueError(f"{fila}: hay_administrador debe ser si o no")
 
-    entidad, sin_actor = _entidad(fila.entidad, _recursos(fila.recurso))
+    entidad, valores = _entidad(fila.entidad, _recursos(fila.recurso))
+    segundo_factor, sesion = CONTROLES[valores.get("controles")]
     contexto = ContextoAutorizacion(
-        persona_id=None if sin_actor else PERSONAS["yo"],
+        persona_id=None if valores.get("actor") == "nadie" else PERSONAS["yo"],
         consorcio_id=CONSORCIO,
         hoy=HOY,
         vinculos=tuple(vinculos),
@@ -265,5 +300,8 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         mandatos=tuple(mandatos),
         facultades=tuple(facultades),
         hay_administrador_vigente=fila.hay_administrador == "si",
+        identidades=_identidades(valores),
+        segundo_factor_reciente=segundo_factor,
+        sesion_reciente=sesion,
     )
     return contexto, entidad

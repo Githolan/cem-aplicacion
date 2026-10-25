@@ -7,8 +7,22 @@
 2. **Acción no declarada:** se niega (R1).
 3. **Concesión:** por vínculo declarado, por ámbito declarado o por una facultad con el código
    exacto, de un mandato vigente de este consorcio, cuyo recurso alcanza (R7, R11).
-4. **Filtros, todos:** modo (R6), separación por `persona_id` (R8), respaldo (R9),
-   destinatario único (A14) y económicas (R10). Cualquiera niega; **ninguno concede**.
+4. **Filtros, todos:** modo (R6), separación (R8), respaldo (R9), destinatario único (A14) y
+   económicas (R10). Cualquiera niega; **ninguno concede**.
+
+**Separación entre seres humanos (A13-C, 2b-6a).** Una cuenta (`persona_id`) no prueba quién es
+el ser humano: las reglas que exigen personas distintas comparan también la identidad humana
+verificada en el consorcio (`ContextoAutorizacion.identidades`, migración 0026). Si a
+cualquiera de las partes que hay que comparar le falta, se niega con `identidad_no_verificada`
+(A5: si la identidad no se puede determinar, se niega). No se aplica a las acciones sin
+separación ni cuando la otra parte no es una persona (el equipo, un mandatario sin cuenta, una
+baja sin decisión). P4-c (`no_es_su_propio_vinculo`, `no_es_quien_registro`) sigue comparando
+solo cuentas: la otra parte es cualquier propietario y el propietario decide aparte si se
+verifica a todos.
+
+**Económicas (R10, 2b-6a).** Ya no se niegan siempre: piden la sesión con el segundo factor
+verificado hace poco (`segundo_factor_reciente`), la sesión de menos de 12 horas
+(`sesion_reciente`) y la identidad humana verificada de quien actúa.
 
 Los tipos de entrada son propios y puros. El PR 3 armará el `ContextoAutorizacion` desde la
 base (`hoy_del_consorcio`, `nucleo.mandato_vigente`); acá no se toca `app.contexto`. Aunque el
@@ -47,7 +61,29 @@ class Motivo(StrEnum):
     SOLICITUD_YA_EMITIDA = "solicitud_ya_emitida"
     SIN_RESPALDO = "sin_respaldo"
     SIN_ADMINISTRADOR_VIGENTE = "sin_administrador_vigente"
-    REQUIERE_CONTROLES_2B6 = "requiere_controles_2b6"
+    IDENTIDAD_NO_VERIFICADA = "identidad_no_verificada"
+    REQUIERE_SEGUNDO_FACTOR_RECIENTE = "requiere_segundo_factor_reciente"
+    REQUIERE_SESION_RECIENTE = "requiere_sesion_reciente"
+
+
+HUMANAS = frozenset(CodigoSeparacion) - {
+    CodigoSeparacion.NO_ES_SU_PROPIO_VINCULO,
+    CodigoSeparacion.NO_ES_QUIEN_REGISTRO,
+}
+"""Las separaciones que comparan seres humanos (A13-C). P4-c queda afuera en este corte."""
+
+SOLO_POR_CUENTA = frozenset({
+    ("mandatos.baja", CodigoSeparacion.NO_ES_SU_PROPIO_MANDATO),
+    ("mandatos.desasociar_persona", CodigoSeparacion.NO_ES_SU_PROPIO_MANDATO),
+})  # fmt: skip
+"""A4 al quitar, no al dar: dar de baja un mandato o desasociar su cuenta sigue comparando
+cuentas. Con la regla fuerte, a una cuenta sin identidad verificada (una mal asociada, que no se
+va a verificar nunca) no se la podría sacar por la API: la regla bloquearía el remedio. Frenado y
+presentado al propietario (24-10-2026); A15 de la baja sí compara seres humanos."""
+
+
+def separa_seres_humanos(accion: str, codigo: CodigoSeparacion) -> bool:
+    return codigo in HUMANAS and (accion, codigo) not in SOLO_POR_CUENTA
 
 
 @dataclass(frozen=True)
@@ -97,6 +133,13 @@ class ContextoAutorizacion:
     facultades: tuple[Facultad, ...] = ()
     hay_administrador_vigente: bool = False
     """Si existe el único mandato vigente de administración del consorcio (A14)."""
+    identidades: Mapping[UUID, UUID] = field(default_factory=dict)
+    """`persona_id` → identidad humana verificada en este consorcio (A13-C), de quien actúa y
+    de las personas de la entidad. Una persona que no está, no tiene identidad verificada."""
+    segundo_factor_reciente: bool = False
+    """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
+    sesion_reciente: bool = False
+    """La sesión empezó hace menos de 12 horas (R10: sesión de 12 h para lo económico)."""
 
 
 @dataclass(frozen=True)
@@ -218,9 +261,10 @@ def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entida
             return Motivo.SIN_MODO_REGISTRADO
     elif contexto.modo not in politica.modos:
         return Motivo.MODO_NO_ADMITIDO
-    # Separación de funciones (R8, A4, A5): por persona; sin identidad, se niega.
+    # Separación de funciones (R8, A4, A5, A13-C): por persona y por ser humano; sin
+    # identidad, se niega.
     for codigo in politica.separacion:
-        motivo = _separacion(codigo, contexto.persona_id, entidad)
+        motivo = _separacion(politica.accion, codigo, contexto, entidad)
         if motivo is not None:
             return motivo
     # Respaldo documental (R9). Su contenido lo valida la base (0011, 0012).
@@ -230,13 +274,22 @@ def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entida
     # una solicitud formal, emite la segunda firma, es decir, cuando ya hay una.
     if politica.destinatario_unico and entidad.firmas and not contexto.hay_administrador_vigente:
         return Motivo.SIN_ADMINISTRADOR_VIGENTE
-    # Económicas (R10): se niegan siempre hasta 2b-6.
+    # Económicas (R10): segundo factor reciente, sesión de 12 h e identidad humana de quien
+    # actúa (interviene en una separación económica, como quien actúa o como la otra parte).
     if politica.economica:
-        return Motivo.REQUIERE_CONTROLES_2B6
+        if contexto.persona_id not in contexto.identidades:
+            return Motivo.IDENTIDAD_NO_VERIFICADA
+        if not contexto.segundo_factor_reciente:
+            return Motivo.REQUIERE_SEGUNDO_FACTOR_RECIENTE
+        if not contexto.sesion_reciente:
+            return Motivo.REQUIERE_SESION_RECIENTE
     return None
 
 
-def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) -> str | None:
+def _separacion(
+    accion: str, codigo: CodigoSeparacion, contexto: ContextoAutorizacion, entidad: Entidad
+) -> str | None:
+    actor = contexto.persona_id
     if actor is None:
         return Motivo.IDENTIDAD_INDETERMINADA
     match codigo:
@@ -277,5 +330,14 @@ def _separacion(codigo: CodigoSeparacion, actor: UUID | None, entidad: Entidad) 
     if any(p is None for p in otras):
         return Motivo.IDENTIDAD_INDETERMINADA
     if actor in otras:
+        return codigo
+    if not separa_seres_humanos(accion, codigo):
+        return None
+    # A13-C: los mismos lugares, entre seres humanos verificados en el consorcio. La primera firma
+    # también la pide: la segunda se compara con ella.
+    identidades = contexto.identidades
+    if actor not in identidades or any(p not in identidades for p in otras):
+        return Motivo.IDENTIDAD_NO_VERIFICADA
+    if identidades[actor] in {identidades[p] for p in otras}:
         return codigo
     return None

@@ -93,13 +93,19 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     vigencia vacía, se le devuelve un día (solo en esta base). Y con 0021, que se niega a bajar
     si hay esquemas de coeficientes: se borran. Y con 0023, que se niega a bajar si hay
     revisiones de mandatos: se borran. Y con 0025, que se niega a bajar si hay importaciones de
-    padrón o invitaciones que nombran su vínculo: se les quita y se borran.
+    padrón o invitaciones que nombran su vínculo: se les quita y se borran. Y con 0026, que se
+    niega a bajar si hay identidades humanas: se borran con sus vínculos y verificaciones.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('nucleo.identidad_humana') is not null then"
+                "   delete from nucleo.verificacion_identidad;"
+                "   delete from nucleo.identidad_persona;"
+                "   delete from nucleo.identidad_humana;"
+                " end if;"
                 " if to_regclass('nucleo.importacion_padron') is not null then"
                 "   update nucleo.vinculo set importacion_id = null, nombre_declarado = null"
                 "    where importacion_id is not null;"
@@ -360,6 +366,42 @@ def datos(motor_migrate: Engine) -> Datos:
         ]:
             uno(c, ins_v, c=cons, u=uni, p=per, t=tipo, desde=desde, hasta=hasta)
     return Datos(ca, cb, a1, a2, b1, pa, pb, pab, pv)
+
+
+def verificar_en_el_consorcio(motor_migrate: Engine, consorcio: UUID, persona: UUID) -> UUID:
+    """Datos de prueba: la cuenta queda verificada en el consorcio (A13-C) con un documento que
+    nadie más tiene. Escribe directo como `cem_migrate`, sin el script de soporte ni su evento
+    de auditoría; lo que hace soporte se prueba en `test_identidad_humana.py`."""
+    with motor_migrate.begin() as c:
+        identidad = c.execute(
+            text(
+                "insert into nucleo.identidad_humana (consorcio_id, huella, clave_version)"
+                " values (:c, :h, 1) returning id"
+            ),
+            {"c": consorcio, "h": os.urandom(32)},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
+                " values (:c, :p, :i)"
+            ),
+            {"c": consorcio, "p": persona, "i": identidad},
+        )
+    return identidad
+
+
+def misma_identidad(motor_migrate: Engine, consorcio: UUID, de: UUID, cuenta: UUID) -> None:
+    """Datos de prueba: `cuenta` es otra cuenta del mismo ser humano que `de`, que tiene que
+    estar verificada en el consorcio (lo que hace `vincular` de soporte)."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
+                " select consorcio_id, :p, identidad_id from nucleo.identidad_persona"
+                " where consorcio_id = :c and persona_id = :de and desvinculada_en is null"
+            ),
+            {"c": consorcio, "p": cuenta, "de": de},
+        )
 
 
 def clave_idempotencia() -> dict[str, str]:

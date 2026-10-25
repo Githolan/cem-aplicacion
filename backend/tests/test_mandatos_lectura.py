@@ -11,6 +11,7 @@ import pytest
 from app.autorizacion.evaluador import Decision
 from app.autorizacion.requiere import Permiso
 from app.consorcios.mandatos import Discrepancia
+from tests.conftest import verificar_en_el_consorcio
 from tests.test_contexto_mandatos import cliente, denegaciones
 from tests.test_identidad import app, navegador  # noqa: F401  (`app` es un fixture)
 from tests.test_mandatos import otra_persona, vinculo_confirmado
@@ -164,8 +165,13 @@ def test_una_cuenta_con_vinculo_en_otro_consorcio_da_el_mismo_motivo(escena, mot
     vinculo_confirmado(motor_app, otro, ajena)
     respuestas = [alta_http(e["mc1"], e["cons"], e["acta"], persona_id=p).json()
                   for p in (ajena, INEXISTENTE)]  # fmt: skip
-    assert [c["codigo"] for c in respuestas] == ["persona_sin_vinculo"] * 2
+    # Sin identidad verificada en este consorcio, las dos se niegan igual antes de mirar la cuenta.
+    assert [c["codigo"] for c in respuestas] == ["sin_permiso"] * 2
     assert respuestas[0]["mensaje"] == respuestas[1]["mensaje"]
+    # Verificada aquí pero sin vínculo: la base da el motivo, sin decir nada del otro consorcio.
+    verificar_en_el_consorcio(motor_migrate, e["cons"], ajena)
+    r = alta_http(e["mc1"], e["cons"], e["acta"], persona_id=ajena)
+    assert (r.status_code, r.json()["codigo"]) == (422, "persona_sin_vinculo")
     # Control: con su vínculo confirmado en este consorcio, la vecina entra.
     assert alta_http(e["mc1"], e["cons"], e["acta"], persona_id=e["vecina"]).status_code == 201
 

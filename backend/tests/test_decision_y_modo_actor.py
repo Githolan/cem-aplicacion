@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.conftest import alembic_config, vaciar_mandatos
+from tests.conftest import alembic_config, vaciar_mandatos, verificar_en_el_consorcio
 from tests.test_mandatos_0012 import alta
 
 pytestmark = pytest.mark.db
@@ -37,6 +37,8 @@ def consorcio_con_dos_personas(motor_migrate) -> tuple[UUID, UUID, UUID]:
             ).scalar_one()
             for n in ("a", "b")
         )
+    for persona in (p, otra):
+        verificar_en_el_consorcio(motor_migrate, cons, persona)
     return cons, p, otra
 
 
