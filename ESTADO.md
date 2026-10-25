@@ -470,3 +470,22 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - crear `CEM_IDENTIDAD_CLAVES` en `cem-backend-staging` y `cem-backend`, con claves distintas;
      - tener en cuenta que, sin verificar a las personas, las altas de mandato por la API se niegan;
      - desde `0026`, ninguna base con identidades baja de esa revisión.
+12. **2b-6b, cambio de modo (RF41-C, cierra E29; decisiones del propietario del 24-10-2026):** PR #113 (rama `modos-rf41c`, desde `13d190a`), fusionado el 25-10-2026 a las 04:12 UTC en `03a81e8` (head `4127430`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+   - **Qué trae:**
+     - migración `0027`: `cambiar_modo` solo por soporte (sin POST público), con decisión de asamblea no reutilizada, sin cambios retroactivos ni anticipados (la transición rige desde hoy, en la fecha del consorcio, y una por día), solo las transiciones del diagrama 12 (no AG→Consejo) y niega los estados ambiguos;
+     - la transición se niega si queda un mandato de administración vigente o futuro (`transicion_requiere_fin_de_mandato`): la baja nunca se infiere;
+     - la salida con la transición (la misma decisión dio de baja a la administración) espera al paquete de transferencia de RF52 (`transicion_requiere_paquete_de_transferencia`), sin excepciones;
+     - `GET /api/v1/consorcios/{consorcio_id}/modos` (`modos.ver`, facultad `decisiones.ver`): modo, vigencia y decisión, nada más; `nucleo.modos_del_consorcio()` repite la barrera en la base;
+     - contrato 0.20.0. La decisión 11 no cambia.
+   - **Frenado y presentado al propietario:** el primer modo de un consorcio sigue admitiendo los tres (desde la fecha de su decisión y hasta hoy, nunca anticipado).
+   - **Controles sobre `4127430`:**
+     - `ci.ps1` verde: backend 1650, contratos 58, frontend 330, e2e 177;
+     - Codex sin hallazgos (su único P2 sobre `e2aac8a`, mandatos con rango vacío, coincidía con un P2 de la revisión y quedó resuelto);
+     - revisión independiente sin P1 ni P2.
+     Sobre `e2aac8a`, la revisión había dado dos P2 (un mandato futuro no bloqueaba; partir la salida en dos llamadas esquivaba RF52) y cuatro P3, corregidos en `4127430` con un control de que cada prueba P2 falla sin su arreglo.
+   - **Deuda conocida (P3, sin código):**
+     - una prueba devuelve un valor y otra la llama (aviso `PytestReturnNotNoneWarning`);
+     - la misma acta cargada como dos decisiones distintas esquiva el control de RF52;
+     - un bloqueo mutuo intermitente en `test_la_migracion_0005_baja_y_sube` (1 de 2 corridas completas; no se repitió sola ni al relanzar). Causa **SIN VERIFICAR**.
+   - **Pendiente del propietario, fuera de RF41-C:** la baja general de la administración por `baja_mandato` no exige el paquete de RF52.
+   - **Para desplegar, cuando se autorice:** sin variables nuevas. Desde `0027`, los cambios de modo por la API (`origen` distinto de soporte) se niegan con `origen_invalido`.
