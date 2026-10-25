@@ -29,7 +29,7 @@ pytestmark = [pytest.mark.db, pytest.mark.redis]
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 CAMPOS_PROPIO = {"fecha", "accion", "recurso", "origen", "cambios"}
 CAMPOS_CONSORCIO = CAMPOS_PROPIO | {"actor"}
-SECRETOS = ("hash", "sha256", "secuencia", "ip", "testclient", "persona_id", "decision_id", "@")
+CLAVES_TECNICAS = ("hash", "sha256", "secuencia", "ip", "persona_id", "decision_id")
 
 
 def _get(persona, url):
@@ -62,8 +62,21 @@ def _crudo(motor_migrate, cons, accion):
 def _sin_datos_tecnicos(r):
     assert UUID.search(r.text) is None, r.text
     cuerpo = r.text.lower()
-    for clave in SECRETOS:
-        assert f'"{clave}' not in cuerpo, clave
+    for clave in CLAVES_TECNICAS:
+        assert f'"{clave}"' not in cuerpo, clave
+    assert "@" not in cuerpo and "testclient" not in cuerpo
+
+
+def test_el_control_de_datos_tecnicos_detecta_lo_que_busca():
+    class Respuesta:
+        def __init__(self, texto):
+            self.text = texto
+
+    for malo in ('{"x": "01a17151-edc4-703d-9abc-505532e80755"}', '{"hash": "ab"}',
+                 '{"ip": "1.2.3.4"}', '{"y": "a@b.com"}'):  # fmt: skip
+        with pytest.raises(AssertionError):
+            _sin_datos_tecnicos(Respuesta(malo))
+    _sin_datos_tecnicos(Respuesta('{"accion": "Registró una decisión"}'))  # control
 
 
 def _insertar(motor_migrate, cons, accion, actor=None, origen="soporte", creado_en=None,
@@ -107,15 +120,19 @@ def test_cada_uno_lee_sus_eventos_con_la_proyeccion(escena, motor_migrate):  # n
     assert (otro.status_code, otro.json()["elementos"]) == (200, [])
 
 
-def test_la_negacion_no_sale_entre_los_eventos_propios(escena, motor_app):  # noqa: F811
+def test_la_negacion_no_sale_entre_los_eventos_propios(escena, motor_migrate, motor_app):  # noqa: F811
     e = escena
     r = _get(e["prop"], _url(e["cons"]))
     assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
     # Control: la negación quedó auditada, con su motivo interno.
     assert [d["accion"] for d in denegaciones(motor_app, e["cons"], e["mc2"], e["prop"])] == [
         "auditoria.ver"]  # fmt: skip
+    # Control: un evento propio de la lista blanca sí sale.
+    _insertar(motor_migrate, e["cons"], "identidad.invitacion.revocar", actor=e["prop"],
+              origen="api")  # fmt: skip
     propios = _get(e["prop"], _url(e["cons"], "/mis-eventos"))
-    assert (propios.status_code, propios.json()["elementos"]) == (200, [])
+    assert propios.status_code == 200
+    assert [f["accion"] for f in propios.json()["elementos"]] == ["Retiró una invitación"]
     assert "denegad" not in propios.text and "sin_concesion" not in propios.text
 
 
@@ -250,7 +267,7 @@ def test_el_cursor_recorre_todo_una_vez_aun_con_fechas_iguales(escena, motor_mig
     for limite in (1, 2, 3):
         filas, paginas = _todas(e["mc1"], _url(e["cons"]), limite)
         assert filas == completa["elementos"], limite
-        assert paginas >= len(filas) // limite
+        assert paginas == len(filas) // limite + 1  # la página llena siempre da cursor
     # El cursor no lleva la secuencia ni identificadores: solo la fecha y cuántos saltar.
     cursor = _get(e["mc1"], _url(e["cons"]) + "?limite=2").json()["siguiente"]
     fecha, saltar = base64.urlsafe_b64decode(cursor).decode().split("|")
@@ -270,7 +287,8 @@ def test_los_eventos_propios_tambien_se_paginan(escena):  # noqa: F811
     "consulta",
     ["limite=0", "limite=101", "cursor=no-es-base64!", "cursor=" + base64.urlsafe_b64encode(
         b"2026-06-01T12:00:00|1").decode(), "cursor=" + base64.urlsafe_b64encode(
-        b"2026-06-01T12:00:00+00:00|0").decode(), "cursor=" + "A" * 201],
+        b"2026-06-01T12:00:00+00:00|0").decode(), "cursor=" + base64.urlsafe_b64encode(
+        b"2026-06-01T12:00:00+00:00|2147483648").decode(), "cursor=" + "A" * 201],
 )  # fmt: skip
 def test_un_cursor_o_limite_invalido_da_422(escena, consulta):  # noqa: F811
     r = _get(escena["mc1"], _url(escena["cons"]) + "?" + consulta)
@@ -347,3 +365,49 @@ def test_si_la_base_niega_y_el_evaluador_concede_falla_fuerte(escena, monkeypatc
 @pytest.mark.parametrize("resto", ["", "/mis-eventos"])
 def test_sin_sesion_responde_401(app, escena, resto):  # noqa: F811
     assert navegador(app).get(_url(escena["cons"], resto)).status_code == 401
+
+
+def test_el_nombre_sale_solo_de_quien_figura_en_el_padron(escena, motor_migrate):  # noqa: F811
+    """Revisión de 2b-6c (P2): `padron.ver` deja conocer a quien el padrón muestra hoy."""
+    e = escena
+    _nombre(motor_migrate, e["vecina"], "Vecina Prueba")
+    _insertar(motor_migrate, e["cons"], "identidad.invitacion.revocar", actor=e["vecina"],
+              origen="api")  # fmt: skip
+    # Control: con su vínculo vigente, quien tiene `padron.ver` ve el nombre.
+    assert "Vecina Prueba" in _get(e["mc2"], _url(e["cons"])).text
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.vinculo set vigente_hasta = vigente_desde + 1"
+                " where consorcio_id = :c and persona_id = :p"
+            ),
+            {"c": e["cons"], "p": e["vecina"]},
+        )
+    r = _get(e["mc2"], _url(e["cons"]))
+    assert r.status_code == 200, r.text
+    (retiro,) = [f for f in r.json()["elementos"] if f["accion"] == "Retiró una invitación"]
+    assert retiro["actor"] == {"tipo": "persona", "nombre": None}
+    assert "Vecina" not in r.text
+
+
+def test_las_lecturas_son_security_definer_y_solo_ellas_para_cem_app(motor_migrate):
+    firmas = {
+        "auditoria.eventos_propios(timestamptz,integer,integer)": True,
+        "auditoria.eventos_del_consorcio(timestamptz,integer,integer)": True,
+        "auditoria.cambios_funcionales(jsonb,jsonb,text[])": False,
+        "auditoria.exigir_pagina(timestamptz,integer,integer)": False,
+    }
+    with motor_migrate.begin() as c:
+        for firma, para_app in firmas.items():
+            definer, config, app_puede, publico = c.execute(
+                text(
+                    "select p.prosecdef, p.proconfig,"
+                    " has_function_privilege('cem_app', p.oid, 'execute'),"
+                    " has_function_privilege('public', p.oid, 'execute')"
+                    " from pg_proc p where p.oid = cast(:f as regprocedure)"
+                ),
+                {"f": firma},
+            ).one()
+            assert config == ["search_path=pg_catalog, pg_temp"], firma
+            assert (app_puede, publico) == (para_app, False), firma
+            assert definer == para_app, firma

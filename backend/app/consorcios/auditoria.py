@@ -6,9 +6,10 @@ Diseño: `doc/diseno/H2b_6_Diseno.md` del repositorio CEM, §6.
   lee en el consorcio.
 - `GET …/auditoria` (`auditoria.ver`, MC y AD): los del consorcio.
 
-La política decide antes de leer; las funciones de `0028` vuelven a exigir el ámbito y la
-facultad y arman la proyección (lista blanca de acciones y de campos). Si la base niega lo que el
-evaluador concedió, es una discrepancia (500), nunca una lista vacía. Sin exportación (E0).
+La política decide al entrar, antes de validar el cursor; las funciones de `0028` vuelven a
+exigir el ámbito y la facultad y arman la proyección (lista blanca de acciones y de campos). Si la
+base niega lo que el evaluador concedió, es una discrepancia (500), nunca una lista vacía. Sin
+exportación (E0).
 
 **Cursor.** Opaco para el cliente: la fecha del último evento de la página y cuántos eventos de
 esa misma fecha ya salieron, en base64url. Ningún identificador ni la secuencia. Con la página
@@ -42,6 +43,8 @@ from app.errores import ErrorApi, sin_cache
 router = APIRouter(prefix="/api/v1", tags=["auditoria"], dependencies=[Depends(sin_cache)])
 
 CursorConsulta = Annotated[str | None, Query(max_length=LARGO_MAXIMO_CURSOR)]
+MAXIMO_SALTAR = 2**31 - 1
+"""`saltar` es `integer` en la base: un cursor que lo pase no es válido."""
 LimiteConsulta = Annotated[int, Query(ge=1, le=LIMITE_MAXIMO)]
 
 
@@ -54,7 +57,7 @@ def _leer_cursor(cursor: str | None) -> tuple[datetime | None, int]:
         antes_de, n = datetime.fromisoformat(fecha), int(saltar)
     except (ValueError, UnicodeError, binascii.Error) as e:
         raise ErrorApi(422, CodigoError.PETICION_INVALIDA, "El cursor no es válido.") from e
-    if antes_de.tzinfo is None or n < 1:
+    if antes_de.tzinfo is None or not 1 <= n <= MAXIMO_SALTAR:
         raise ErrorApi(422, CodigoError.PETICION_INVALIDA, "El cursor no es válido.")
     return antes_de, n
 
@@ -78,7 +81,7 @@ def _cambios(fila) -> list[CambioEvento]:
     responses={422: {"description": "Cursor o límite inválidos."}},
 )
 def mis_eventos(
-    permiso: Annotated[Permiso, Depends(requiere("auditoria.mis_eventos"))],
+    permiso: Annotated[Permiso, Depends(requiere("auditoria.mis_eventos", al_entrar=True))],
     motor: MotorDep,
     cursor: CursorConsulta = None,
     limite: LimiteConsulta = LIMITE_POR_DEFECTO,
@@ -116,7 +119,7 @@ def mis_eventos(
     },
 )
 def eventos_del_consorcio(
-    permiso: Annotated[Permiso, Depends(requiere("auditoria.ver"))],
+    permiso: Annotated[Permiso, Depends(requiere("auditoria.ver", al_entrar=True))],
     motor: MotorDep,
     cursor: CursorConsulta = None,
     limite: LimiteConsulta = LIMITE_POR_DEFECTO,

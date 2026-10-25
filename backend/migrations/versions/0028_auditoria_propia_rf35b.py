@@ -22,7 +22,10 @@ lista no sale nunca. Quedan fuera, a propósito:
   (`referencia`), los datos del consorcio (`nombre`, `cuit`) y todo campo que no esté en la lista.
 
 **Actor** (solo en los eventos del consorcio): `vos`, `persona`, `soporte` o `sistema`. El nombre de
-otra persona sale solo si quien lee tiene `padron.ver` vigente.
+otra persona sale solo si quien lee tiene `padron.ver` vigente (general, sin recurso) y esa persona
+figura hoy en el padrón: un vínculo vigente o futuro, con la unidad y la persona sin borrar (el
+filtro de `padron_del_consorcio`, 0014). Lo que el padrón ya no muestra (un propietario que se fue,
+un vínculo anulado, un mandatario sin vínculo) sale sin nombre.
 
 **Paginación.** Del más reciente al más antiguo, por `(creado_en, secuencia)`. El cursor no lleva
 la secuencia: es la fecha del último evento de la página y cuántos eventos de esa misma fecha ya
@@ -274,7 +277,15 @@ create function auditoria.eventos_del_consorcio(antes_de timestamptz, saltar int
                   when g.actor_persona_id = quien then 'vos'
                   else 'persona' end,
              case when con_nombres and g.origen = 'api' and g.actor_persona_id <> quien
-                  then (select x.nombre from nucleo.persona x where x.id = g.actor_persona_id)
+                  then (select x.nombre from nucleo.persona x
+                         where x.id = g.actor_persona_id and x.eliminado_en is null
+                           and exists (
+                             select 1 from nucleo.vinculo v
+                               join nucleo.unidad u
+                                 on u.consorcio_id = v.consorcio_id and u.id = v.unidad_id
+                              where v.consorcio_id = c and v.persona_id = x.id
+                                and (v.vigente_hasta is null or v.vigente_hasta > hoy)
+                                and u.eliminado_en is null))
              end,
              auditoria.cambios_funcionales(g.antes, g.despues, p.campos)
         from pagina g join auditoria.proyeccion p on p.accion = g.accion
