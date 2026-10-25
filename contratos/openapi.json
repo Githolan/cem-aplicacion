@@ -84,6 +84,31 @@
         "title": "AceptacionInvitacionMandato",
         "type": "object"
       },
+      "ActorEvento": {
+        "properties": {
+          "nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Solo si quien lee tiene `padron.ver`.",
+            "title": "Nombre"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoActor"
+          }
+        },
+        "required": [
+          "tipo",
+          "nombre"
+        ],
+        "title": "ActorEvento",
+        "type": "object"
+      },
       "AltaTotp": {
         "description": "Respuesta de `POST /api/v1/auth/totp/alta`: el secreto para cargar en la aplicación.\n\nSe muestra una sola vez y queda pendiente hasta que la persona lo confirme con un código.",
         "properties": {
@@ -179,6 +204,44 @@
           "descripcion"
         ],
         "title": "BajaMandato",
+        "type": "object"
+      },
+      "CambioEvento": {
+        "description": "Un campo de la lista blanca funcional de la acción, con su valor antes y después.",
+        "properties": {
+          "antes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Antes"
+          },
+          "campo": {
+            "title": "Campo",
+            "type": "string"
+          },
+          "despues": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Despues"
+          }
+        },
+        "required": [
+          "campo",
+          "antes",
+          "despues"
+        ],
+        "title": "CambioEvento",
         "type": "object"
       },
       "CandidatoMandato": {
@@ -962,6 +1025,86 @@
           "verificado_en"
         ],
         "title": "EstadoSegundoFactor",
+        "type": "object"
+      },
+      "EventoConsorcio": {
+        "properties": {
+          "accion": {
+            "description": "La acción, traducida.",
+            "title": "Accion",
+            "type": "string"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/ActorEvento"
+          },
+          "cambios": {
+            "items": {
+              "$ref": "#/components/schemas/CambioEvento"
+            },
+            "title": "Cambios",
+            "type": "array"
+          },
+          "fecha": {
+            "format": "date-time",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenEvento"
+          },
+          "recurso": {
+            "description": "El tipo de recurso, en términos funcionales.",
+            "title": "Recurso",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fecha",
+          "accion",
+          "recurso",
+          "origen",
+          "cambios",
+          "actor"
+        ],
+        "title": "EventoConsorcio",
+        "type": "object"
+      },
+      "EventoPropio": {
+        "properties": {
+          "accion": {
+            "description": "La acción, traducida.",
+            "title": "Accion",
+            "type": "string"
+          },
+          "cambios": {
+            "items": {
+              "$ref": "#/components/schemas/CambioEvento"
+            },
+            "title": "Cambios",
+            "type": "array"
+          },
+          "fecha": {
+            "format": "date-time",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "origen": {
+            "$ref": "#/components/schemas/OrigenEvento"
+          },
+          "recurso": {
+            "description": "El tipo de recurso, en términos funcionales.",
+            "title": "Recurso",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fecha",
+          "accion",
+          "recurso",
+          "origen",
+          "cambios"
+        ],
+        "title": "EventoPropio",
         "type": "object"
       },
       "FaltaSegundoFactor": {
@@ -1909,6 +2052,66 @@
         "title": "ListaDecisiones",
         "type": "object"
       },
+      "ListaEventosConsorcio": {
+        "description": "Del más reciente al más antiguo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/EventoConsorcio"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente"
+        ],
+        "title": "ListaEventosConsorcio",
+        "type": "object"
+      },
+      "ListaEventosPropios": {
+        "description": "Del más reciente al más antiguo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/EventoPropio"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente"
+        ],
+        "title": "ListaEventosPropios",
+        "type": "object"
+      },
       "ListaInvitaciones": {
         "description": "`GET /api/v1/consorcios/{consorcio_id}/invitaciones`: la más reciente primero.",
         "properties": {
@@ -2475,6 +2678,16 @@
         "title": "NuevaContrasena",
         "type": "object"
       },
+      "OrigenEvento": {
+        "description": "De dónde vino el evento, en términos funcionales.",
+        "enum": [
+          "aplicacion",
+          "soporte",
+          "sistema"
+        ],
+        "title": "OrigenEvento",
+        "type": "string"
+      },
       "Padron": {
         "description": "`GET /api/v1/consorcios/{consorcio_id}/padron`: vigentes y futuros, por unidad.",
         "properties": {
@@ -2833,6 +3046,16 @@
         ],
         "title": "SesionesRevocadas",
         "type": "object"
+      },
+      "TipoActor": {
+        "enum": [
+          "vos",
+          "persona",
+          "soporte",
+          "sistema"
+        ],
+        "title": "TipoActor",
+        "type": "string"
       },
       "TipoDecision": {
         "enum": [
@@ -3945,6 +4168,139 @@
         "summary": "Verificar el segundo factor en esta sesión",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/auditoria": {
+      "get": {
+        "operationId": "eventos_del_consorcio_api_v1_consorcios__consorcio_id__auditoria_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaEventosConsorcio"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `auditoria.ver` en el consorcio."
+          },
+          "422": {
+            "description": "Cursor o límite inválidos."
+          }
+        },
+        "summary": "Los eventos del consorcio, con lo mínimo",
+        "tags": [
+          "auditoria"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/auditoria/mis-eventos": {
+      "get": {
+        "operationId": "mis_eventos_api_v1_consorcios__consorcio_id__auditoria_mis_eventos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaEventosPropios"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Cursor o límite inválidos."
+          }
+        },
+        "summary": "Los eventos propios en el consorcio, con lo mínimo",
+        "tags": [
+          "auditoria"
         ]
       }
     },

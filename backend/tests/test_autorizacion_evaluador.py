@@ -216,8 +216,10 @@ def test_unidades_listar_por_ambito_y_control_sin_la_declaracion():
     assert (d.estado, d.motivo_interno) == (403, "sin_concesion")
 
 
-def test_solo_unidades_listar_concede_por_ambito():
-    assert [a for a, p in POLITICAS.items() if p.concede_por_ambito] == ["unidades.listar"]
+def test_solo_unidades_listar_y_los_eventos_propios_conceden_por_ambito():
+    # RF35-B (2b-6c): cada persona lee sus propios eventos en el consorcio.
+    assert sorted(a for a, p in POLITICAS.items() if p.concede_por_ambito) == [
+        "auditoria.mis_eventos", "unidades.listar"]  # fmt: skip
 
 
 # --- Una acción, una vista; A6 --------------------------------------------------------------
@@ -321,7 +323,7 @@ def test_las_politicas_usan_el_catalogo_de_d2_y_su_marca_economica():
 def test_las_acciones_de_la_tabla():
     # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4), las 3 de lectura (2b-4c) y la revisión
     # del mandato pendiente (E62) y la historia de modos (RF41-C, 2b-6b)
-    assert len(POLITICAS) == 39
+    assert len(POLITICAS) == 41
 
 
 def _archivo(tmp_path, nombre, politicas):

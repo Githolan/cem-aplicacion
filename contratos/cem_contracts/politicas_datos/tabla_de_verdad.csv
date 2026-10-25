@@ -390,3 +390,17 @@ RF41-C,modos.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: la his
 RF41-C,modos.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
 RF41-C,modo.cambiar,MC,C,,vigente,si,respaldo=si,403,sin_concesion,nadie cambia el modo por la API: solo el equipo (C7)
 RF41-C,modo.cambiar,AD,AA,,vigente,si,respaldo=si,403,sin_concesion,tampoco el administrador
+RF35-B,auditoria.mis_eventos,P,C,,sin_mandato,si,,200,concedido_por_ambito,la propietaria lee sus propios eventos
+RF35-B,auditoria.mis_eventos,I,AG,,sin_mandato,si,,200,concedido_por_ambito,el inquilino lee sus propios eventos
+RF35-B,auditoria.mis_eventos,MC,C,,vigente,si,,200,concedido_por_ambito,el miembro del Consejo lee sus propios eventos
+RF35-B,auditoria.mis_eventos,AE,AA,,vigente,si,,200,concedido_por_ambito,el administrador externo con cuenta lee sus propios eventos
+RF35-B,auditoria.mis_eventos,P,—,,sin_mandato,no,,200,concedido_por_ambito,sin modo: los eventos propios se leen igual
+RF35-B,auditoria.mis_eventos,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF35-B,auditoria.ver,P,C,,sin_mandato,si,,403,sin_concesion,la propietaria no lee los eventos del consorcio
+RF35-B,auditoria.ver,MC,C,,vigente,si,,200,concedido_por_facultad,MC lee los eventos del consorcio (auditoria.ver)
+RF35-B,auditoria.ver,AD,AA,,vigente,si,,200,concedido_por_facultad,AD lee los eventos del consorcio
+RF35-B,auditoria.ver,AE,C,,vigente,si,,403,sin_concesion,AE no lee los eventos del consorcio: sin auditoria.ver
+RF35-B,auditoria.ver,MC[padron.ver|decisiones.ver],C,,vigente,si,,403,sin_concesion,el acta quitó auditoria.ver
+RF35-B,auditoria.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la auditoría
+RF35-B,auditoria.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: la auditoría se lee igual
+RF35-B,auditoria.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato

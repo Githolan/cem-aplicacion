@@ -33,6 +33,7 @@ pytestmark = pytest.mark.db
 DESDE = date(2026, 1, 1)
 PAQUETE_CONSEJO = sorted(
     [
+        "auditoria.ver",
         "decisiones.registrar",
         "decisiones.ver",
         "documentos.ver",
