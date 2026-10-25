@@ -322,8 +322,9 @@ def test_las_politicas_usan_el_catalogo_de_d2_y_su_marca_economica():
 
 def test_las_acciones_de_la_tabla():
     # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4), las 3 de lectura (2b-4c) y la revisión
-    # del mandato pendiente (E62) y la historia de modos (RF41-C, 2b-6b)
-    assert len(POLITICAS) == 41
+    # del mandato pendiente (E62), la historia de modos (RF41-C, 2b-6b), las 2 de la auditoría
+    # (RF35-B, 2b-6c) y las 2 de la lectura de coeficientes (RF05)
+    assert len(POLITICAS) == 43
 
 
 def _archivo(tmp_path, nombre, politicas):

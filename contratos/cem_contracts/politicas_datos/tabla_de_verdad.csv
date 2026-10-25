@@ -404,3 +404,14 @@ RF35-B,auditoria.ver,MC[padron.ver|decisiones.ver],C,,vigente,si,,403,sin_conces
 RF35-B,auditoria.ver,Fac(padron.ver),C,,vigente,si,,403,sin_concesion,otra facultad no da la auditoría
 RF35-B,auditoria.ver,MC,—,,vigente,no,,200,concedido_por_facultad,sin modo: la auditoría se lee igual
 RF35-B,auditoria.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF05,coeficientes.ver_por_unidad,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,P no lee los coeficientes
+RF05,coeficientes.ver_por_unidad,MC,C,unidad:3A,vigente,si,,200,concedido_por_facultad,MC lee el coeficiente de la unidad con padron.ver
+RF05,coeficientes.ver_por_unidad,AD,AA,unidad:3A,vigente,si,,200,concedido_por_facultad,AD lee el coeficiente de la unidad con padron.ver
+RF05,coeficientes.ver_por_unidad,AE,C,unidad:3A,vigente,si,,403,sin_concesion,AE no lee coeficientes: no tiene padron.ver
+RF05,coeficientes.ver_por_unidad,Fac(padron.ver@unidad:5B),C,unidad:3A,vigente,si,,403,recurso_no_alcanza,padron.ver de otra unidad no alcanza
+RF05,coeficientes.ver_por_unidad,MC,—,unidad:3A,vigente,no,,200,concedido_por_facultad,sin modo: se lee igual que el padrón
+RF05,coeficientes.ver_por_unidad,ninguna,C,unidad:3A,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF05,coeficientes.ver_por_grupo,AD,AA,grupo:agua,vigente,si,,200,concedido_por_facultad,AD lee los esquemas del grupo con coeficientes.proponer y sin respaldo
+RF05,coeficientes.ver_por_grupo,MC,C,grupo:agua,vigente,si,,403,sin_concesion,MC no tiene coeficientes.proponer: lee por unidad
+RF05,coeficientes.ver_por_grupo,Fac(coeficientes.proponer@grupo:agua),C,grupo:cocheras,vigente,si,,403,recurso_no_alcanza,otro grupo no alcanza
+RF05,coeficientes.ver_por_grupo,AD,—,grupo:agua,vigente,no,,403,sin_modo_registrado,sin modo no se lee por grupo: igual que proponer

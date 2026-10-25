@@ -474,6 +474,38 @@
         "title": "CodigosRecuperacion",
         "type": "object"
       },
+      "CoeficienteUnidad": {
+        "properties": {
+          "designacion": {
+            "description": "Designación de la unidad.",
+            "examples": [
+              "3° B"
+            ],
+            "title": "Designacion",
+            "type": "string"
+          },
+          "porcentaje": {
+            "description": "Tal como lo guarda la base, como texto decimal con 6 decimales (D4).",
+            "examples": [
+              "33.320000"
+            ],
+            "title": "Porcentaje",
+            "type": "string"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "designacion",
+          "porcentaje"
+        ],
+        "title": "CoeficienteUnidad",
+        "type": "object"
+      },
       "CoeficientesGrupo": {
         "description": "Lo que dice la planilla de un grupo de gasto. Se informa, no se escribe ni se corrige.",
         "properties": {
@@ -870,6 +902,66 @@
           "id_correlacion"
         ],
         "title": "Error",
+        "type": "object"
+      },
+      "EsquemaCoeficientes": {
+        "description": "Una versión del esquema de un grupo de gasto, inalterable.",
+        "properties": {
+          "coeficientes": {
+            "description": "Solo los que quien lee puede ver, por designación de la unidad. Una versión muestra lo que se guardó: también una unidad borrada después.",
+            "items": {
+              "$ref": "#/components/schemas/CoeficienteUnidad"
+            },
+            "title": "Coeficientes",
+            "type": "array"
+          },
+          "grupo": {
+            "examples": [
+              "expensas_comunes"
+            ],
+            "title": "Grupo",
+            "type": "string"
+          },
+          "reglas": {
+            "description": "De la más vieja a la más nueva.",
+            "items": {
+              "$ref": "#/components/schemas/ReglaReparto"
+            },
+            "title": "Reglas",
+            "type": "array"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusivo: el día en que empieza la versión siguiente del grupo. Sin fecha, es la versión vigente o una futura.",
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "grupo",
+          "version",
+          "vigente_desde",
+          "vigente_hasta",
+          "reglas",
+          "coeficientes"
+        ],
+        "title": "EsquemaCoeficientes",
         "type": "object"
       },
       "EstadoCola": {
@@ -2052,6 +2144,23 @@
         "title": "ListaDecisiones",
         "type": "object"
       },
+      "ListaEsquemasCoeficientes": {
+        "description": "`GET /api/v1/consorcios/{consorcio_id}/coeficientes`: por grupo y versión. Vacía: no hay\nesquemas o quien lee no ve ninguno.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/EsquemaCoeficientes"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaEsquemasCoeficientes",
+        "type": "object"
+      },
       "ListaEventosConsorcio": {
         "description": "Del más reciente al más antiguo.",
         "properties": {
@@ -2636,6 +2745,14 @@
         "title": "MandatoRevisado",
         "type": "object"
       },
+      "MetodoReparto": {
+        "description": "`nucleo.metodo_reparto` (0021).",
+        "enum": [
+          "proporcional_a_coeficientes"
+        ],
+        "title": "MetodoReparto",
+        "type": "string"
+      },
       "ModoOperacion": {
         "description": "Modo de operación del consorcio (documento 08, §5; `nucleo.tipo_modo`, 0010).",
         "enum": [
@@ -2794,6 +2911,28 @@
           "mensaje"
         ],
         "title": "Problema",
+        "type": "object"
+      },
+      "ReglaReparto": {
+        "description": "Una versión de la regla de un esquema. Ninguna versión cambia: se agrega otra.",
+        "properties": {
+          "centavos": {
+            "$ref": "#/components/schemas/TratamientoCentavos"
+          },
+          "metodo": {
+            "$ref": "#/components/schemas/MetodoReparto"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "metodo",
+          "centavos"
+        ],
+        "title": "ReglaReparto",
         "type": "object"
       },
       "RevisionMandato": {
@@ -3115,6 +3254,14 @@
         ],
         "title": "TokenInvitacionMandato",
         "type": "object"
+      },
+      "TratamientoCentavos": {
+        "description": "`nucleo.tratamiento_centavos` (0021): restos mayores, con desempate por unidad.",
+        "enum": [
+          "restos_mayores"
+        ],
+        "title": "TratamientoCentavos",
+        "type": "string"
       },
       "Unidad": {
         "description": "Unidad funcional del padrón.",
@@ -4301,6 +4448,53 @@
         "summary": "Los eventos propios en el consorcio, con lo mínimo",
         "tags": [
           "auditoria"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/coeficientes": {
+      "get": {
+        "description": "Los porcentajes tal como los guarda la base (D4). Sin la referencia de la fuente, la\ndecisión de cada versión ni quién la registró.",
+        "operationId": "listar_coeficientes_api_v1_consorcios__consorcio_id__coeficientes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaEsquemasCoeficientes"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `padron.ver` ni `coeficientes.proponer` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Esquemas de coeficientes y reglas de reparto, por grupo y versión",
+        "tags": [
+          "coeficientes"
         ]
       }
     },
