@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 24-10-2026.
+**Actualizado:** 25-10-2026.
 
 ## Qué existe
 
@@ -53,7 +53,7 @@ Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14,
   - **Pruebas de la página:** 14 de Vitest con `axe` y 3 de extremo a extremo contra el nginx de la imagen, con la API simulada desde Playwright.
     - Las de extremo a extremo comprueban: QR y códigos enteros a 360 px, sin violar la CSP; `axe` con contraste; sin sesión, el backend real responde 401. El control comprueba que la vigilancia sí ve un estilo en línea.
     - El QR se decodificó con OpenCV y dio la URI exacta; como control, con la mitad borrada no da nada.
-  - **Falta:** que el segundo factor sea obligatorio para los roles de dinero y la sesión de 12 h llegan con los mandatos (H2 2b; al 24-10-2026 siguen sin código); probarlo con una aplicación real en un teléfono.
+  - **Falta:** probarlo con una aplicación real en un teléfono. El segundo factor reciente (10 minutos) y la sesión de 12 h para las acciones económicas (R10) están en el evaluador desde 2b-6a (app #111, 25-10-2026); no hay rutas económicas hasta H3.
 - **`/entrar` con una versión vieja en caché (PR #30):** `/entrar` nunca sale de la caché del service worker; el token se guarda en `sessionStorage` 15 minutos para sobrevivir a una recarga; una versión nueva esperando se aplica sola; `sw-entrar.js` rescata a los clientes que ya tienen la versión vieja.
 - **Imágenes en ghcr.io (PR #31 y #32):** `ci.ps1` construye `cem-backend` y `cem-frontend` para `linux/arm64` y las sube a `ghcr.io/githolan/<imagen>:<sha>` con su digest en la constancia; `cd.ps1` solo cambia la etiqueta de las apps `dockerimage` de Coolify y verifica el digest en la VM. `deploy-map.ps1` tiene los UUID nuevos de los dos entornos. La VM ya no construye nada.
 - Migración `0001`: esquemas, consorcio, persona, unidad, vínculo, auditoría encadenada, RLS forzada y privilegios de `cem_app`.
@@ -412,7 +412,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Hecho el 16-10:** el formulario para pedir el enlace en `/entrar` (PR #44), en staging y producción;
    - **Hecho el 16 y el 17-10:** contraseña Argon2id con sus pantallas (#48 y #50), página `/cuenta` (#46) y modo lectura ampliada (RF53, #47);
    - **falta:**
-     - TOTP obligatorio para roles de dinero (con los mandatos, 2b; sin código al 24-10-2026);
+     - TOTP obligatorio para roles de dinero: en el evaluador desde 2b-6a (R10, app #111); se ejerce cuando lleguen las rutas económicas (H3);
      - la ayuda por persona autorizada (RF53, 2b);
      - la cuenta de solo carga;
      - borradores fuera de línea (PA16);
@@ -448,3 +448,25 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - un defecto de foco que encontró la e2e.
    - **Deuda conocida (P3, sin código):** un rechazo seguido de una recarga fallida reemplaza el aviso de negocio; el 403 al confirmar enumera causas sin mencionar la falta de modo; el patrón del campo deja pasar un tabulador, que la API rechaza con 422; faltan pruebas de la clave conservada ante `idempotencia_en_curso` o un corte de red; la prueba de `iniciado` tiene una carrera de segundos a las 03:00 UTC; y `InvitacionMandato.tsx` todavía compara fechas en el cliente (anterior a este corte).
    - **Despliegue (autorizado por el propietario el 24-10):** `ci.ps1` sobre la punta `5b289ba` (`cd.ps1` despliega solo la punta de `main`), primero staging y después producción con la misma SHA.
+11. **2b-6a, identidad humana (A13-C), R10 y F9 (decisiones del propietario del 24-10-2026):** PR #111 (rama `identidad-humana-r10-autoinvitacion`, desde `1017a64`), fusionado el 25-10-2026 en `13d190a` (head `bedb60f`). **No desplegado:** el propietario no autorizó desplegar 2b-6.
+   - **Qué trae:**
+     - migración `0026`: identidad humana por consorcio con la huella HMAC del documento (`CEM_IDENTIDAD_CLAVES`), verificaciones de soporte y la regla fuerte como segunda barrera en la base;
+     - `scripts.identidad_humana` (solo soporte, el número por stdin);
+     - R10 en el evaluador: identidad verificada, TOTP de 10 minutos y sesión de menos de 12 h;
+     - F9: `invitacion_propia` y `cobertura_consejo` sin autoaceptaciones;
+     - contrato 0.19.0.
+   - **Frenado y presentado al propietario** (sigue por `persona_id`):
+     - A4 de baja y desasociar;
+     - P4-c;
+     - A7 y P1-d al aceptar.
+     Detalle en el documento de diseño `H2b_6_Diseno.md` del repositorio CEM.
+   - **Controles sobre `bedb60f`:**
+     - `ci.ps1` verde: backend 1614, contratos 58, frontend 330, e2e 177;
+     - Codex sin hallazgos;
+     - revisión independiente sin P1 ni P2.
+     Sobre `bccbe71`, la revisión había dado un P2 (500 al revisar un administrador externo sin cuenta) y tres P3, corregidos en `bedb60f` con un control de que la prueba falla sin el arreglo.
+   - **Deuda conocida (P3, sin código):** una identidad huérfana firmada con una versión de clave que se quiere retirar bloquea `verificar`, `vincular` y `corregir` del consorcio hasta volver a poner esa clave. El bloqueo es seguro (niega).
+   - **Para desplegar, cuando se autorice:**
+     - crear `CEM_IDENTIDAD_CLAVES` en `cem-backend-staging` y `cem-backend`, con claves distintas;
+     - tener en cuenta que, sin verificar a las personas, las altas de mandato por la API se niegan;
+     - desde `0026`, ninguna base con identidades baja de esa revisión.
