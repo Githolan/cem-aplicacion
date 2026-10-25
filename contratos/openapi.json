@@ -95,7 +95,7 @@
                 "type": "null"
               }
             ],
-            "description": "Solo si quien lee tiene `padron.ver`.",
+            "description": "Solo si quien lee tiene `padron.ver` y el padrón muestra hoy a esa persona con su nombre.",
             "title": "Nombre"
           },
           "tipo": {

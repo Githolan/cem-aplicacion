@@ -411,3 +411,63 @@ def test_las_lecturas_son_security_definer_y_solo_ellas_para_cem_app(motor_migra
             assert config == ["search_path=pg_catalog, pg_temp"], firma
             assert (app_puede, publico) == (para_app, False), firma
             assert definer == para_app, firma
+
+
+def test_sin_nombre_si_la_persona_esta_borrada_o_solo_es_importada_pendiente(escena, motor_migrate):  # noqa: F811
+    """Revisión de 2b-6c (P2): el padrón muestra a la importada pendiente con el nombre de la
+    planilla (0025), y a la persona borrada no la muestra."""
+    e = escena
+    importada = otra_persona(motor_migrate, e["cons"])
+    _nombre(motor_migrate, importada, "Nombre Real")
+    _nombre(motor_migrate, e["vecina"], "Vecina Prueba")
+    with motor_migrate.begin() as c:
+        imp = c.execute(
+            text(
+                "insert into nucleo.importacion_padron (consorcio_id, archivo_sha256,"
+                " registrada_por) values (:c, sha256('planilla'), :p) returning id"
+            ),
+            {"c": e["cons"], "p": e["prop"]},
+        ).scalar_one()
+        uni = c.execute(
+            text(
+                "insert into nucleo.unidad (consorcio_id, designacion) values (:c, 'UF importada')"
+                " returning id"
+            ),
+            {"c": e["cons"]},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                " vigente_desde, fuente, origen, registrado_por, importacion_id, nombre_declarado)"
+                " values (:c, :u, :p, 'propietario', '2020-01-01', 'importacion', 'api', :r, :i,"
+                " 'Nombre de la planilla')"
+            ),
+            {"c": e["cons"], "u": uni, "p": importada, "r": e["prop"], "i": imp},
+        )
+    for actor in (importada, e["vecina"]):
+        _insertar(motor_migrate, e["cons"], "identidad.invitacion.revocar", actor=actor,
+                  origen="api")  # fmt: skip
+    # Control: la vecina, con su vínculo confirmado, sale con su nombre.
+    antes = _get(e["mc2"], _url(e["cons"]))
+    assert "Vecina Prueba" in antes.text
+    assert "Nombre Real" not in antes.text and "Nombre de la planilla" not in antes.text
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.persona set eliminado_en = now() where id = :p"),
+                  {"p": e["vecina"]})  # fmt: skip
+    r = _get(e["mc2"], _url(e["cons"]))
+    assert r.status_code == 200, r.text
+    retiros = [f["actor"] for f in r.json()["elementos"] if f["accion"] == "Retiró una invitación"]
+    assert retiros == [{"tipo": "persona", "nombre": None}] * 2
+    assert "Vecina" not in r.text
+
+
+@pytest.mark.parametrize("consulta", ["?limite=0", "?cursor=no-es-base64!"])
+def test_sin_permiso_la_politica_responde_antes_que_la_validacion(escena, motor_app, consulta):  # noqa: F811
+    """Revisión de 2b-6c (P3): la negación se audita aunque el pedido traiga datos inválidos."""
+    e = escena
+    r = _get(e["prop"], _url(e["cons"]) + consulta)
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert [d["accion"] for d in denegaciones(motor_app, e["cons"], e["mc2"], e["prop"])] == [
+        "auditoria.ver"]  # fmt: skip
+    # Control: quien puede leer recibe el 422 por el mismo pedido.
+    assert _get(e["mc1"], _url(e["cons"]) + consulta).status_code == 422

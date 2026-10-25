@@ -23,9 +23,11 @@ lista no sale nunca. Quedan fuera, a propósito:
 
 **Actor** (solo en los eventos del consorcio): `vos`, `persona`, `soporte` o `sistema`. El nombre de
 otra persona sale solo si quien lee tiene `padron.ver` vigente (general, sin recurso) y esa persona
-figura hoy en el padrón: un vínculo vigente o futuro, con la unidad y la persona sin borrar (el
-filtro de `padron_del_consorcio`, 0014). Lo que el padrón ya no muestra (un propietario que se fue,
-un vínculo anulado, un mandatario sin vínculo) sale sin nombre.
+figura hoy en el padrón con ese nombre: un vínculo vigente o futuro, con la unidad y la persona
+sin borrar, que no sea un importado pendiente (el padrón lo muestra con el nombre de la planilla,
+0025). Es el filtro de `padron_del_consorcio`. Lo que el padrón no muestra con el nombre de la
+persona (un propietario que se fue, un vínculo anulado, un importado pendiente, un mandatario sin
+vínculo) sale sin nombre.
 
 **Paginación.** Del más reciente al más antiguo, por `(creado_en, secuencia)`. El cursor no lleva
 la secuencia: es la fecha del último evento de la página y cuántos eventos de esa misma fecha ya
@@ -285,7 +287,20 @@ create function auditoria.eventos_del_consorcio(antes_de timestamptz, saltar int
                                  on u.consorcio_id = v.consorcio_id and u.id = v.unidad_id
                               where v.consorcio_id = c and v.persona_id = x.id
                                 and (v.vigente_hasta is null or v.vigente_hasta > hoy)
-                                and u.eliminado_en is null))
+                                and u.eliminado_en is null
+                                -- El criterio de 0025 para mostrar el nombre de la persona.
+                                and not (v.nombre_declarado is not null
+                                         and v.confirmado_en is null
+                                         and not exists (
+                                           select 1 from auditoria.eventos ea
+                                             join nucleo.invitacion i
+                                               on i.id = ea.entidad_id
+                                              and i.consorcio_id = ea.consorcio_id
+                                            where ea.consorcio_id = v.consorcio_id
+                                              and ea.accion = 'identidad.invitacion.aceptar'
+                                              and ea.entidad = 'invitacion'
+                                              and ea.despues ->> 'vinculo_id' = v.id::text
+                                              and i.aceptada_en is not null))))
              end,
              auditoria.cambios_funcionales(g.antes, g.despues, p.campos)
         from pagina g join auditoria.proyeccion p on p.accion = g.accion

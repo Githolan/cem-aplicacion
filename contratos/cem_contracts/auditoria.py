@@ -9,8 +9,9 @@ proyección funcional que arma la base (segunda barrera, `0028`), nunca la fila 
 
 Cada evento trae la fecha, la acción traducida, el recurso funcional, el origen y una lista
 blanca de cambios. El actor sale solo en los eventos del consorcio: el nombre, solo si quien lee
-tiene `padron.ver`. Nunca IP, hashes, secuencia, identificadores, el `antes`/`despues` completo,
-el detalle de una negación ni ningún dato fuera de la proyección. Sin exportación (E0).
+tiene `padron.ver` y el padrón muestra hoy a esa persona con su nombre. Nunca IP, hashes,
+secuencia, identificadores, el `antes`/`despues` completo, el detalle de una negación ni ningún
+dato fuera de la proyección. Sin exportación (E0).
 
 Paginación por cursor: el cursor es opaco para el cliente y solo lleva la fecha del último
 evento de la página y cuántos eventos de esa misma fecha ya salieron.
@@ -41,7 +42,7 @@ class TipoActor(StrEnum):
     VOS = "vos"
     """Quien lee."""
     PERSONA = "persona"
-    """Otra persona; el nombre sale solo con `padron.ver`."""
+    """Otra persona; el nombre sale solo con `padron.ver` y si el padrón la muestra hoy."""
     SOPORTE = "soporte"
     SISTEMA = "sistema"
 
@@ -60,7 +61,10 @@ class ActorEvento(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tipo: TipoActor
-    nombre: str | None = Field(description="Solo si quien lee tiene `padron.ver`.")
+    nombre: str | None = Field(
+        description="Solo si quien lee tiene `padron.ver` y el padrón muestra hoy a esa persona "
+        "con su nombre."
+    )
 
 
 class EventoPropio(BaseModel):
