@@ -111,11 +111,24 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido el 24-10-2026 (despliegue de `93f9a29`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-24-93f9a29.md`).
+Medido el 25-10-2026 (despliegue de `5b289ba`) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (los últimos, `2026-10-24-5b289ba.md` para staging y `2026-10-25-5b289ba.md` para producción: `cd.ps1` escribe uno por día UTC).
 
-**En `main` sin desplegar (24-10-2026, 23:11 UTC):** `84d50e7`, con el corte 4 de 2b-5 (PR #108): pantalla `/padron` y contrato 0.18.0, sin migración nueva (la base sigue en `0025`). Detalle en «Próximo paso», punto 10.
+**Staging y producción en `5b289ba`** (staging el 24-10-2026 de 23:56 a 23:58 UTC, producción el 25-10 de 00:00 a 00:02 UTC), base `0025`, contrato 0.18.0.
 
-**Staging y producción en `93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
+- **Qué es:** el corte 4 de 2b-5. La SHA es la punta de `main`, `5b289ba`: el merge funcional de PR #108 (`84d50e7`: página `/padron` y `FilaPadron.iniciado`) más el cierre documental de PR #109. `/health` informa `sha_imagen` `5b289ba` porque `ci.ps1` construye y etiqueta la punta. Detalle del corte en «Próximo paso», punto 10.
+- **Controles.** `ci.ps1` verde sobre `5b289ba`: backend 1540, contratos 58, frontend 329 y e2e 177. Imágenes: `cem-backend` `sha256:d4c87f69…8728` y `cem-frontend` `sha256:79597adb…1ca4`, las mismas en los dos entornos.
+- **Despliegue (Claude, con la autorización del propietario del 24-10).** Sin copia previa, porque no había migraciones nuevas. En los dos entornos:
+  - los 4 servicios `running healthy`, con la imagen y el digest validados;
+  - `/health` con `5b289ba` y contrato 0.18.0;
+  - deps y cola en `ok`;
+  - `alembic current` = `0025 (head)`;
+  - ninguna instancia vieja y 0 errores en los registros.
+  - **Staging:** smoke `35aa6bc5` con 15 controles (incluido `iniciado`) y la cadena de auditoría con 529 eventos, 0 rotos.
+  - **Producción:** el navegador sin sesión lleva de `/padron` a `/entrar` a 375 px. La CSP bloquea el beacon que inyecta Cloudflare Web Analytics; es externo y no una regresión.
+  - Producción previa: `93f9a29`. No hizo falta volver atrás.
+- **SIN VERIFICAR:** el importado pendiente con una sesión real en staging (no hay forma legítima de darle sesión; lo cubre `ci.ps1`), y el recorrido con un vínculo real (decisión 12 del propietario).
+
+Antes, **`93f9a29`** (24-10-2026), base `0025`, contrato 0.17.0.
 
 - **Incluye tres PR fusionados desde `aab4481`:** #102 (E62, el mandato del Consejo opera solo con su condición habilitante, `0023`), #104 (RF02, el importado pendiente no da ámbito y ve sus invitaciones, `0024`) y #105 (RF02 corte 3, importación del padrón con informe previo, `0025`).
 - **RF02 corte 3 (PR #105, migración `0025`).** `POST …/padron/importacion/informe` (no escribe), `POST …/padron/importacion` (todo o nada, idempotente; `padron.gestionar` con alcance e `invitaciones.crear`), `POST …/vinculos/{v}/anular` y `scripts.anular_vinculo`. Tabla `importacion_padron` con RLS forzada; `invitacion.vinculo_id` opcional que completa el importador. Decisiones del propietario en CEM `doc/diseno/Decisiones_Propietario_2026-10-21.md` §2.4 (CEM #69). Deuda conocida (P3 1-20 y el riesgo G × D del informe de coeficientes) en la descripción de #105.
@@ -425,7 +438,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Pruebas:** 1534 passed sobre el código final, en una imagen local equivalente: la oficial no se pudo construir en la nube. Después, `ci.ps1` con la imagen oficial dio verde sobre `492f531` y sobre `93f9a29`.
    - **Revisión independiente final sobre `492f531`: sin P1 ni P2**, con Codex sin hallazgos sobre el mismo SHA. La de `129730f` no valía como final: sus P1 y P2 cambiaron el código.
    - **Hecho después (24-10):** la revisión independiente final y Codex sobre `492f531`, `ci.ps1` con la imagen oficial y las decisiones D1, D3, D4 y las del 23-10 en el documento de decisiones de CEM (§2.4, CEM #69).
-10. **Corte 4 de 2b-5, pantalla del padrón (24-10-2026):** PR #108 (rama `padron-corte4`, desde `3ec895f`), fusionado el 24-10-2026 a las 23:11 UTC en `84d50e7` (head `36365c7`). **Sin desplegar:** staging y producción siguen en `93f9a29`.
+10. **Corte 4 de 2b-5, pantalla del padrón (24-10-2026):** PR #108 (rama `padron-corte4`, desde `3ec895f`), fusionado el 24-10-2026 a las 23:11 UTC en `84d50e7` (head `36365c7`). **Desplegado** en staging y producción el 25-10 (UTC) en `5b289ba` (ver «Desplegado»).
    - **Qué trae:** página `/padron` (enlace «Padrón del edificio» en el inicio). Lista los vínculos vigentes y futuros con unidad, nombre, carácter, vigencia y confirmación, sin correo ni teléfono. **Confirmar** pide la referencia del título (`padron.confirmar_vinculo`) y **finalizar** pide el motivo y una segunda confirmación (`padron.gestionar`). La interfaz no concede nada: decide la API. Lleva CSRF, `Idempotency-Key` por intento y descarte de respuestas viejas (E35).
    - **Contrato 0.18.0** (autorizado por el propietario el 24-10): `FilaPadron.iniciado`. El backend lo calcula como `vigente_desde <= nucleo.hoy_del_consorcio(c)`, la misma regla con que `finalizar_vinculo` (0020) decide si el vínculo empezó. La pantalla lo usa para «todavía no empezó» y para ofrecer «Finalizar», en vez de calcular la fecha de Buenos Aires (P2 de Codex sobre `c64ce9e`). No concede permisos; sin migración.
    - **Pruebas:** 31 unitarias de la pantalla y su e2e en un teléfono de 360 px con la CSP real. En el backend: el importado pendiente sigue sin usar el padrón ni sus acciones, y `iniciado` y el fin coinciden con la fecha del consorcio cuando está en otro día que Buenos Aires.
@@ -434,4 +447,4 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - dos P2 de la revisión independiente: finales de línea CRLF y la misma prueba entre las 0 y las 3 UTC;
      - un defecto de foco que encontró la e2e.
    - **Deuda conocida (P3, sin código):** un rechazo seguido de una recarga fallida reemplaza el aviso de negocio; el 403 al confirmar enumera causas sin mencionar la falta de modo; el patrón del campo deja pasar un tabulador, que la API rechaza con 422; faltan pruebas de la clave conservada ante `idempotencia_en_curso` o un corte de red; la prueba de `iniciado` tiene una carrera de segundos a las 03:00 UTC; y `InvitacionMandato.tsx` todavía compara fechas en el cliente (anterior a este corte).
-   - **Para desplegarlo** hace falta la autorización del propietario: primero staging y después producción, con la misma SHA. `cd.ps1` despliega solo la punta de `main` con `ci.ps1` en verde: después de los PR de documentación, la punta ya no es `84d50e7` y hay que correr `ci.ps1` sobre ella.
+   - **Despliegue (autorizado por el propietario el 24-10):** `ci.ps1` sobre la punta `5b289ba` (`cd.ps1` despliega solo la punta de `main`), primero staging y después producción con la misma SHA.
