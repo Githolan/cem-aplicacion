@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
@@ -217,7 +218,11 @@ export function ContactosGestion() {
     textoAviso.current?.focus();
   }, [enviando]);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  // Sin sesión no queda ninguna copia de /contactos, igual que allá y en /cuenta.
+  const aEntrar = useCallback(() => {
+    borrarCopias();
+    navegar(RUTA_ENTRAR, { replace: true });
+  }, [navegar]);
 
   useEffect(() => {
     if (consultado.current) return;
@@ -270,6 +275,13 @@ export function ContactosGestion() {
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar]);
+
+  // Mientras llega la lista nueva, la vieja no queda a mano: un formulario abierto con sus datos
+  // mandaría un PUT completo que deshace el cambio recién hecho.
+  function volverAPedir() {
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function abrir(accion: Accion, contacto: Contacto | null) {
     clave.current = null;
@@ -358,7 +370,7 @@ export function ContactosGestion() {
           setConfirmar(false);
           if (cambioLaLista(response.status, codigo)) {
             cerrar();
-            setVuelta((v) => v + 1);
+            volverAPedir();
           }
           return;
         }
@@ -372,7 +384,7 @@ export function ContactosGestion() {
         };
         setAviso({ texto: `Listo: ${hecho[accion]}.`, ok: true });
         // Lo que se ve lo decide la API: la lista se vuelve a pedir.
-        setVuelta((v) => v + 1);
+        volverAPedir();
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();

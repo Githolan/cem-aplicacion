@@ -66,7 +66,7 @@ function error(codigo: string, status: number, detalle: unknown = null) {
   return Response.json({ codigo, mensaje: "x", detalle, id_correlacion: "c" }, { status });
 }
 
-type Respuestas = Record<string, () => Response>;
+type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 /** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
@@ -139,10 +139,18 @@ describe("página /contactos/gestion", () => {
     expect((await screen.findByRole("link", { name: "Gestionar la lista" })).getAttribute("href")).toBe("/contactos/gestion");
   });
 
-  it("sin sesión (401) manda a /entrar", async () => {
-    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error("no_autenticado", 401) }));
+  it("sin sesión (401) manda a /entrar y borra las copias de /contactos", async () => {
+    localStorage.setItem(`cem-contactos:${C1}`, "{}");
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        [`GET ${GESTION}`]: () => error("no_autenticado", 401),
+      }),
+    );
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
+    expect(localStorage.length).toBe(0);
   });
 
   it("muestra cada contacto con lo de gestión, y la lista no se guarda en el dispositivo", async () => {
@@ -243,6 +251,34 @@ describe("página /contactos/gestion", () => {
       consentimiento_referencia: "Nota firmada del 20-10",
       indicaciones: null,
     });
+  });
+
+  it("después de un cambio, la lista vieja no se puede usar hasta que llega la nueva", async () => {
+    let soltar: () => void = () => undefined;
+    let vueltas = 0;
+    const simulado = conLista({
+      [`GET ${GESTION}`]: () => {
+        vueltas += 1;
+        if (vueltas === 1) return Response.json(LISTA);
+        return new Promise<Response>((listo) => {
+          soltar = () => listo(Response.json(LISTA));
+        });
+      },
+      [`PUT ${BASE}/${K2}`]: () => Response.json({ id: K2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const marta = await tarjeta("Encargado o encargada: Marta Ruiz");
+    fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
+    escribir("Teléfono", "11 4000-0001");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
+    await screen.findByText("Listo: corregimos el contacto Marta Ruiz.");
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    expect(screen.queryAllByRole("button", { name: "Corregir" })).toHaveLength(0);
+    expect(screen.getByText("Consultando…")).toBeTruthy();
+    soltar();
+    // Control: con la lista nueva, los botones vuelven.
+    expect(await screen.findAllByRole("button", { name: "Corregir" })).toHaveLength(2);
   });
 
   it("retirar pide una confirmación explícita; «No» no envía y «Sí, retirar» sí", async () => {
