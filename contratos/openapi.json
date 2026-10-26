@@ -2566,7 +2566,7 @@
                 "type": "null"
               }
             ],
-            "description": "El último cambio o verificación de cualquier contacto vigente.",
+            "description": "El último cambio de la lista: un alta, una corrección, una verificación, un señalamiento, un retiro, o un contacto que empezó o terminó por fecha.",
             "title": "Actualizada En"
           },
           "elementos": {
@@ -2575,11 +2575,20 @@
             },
             "title": "Elementos",
             "type": "array"
+          },
+          "zona_horaria": {
+            "description": "La zona del consorcio. Con ella, el dispositivo calcula «hoy» al volver a aplicar la vigencia a la copia sin conexión.",
+            "examples": [
+              "America/Argentina/Buenos_Aires"
+            ],
+            "title": "Zona Horaria",
+            "type": "string"
           }
         },
         "required": [
           "elementos",
-          "actualizada_en"
+          "actualizada_en",
+          "zona_horaria"
         ],
         "title": "ListaContactos",
         "type": "object"

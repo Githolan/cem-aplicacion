@@ -17,6 +17,8 @@ Las funciones de `0031` vuelven a exigir el ámbito o la facultad. Si la base ni
 evaluador concedió, es una discrepancia (500), nunca una lista vacía ni un 403.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Annotated
 from uuid import UUID
 
@@ -66,23 +68,22 @@ COLUMNAS_GESTION = (
 )
 
 
-def _leer(permiso: Permiso, motor, columnas: str, gestion: bool) -> list:
+@contextmanager
+def _lectura(permiso: Permiso, motor) -> Iterator[Connection]:
     ctx = permiso.ctx
     permiso.verificar(Entidad())
     try:
         with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
-            return list(
-                c.execute(
-                    text(f"select {columnas} from nucleo.contactos_del_consorcio(:g)"),
-                    {"g": gestion},
-                )
-                .mappings()
-                .all()
-            )
+            yield c
     except DBAPIError as e:
         if isinstance(e.orig, InsufficientPrivilege):
             raise Discrepancia(f"la base niega {permiso.accion} y el evaluador lo concede") from e
         raise
+
+
+def _contactos(c: Connection, columnas: str, gestion: bool) -> list:
+    sql = f"select {columnas} from nucleo.contactos_del_consorcio(:g)"
+    return list(c.execute(text(sql), {"g": gestion}).mappings().all())
 
 
 def _escribir(conn: Connection, sql: str, parametros: dict):
@@ -106,11 +107,10 @@ def _escribir(conn: Connection, sql: str, parametros: dict):
 def listar_contactos(
     permiso: Annotated[Permiso, Depends(requiere("contactos.ver"))], motor: MotorDep
 ) -> ListaContactos:
-    filas = _leer(permiso, motor, COLUMNAS, gestion=False)
-    fechas = [f for c in filas for f in (c["actualizado_en"], c["verificado_en"]) if f is not None]
-    return ListaContactos(
-        elementos=[Contacto(**c) for c in filas], actualizada_en=max(fechas, default=None)
-    )
+    with _lectura(permiso, motor) as c:
+        filas = _contactos(c, COLUMNAS, gestion=False)
+        estado = c.execute(text("select * from nucleo.estado_contactos()")).mappings().one()
+    return ListaContactos(elementos=[Contacto(**k) for k in filas], **estado)
 
 
 @router.get(
@@ -122,7 +122,8 @@ def listar_contactos(
 def listar_contactos_gestion(
     permiso: Annotated[Permiso, Depends(requiere("contactos.gestionar"))], motor: MotorDep
 ) -> ListaContactosGestion:
-    filas = _leer(permiso, motor, COLUMNAS_GESTION, gestion=True)
+    with _lectura(permiso, motor) as c:
+        filas = _contactos(c, COLUMNAS_GESTION, gestion=True)
     return ListaContactosGestion(elementos=[ContactoGestion(**c) for c in filas])
 
 

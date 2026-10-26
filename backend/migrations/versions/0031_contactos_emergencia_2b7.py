@@ -65,13 +65,15 @@ def _upgrade() -> str:
     proyeccion = ",\n  ".join(f"('{a}', '{t}', 'Contacto', {campos})" for a, t in PROYECCION)
     return f"""
 -- §2.1: en el texto libre no va un teléfono (8 o más dígitos, con o sin separadores) ni un correo.
+-- Se quita todo lo que no sea letra, dígito, dos puntos o coma, y se buscan 8 dígitos seguidos:
+-- así ningún separador ('11 - 2345 - 6789') lo esquiva, y un horario ('9:00/13:00') pasa.
 create function nucleo.sin_contacto_libre(t text)
   returns boolean
   language sql immutable
   set search_path = pg_catalog, pg_temp
   as $$
     select t is null
-        or (t !~ '([0-9][^0-9a-zA-Z]{{0,2}}){{7}}[0-9]'
+        or (regexp_replace(t, '[^[:alnum:]:,]', '', 'g') !~ '[0-9]{{8}}'
             and t !~ '[^[:space:]@]+@[^[:space:]@]+')
   $$;
 
@@ -120,6 +122,8 @@ create policy por_consorcio on nucleo.contacto_emergencia for select
 revoke all on nucleo.contacto_emergencia from public, cem_app;
 
 -- Ámbito: un vínculo vigente que no sea un importado pendiente (0024) o un mandato vigente.
+-- Recibe `quien` para no repetir la lectura, pero solo la llaman las funciones de este archivo,
+-- siempre con `plataforma.persona_actual()`; no se concede a `cem_app`.
 create function nucleo.en_ambito(c uuid, quien uuid)
   returns boolean
   language sql stable
@@ -136,6 +140,39 @@ create function nucleo.en_ambito(c uuid, quien uuid)
                 and nucleo.mandato_vigente(m.id, nucleo.hoy_del_consorcio(c)))
   $$;
 revoke all on function nucleo.en_ambito(uuid, uuid) from public;
+
+-- Cuándo cambió por última vez la lista general, y la zona del consorcio con la que el
+-- dispositivo vuelve a aplicar la vigencia a su copia. Cuenta todos los contactos, también los
+-- retirados y los que empezaron o terminaron por fecha: un retiro o un vencimiento también la
+-- cambian.
+create function nucleo.estado_contactos()
+  returns table (actualizada_en timestamptz, zona_horaria text)
+  language plpgsql stable security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+    quien uuid := plataforma.persona_actual();
+    hoy date;
+    zona text;
+  begin
+    if c is null or quien is null or not nucleo.en_ambito(c, quien) then
+      raise exception 'sin ámbito en este consorcio' using errcode = '42501';
+    end if;
+    hoy := nucleo.hoy_del_consorcio(c);
+    select k.zona_horaria into strict zona from nucleo.consorcio k where k.id = c;
+    return query
+      select max(greatest(
+               k.actualizado_en, k.verificado_en, k.observado_en,
+               case when k.vigente_desde <= hoy
+                    then k.vigente_desde::timestamp at time zone zona end,
+               case when k.vigente_hasta <= hoy
+                    then k.vigente_hasta::timestamp at time zone zona end)),
+             zona
+        from nucleo.contacto_emergencia k
+       where k.consorcio_id = c;
+  end
+  $$;
 
 -- La lista general son los vigentes hoy; la de gestión suma los futuros y lo que no se publica.
 create function nucleo.contactos_del_consorcio(gestion boolean)
@@ -379,6 +416,7 @@ create function nucleo.senalar_contacto(contacto uuid, motivo text, actor uuid,
 
 revoke all on function
   nucleo.contactos_del_consorcio(boolean),
+  nucleo.estado_contactos(),
   nucleo.crear_contacto(text, text, text, text, text, text, date, uuid, text),
   nucleo.corregir_contacto(uuid, text, text, text, text, text, text, uuid, text),
   nucleo.retirar_contacto(uuid, uuid, text),
@@ -387,6 +425,7 @@ revoke all on function
   from public;
 grant execute on function
   nucleo.contactos_del_consorcio(boolean),
+  nucleo.estado_contactos(),
   nucleo.crear_contacto(text, text, text, text, text, text, date, uuid, text),
   nucleo.corregir_contacto(uuid, text, text, text, text, text, text, uuid, text),
   nucleo.retirar_contacto(uuid, uuid, text),
@@ -416,6 +455,7 @@ drop function nucleo.auditar_contacto(uuid, nucleo.contacto_emergencia, text, uu
   nucleo.contacto_emergencia);
 drop function nucleo.exigir_gestion_contactos(uuid, uuid, text);
 drop function nucleo.contactos_del_consorcio(boolean);
+drop function nucleo.estado_contactos();
 drop function nucleo.en_ambito(uuid, uuid);
 drop table nucleo.contacto_emergencia;
 drop function nucleo.sin_contacto_libre(text);

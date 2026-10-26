@@ -20,13 +20,23 @@ from enum import StrEnum
 from typing import Annotated, Self
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 LARGO_MAXIMO_NOMBRE = 120
 LARGO_MAXIMO_TEXTO = 300
 FORMATO_TELEFONO = r"^[+0-9][0-9 ()-]{2,29}$"
-TELEFONO_EN_TEXTO = re.compile(r"([0-9][^0-9a-zA-Z]{0,2}){7}[0-9]")
-"""8 o más dígitos con hasta dos separadores entre cada uno: el mismo patrón que la base."""
+SEPARADORES = re.compile(r"[^\w:,]|_")
+"""Lo que se quita antes de contar dígitos: todo salvo letras, dígitos, dos puntos y coma. Es la
+misma regla que `nucleo.sin_contacto_libre` (`[^[:alnum:]:,]`): ningún separador esquiva la
+búsqueda ("11 - 2345 - 6789") y un horario ("9:00/13:00") pasa."""
+TELEFONO_EN_TEXTO = re.compile(r"[0-9]{8}")
 CORREO_EN_TEXTO = re.compile(r"[^\s@]+@[^\s@]+")
 
 
@@ -35,7 +45,7 @@ def _sin_contacto_libre(texto: str) -> str:
     texto = texto.strip()
     if not texto:
         raise ValueError("El campo no puede quedar vacío.")
-    if TELEFONO_EN_TEXTO.search(texto) or CORREO_EN_TEXTO.search(texto):
+    if TELEFONO_EN_TEXTO.search(SEPARADORES.sub("", texto)) or CORREO_EN_TEXTO.search(texto):
         raise ValueError("Sin teléfonos ni correos acá: el número va solo en el teléfono.")
     return texto
 
@@ -46,8 +56,16 @@ def _texto(largo: int):
 
 Nombre = _texto(LARGO_MAXIMO_NOMBRE)
 TextoLibre = _texto(LARGO_MAXIMO_TEXTO)
-Telefono = Annotated[str, Field(pattern=FORMATO_TELEFONO, examples=["0800-555-1234"])]
-Referencia = Annotated[str, Field(min_length=1, max_length=LARGO_MAXIMO_TEXTO)]
+Telefono = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, pattern=FORMATO_TELEFONO),
+    Field(examples=["0800-555-1234"]),
+]
+Referencia = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MAXIMO_TEXTO)
+]
+"""Se recortan antes de validar: un valor con espacios alrededor, o solo espacios, nunca llega a
+la base, que lo rechazaría con un CHECK (500)."""
 
 
 class FuncionContacto(StrEnum):
@@ -139,7 +157,13 @@ class ListaContactos(BaseModel):
 
     elementos: list[Contacto]
     actualizada_en: datetime | None = Field(
-        description="El último cambio o verificación de cualquier contacto vigente."
+        description="El último cambio de la lista: un alta, una corrección, una verificación, un"
+        " señalamiento, un retiro, o un contacto que empezó o terminó por fecha."
+    )
+    zona_horaria: str = Field(
+        description="La zona del consorcio. Con ella, el dispositivo calcula «hoy» al volver a"
+        " aplicar la vigencia a la copia sin conexión.",
+        examples=["America/Argentina/Buenos_Aires"],
     )
 
 

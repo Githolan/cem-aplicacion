@@ -12,6 +12,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app.autorizacion.evaluador import Decision
+from app.autorizacion.requiere import Permiso
+from app.consorcios.padron import Discrepancia
 from app.db import transaccion
 from tests.conftest import clave_idempotencia
 from tests.test_contexto_mandatos import cliente, denegaciones
@@ -95,6 +98,7 @@ def test_el_consejo_agrega_y_todos_leen_lo_publicado(escena):
     assert (k["nombre"], k["telefono"], k["observado"]) == ("Ascensores del Sur", "0800-555-1234",
                                                             False)  # fmt: skip
     assert r.json()["actualizada_en"] == k["actualizado_en"]
+    assert r.json()["zona_horaria"] == "America/Argentina/Buenos_Aires"
 
 
 @pytest.mark.redis
@@ -107,8 +111,12 @@ def test_un_contacto_vencido_o_futuro_no_figura_como_vigente(escena):
     assert [k["id"] for k in leer(e["prop"], e["cons"]).json()["elementos"]] == [vigente]
     gestion = {k["id"] for k in leer(e["mc"], e["cons"], "/gestion").json()["elementos"]}
     assert gestion == {vigente, futuro}
+    antes = leer(e["prop"], e["cons"]).json()["actualizada_en"]
     assert accion(e["mc"], e["cons"], vigente, "retirar").status_code == 200
-    assert leer(e["prop"], e["cons"]).json() == {"elementos": [], "actualizada_en": None}
+    despues = leer(e["prop"], e["cons"]).json()
+    assert despues["elementos"] == []
+    # El retiro también cambia la lista: su fecha avanza aunque ya no quede ninguno.
+    assert despues["actualizada_en"] > antes
     # Retirado no se toca más: se agrega otro.
     r = accion(e["mc"], e["cons"], vigente, "verificar")
     assert (r.status_code, r.json()["codigo"]) == (409, "contacto_terminado")
@@ -174,6 +182,8 @@ def test_el_profesional_va_siempre_con_su_numero_y_su_constancia(escena, datos):
         ("indicaciones", "Si no atiende, llamar al (011) 4567.8901"),
         ("indicaciones", "Póliza vigente hasta 31-12-2026"),
         ("indicaciones", "Escribir a guardia@ejemplo.com"),
+        ("indicaciones", "Llamar al 11 - 2345 - 6789"),  # separadores de tres caracteres
+        ("nombre", "Guardia 11 . 2345 . 6789"),
     ],
 )
 def test_ningun_telefono_ni_correo_fuera_del_campo_telefono(escena, campo, valor):
@@ -183,6 +193,9 @@ def test_ningun_telefono_ni_correo_fuera_del_campo_telefono(escena, campo, valor
     # Control: una dirección, un piso y una fecha con palabras pasan.
     assert crear(e["mc"], e["cons"], indicaciones="Av. Corrientes 1234, 5° piso; póliza vigente"
                  " hasta el 31 de diciembre de 2026").status_code == 201  # fmt: skip
+    # Control: un horario también pasa.
+    r = crear(e["mc"], e["cons"], indicaciones="Atiende de 9:00/13:00, 14:00/18:00")
+    assert r.status_code == 201, r.text
 
 
 def test_la_base_repite_la_regla_del_texto_libre_y_la_del_profesional(escena, motor_migrate):
@@ -191,8 +204,10 @@ def test_la_base_repite_la_regla_del_texto_libre_y_la_del_profesional(escena, mo
         assert c.execute(text(
             "select nucleo.sin_contacto_libre('llamar al 11 2345 6789'),"
             " nucleo.sin_contacto_libre('a@b.com'), nucleo.sin_contacto_libre('31-12-2026'),"
-            " nucleo.sin_contacto_libre('Corrientes 1234, piso 5')")).one() == (
-            False, False, False, True)  # fmt: skip
+            " nucleo.sin_contacto_libre('Corrientes 1234, piso 5'),"
+            " nucleo.sin_contacto_libre('11 - 2345 - 6789'),"
+            " nucleo.sin_contacto_libre('9:00/13:00, 14:00/18:00')")).one() == (
+            False, False, False, True, False, True)  # fmt: skip
     with pytest.raises(IntegrityError), motor_migrate.begin() as c:
         c.execute(
             text("insert into nucleo.contacto_emergencia (consorcio_id, funcion, naturaleza,"
@@ -296,3 +311,82 @@ def test_cem_app_no_toca_la_tabla_directo(escena, motor_app):
     with pytest.raises(DBAPIError, match="permission denied"):
         with transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c:
             c.execute(text("select * from nucleo.contacto_emergencia")).all()
+
+
+@pytest.mark.redis
+def test_el_telefono_y_la_constancia_se_recortan(escena):
+    e = escena
+    r = crear(e["mc"], e["cons"], **PROFESIONAL | {"telefono": " 11 4000 0000 ",
+              "consentimiento_referencia": "  Nota firmada  "})  # fmt: skip
+    assert r.status_code == 201, r.text
+    [g] = leer(e["mc"], e["cons"], "/gestion").json()["elementos"]
+    assert (g["telefono"], g["consentimiento_referencia"]) == ("11 4000 0000", "Nota firmada")
+    # Solo espacios es como no haberlo puesto: 422, nunca un CHECK de la base (500).
+    r = crear(e["mc"], e["cons"], **PROFESIONAL | {"consentimiento_referencia": "   "})
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize(
+    "columna,valor",
+    [
+        ("nombre", "'   '"),
+        ("nombre", "'Juan 11 2345 6789'"),
+        ("telefono", "'llamar ya'"),
+        ("indicaciones", "'a@b.com'"),
+        ("vigente_hasta", "'2025-12-31'"),  # antes de vigente_desde
+        ("observacion", "'Mal cargado'"),  # sin observado_en
+        ("verificado_por", "(select id from nucleo.persona limit 1)"),  # sin verificado_en
+    ],
+)
+def test_la_base_rechaza_cada_fila_invalida(escena, motor_migrate, columna, valor):
+    e = escena
+    base = {"nombre": "'Guardia'", "telefono": "'0800-555-1234'"}
+    fila = base | {columna: valor}
+    sql = ("insert into nucleo.contacto_emergencia (consorcio_id, funcion, naturaleza,"
+           " vigente_desde, {c})"
+           " values (:c, 'emergencias', 'empresa', '2026-01-01', {v})")  # fmt: skip
+    with pytest.raises(IntegrityError), motor_migrate.begin() as c:
+        c.execute(text(sql.format(c=", ".join(fila), v=", ".join(fila.values()))),
+                  {"c": e["cons"]})  # fmt: skip
+    # Control: la fila base entra.
+    with motor_migrate.begin() as c:
+        c.execute(text(sql.format(c=", ".join(base), v=", ".join(base.values()))),
+                  {"c": e["cons"]})  # fmt: skip
+
+
+def administracion(motor_migrate, motor_app, modo, tipo, **datos):
+    """Consorcio en `modo` con su propietaria y un mandato de administración de `tipo`."""
+    cons, _, prop = consorcio_con_persona(motor_migrate)
+    acta = decidir_equipo(motor_app, cons)
+    cambiar(motor_app, cons, modo, acta)
+    quien = otra_persona(motor_migrate, cons)
+    alta(motor_app, cons, None, acta, tipo=tipo, persona=quien, origen="soporte", **datos)
+    return cons, prop, quien
+
+
+@pytest.mark.redis
+def test_el_administrador_gestiona_y_el_externo_no(motor_migrate, motor_app):
+    cons, _, externo = administracion(motor_migrate, motor_app, "consejo",
+                                      "administrador_externo", nombre="Estudio",
+                                      cuit="20111111112")  # fmt: skip
+    r = crear(externo, cons)
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    # El externo lee la lista general, como todo el que tiene ámbito; la de gestión, no.
+    assert leer(externo, cons).status_code == 200
+    assert leer(externo, cons, "/gestion").status_code == 403
+    # Control: el administrador aumentado agrega, y la propietaria lo lee.
+    cons, prop, ad = administracion(motor_migrate, motor_app, "administrador_aumentado",
+                                    "administrador")  # fmt: skip
+    assert crear(ad, cons).status_code == 201
+    assert len(leer(prop, cons).json()["elementos"]) == 1
+
+
+def test_si_la_base_niega_y_el_evaluador_concede_falla_fuerte(escena, monkeypatch):
+    e = escena
+    monkeypatch.setattr(
+        Permiso, "decidir", lambda self, entidad=None: Decision(True, 200, "concedido_por_facultad")
+    )
+    # La propietaria tiene ámbito pero no la facultad: la base niega la gestión. Es una
+    # discrepancia (500), nunca una lista vacía ni un 403.
+    with cliente(e["prop"]) as c, pytest.raises(Discrepancia):
+        c.get(url(e["cons"], "/gestion"))
