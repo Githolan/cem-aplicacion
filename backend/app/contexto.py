@@ -130,10 +130,11 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         if hoy is None:  # no existe, está dado de baja (E28) o no está en el ámbito
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
         vinculos = tuple(
-            Vinculo(tipo=TipoVinculo(f.tipo), unidad_id=f.unidad_id)
+            Vinculo(tipo=TipoVinculo(f.tipo), unidad_id=f.unidad_id, confirmado=f.confirmado)
             for f in conn.execute(
                 text(
-                    "select tipo::text as tipo, unidad_id from nucleo.vinculo"
+                    "select tipo::text as tipo, unidad_id,"
+                    " confirmado_en is not null as confirmado from nucleo.vinculo"
                     " where consorcio_id = :c and persona_id = :p"
                     " and daterange(vigente_desde, vigente_hasta) @> :hoy"
                     # RF02: el importado pendiente no da ámbito ni concesiones (0024).

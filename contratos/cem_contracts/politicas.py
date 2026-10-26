@@ -80,6 +80,8 @@ class ConcesionPorVinculo(_Estricto):
     tipos: tuple[TipoVinculo, ...] = Field(min_length=1)
     misma_unidad: StrictBool
     """Si es `true`, el vínculo tiene que ser de la unidad de la entidad (p. ej. P de 3-A)."""
+    solo_confirmados: StrictBool = False
+    """Si es `true`, solo concede un vínculo confirmado (P4, `nucleo.vinculo.confirmado_en`)."""
 
     @model_validator(mode="after")
     def _sin_repetidos(self) -> "ConcesionPorVinculo":

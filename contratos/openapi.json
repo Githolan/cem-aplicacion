@@ -4479,7 +4479,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Sin `padron.ver` ni `coeficientes.proponer` en el consorcio."
+            "description": "Sin `padron.ver` ni `coeficientes.proponer` en el consorcio, ni un vínculo confirmado con alguna unidad."
           },
           "422": {
             "content": {

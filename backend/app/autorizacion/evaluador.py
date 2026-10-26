@@ -92,6 +92,8 @@ class Vinculo:
 
     tipo: TipoVinculo
     unidad_id: UUID
+    confirmado: bool = False
+    """Confirmado por quien tiene la facultad (P4, 2b-4)."""
 
 
 @dataclass(frozen=True)
@@ -233,8 +235,10 @@ def _concesion(
     if por_vinculo is not None:
         unidad = entidad.recursos.get(TipoRecurso.UNIDAD)
         for v in contexto.vinculos:
-            if v.tipo in por_vinculo.tipos and (
-                not por_vinculo.misma_unidad or str(v.unidad_id) == unidad
+            if (
+                v.tipo in por_vinculo.tipos
+                and (not por_vinculo.misma_unidad or str(v.unidad_id) == unidad)
+                and (not por_vinculo.solo_confirmados or v.confirmado)
             ):
                 return _permite(Motivo.CONCEDIDO_POR_VINCULO)
     if politica.concede_por_ambito:

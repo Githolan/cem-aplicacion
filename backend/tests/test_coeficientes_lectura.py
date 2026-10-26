@@ -296,3 +296,107 @@ def test_coeficientes_sin_sesion_responde_401(app, edificio):  # noqa: F811
     assert (
         navegador(app).get(f"/api/v1/consorcios/{edificio['cons']}/coeficientes").status_code == 401
     )
+
+
+def confirmar(motor_migrate, cons, persona, unidad):
+    """Confirma el vínculo vigente de la persona con la unidad (P4), como lo dejaría soporte."""
+    with motor_migrate.begin() as c:
+        quien = c.execute(
+            text("insert into nucleo.persona (correo, nombre) values (:c, 'Confirma')"
+                 " returning id"),
+            {"c": f"confirma-{persona}@ejemplo.com"},
+        ).scalar_one()  # fmt: skip
+        n = c.execute(
+            text("update nucleo.vinculo set confirmado_por = :q, confirmado_en = now(),"
+                 " confirmacion_referencia = 'Escritura de prueba'"
+                 " where consorcio_id = :c and persona_id = :p and unidad_id = :u"),
+            {"q": quien, "c": cons, "p": persona, "u": unidad},
+        ).rowcount  # fmt: skip
+    assert n == 1
+
+
+@pytest.mark.redis
+def test_con_vinculo_confirmado_lee_solo_su_unidad(edificio, motor_migrate, motor_app):
+    """Decisión del 25-10 (§1.8): sin padron.ver, el coeficiente de su unidad y nada más."""
+    e = edificio
+    # Control: con el vínculo sin confirmar, la propietaria no lee (403 auditado).
+    assert leer(e["per"], e["cons"]).status_code == 403
+    confirmar(motor_migrate, e["cons"], e["per"], e["u"][0])
+    r = leer(e["per"], e["cons"])
+    assert r.status_code == 200, r.text
+    cuerpo = r.json()
+    # Los tres esquemas que contienen su unidad, con versión y vigencia, y solo su coeficiente.
+    assert [(x["grupo"], x["version"], x["vigente_hasta"]) for x in cuerpo["elementos"]] == [
+        ("agua", 1, None),
+        ("expensas_comunes", 1, str(CAMBIO)),
+        ("expensas_comunes", 2, None),
+    ]
+    for grupo, version, fila in (("agua", 1, AGUA), ("expensas_comunes", 1, EXPENSAS),
+                                 ("expensas_comunes", 2, EXPENSAS_V2)):  # fmt: skip
+        assert coeficientes_de(cuerpo, grupo, version) == {str(e["u"][0]): fila[0]}
+    assert all(x["reglas"] for x in cuerpo["elementos"])
+
+
+@pytest.mark.redis
+def test_el_inquilino_confirmado_tambien_y_nunca_una_unidad_ajena(edificio, motor_migrate,
+                                                                  motor_app):  # fmt: skip
+    e = edificio
+    inq = otra_persona(motor_migrate, e["cons"])
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                 " vigente_desde, fuente, origen) values (:c, :u, :p, 'inquilino',"
+                 " '2020-01-01', 'documento', 'soporte')"),
+            {"c": e["cons"], "u": e["u"][3], "p": inq},
+        )  # fmt: skip
+    confirmar(motor_migrate, e["cons"], inq, e["u"][3])
+    r = leer(inq, e["cons"])
+    assert r.status_code == 200, r.text
+    vistas = {u for x in r.json()["elementos"] for u in (c["unidad_id"] for c in x["coeficientes"])}
+    assert vistas == {str(e["u"][3])}
+
+
+def test_la_base_devuelve_solo_las_filas_de_la_unidad_confirmada(edificio, motor_migrate,
+                                                                motor_app):  # fmt: skip
+    """Segunda barrera: sin mandato, la base no le da a la aplicación filas de otras unidades."""
+    e = edificio
+    confirmar(motor_migrate, e["cons"], e["per"], e["u"][0])
+    with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
+        filas = c.execute(text("select unidad_id from nucleo.coeficientes_del_consorcio()")).all()
+        reglas = c.execute(
+            text("select esquema_id from nucleo.reglas_de_reparto_del_consorcio()")
+        ).all()
+    assert {f.unidad_id for f in filas} == {e["u"][0]} and len(filas) == 3
+    assert len(reglas) == 3
+    # Control: el Consejo, con padron.ver, recibe las cinco unidades de cada esquema.
+    mc = lector(motor_migrate, motor_app, e, tipo="miembro_consejo")
+    with transaccion(motor_app, persona_id=mc, consorcio_id=e["cons"]) as c:
+        assert len(c.execute(text("select 1 from nucleo.coeficientes_del_consorcio()")).all()) == 15
+
+
+def test_un_vinculo_confirmado_vencido_no_da_lectura(edificio, motor_migrate, motor_app):
+    e = edificio
+    confirmar(motor_migrate, e["cons"], e["per"], e["u"][0])
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.vinculo set vigente_hasta = '2021-01-01'"
+                 " where consorcio_id = :c and persona_id = :p"),
+            {"c": e["cons"], "p": e["per"]},
+        )  # fmt: skip
+    with pytest.raises(DBAPIError, match="ni un vínculo confirmado"):
+        with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
+            c.execute(text("select * from nucleo.coeficientes_del_consorcio()")).all()
+
+
+@pytest.mark.redis
+def test_vinculo_confirmado_con_una_unidad_sin_coeficientes_lista_vacia(edificio, motor_migrate,
+                                                                        motor_app):  # fmt: skip
+    """Codex en #120: que la unidad todavía no esté en un esquema no es falta de permiso."""
+    e = edificio
+    nueva, quien = otra_unidad(motor_migrate, e["cons"], "7° A")
+    # Control: con el vínculo sin confirmar, 403 auditado.
+    assert leer(quien, e["cons"]).status_code == 403
+    confirmar(motor_migrate, e["cons"], quien, nueva)
+    r = leer(quien, e["cons"])
+    assert (r.status_code, r.json()) == (200, {"elementos": []})
+    assert len(denegaciones(motor_app, e["cons"], quien, quien)) == 1  # solo la del control

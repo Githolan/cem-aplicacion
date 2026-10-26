@@ -55,6 +55,20 @@
       "economica": false,
       "destinatario_unico": false,
       "fuente_normativa": "RF05; D4; H2b_5 §3: por la API, solo lectura, para quien tiene padron.ver o coeficientes.proponer. Con coeficientes.proponer, los esquemas del grupo en el que puede proponer"
+    },
+    {
+      "accion": "coeficientes.ver_propia_unidad",
+      "concede_por_vinculo": {"tipos": ["propietario", "inquilino", "ocupante"], "misma_unidad": true, "solo_confirmados": true},
+      "concede_por_ambito": false,
+      "facultad": null,
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF05; D4; decisión del propietario del 25-10-2026 (§1.8): una persona con vínculo confirmado ve el coeficiente de su propia unidad, sin padron.ver; nunca el de una unidad ajena"
     }
   ]
 }
