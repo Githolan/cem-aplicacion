@@ -317,7 +317,7 @@
         "type": "object"
       },
       "CategoriaDocumento": {
-        "description": "Las 8 categorías de §4. Quién ve y quién carga cada una llega en 2c-2.",
+        "description": "Las 8 categorías de §4. Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y\n`ACCIONES_DE_CARGA`.",
         "enum": [
           "institucional",
           "actas_y_decisiones",
@@ -422,7 +422,9 @@
           "sin_condicion_habilitante",
           "contacto_terminado",
           "archivo_demasiado_grande",
-          "tipo_no_admitido"
+          "tipo_no_admitido",
+          "version_no_disponible",
+          "archivo_vencido"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1248,6 +1250,50 @@
         "title": "DesasociacionHecha",
         "type": "object"
       },
+      "DocumentoEnLista": {
+        "properties": {
+          "cargado_en": {
+            "format": "date-time",
+            "title": "Cargado En",
+            "type": "string"
+          },
+          "categoria": {
+            "$ref": "#/components/schemas/CategoriaDocumento"
+          },
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "titulo": {
+            "title": "Titulo",
+            "type": "string"
+          },
+          "versiones": {
+            "description": "De la más nueva a la más vieja.",
+            "items": {
+              "$ref": "#/components/schemas/VersionEnLista"
+            },
+            "title": "Versiones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "categoria",
+          "titulo",
+          "fecha",
+          "cargado_en",
+          "versiones"
+        ],
+        "title": "DocumentoEnLista",
+        "type": "object"
+      },
       "DocumentoId": {
         "properties": {
           "id": {
@@ -1587,6 +1633,15 @@
         ],
         "title": "EstadoSegundoFactor",
         "type": "object"
+      },
+      "EstadoVersion": {
+        "enum": [
+          "en_cuarentena",
+          "disponible",
+          "rechazado"
+        ],
+        "title": "EstadoVersion",
+        "type": "string"
       },
       "EventoConsorcio": {
         "properties": {
@@ -2682,6 +2737,23 @@
         "title": "ListaDecisiones",
         "type": "object"
       },
+      "ListaDocumentos": {
+        "properties": {
+          "documentos": {
+            "description": "Los vigentes de las categorías que la persona puede ver, del más nuevo al más viejo por su fecha.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentoEnLista"
+            },
+            "title": "Documentos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "documentos"
+        ],
+        "title": "ListaDocumentos",
+        "type": "object"
+      },
       "ListaEsquemasCoeficientes": {
         "description": "`GET /api/v1/consorcios/{consorcio_id}/coeficientes`: por grupo y versión. Vacía: no hay\nesquemas o quien lee no ve ninguno.",
         "properties": {
@@ -3299,6 +3371,17 @@
           "autogestion"
         ],
         "title": "ModoOperacion",
+        "type": "string"
+      },
+      "MotivoRechazo": {
+        "enum": [
+          "virus",
+          "contenido_activo",
+          "pdf_cifrado",
+          "pdf_mal_formado",
+          "no_coincide"
+        ],
+        "title": "MotivoRechazo",
         "type": "string"
       },
       "NaturalezaContacto": {
@@ -3949,6 +4032,56 @@
           "sha256"
         ],
         "title": "VersionCargada",
+        "type": "object"
+      },
+      "VersionEnLista": {
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion",
+            "description": "Quien lee ve solo las versiones `disponible`; las que están en cuarentena o fueron rechazadas las ve solo quien las subió."
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo_rechazo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotivoRechazo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sha256": {
+            "description": "Para verificar el archivo descargado (documento 13 §9.3).",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "subida_en": {
+            "format": "date-time",
+            "title": "Subida En",
+            "type": "string"
+          },
+          "tamano": {
+            "title": "Tamano",
+            "type": "integer"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoArchivo"
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "tipo",
+          "tamano",
+          "sha256",
+          "subida_en"
+        ],
+        "title": "VersionEnLista",
         "type": "object"
       },
       "VinculoAnulado": {
@@ -5742,6 +5875,50 @@
       }
     },
     "/api/v1/consorcios/{consorcio_id}/documentos": {
+      "get": {
+        "operationId": "listar_documentos_api_v1_consorcios__consorcio_id__documentos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaDocumentos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `documentos.ver` en el consorcio (A6: ni I ni O)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los documentos vigentes que la persona puede ver, con sus versiones",
+        "tags": [
+          "documentos"
+        ]
+      },
       "post": {
         "operationId": "crear_documento_api_v1_consorcios__consorcio_id__documentos_post",
         "parameters": [
@@ -5790,7 +5967,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Sin `documentos.cargar` en el consorcio."
+            "description": "Sin `documentos.cargar` en el consorcio, ni `documentos.cargar_operativos` para una categoría operativa."
           },
           "422": {
             "content": {
@@ -5881,7 +6058,7 @@
             "description": "Successful Response"
           },
           "403": {
-            "description": "Sin `documentos.cargar` en el consorcio."
+            "description": "Sin una acción de carga para la categoría del documento."
           },
           "404": {
             "description": "El documento no existe en este consorcio."
@@ -5910,6 +6087,74 @@
           }
         },
         "summary": "Subir un archivo de un documento: entra en cuarentena hasta que se analiza",
+        "tags": [
+          "documentos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar": {
+      "get": {
+        "operationId": "descargar_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones__version_id__descargar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "`Location` es la URL firmada del almacén; vence a los 5 minutos."
+          },
+          "403": {
+            "description": "Sin `documentos.ver` en el consorcio."
+          },
+          "404": {
+            "description": "La versión o el documento no existen en este consorcio, o su categoría es restringida y la persona no tiene la facultad `documentos.ver`."
+          },
+          "409": {
+            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió; a otros, 404)."
+          },
+          "410": {
+            "description": "El archivo ya no está en el almacén (staging, a los 30 días)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
         "tags": [
           "documentos"
         ]

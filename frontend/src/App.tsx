@@ -4,6 +4,7 @@ import { Link, Route, Routes } from "react-router";
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
+import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
@@ -39,6 +40,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_CONTACTOS}>Contactos de emergencia</Link>
+      </p>
+      <p>
+        <Link to={RUTA_DOCUMENTOS}>Documentos del edificio</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -97,6 +101,7 @@ export function App() {
           <Route path={RUTA_PADRON} element={<Padron />} />
           <Route path={RUTA_CONTACTOS} element={<Contactos />} />
           <Route path={RUTA_CONTACTOS_GESTION} element={<ContactosGestion />} />
+          <Route path={RUTA_DOCUMENTOS} element={<Documentos />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

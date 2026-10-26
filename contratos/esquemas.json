@@ -727,7 +727,9 @@
           "sin_condicion_habilitante",
           "contacto_terminado",
           "archivo_demasiado_grande",
-          "tipo_no_admitido"
+          "tipo_no_admitido",
+          "version_no_disponible",
+          "archivo_vencido"
         ],
         "title": "CodigoError",
         "type": "string"

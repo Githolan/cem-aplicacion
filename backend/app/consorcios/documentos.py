@@ -1,10 +1,13 @@
-"""Documentos del consorcio: carga a cuarentena (H2c 2c-1; RF24, primera parte).
+"""Documentos del consorcio: carga a cuarentena, lista y descarga (H2c 2c-1 y 2c-2; RF24).
 
-Diseño: `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2 y §3.
+Diseño: `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2, §3 y §4. Cada categoría tiene su
+acción de lectura y sus acciones de carga (`ACCION_DE_LECTURA`, `ACCIONES_DE_CARGA` del
+contrato): la categoría elige la acción.
 
-- **`POST …/documentos`** (`documentos.cargar`): crea el documento, sin versiones.
-- **`POST …/documentos/{id}/versiones`** (`documentos.cargar`): el archivo crudo en el cuerpo,
-  sin multipart (Starlette guarda en disco los multipart de más de 1 MB).
+- **`POST …/documentos`** (`documentos.cargar`, o `documentos.cargar_operativos` para actas,
+  presupuestos y mantenimiento): crea el documento, sin versiones.
+- **`POST …/documentos/{id}/versiones`** (la carga de la categoría del documento): el archivo
+  crudo en el cuerpo, sin multipart (Starlette guarda en disco los multipart de más de 1 MB).
   - Se lee **en tramos con un contador**, a memoria, y corta con 413 al pasar los 20 MB, antes
     de escribir nada.
   - El tipo real sale de los primeros bytes; otro tipo, o uno que no coincide con el declarado,
@@ -18,23 +21,39 @@ Diseño: `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2 y §3.
     `en_cuarentena` y se encola `documentos.verificar`, en la misma transacción: si la subida
     falla, no queda la fila.
 
-En este corte no hay lectura ni descarga (2c-2): ninguna versión se sirve todavía.
+- **`GET …/documentos`** (`documentos.ver`): los vigentes de las categorías que la persona puede
+  ver. De las versiones, las `disponible`; las otras, solo las que subió ella.
+- **`GET …/documentos/{id}/versiones/{v}/descargar`** (la lectura de la categoría): 302 a una URL
+  firmada de `VIGENCIA_DESCARGA` segundos, solo si la versión está `disponible` (documento 13
+  §9.2). Nunca hay una URL permanente. Si el objeto ya no está en el almacén (staging lo borra a
+  los 30 días), 410.
 """
 
 import hashlib
+import re
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
 import anyio
+from botocore.exceptions import ClientError
 from cem_contracts.documentos import (
+    ACCION_DE_LECTURA,
+    ACCIONES_DE_CARGA,
     TOPE_BYTES,
+    CategoriaDocumento,
+    DocumentoEnLista,
     DocumentoId,
     DocumentoNuevo,
+    EstadoVersion,
+    ListaDocumentos,
     TipoArchivo,
     VersionCargada,
+    VersionEnLista,
 )
 from cem_contracts.errores import CodigoError
 from fastapi import APIRouter, Depends, Request, Response
+from fastapi.responses import RedirectResponse
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
@@ -43,7 +62,8 @@ from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
 from app.consorcios.padron import Discrepancia
 from app.contexto import MotorDep
-from app.errores import ErrorApi, sin_cache
+from app.db import transaccion
+from app.errores import SIN_CACHE, ErrorApi, sin_cache
 from app.plataforma import almacen, cola
 from app.plataforma.idempotencia import (
     ClaveIdempotenciaDep,
@@ -73,6 +93,10 @@ FIRMAS = (
     (b"\x89PNG\r\n\x1a\n", TipoArchivo.PNG),
 )
 """Los primeros bytes de cada tipo admitido (§3, paso 3)."""
+
+VIGENCIA_DESCARGA = 300
+"""Segundos que vale la URL firmada de una descarga (documento 13 §9.2: 5 minutos)."""
+EXTENSIONES = {TipoArchivo.PDF: ".pdf", TipoArchivo.JPEG: ".jpg", TipoArchivo.PNG: ".png"}
 
 ERRORES = {"no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)}
 """Motivos de las funciones de `0035`. `origen_invalido` lo fija esta ruta: si llega, es un
@@ -106,13 +130,43 @@ def tipo_real(cuerpo: bytes) -> TipoArchivo | None:
     return next((t for firma, t in FIRMAS if cuerpo.startswith(firma)), None)
 
 
+def _verificar_carga(
+    cargar: Permiso, operativos: Permiso, categoria: CategoriaDocumento | None
+) -> None:
+    """Concede si alguna acción de carga de la categoría lo permite; si no, niega y audita con
+    `documentos.cargar`. Sin categoría (todavía no se leyó la del documento), con cualquiera de
+    las dos."""
+    acciones = ACCIONES_DE_CARGA[categoria] if categoria else (cargar.accion, operativos.accion)
+    permisos = [p for p in (cargar, operativos) if p.accion in acciones]
+    if not any(p.decidir(Entidad()).permitido for p in permisos):
+        cargar.verificar(Entidad())  # niega, audita y responde 403
+        raise Discrepancia("el evaluador niega y después concede la carga")
+
+
+def _categoria_para_cargar(motor, ctx, documento_id: UUID) -> CategoriaDocumento:
+    """La categoría del documento, para elegir la acción antes de leer el archivo; 404 si no
+    existe o está borrado."""
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        try:
+            categoria = conn.execute(
+                text("select nucleo.categoria_para_cargar(:d)"), {"d": documento_id}
+            ).scalar_one()
+        except DBAPIError as e:
+            if isinstance(e.orig, InsufficientPrivilege):
+                raise Discrepancia("la base niega la carga y el evaluador la concede") from e
+            raise
+    if categoria is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return CategoriaDocumento(categoria)
+
+
 def _escribir(conn: Connection, sql: str, parametros: dict):
-    """Ejecuta una función de `0035` y traduce sus motivos a errores de la API."""
+    """Ejecuta una función de `0035`/`0036` y traduce sus motivos a errores de la API."""
     try:
         return conn.execute(text(sql), parametros)
     except DBAPIError as e:
         if isinstance(e.orig, InsufficientPrivilege):
-            raise Discrepancia("la base niega documentos.cargar y el evaluador lo concede") from e
+            raise Discrepancia("la base niega la carga y el evaluador la concede") from e
         motivo = e.orig.diag.message_hint
         if motivo in ERRORES:
             raise ErrorApi(*ERRORES[motivo]) from e
@@ -124,16 +178,22 @@ def _escribir(conn: Connection, sql: str, parametros: dict):
     status_code=201,
     response_model=DocumentoId,
     summary="Crear un documento (sin archivos todavía)",
-    responses={403: {"description": "Sin `documentos.cargar` en el consorcio."}},
+    responses={
+        403: {
+            "description": "Sin `documentos.cargar` en el consorcio, ni"
+            " `documentos.cargar_operativos` para una categoría operativa."
+        }
+    },
 )
 def crear_documento(
     nuevo: DocumentoNuevo,
-    permiso: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    ctx = permiso.ctx
-    permiso.verificar(Entidad())
+    ctx = cargar.ctx
+    _verificar_carga(cargar, operativos, nuevo.categoria)
 
     def efecto(conn: Connection) -> tuple[int, DocumentoId]:
         nuevo_id = _escribir(
@@ -182,7 +242,7 @@ async def _leer_con_tope(request: Request) -> bytes:
         }
     },
     responses={
-        403: {"description": "Sin `documentos.cargar` en el consorcio."},
+        403: {"description": "Sin una acción de carga para la categoría del documento."},
         404: {"description": "El documento no existe en este consorcio."},
         408: {"description": "El cuerpo no llegó entero a tiempo: no se guardó nada."},
         413: {"description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."},
@@ -193,12 +253,19 @@ async def _leer_con_tope(request: Request) -> bytes:
 async def subir_version(
     documento_id: UUID,
     request: Request,
-    permiso: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
     clave: ClaveIdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    ctx = permiso.ctx
-    permiso.verificar(Entidad())
+    ctx = cargar.ctx
+
+    def autorizar() -> None:
+        # Lee la categoría y, si niega, audita: las dos van a la base, fuera del bucle de eventos.
+        _verificar_carga(cargar, operativos, None)
+        _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
+
+    await anyio.to_thread.run_sync(autorizar)
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
@@ -256,3 +323,166 @@ async def subir_version(
         return await anyio.to_thread.run_sync(lambda: responder_una_vez(motor, ctx, pedido, efecto))
     finally:
         turnos.release()
+
+
+def _leer(conn: Connection, sql: str, parametros: dict, ver: Permiso):
+    """Una lectura de `0036`. Si la base la niega y el evaluador también, 403 auditado; si el
+    evaluador la concede, es una discrepancia."""
+    try:
+        return conn.execute(text(sql), parametros).mappings().all()
+    except DBAPIError as e:
+        if not isinstance(e.orig, InsufficientPrivilege):
+            raise
+        if ver.decidir(Entidad()).permitido:
+            raise Discrepancia("la base niega leer documentos y el evaluador lo concede") from e
+        ver.verificar(Entidad())  # niega, audita y responde 403
+        raise Discrepancia("el evaluador niega y después concede la lectura") from e
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos",
+    response_model=ListaDocumentos,
+    summary="Los documentos vigentes que la persona puede ver, con sus versiones",
+    responses={403: {"description": "Sin `documentos.ver` en el consorcio (A6: ni I ni O)."}},
+)
+def listar_documentos(
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    motor: MotorDep,
+) -> ListaDocumentos:
+    ctx = ver.ctx
+    ver.verificar(Entidad())
+    puede = {
+        ver.accion: True,
+        restringidos.accion: restringidos.decidir(Entidad()).permitido,
+    }
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        filas = _leer(
+            conn,
+            "select documento_id, categoria, titulo, fecha, cargado_en, version_id, estado,"
+            " motivo_rechazo, tipo, tamano, sha256, subida_en"
+            " from nucleo.documentos_del_consorcio()",
+            {},
+            ver,
+        )
+    documentos: dict[UUID, DocumentoEnLista] = {}
+    for f in filas:
+        categoria = CategoriaDocumento(f["categoria"])
+        # La base filtra por el vínculo o la facultad; el modo y el recurso, el evaluador.
+        if not puede[ACCION_DE_LECTURA[categoria]]:
+            continue
+        d = documentos.get(f["documento_id"])
+        if d is None:
+            d = documentos[f["documento_id"]] = DocumentoEnLista(
+                id=f["documento_id"], categoria=categoria, titulo=f["titulo"],
+                fecha=f["fecha"], cargado_en=f["cargado_en"], versiones=[],
+            )  # fmt: skip
+        if f["version_id"] is not None:
+            d.versiones.append(
+                VersionEnLista(
+                    id=f["version_id"], estado=f["estado"], motivo_rechazo=f["motivo_rechazo"],
+                    tipo=f["tipo"], tamano=f["tamano"], sha256=f["sha256"],
+                    subida_en=f["subida_en"],
+                )
+            )  # fmt: skip
+    return ListaDocumentos(documentos=list(documentos.values()))
+
+
+def _disposicion(titulo: str, tipo: TipoArchivo) -> str:
+    """`attachment` con el título como nombre: una versión ASCII y la original en UTF-8
+    (RFC 6266)."""
+    nombre = titulo + EXTENSIONES[tipo]
+    ascii_ = re.sub(r"[^A-Za-z0-9 ._-]", "_", nombre)
+    return f"attachment; filename=\"{ascii_}\"; filename*=UTF-8''{quote(nombre, safe='')}"
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
+    responses={
+        302: {"description": "`Location` es la URL firmada del almacén; vence a los 5 minutos."},
+        403: {"description": "Sin `documentos.ver` en el consorcio."},
+        404: {
+            "description": "La versión o el documento no existen en este consorcio, o su"
+            " categoría es restringida y la persona no tiene la facultad `documentos.ver`."
+        },
+        409: {
+            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"
+            " a otros, 404)."
+        },
+        410: {"description": "El archivo ya no está en el almacén (staging, a los 30 días)."},
+    },
+)
+def descargar_version(
+    documento_id: UUID,
+    version_id: UUID,
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    motor: MotorDep,
+) -> RedirectResponse:
+    ctx = ver.ctx
+    ver.verificar(Entidad())
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        try:
+            filas = conn.execute(
+                text(
+                    "select categoria, estado, tipo, clave_objeto, version_objeto, titulo, propia"
+                    " from nucleo.version_para_descargar(:d, :v)"
+                ),
+                {"d": documento_id, "v": version_id},
+            ).mappings().all()  # fmt: skip
+        except DBAPIError as e:
+            if not isinstance(e.orig, InsufficientPrivilege):
+                raise
+            if e.orig.diag.message_hint != "categoria_restringida":
+                if ver.decidir(Entidad()).permitido:
+                    raise Discrepancia(
+                        "la base niega leer documentos y el evaluador lo concede"
+                    ) from e
+                ver.verificar(Entidad())  # niega, audita y responde 403
+                raise Discrepancia("el evaluador niega y después concede la lectura") from e
+            # La base niega la categoría restringida: el evaluador decide y, para no revelar
+            # que el documento existe, responde 404.
+            if restringidos.decidir(Entidad()).permitido:
+                raise Discrepancia(
+                    "la base niega una categoría restringida y el evaluador la concede"
+                ) from e
+            restringidos.verificar(Entidad(), estado_negado=404)
+            raise Discrepancia("el evaluador niega y después concede la lectura") from e
+    if not filas:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    f = filas[0]
+    if ACCION_DE_LECTURA[CategoriaDocumento(f["categoria"])] == restringidos.accion:
+        restringidos.verificar(Entidad(), estado_negado=404)
+    if f["estado"] != EstadoVersion.DISPONIBLE and not f["propia"]:
+        # La de otro, en cuarentena o rechazada: la lista no se la muestra, la descarga tampoco.
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    if f["estado"] != EstadoVersion.DISPONIBLE:
+        raise ErrorApi(
+            409,
+            CodigoError.VERSION_NO_DISPONIBLE,
+            "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
+        )
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
+    s3 = origen.cliente()
+    objeto = {"Bucket": origen.bucket, "Key": f["clave_objeto"]}
+    if f["version_objeto"]:
+        objeto["VersionId"] = f["version_objeto"]
+    try:
+        s3.head_object(**objeto)
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey", "NoSuchVersion"):
+            raise
+        raise ErrorApi(
+            410, CodigoError.ARCHIVO_VENCIDO, "Este archivo ya no está disponible."
+        ) from e
+    tipo = TipoArchivo(f["tipo"])
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params=objeto | {"ResponseContentType": tipo.value,
+                         "ResponseContentDisposition": _disposicion(f["titulo"], tipo)},
+        ExpiresIn=VIGENCIA_DESCARGA,
+    )  # fmt: skip
+    return RedirectResponse(url, status_code=302, headers=SIN_CACHE)

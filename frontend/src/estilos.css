@@ -286,6 +286,35 @@ button:focus-visible {
   padding: 0.5rem 0.75rem;
 }
 
+/* Documentos: los archivos de cada documento, uno por renglón, y «Descargar» con el área táctil
+   de 44 px de un botón (es un enlace: el navegador sigue la redirección y descarga). */
+.versiones {
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.versiones li + li {
+  margin-top: 0.5rem;
+}
+
+.enlace-boton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--azul);
+  border-radius: 0.5rem;
+  color: var(--azul);
+  font-weight: 600;
+}
+
+.enlace-boton:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
 /* Móvil (≤ 480 px = 30em): tarjetas con menos relleno, nunca texto más chico, y el botón de envío
    de los formularios de /invitaciones y /mandatos a todo el ancho. */
 @media (max-width: 30em) {

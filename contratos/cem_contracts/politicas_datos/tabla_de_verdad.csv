@@ -430,3 +430,15 @@ RF05,coeficientes.ver_propia_unidad,MC,C,unidad:3A,vigente,si,,403,sin_concesion
 2b-7,contactos.gestionar,AE,C,,vigente,si,,403,sin_concesion,el administrador externo no recibe la facultad (solo carga)
 2b-7,contactos.gestionar,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo no se gestiona
 2b-7,contactos.gestionar,P+MC,C,,vencido,si,,403,sin_concesion,con el mandato de Consejo vencido no gestiona
+2c-2,documentos.ver_restringidos,P,C,,sin_mandato,si,,403,sin_concesion,el propietario no ve contratos ni otros por su vínculo
+2c-2,documentos.ver_restringidos,P+Fac(documentos.ver),C,,vigente,si,,200,concedido_por_facultad,control: el mismo propietario con la facultad los ve
+2c-2,documentos.ver_restringidos,I,AA,,sin_mandato,si,,403,sin_concesion,el inquilino no ve documentos comunes (A6)
+2c-2,documentos.ver_restringidos,MC,C,,vigente,si,,200,concedido_por_facultad,el Consejo con documentos.ver
+2c-2,documentos.ver_restringidos,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración con documentos.ver
+2c-2,documentos.ver_restringidos,AE,C,,vigente,si,,403,sin_concesion,el administrador externo solo carga
+2c-2,documentos.ver_restringidos,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo no corre
+2c-2,documentos.cargar_operativos,MC,C,,vigente,si,,200,concedido_por_facultad,el Consejo carga actas y presupuestos y mantenimiento
+2c-2,documentos.cargar_operativos,AD,AA,,vigente,si,,403,sin_concesion,la administración carga con documentos.cargar
+2c-2,documentos.cargar_operativos,AE,C,,vigente,si,,403,sin_concesion,el administrador externo carga con documentos.cargar
+2c-2,documentos.cargar_operativos,P,C,,sin_mandato,si,,403,sin_concesion,el propietario no carga
+2c-2,documentos.cargar_operativos,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo no corre

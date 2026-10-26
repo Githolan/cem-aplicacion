@@ -130,12 +130,20 @@ ADICIONES_0031 = {
     "administrador": ["contactos.gestionar"],
     "administrador_externo": [],
 }
+# `0036` (2c-2): carga de actas, presupuestos y mantenimiento, solo para MC.
+CATALOGO |= {"documentos.cargar_operativos": False}
+ADICIONES_0036 = {
+    "miembro_consejo": ["documentos.cargar_operativos"],
+    "administrador": [],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
     + ADICIONES_0018[tipo]
     + ADICIONES_0028[tipo]
     + ADICIONES_0031[tipo]
+    + ADICIONES_0036[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

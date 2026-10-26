@@ -5,10 +5,12 @@
 --
 --   psql "$URL_SUPERUSUARIO" -v base=cem \
 --     -v clave_migrate="$CLAVE_MIGRATE" -v clave_app="$CLAVE_APP" -v clave_ro="$CLAVE_RO" \
---     -v clave_backup="$CLAVE_BACKUP" -f scripts/crear_roles.sql
+--     -v clave_backup="$CLAVE_BACKUP" \
+--     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" -f scripts/crear_roles.sql
 --
 -- Es idempotente: no toca roles ni bases que ya existen. En un servidor creado antes de las
--- copias, volver a correrlo solo agrega cem_backup.
+-- copias, volver a correrlo solo agrega cem_backup. El rol de soporte de documentos (2c-2) está
+-- en su propio archivo, para crearlo solo en un servidor que ya existe.
 
 \set ON_ERROR_STOP on
 
@@ -46,3 +48,11 @@ where not exists (select 1 from pg_database where datname = :'base') \gexec
 
 revoke all on database :"base" from public;
 grant connect on database :"base" to cem_app, cem_ro, cem_backup;
+
+-- Sin `clave_soporte_documentos` (volver a correrlo en un servidor que ya existe, como para
+-- agregar cem_backup), no se toca ese rol.
+\if :{?clave_soporte_documentos}
+\ir crear_rol_soporte_documentos.sql
+\else
+\echo 'sin clave_soporte_documentos: cem_soporte_documentos no se crea (crear_rol_soporte_documentos.sql)'
+\endif
