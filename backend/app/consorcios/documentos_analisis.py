@@ -58,6 +58,10 @@ ANTIGUEDAD_HUERFANO = timedelta(days=1)
 """Un objeto sin fila más viejo que esto quedó de una carga que no confirmó; ninguna carga en
 curso dura tanto."""
 LOTE_CLAVES = 1000
+TOPE_HUERFANOS = 20
+"""Más objetos sin fila que esto en una corrida no son cargas fallidas sino una base atrasada o
+equivocada (una restauración a un momento anterior, otra base): la tarea falla sin borrar
+nada."""
 
 
 class FirmasViejas(RuntimeError):
@@ -201,7 +205,11 @@ def borrar_rechazado(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 def limpiar_huerfanos(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     """Borra los objetos de `cem/` que no tienen fila en la base y tienen más de
     `ANTIGUEDAD_HUERFANO`: quedaron de una carga cuya transacción no confirmó después de subir
-    (nunca se analizaron ni se van a servir). Con versiones, borra todas las del objeto."""
+    (nunca se analizaron ni se van a servir).
+
+    Es un borrado simple, sin `VersionId`: en un bucket con versiones (producción) la versión
+    queda 35 días por la regla del bucket y se puede recuperar si la base estaba atrasada. Con más
+    de `TOPE_HUERFANOS` no borra nada y falla."""
     origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
     s3 = origen.cliente()
     limite = datetime.now(UTC) - ANTIGUEDAD_HUERFANO
@@ -219,15 +227,13 @@ def limpiar_huerfanos(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]
             ).scalars()
         )
     huerfanas = [c for c in candidatas if c not in registradas]
-    con_versiones = s3.get_bucket_versioning(Bucket=origen.bucket).get("Status") == "Enabled"
+    if len(huerfanas) > TOPE_HUERFANOS:
+        raise RuntimeError(
+            f"{len(huerfanas)} objetos sin fila (tope {TOPE_HUERFANOS}): ¿la base está atrasada?"
+            " No se borra nada."
+        )
     for clave in huerfanas:
-        if not con_versiones:
-            s3.delete_object(Bucket=origen.bucket, Key=clave)
-            continue
-        listado = s3.list_object_versions(Bucket=origen.bucket, Prefix=clave)
-        for x in listado.get("Versions", []) + listado.get("DeleteMarkers", []):
-            if x["Key"] == clave:
-                s3.delete_object(Bucket=origen.bucket, Key=clave, VersionId=x["VersionId"])
+        s3.delete_object(Bucket=origen.bucket, Key=clave)
     if huerfanas:
         log.warning("objetos sin fila borrados", extra={"cantidad": len(huerfanas)})
     return {"revisadas": len(candidatas), "borradas": len(huerfanas)}

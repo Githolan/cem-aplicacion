@@ -703,10 +703,31 @@ def test_la_limpieza_borra_solo_los_objetos_sin_fila(escena, bucket_con_versione
     with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
         r = documentos_analisis.limpiar_huerfanos(c, None)
     assert r["borradas"] == 1 and r["revisadas"] >= 2
+    assert not existe(bucket_con_versiones, huerfana)
+    # Borrado simple: las dos versiones siguen recuperables (quedan hasta la regla de 35 días).
     listado = s3.list_object_versions(Bucket=bucket_con_versiones, Prefix=huerfana)
-    assert listado.get("Versions", []) == [] and listado.get("DeleteMarkers", []) == []
+    assert len(listado.get("Versions", [])) == 2
     # Control: la registrada y lo que está fuera de `cem/` siguen.
     assert existe(bucket_con_versiones, registrada) and existe(bucket_con_versiones, fuera)
+
+
+def test_con_demasiados_huerfanos_la_limpieza_no_borra_nada(escena, bucket, motor_app,
+                                                           monkeypatch):  # fmt: skip
+    """Una base atrasada (una restauración) vería como huérfanos a documentos reales."""
+    e = escena
+    claves = [f"cem/{e['cons']}/{uuid4()}/{uuid4()}" for _ in range(3)]
+    for clave in claves:
+        _s3().put_object(Bucket=bucket, Key=clave, Body=pdf())
+    monkeypatch.setattr(documentos_analisis, "ANTIGUEDAD_HUERFANO", timedelta(0))
+    monkeypatch.setattr(documentos_analisis, "TOPE_HUERFANOS", 2)
+    with pytest.raises(RuntimeError, match="No se borra nada"):
+        with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
+            documentos_analisis.limpiar_huerfanos(c, None)
+    assert all(existe(bucket, clave) for clave in claves)
+    monkeypatch.setattr(documentos_analisis, "TOPE_HUERFANOS", 3)  # control: dentro del tope
+    with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
+        assert documentos_analisis.limpiar_huerfanos(c, None)["borradas"] == 3
+    assert not any(existe(bucket, clave) for clave in claves)
 
 
 def test_la_limpieza_respeta_la_antiguedad(escena, bucket, motor_app, motor_migrate):
