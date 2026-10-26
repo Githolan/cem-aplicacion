@@ -143,6 +143,10 @@ class CodigoError(StrEnum):
     """Desde hoy hasta el día en que rige la revisión, la persona no cumple sin interrupción una
     condición habilitante para integrar el Consejo (E62)."""
 
+    CONTACTO_TERMINADO = "contacto_terminado"
+    """El contacto de emergencia ya no está vigente: no se corrige, verifica ni señala; se agrega
+    otro (2b-7)."""
+
 
 class Error(BaseModel):
     codigo: CodigoError

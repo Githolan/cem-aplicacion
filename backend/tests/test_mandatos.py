@@ -34,6 +34,7 @@ DESDE = date(2026, 1, 1)
 PAQUETE_CONSEJO = sorted(
     [
         "auditoria.ver",
+        "contactos.gestionar",
         "decisiones.registrar",
         "decisiones.ver",
         "documentos.ver",

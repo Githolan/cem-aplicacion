@@ -724,7 +724,8 @@
           "mandato_no_pendiente",
           "eficaz_desde_invalida",
           "revision_duplicada",
-          "sin_condicion_habilitante"
+          "sin_condicion_habilitante",
+          "contacto_terminado"
         ],
         "title": "CodigoError",
         "type": "string"

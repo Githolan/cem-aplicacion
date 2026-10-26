@@ -123,11 +123,19 @@ ADICIONES_0028 = {
     "administrador": ["auditoria.ver"],
     "administrador_externo": [],
 }
+# `0031` (2b-7): gestión de los contactos de emergencia, para MC y AD, no AE.
+CATALOGO |= {"contactos.gestionar": False}
+ADICIONES_0031 = {
+    "miembro_consejo": ["contactos.gestionar"],
+    "administrador": ["contactos.gestionar"],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
     + ADICIONES_0018[tipo]
     + ADICIONES_0028[tipo]
+    + ADICIONES_0031[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

@@ -1,0 +1,40 @@
+{
+  "politicas": [
+    {
+      "accion": "contactos.ver",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": true,
+      "facultad": null,
+      "modos": [
+        "consejo",
+        "administrador_aumentado",
+        "autogestion"
+      ],
+      "sin_modo": true,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF06; D5; decisión del propietario del 25-10-2026 (§1.1): todos los que tienen acceso válido al consorcio consultan los contactos de emergencia publicados, solo los que no son personales; documento 08 §12 (se muestran también con conexión limitada)"
+    },
+    {
+      "accion": "contactos.gestionar",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "contactos.gestionar",
+      "modos": [
+        "consejo",
+        "administrador_aumentado",
+        "autogestion"
+      ],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "RF06; D5 (la administración o el Consejo cargan y mantienen); decisión del propietario del 25-10-2026 (§1.1): facultad mínima para la administración y el Consejo, por el sistema de facultades"
+    }
+  ]
+}

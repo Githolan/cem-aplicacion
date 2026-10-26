@@ -29,6 +29,7 @@ def test_todos_los_archivos_validan_y_hay_uno_por_modulo():
     assert nombres == {
         "consorcios", "invitaciones", "padron", "mandatos", "fiscalizacion",
         "documentos", "liquidacion", "egresos", "fondo_reserva", "coeficientes", "auditoria",
+        "contactos",
     }  # fmt: skip
     for ruta in archivos():
         ArchivoPoliticas.model_validate(json.loads(ruta.read_text(encoding="utf-8")))

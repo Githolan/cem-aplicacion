@@ -6,6 +6,7 @@ from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.auditoria import router as auditoria
 from app.consorcios.coeficientes import router as coeficientes
+from app.consorcios.contactos import router as contactos
 from app.consorcios.importacion import router as importacion
 from app.consorcios.mandatos import router as mandatos
 from app.consorcios.mandatos_invitaciones import router as mandatos_invitaciones
@@ -64,5 +65,6 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(mandatos)
     app.include_router(auditoria)
     app.include_router(mandatos_invitaciones)
+    app.include_router(contactos)
     app.include_router(soporte)
     return app
