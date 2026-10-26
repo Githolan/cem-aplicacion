@@ -612,17 +612,18 @@ def test_sin_content_length_el_contador_corta_al_pasar_el_tope(escena, bucket, m
     assert r.json()["tamano"] == len(base)
 
 
-def test_si_el_objeto_ya_no_esta_la_version_queda_rechazada(escena, bucket, motor_app,
-                                                            motor_migrate):  # fmt: skip
-    """Un borrado que no llegó a confirmar (o un objeto que falta) no deja la versión en
-    cuarentena para siempre: se resuelve como `no_coincide`."""
+def test_si_el_objeto_no_esta_el_trabajo_falla_y_la_version_sigue_en_cuarentena(
+    escena, bucket, motor_app, motor_migrate
+):
+    """Un objeto ausente (o una clave que no llega a él) no se resuelve en silencio: el trabajo
+    falla con el error del almacén y se reintenta; Kuma avisa si se demora."""
     e = escena
     v = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
     _s3().delete_object(Bucket=bucket, Key=version(motor_migrate, v)["clave_objeto"])
     assert analizar(motor_app) == 1
-    fila = version(motor_migrate, v)
-    assert (fila["estado"], fila["motivo_rechazo"]) == ("rechazado", "no_coincide")
-    assert [t[0] for t in trabajos(motor_migrate)] == ["hecho"]
+    assert version(motor_migrate, v)["estado"] == "en_cuarentena"
+    [(estado, intentos, error)] = trabajos(motor_migrate)
+    assert (estado, intentos) == ("pendiente", 1) and "NoSuchKey" in error
 
 
 def test_un_archivo_que_no_coincide_con_lo_cargado_queda_rechazado(escena, bucket, motor_app,

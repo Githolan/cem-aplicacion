@@ -5886,6 +5886,9 @@
           "404": {
             "description": "El documento no existe en este consorcio."
           },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
           "413": {
             "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
           },

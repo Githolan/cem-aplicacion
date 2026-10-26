@@ -601,4 +601,5 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Conocido, sin resolver en este corte:**
      - si la subida sale bien y falla algo después (el commit, por ejemplo), el objeto queda en el bucket sin fila; nunca se sirve y la clave de documentos no puede borrarlo;
      - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
+     - el análisis borra el objeto de un rechazado antes de confirmar su transacción: si después pierde la reserva o falla el commit, la versión vuelve a cuarentena sin objeto, el trabajo falla por `NoSuchKey` hasta quedar `muerto` y Kuma avisa (un objeto ausente nunca se resuelve en silencio, porque una clave mal configurada se vería igual);
      - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial.
