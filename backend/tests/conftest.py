@@ -33,6 +33,7 @@ CLAVES = {
     "app": "app_prueba",
     "ro": "ro_prueba",
     "backup": "backup_prueba",
+    "soporte_documentos": "soporte_documentos_prueba",
 }
 
 
@@ -66,6 +67,7 @@ def base_de_prueba() -> None:
             "-v", f"clave_app={CLAVES['app']}",
             "-v", f"clave_ro={CLAVES['ro']}",
             "-v", f"clave_backup={CLAVES['backup']}",
+            "-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
             "-f", str(RAIZ / "scripts" / "crear_roles.sql"),
         ],
         check=True,
