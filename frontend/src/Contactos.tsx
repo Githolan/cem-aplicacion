@@ -128,16 +128,18 @@ export function Contactos() {
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/contactos", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
-        // Un 401 vale aunque la respuesta llegue tarde: la sesión ya no está.
+        // Un 401, un 403 o un 404 valen aunque la respuesta llegue tarde (otro edificio elegido, o
+        // la página cerrada): la sesión o el acceso ya no están, y la copia se borra igual. Solo la
+        // pantalla queda detrás del guarda.
         exigirSesion(response);
+        const negado = response.status === ESTADO.sinPermiso || response.status === ESTADO.noEncontrado;
+        if (negado) borrarCopia(consorcio);
         if (!vigente) return;
         if (data !== undefined) {
           const copia: Copia = { consorcio_id: consorcio, nombre, guardada_en: new Date().toISOString(), lista: data };
           setLectura({ tipo: "en_linea", copia, guardada: guardarCopia(copia) });
-        } else if (response.status === ESTADO.sinPermiso || response.status === ESTADO.noEncontrado) {
-          borrarCopia(consorcio);
-          setLectura({ tipo: "sin_permiso" });
-        } else sinRed(mensajeDeFalla(response.status, codigoDe(error)));
+        } else if (negado) setLectura({ tipo: "sin_permiso" });
+        else sinRed(mensajeDeFalla(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();

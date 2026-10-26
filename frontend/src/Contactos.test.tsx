@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -283,6 +283,32 @@ describe("página /contactos: lo que no tiene que pasar", () => {
     expect(await nombres()).toEqual(["Emergencias: Plomería del Verde"]);
     // Control: la respuesta tardía no se muestra, pero sí se guarda la copia del verde.
     expect((copiaGuardada(C2) as { lista: Lista }).lista).toEqual(verde);
+  });
+
+  it("un 403 que llega tarde, con otro edificio ya elegido, igual borra la copia del negado", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    let soltarAzul: (r: Response) => void = () => undefined;
+    const azul = new Promise<Response>((r) => {
+      soltarAzul = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+        [`GET ${RUTA(C1)}`]: () => azul,
+        [`GET ${RUTA(C2)}`]: () => Response.json(LISTA),
+      }),
+    );
+    abrir();
+    fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });
+    await nombres();
+    // Control: hasta que llega la negación, la copia del azul sigue.
+    expect(copiaGuardada(C1)).not.toBeNull();
+    soltarAzul(error("sin_permiso", 403));
+    await waitFor(() => expect(copiaGuardada(C1)).toBeNull());
+    // La pantalla sigue en el verde.
+    expect(screen.queryByText("No tenés acceso a los contactos de este edificio.")).toBeNull();
   });
 
   it("si el navegador no deja guardar, lo dice y no deja la copia vieja", async () => {
