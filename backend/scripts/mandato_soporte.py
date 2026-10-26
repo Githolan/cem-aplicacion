@@ -3,8 +3,10 @@
 Solo cuando el flujo de cuatro ojos de la aplicación no es viable (por ejemplo, todavía no hay
 dos personas con `mandatos.registrar` en el consorcio). Lleva la misma referencia obligatoria
 que la aplicación y, además, el motivo de por qué no hubo cuatro ojos; los dos quedan en la
-fila, no en la auditoría, que registra el origen `soporte`. Corre dentro del contenedor de
-`cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`, sujeto a la RLS) y su `CEM_ORIGEN_PUBLICO`:
+fila, con el origen `soporte`. Soporte no escribe eventos de auditoría funcional (decisión del
+propietario del 26-10-2026, corte S2a); aceptar la invitación, que hace la persona, sí. Corre
+dentro del contenedor de `cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`, sujeto a la RLS)
+y su `CEM_ORIGEN_PUBLICO`:
 
     python -m scripts.mandato_soporte invitar --consorcio <uuid> --mandato <uuid> \\
         --correo admin@estudio.com --referencia "Contrato del 01-10" --motivo "Un solo MC"

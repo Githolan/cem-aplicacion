@@ -769,6 +769,30 @@ def test_soporte_emite_y_aprueba_en_un_paso_con_motivo(
     assert [x for x in eventos(motor_migrate, e["cons"]) if x["origen"] == "soporte"] == []
 
 
+def test_el_reemplazo_por_soporte_sin_evento_y_por_la_api_con_evento(
+    motor_migrate,
+    escena,
+    monkeypatch,
+):
+    """S2a (0033): la invitación de soporte que reemplaza una pendiente no escribe el evento de
+    reemplazo. Control: una emisión por la API que reemplaza la de soporte sí lo escribe."""
+    e = escena
+    monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
+    monkeypatch.setenv("CEM_ORIGEN_PUBLICO", "https://cem.ejemplo.com")
+    assert emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).status_code == 201
+    argumentos = ["invitar", "--consorcio", str(e["cons"]), "--mandato", str(e["ae"]),
+                  "--correo", correo_nuevo(), "--referencia", REFERENCIA,
+                  "--motivo", "Un solo miembro del Consejo"]  # fmt: skip
+    assert mandato_soporte.main(argumentos) == 0
+    reemplazos = [x for x in eventos(motor_migrate, e["cons"])
+                  if x["accion"] == "consorcio.mandato.reemplazar_invitacion"]  # fmt: skip
+    assert reemplazos == []
+    assert emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).status_code == 201
+    reemplazos = [x["origen"] for x in eventos(motor_migrate, e["cons"])
+                  if x["accion"] == "consorcio.mandato.reemplazar_invitacion"]  # fmt: skip
+    assert reemplazos == ["api"]
+
+
 def test_soporte_revoca_sin_evento_y_la_api_con_evento(motor_migrate, escena):
     """S2a (0033): soporte revoca la invitación sin escribir un evento; la constancia es
     `revocada_en`. Control: la emisión y una revocación por la API sí dejan el suyo."""

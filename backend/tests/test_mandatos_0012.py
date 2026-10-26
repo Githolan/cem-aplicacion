@@ -480,9 +480,10 @@ def test_baja_ordinaria_corta_hoy_revoca_y_no_admite_otra(escena, motor_migrate,
 
 
 def test_error_carga_por_soporte_no_escribe_evento(escena, motor_migrate, motor_app):
-    """S2a (0033): la baja por `error_carga` de soporte corrige una carga suya y no escribe
-    evento; la constancia es `causa_baja` e `instrumento_referencia` en la fila. Controles: la
-    misma causa por la API y una renuncia registrada por soporte (clase B, S2b) sí lo escriben."""
+    """S2a (0033): la baja por `error_carga` hecha por soporte (cualquiera haya cargado el
+    mandato) no escribe evento; la constancia es `causa_baja` e `instrumento_referencia` en la
+    fila. Controles: la misma causa por la API y una renuncia registrada por soporte (clase B,
+    S2b) sí lo escriben."""
     e = escena
 
     def eventos_de(m):
