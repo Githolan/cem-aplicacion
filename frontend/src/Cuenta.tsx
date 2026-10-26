@@ -56,7 +56,12 @@ export function Cuenta() {
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const consultado = useRef(false);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  // Toda salida a /entrar (salir, cerrar la sesión actual o una sesión vencida) borra las copias de
+  // los contactos (H2b_7 §5).
+  const aEntrar = useCallback(() => {
+    borrarCopias();
+    navegar(RUTA_ENTRAR, { replace: true });
+  }, [navegar]);
 
   /** Ante un error: sin sesión, a /entrar; si no, el aviso de conexión. */
   const atajar = useCallback(
@@ -164,8 +169,6 @@ export function Cuenta() {
       .then(({ response }) => {
         exigirSesion(response);
         if (!response.ok) throw new Error(String(response.status));
-        // Al salir no queda ninguna copia de los contactos (H2b_7 §5).
-        borrarCopias();
         aEntrar();
       })
       .catch(atajar)

@@ -30,7 +30,10 @@ function almacen(): Storage | null {
   }
 }
 
-/** Guarda la lista general recién leída; devuelve false si este navegador no deja guardarla. */
+/**
+ * Guarda la lista general recién leída; devuelve false si este navegador no deja guardarla. Si no
+ * se pudo guardar, la copia anterior se borra: nunca queda una lista vieja como si fuera la última.
+ */
 export function guardarCopia(copia: Copia): boolean {
   const a = almacen();
   if (a === null) return false;
@@ -38,6 +41,7 @@ export function guardarCopia(copia: Copia): boolean {
     a.setItem(PREFIJO_COPIA + copia.consorcio_id, JSON.stringify(copia));
     return true;
   } catch {
+    borrarCopia(copia.consorcio_id);
     return false;
   }
 }
@@ -73,7 +77,22 @@ export function leerCopias(): Copia[] {
 
 /** Al salir de la cuenta, o con la sesión vencida: no queda ninguna copia. */
 export function borrarCopias() {
-  for (const c of leerCopias()) borrarCopia(c.consorcio_id);
+  conservarSolo([]);
+}
+
+/** Borra las copias de los edificios que no están en `ids` (la lista que acaba de dar la API). */
+export function conservarSolo(ids: string[]) {
+  const a = almacen();
+  if (a === null) return;
+  const quedan = new Set(ids);
+  try {
+    for (let i = a.length - 1; i >= 0; i--) {
+      const clave = a.key(i);
+      if (clave?.startsWith(PREFIJO_COPIA) && !quedan.has(clave.slice(PREFIJO_COPIA.length))) a.removeItem(clave);
+    }
+  } catch {
+    // Sin acceso al almacenamiento no hay copia que borrar.
+  }
 }
 
 function interpretar(texto: string | null): Copia | null {
@@ -83,12 +102,29 @@ function interpretar(texto: string | null): Copia | null {
     const ok =
       typeof c.consorcio_id === "string" &&
       typeof c.nombre === "string" &&
-      typeof c.guardada_en === "string" &&
+      esFecha(c.guardada_en) &&
       Array.isArray(c.lista?.elementos) &&
-      typeof c.lista?.zona_horaria === "string";
+      (c.lista?.actualizada_en === null || esFecha(c.lista?.actualizada_en)) &&
+      esZona(c.lista?.zona_horaria);
     return ok ? (c as Copia) : null;
   } catch {
     return null;
+  }
+}
+
+// Una entrada dañada no puede tirar la página de emergencia: una fecha o una zona inválidas la
+// descartan al leerla, en vez de lanzar al mostrarla.
+function esFecha(v: unknown): v is string {
+  return typeof v === "string" && !Number.isNaN(Date.parse(v));
+}
+
+function esZona(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: v });
+    return true;
+  } catch {
+    return false;
   }
 }
 

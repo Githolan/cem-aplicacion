@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -160,7 +160,9 @@ describe("página /contactos", () => {
     vi.stubGlobal(
       "fetch",
       backend({
-        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        // Los dos edificios siguen en la cuenta: la copia de C2 no se poda por eso.
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
         [`GET ${RUTA(C1)}`]: () => error(codigo, estado),
       }),
     );
@@ -187,7 +189,7 @@ describe("página /contactos", () => {
     abrir();
     // `vigente_hasta` es exclusivo: el 1-11 la guardia de gas ya no figura.
     expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur"]);
-    expect(screen.getByText(/^Sin conexión: esta es la copia guardada el /)).toBeTruthy();
+    expect(screen.getByText(/Esta es la copia guardada el /)).toBeTruthy();
   });
 
   it("control: el día anterior al fin, sin conexión, el contacto se muestra", async () => {
@@ -206,14 +208,107 @@ describe("página /contactos", () => {
     );
     abrir();
     expect(await nombres()).toHaveLength(2);
-    expect(screen.getByText(/^Sin conexión: esta es la copia guardada el /)).toBeTruthy();
+    expect(screen.getByText(/Esta es la copia guardada el /)).toBeTruthy();
   });
 
   it("sin conexión y sin copia lo dice, sin inventar una lista", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": sinRed }));
     abrir();
-    expect(await screen.findByText(/este dispositivo no tiene contactos guardados/)).toBeTruthy();
+    expect(await screen.findByText(/Este dispositivo no tiene contactos guardados/)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
+  });
+});
+
+describe("página /contactos: lo que no tiene que pasar", () => {
+  it("un 401 en la lista del edificio borra todas las copias y manda a /entrar", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    guardar(C2, "Edificio Verde", LISTA);
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        [`GET ${RUTA(C1)}`]: () => error("no_autenticado", 401),
+      }),
+    );
+    abrir();
+    expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
+    expect([copiaGuardada(C1), copiaGuardada(C2)]).toEqual([null, null]);
+  });
+
+  it("la copia de un edificio que ya no figura se borra, aunque otro siga", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    guardar(C2, "Edificio Verde", LISTA);
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
+      }),
+    );
+    abrir();
+    await nombres();
+    expect(copiaGuardada(C2)).toBeNull();
+    // Control: la del edificio que sigue queda, recién guardada.
+    expect(copiaGuardada(C1)).not.toBeNull();
+  });
+
+  it("si el servicio está caído (503), muestra la copia y no una lista vacía", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => new Response("", { status: 503 }) }));
+    abrir();
+    expect(await nombres()).toHaveLength(2);
+    expect(screen.getByText(/^El servicio no está disponible/).textContent).toMatch(/Esta es la copia guardada el /);
+  });
+
+  it("al cambiar de edificio, una respuesta vieja que llega tarde no pisa la nueva", async () => {
+    let soltarAzul: (r: Response) => void = () => undefined;
+    const azul = new Promise<Response>((r) => {
+      soltarAzul = r;
+    });
+    const verde = { ...LISTA, elementos: [contacto(K1, "Plomería del Verde")] };
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+        [`GET ${RUTA(C1)}`]: () => azul,
+        [`GET ${RUTA(C2)}`]: () => Response.json(verde),
+      }),
+    );
+    abrir();
+    fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await nombres()).toEqual(["Emergencias: Plomería del Verde"]);
+    soltarAzul(Response.json(LISTA));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await nombres()).toEqual(["Emergencias: Plomería del Verde"]);
+    // Control: la respuesta tardía no se muestra, pero sí se guarda la copia del verde.
+    expect((copiaGuardada(C2) as { lista: Lista }).lista).toEqual(verde);
+  });
+
+  it("si el navegador no deja guardar, lo dice y no deja la copia vieja", async () => {
+    guardar(C1, "Edificio Azul", { ...LISTA, elementos: [contacto(K2, "Lista vieja")] });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("lleno", "QuotaExceededError");
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
+      }),
+    );
+    abrir();
+    expect(await screen.findByText(/Este navegador no deja guardar la lista/)).toBeTruthy();
+    expect(copiaGuardada(C1)).toBeNull();
+  });
+
+  it("una copia dañada (zona o fecha inválidas) se descarta sin romper la página", async () => {
+    guardar(C1, "Edificio Azul", { ...LISTA, zona_horaria: "Zona/Inexistente" });
+    guardar(C2, "Edificio Verde", LISTA, "no es una fecha");
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": sinRed }));
+    abrir();
+    expect(await screen.findByText(/Este dispositivo no tiene contactos guardados/)).toBeTruthy();
+    expect([copiaGuardada(C1), copiaGuardada(C2)]).toEqual([null, null]);
   });
 });
 

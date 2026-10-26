@@ -2,15 +2,26 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
-import { borrarCopia, borrarCopias, type Contacto, type Copia, guardarCopia, hoyEn, leerCopias, vigentes } from "./copiaContactos";
+import {
+  borrarCopia,
+  borrarCopias,
+  conservarSolo,
+  type Contacto,
+  type Copia,
+  guardarCopia,
+  hoyEn,
+  leerCopias,
+  vigentes,
+} from "./copiaContactos";
 import { RUTA_ENTRAR } from "./enlace";
-import { codigoDe, esDeConexion, mensajeDeFalla } from "./fallas";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Página /contactos (H2b 2b-7b; doc/diseno/H2b_7_Diseno.md §5 del repositorio CEM): los contactos
 // de emergencia vigentes del edificio, que no son personales, para tenerlos a mano también sin
-// conexión. Cada lectura buena reemplaza la copia del edificio; un 401, 403 o 404 la borra. Sin
-// conexión se muestra la copia con su fecha, volviendo a aplicar la vigencia con el día del
-// consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
+// conexión. Cada lectura buena reemplaza la copia del edificio; un 403 o 404 la borra, y un 401
+// borra todas. La lista de edificios descarta las copias de los que ya no figuran. Si la API no
+// responde (sin red o caída), se muestra la copia con su fecha, volviendo a aplicar la vigencia con
+// el día del consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
 
 export const RUTA_CONTACTOS = "/contactos";
 
@@ -34,13 +45,15 @@ type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_permiso" }
   | { tipo: "en_linea"; copia: Copia; guardada: boolean }
-  | { tipo: "copia"; copia: Copia }
+  | { tipo: "copia"; copia: Copia; mensaje: string }
   | { tipo: "sin_servicio"; mensaje: string };
 
 type Pantalla =
   | { tipo: "cargando" }
   | { tipo: "sin_consorcios" }
-  | { tipo: "lista"; consorcios: { id: string; nombre: string }[]; sinConexion: boolean };
+  | { tipo: "lista"; consorcios: { id: string; nombre: string }[] }
+  /** La API no respondió: los edificios salen de las copias guardadas. */
+  | { tipo: "copias"; consorcios: { id: string; nombre: string }[]; mensaje: string };
 
 class SinSesion extends Error {}
 
@@ -62,16 +75,11 @@ export function Contactos() {
     navegar(RUTA_ENTRAR, { replace: true });
   }, [navegar]);
 
-  /** Sin conexión, los edificios salen de las copias guardadas. */
-  const desdeCopias = useCallback(() => {
+  /** La API no respondió (sin red o caída): los edificios salen de las copias guardadas. */
+  const desdeCopias = useCallback((mensaje: string) => {
     const copias = leerCopias();
-    const primera = copias[0];
-    if (primera === undefined) {
-      setPantalla({ tipo: "lista", consorcios: [], sinConexion: true });
-      return;
-    }
-    setPantalla({ tipo: "lista", consorcios: copias.map((c) => ({ id: c.consorcio_id, nombre: c.nombre })), sinConexion: true });
-    setConsorcio(primera.consorcio_id);
+    setPantalla({ tipo: "copias", consorcios: copias.map((c) => ({ id: c.consorcio_id, nombre: c.nombre })), mensaje });
+    if (copias[0] !== undefined) setConsorcio(copias[0].consorcio_id);
   }, []);
 
   useEffect(() => {
@@ -81,11 +89,14 @@ export function Contactos() {
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
         exigirSesion(response);
+        // Cualquier falla que no sea un 401 (sin red, 5xx, 429): justo cuando hacen falta, las copias.
         if (data === undefined) {
-          if (esDeConexion(response.status, codigoDe(error))) desdeCopias();
-          else setPantalla({ tipo: "lista", consorcios: [], sinConexion: false });
+          desdeCopias(mensajeDeFalla(response.status, codigoDe(error)));
           return;
         }
+        // Un edificio que ya no figura (perdió el acceso, u otra cuenta en el mismo dispositivo) no
+        // deja su copia.
+        conservarSolo(data.map((c) => c.id));
         const primero = data[0];
         if (primero === undefined) {
           // Ya no participa de ningún edificio: ninguna copia sigue valiendo.
@@ -93,31 +104,31 @@ export function Contactos() {
           setPantalla({ tipo: "sin_consorcios" });
           return;
         }
-        setPantalla({ tipo: "lista", consorcios: data, sinConexion: false });
+        setPantalla({ tipo: "lista", consorcios: data });
         setConsorcio(primero.id);
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else desdeCopias();
+        else desdeCopias(SIN_CONEXION);
       });
   }, [aEntrar, desdeCopias]);
 
   useEffect(() => {
-    if (consorcio === "" || pantalla.tipo !== "lista") return;
+    if (consorcio === "" || pantalla.tipo === "cargando" || pantalla.tipo === "sin_consorcios") return;
     const nombre = pantalla.consorcios.find((c) => c.id === consorcio)?.nombre ?? "";
-    const guardada = () => leerCopias().find((c) => c.consorcio_id === consorcio);
     const sinRed = (mensaje: string) => {
-      const copia = guardada();
-      setLectura(copia === undefined ? { tipo: "sin_servicio", mensaje } : { tipo: "copia", copia });
+      const copia = leerCopias().find((c) => c.consorcio_id === consorcio);
+      setLectura(copia === undefined ? { tipo: "sin_servicio", mensaje } : { tipo: "copia", copia, mensaje });
     };
-    if (pantalla.sinConexion) {
-      sinRed(mensajeDeFalla(0, undefined));
+    if (pantalla.tipo === "copias") {
+      sinRed(pantalla.mensaje);
       return;
     }
     let vigente = true;
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/contactos", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
+        // Un 401 vale aunque la respuesta llegue tarde: la sesión ya no está.
         exigirSesion(response);
         if (!vigente) return;
         if (data !== undefined) {
@@ -129,9 +140,8 @@ export function Contactos() {
         } else sinRed(mensajeDeFalla(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
-        if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
-        else sinRed(mensajeDeFalla(0, undefined));
+        else if (vigente) sinRed(SIN_CONEXION);
       });
     return () => {
       vigente = false;
@@ -147,7 +157,7 @@ export function Contactos() {
         sin conexión, y se borran al salir de la cuenta.
       </p>
 
-      {pantalla.tipo === "lista" && pantalla.consorcios.length > 1 && (
+      {pantalla.tipo !== "cargando" && pantalla.tipo !== "sin_consorcios" && pantalla.consorcios.length > 1 && (
         <div className="formulario formulario-movil tarjeta">
           <label htmlFor={`${id}-consorcio`}>Edificio</label>
           <select
@@ -170,14 +180,13 @@ export function Contactos() {
       <div role="status" aria-live="polite">
         {pantalla.tipo === "cargando" && <p className="tarjeta">Consultando…</p>}
         {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Todavía no participás de ningún edificio.</p>}
-        {pantalla.tipo === "lista" && pantalla.consorcios.length === 0 && (
+        {pantalla.tipo === "copias" && pantalla.consorcios.length === 0 && (
           <p className="tarjeta aviso-error">
-            {pantalla.sinConexion
-              ? "Sin conexión, y este dispositivo no tiene contactos guardados. Abrí esta página con conexión para guardarlos."
-              : "No pudimos consultar tus edificios. Probá de nuevo en unos minutos."}
+            {pantalla.mensaje} Este dispositivo no tiene contactos guardados: abrí esta página con conexión
+            para guardarlos.
           </p>
         )}
-        {pantalla.tipo === "lista" && pantalla.consorcios.length > 0 && estado()}
+        {pantalla.tipo !== "cargando" && pantalla.tipo !== "sin_consorcios" && pantalla.consorcios.length > 0 && estado()}
       </div>
 
       {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
@@ -195,8 +204,8 @@ export function Contactos() {
       case "copia":
         return (
           <p className="tarjeta aviso-error">
-            Sin conexión: esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no tener
-            los últimos cambios
+            {lectura.mensaje} Esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no
+            tener los últimos cambios
           </p>
         );
       case "en_linea":
