@@ -404,7 +404,8 @@
           "mandato_no_pendiente",
           "eficaz_desde_invalida",
           "revision_duplicada",
-          "sin_condicion_habilitante"
+          "sin_condicion_habilitante",
+          "contacto_terminado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -601,6 +602,352 @@
         "title": "ConsorcioResumen",
         "type": "object"
       },
+      "Contacto": {
+        "description": "Un contacto de la lista general: lo que se publica y se guarda sin conexión.",
+        "properties": {
+          "actualizado_en": {
+            "format": "date-time",
+            "title": "Actualizado En",
+            "type": "string"
+          },
+          "funcion": {
+            "$ref": "#/components/schemas/FuncionContacto"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "indicaciones": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indicaciones"
+          },
+          "naturaleza": {
+            "$ref": "#/components/schemas/NaturalezaContacto"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "observado": {
+            "description": "Hay un dato señalado como incorrecto sin resolver.",
+            "title": "Observado",
+            "type": "boolean"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "verificado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verificado En"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "id",
+          "funcion",
+          "naturaleza",
+          "nombre",
+          "telefono",
+          "indicaciones",
+          "vigente_desde",
+          "vigente_hasta",
+          "actualizado_en",
+          "verificado_en",
+          "observado"
+        ],
+        "title": "Contacto",
+        "type": "object"
+      },
+      "ContactoGestion": {
+        "description": "La lista de gestión: con quién cambió qué. Nunca se guarda sin conexión.",
+        "properties": {
+          "actualizado_en": {
+            "format": "date-time",
+            "title": "Actualizado En",
+            "type": "string"
+          },
+          "actualizado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actualizado Por"
+          },
+          "consentimiento_referencia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consentimiento Referencia"
+          },
+          "funcion": {
+            "$ref": "#/components/schemas/FuncionContacto"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "indicaciones": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indicaciones"
+          },
+          "naturaleza": {
+            "$ref": "#/components/schemas/NaturalezaContacto"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "observacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observacion"
+          },
+          "observado": {
+            "description": "Hay un dato señalado como incorrecto sin resolver.",
+            "title": "Observado",
+            "type": "boolean"
+          },
+          "observado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observado Por"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "verificado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verificado En"
+          },
+          "verificado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verificado Por"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vigente Hasta"
+          }
+        },
+        "required": [
+          "id",
+          "funcion",
+          "naturaleza",
+          "nombre",
+          "telefono",
+          "indicaciones",
+          "vigente_desde",
+          "vigente_hasta",
+          "actualizado_en",
+          "verificado_en",
+          "observado",
+          "consentimiento_referencia",
+          "observacion",
+          "actualizado_por",
+          "verificado_por",
+          "observado_por"
+        ],
+        "title": "ContactoGestion",
+        "type": "object"
+      },
+      "ContactoId": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ContactoId",
+        "type": "object"
+      },
+      "ContactoNuevo": {
+        "additionalProperties": false,
+        "properties": {
+          "consentimiento_referencia": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dónde consta que el número es profesional y que se consintió publicarlo. Obligatoria para un profesional; nula para las demás naturalezas.",
+            "title": "Consentimiento Referencia"
+          },
+          "funcion": {
+            "$ref": "#/components/schemas/FuncionContacto"
+          },
+          "indicaciones": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indicaciones"
+          },
+          "naturaleza": {
+            "$ref": "#/components/schemas/NaturalezaContacto"
+          },
+          "nombre": {
+            "maxLength": 120,
+            "title": "Nombre",
+            "type": "string"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "examples": [
+                  "0800-555-1234"
+                ],
+                "pattern": "^[+0-9][0-9 ()-]{2,29}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "vigente_desde": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Por omisión, hoy en el consorcio.",
+            "title": "Vigente Desde"
+          }
+        },
+        "required": [
+          "funcion",
+          "naturaleza",
+          "nombre"
+        ],
+        "title": "ContactoNuevo",
+        "type": "object"
+      },
       "ContrasenaGuardada": {
         "description": "Respuesta de `PUT /api/v1/auth/contrasena`.",
         "properties": {
@@ -621,6 +968,71 @@
           "sesiones_cerradas"
         ],
         "title": "ContrasenaGuardada",
+        "type": "object"
+      },
+      "DatosContacto": {
+        "additionalProperties": false,
+        "description": "Lo que se carga o se corrige.",
+        "properties": {
+          "consentimiento_referencia": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dónde consta que el número es profesional y que se consintió publicarlo. Obligatoria para un profesional; nula para las demás naturalezas.",
+            "title": "Consentimiento Referencia"
+          },
+          "funcion": {
+            "$ref": "#/components/schemas/FuncionContacto"
+          },
+          "indicaciones": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indicaciones"
+          },
+          "naturaleza": {
+            "$ref": "#/components/schemas/NaturalezaContacto"
+          },
+          "nombre": {
+            "maxLength": 120,
+            "title": "Nombre",
+            "type": "string"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "examples": [
+                  "0800-555-1234"
+                ],
+                "pattern": "^[+0-9][0-9 ()-]{2,29}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          }
+        },
+        "required": [
+          "funcion",
+          "naturaleza",
+          "nombre"
+        ],
+        "title": "DatosContacto",
         "type": "object"
       },
       "DecisionDetalle": {
@@ -1420,6 +1832,20 @@
         "title": "FinVinculo",
         "type": "object"
       },
+      "FuncionContacto": {
+        "description": "D5: administración, encargado, emergencias, aseguradora y proveedores críticos, más dos.",
+        "enum": [
+          "administracion",
+          "encargado",
+          "emergencias",
+          "aseguradora",
+          "proveedor_critico",
+          "servicio_publico",
+          "otro"
+        ],
+        "title": "FuncionContacto",
+        "type": "string"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2128,6 +2554,61 @@
         "title": "ListaCandidatos",
         "type": "object"
       },
+      "ListaContactos": {
+        "properties": {
+          "actualizada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El último cambio de la lista: un alta, una corrección, una verificación, un señalamiento, un retiro, o un contacto que empezó o terminó por fecha.",
+            "title": "Actualizada En"
+          },
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Contacto"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "zona_horaria": {
+            "description": "La zona del consorcio. Con ella, el dispositivo calcula «hoy» al volver a aplicar la vigencia a la copia sin conexión.",
+            "examples": [
+              "America/Argentina/Buenos_Aires"
+            ],
+            "title": "Zona Horaria",
+            "type": "string"
+          }
+        },
+        "required": [
+          "elementos",
+          "actualizada_en",
+          "zona_horaria"
+        ],
+        "title": "ListaContactos",
+        "type": "object"
+      },
+      "ListaContactosGestion": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ContactoGestion"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaContactosGestion",
+        "type": "object"
+      },
       "ListaDecisiones": {
         "properties": {
           "elementos": {
@@ -2763,6 +3244,16 @@
         "title": "ModoOperacion",
         "type": "string"
       },
+      "NaturalezaContacto": {
+        "enum": [
+          "empresa",
+          "servicio",
+          "organismo",
+          "profesional"
+        ],
+        "title": "NaturalezaContacto",
+        "type": "string"
+      },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
         "properties": {
@@ -3040,6 +3531,21 @@
           "codigos_recuperacion_restantes"
         ],
         "title": "SegundoFactorVerificado",
+        "type": "object"
+      },
+      "Senalamiento": {
+        "additionalProperties": false,
+        "properties": {
+          "motivo": {
+            "maxLength": 300,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "Senalamiento",
         "type": "object"
       },
       "SesionAbierta": {
@@ -4495,6 +5001,477 @@
         "summary": "Esquemas de coeficientes y reglas de reparto, por grupo y versión",
         "tags": [
           "coeficientes"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos": {
+      "get": {
+        "operationId": "listar_contactos_api_v1_consorcios__consorcio_id__contactos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaContactos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contactos de emergencia vigentes, solo los que no son personales",
+        "tags": [
+          "contactos"
+        ]
+      },
+      "post": {
+        "operationId": "crear_contacto_api_v1_consorcios__consorcio_id__contactos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Agregar un contacto de emergencia",
+        "tags": [
+          "contactos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos/gestion": {
+      "get": {
+        "operationId": "listar_contactos_gestion_api_v1_consorcios__consorcio_id__contactos_gestion_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaContactosGestion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contactos vigentes y futuros, con quién cambió qué (gestión)",
+        "tags": [
+          "contactos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos/{contacto_id}": {
+      "put": {
+        "operationId": "corregir_contacto_api_v1_consorcios__consorcio_id__contactos__contacto_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contacto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contacto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatosContacto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "404": {
+            "description": "El contacto no existe en este consorcio."
+          },
+          "409": {
+            "description": "El contacto ya no está vigente (`contacto_terminado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Corregir un contacto vigente; resuelve la observación si había",
+        "tags": [
+          "contactos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos/{contacto_id}/retirar": {
+      "post": {
+        "operationId": "retirar_contacto_api_v1_consorcios__consorcio_id__contactos__contacto_id__retirar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contacto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contacto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "404": {
+            "description": "El contacto no existe en este consorcio."
+          },
+          "409": {
+            "description": "El contacto ya no está vigente (`contacto_terminado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar un contacto: desde hoy deja de figurar (la fila no se borra)",
+        "tags": [
+          "contactos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos/{contacto_id}/senalar": {
+      "post": {
+        "operationId": "senalar_contacto_api_v1_consorcios__consorcio_id__contactos__contacto_id__senalar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contacto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contacto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Senalamiento"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "404": {
+            "description": "El contacto no existe en este consorcio."
+          },
+          "409": {
+            "description": "El contacto ya no está vigente (`contacto_terminado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Señalar un dato incorrecto, con el motivo (sin teléfonos ni correos)",
+        "tags": [
+          "contactos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contactos/{contacto_id}/verificar": {
+      "post": {
+        "operationId": "verificar_contacto_api_v1_consorcios__consorcio_id__contactos__contacto_id__verificar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contacto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contacto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `contactos.gestionar` en el consorcio."
+          },
+          "404": {
+            "description": "El contacto no existe en este consorcio."
+          },
+          "409": {
+            "description": "El contacto ya no está vigente (`contacto_terminado`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dejar constancia de que el contacto se comprobó; resuelve la observación",
+        "tags": [
+          "contactos"
         ]
       }
     },

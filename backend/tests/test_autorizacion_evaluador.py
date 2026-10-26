@@ -216,10 +216,11 @@ def test_unidades_listar_por_ambito_y_control_sin_la_declaracion():
     assert (d.estado, d.motivo_interno) == (403, "sin_concesion")
 
 
-def test_solo_unidades_listar_y_los_eventos_propios_conceden_por_ambito():
-    # RF35-B (2b-6c): cada persona lee sus propios eventos en el consorcio.
+def test_solo_unidades_listar_los_eventos_propios_y_los_contactos_conceden_por_ambito():
+    # RF35-B (2b-6c): cada persona lee sus propios eventos en el consorcio. 2b-7: los contactos
+    # de emergencia publicados, que no son personales (decisión del propietario del 25-10).
     assert sorted(a for a, p in POLITICAS.items() if p.concede_por_ambito) == [
-        "auditoria.mis_eventos", "unidades.listar"]  # fmt: skip
+        "auditoria.mis_eventos", "contactos.ver", "unidades.listar"]  # fmt: skip
 
 
 # --- Una acción, una vista; A6 --------------------------------------------------------------
@@ -324,7 +325,7 @@ def test_las_acciones_de_la_tabla():
     # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4), las 3 de lectura (2b-4c) y la revisión
     # del mandato pendiente (E62), la historia de modos (RF41-C, 2b-6b), las 2 de la auditoría
     # (RF35-B, 2b-6c) y las 2 de la lectura de coeficientes (RF05)
-    assert len(POLITICAS) == 44
+    assert len(POLITICAS) == 46
 
 
 def _archivo(tmp_path, nombre, politicas):

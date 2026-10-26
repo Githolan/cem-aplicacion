@@ -421,3 +421,12 @@ RF05,coeficientes.ver_propia_unidad,Pc,C,unidad:5B,sin_mandato,si,,403,sin_conce
 RF05,coeficientes.ver_propia_unidad,Ic,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,el inquilino con vínculo confirmado lee el de su unidad
 RF05,coeficientes.ver_propia_unidad,Oc,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinculo,sin modo también: como el padrón
 RF05,coeficientes.ver_propia_unidad,MC,C,unidad:3A,vigente,si,,403,sin_concesion,un mandato no da esta lectura: el Consejo lee por padron.ver
+2b-7,contactos.ver,P,C,,sin_mandato,si,,200,concedido_por_ambito,el propietario lee los contactos publicados
+2b-7,contactos.ver,I,—,,sin_mandato,no,,200,concedido_por_ambito,el inquilino también y sin modo: son de emergencia
+2b-7,contactos.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato no hay ámbito
+2b-7,contactos.gestionar,P,C,,sin_mandato,si,,403,sin_concesion,el propietario no gestiona
+2b-7,contactos.gestionar,MC,C,,vigente,si,,200,concedido_por_facultad,el Consejo gestiona con contactos.gestionar
+2b-7,contactos.gestionar,AD,AA,,vigente,si,,200,concedido_por_facultad,la administración gestiona
+2b-7,contactos.gestionar,AE,C,,vigente,si,,403,sin_concesion,el administrador externo no recibe la facultad (solo carga)
+2b-7,contactos.gestionar,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo no se gestiona
+2b-7,contactos.gestionar,P+MC,C,,vencido,si,,403,sin_concesion,con el mandato de Consejo vencido no gestiona
