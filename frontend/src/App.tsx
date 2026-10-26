@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
+import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Entrar } from "./Entrar";
@@ -95,6 +96,7 @@ export function App() {
           <Route path={RUTA_MANDATOS} element={<Mandatos />} />
           <Route path={RUTA_PADRON} element={<Padron />} />
           <Route path={RUTA_CONTACTOS} element={<Contactos />} />
+          <Route path={RUTA_CONTACTOS_GESTION} element={<ContactosGestion />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
