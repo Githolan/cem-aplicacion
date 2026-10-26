@@ -79,7 +79,7 @@ def test_el_control_de_datos_tecnicos_detecta_lo_que_busca():
     _sin_datos_tecnicos(Respuesta('{"accion": "Registró una decisión"}'))  # control
 
 
-def _insertar(motor_migrate, cons, accion, actor=None, origen="soporte", creado_en=None,
+def _insertar(motor_migrate, cons, accion, actor=None, origen="trabajos", creado_en=None,
               despues=None):  # fmt: skip
     with motor_migrate.begin() as c:
         c.execute(
@@ -158,18 +158,24 @@ def test_el_consejo_lee_el_consorcio_con_el_actor_segun_padron(escena, motor_mig
     filas = r.json()["elementos"]
     assert all(set(f) == CAMPOS_CONSORCIO for f in filas)
     decisiones = [f["actor"] for f in filas if f["accion"] == "Registró una decisión"]
-    # La más reciente es la propia; la otra, con el nombre (MC tiene `padron.ver`); la del acta
-    # de la escena la cargó el equipo.
+    # La más reciente es la propia; la otra, con el nombre (MC tiene `padron.ver`). El acta y las
+    # altas de la escena las cargó soporte: no figuran (decisión del propietario del 26-10; 0032).
     assert decisiones == [{"tipo": "vos", "nombre": None},
-                          {"tipo": "persona", "nombre": "Diego Prueba"},
-                          {"tipo": "soporte", "nombre": None}]  # fmt: skip
-    # Las altas de la escena las registró el equipo: sin nombre.
-    altas = [f for f in filas if f["accion"] == "Dio de alta un mandato"]
-    assert len(altas) == 2
-    assert {(f["actor"]["tipo"], f["actor"]["nombre"], f["origen"]) for f in altas} == {
-        ("soporte", None, "soporte")}  # fmt: skip
-    assert {c["campo"] for c in altas[0]["cambios"]} <= {"tipo", "desde", "hasta"}
+                          {"tipo": "persona", "nombre": "Diego Prueba"}]  # fmt: skip
+    assert [f for f in filas if f["accion"] == "Dio de alta un mandato"] == []
+    assert all(f["origen"] != "soporte" and f["actor"]["tipo"] != "soporte" for f in filas)
     _sin_datos_tecnicos(r)
+
+
+def test_soporte_no_figura_en_la_auditoria_del_consorcio(escena, motor_migrate):  # noqa: F811
+    """S1: un evento de soporte no aparece, tampoco en las páginas siguientes. Control: el mismo
+    evento con otro origen sí aparece."""
+    e = escena
+    _insertar(motor_migrate, e["cons"], "consorcio.modo.cambiar", origen="soporte")
+    _insertar(motor_migrate, e["cons"], "consorcio.modo.cambiar", origen="trabajos")
+    filas = _get(e["mc2"], _url(e["cons"])).json()["elementos"]
+    modos = [f for f in filas if f["accion"] == "Cambió el modo de operación"]
+    assert [(f["origen"], f["actor"]["tipo"]) for f in modos] == [("sistema", "sistema")]
 
 
 def test_sin_padron_ver_el_actor_no_tiene_nombre(escena, motor_migrate, motor_app):  # noqa: F811
@@ -306,12 +312,16 @@ def _leer_base(motor_app, cons, persona, sql):
         return c.execute(text(sql)).all()
 
 
+@pytest.mark.redis
 def test_la_base_exige_auditoria_ver(escena, motor_app):  # noqa: F811
     e = escena
     sql = "select * from auditoria.eventos_del_consorcio(null, 0, 10)"
     with pytest.raises(DBAPIError, match="sin auditoria.ver"):
         _leer_base(motor_app, e["cons"], e["prop"], sql)
-    assert _leer_base(motor_app, e["cons"], e["mc1"], sql)  # control
+    # Control: con un evento de la aplicación (los de la escena son de soporte y no figuran,
+    # 0032), quien tiene la facultad lo lee.
+    assert decision(e["mc1"], e["cons"]).status_code == 201
+    assert _leer_base(motor_app, e["cons"], e["mc1"], sql)
 
 
 def test_la_base_da_solo_los_eventos_del_que_lee(escena, motor_app):  # noqa: F811

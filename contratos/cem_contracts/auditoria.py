@@ -32,8 +32,6 @@ class OrigenEvento(StrEnum):
 
     APLICACION = "aplicacion"
     """Una persona, desde la aplicación."""
-    SOPORTE = "soporte"
-    """El equipo de soporte."""
     SISTEMA = "sistema"
     """Un proceso automático (trabajos en segundo plano o tareas periódicas)."""
 
@@ -43,8 +41,11 @@ class TipoActor(StrEnum):
     """Quien lee."""
     PERSONA = "persona"
     """Otra persona; el nombre sale solo con `padron.ver` y si el padrón la muestra hoy."""
-    SOPORTE = "soporte"
     SISTEMA = "sistema"
+
+
+# Soporte de plataforma no figura: es un actor externo al modelo de usuarios, y lo que hace no es
+# actividad funcional del consorcio (decisión del propietario del 26-10-2026; 0032).
 
 
 class CambioEvento(BaseModel):

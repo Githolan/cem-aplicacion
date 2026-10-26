@@ -3290,7 +3290,6 @@
         "description": "De dónde vino el evento, en términos funcionales.",
         "enum": [
           "aplicacion",
-          "soporte",
           "sistema"
         ],
         "title": "OrigenEvento",
@@ -3696,7 +3695,6 @@
         "enum": [
           "vos",
           "persona",
-          "soporte",
           "sistema"
         ],
         "title": "TipoActor",
