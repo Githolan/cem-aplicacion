@@ -248,9 +248,13 @@ def test_un_png_y_un_jpeg_pasan(escena, bucket, motor_app, motor_migrate, conten
 
 def test_sin_documentos_cargar_no_se_crea_ni_se_sube(escena, bucket):
     e = escena
-    assert crear(e["mc"], e["cons"]).status_code == 403
+    # Seguros no es una categoría operativa: el Consejo no la carga (2c-2 le da actas,
+    # presupuestos y mantenimiento con `documentos.cargar_operativos`).
+    assert crear(e["mc"], e["cons"], categoria="seguros").status_code == 403
     assert crear(e["prop"], e["cons"]).status_code == 403
-    doc = documento(e)  # control: el administrador externo sí
+    r = crear(e["ae"], e["cons"], categoria="seguros")  # control: el administrador externo sí
+    assert r.status_code == 201, r.text
+    doc = r.json()["id"]
     assert subir(e["mc"], e["cons"], doc, pdf(), "application/pdf").status_code == 403
     assert subir(e["ae"], e["cons"], doc, pdf(), "application/pdf").status_code == 201
 

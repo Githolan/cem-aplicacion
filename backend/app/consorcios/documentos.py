@@ -379,8 +379,8 @@ def listar_documentos(
                     id=f["version_id"], estado=f["estado"], motivo_rechazo=f["motivo_rechazo"],
                     tipo=f["tipo"], tamano=f["tamano"], sha256=f["sha256"],
                     subida_en=f["subida_en"],
-                )  # fmt: skip
-            )
+                )
+            )  # fmt: skip
     return ListaDocumentos(documentos=list(documentos.values()))
 
 
