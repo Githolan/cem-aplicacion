@@ -27,6 +27,34 @@
       "economica": false,
       "destinatario_unico": false,
       "fuente_normativa": "Documento 08 §4, Permisos base (Consultar rendición común); D2 (documentos.ver); A6"
+    },
+    {
+      "accion": "documentos.ver_restringidos",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "documentos.ver",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "H2c §4 (CEM): las categorías contratos_proveedores y otros las ve solo quien tiene la facultad documentos.ver, sin concesión por vínculo (Codex en CEM #86); el reparto por categoría es inferencia y va al propietario (§8)"
+    },
+    {
+      "accion": "documentos.cargar_operativos",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "documentos.cargar_operativos",
+      "modos": ["consejo", "administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": null,
+      "separacion": [],
+      "respaldo": null,
+      "economica": false,
+      "destinatario_unico": false,
+      "fuente_normativa": "Decisión del propietario del 25-10-2026 (§1.3: el Consejo debe poder cargar lo que le corresponde); H2c §4 (CEM): facultad mínima en el paquete de MC, solo actas, presupuestos y mantenimiento; qué categorías le corresponden es inferencia y va al propietario (§8)"
     }
   ]
 }

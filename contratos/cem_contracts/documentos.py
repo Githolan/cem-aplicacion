@@ -7,13 +7,18 @@ propietario del 25-10-2026 (`Decisiones_Propietario_2026-10-25.md`, §1.3).
   archivo crudo en el cuerpo, sin multipart, con su `Content-Type`.
 - **Solo PDF, JPEG y PNG, hasta 20 MB.** El tipo real sale de los primeros bytes, no de la
   extensión ni del tipo declarado.
-- **Cada archivo entra en cuarentena** y recién se sirve cuando el análisis lo aprueba (2c-2
-  trae la lista y la descarga).
+- **Cada archivo entra en cuarentena** y recién se sirve cuando el análisis lo aprueba.
+- **Quién ve y quién carga cada categoría** (2c-2, §4): un mapa cerrado de categoría a acción.
+  `contratos_proveedores` y `otros` se leen con `documentos.ver_restringidos` (la facultad
+  `documentos.ver`, sin concesión por vínculo); las demás, con `documentos.ver`. Actas,
+  presupuestos y mantenimiento se cargan también con `documentos.cargar_operativos`.
+- **La descarga** responde 302 a una URL firmada de 5 minutos, solo para una versión
+  `disponible`; nunca hay una URL permanente.
 - El título no admite teléfonos ni correos, como el texto libre de los contactos (2b-7); la base
   repite la regla (`nucleo.sin_contacto_libre`).
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
@@ -28,7 +33,8 @@ TOPE_BYTES = 20 * 1024 * 1024
 
 
 class CategoriaDocumento(StrEnum):
-    """Las 8 categorías de §4. Quién ve y quién carga cada una llega en 2c-2."""
+    """Las 8 categorías de §4. Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y
+    `ACCIONES_DE_CARGA`."""
 
     INSTITUCIONAL = "institucional"
     ACTAS_Y_DECISIONES = "actas_y_decisiones"
@@ -38,6 +44,33 @@ class CategoriaDocumento(StrEnum):
     PRESUPUESTOS = "presupuestos"
     MANTENIMIENTO_Y_CERTIFICADOS = "mantenimiento_y_certificados"
     OTROS = "otros"
+
+
+CATEGORIAS_RESTRINGIDAS = frozenset(
+    {CategoriaDocumento.CONTRATOS_PROVEEDORES, CategoriaDocumento.OTROS}
+)
+"""Las ve solo quien tiene la facultad `documentos.ver`, nunca un propietario por su vínculo
+(Codex en CEM #86)."""
+CATEGORIAS_OPERATIVAS = frozenset(
+    {
+        CategoriaDocumento.ACTAS_Y_DECISIONES,
+        CategoriaDocumento.PRESUPUESTOS,
+        CategoriaDocumento.MANTENIMIENTO_Y_CERTIFICADOS,
+    }
+)
+"""Las que el Consejo carga con `documentos.cargar_operativos` (inferencia de §4, va al
+propietario en §8)."""
+
+ACCION_DE_LECTURA: dict[CategoriaDocumento, str] = {
+    c: "documentos.ver_restringidos" if c in CATEGORIAS_RESTRINGIDAS else "documentos.ver"
+    for c in CategoriaDocumento
+}
+ACCIONES_DE_CARGA: dict[CategoriaDocumento, tuple[str, ...]] = {
+    c: ("documentos.cargar", "documentos.cargar_operativos")
+    if c in CATEGORIAS_OPERATIVAS
+    else ("documentos.cargar",)
+    for c in CategoriaDocumento
+}
 
 
 class TipoArchivo(StrEnum):
@@ -69,3 +102,46 @@ class VersionCargada(BaseModel):
     tipo: TipoArchivo = Field(description="El tipo real, leído de los primeros bytes.")
     tamano: int
     sha256: str
+
+
+class EstadoVersion(StrEnum):
+    EN_CUARENTENA = "en_cuarentena"
+    DISPONIBLE = "disponible"
+    RECHAZADO = "rechazado"
+
+
+class MotivoRechazo(StrEnum):
+    VIRUS = "virus"
+    CONTENIDO_ACTIVO = "contenido_activo"
+    PDF_CIFRADO = "pdf_cifrado"
+    PDF_MAL_FORMADO = "pdf_mal_formado"
+    NO_COINCIDE = "no_coincide"
+
+
+class VersionEnLista(BaseModel):
+    id: UUID
+    estado: EstadoVersion = Field(
+        description="Quien lee ve solo las versiones `disponible`; las que están en cuarentena o"
+        " fueron rechazadas las ve solo quien las subió."
+    )
+    motivo_rechazo: MotivoRechazo | None = None
+    tipo: TipoArchivo
+    tamano: int
+    sha256: str = Field(description="Para verificar el archivo descargado (documento 13 §9.3).")
+    subida_en: datetime
+
+
+class DocumentoEnLista(BaseModel):
+    id: UUID
+    categoria: CategoriaDocumento
+    titulo: str
+    fecha: date
+    cargado_en: datetime
+    versiones: list[VersionEnLista] = Field(description="De la más nueva a la más vieja.")
+
+
+class ListaDocumentos(BaseModel):
+    documentos: list[DocumentoEnLista] = Field(
+        description="Los vigentes de las categorías que la persona puede ver, del más nuevo al"
+        " más viejo por su fecha."
+    )

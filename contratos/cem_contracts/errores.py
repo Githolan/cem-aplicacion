@@ -152,6 +152,10 @@ class CodigoError(StrEnum):
     TIPO_NO_ADMITIDO = "tipo_no_admitido"
     """El archivo no es PDF, JPEG ni PNG por sus primeros bytes, o no coincide con el tipo
     declarado (2c-1): no se escribió nada."""
+    VERSION_NO_DISPONIBLE = "version_no_disponible"
+    """La versión está en cuarentena o fue rechazada: no se descarga (2c-2)."""
+    ARCHIVO_VENCIDO = "archivo_vencido"
+    """El archivo de la versión ya no está en el almacén (staging lo borra a los 30 días; 2c-2)."""
 
 
 class Error(BaseModel):
