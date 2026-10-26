@@ -111,14 +111,34 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `bfab68b` (26-10-2026: staging de 07:51 a 07:53 UTC y producción de 07:55 a 07:57 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-26-bfab68b.md`, con los dos entornos: `cd.ps1` escribe uno por día y SHA).
+Medido en el despliegue de `2ea0aca` (26-10-2026: staging de 15:53 a 15:56 UTC y producción de 19:03 a 19:06 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-26-2ea0aca.md`, con los dos entornos: `cd.ps1` escribe uno por día y SHA).
 
-**Staging y producción en `bfab68b`** (26-10-2026), base `0034`, contrato 0.24.0.
+**Staging y producción en `2ea0aca`** (26-10-2026), base `0035`, contrato 0.25.0.
+
+- **Qué es:** 2c-1, documentos en cuarentena con antivirus (PR #127, `0035`). La SHA es la punta de `main`, el merge de #127. Detalle en «Próximo paso», punto 18.
+- **Infraestructura nueva:**
+  - `cem-antivirus-staging` y `cem-antivirus` (ClamAV 1.5.4);
+  - las variables de 2c-1;
+  - en producción, los usuarios, grupos, políticas y claves S3 de H2c §3.1, probados desde los contenedores reales: 19 de 19, con la purga por `VersionId` en el bucket con versiones.
+
+  Registro en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
+- **Controles.** `ci.ps1` verde sobre `2ea0aca`, con 1831 pruebas de backend. Copia previa verificada en cada entorno. `alembic current` da `0035 (head)` en los dos, y `/health` responde con `2ea0aca`.
+- **Staging:** smoke `beab872d` con 30 controles, 6 de ellos de carga por HTTP a través de nginx:
+  - 20 MB exactos dan 201, 20 MB + 1 dan 413 de la API y 22 MB los corta nginx;
+  - el PDF limpio queda `disponible`, y el EICAR `rechazado` y borrado del bucket;
+  - nginx no escribe cuerpos a disco.
+- **Producción:**
+  - `documentos.limpiar_huerfanos` corre con la clave de análisis;
+  - la alarma de firmas viejas avisó mientras `clamd` tenía las de la imagen, y dejó de avisar cuando las recargó (19:13 UTC);
+  - 0 documentos.
+- **SIN VERIFICAR:** una carga real en producción (no hay pantalla hasta 2c-2), y el aviso a Kuma del análisis (falta el monitor push, `CEM_DOCUMENTOS_AVISO_URL`).
+
+El bloque siguiente es el del despliegue anterior, `bfab68b`, base `0034`:
 
 - **Qué es:** `anular_vinculo` por soporte sin eventos (PR #126, `0034`), sobre `614de49`. `ci.ps1` verde sobre `bfab68b`; copia previa verificada en cada entorno; `alembic current` da `0034 (head)` en los dos; `/health` con `bfab68b`. Detalle en el registro `2026-10-26-bfab68b.md` del repositorio CEM y en «Próximo paso», punto 17.
 - **Después (26-10, 13:15 a 13:35 UTC):** se cargaron en staging las tres claves S3 separadas de H2c §3.1 como variables de `cem-backend-staging` y `cem-trabajos-staging`, y esas dos apps se redesplegaron con la misma imagen. Todavía no las lee ningún código: las usa 2c-1 (punto 18). Registro en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM.
 
-El bloque siguiente es el del despliegue anterior, `614de49`, base `0033`:
+Antes, **`614de49`** (26-10-2026: staging de 06:39 a 06:41 UTC y producción de 06:43 a 06:45 UTC), base `0033`, contrato 0.24.0.
 
 - **Qué es:** 2b-7c, la página `/contactos/gestion` (PR #125, solo frontend). La SHA es la punta de `main`, el merge de #125. Antes, el mismo día: S1 en `25eff74` (`0032`) y S2a en `4924dca` (PR #124, `0033`), con copia previa verificada en cada uno. Detalle en «Próximo paso», puntos 16 y 17.
 - **Sin variables nuevas** ni migraciones respecto de `4924dca`: `cd.ps1` no hizo copia previa.
@@ -584,7 +604,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **`anular_vinculo`** (esta rama, `anular-vinculo-sin-evento`; diseño en `doc/diseno/Anular_Vinculo_Sin_Evento.md` del repositorio CEM, opción C): `0034` hace que, con origen `soporte`, la función no escriba `consorcio.vinculo.anular` ni `identidad.invitacion.revocar`. Sigue borrando la fila y retirando las invitaciones, sin cambio de firma ni de permisos. La base no conserva rastro de la anulación; la constancia es el respaldo del equipo y la salida de `scripts/anular_vinculo.py` (lo anulado, la referencia y las invitaciones retiradas, sin el motivo). Con origen `api`, igual que antes.
    - **Fuera:** la clase B (S2b), que espera al propietario. Los textos (S3) están en CEM #90.
    - `anular_vinculo` se fusionó en `bfab68b` (PR #126) y está **desplegado** en los dos entornos.
-18. **2c-1, documentos con antivirus** (rama `documentos-antivirus-2c1`; diseño en `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2, §3 y §3.1):
+18. **2c-1, documentos con antivirus** (PR #127, fusionado el 26-10-2026 en `2ea0aca`, head `68c9476`; **desplegado** en staging y en producción, ver «Desplegado»; diseño en `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2, §3 y §3.1):
    - **Qué trae:**
      - `0035`: `nucleo.documento` y `nucleo.version_documento` con RLS forzada; funciones de carga (`documentos.cargar` de la persona de la sesión, auditadas) y de análisis (solo sin persona en la sesión; el rechazo se audita con origen `trabajos`).
      - `POST …/documentos` y `POST …/documentos/{id}/versiones`: el archivo crudo, leído en tramos con tope de 20 MB (413), tipo por los primeros bytes (415), a lo sumo 2 cargas por proceso (503 a los 30 s) y un `put_object` único con la clave de documentos.
@@ -592,13 +612,16 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - La tarea `documentos.vigilar_cuarentena`, cada 5 minutos, avisa a Kuma las versiones demoradas y las firmas viejas.
      - El borrado de un rechazado es su propio trabajo (`documentos.borrar_rechazado`), encolado con el rechazo: si se pierde la reserva o falla el commit, no queda ni el rechazo ni el borrado. `documentos.limpiar_huerfanos`, cada día a las 04:45 UTC, borra con la clave de análisis los objetos de `cem/` de más de un día sin fila: los de una carga que subió y no confirmó. Es un borrado simple (con versiones, la versión queda 35 días y se recupera si la base estaba atrasada), y con más de 20 huérfanos falla sin borrar nada. Los dos se reintentan solos (Codex en #127).
      - nginx: la ruta de carga con `client_max_body_size 21m` y sin búfer de pedido. Contrato 0.25.0.
-   - **Para desplegar:**
+   - **Para desplegar (hecho el 26-10, salvo el monitor de Kuma):**
      - `cem-antivirus-staging` y `cem-antivirus` en Coolify;
      - en `cem-backend`, `CEM_DOCUMENTOS_S3_ENDPOINT`/`_REGION`; en `cem-trabajos`, `CEM_DOCUMENTOS_ANALISIS_S3_ENDPOINT`/`_REGION`; en las dos, `CEM_DOCUMENTOS_BUCKET`;
      - en `cem-trabajos`, `CEM_ANTIVIRUS_SERVIDOR`/`_PUERTO` y `CEM_DOCUMENTOS_AVISO_URL` con su monitor de Kuma.
    - En producción, además, los usuarios, grupos, políticas y claves de §3.1.
    - **Sin lectura ni descarga:** llegan en 2c-2. Ninguna versión se sirve todavía.
-   - **SIN VERIFICAR hasta desplegar:** 20 MB de punta a punta a través de nginx con su directorio de cuerpos temporales vacío (se prueba en staging); que el bucket con versiones de producción devuelva `VersionId` por la API S3 de OCI (si no, el rechazo haría un borrado simple; se prueba antes de producción).
+   - **Verificado al desplegar (26-10):**
+     - 20 MB de punta a punta a través de nginx en staging, sin cuerpos temporales en disco;
+     - el bucket con versiones de producción devuelve `VersionId` y la clave de análisis borra por él, sin dejar marca.
+     - OCI devuelve un `VersionId` también en el bucket sin versiones de staging, y el borrado por él funciona: el comentario de `documentos.py` que dice que un bucket sin versiones no devuelve ninguno es inexacto (P3).
    - **Conocido, sin resolver en este corte:**
      - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
      - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial.
