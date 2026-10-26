@@ -8,7 +8,8 @@ funcional, decisión del propietario del 26-10-2026) y §4 (borrado y categoría
   migración solo da los permisos: `SELECT` sobre documentos y versiones, y `UPDATE` solo de las
   columnas del borrado y de la categoría. Sin `BYPASSRLS`: las políticas `por_consorcio` (que ya
   filtran la lectura) y la nueva `soporte_actualiza` le dejan ver y cambiar solo las filas del
-  consorcio fijado en el contexto. Sin `DELETE` y sin tocar las versiones.
+  consorcio fijado en el contexto. Sin `DELETE` y sin tocar las versiones. Ninguna política
+  nombra al rol: la copia diaria se verifica restaurando sin roles (`pg_restore --no-acl`).
 - **La constancia queda en la fila del documento**, no en la auditoría funcional (§1.1): el motivo,
   la referencia del respaldo, la fecha, quién lo pidió y el mandato con el que tenía la capacidad.
   Del cambio de categoría, también la categoría anterior (la del último cambio).
@@ -118,7 +119,11 @@ grant usage on schema nucleo, plataforma to {ROL};
 grant execute on function plataforma.consorcio_actual() to {ROL};
 grant select on nucleo.documento, nucleo.version_documento to {ROL};
 grant update ({", ".join(COLUMNAS_SOPORTE)}) on nucleo.documento to {ROL};
-create policy soporte_actualiza on nucleo.documento for update to {ROL}
+-- Sin `to {ROL}`: como `por_consorcio`, vale para todos los roles, y solo este tiene `UPDATE`
+-- sobre la tabla (`cem_migrate` tiene BYPASSRLS). Una política que nombra un rol rompe la
+-- restauración de la copia diaria en el PostgreSQL efímero (`pg_restore --no-acl` no la omite y
+-- el rol no existe ahí: `ci.ps1` sobre ed56553).
+create policy soporte_actualiza on nucleo.documento for update
   using (consorcio_id = plataforma.consorcio_actual())
   with check (consorcio_id = plataforma.consorcio_actual());
 """
