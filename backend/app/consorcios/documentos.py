@@ -259,9 +259,13 @@ async def subir_version(
     motor: MotorDep,
 ) -> Response:
     ctx = cargar.ctx
-    _verificar_carga(cargar, operativos, None)
-    categoria = _categoria_para_cargar(motor, ctx, documento_id)
-    _verificar_carga(cargar, operativos, categoria)
+
+    def autorizar() -> None:
+        # Lee la categoría y, si niega, audita: las dos van a la base, fuera del bucle de eventos.
+        _verificar_carga(cargar, operativos, None)
+        _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
+
+    await anyio.to_thread.run_sync(autorizar)
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
