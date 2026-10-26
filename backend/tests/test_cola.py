@@ -489,17 +489,21 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 4)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 6)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
     # Sin las variables de las copias, la copia y el control de índices fallan y lo dicen; no
-    # se saltean en silencio.
+    # se saltean en silencio. La vigilancia de la cuarentena termina y anota que no llega a
+    # `clamd` (sin aviso a Kuma configurado, solo informa), y la limpieza de objetos sin fila falla
+    # porque no tiene las variables del almacén de documentos.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
-                        " 'consorcio.revocar_por_vencimiento')"
+                        " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena')"
                         " or error like '%faltan variables de las copias%'"
-                        " or error like '%falta CEM_DATABASE_URL_BACKUP%'") == 4)  # fmt: skip
+                        " or error like '%falta CEM_DATABASE_URL_BACKUP%'"
+                        " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'")
+           == 6)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -511,13 +515,16 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     assert "cem-planificador es el líder" in [x["mensaje"] for x in registros["planificador"]]
     hechos = [x for x in registros["trabajos"] if x["mensaje"].startswith("trabajo hecho")]
     assert sorted(x["tipo_trabajo"] for x in hechos) == [
-        "consorcio.revocar_por_vencimiento", "plataforma.purgar_cola"]  # fmt: skip
+        "consorcio.revocar_por_vencimiento", "documentos.vigilar_cuarentena",
+        "plataforma.purgar_cola"]  # fmt: skip
     assert all(x["consorcio_id"] is None for x in hechos)
     with motor_migrate.connect() as c:
         assert c.execute(
             text("select tipo from plataforma.ejecuciones_programadas order by tipo")
         ).all() == [
             ("consorcio.revocar_por_vencimiento",),
+            ("documentos.limpiar_huerfanos",),
+            ("documentos.vigilar_cuarentena",),
             ("plataforma.copia_diaria",),
             ("plataforma.purgar_cola",),
             ("plataforma.verificar_indices",),

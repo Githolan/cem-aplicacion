@@ -35,9 +35,25 @@ services:
       ROOT_ACCESS_KEY_ID: clave-id-pruebas
       ROOT_SECRET_ACCESS_KEY: clave-secreta-pruebas
       VGW_REGION: sa-santiago-1
-    command: ["--quiet", "posix", "/datos"]
+    # `--versioning-dir` habilita los buckets con versiones, para probar el borrado por
+    # `VersionId` de un documento rechazado (H2c §3, paso 5), como en producción.
+    command: ["--quiet", "posix", "--versioning-dir", "/versiones", "/datos"]
     tmpfs:
       - /datos
+      - /versiones
+
+  # ClamAV real para el análisis de documentos (H2c §3), la misma imagen que `cem-antivirus`
+  # (la variante debian es multiarquitectura: la VM es arm64). Sin `_base` trae las firmas
+  # del día en que se construyó; sin freshclam, nada sale de esta red. Tarda en cargar.
+  cem-antivirus-pruebas:
+    image: clamav/clamav:1.5.4-debian13-slim
+    environment:
+      CLAMAV_NO_FRESHCLAMD: "true"
+      CLAMAV_NO_MILTERD: "true"
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 5s
+      retries: 60
 
   # Servidor SMTP de pruebas para `notificar.correo` (documento 13, §12.4): STARTTLS obligatorio
   # con un certificado autofirmado para su nombre (lo genera al arrancar), autenticación con un
@@ -69,6 +85,8 @@ services:
         condition: service_started
       cem-correo-pruebas:
         condition: service_healthy
+      cem-antivirus-pruebas:
+        condition: service_healthy
     environment:
       CEM_TEST_ADMIN_URL: postgresql+psycopg://postgres:postgres@cem-postgres-pruebas:5432/postgres
       CEM_TEST_REDIS_URL: redis://cem-redis-pruebas:6379/0
@@ -81,6 +99,8 @@ services:
       CEM_TEST_SMTP_USUARIO: usuario-pruebas
       CEM_TEST_SMTP_CLAVE: clave-pruebas
       CEM_TEST_CORREO_API: http://cem-correo-pruebas:8025
+      CEM_TEST_ANTIVIRUS_SERVIDOR: cem-antivirus-pruebas
+      CEM_TEST_ANTIVIRUS_PUERTO: "3310"
     volumes:
       - ../..:/src
     entrypoint: []

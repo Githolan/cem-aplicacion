@@ -13,3 +13,5 @@ cryptography==50.0.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
 boto3==1.43.113
+# Análisis de PDF de los documentos (H2c §3, paso 5): contenido activo, cifrado o mal formado.
+pypdf==6.20.1

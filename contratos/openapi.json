@@ -316,6 +316,21 @@
         "title": "CanjeEnlace",
         "type": "object"
       },
+      "CategoriaDocumento": {
+        "description": "Las 8 categorías de §4. Quién ve y quién carga cada una llega en 2c-2.",
+        "enum": [
+          "institucional",
+          "actas_y_decisiones",
+          "seguros",
+          "contratos_proveedores",
+          "facturas_y_comprobantes",
+          "presupuestos",
+          "mantenimiento_y_certificados",
+          "otros"
+        ],
+        "title": "CategoriaDocumento",
+        "type": "string"
+      },
       "CausaBaja": {
         "enum": [
           "remocion",
@@ -405,7 +420,9 @@
           "eficaz_desde_invalida",
           "revision_duplicada",
           "sin_condicion_habilitante",
-          "contacto_terminado"
+          "contacto_terminado",
+          "archivo_demasiado_grande",
+          "tipo_no_admitido"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1229,6 +1246,46 @@
           "sesiones_revocadas"
         ],
         "title": "DesasociacionHecha",
+        "type": "object"
+      },
+      "DocumentoId": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DocumentoId",
+        "type": "object"
+      },
+      "DocumentoNuevo": {
+        "additionalProperties": false,
+        "properties": {
+          "categoria": {
+            "$ref": "#/components/schemas/CategoriaDocumento"
+          },
+          "fecha": {
+            "description": "Fecha del documento (no la de la carga).",
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "titulo": {
+            "maxLength": 200,
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "categoria",
+          "titulo",
+          "fecha"
+        ],
+        "title": "DocumentoNuevo",
         "type": "object"
       },
       "EnlacePedido": {
@@ -3700,6 +3757,15 @@
         "title": "TipoActor",
         "type": "string"
       },
+      "TipoArchivo": {
+        "enum": [
+          "application/pdf",
+          "image/jpeg",
+          "image/png"
+        ],
+        "title": "TipoArchivo",
+        "type": "string"
+      },
       "TipoDecision": {
         "enum": [
           "asamblea",
@@ -3847,6 +3913,42 @@
           "codigo"
         ],
         "title": "VerificacionSegundoFactor",
+        "type": "object"
+      },
+      "VersionCargada": {
+        "properties": {
+          "estado": {
+            "const": "en_cuarentena",
+            "description": "Toda versión nueva entra en cuarentena hasta que el análisis la resuelve.",
+            "title": "Estado",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "tamano": {
+            "title": "Tamano",
+            "type": "integer"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoArchivo",
+            "description": "El tipo real, leído de los primeros bytes."
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "tipo",
+          "tamano",
+          "sha256"
+        ],
+        "title": "VersionCargada",
         "type": "object"
       },
       "VinculoAnulado": {
@@ -5636,6 +5738,180 @@
         "summary": "Detalle de una decisión formal, con la referencia del acta",
         "tags": [
           "mandatos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos": {
+      "post": {
+        "operationId": "crear_documento_api_v1_consorcios__consorcio_id__documentos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `documentos.cargar` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Crear un documento (sin archivos todavía)",
+        "tags": [
+          "documentos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones": {
+      "post": {
+        "operationId": "subir_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionCargada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `documentos.cargar` en el consorcio."
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+          }
+        },
+        "summary": "Subir un archivo de un documento: entra en cuarentena hasta que se analiza",
+        "tags": [
+          "documentos"
         ]
       }
     },

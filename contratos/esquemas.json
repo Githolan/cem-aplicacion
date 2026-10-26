@@ -725,7 +725,9 @@
           "eficaz_desde_invalida",
           "revision_duplicada",
           "sin_condicion_habilitante",
-          "contacto_terminado"
+          "contacto_terminado",
+          "archivo_demasiado_grande",
+          "tipo_no_admitido"
         ],
         "title": "CodigoError",
         "type": "string"
