@@ -427,3 +427,17 @@ def test_un_contacto_futuro_no_mueve_la_fecha_de_la_lista(escena):
     # Control: uno vigente sí la mueve.
     crear(e["mc"], e["cons"], nombre="Plomería")
     assert leer(e["prop"], e["cons"]).json()["actualizada_en"] > antes
+
+
+def test_soporte_no_escribe_contactos_ni_deja_auditoria(escena, motor_migrate, motor_app):
+    """Soporte está fuera del modelo de usuarios y de la auditoría funcional (decisión del
+    propietario del 26-10-2026): por estas funciones no escribe, y no queda ningún evento."""
+    e = escena
+    with pytest.raises(DBAPIError, match="origen inválido"):
+        with transaccion(motor_app, persona_id=None, consorcio_id=e["cons"]) as c:
+            c.execute(text("select nucleo.crear_contacto('emergencias', 'empresa', 'Guardia',"
+                           " '0800-555-1234', null, null, null, null, 'soporte')"))  # fmt: skip
+    assert eventos(motor_migrate, e["cons"]) == []
+    # Control: el Consejo, por la API, escribe y queda auditado.
+    assert crear(e["mc"], e["cons"]).status_code == 201
+    assert [ev.accion for ev in eventos(motor_migrate, e["cons"])] == ["consorcio.contacto.crear"]

@@ -221,8 +221,9 @@ create function nucleo.contactos_del_consorcio(gestion boolean)
   end
   $$;
 
--- Quién escribe: por la API, la persona de la sesión con la facultad vigente; soporte, sin
--- persona en la sesión ni actor.
+-- Quién escribe: solo por la API, la persona de la sesión con la facultad vigente, y queda
+-- auditado. Soporte no escribe contactos por acá: es un actor fuera del modelo de usuarios y
+-- sus intervenciones no van a la auditoría funcional (decisión del propietario del 26-10-2026).
 create function nucleo.exigir_gestion_contactos(c uuid, actor uuid, origen_pedido text)
   returns void
   language plpgsql stable
@@ -232,19 +233,13 @@ create function nucleo.exigir_gestion_contactos(c uuid, actor uuid, origen_pedid
     if c is null then
       raise exception 'sin consorcio en el ámbito' using errcode = '42501';
     end if;
-    if origen_pedido = 'soporte' then
-      if actor is not null or plataforma.persona_actual() is not null then
-        raise exception 'soporte escribe sin persona en la sesión'
-          using errcode = 'P0001', hint = 'origen_invalido';
-      end if;
-    elsif origen_pedido = 'api' then
-      if actor is null or actor is distinct from plataforma.persona_actual()
+    if origen_pedido is distinct from 'api' then
+      raise exception 'origen inválido' using errcode = 'P0001', hint = 'origen_invalido';
+    end if;
+    if actor is null or actor is distinct from plataforma.persona_actual()
          or not nucleo.tiene_facultad_vigente(c, actor, '{FACULTAD}',
                                               nucleo.hoy_del_consorcio(c)) then
-        raise exception 'sin {FACULTAD} en este consorcio' using errcode = '42501';
-      end if;
-    else
-      raise exception 'origen inválido' using errcode = 'P0001', hint = 'origen_invalido';
+      raise exception 'sin {FACULTAD} en este consorcio' using errcode = '42501';
     end if;
   end
   $$;
