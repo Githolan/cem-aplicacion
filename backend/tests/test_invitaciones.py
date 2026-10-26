@@ -649,7 +649,7 @@ def test_dos_invitaciones_al_mismo_correo_nuevo_aceptadas_a_la_vez_crean_una_per
 # Alta por el equipo de la plataforma -----------------------------------------------------
 
 
-def test_el_script_invita_sin_persona_y_con_origen_soporte(motor_migrate, monkeypatch, capsys):
+def test_el_script_invita_sin_persona_y_sin_evento(motor_migrate, monkeypatch, capsys):
     e = edificio(motor_migrate)
     nuevo = correo_nuevo()
     monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
@@ -664,8 +664,20 @@ def test_el_script_invita_sin_persona_y_con_origen_soporte(motor_migrate, monkey
             text("select id, invitada_por from nucleo.invitacion where correo = :c"), {"c": nuevo}
         ).one()
     assert por is None
-    [aud] = auditoria_de(motor_migrate, id_)
-    assert (aud["origen"], aud["actor_persona_id"]) == ("soporte", None)
+    # S2a (0033): la invitación del equipo no escribe evento; `invitada_por` nulo dice de dónde
+    # vino. Tampoco el reemplazo: invitar de nuevo a la misma persona retira la anterior.
+    assert auditoria_de(motor_migrate, id_) == []
+    assert script_invitar.main([*argumentos, "--unidad", str(e.u2), "--nombre", "Eva"]) == 0
+    with motor_migrate.connect() as conn:
+        revocada = conn.execute(
+            text("select revocada_en is not null from nucleo.invitacion where id = :i"),
+            {"i": id_},
+        ).scalar_one()
+        de_soporte = conn.execute(
+            text("select count(*) from auditoria.eventos where consorcio_id = :c"
+                 " and origen = 'soporte'"), {"c": e.consorcio},
+        ).scalar_one()  # fmt: skip
+    assert revocada and de_soporte == 0
     # Una unidad de otro consorcio: no la ve, no crea nada.
     otro = edificio(motor_migrate)
     assert script_invitar.main([*argumentos, "--unidad", str(otro.u1), "--nombre", "Eva"]) == 1

@@ -276,8 +276,9 @@ def test_el_equipo_finaliza_por_soporte_sin_actor(escena, motor_migrate, motor_a
     finalizar(motor_app, e["cons"], None, e["v_inq_mc"], actor=None, origen="soporte")
     f = fila(motor_migrate, e["v_inq_mc"])
     assert f["finalizado_en"] is not None and f["finalizado_por"] is None
-    [ev] = eventos(motor_migrate, e["cons"], "consorcio.vinculo.finalizar")
-    assert (ev["actor_persona_id"], ev["origen"]) == (None, "soporte")
+    # S2a (0033): soporte no escribe el evento; la constancia es la fila. Control: la misma
+    # baja por la API deja su evento (las pruebas de arriba).
+    assert eventos(motor_migrate, e["cons"], "consorcio.vinculo.finalizar") == []
 
 
 @pytest.mark.parametrize("motivo", [None, "", "   ", "x" * 301])

@@ -18,7 +18,8 @@ mostrar edificio, unidad y vínculo, y la acepta (`POST /api/v1/auth/invitacion/
   `invitacion_requiere_sesion` si no hay sesión, 409 `invitacion_de_otra_persona` si es de otra).
 
 Invitar de nuevo al mismo correo, unidad y vínculo retira la pendiente anterior (reenviar).
-Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo.
+Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo, salvo crear y
+reemplazar cuando invita el equipo: desde S2a (`0033`) no escriben evento.
 """
 
 import logging
@@ -164,16 +165,17 @@ def crear(
         ),
         {"ids": list(bloqueadas)},
     ).all():
-        auditoria.registrar(
-            conn,
-            consorcio_id=consorcio_id,
-            actor=invitada_por,
-            origen=origen,
-            accion="identidad.invitacion.reemplazar",
-            entidad="invitacion",
-            entidad_id=anterior,
-            ip=ip,
-        )
+        if origen != "soporte":
+            auditoria.registrar(
+                conn,
+                consorcio_id=consorcio_id,
+                actor=invitada_por,
+                origen=origen,
+                accion="identidad.invitacion.reemplazar",
+                entidad="invitacion",
+                entidad_id=anterior,
+                ip=ip,
+            )
     token = sesiones.nuevo_token()
     fila = (
         conn.execute(
@@ -199,17 +201,20 @@ def crear(
         .one()
     )
     invitacion = Invitacion(**fila)
-    auditoria.registrar(
-        conn,
-        consorcio_id=consorcio_id,
-        actor=invitada_por,
-        origen=origen,
-        accion="identidad.invitacion.crear",
-        entidad="invitacion",
-        entidad_id=invitacion.id,
-        despues={"unidad_id": invitacion.unidad_id, "tipo": invitacion.tipo.value},
-        ip=ip,
-    )
+    # Soporte de plataforma no escribe eventos de auditoría funcional (decisión del propietario
+    # del 26-10-2026, corte S2a): la invitación del equipo queda con `invitada_por` nulo.
+    if origen != "soporte":
+        auditoria.registrar(
+            conn,
+            consorcio_id=consorcio_id,
+            actor=invitada_por,
+            origen=origen,
+            accion="identidad.invitacion.crear",
+            entidad="invitacion",
+            entidad_id=invitacion.id,
+            despues={"unidad_id": invitacion.unidad_id, "tipo": invitacion.tipo.value},
+            ip=ip,
+        )
     consorcio, zona = conn.execute(
         text("select nombre, zona_horaria from nucleo.consorcio where id = :c"),
         {"c": consorcio_id},

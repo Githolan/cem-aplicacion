@@ -276,3 +276,11 @@ def test_invitar_con_los_ids_impresos_y_aceptar(app, correr, motor_migrate, monk
         "Edificio Prueba de Alta",
         ["propietario"],
     )
+    # S2a: la invitación del equipo no escribe evento (queda con `invitada_por` nulo); aceptarla,
+    # que es un acto de la persona por la API, sí.
+    with motor_migrate.connect() as c:
+        acciones = c.execute(
+            text("select accion, origen from auditoria.eventos where consorcio_id = :c"
+                 " and accion like 'identidad.invitacion.%' order by secuencia"), {"c": cid},
+        ).all()  # fmt: skip
+    assert [tuple(x) for x in acciones] == [("identidad.invitacion.aceptar", "api")]

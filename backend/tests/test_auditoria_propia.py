@@ -280,6 +280,35 @@ def test_el_cursor_recorre_todo_una_vez_aun_con_fechas_iguales(escena, motor_mig
     assert datetime.fromisoformat(fecha) == misma and saltar == "2"
 
 
+def test_soporte_no_corre_la_paginacion(escena, motor_migrate):  # noqa: F811
+    """S1 (0032): soporte queda afuera en las dos mitades del `union all`. Con eventos de soporte
+    intercalados en la misma fecha, cada tamaño de página recorre lo mismo que la lista entera:
+    si la mitad `antes_de` no los filtrara, aparecerían desde la segunda página y correrían el
+    `saltar`."""
+    e = escena
+    misma = datetime(2030, 6, 1, 12, 0, 0, 123456, tzinfo=UTC)
+    for origen in ("soporte", "trabajos", "soporte", "trabajos", "trabajos"):
+        _insertar(motor_migrate, e["cons"], "consorcio.decision.registrar", origen=origen,
+                  creado_en=misma, despues='{"tipo": "asamblea"}')  # fmt: skip
+    completa = _get(e["mc1"], _url(e["cons"]) + "?limite=100").json()["elementos"]
+    iguales = [f for f in completa if datetime.fromisoformat(f["fecha"]) == misma]
+    assert [f["origen"] for f in iguales] == ["sistema"] * 3
+    for limite in (1, 2, 3):
+        filas, _ = _todas(e["mc1"], _url(e["cons"]), limite)
+        assert filas == completa, limite
+
+
+def test_los_eventos_propios_excluyen_a_soporte(escena, motor_migrate):  # noqa: F811
+    """S1 (0032): un evento de soporte con el actor de quien lee (nada en el esquema lo impide)
+    no sale entre los suyos. Control: el mismo con origen `api` sí."""
+    e = escena
+    for origen in ("soporte", "api"):
+        _insertar(motor_migrate, e["cons"], "consorcio.decision.registrar", actor=e["mc1"],
+                  origen=origen, despues='{"tipo": "asamblea"}')  # fmt: skip
+    filas = _get(e["mc1"], _url(e["cons"], "/mis-eventos")).json()["elementos"]
+    assert [f["origen"] for f in filas] == ["aplicacion"]
+
+
 def test_los_eventos_propios_tambien_se_paginan(escena):  # noqa: F811
     e = escena
     for _ in range(3):
