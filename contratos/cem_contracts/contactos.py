@@ -15,6 +15,7 @@ Diseño: `doc/diseno/H2b_7_Diseno.md` del repositorio CEM, con la decisión del 
 """
 
 import re
+import string
 from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated, Self
@@ -33,16 +34,18 @@ LARGO_MAXIMO_NOMBRE = 120
 LARGO_MAXIMO_TEXTO = 300
 FORMATO_TELEFONO = r"^[+0-9][0-9 ()-]{2,29}$"
 TELEFONO_EN_TEXTO = re.compile(r"[0-9]{8}")
+CORREO_EN_TEXTO = re.compile(r"[^\s@]+@[^\s@]+")
+CONSERVADOS = frozenset(string.ascii_letters + "0123456789:,")
 
 
 def _sin_separadores(texto: str) -> str:
-    """Lo que queda antes de contar dígitos: letras, los dígitos 0-9, dos puntos y coma. Es la
-    regla de `nucleo.sin_contacto_libre` (`[^[:alnum:]:,]`), pero más estricta: un «²» o un «½»
-    se quitan acá como en la base, así que lo que la base rechaza nunca pasa este control (un 422,
-    no el CHECK de la base con un 500). Ningún separador esquiva la búsqueda ("11 - 2345 - 6789")
-    y un horario ("9:00/13:00") pasa."""
-    return "".join(c for c in texto if c.isalpha() or c in "0123456789:,")
-CORREO_EN_TEXTO = re.compile(r"[^\s@]+@[^\s@]+")
+    """Lo que queda antes de contar dígitos: letras ASCII, los dígitos 0-9, dos puntos y coma. La
+    base quita `[^[:alnum:]:,]`, que en cualquier configuración regional conserva esto y quizá
+    algo más: así este control es siempre igual o más estricto, y lo que la base rechazaría es un
+    422 acá, nunca el CHECK de la base con un 500 (un «²», un «é» o una letra Unicode que la
+    biblioteca de la base no conoce). Ningún separador esquiva la búsqueda ("11 - 2345 - 6789") y
+    un horario ("9:00/13:00") pasa."""
+    return "".join(c for c in texto if c in CONSERVADOS)
 
 
 def _sin_contacto_libre(texto: str) -> str:

@@ -396,7 +396,10 @@ def test_si_la_base_niega_y_el_evaluador_concede_falla_fuerte(escena, monkeypatc
         c.get(url(e["cons"], "/gestion"))
 
 
-@pytest.mark.parametrize("texto", ["Llamar 1234²5678", "Llamar 1234½5678", "Llamar 12345678"])
+@pytest.mark.parametrize(
+    "texto",
+    ["Llamar 1234²5678", "Llamar 1234½5678", "Llamar 1234ࡰ5678", "Llamar 12345678"],
+)
 def test_lo_que_la_base_rechaza_el_contrato_tambien(motor_migrate, texto):
     """El contrato es igual o más estricto que la base: nunca un CHECK de la base (500)."""
     from cem_contracts.contactos import _sin_contacto_libre
