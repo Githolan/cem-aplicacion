@@ -389,7 +389,7 @@ describe("página /contactos/gestion", () => {
   it("las rutas, el encabezado de reintento, los cuerpos y los topes son los del contrato", () => {
     type Operacion = {
       parameters?: { name: string; required?: boolean }[];
-      requestBody?: { content: { "application/json": { schema: { $ref: string } } } };
+      requestBody?: { content: { "application/json"?: { schema: { $ref: string } } } };
     };
     const rutas = contrato.paths as Record<string, Record<string, Operacion> | undefined>;
     expect(rutas["/api/v1/consorcios/{consorcio_id}/contactos/gestion"]?.get).toBeTruthy();
@@ -402,7 +402,7 @@ describe("página /contactos/gestion", () => {
     ] as const;
     for (const [op, esquema] of conClave) {
       expect(op?.parameters?.find((p) => p.name === "Idempotency-Key")?.required).toBe(true);
-      expect(op?.requestBody?.content["application/json"].schema.$ref ?? null).toBe(
+      expect(op?.requestBody?.content["application/json"]?.schema.$ref ?? null).toBe(
         esquema === null ? null : `#/components/schemas/${esquema}`,
       );
     }

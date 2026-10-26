@@ -471,7 +471,7 @@ describe("página /padron", () => {
   it("las rutas, el encabezado de reintento y los cuerpos son los del contrato", () => {
     type Operacion = {
       parameters?: { name: string; required?: boolean }[];
-      requestBody?: { content: { "application/json": { schema: { $ref: string } } } };
+      requestBody?: { content: { "application/json"?: { schema: { $ref: string } } } };
     };
     const rutas = contrato.paths as Record<string, Record<string, Operacion> | undefined>;
     expect(rutas["/api/v1/consorcios/{consorcio_id}/padron"]?.get).toBeTruthy();
@@ -481,7 +481,7 @@ describe("página /padron", () => {
     ] as const) {
       const op = rutas[`/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/${accion}`]?.post;
       expect(op?.parameters?.find((p) => p.name === "Idempotency-Key")?.required).toBe(true);
-      expect(op?.requestBody?.content["application/json"].schema.$ref).toBe(`#/components/schemas/${esquema}`);
+      expect(op?.requestBody?.content["application/json"]?.schema.$ref).toBe(`#/components/schemas/${esquema}`);
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
