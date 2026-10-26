@@ -12,7 +12,8 @@ Diseño: `doc/diseno/H2b_7_Diseno.md` del repositorio CEM, con la decisión del 
   (el criterio de `0028`).
 - **Funciones `security definer`**, con la segunda barrera: leer exige ámbito (vínculo vigente no
   pendiente o mandato vigente), y la lista de gestión y las escrituras por la API exigen la
-  facultad vigente de quien está en la sesión. Soporte escribe sin persona en la sesión.
+  facultad vigente de quien está en la sesión. Soporte no escribe contactos: solo el origen `api`
+  (`origen_invalido`, desde la revisión de app #121).
 - **Auditoría** de cada escritura, sin datos de contacto ni texto libre (`app/auditoria.py`): la
   función, la naturaleza, si hay teléfono y la vigencia. Las cinco acciones entran en la
   proyección funcional de RF35-B (`0028`).

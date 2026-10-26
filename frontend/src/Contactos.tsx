@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import {
@@ -13,6 +13,7 @@ import {
   leerCopias,
   vigentes,
 } from "./copiaContactos";
+import { RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
@@ -192,6 +193,10 @@ export function Contactos() {
       </div>
 
       {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
+
+      <p className="tarjeta">
+        <Link to={RUTA_CONTACTOS_GESTION}>Gestionar la lista</Link> (administración y Consejo)
+      </p>
     </>
   );
 
