@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
@@ -55,7 +56,12 @@ export function Cuenta() {
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const consultado = useRef(false);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  // Toda salida a /entrar (salir, cerrar la sesión actual o una sesión vencida) borra las copias de
+  // los contactos (H2b_7 §5).
+  const aEntrar = useCallback(() => {
+    borrarCopias();
+    navegar(RUTA_ENTRAR, { replace: true });
+  }, [navegar]);
 
   /** Ante un error: sin sesión, a /entrar; si no, el aviso de conexión. */
   const atajar = useCallback(

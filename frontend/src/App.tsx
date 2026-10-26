@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link, Route, Routes } from "react-router";
 
+import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Entrar } from "./Entrar";
@@ -34,6 +35,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_PADRON}>Padrón del edificio</Link>
+      </p>
+      <p>
+        <Link to={RUTA_CONTACTOS}>Contactos de emergencia</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -90,6 +94,7 @@ export function App() {
           <Route path={RUTA_INVITACIONES} element={<Invitar />} />
           <Route path={RUTA_MANDATOS} element={<Mandatos />} />
           <Route path={RUTA_PADRON} element={<Padron />} />
+          <Route path={RUTA_CONTACTOS} element={<Contactos />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

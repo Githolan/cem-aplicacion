@@ -7,8 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
+import { PREFIJO_COPIA } from "./copiaContactos";
 import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
+
+/** Una copia de contactos válida, para probar el borrado real y no el descarte de una dañada. */
+const COPIA_VALIDA = JSON.stringify({
+  consorcio_id: "c1",
+  nombre: "Edificio",
+  guardada_en: "2026-10-21T12:00:00Z",
+  lista: { elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" },
+});
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const ACTUAL = "11111111-1111-4111-8111-111111111111";
@@ -233,15 +242,29 @@ describe("página /cuenta", () => {
     expect(pedidoOtras?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
-  it("salir con CSRF lleva a /entrar", async () => {
+  it("salir con CSRF lleva a /entrar y borra las copias de los contactos", async () => {
     const simulado = conSesion({ "POST /api/v1/auth/salir": sinCuerpo(204) });
     vi.stubGlobal("fetch", simulado);
+    localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
     abrir();
+    // Control: con la sesión abierta, la copia sigue ahí.
+    await screen.findByRole("button", { name: "Salir" });
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBe(COPIA_VALIDA);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salir" }));
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
     expect(pedido(simulado, "POST", "/api/v1/auth/salir")?.headers.get("X-CSRF-Token")).toBe("abc123");
+  });
+
+  it("salir con la sesión ya vencida (401) también borra las copias", async () => {
+    vi.stubGlobal("fetch", conSesion({ "POST /api/v1/auth/salir": () => error("no_autenticado", 401) }));
+    localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
   });
 
   it("si la sesión venció entre medio, una acción lleva a /entrar", async () => {
