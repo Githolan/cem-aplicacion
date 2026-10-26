@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
+import { PREFIJO_COPIA } from "./copiaContactos";
 import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
 
@@ -233,14 +234,19 @@ describe("página /cuenta", () => {
     expect(pedidoOtras?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
-  it("salir con CSRF lleva a /entrar", async () => {
+  it("salir con CSRF lleva a /entrar y borra las copias de los contactos", async () => {
     const simulado = conSesion({ "POST /api/v1/auth/salir": sinCuerpo(204) });
     vi.stubGlobal("fetch", simulado);
+    localStorage.setItem(`${PREFIJO_COPIA}c1`, "{}");
     abrir();
+    // Control: con la sesión abierta, la copia sigue ahí.
+    await screen.findByRole("button", { name: "Salir" });
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBe("{}");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salir" }));
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
     expect(pedido(simulado, "POST", "/api/v1/auth/salir")?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 

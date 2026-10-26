@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
@@ -163,6 +164,8 @@ export function Cuenta() {
       .then(({ response }) => {
         exigirSesion(response);
         if (!response.ok) throw new Error(String(response.status));
+        // Al salir no queda ninguna copia de los contactos (H2b_7 §5).
+        borrarCopias();
         aEntrar();
       })
       .catch(atajar)

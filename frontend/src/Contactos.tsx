@@ -1,0 +1,256 @@
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+
+import { api } from "./api/cliente";
+import { borrarCopia, borrarCopias, type Contacto, type Copia, guardarCopia, hoyEn, leerCopias, vigentes } from "./copiaContactos";
+import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, esDeConexion, mensajeDeFalla } from "./fallas";
+
+// Página /contactos (H2b 2b-7b; doc/diseno/H2b_7_Diseno.md §5 del repositorio CEM): los contactos
+// de emergencia vigentes del edificio, que no son personales, para tenerlos a mano también sin
+// conexión. Cada lectura buena reemplaza la copia del edificio; un 401, 403 o 404 la borra. Sin
+// conexión se muestra la copia con su fecha, volviendo a aplicar la vigencia con el día del
+// consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
+
+export const RUTA_CONTACTOS = "/contactos";
+
+const ESTADO = { sinSesion: 401, sinPermiso: 403, noEncontrado: 404 } as const;
+
+const TEXTO_FUNCION: Record<Contacto["funcion"], string> = {
+  administracion: "Administración",
+  encargado: "Encargado o encargada",
+  emergencias: "Emergencias",
+  aseguradora: "Aseguradora",
+  proveedor_critico: "Proveedor crítico",
+  servicio_publico: "Servicio público",
+  otro: "Otro",
+};
+
+const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeStyle: "short" });
+const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
+
+/** Lo que muestra la página para el edificio elegido. */
+type Lectura =
+  | { tipo: "cargando" }
+  | { tipo: "sin_permiso" }
+  | { tipo: "en_linea"; copia: Copia; guardada: boolean }
+  | { tipo: "copia"; copia: Copia }
+  | { tipo: "sin_servicio"; mensaje: string };
+
+type Pantalla =
+  | { tipo: "cargando" }
+  | { tipo: "sin_consorcios" }
+  | { tipo: "lista"; consorcios: { id: string; nombre: string }[]; sinConexion: boolean };
+
+class SinSesion extends Error {}
+
+function exigirSesion(response: Response) {
+  if (response.status === ESTADO.sinSesion) throw new SinSesion();
+}
+
+export function Contactos() {
+  const id = useId();
+  const navegar = useNavigate();
+  const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const [consorcio, setConsorcio] = useState("");
+  const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
+  const consultado = useRef(false);
+
+  // Sin sesión no queda ninguna copia: el próximo que use el dispositivo no ve las listas.
+  const aEntrar = useCallback(() => {
+    borrarCopias();
+    navegar(RUTA_ENTRAR, { replace: true });
+  }, [navegar]);
+
+  /** Sin conexión, los edificios salen de las copias guardadas. */
+  const desdeCopias = useCallback(() => {
+    const copias = leerCopias();
+    const primera = copias[0];
+    if (primera === undefined) {
+      setPantalla({ tipo: "lista", consorcios: [], sinConexion: true });
+      return;
+    }
+    setPantalla({ tipo: "lista", consorcios: copias.map((c) => ({ id: c.consorcio_id, nombre: c.nombre })), sinConexion: true });
+    setConsorcio(primera.consorcio_id);
+  }, []);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    void api
+      .GET("/api/v1/me/consorcios")
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data === undefined) {
+          if (esDeConexion(response.status, codigoDe(error))) desdeCopias();
+          else setPantalla({ tipo: "lista", consorcios: [], sinConexion: false });
+          return;
+        }
+        const primero = data[0];
+        if (primero === undefined) {
+          // Ya no participa de ningún edificio: ninguna copia sigue valiendo.
+          borrarCopias();
+          setPantalla({ tipo: "sin_consorcios" });
+          return;
+        }
+        setPantalla({ tipo: "lista", consorcios: data, sinConexion: false });
+        setConsorcio(primero.id);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else desdeCopias();
+      });
+  }, [aEntrar, desdeCopias]);
+
+  useEffect(() => {
+    if (consorcio === "" || pantalla.tipo !== "lista") return;
+    const nombre = pantalla.consorcios.find((c) => c.id === consorcio)?.nombre ?? "";
+    const guardada = () => leerCopias().find((c) => c.consorcio_id === consorcio);
+    const sinRed = (mensaje: string) => {
+      const copia = guardada();
+      setLectura(copia === undefined ? { tipo: "sin_servicio", mensaje } : { tipo: "copia", copia });
+    };
+    if (pantalla.sinConexion) {
+      sinRed(mensajeDeFalla(0, undefined));
+      return;
+    }
+    let vigente = true;
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/contactos", { params: { path: { consorcio_id: consorcio } } })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (!vigente) return;
+        if (data !== undefined) {
+          const copia: Copia = { consorcio_id: consorcio, nombre, guardada_en: new Date().toISOString(), lista: data };
+          setLectura({ tipo: "en_linea", copia, guardada: guardarCopia(copia) });
+        } else if (response.status === ESTADO.sinPermiso || response.status === ESTADO.noEncontrado) {
+          borrarCopia(consorcio);
+          setLectura({ tipo: "sin_permiso" });
+        } else sinRed(mensajeDeFalla(response.status, codigoDe(error)));
+      })
+      .catch((e: unknown) => {
+        if (!vigente) return;
+        if (e instanceof SinSesion) aEntrar();
+        else sinRed(mensajeDeFalla(0, undefined));
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [consorcio, pantalla, aEntrar]);
+
+  return (
+    <>
+      <h1>Contactos de emergencia</h1>
+      <p className="tarjeta">
+        Los teléfonos de la administración, el encargado, emergencias, la aseguradora y los
+        proveedores críticos del edificio. Quedan guardados en este dispositivo para verlos también
+        sin conexión, y se borran al salir de la cuenta.
+      </p>
+
+      {pantalla.tipo === "lista" && pantalla.consorcios.length > 1 && (
+        <div className="formulario formulario-movil tarjeta">
+          <label htmlFor={`${id}-consorcio`}>Edificio</label>
+          <select
+            id={`${id}-consorcio`}
+            value={consorcio}
+            onChange={(e) => {
+              setLectura({ tipo: "cargando" });
+              setConsorcio(e.target.value);
+            }}
+          >
+            {pantalla.consorcios.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.nombre}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div role="status" aria-live="polite">
+        {pantalla.tipo === "cargando" && <p className="tarjeta">Consultando…</p>}
+        {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Todavía no participás de ningún edificio.</p>}
+        {pantalla.tipo === "lista" && pantalla.consorcios.length === 0 && (
+          <p className="tarjeta aviso-error">
+            {pantalla.sinConexion
+              ? "Sin conexión, y este dispositivo no tiene contactos guardados. Abrí esta página con conexión para guardarlos."
+              : "No pudimos consultar tus edificios. Probá de nuevo en unos minutos."}
+          </p>
+        )}
+        {pantalla.tipo === "lista" && pantalla.consorcios.length > 0 && estado()}
+      </div>
+
+      {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
+    </>
+  );
+
+  function estado() {
+    switch (lectura.tipo) {
+      case "cargando":
+        return <p className="tarjeta">Consultando…</p>;
+      case "sin_permiso":
+        return <p className="tarjeta">No tenés acceso a los contactos de este edificio.</p>;
+      case "sin_servicio":
+        return <p className="tarjeta aviso-error">{lectura.mensaje} Este dispositivo no tiene una copia guardada de este edificio.</p>;
+      case "copia":
+        return (
+          <p className="tarjeta aviso-error">
+            Sin conexión: esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no tener
+            los últimos cambios
+          </p>
+        );
+      case "en_linea":
+        return lectura.guardada ? null : (
+          <p className="tarjeta aviso-error">Este navegador no deja guardar la lista: sin conexión no la vas a poder ver.</p>
+        );
+    }
+  }
+
+  function lista(copia: Copia, sinConexion: boolean) {
+    const { lista: datos } = copia;
+    // Sin conexión, un contacto cuyo fin ya llegó no se muestra aunque la copia sea anterior.
+    const contactos = sinConexion ? vigentes(datos.elementos, hoyEn(datos.zona_horaria)) : datos.elementos;
+    return (
+      <section aria-labelledby={`${id}-lista`} className="tarjeta">
+        <h2 id={`${id}-lista`}>{copia.nombre}</h2>
+        <p>Actualizado el {momento(copia.guardada_en)}</p>
+        {datos.actualizada_en !== null && <p>Último cambio de la lista: {momento(datos.actualizada_en)}</p>}
+        {contactos.length === 0 ? (
+          <p>El edificio no tiene contactos de emergencia cargados.</p>
+        ) : (
+          <ul className="sesiones" aria-label="Contactos de emergencia">
+            {contactos.map((c) => (
+              <li key={c.id}>
+                <h3>
+                  {TEXTO_FUNCION[c.funcion]}: {c.nombre}
+                </h3>
+                <dl className="detalles">
+                  {c.telefono !== null && (
+                    <>
+                      <dt>Teléfono</dt>
+                      <dd>
+                        <a href={`tel:${c.telefono.replace(/[^+0-9]/g, "")}`}>{c.telefono}</a>
+                      </dd>
+                    </>
+                  )}
+                  {c.indicaciones !== null && (
+                    <>
+                      <dt>Indicaciones</dt>
+                      <dd>{c.indicaciones}</dd>
+                    </>
+                  )}
+                  {c.observado && (
+                    <>
+                      <dt>Aviso</dt>
+                      <dd>Alguien señaló un dato como incorrecto; la administración lo está revisando.</dd>
+                    </>
+                  )}
+                </dl>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    );
+  }
+}
