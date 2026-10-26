@@ -16,10 +16,10 @@ unidad. `nucleo.finalizar_vinculo` (migración 0020) cierra la vigencia hoy, con
 revoca las sesiones de la persona solo si no le queda otro acceso al consorcio.
 
 **Anulación (2b-5, corte 3).** Un vínculo que todavía no empezó no se finaliza: si se cargó por
-error, se anula. `nucleo.anular_vinculo` (0025) lo borra y deja un evento con sus datos, sin el
-motivo (E31). Por la API, con `padron.gestionar` sobre su unidad y solo sin confirmar; uno
-confirmado lo anula el equipo por soporte, con la referencia del respaldo
-(`scripts.anular_vinculo`).
+error, se anula. `nucleo.anular_vinculo` (0025) lo borra; por la API deja un evento con sus
+datos, sin el motivo (E31). Por la API, con `padron.gestionar` sobre su unidad y solo sin
+confirmar; uno confirmado lo anula el equipo por soporte, con la referencia del respaldo
+(`scripts.anular_vinculo`), y desde `0034` sin evento: la constancia es la salida del script.
 """
 
 import logging

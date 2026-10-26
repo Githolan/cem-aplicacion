@@ -17,6 +17,7 @@ decisiones del propietario del 22-10-2026 (D1 a D4 en `doc/rf02_corte3_informe.m
 - RLS de `importacion_padron` y la ida y vuelta 0024 ⇄ 0025.
 """
 
+import contextlib
 import hashlib
 import json
 import threading
@@ -941,8 +942,10 @@ def test_un_vinculo_que_ya_empezo_no_se_anula(escena, motor_migrate):
 
 
 def test_un_vinculo_confirmado_no_se_anula_por_la_api_y_si_por_soporte(
-    escena, motor_migrate, monkeypatch
+    escena, motor_migrate, monkeypatch, capsys
 ):
+    """Por soporte (`0034`): sin eventos de auditoría. La fila se borra y la invitación se
+    retira; lo anulado y la referencia quedan solo en la salida del script, sin el motivo."""
     e = escena
     v = futuro_importado(e, motor_migrate)
     with motor_migrate.begin() as c:
@@ -953,17 +956,79 @@ def test_un_vinculo_confirmado_no_se_anula_por_la_api_y_si_por_soporte(
             ),
             {"p": e["prop2"], "v": v["id"]},
         )
+        [inv] = c.execute(
+            text("select id from nucleo.invitacion where vinculo_id = :v and revocada_en is null"),
+            {"v": v["id"]},
+        ).scalars()
     r = anular(e["admin"], e["cons"], v["id"])
     assert (r.status_code, r.json()["codigo"]) == (409, "vinculo_confirmado")
     monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
-    base = ["--consorcio", str(e["cons"]), "--vinculo", str(v["id"]), "--motivo", "Error"]
+    base = ["--consorcio", str(e["cons"]), "--vinculo", str(v["id"])]
+    base += ["--motivo", "Motivo reservado"]
+    capsys.readouterr()
     assert script_anular.main(base + ["--referencia", "  "]) == 1  # sin respaldo, no
+    assert "anulado" not in capsys.readouterr().out  # rechazada: nada impreso como anulado
     assert script_anular.main(base + ["--referencia", "Escritura corregida 815"]) == 0
-    [ev] = [x for x in eventos(motor_migrate, e["cons"], "consorcio.vinculo.anular")
-            if x["entidad_id"] == v["id"]]  # fmt: skip
-    assert (ev["origen"], ev["actor_persona_id"]) == ("soporte", None)
-    assert ev["despues"] == {"referencia": "Escritura corregida 815"}
-    assert ev["antes"]["confirmado"] is True
+    salida = capsys.readouterr().out
+    assert f"vínculo {v['id']} anulado" in salida
+    assert f"vigente_desde: {v['vigente_desde']}" in salida and "confirmado: True" in salida
+    assert "referencia: Escritura corregida 815" in salida
+    assert f"invitaciones retiradas: {inv}" in salida
+    assert "Motivo reservado" not in salida
+    with motor_migrate.connect() as c:
+        assert c.execute(text("select count(*) from nucleo.vinculo where id = :v"),
+                         {"v": v["id"]}).scalar_one() == 0  # fmt: skip
+        revocada = text("select revocada_en is not null from nucleo.invitacion where id = :i")
+        assert c.execute(revocada, {"i": inv}).scalar_one()
+    assert [x for x in eventos(motor_migrate, e["cons"], "consorcio.vinculo.anular")
+            if x["entidad_id"] == v["id"]] == []  # fmt: skip
+    assert [x for x in eventos(motor_migrate, e["cons"], "identidad.invitacion.revocar")
+            if x["entidad_id"] == inv] == []  # fmt: skip
+    assert cadena_rota(motor_migrate, e["cons"]) == 0
+
+
+def test_si_el_vinculo_cambia_mientras_soporte_lo_anula_no_se_anula_nada(
+    escena, motor_migrate, monkeypatch, capsys
+):
+    """Codex en app #126: si alguien confirma el vínculo entre la lectura del script y el
+    bloqueo de la función, la salida describiría algo distinto de lo borrado. Con lectura
+    repetible la función falla por serialización: nada anulado ni impreso como anulado."""
+    e = escena
+    v = futuro_importado(e, motor_migrate)
+    original = script_anular.transaccion
+
+    @contextlib.contextmanager
+    def con_confirmacion_concurrente(*args, **kwargs):
+        with original(*args, **kwargs) as conn:
+            ejecutar = conn.execute
+
+            def execute(sentencia, *resto, **mas):
+                if "nucleo.anular_vinculo" in str(sentencia):
+                    with motor_migrate.begin() as otra:  # confirma y se compromete en el medio
+                        otra.execute(
+                            text(
+                                "update nucleo.vinculo set confirmado_por = :p,"
+                                " confirmado_en = now(), confirmacion_referencia = 'Escritura 2'"
+                                " where id = :v"
+                            ),
+                            {"p": e["prop2"], "v": v["id"]},
+                        )
+                return ejecutar(sentencia, *resto, **mas)
+
+            monkeypatch.setattr(conn, "execute", execute)
+            yield conn
+
+    monkeypatch.setattr(script_anular, "transaccion", con_confirmacion_concurrente)
+    monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
+    args = ["--consorcio", str(e["cons"]), "--vinculo", str(v["id"])]
+    args += ["--motivo", "Error", "--referencia", "Escritura corregida 816"]
+    capsys.readouterr()
+    assert script_anular.main(args) == 1
+    salida = capsys.readouterr()
+    assert "anulado" not in salida.out and "could not serialize" in salida.err
+    with motor_migrate.connect() as c:  # sigue, y confirmado
+        assert c.execute(text("select confirmado_en is not null from nucleo.vinculo where id = :v"),
+                         {"v": v["id"]}).scalar_one()  # fmt: skip
 
 
 def test_anular_exige_padron_gestionar_sobre_la_unidad(escena, motor_migrate, motor_app):
