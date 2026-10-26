@@ -142,9 +142,9 @@ create function nucleo.en_ambito(c uuid, quien uuid)
 revoke all on function nucleo.en_ambito(uuid, uuid) from public;
 
 -- Cuándo cambió por última vez la lista general, y la zona del consorcio con la que el
--- dispositivo vuelve a aplicar la vigencia a su copia. Cuenta todos los contactos, también los
--- retirados y los que empezaron o terminaron por fecha: un retiro o un vencimiento también la
--- cambian.
+-- dispositivo vuelve a aplicar la vigencia a su copia. Cuenta los contactos que figuraron alguna
+-- vez, también los retirados y los que empezaron o terminaron por fecha: un retiro o un
+-- vencimiento también la cambian.
 create function nucleo.estado_contactos()
   returns table (actualizada_en timestamptz, zona_horaria text)
   language plpgsql stable security definer
@@ -170,7 +170,10 @@ create function nucleo.estado_contactos()
                     then k.vigente_hasta::timestamp at time zone zona end)),
              zona
         from nucleo.contacto_emergencia k
-       where k.consorcio_id = c;
+       where k.consorcio_id = c
+         -- Un contacto futuro todavía no figuró: no mueve la fecha. (Un rango vacío no se
+         -- excluye: también es el de uno que empezó hoy y se retiró hoy, que sí figuró.)
+         and k.vigente_desde <= hoy;
   end
   $$;
 
@@ -189,7 +192,8 @@ create function nucleo.contactos_del_consorcio(gestion boolean)
     quien uuid := plataforma.persona_actual();
     hoy date;
   begin
-    if c is null or quien is null then
+    -- Un `gestion` nulo dejaría las dos barreras en NULL y pasaría sin ninguna (Codex en #121).
+    if c is null or quien is null or gestion is null then
       raise exception 'sin ámbito para leer los contactos' using errcode = '42501';
     end if;
     hoy := nucleo.hoy_del_consorcio(c);

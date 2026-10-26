@@ -288,8 +288,12 @@ def test_la_base_niega_sin_ambito_o_sin_facultad(escena, motor_migrate, motor_ap
     with pytest.raises(DBAPIError, match="sin contactos.gestionar"):
         with transaccion(motor_app, persona_id=e["prop"], consorcio_id=e["cons"]) as c:
             c.execute(text("select * from nucleo.contactos_del_consorcio(true)")).all()
-    # Quien no tiene ámbito no lee ni la lista general.
+    # Un `gestion` nulo no esquiva las dos barreras (Codex en #121).
     ajena = otra_persona(motor_migrate, e["cons"])
+    with pytest.raises(DBAPIError, match="sin ámbito"):
+        with transaccion(motor_app, persona_id=ajena, consorcio_id=e["cons"]) as c:
+            c.execute(text("select * from nucleo.contactos_del_consorcio(null)")).all()
+    # Quien no tiene ámbito no lee ni la lista general.
     with pytest.raises(DBAPIError, match="sin ámbito"):
         with transaccion(motor_app, persona_id=ajena, consorcio_id=e["cons"]) as c:
             c.execute(text("select * from nucleo.contactos_del_consorcio(false)")).all()
@@ -390,3 +394,33 @@ def test_si_la_base_niega_y_el_evaluador_concede_falla_fuerte(escena, monkeypatc
     # discrepancia (500), nunca una lista vacía ni un 403.
     with cliente(e["prop"]) as c, pytest.raises(Discrepancia):
         c.get(url(e["cons"], "/gestion"))
+
+
+@pytest.mark.parametrize("texto", ["Llamar 1234²5678", "Llamar 1234½5678", "Llamar 12345678"])
+def test_lo_que_la_base_rechaza_el_contrato_tambien(motor_migrate, texto):
+    """El contrato es igual o más estricto que la base: nunca un CHECK de la base (500)."""
+    from cem_contracts.contactos import _sin_contacto_libre
+
+    with motor_migrate.connect() as c:
+        en_la_base = c.execute(text("select nucleo.sin_contacto_libre(:t)"), {"t": texto}).scalar()
+    assert en_la_base is False
+    with pytest.raises(ValueError):
+        _sin_contacto_libre(texto)
+    # Control: un horario y una dirección pasan en los dos.
+    for bueno in ("Atiende 9:00/13:00", "Corrientes 1234, piso 5"):
+        with motor_migrate.connect() as c:
+            assert c.execute(text("select nucleo.sin_contacto_libre(:t)"), {"t": bueno}).scalar()
+        assert _sin_contacto_libre(bueno) == bueno
+
+
+@pytest.mark.redis
+def test_un_contacto_futuro_no_mueve_la_fecha_de_la_lista(escena):
+    e = escena
+    crear(e["mc"], e["cons"])
+    antes = leer(e["prop"], e["cons"]).json()["actualizada_en"]
+    crear(e["mc"], e["cons"], nombre="Guardia nueva",
+          vigente_desde=str(date.today() + timedelta(days=30)))  # fmt: skip
+    assert leer(e["prop"], e["cons"]).json()["actualizada_en"] == antes
+    # Control: uno vigente sí la mueve.
+    crear(e["mc"], e["cons"], nombre="Plomería")
+    assert leer(e["prop"], e["cons"]).json()["actualizada_en"] > antes

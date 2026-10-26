@@ -32,11 +32,16 @@ from pydantic import (
 LARGO_MAXIMO_NOMBRE = 120
 LARGO_MAXIMO_TEXTO = 300
 FORMATO_TELEFONO = r"^[+0-9][0-9 ()-]{2,29}$"
-SEPARADORES = re.compile(r"[^\w:,]|_")
-"""Lo que se quita antes de contar dígitos: todo salvo letras, dígitos, dos puntos y coma. Es la
-misma regla que `nucleo.sin_contacto_libre` (`[^[:alnum:]:,]`): ningún separador esquiva la
-búsqueda ("11 - 2345 - 6789") y un horario ("9:00/13:00") pasa."""
 TELEFONO_EN_TEXTO = re.compile(r"[0-9]{8}")
+
+
+def _sin_separadores(texto: str) -> str:
+    """Lo que queda antes de contar dígitos: letras, los dígitos 0-9, dos puntos y coma. Es la
+    regla de `nucleo.sin_contacto_libre` (`[^[:alnum:]:,]`), pero más estricta: un «²» o un «½»
+    se quitan acá como en la base, así que lo que la base rechaza nunca pasa este control (un 422,
+    no el CHECK de la base con un 500). Ningún separador esquiva la búsqueda ("11 - 2345 - 6789")
+    y un horario ("9:00/13:00") pasa."""
+    return "".join(c for c in texto if c.isalpha() or c in "0123456789:,")
 CORREO_EN_TEXTO = re.compile(r"[^\s@]+@[^\s@]+")
 
 
@@ -45,7 +50,7 @@ def _sin_contacto_libre(texto: str) -> str:
     texto = texto.strip()
     if not texto:
         raise ValueError("El campo no puede quedar vacío.")
-    if TELEFONO_EN_TEXTO.search(SEPARADORES.sub("", texto)) or CORREO_EN_TEXTO.search(texto):
+    if TELEFONO_EN_TEXTO.search(_sin_separadores(texto)) or CORREO_EN_TEXTO.search(texto):
         raise ValueError("Sin teléfonos ni correos acá: el número va solo en el teléfono.")
     return texto
 
