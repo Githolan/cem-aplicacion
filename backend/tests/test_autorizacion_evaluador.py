@@ -324,7 +324,7 @@ def test_las_acciones_de_la_tabla():
     # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4), las 3 de lectura (2b-4c) y la revisión
     # del mandato pendiente (E62), la historia de modos (RF41-C, 2b-6b), las 2 de la auditoría
     # (RF35-B, 2b-6c) y las 2 de la lectura de coeficientes (RF05)
-    assert len(POLITICAS) == 43
+    assert len(POLITICAS) == 44
 
 
 def _archivo(tmp_path, nombre, politicas):

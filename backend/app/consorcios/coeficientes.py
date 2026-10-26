@@ -5,12 +5,16 @@ tiene `padron.ver` o `coeficientes.proponer`. No hay facultades nuevas: dos pol�
 deciden cada coeficiente con esas facultades, fila por fila, como el padrón:
 `coeficientes.ver_por_unidad` (`padron.ver` sobre la unidad del coeficiente) y
 `coeficientes.ver_por_grupo` (`coeficientes.proponer` sobre el grupo del esquema, sin el respaldo
-documental que pide proponer: leer no propone nada). Un esquema sale si quien lee ve alguno de sus
-coeficientes o lo lee por su grupo.
+documental que pide proponer: leer no propone nada). Desde la decisión del propietario del
+25-10-2026 (`Decisiones_Propietario_2026-10-25.md`, §1.8), una tercera,
+`coeficientes.ver_propia_unidad`, deja ver el coeficiente de su unidad a quien tiene el vínculo
+confirmado, sin `padron.ver`. Un esquema sale si quien lee ve alguno de sus coeficientes o lo lee
+por su grupo.
 
-Las funciones de `0029` exigen, como segunda barrera, un mandato vigente con alguna de las dos
-facultades. Si la base niega y el evaluador concede alguna, no coinciden: la ruta falla fuerte
-(500), nunca devuelve una lista vacía. Si niegan las dos, la negación queda auditada con
+Las funciones de `0030` exigen, como segunda barrera, un mandato vigente con alguna de las dos
+facultades; sin él, un vínculo vigente y confirmado, y entonces devuelven solo las filas de esas
+unidades. Si la base niega y el evaluador concede alguna, no coinciden: la ruta falla fuerte
+(500), nunca devuelve una lista vacía. Si niegan todas, la negación queda auditada con
 `coeficientes.ver_por_unidad` (la lectura que el diseño nombra primero) y responde 403.
 
 Si la base deja leer pero ninguna política concede nada, una negación por filtro (sin modo, un
@@ -56,12 +60,16 @@ def sobre_grupo(grupo: str) -> Entidad:
     response_model=ListaEsquemasCoeficientes,
     summary="Esquemas de coeficientes y reglas de reparto, por grupo y versión",
     responses={
-        403: {"description": "Sin `padron.ver` ni `coeficientes.proponer` en el consorcio."}
+        403: {
+            "description": "Sin `padron.ver` ni `coeficientes.proponer` en el consorcio, ni un"
+            " vínculo confirmado con alguna unidad."
+        }
     },
 )
 def listar_coeficientes(
     por_unidad: Annotated[Permiso, Depends(requiere("coeficientes.ver_por_unidad"))],
     por_grupo: Annotated[Permiso, Depends(requiere("coeficientes.ver_por_grupo"))],
+    propia: Annotated[Permiso, Depends(requiere("coeficientes.ver_propia_unidad"))],
     motor: MotorDep,
 ) -> ListaEsquemasCoeficientes:
     """Los porcentajes tal como los guarda la base (D4). Sin la referencia de la fuente, la
@@ -93,7 +101,11 @@ def listar_coeficientes(
     except DBAPIError as e:
         if not isinstance(e.orig, InsufficientPrivilege):
             raise
-        if por_unidad.decidir(Entidad()).permitido or por_grupo.decidir(Entidad()).permitido:
+        if (
+            por_unidad.decidir(Entidad()).permitido
+            or por_grupo.decidir(Entidad()).permitido
+            or any(propia.decidir(sobre_unidad(v.unidad_id)).permitido for v in ctx.vinculos)
+        ):
             raise Discrepancia(
                 "la base niega leer los coeficientes y el evaluador lo concede"
             ) from e
@@ -131,7 +143,11 @@ def listar_coeficientes(
             }
         if f["unidad_id"] is None:
             continue
-        if e["por_grupo"] or permite(por_unidad, sobre_unidad(f["unidad_id"])):
+        if (
+            e["por_grupo"]
+            or permite(por_unidad, sobre_unidad(f["unidad_id"]))
+            or permite(propia, sobre_unidad(f["unidad_id"]))
+        ):
             e["coeficientes"].append(
                 CoeficienteUnidad(
                     unidad_id=f["unidad_id"],
@@ -156,7 +172,7 @@ def listar_coeficientes(
         # que los filtros: una negación por filtro (sin modo, un recurso inválido) gana sobre una
         # por alcance y se audita con 403. La lista vacía solo vale si lo único que faltó fue el
         # alcance (una facultad acotada que no cubre ningún esquema).
-        for permiso in (por_unidad, por_grupo):
+        for permiso in (por_unidad, por_grupo, propia):
             permite(permiso, Entidad())
         if not concedio:
             por_filtro = [n for n in negadas if n[2] not in (NO_ALCANZA, Motivo.SIN_CONCESION)]

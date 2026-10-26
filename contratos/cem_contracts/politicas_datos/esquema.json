@@ -24,6 +24,11 @@
           "title": "Misma Unidad",
           "type": "boolean"
         },
+        "solo_confirmados": {
+          "default": false,
+          "title": "Solo Confirmados",
+          "type": "boolean"
+        },
         "tipos": {
           "items": {
             "$ref": "#/$defs/TipoVinculo"

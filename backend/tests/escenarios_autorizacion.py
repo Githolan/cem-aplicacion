@@ -146,7 +146,8 @@ SITUACIONES = {
 
 _FAC = re.compile(r"Fac\(([a-z_.]+)(?:@(.*))?\)")
 _PAQUETE = re.compile(r"(MC|AD|AE)(?:\[(.*)\])?")
-_VINCULO = re.compile(r"([PIO])(?:@(\w+))?")
+_VINCULO = re.compile(r"([PIO])(c)?(?:@(\w+))?")
+"""`P`, `I` u `O`; con `c`, el vínculo está confirmado (P4); con `@unidad`, de esa unidad."""
 
 
 @dataclass(frozen=True)
@@ -281,8 +282,14 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         if termino == "ninguna":
             continue
         if v := _VINCULO.fullmatch(termino):
-            unidad = SIMBOLOS[v.group(2) or "3A"]
-            vinculos.append(Vinculo(tipo=VINCULOS[v.group(1)], unidad_id=UUID(unidad)))
+            unidad = SIMBOLOS[v.group(3) or "3A"]
+            vinculos.append(
+                Vinculo(
+                    tipo=VINCULOS[v.group(1)],
+                    unidad_id=UUID(unidad),
+                    confirmado=v.group(2) is not None,
+                )
+            )
         elif p := _PAQUETE.fullmatch(termino):
             paquete = PAQUETES[FIGURAS_MANDATO[p.group(1)]]
             elegidas = p.group(2).split("|") if p.group(2) is not None else paquete

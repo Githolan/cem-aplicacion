@@ -415,3 +415,9 @@ RF05,coeficientes.ver_por_grupo,AD,AA,grupo:agua,vigente,si,,200,concedido_por_f
 RF05,coeficientes.ver_por_grupo,MC,C,grupo:agua,vigente,si,,403,sin_concesion,MC no tiene coeficientes.proponer: lee por unidad
 RF05,coeficientes.ver_por_grupo,Fac(coeficientes.proponer@grupo:agua),C,grupo:cocheras,vigente,si,,403,recurso_no_alcanza,otro grupo no alcanza
 RF05,coeficientes.ver_por_grupo,AD,—,grupo:agua,vigente,no,,403,sin_modo_registrado,sin modo no se lee por grupo: igual que proponer
+RF05,coeficientes.ver_propia_unidad,Pc,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,P con el vínculo confirmado lee el coeficiente de su unidad sin padron.ver
+RF05,coeficientes.ver_propia_unidad,P,C,unidad:3A,sin_mandato,si,,403,sin_concesion,un vínculo sin confirmar no alcanza
+RF05,coeficientes.ver_propia_unidad,Pc,C,unidad:5B,sin_mandato,si,,403,sin_concesion,el vínculo confirmado de 3-A no lee el coeficiente de otra unidad
+RF05,coeficientes.ver_propia_unidad,Ic,C,unidad:3A,sin_mandato,si,,200,concedido_por_vinculo,el inquilino con vínculo confirmado lee el de su unidad
+RF05,coeficientes.ver_propia_unidad,Oc,—,unidad:3A,sin_mandato,no,,200,concedido_por_vinculo,sin modo también: como el padrón
+RF05,coeficientes.ver_propia_unidad,MC,C,unidad:3A,vigente,si,,403,sin_concesion,un mandato no da esta lectura: el Consejo lee por padron.ver

@@ -4,9 +4,10 @@ Diseño: `doc/diseno/H2b_5_Diseno.md` del repositorio CEM, §3: por la API, solo
 quien tiene `padron.ver` o `coeficientes.proponer`. Proponer y aprobar siguen fuera de la API.
 
 Cada coeficiente sale si quien lee tiene `padron.ver` sobre su unidad
-(`coeficientes.ver_por_unidad`) o `coeficientes.proponer` sobre su grupo
-(`coeficientes.ver_por_grupo`). Un esquema sale si quien lee ve alguno de sus coeficientes o lo lee
-por su grupo. Los porcentajes salen **tal como los guarda la base** (D4): si la fuente suma
+(`coeficientes.ver_por_unidad`), `coeficientes.proponer` sobre su grupo
+(`coeficientes.ver_por_grupo`) o un vínculo confirmado con esa unidad
+(`coeficientes.ver_propia_unidad`, decisión del propietario del 25-10-2026). Un esquema sale si
+quien lee ve alguno de sus coeficientes o lo lee por su grupo. Los porcentajes salen **tal como los guarda la base** (D4): si la fuente suma
 99,96 %, se lee 99,96 %. La referencia de la fuente, la decisión que respalda cada versión y quién
 la registró no salen.
 """
