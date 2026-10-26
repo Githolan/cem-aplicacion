@@ -184,6 +184,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        LECTURAS_0029 + "drop function nucleo.unidades_propias_confirmadas(uuid, uuid);"
-    )
+    op.execute(LECTURAS_0029 + "drop function nucleo.unidades_propias_confirmadas(uuid, uuid);")

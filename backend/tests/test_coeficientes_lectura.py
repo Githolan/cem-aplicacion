@@ -387,3 +387,16 @@ def test_un_vinculo_confirmado_vencido_no_da_lectura(edificio, motor_migrate, mo
         with transaccion(motor_app, persona_id=e["per"], consorcio_id=e["cons"]) as c:
             c.execute(text("select * from nucleo.coeficientes_del_consorcio()")).all()
 
+
+@pytest.mark.redis
+def test_vinculo_confirmado_con_una_unidad_sin_coeficientes_lista_vacia(edificio, motor_migrate,
+                                                                        motor_app):  # fmt: skip
+    """Codex en #120: que la unidad todavía no esté en un esquema no es falta de permiso."""
+    e = edificio
+    nueva, quien = otra_unidad(motor_migrate, e["cons"], "7° A")
+    # Control: con el vínculo sin confirmar, 403 auditado.
+    assert leer(quien, e["cons"]).status_code == 403
+    confirmar(motor_migrate, e["cons"], quien, nueva)
+    r = leer(quien, e["cons"])
+    assert (r.status_code, r.json()) == (200, {"elementos": []})
+    assert len(denegaciones(motor_app, e["cons"], quien, quien)) == 1  # solo la del control

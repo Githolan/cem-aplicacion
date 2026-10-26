@@ -171,9 +171,12 @@ def listar_coeficientes(
         # La base dejó leer, pero ninguna política concedió. El evaluador mira el alcance antes
         # que los filtros: una negación por filtro (sin modo, un recurso inválido) gana sobre una
         # por alcance y se audita con 403. La lista vacía solo vale si lo único que faltó fue el
-        # alcance (una facultad acotada que no cubre ningún esquema).
-        for permiso in (por_unidad, por_grupo, propia):
+        # alcance (una facultad acotada que no cubre ningún esquema), o si quien lee tiene el
+        # vínculo confirmado con una unidad que todavía no está en ningún esquema.
+        for permiso in (por_unidad, por_grupo):
             permite(permiso, Entidad())
+        for v in ctx.vinculos:
+            permite(propia, sobre_unidad(v.unidad_id))
         if not concedio:
             por_filtro = [n for n in negadas if n[2] not in (NO_ALCANZA, Motivo.SIN_CONCESION)]
             alcance = any(n[2] == NO_ALCANZA for n in negadas)
