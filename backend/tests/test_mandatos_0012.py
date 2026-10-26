@@ -479,6 +479,32 @@ def test_baja_ordinaria_corta_hoy_revoca_y_no_admite_otra(escena, motor_migrate,
         baja(motor_app, e["cons"], e["per"], m, "error_carga", instrumento="Corrección")
 
 
+def test_error_carga_por_soporte_no_escribe_evento(escena, motor_migrate, motor_app):
+    """S2a (0033): la baja por `error_carga` de soporte corrige una carga suya y no escribe
+    evento; la constancia es `causa_baja` e `instrumento_referencia` en la fila. Controles: la
+    misma causa por la API y una renuncia registrada por soporte (clase B, S2b) sí lo escriben."""
+    e = escena
+
+    def eventos_de(m):
+        with motor_migrate.connect() as c:
+            return c.execute(
+                text("select origen from auditoria.eventos where entidad_id = :m"
+                     " and accion = 'consorcio.mandato.baja'"), {"m": m},
+            ).scalars().all()  # fmt: skip
+
+    por_soporte = alta(motor_app, e["cons"], None, e["acta"], persona=e["p1"], origen="soporte")
+    baja(motor_app, e["cons"], None, por_soporte, "error_carga", instrumento="Corrección",
+         origen="soporte")  # fmt: skip
+    assert fila(motor_app, e["cons"], e["per"], por_soporte)["causa"] == "error_carga"
+    assert eventos_de(por_soporte) == []
+    por_api = alta(motor_app, e["cons"], e["per"], e["acta"], persona=e["p1"])
+    baja(motor_app, e["cons"], e["per"], por_api, "error_carga", instrumento="Corrección")
+    assert eventos_de(por_api) == ["api"]
+    renuncia = alta(motor_app, e["cons"], None, e["acta"], persona=e["p2"], origen="soporte")
+    baja(motor_app, e["cons"], None, renuncia, origen="soporte")
+    assert eventos_de(renuncia) == ["soporte"]
+
+
 def test_error_carga_conserva_fechas_y_no_vale_para_ninguna_fecha(escena, motor_migrate, motor_app):
     e = escena
     m = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p1"],

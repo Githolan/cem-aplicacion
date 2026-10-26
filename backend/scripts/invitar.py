@@ -8,8 +8,10 @@ propietario que pueda invitar desde la aplicación. Corre dentro del contenedor 
     python -m scripts.invitar --consorcio <uuid> --unidad <uuid> --tipo propietario \\
         --correo ana@ejemplo.com --nombre "Ana"
 
-La invitación queda sin `invitada_por` y su auditoría con origen `soporte`. El correo sale
-por la cola como cualquier otro. No imprime el enlace: le llega solo a la persona invitada.
+La invitación queda sin `invitada_por`, que dice que la emitió el equipo, y sin evento de
+auditoría: soporte no forma parte de la auditoría funcional (decisión del propietario del
+26-10-2026, corte S2a). Aceptarla sí queda auditado. El correo sale por la cola como cualquier
+otro. No imprime el enlace: le llega solo a la persona invitada.
 """
 
 import argparse

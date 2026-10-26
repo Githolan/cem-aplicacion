@@ -746,15 +746,50 @@ def test_soporte_emite_y_aprueba_en_un_paso_con_motivo(
         ).one()  # fmt: skip
     assert (fila.origen, fila.emitida_por, fila.aprobada_por) == ("soporte", None, None)
     assert fila.aprobada_en is not None and fila.motivo_soporte.startswith("Hay un solo")
-    [evento] = [x for x in eventos(motor_migrate, e["cons"])
-                if x["accion"] == "consorcio.mandato.invitar_persona"]  # fmt: skip
-    assert (evento["origen"], evento["despues"]["un_paso"]) == ("soporte", True)
+    # S2a (0033): soporte no escribe el evento; la constancia es `motivo_soporte` en la fila.
+    assert [x["accion"] for x in eventos(motor_migrate, e["cons"])
+            if x["accion"].startswith("consorcio.mandato.invitar")] == []  # fmt: skip
     assert aceptar(navegador(app), token_de(correo)).status_code == 200
+    # Control: aceptar, que es un acto de la persona por la API, sí deja su evento.
+    assert any(x["origen"] == "api" for x in eventos(motor_migrate, e["cons"]))
     with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
         c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(e["cons"])})
         c.execute(text("select nucleo.desasociar_persona_de_mandato(:m, 'x', null, null,"
                        " 'soporte')"), {"m": e["ae"]})  # fmt: skip
     assert error.value.orig.diag.message_hint == "motivo_requerido"
+    with motor_migrate.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(e["cons"])})
+        c.execute(text("select nucleo.desasociar_persona_de_mandato(:m, 'x', 'Cuenta equivocada',"
+                       " null, 'soporte')"), {"m": e["ae"]})  # fmt: skip
+        motivo = c.execute(
+            text("select motivo_soporte from nucleo.desasociacion_mandato where mandato_id = :m"),
+            {"m": e["ae"]},
+        ).scalar_one()
+    assert motivo == "Cuenta equivocada"
+    assert [x for x in eventos(motor_migrate, e["cons"]) if x["origen"] == "soporte"] == []
+
+
+def test_soporte_revoca_sin_evento_y_la_api_con_evento(motor_migrate, escena):
+    """S2a (0033): soporte revoca la invitación sin escribir un evento; la constancia es
+    `revocada_en`. Control: la emisión y una revocación por la API sí dejan el suyo."""
+    e = escena
+    # Una a la vez: una invitación nueva del mismo mandato reemplaza (revoca) la pendiente.
+    por_soporte = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    with motor_migrate.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(e["cons"])})
+        c.execute(text("select set_config('app.persona_id', '', true)"))
+        assert c.execute(text("select nucleo.revocar_invitacion_mandato(:i, null, 'soporte')"),
+                         {"i": por_soporte}).scalar_one() is True  # fmt: skip
+        assert c.execute(text("select revocada_en is not null from nucleo.invitacion_mandato"
+                              " where id = :i"), {"i": por_soporte}).scalar_one()  # fmt: skip
+    por_api = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    with cliente(e["mc2"]) as c:
+        r = c.post(url_invitacion(e["cons"], por_api, "revocar"), headers=clave_idempotencia())
+        assert r.status_code == 204, r.text
+    todos = eventos(motor_migrate, e["cons"])
+    assert [x["origen"] for x in todos
+            if x["accion"] == "consorcio.mandato.revocar_invitacion"] == ["api"]  # fmt: skip
+    assert [x["accion"] for x in todos].count("consorcio.mandato.invitar_persona") == 2
 
 
 def test_el_downgrade_de_0015_se_niega_con_datos(base_aparte):  # noqa: F811

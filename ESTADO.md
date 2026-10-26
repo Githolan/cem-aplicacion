@@ -111,9 +111,26 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `dbebf79` (25-10-2026: staging a las 21:16 UTC y producción a las 21:20 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-25-dbebf79.md`, con los dos entornos: `cd.ps1` escribe uno por día UTC).
+Medido en el despliegue de `25eff74` (26-10-2026: staging a las 04:20 UTC y producción a las 04:24 UTC) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-26-25eff74.md`, con los dos entornos: `cd.ps1` escribe uno por día UTC).
 
-**Staging y producción en `dbebf79`** (25-10-2026: staging de 21:14 a 21:16 UTC, producción de 21:17 a 21:20 UTC), base `0029`, contrato 0.22.0.
+**Staging y producción en `25eff74`** (26-10-2026: staging de 04:17 a 04:20 UTC, producción de 04:21 a 04:24 UTC), base `0032`, contrato 0.24.0.
+
+- **Qué es:** S1 de soporte fuera de la auditoría (PR #123, `0032`): RF35 deja de mostrar los eventos de soporte. La SHA es la punta de `main`, el merge de #123. Detalle en «Próximo paso», punto 17.
+- **Sin variables nuevas.**
+- **Controles.** `ci.ps1` verde sobre `25eff74`: backend 1787, contratos 58, frontend 350 y e2e 177. Imágenes: `cem-backend` `sha256:42f0283f…` y `cem-frontend` `sha256:3959a038…`, las mismas en los dos entornos.
+- **Despliegue (Claude, con el mandato autónomo del 25-10 y el mensaje del 26-10).** Copia previa verificada en los dos entornos, porque `0032` estaba pendiente. En los dos: los 4 servicios `running healthy` con la imagen y el digest validados, `/health` con `25eff74` y contrato 0.24.0, base en `0032 (head)`, 0 reinicios y 0 errores en los registros.
+  - **Staging:** smoke `2c4298cf` con 23 controles: los de `fde3d7f` más S1 (ningún evento de soporte en la auditoría del consorcio; control: 139 eventos de soporte en la base en la misma ventana de fechas). La cadena de auditoría tiene 932 eventos y 0 rotos.
+  - **Producción:** `…/auditoria` sin sesión da 401 JSON. En Kuma, `cem-trabajos` quedó pendiente durante el reemplazo de su contenedor (502 y 503 a las 04:22 y 04:23 UTC) y volvió a 200 a las 04:24.
+  - Producción previa: `fde3d7f`.
+- **SIN VERIFICAR:** con datos reales en producción, porque no hay consorcios.
+
+Antes, **`fde3d7f`** (26-10-2026: staging de 03:35 a 03:37 UTC, producción de 03:45 a 03:48 UTC), base `0031`, contrato 0.23.0.
+
+- **Qué es:** RF05 de la propia unidad (PR #120, `0030`, contrato 0.23.0) y 2b-7 contactos de emergencia (PR #121 con `0031`; PR #122, la página `/contactos` con copia sin conexión). Detalle en «Próximo paso», puntos 15 y 16.
+- **Controles.** `ci.ps1` verde: backend 1786, contratos 58, frontend 350 y e2e 177. Imágenes: `cem-backend` `sha256:16219860…` y `cem-frontend` `sha256:0c8f2864…`.
+- **Despliegue.** Copia previa verificada en los dos entornos. Staging: smoke `627dfaee` con 22 controles, uno nuevo de 2b-7 que solo lee y prueba rechazos (un contacto escrito dejaría staging sin poder bajar de `0031`). Producción: `…/contactos` sin sesión da 401 JSON y el bundle tiene la copia; Kuma en verde. Registro en `doc/deploys/2026-10-26-fde3d7f.md` del repositorio CEM.
+
+Antes, **`dbebf79`** (25-10-2026: staging de 21:14 a 21:16 UTC, producción de 21:17 a 21:20 UTC), base `0029`, contrato 0.22.0.
 
 - **Qué es:** RF05, la lectura de coeficientes por la API (PR #118, `0029`). La SHA es la punta de `main`, el merge de #118. Detalle en «Próximo paso», punto 14.
 - **Sin variables nuevas.**
@@ -553,3 +570,9 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Controles sobre `b2be268`:** `ci.ps1` verde; Codex sin hallazgos; revisión independiente sin P1 ni P2. Antes, la revisión encontró dos P2: la lista vacía sin auditar con `proponer` sin modo y acotado a un grupo. Ahora una negación por filtro da 403 auditado, y cada caso tiene una prueba que falla con la ruta anterior.
    - **Lo elegido por defecto** (que `proponer` también lee, que no sale la fuente, los porcentajes sin redondear) espera la confirmación del propietario: está en el paquete de decisiones de H2 del repositorio CEM, §3.
    - **Para desplegar (hecho el 25-10):** sin variables nuevas. `0029` solo agrega funciones.
+15. **RF05, el coeficiente de la propia unidad (decisión del propietario del 25-10-2026, §1.8):** PR #120, fusionado el 26-10-2026 a las 00:30 UTC. `0030` y la política `coeficientes.ver_propia_unidad` (vínculo confirmado, solo sus unidades); contrato 0.23.0. **Desplegado** en `fde3d7f`.
+16. **2b-7, contactos de emergencia (decisiones del propietario del 25-10-2026):** PR #121 (API, `0031`, políticas `contactos.ver` y `contactos.gestionar`, solo por la API: soporte no escribe contactos) fusionado el 26-10 a las 02:23 UTC, y PR #122 (página `/contactos` con copia sin conexión que se borra al salir o ante un 401, 403 o 404) a las 03:09 UTC. **Desplegados** en `fde3d7f`. Falta 2b-7c: los formularios de gestión.
+17. **Soporte fuera de la auditoría funcional (decisión del propietario del 26-10-2026; diseño en `doc/diseno/Soporte_Fuera_de_la_Auditoria.md` del repositorio CEM):**
+   - **S1** (PR #123, fusionado el 26-10 a las 03:53 UTC en `25eff74`): `0032` saca a soporte de `eventos_del_consorcio` y `eventos_propios`, en las dos mitades de su paginación; el contrato quita `soporte` de origen y actor (0.24.0). **Desplegado** en `25eff74`.
+   - **S2a** (esta rama, `auditoria-sin-soporte-s2a`): `0033` hace que soporte deje de escribir los eventos de clase A (invitar a un mandato y reemplazar la invitación, revocarla, desasociar, finalizar un vínculo, la baja por `error_carga` y la identidad humana; se borra `nucleo.auditar_identidad`), y la invitación del equipo deja de escribir los suyos. La constancia queda en la fila. Con origen `api`, igual que antes.
+   - **Fuera de S2a:** `anular_vinculo`, que borra la fila y guarda la referencia solo en el evento (pasar a borrado lógico es un corte propio); la clase B (S2b), que espera al propietario; y los textos (S3).

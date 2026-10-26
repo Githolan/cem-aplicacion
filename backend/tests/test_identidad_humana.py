@@ -228,20 +228,30 @@ def test_cem_app_no_lee_la_huella_ni_las_verificaciones(motor_migrate, motor_app
 
 
 @pytest.mark.db
-def test_la_auditoria_no_lleva_huella_ni_referencia(motor_migrate, motor_app):
+def test_la_identidad_humana_no_escribe_eventos_de_auditoria(motor_migrate, motor_app):
+    """S2a (0033): la identidad humana es solo de soporte, y soporte no escribe eventos de
+    auditoría funcional. Su registro propio es `verificacion_identidad`."""
     cons, _, ana = consorcio_con_persona(motor_migrate, verificada=False)
     huella = huella_al_azar()
     identidad = verificar_identidad(motor_app, cons, ana, huella)
     with motor_migrate.connect() as c:
-        accion, origen, actor, despues = c.execute(
-            text(
-                "select accion, origen, actor_persona_id, despues::text from auditoria.eventos"
-                " where entidad = 'identidad_humana' and entidad_id = :i"
-            ),
+        eventos = c.execute(
+            text("select e::text from auditoria.eventos e where consorcio_id = :c"
+                 " and (accion like 'identidad.humana.%' or entidad = 'identidad_humana')"),
+            {"c": cons},
+        ).scalars().all()  # fmt: skip
+        constancia = c.execute(
+            text("select accion from nucleo.verificacion_identidad where identidad_id = :i"),
             {"i": identidad},
-        ).one()
-    assert (accion, origen, actor) == ("identidad.humana.verificar", "soporte", None)
-    assert huella.hex() not in despues and "acta" not in despues and str(ana) in despues
+        ).scalars().all()  # fmt: skip
+        funcion = c.execute(
+            text("select to_regprocedure("
+                 "'nucleo.auditar_identidad(uuid, text, uuid, uuid, text)') is null")
+        ).scalar_one()  # fmt: skip
+    assert eventos == []
+    # Control: el acto sí quedó, en su registro propio.
+    assert constancia == ["verificar"]
+    assert funcion is True
 
 
 @pytest.mark.db
