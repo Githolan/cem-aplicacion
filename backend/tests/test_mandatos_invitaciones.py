@@ -751,7 +751,8 @@ def test_soporte_emite_y_aprueba_en_un_paso_con_motivo(
             if x["accion"].startswith("consorcio.mandato.invitar")] == []  # fmt: skip
     assert aceptar(navegador(app), token_de(correo)).status_code == 200
     # Control: aceptar, que es un acto de la persona por la API, sí deja su evento.
-    assert any(x["origen"] == "api" for x in eventos(motor_migrate, e["cons"]))
+    assert [x["origen"] for x in eventos(motor_migrate, e["cons"])
+            if x["accion"] == "consorcio.mandato.asociar_persona"] == ["api"]  # fmt: skip
     with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
         c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(e["cons"])})
         c.execute(text("select nucleo.desasociar_persona_de_mandato(:m, 'x', null, null,"
@@ -779,7 +780,7 @@ def test_el_reemplazo_por_soporte_sin_evento_y_por_la_api_con_evento(
     e = escena
     monkeypatch.setenv("CEM_DATABASE_URL", url_rol("app"))
     monkeypatch.setenv("CEM_ORIGEN_PUBLICO", "https://cem.ejemplo.com")
-    assert emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).status_code == 201
+    primera = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
     argumentos = ["invitar", "--consorcio", str(e["cons"]), "--mandato", str(e["ae"]),
                   "--correo", correo_nuevo(), "--referencia", REFERENCIA,
                   "--motivo", "Un solo miembro del Consejo"]  # fmt: skip
@@ -787,6 +788,10 @@ def test_el_reemplazo_por_soporte_sin_evento_y_por_la_api_con_evento(
     reemplazos = [x for x in eventos(motor_migrate, e["cons"])
                   if x["accion"] == "consorcio.mandato.reemplazar_invitacion"]  # fmt: skip
     assert reemplazos == []
+    # Control: hubo reemplazo (la pendiente de la API quedó revocada).
+    with motor_migrate.connect() as c:
+        assert c.execute(text("select revocada_en is not null from nucleo.invitacion_mandato"
+                              " where id = :i"), {"i": primera}).scalar_one()  # fmt: skip
     assert emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).status_code == 201
     reemplazos = [x["origen"] for x in eventos(motor_migrate, e["cons"])
                   if x["accion"] == "consorcio.mandato.reemplazar_invitacion"]  # fmt: skip
@@ -798,14 +803,15 @@ def test_soporte_revoca_sin_evento_y_la_api_con_evento(motor_migrate, escena):
     `revocada_en`. Control: la emisión y una revocación por la API sí dejan el suyo."""
     e = escena
     # Una a la vez: una invitación nueva del mismo mandato reemplaza (revoca) la pendiente.
-    por_soporte = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    revocada_por_soporte = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
     with motor_migrate.begin() as c:
         c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(e["cons"])})
         c.execute(text("select set_config('app.persona_id', '', true)"))
         assert c.execute(text("select nucleo.revocar_invitacion_mandato(:i, null, 'soporte')"),
-                         {"i": por_soporte}).scalar_one() is True  # fmt: skip
+                         {"i": revocada_por_soporte}).scalar_one() is True  # fmt: skip
         assert c.execute(text("select revocada_en is not null from nucleo.invitacion_mandato"
-                              " where id = :i"), {"i": por_soporte}).scalar_one()  # fmt: skip
+                              " where id = :i"),
+                         {"i": revocada_por_soporte}).scalar_one()  # fmt: skip
     por_api = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
     with cliente(e["mc2"]) as c:
         r = c.post(url_invitacion(e["cons"], por_api, "revocar"), headers=clave_idempotencia())

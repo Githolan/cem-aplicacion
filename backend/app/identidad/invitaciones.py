@@ -18,7 +18,8 @@ mostrar edificio, unidad y vínculo, y la acepta (`POST /api/v1/auth/invitacion/
   `invitacion_requiere_sesion` si no hay sesión, 409 `invitacion_de_otra_persona` si es de otra).
 
 Invitar de nuevo al mismo correo, unidad y vínculo retira la pendiente anterior (reenviar).
-Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo.
+Crear, retirar y aceptar quedan en la auditoría encadenada, sin el correo, salvo crear y
+reemplazar cuando invita el equipo: desde S2a (`0033`) no escriben evento.
 """
 
 import logging
