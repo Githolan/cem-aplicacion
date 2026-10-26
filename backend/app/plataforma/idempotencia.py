@@ -84,12 +84,34 @@ async def pedido_idempotente(
         ),
     ],
 ) -> PedidoIdempotente:
-    cuerpo = await request.body()
+    return pedido_con_cuerpo(request, clave, await request.body())
+
+
+def pedido_con_cuerpo(request: Request, clave: str, cuerpo: bytes) -> PedidoIdempotente:
     huella = hashlib.sha256(request.scope["query_string"] + b"\0" + cuerpo).digest()
     return PedidoIdempotente(clave, request.method, request.url.path, huella)
 
 
 IdempotenciaDep = Annotated[PedidoIdempotente, Depends(pedido_idempotente)]
+
+
+def clave_idempotencia(
+    clave: Annotated[
+        str,
+        Header(
+            alias=ENCABEZADO,
+            pattern=FORMATO_CLAVE,
+            description="Clave única por intento lógico (UUID v4). Un reintento repite la misma"
+            " clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+        ),
+    ],
+) -> str:
+    """Solo la clave, sin leer el cuerpo: para una ruta que lee su cuerpo en tramos con un tope
+    (la carga de documentos) y arma el pedido con `pedido_con_cuerpo` al terminar."""
+    return clave
+
+
+ClaveIdempotenciaDep = Annotated[str, Depends(clave_idempotencia)]
 
 Efecto = Callable[[Connection], tuple[int, BaseModel]]
 """Recibe la conexión con el ámbito fijado y devuelve el estado 2xx y el modelo de la respuesta.

@@ -54,6 +54,18 @@ server {
         include /etc/nginx/cem/proxy.conf;
     }
 
+    # Carga de un archivo de un documento (H2c §3, repositorio CEM): hasta 20 MB y sin búfer de
+    # pedido, así nginx lo pasa al backend en tramos en vez de escribirlo en su directorio de
+    # cuerpos temporales (el tope de 1 MB por omisión daría 413 antes). 21m deja margen para que
+    # el 413 de 20 MB + 1 lo dé el backend, con su código de error. `proxy.conf` ya pone
+    # HTTP/1.1, que el reenvío sin búfer necesita para los cuerpos por tramos.
+    location ~ ^/api/v1/consorcios/[^/]+/documentos/[^/]+/versiones$ {
+        client_max_body_size 21m;
+        proxy_request_buffering off;
+        include /etc/nginx/cem/cabeceras.conf;
+        include /etc/nginx/cem/proxy.conf;
+    }
+
     location = /health {
         include /etc/nginx/cem/cabeceras.conf;
         include /etc/nginx/cem/proxy.conf;

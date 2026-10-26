@@ -147,6 +147,12 @@ class CodigoError(StrEnum):
     """El contacto de emergencia ya no está vigente: no se corrige, verifica ni señala; se agrega
     otro (2b-7)."""
 
+    ARCHIVO_DEMASIADO_GRANDE = "archivo_demasiado_grande"
+    """El archivo pasa de 20 MB (2c-1): no se escribió nada."""
+    TIPO_NO_ADMITIDO = "tipo_no_admitido"
+    """El archivo no es PDF, JPEG ni PNG por sus primeros bytes, o no coincide con el tipo
+    declarado (2c-1): no se escribió nada."""
+
 
 class Error(BaseModel):
     codigo: CodigoError

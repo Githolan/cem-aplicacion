@@ -95,13 +95,18 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     revisiones de mandatos: se borran. Y con 0025, que se niega a bajar si hay importaciones de
     padrón o invitaciones que nombran su vínculo: se les quita y se borran. Y con 0026, que se
     niega a bajar si hay identidades humanas: se borran con sus vínculos y verificaciones. Y con
-    0031, que se niega a bajar si hay contactos de emergencia: se borran.
+    0031, que se niega a bajar si hay contactos de emergencia: se borran. Y con 0035, que se
+    niega a bajar si hay documentos: se borran con sus versiones.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('nucleo.documento') is not null then"
+                "   delete from nucleo.version_documento;"
+                "   delete from nucleo.documento;"
+                " end if;"
                 " if to_regclass('nucleo.contacto_emergencia') is not null then"
                 "   delete from nucleo.contacto_emergencia;"
                 " end if;"
