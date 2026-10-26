@@ -9,6 +9,7 @@ pasa.
 import io
 import os
 import time
+import zlib
 from datetime import timedelta
 from uuid import uuid4
 
@@ -545,3 +546,94 @@ def test_0035_ida_y_vuelta(base_aparte):  # noqa: F811
     command.upgrade(cfg, "0035")  # control: vuelve a subir limpio
     with motor.connect() as c:
         assert c.execute(text("select to_regclass('nucleo.documento')")).scalar_one() is not None
+
+
+# Casos de la revisión de #127 ------------------------------------------------------------
+
+
+def _pdf_con_flujo_de_objetos(catalogo: bytes, relleno: int = 0) -> bytes:
+    """Un PDF cuyo catálogo y árbol de páginas están dentro de un flujo de objetos comprimido
+    (con una tabla de referencias en flujo), como los que arman muchos programas."""
+    paginas = b"<< /Type /Pages /Kids [] /Count 0 >>"
+    cabeza = (b"1 0 3 %d " % len(catalogo)).ljust(12)
+    datos = zlib.compress(cabeza + catalogo + paginas + b" " * relleno, 9)
+    salida = io.BytesIO()
+    salida.write(b"%PDF-1.7\n")
+    pos4 = salida.tell()
+    salida.write(b"4 0 obj\n<< /Type /ObjStm /N 2 /First 12 /Filter /FlateDecode /Length %d >>\n"
+                 b"stream\n" % len(datos))  # fmt: skip
+    salida.write(datos + b"\nendstream\nendobj\n")
+    pos5 = salida.tell()
+    filas = b"".join([
+        bytes([0, 0, 0, 0, 0, 0]), bytes([2, 0, 0, 0, 4, 0]), bytes([0, 0, 0, 0, 0, 0]),
+        bytes([2, 0, 0, 0, 4, 1]), bytes([1]) + pos4.to_bytes(4, "big") + b"\x00",
+        bytes([1]) + pos5.to_bytes(4, "big") + b"\x00",
+    ])  # fmt: skip
+    salida.write(b"5 0 obj\n<< /Type /XRef /Size 6 /W [1 4 1] /Root 1 0 R /Length %d >>\n"
+                 b"stream\n" % len(filas))  # fmt: skip
+    salida.write(filas + b"\nendstream\nendobj\nstartxref\n%d\n%%%%EOF\n" % pos5)
+    return salida.getvalue()
+
+
+def test_una_bomba_de_compresion_en_un_pdf_se_rechaza_como_ilegible():
+    catalogo = b"<< /Type /Catalog /Pages 3 0 R >>"
+    # Control: el mismo PDF sin la bomba se lee y no tiene nada activo; con JavaScript dentro del
+    # flujo comprimido, el recorrido lo encuentra.
+    assert documentos_analisis.motivo_pdf(_pdf_con_flujo_de_objetos(catalogo)) is None
+    js = b"<< /Type /Catalog /Pages 3 0 R /OpenAction << /S /JavaScript /JS (x) >> >>"
+    assert documentos_analisis.motivo_pdf(_pdf_con_flujo_de_objetos(js)) == "contenido_activo"
+    bomba = _pdf_con_flujo_de_objetos(catalogo, relleno=300 * 1024 * 1024)
+    assert len(bomba) < 2 * 1024 * 1024  # pocos KB comprimidos que se expanden a 300 MB
+    assert documentos_analisis.motivo_pdf(bomba) == "pdf_mal_formado"
+
+
+def _en_tramos(contenido: bytes, tramo: int = 1024 * 1024):
+    for i in range(0, len(contenido), tramo):
+        yield contenido[i : i + tramo]
+
+
+def test_sin_content_length_el_contador_corta_al_pasar_el_tope(escena, bucket, motor_migrate):
+    """Detrás de nginx sin búfer el cuerpo llega en tramos, sin `Content-Length`: el tope lo da el
+    contador, no la cabecera."""
+    e = escena
+    doc = documento(e)
+    base = pdf()
+    exceso = base + b"%" * (TOPE_BYTES + 1 - len(base))
+    with cliente(e["ae"]) as c:
+        r = c.post(url(e["cons"], f"/{doc}/versiones"), content=_en_tramos(exceso),
+                   headers={"Content-Type": "application/pdf"} | clave_idempotencia())  # fmt: skip
+        assert "content-length" not in {k.lower() for k in r.request.headers}
+    assert r.status_code == 413, r.text
+    assert not existe(bucket, f"cem/{e['cons']}/{doc}/")
+    with cliente(e["ae"]) as c:  # control: en tramos y dentro del tope, pasa
+        r = c.post(url(e["cons"], f"/{doc}/versiones"), content=_en_tramos(base, 64),
+                   headers={"Content-Type": "application/pdf"} | clave_idempotencia())  # fmt: skip
+    assert r.status_code == 201, r.text
+    assert r.json()["tamano"] == len(base)
+
+
+def test_si_el_objeto_ya_no_esta_la_version_queda_rechazada(escena, bucket, motor_app,
+                                                            motor_migrate):  # fmt: skip
+    """Un borrado que no llegó a confirmar (o un objeto que falta) no deja la versión en
+    cuarentena para siempre: se resuelve como `no_coincide`."""
+    e = escena
+    v = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    _s3().delete_object(Bucket=bucket, Key=version(motor_migrate, v)["clave_objeto"])
+    assert analizar(motor_app) == 1
+    fila = version(motor_migrate, v)
+    assert (fila["estado"], fila["motivo_rechazo"]) == ("rechazado", "no_coincide")
+    assert [t[0] for t in trabajos(motor_migrate)] == ["hecho"]
+
+
+def test_un_archivo_que_no_coincide_con_lo_cargado_queda_rechazado(escena, bucket, motor_app,
+                                                                   motor_migrate):  # fmt: skip
+    e = escena
+    v = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    # Otro contenido en la misma clave (con el usuario raíz del almacén de pruebas): la suma ya no
+    # es la que guardó la carga.
+    _s3().put_object(Bucket=bucket, Key=version(motor_migrate, v)["clave_objeto"],
+                     Body=pdf(js="x"))  # fmt: skip
+    assert analizar(motor_app) == 1
+    fila = version(motor_migrate, v)
+    assert (fila["estado"], fila["motivo_rechazo"]) == ("rechazado", "no_coincide")
+    assert not existe(bucket, fila["clave_objeto"])

@@ -22,8 +22,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from botocore.exceptions import ClientError
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject
 from sqlalchemy import Connection, text
 
@@ -45,6 +46,7 @@ CLAVES_ACTIVAS = frozenset(
      "/RichMedia", "/XFA"}
 )  # fmt: skip
 ACCIONES_ACTIVAS = frozenset({"/JavaScript", "/Launch", "/RichMediaExecute"})
+OBJETO_AUSENTE = frozenset({"NoSuchKey", "NoSuchVersion", "404"})
 
 
 class FirmasViejas(RuntimeError):
@@ -79,7 +81,9 @@ def motivo_pdf(contenido: bytes) -> str | None:
                 pendientes.extend(objeto.values())
             elif isinstance(objeto, ArrayObject):
                 pendientes.extend(objeto)
-    except (PdfReadError, ValueError, KeyError, TypeError, RecursionError) as e:
+    # `PyPdfError` incluye `PdfReadError` y `LimitReachedError` (un flujo que se expande más allá
+    # del límite de pypdf, una bomba de compresión): lo que no se puede leer se rechaza (§3).
+    except (PyPdfError, ValueError, KeyError, TypeError, RecursionError) as e:
         log.info("pdf ilegible", extra={"error": type(e).__name__})
         return "pdf_mal_formado"
     return None
@@ -111,11 +115,21 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     lugar = {"Bucket": origen.bucket, "Key": v["clave_objeto"]}
     if v["version_objeto"]:
         lugar["VersionId"] = v["version_objeto"]
-    contenido = s3.get_object(**lugar)["Body"].read()
+    try:
+        contenido = s3.get_object(**lugar)["Body"].read()
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in OBJETO_AUSENTE:
+            raise
+        # El binario ya no está (p. ej. un rechazo anterior que borró el objeto pero no llegó a
+        # confirmar): nunca se va a poder servir. Se resuelve como rechazado en vez de reintentar
+        # para siempre.
+        contenido = None
 
     motivo = None
     firmas = None
-    if (
+    if contenido is None:
+        motivo = "no_coincide"
+    elif (
         len(contenido) != v["tamano"]
         or hashlib.sha256(contenido).hexdigest() != v["sha256"]
         or tipo_real(contenido) is None
@@ -136,7 +150,7 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         {"v": version, "m": motivo, "av": firmas.antivirus if firmas else None,
          "f": firmas.fecha if firmas else None},
     ).scalar_one()  # fmt: skip
-    if resuelta and motivo is not None:
+    if resuelta and motivo is not None and contenido is not None:
         # Un archivo rechazado nunca fue un documento: su binario no se conserva (§3, paso 5).
         s3.delete_object(**lugar)
     return {"estado": "rechazado" if motivo else "disponible", "motivo": motivo}

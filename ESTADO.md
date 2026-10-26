@@ -597,3 +597,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - en `cem-trabajos`, `CEM_ANTIVIRUS_SERVIDOR`/`_PUERTO` y `CEM_DOCUMENTOS_AVISO_URL` con su monitor de Kuma.
    - En producción, además, los usuarios, grupos, políticas y claves de §3.1.
    - **Sin lectura ni descarga:** llegan en 2c-2. Ninguna versión se sirve todavía.
+   - **SIN VERIFICAR hasta desplegar:** 20 MB de punta a punta a través de nginx con su directorio de cuerpos temporales vacío (se prueba en staging); que el bucket con versiones de producción devuelva `VersionId` por la API S3 de OCI (si no, el rechazo haría un borrado simple; se prueba antes de producción).
+   - **Conocido, sin resolver en este corte:**
+     - si la subida sale bien y falla algo después (el commit, por ejemplo), el objeto queda en el bucket sin fila; nunca se sirve y la clave de documentos no puede borrarlo;
+     - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
+     - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial.

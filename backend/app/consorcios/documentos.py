@@ -9,9 +9,10 @@ Diseño: `doc/diseno/H2c_Diseno.md` del repositorio CEM, §2 y §3.
     de escribir nada.
   - El tipo real sale de los primeros bytes; otro tipo, o uno que no coincide con el declarado,
     da 415 sin escribir nada.
-  - **A lo sumo `CARGAS_POR_PROCESO` a la vez** por proceso (`cem-backend` corre 2: 4 cargas de
-    20 MB son 80 MB de los 512 del contenedor). La siguiente espera su turno o recibe 503 a los
-    `ESPERA_TURNO` segundos.
+  - **A lo sumo `CARGAS_POR_PROCESO` a la vez** por proceso (`cem-backend` corre 2). Cada carga
+    de 20 MB llega a ~40 MB en el pico (el búfer y su copia), así que 4 son ~160 MB de los 512 del
+    contenedor. La siguiente espera su turno o recibe 503 a los `ESPERA_TURNO` segundos, y el
+    cuerpo entero tiene que llegar en `LECTURA_MAXIMA` segundos (408).
   - El objeto se sube con la clave de documentos (§3.1) en un `put_object` único: la clave no
     tiene `OBJECT_OVERWRITE`, que la carga multiparte de OCI pide. La versión queda
     `en_cuarentena` y se encola `documentos.verificar`, en la misma transacción: si la subida
@@ -58,6 +59,9 @@ CARGAS_POR_PROCESO = 2
 procesos, cambia esto (§3)."""
 ESPERA_TURNO = 30
 """Segundos que una carga espera un turno antes del 503."""
+LECTURA_MAXIMA = 120
+"""Segundos para recibir el cuerpo entero: un cliente que manda de a un byte no retiene un
+turno más que esto (nginx solo corta a los 60 s sin recibir nada)."""
 TRABAJO_VERIFICAR = "documentos.verificar"
 
 FIRMAS = (
@@ -146,10 +150,18 @@ async def _leer_con_tope(request: Request) -> bytes:
     if declarado is not None and declarado.isdigit() and int(declarado) > TOPE_BYTES:
         raise _demasiado_grande()
     cuerpo = bytearray()
-    async for tramo in request.stream():
-        cuerpo += tramo
-        if len(cuerpo) > TOPE_BYTES:
-            raise _demasiado_grande()
+    try:
+        with anyio.fail_after(LECTURA_MAXIMA):
+            async for tramo in request.stream():
+                cuerpo += tramo
+                if len(cuerpo) > TOPE_BYTES:
+                    raise _demasiado_grande()
+    except TimeoutError:
+        raise ErrorApi(
+            408,
+            CodigoError.PETICION_INVALIDA,
+            "El archivo tardó demasiado en llegar: no se guardó.",
+        ) from None
     return bytes(cuerpo)
 
 
@@ -169,6 +181,7 @@ async def _leer_con_tope(request: Request) -> bytes:
     responses={
         403: {"description": "Sin `documentos.cargar` en el consorcio."},
         404: {"description": "El documento no existe en este consorcio."},
+        408: {"description": "El cuerpo no llegó entero a tiempo: no se guardó nada."},
         413: {"description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."},
         415: {"description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."},
         503: {"description": "Demasiadas cargas a la vez: probá de nuevo en un momento."},
