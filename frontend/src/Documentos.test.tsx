@@ -228,13 +228,58 @@ describe("página /documentos", () => {
     expect(pedidos(simulado, "GET", BASE)).toHaveLength(2);
   });
 
-  it("sin permiso para ver (403) lo dice sin error, sin lista ni formulario de carga", async () => {
-    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}`]: () => error("sin_permiso", 403) }));
+  it("sin permiso para ver (403) lo dice sin error y sin lista, pero deja cargar (administrador externo)", async () => {
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => error("sin_permiso", 403),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () =>
+        Response.json(
+          { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+          { status: 201 },
+        ),
+    });
+    vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No tenés acceso a los documentos de este edificio/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
+    expect(await screen.findByText(/No tenés acceso a la lista de documentos de este edificio/)).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actualizar" })).toBeNull();
     expect(document.querySelector(".aviso-error")).toBeNull();
+    // El administrador externo solo carga (documento 08 §4): el formulario sigue disponible.
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    expect(await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/)).toBeTruthy();
+    expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
+  });
+
+  it("sin acceso a la lista, si falla el archivo se reintenta igual, sin crear otro documento", async () => {
+    let intentos = 0;
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => error("sin_permiso", 403),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () =>
+        ++intentos === 1
+          ? new Response(JSON.stringify({ codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" }), {
+              status: 503,
+              headers: { "Content-Type": "application/json", "Retry-After": "30" },
+            })
+          : Response.json(
+              { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+              { status: 201 },
+            ),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
+    expect(reintento.tagName).toBe("H3"); // bajo el h2 de la sección, sin saltar niveles
+    const reglas = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
+    elegir(pdf());
+    fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
+    expect(await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/)).toBeTruthy();
+    expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(2);
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
   });
 
   it("carga en dos pasos: crea con JSON y sube el archivo crudo con su tipo, CSRF y claves distintas", async () => {

@@ -229,10 +229,11 @@ create function nucleo.documentos_del_consorcio()
   $$;
 
 -- La versión pedida de un documento vigente, para firmar su descarga. La aplicación responde
--- 409 si no está `disponible`; acá solo se filtra el ámbito y la lectura.
+-- 409 si no está `disponible` y la subió quien pide, y 404 si es de otro (como la lista, que no
+-- se la muestra); acá solo se filtra el ámbito y la lectura.
 create function nucleo.version_para_descargar(documento uuid, version uuid)
   returns table (categoria text, estado text, tipo text, clave_objeto text, version_objeto text,
-                 titulo text)
+                 titulo text, propia boolean)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -253,10 +254,12 @@ create function nucleo.version_para_descargar(documento uuid, version uuid)
       return;
     end if;
     if cat in ({_lista(RESTRINGIDAS)}) and not nucleo.lee_documentos(c, quien, true) then
-      raise exception 'sin documentos.ver para esta categoría' using errcode = '42501';
+      raise exception 'sin documentos.ver para esta categoría'
+        using errcode = '42501', hint = 'categoria_restringida';
     end if;
     return query
-      select cat, x.estado, x.tipo, x.clave_objeto, x.version_objeto, d.titulo
+      select cat, x.estado, x.tipo, x.clave_objeto, x.version_objeto, d.titulo,
+             x.subida_por = quien
         from nucleo.version_documento x
         join nucleo.documento d on d.consorcio_id = x.consorcio_id and d.id = x.documento_id
        where x.consorcio_id = c and x.documento_id = documento and x.id = version;

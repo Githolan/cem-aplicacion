@@ -11,8 +11,9 @@ funcional, decisión del propietario del 26-10-2026) y §4 (borrado y categoría
   consorcio fijado en el contexto. Sin `DELETE` y sin tocar las versiones. Ninguna política
   nombra al rol: la copia diaria se verifica restaurando sin roles (`pg_restore --no-acl`).
 - **La constancia queda en la fila del documento**, no en la auditoría funcional (§1.1): el motivo,
-  la referencia del respaldo, la fecha, quién lo pidió y el mandato con el que tenía la capacidad.
-  Del cambio de categoría, también la categoría anterior (la del último cambio).
+  la referencia del respaldo, la fecha, quién lo pidió, el día del pedido y el mandato con el que
+  ese día tenía la capacidad. Del cambio de categoría, también la categoría anterior (la del último
+  cambio); un disparador niega cambiar la categoría sin dejar esa constancia.
 - **`nucleo.capacidad_del_solicitante(consorcio, persona, facultades, fecha)`:** el mandato vigente
   ese día con todas las facultades pedidas, cada una general (sin recurso), o null. Exige que el
   consorcio sea el del contexto y que el día no sea posterior a hoy en el consorcio; solo la
@@ -38,14 +39,16 @@ depends_on = None
 ROL = "cem_soporte_documentos"
 COLUMNAS_SOPORTE = (
     "estado", "borrado_en", "borrado_motivo", "borrado_referencia", "borrado_solicitado_por",
-    "borrado_mandato", "categoria", "categoria_anterior", "categoria_cambiada_en",
-    "categoria_motivo", "categoria_referencia", "categoria_solicitada_por", "categoria_mandato",
+    "borrado_mandato", "borrado_fecha_pedido", "categoria", "categoria_anterior",
+    "categoria_cambiada_en", "categoria_motivo", "categoria_referencia",
+    "categoria_solicitada_por", "categoria_mandato", "categoria_fecha_pedido",
 )  # fmt: skip
 
 UPGRADE = f"""
 alter table nucleo.documento
   add column borrado_solicitado_por uuid references nucleo.persona (id),
   add column borrado_mandato uuid,
+  add column borrado_fecha_pedido date,
   add column categoria_anterior text,
   add column categoria_cambiada_en timestamptz,
   add column categoria_motivo text check (length(btrim(categoria_motivo)) between 1 and 300),
@@ -53,16 +56,19 @@ alter table nucleo.documento
     check (length(btrim(categoria_referencia)) between 1 and 300),
   add column categoria_solicitada_por uuid references nucleo.persona (id),
   add column categoria_mandato uuid,
+  add column categoria_fecha_pedido date,
   add foreign key (consorcio_id, borrado_mandato) references nucleo.mandato (consorcio_id, id),
   add foreign key (consorcio_id, categoria_mandato) references nucleo.mandato (consorcio_id, id),
   add check (borrado_en is null
-             or (borrado_solicitado_por is not null and borrado_mandato is not null)),
+             or (borrado_solicitado_por is not null and borrado_mandato is not null
+                 and borrado_fecha_pedido is not null)),
   add check (categoria_anterior is null or categoria_anterior <> categoria),
   add check ((categoria_cambiada_en is null) = (categoria_anterior is null)
              and (categoria_cambiada_en is null) = (categoria_motivo is null)
              and (categoria_cambiada_en is null) = (categoria_referencia is null)
              and (categoria_cambiada_en is null) = (categoria_solicitada_por is null)
-             and (categoria_cambiada_en is null) = (categoria_mandato is null));
+             and (categoria_cambiada_en is null) = (categoria_mandato is null)
+             and (categoria_cambiada_en is null) = (categoria_fecha_pedido is null));
 
 -- Un documento borrado no se cambia más: ni vuelve a vigente ni cambia de categoría.
 create function nucleo.documento_borrado_no_cambia()
@@ -80,6 +86,27 @@ create function nucleo.documento_borrado_no_cambia()
   $$;
 create trigger documento_borrado_no_cambia before update on nucleo.documento
   for each row execute function nucleo.documento_borrado_no_cambia();
+
+-- Un cambio de categoría deja su constancia en la misma fila: la categoría anterior es la que
+-- tenía y la fecha del cambio es nueva. Sin esto, un `update` de la categoría sola pasaría los
+-- `check` (las columnas del cambio quedarían como estaban).
+create function nucleo.categoria_con_constancia()
+  returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if new.categoria is distinct from old.categoria
+       and (new.categoria_anterior is distinct from old.categoria
+            or new.categoria_cambiada_en is not distinct from old.categoria_cambiada_en) then
+      raise exception 'un cambio de categoría sin su constancia'
+        using errcode = 'P0001', hint = 'cambio_sin_constancia';
+    end if;
+    return new;
+  end
+  $$;
+create trigger categoria_con_constancia before update on nucleo.documento
+  for each row execute function nucleo.categoria_con_constancia();
 
 create function nucleo.capacidad_del_solicitante(c uuid, persona uuid, facultades text[],
                                                  fecha date)
@@ -145,15 +172,19 @@ revoke select on nucleo.documento, nucleo.version_documento from {ROL};
 revoke execute on function plataforma.consorcio_actual() from {ROL};
 revoke usage on schema nucleo, plataforma from {ROL};
 drop function nucleo.capacidad_del_solicitante(uuid, uuid, text[], date);
+drop trigger categoria_con_constancia on nucleo.documento;
+drop function nucleo.categoria_con_constancia();
 drop trigger documento_borrado_no_cambia on nucleo.documento;
 drop function nucleo.documento_borrado_no_cambia();
 alter table nucleo.documento
+  drop column categoria_fecha_pedido,
   drop column categoria_mandato,
   drop column categoria_solicitada_por,
   drop column categoria_referencia,
   drop column categoria_motivo,
   drop column categoria_cambiada_en,
   drop column categoria_anterior,
+  drop column borrado_fecha_pedido,
   drop column borrado_mandato,
   drop column borrado_solicitado_por;
 """

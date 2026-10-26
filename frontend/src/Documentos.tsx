@@ -437,7 +437,10 @@ export function Documentos() {
             <h2 id={`${id}-lista`}>Documentos</h2>
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
             {lectura.tipo === "sin_permiso" && (
-              <p>No tenés acceso a los documentos de este edificio: los ven los propietarios, la administración y el Consejo.</p>
+              <p>
+                No tenés acceso a la lista de documentos de este edificio: la ven los propietarios, la administración y el
+                Consejo. Si tu mandato te permite cargar documentos, podés cargarlos igual.
+              </p>
             )}
             {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar la lista.</p>}
             {lectura.tipo === "ok" && (
@@ -455,11 +458,17 @@ export function Documentos() {
             )}
           </section>
 
-          {lectura.tipo === "ok" && (
+          {/* También sin acceso a la lista: el administrador externo solo carga (documento 08 §4). Quién puede
+              cargar cada categoría lo decide el servidor. */}
+          {(lectura.tipo === "ok" || lectura.tipo === "sin_permiso") && (
             <section aria-labelledby={`${id}-carga`} className="tarjeta">
               <h2 id={`${id}-carga`}>Cargar un documento</h2>
               {abierto?.tipo === "nuevo" ? (
                 formularioNuevo()
+              ) : abierto?.tipo === "subir" && !enLaLista(abierto.documento) ? (
+                // El reintento del archivo de un documento que la lista no muestra: quien solo carga
+                // (sin acceso a la lista) o una categoría que la persona carga pero no ve.
+                formularioArchivo(`${id}-reintento`, `Subir el archivo de «${abierto.titulo}»`, "h3")
               ) : (
                 <p>
                   <button type="button" onClick={() => abrir({ tipo: "nuevo" })} disabled={enviando}>
@@ -558,6 +567,11 @@ export function Documentos() {
     );
   }
 
+  /** Si el documento figura en la lista que se está mostrando (ahí se dibuja su reintento). */
+  function enLaLista(documento: string) {
+    return lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
+  }
+
   /** El campo del archivo, con la ayuda de qué se acepta. */
   function campoArchivo(titulo: string) {
     const ayuda = `${titulo}-ayuda-archivo`;
@@ -589,10 +603,10 @@ export function Documentos() {
   }
 
   /** Subir el archivo de un documento que ya existe (o reintentar el segundo paso). */
-  function formularioArchivo(titulo: string, encabezado: string) {
+  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h3" | "h5" = "h5") {
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        <h5 id={`${titulo}-accion`}>{encabezado}</h5>
+        <Nivel id={`${titulo}-accion`}>{encabezado}</Nivel>
         {campoArchivo(titulo)}
         <p>
           <button type="submit" disabled={enviando}>

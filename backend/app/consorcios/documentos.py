@@ -404,7 +404,10 @@ def _disposicion(titulo: str, tipo: TipoArchivo) -> str:
             "description": "La versión o el documento no existen en este consorcio, o su"
             " categoría es restringida y la persona no tiene la facultad `documentos.ver`."
         },
-        409: {"description": "La versión está en cuarentena o fue rechazada."},
+        409: {
+            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"
+            " a otros, 404)."
+        },
         410: {"description": "El archivo ya no está en el almacén (staging, a los 30 días)."},
     },
 )
@@ -421,7 +424,7 @@ def descargar_version(
         try:
             filas = conn.execute(
                 text(
-                    "select categoria, estado, tipo, clave_objeto, version_objeto, titulo"
+                    "select categoria, estado, tipo, clave_objeto, version_objeto, titulo, propia"
                     " from nucleo.version_para_descargar(:d, :v)"
                 ),
                 {"d": documento_id, "v": version_id},
@@ -429,6 +432,13 @@ def descargar_version(
         except DBAPIError as e:
             if not isinstance(e.orig, InsufficientPrivilege):
                 raise
+            if e.orig.diag.message_hint != "categoria_restringida":
+                if ver.decidir(Entidad()).permitido:
+                    raise Discrepancia(
+                        "la base niega leer documentos y el evaluador lo concede"
+                    ) from e
+                ver.verificar(Entidad())  # niega, audita y responde 403
+                raise Discrepancia("el evaluador niega y después concede la lectura") from e
             # La base niega la categoría restringida: el evaluador decide y, para no revelar
             # que el documento existe, responde 404.
             if restringidos.decidir(Entidad()).permitido:
@@ -442,6 +452,9 @@ def descargar_version(
     f = filas[0]
     if ACCION_DE_LECTURA[CategoriaDocumento(f["categoria"])] == restringidos.accion:
         restringidos.verificar(Entidad(), estado_negado=404)
+    if f["estado"] != EstadoVersion.DISPONIBLE and not f["propia"]:
+        # La de otro, en cuarentena o rechazada: la lista no se la muestra, la descarga tampoco.
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
     if f["estado"] != EstadoVersion.DISPONIBLE:
         raise ErrorApi(
             409,

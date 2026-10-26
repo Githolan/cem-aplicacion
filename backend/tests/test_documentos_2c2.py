@@ -6,7 +6,7 @@ negación lleva su control: el mismo pedido de quien sí puede pasa.
 """
 
 from urllib.parse import parse_qs, urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -161,6 +161,7 @@ def test_el_consejo_sube_archivos_solo_a_documentos_operativos(escena, bucket):
     # averigua si existe).
     assert subir(e["mc"], e["cons"], str(uuid4()), pdf(), "application/pdf").status_code == 404
     assert subir(e["prop"], e["cons"], actas, pdf(), "application/pdf").status_code == 403
+    assert subir(e["prop"], e["cons"], str(uuid4()), pdf(), "application/pdf").status_code == 403
 
 
 def test_un_mandato_de_consejo_sin_la_facultad_nueva_no_carga(escena, bucket, motor_app,
@@ -218,6 +219,8 @@ def test_en_cuarentena_o_rechazada_da_409(escena, bucket, motor_app, motor_migra
     v = subir(e["mc"], e["cons"], doc, pdf(), "application/pdf").json()["id"]
     r = descargar(e["mc"], e["cons"], doc, v)
     assert r.status_code == 409 and r.json()["codigo"] == "version_no_disponible"
+    # A otro lector (la propietaria ve presupuestos) la versión ajena en cuarentena no le existe.
+    assert descargar(e["prop"], e["cons"], doc, v).status_code == 404
     rechazada = subir(e["mc"], e["cons"], doc, pdf(js="app.alert(1)"), "application/pdf")
     analizar(motor_app)
     analizar(motor_app)
@@ -225,6 +228,7 @@ def test_en_cuarentena_o_rechazada_da_409(escena, bucket, motor_app, motor_migra
     r = descargar(e["mc"], e["cons"], doc, rechazada.json()["id"])
     assert r.status_code == 409 and r.json()["codigo"] == "version_no_disponible"
     assert descargar(e["mc"], e["cons"], doc, v).status_code == 302  # control: la limpia, sí
+    assert descargar(e["prop"], e["cons"], doc, v).status_code == 302  # y a la propietaria también
 
 
 def test_version_ajena_o_inexistente_da_404(escena, bucket, motor_app):
@@ -268,6 +272,7 @@ def _como_app(motor_app, persona, cons, sql, parametros=None):
 def test_la_base_vuelve_a_exigir_la_lectura(escena, bucket, motor_app, motor_migrate):
     e = escena
     doc, v, _ = documento_con_archivo(e, motor_app, "otros")
+    seguro, _, _ = documento_con_archivo(e, motor_app, "seguros")
     inquilino = otra_persona(motor_migrate, e["cons"])
     vinculo(motor_migrate, e["cons"], unidad(motor_migrate, e["cons"], "8° Y"), inquilino,
             tipo="inquilino")  # fmt: skip
@@ -277,12 +282,14 @@ def test_la_base_vuelve_a_exigir_la_lectura(escena, bucket, motor_app, motor_mig
                       "select * from nucleo.documentos_del_consorcio()")  # fmt: skip
         assert error.value.orig.sqlstate == "42501"
     # La propietaria lee la lista, pero sin la restringida, y la base le niega su descarga.
-    assert _como_app(motor_app, e["prop"], e["cons"],
-                     "select * from nucleo.documentos_del_consorcio()") == []  # fmt: skip
+    filas = _como_app(motor_app, e["prop"], e["cons"],
+                      "select documento_id from nucleo.documentos_del_consorcio()")  # fmt: skip
+    assert {f.documento_id for f in filas} == {UUID(seguro)}
     descarga = "select * from nucleo.version_para_descargar(:d, :v)"
     with pytest.raises(DBAPIError) as error:
         _como_app(motor_app, e["prop"], e["cons"], descarga, {"d": doc, "v": v})
     assert error.value.orig.sqlstate == "42501"
+    assert error.value.orig.diag.message_hint == "categoria_restringida"
     # Control: el Consejo, con la facultad, sí.
     filas = _como_app(motor_app, e["mc"], e["cons"],
                       "select categoria from nucleo.version_para_descargar(:d, :v)",

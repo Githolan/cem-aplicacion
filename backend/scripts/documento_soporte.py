@@ -12,7 +12,8 @@ categoría (`0037`).
   y `documentos.cargar`, las dos generales (`nucleo.capacidad_del_solicitante`). Si no, se niega.
   Crear una facultad de borrado es una decisión del propietario (§8).
 - **No escribe eventos de auditoría** (decisión del propietario del 26-10-2026): la constancia
-  queda en la fila del documento (motivo, referencia, fecha, quién lo pidió y su mandato) y en lo
+  queda en la fila del documento (motivo, referencia, fecha, quién lo pidió, el día del pedido y
+  su mandato) y en lo
   que imprime el script, que se adjunta al documento de operación.
 - **El borrado es lógico:** el documento deja de figurar; sus versiones y binarios se conservan.
   Un documento borrado no se cambia más.
@@ -93,13 +94,14 @@ def ejecutar(motor, a: argparse.Namespace) -> dict:
                 + " y ".join(FACULTADES) + " generales"
             )  # fmt: skip
         datos = {"d": a.documento, "m": a.motivo, "r": a.referencia, "p": a.solicitante,
-                 "mandato": mandato}  # fmt: skip
+                 "mandato": mandato, "fp": a.fecha_pedido}  # fmt: skip
         if a.accion == "borrar":
             conn.execute(
                 text(
                     "update nucleo.documento set estado = 'borrado', borrado_en = now(),"
                     " borrado_motivo = btrim(:m), borrado_referencia = btrim(:r),"
-                    " borrado_solicitado_por = :p, borrado_mandato = :mandato where id = :d"
+                    " borrado_solicitado_por = :p, borrado_mandato = :mandato,"
+                    " borrado_fecha_pedido = :fp where id = :d"
                 ),
                 datos,
             )
@@ -109,7 +111,8 @@ def ejecutar(motor, a: argparse.Namespace) -> dict:
                     "update nucleo.documento set categoria_anterior = categoria,"
                     " categoria = :cat, categoria_cambiada_en = now(),"
                     " categoria_motivo = btrim(:m), categoria_referencia = btrim(:r),"
-                    " categoria_solicitada_por = :p, categoria_mandato = :mandato where id = :d"
+                    " categoria_solicitada_por = :p, categoria_mandato = :mandato,"
+                    " categoria_fecha_pedido = :fp where id = :d"
                 ),
                 datos | {"cat": a.categoria.value},
             )

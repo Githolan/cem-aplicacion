@@ -6138,7 +6138,7 @@
             "description": "La versión o el documento no existen en este consorcio, o su categoría es restringida y la persona no tiene la facultad `documentos.ver`."
           },
           "409": {
-            "description": "La versión está en cuarentena o fue rechazada."
+            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió; a otros, 404)."
           },
           "410": {
             "description": "El archivo ya no está en el almacén (staging, a los 30 días)."

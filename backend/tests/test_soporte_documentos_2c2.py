@@ -105,7 +105,8 @@ def test_el_administrador_pide_y_soporte_borra_sin_eventos(edificio, con_url, mo
     f = fila(motor_migrate, doc)
     assert (f["estado"], f["borrado_motivo"], f["borrado_referencia"]) == (
         "borrado", "Cargado por error", "Nota 12/2026")  # fmt: skip
-    assert (f["borrado_solicitado_por"], f["borrado_mandato"]) == (e["ad"], e["m_ad"])
+    assert (f["borrado_solicitado_por"], f["borrado_mandato"], f["borrado_fecha_pedido"]) == (
+        e["ad"], e["m_ad"], HOY)  # fmt: skip
     assert eventos(motor_migrate, e["cons"]) == antes  # soporte no escribe en la auditoría
     assert doc not in visibles(e["prop"], e["cons"])
     assert doc not in visibles(e["mc"], e["cons"])
@@ -166,8 +167,9 @@ def test_cambiar_la_categoria_deja_la_anterior_en_la_fila(edificio, con_url, mot
     antes = eventos(motor_migrate, e["cons"])
     assert correr(e, "cambiar-categoria", doc, e["ad"], categoria="otros") == 0
     f = fila(motor_migrate, doc)
-    assert (f["categoria"], f["categoria_anterior"], f["categoria_mandato"]) == (
-        "otros", "actas_y_decisiones", e["m_ad"])  # fmt: skip
+    cambio = (f["categoria"], f["categoria_anterior"], f["categoria_mandato"],
+              f["categoria_fecha_pedido"])  # fmt: skip
+    assert cambio == ("otros", "actas_y_decisiones", e["m_ad"], HOY)
     assert eventos(motor_migrate, e["cons"]) == antes
     # Ahora es restringida: la propietaria ya no la ve; el Consejo, con la facultad, sí.
     assert doc not in visibles(e["prop"], e["cons"])
@@ -209,6 +211,73 @@ def test_el_rol_no_toca_mas_que_lo_suyo(edificio, sql):
     r = _como_soporte(e["cons"], "update nucleo.documento set categoria = categoria"
                                  " where id = :d", {"d": doc})  # fmt: skip
     assert r.rowcount == 1
+
+
+def test_cambiar_la_categoria_sin_su_constancia_se_niega(edificio, motor_migrate):
+    e = edificio
+    doc = documento(e)
+    with pytest.raises(DBAPIError) as error:
+        _como_soporte(e["cons"], "update nucleo.documento set categoria = 'otros' where id = :d",
+                      {"d": doc})  # fmt: skip
+    assert error.value.orig.diag.message_hint == "cambio_sin_constancia"
+    # Ni dejando una categoría anterior que no es la que tenía.
+    with pytest.raises(DBAPIError) as error:
+        _como_soporte(
+            e["cons"],
+            "update nucleo.documento set categoria = 'otros', categoria_anterior = 'seguros',"
+            " categoria_cambiada_en = now(), categoria_motivo = 'm', categoria_referencia = 'r',"
+            " categoria_solicitada_por = :p, categoria_mandato = :m,"
+            " categoria_fecha_pedido = current_date where id = :d",
+            {"d": doc, "p": e["ad"], "m": e["m_ad"]},
+        )
+    assert error.value.orig.diag.message_hint == "cambio_sin_constancia"
+    assert fila(motor_migrate, doc)["categoria"] == "actas_y_decisiones"
+
+
+def test_de_las_funciones_security_definer_el_rol_ejecuta_solo_la_capacidad(motor_migrate):
+    with motor_migrate.connect() as c:
+        ejecutables = set(
+            c.execute(
+                text("select p.oid::regprocedure::text from pg_proc p"
+                     " join pg_namespace n on n.oid = p.pronamespace"
+                     " where n.nspname in ('nucleo', 'plataforma', 'auditoria') and p.prosecdef"
+                     " and has_function_privilege('cem_soporte_documentos', p.oid, 'execute')"),
+            ).scalars()
+        )  # fmt: skip
+        # Control: la búsqueda encuentra funciones security definer que cem_app sí ejecuta.
+        de_app = c.execute(
+            text("select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                 " where n.nspname = 'nucleo' and p.prosecdef"
+                 " and has_function_privilege('cem_app', p.oid, 'execute')"),
+        ).scalar_one()  # fmt: skip
+    assert de_app > 10
+    assert ejecutables == {
+        "nucleo.capacidad_del_solicitante(uuid,uuid,text[],date)",
+    }
+
+
+def test_crear_roles_se_puede_volver_a_correr_sin_la_clave_nueva():
+    """Volver a correrlo (como para agregar cem_backup) sin `clave_soporte_documentos` no falla:
+    ese rol se crea con su propio archivo."""
+    import subprocess
+
+    from sqlalchemy.engine import make_url
+
+    from tests.conftest import ADMIN_URL, BASE, CLAVES, RAIZ
+
+    libpq = make_url(ADMIN_URL).set(drivername="postgresql").render_as_string(False)
+    comun = ["psql", libpq, "-q", "-v", f"base={BASE}",
+             "-v", f"clave_migrate={CLAVES['migrate']}", "-v", f"clave_app={CLAVES['app']}",
+             "-v", f"clave_ro={CLAVES['ro']}", "-v", f"clave_backup={CLAVES['backup']}",
+             "-f", str(RAIZ / "scripts" / "crear_roles.sql")]  # fmt: skip
+    hecho = subprocess.run(comun, capture_output=True, text=True)
+    assert hecho.returncode == 0, hecho.stderr
+    assert "cem_soporte_documentos no se crea" in hecho.stdout
+    # Control: con la clave, también termina bien (el rol ya existe y no se toca).
+    con = comun[:-2] + ["-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
+                        *comun[-2:]]  # fmt: skip
+    hecho = subprocess.run(con, capture_output=True, text=True)
+    assert hecho.returncode == 0 and "no se crea" not in hecho.stdout, hecho.stderr
 
 
 def test_el_rol_ve_solo_el_consorcio_del_contexto(edificio, motor_migrate, motor_app):
@@ -274,7 +343,7 @@ def test_0037_ida_y_vuelta_y_se_niega_con_un_borrado(base_aparte):  # noqa: F811
                      " 'nucleo' and table_name = 'documento' and column_name like 'categoria_%'"),
             ).scalar_one()  # fmt: skip
 
-    assert columnas() == 6
+    assert columnas() == 7
     command.downgrade(cfg, "0036")
     assert columnas() == 0
     command.upgrade(cfg, "0037")  # control: vuelve a subir limpio
@@ -297,8 +366,9 @@ def test_0037_ida_y_vuelta_y_se_niega_con_un_borrado(base_aparte):  # noqa: F811
         c.execute(
             text("insert into nucleo.documento (consorcio_id, categoria, titulo, fecha,"
                  " cargado_por, estado, borrado_en, borrado_motivo, borrado_referencia,"
-                 " borrado_solicitado_por, borrado_mandato) values (:c, 'otros', 'T',"
-                 " '2026-01-01', :p, 'borrado', now(), 'm', 'r', :p, :m)"),
+                 " borrado_solicitado_por, borrado_mandato, borrado_fecha_pedido) values"
+                 " (:c, 'otros', 'T', '2026-01-01', :p, 'borrado', now(), 'm', 'r', :p, :m,"
+                 " '2026-01-02')"),
             {"c": cons, "p": per, "m": m},
         )  # fmt: skip
     with pytest.raises(DBAPIError) as error:
