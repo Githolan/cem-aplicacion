@@ -39,7 +39,11 @@ def main(argumentos: list[str] | None = None) -> int:
         return 2
     motor = crear_motor(config.database_url)
     try:
-        with transaccion(motor, persona_id=None, consorcio_id=a.consorcio) as conn:
+        # Lectura repetible: si el vínculo cambia entre la lectura de abajo y el bloqueo de la
+        # función (otra persona lo confirma, por ejemplo), la función falla por serialización y no
+        # se anula nada. Así lo impreso es siempre lo que se borró (Codex en app #126).
+        repetible = motor.execution_options(isolation_level="REPEATABLE READ")
+        with transaccion(repetible, persona_id=None, consorcio_id=a.consorcio) as conn:
             # Lo que se anula, leído antes de borrarlo: la fila desaparece. Sin bloqueo (`cem_app`
             # no tiene `update` sobre el vínculo); la función bloquea como siempre.
             vinculo = (
