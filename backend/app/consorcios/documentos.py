@@ -63,6 +63,9 @@ LECTURA_MAXIMA = 120
 """Segundos para recibir el cuerpo entero: un cliente que manda de a un byte no retiene un
 turno más que esto (nginx solo corta a los 60 s sin recibir nada)."""
 TRABAJO_VERIFICAR = "documentos.verificar"
+INTENTOS_VERIFICAR = 10
+"""Se guarda con el trabajo al encolarlo: el proceso de la API no importa el registro de los
+trabajos, y sin esto `encolar` pondría el valor por omisión (3)."""
 
 FIRMAS = (
     (b"%PDF-", TipoArchivo.PDF),
@@ -244,6 +247,7 @@ async def subir_version(
                 carga={"version": str(fila.id)},
                 consorcio_id=ctx.consorcio_id,
                 clave_unica=f"{TRABAJO_VERIFICAR}:{fila.id}",
+                maximo_intentos=INTENTOS_VERIFICAR,
             )
             return 201, VersionCargada(
                 id=fila.id, estado="en_cuarentena", tipo=tipo, tamano=len(cuerpo), sha256=suma

@@ -6,8 +6,12 @@
    `/Launch`, `/EmbeddedFile`, `/RichMedia`, XFA), el cifrado y lo que el analizador no puede
    leer.
 3. Lo manda a `clamd`. Con firmas de más de `FIRMAS_VIGENTES` no aprueba nada.
-4. Limpio → `disponible`. Detectado → `rechazado` con el motivo (auditado por `0035`) y el
-   binario borrado (por `VersionId` en un bucket con versiones).
+4. Limpio → `disponible`. Detectado → `rechazado` con el motivo (auditado por `0035`) y, en la
+   misma transacción, el trabajo `documentos.borrar_rechazado`, que borra el binario (por
+   `VersionId` en un bucket con versiones) y se reintenta por su cuenta.
+
+`documentos.limpiar_huerfanos` borra cada día los objetos que quedaron sin fila (una carga que
+subió el archivo y no llegó a confirmar).
 
 Si no se puede completar (`clamd` caído, firmas viejas, almacén que falla), el trabajo falla, la
 versión sigue en cuarentena y la cola reintenta con espera creciente; `vigilar_cuarentena` avisa
@@ -22,12 +26,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+from botocore.exceptions import ClientError
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject
 from sqlalchemy import Connection, text
 
-from app.consorcios.documentos import TRABAJO_VERIFICAR, tipo_real
+from app.consorcios.documentos import INTENTOS_VERIFICAR, TRABAJO_VERIFICAR, tipo_real
 from app.plataforma import almacen, antivirus, cola, copias
 from app.plataforma.planificador import periodica
 
@@ -45,6 +50,14 @@ CLAVES_ACTIVAS = frozenset(
      "/RichMedia", "/XFA"}
 )  # fmt: skip
 ACCIONES_ACTIVAS = frozenset({"/JavaScript", "/Launch", "/RichMediaExecute"})
+TRABAJO_BORRAR = "documentos.borrar_rechazado"
+YA_BORRADO = frozenset({"NoSuchKey", "NoSuchVersion"})
+"""Respuestas del almacén que, para una versión ya rechazada y confirmada, significan que el
+borrado anterior llegó a hacerse."""
+ANTIGUEDAD_HUERFANO = timedelta(days=1)
+"""Un objeto sin fila más viejo que esto quedó de una carga que no confirmó; ninguna carga en
+curso dura tanto."""
+LOTE_CLAVES = 1000
 
 
 class FirmasViejas(RuntimeError):
@@ -97,7 +110,7 @@ def _version(conn: Connection, version: UUID):
 
 @cola.REGISTRO.tipo(
     TRABAJO_VERIFICAR,
-    maximo_intentos=10,
+    maximo_intentos=INTENTOS_VERIFICAR,
     retroceso_base=timedelta(minutes=1),
     retroceso_tope=timedelta(hours=1),
 )
@@ -110,9 +123,7 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
         return {"estado": v["estado"], "repetido": True}
     origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
     s3 = origen.cliente()
-    lugar = {"Bucket": origen.bucket, "Key": v["clave_objeto"]}
-    if v["version_objeto"]:
-        lugar["VersionId"] = v["version_objeto"]
+    lugar = _lugar(origen, v)
     # Un objeto ausente (o una clave mal configurada, que OCI suele responder igual) hace fallar
     # el trabajo: la versión sigue en cuarentena, se reintenta y `vigilar_cuarentena` avisa. Nunca
     # se resuelve como rechazo en silencio.
@@ -142,9 +153,88 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
          "f": firmas.fecha if firmas else None},
     ).scalar_one()  # fmt: skip
     if resuelta and motivo is not None:
-        # Un archivo rechazado nunca fue un documento: su binario no se conserva (§3, paso 5).
-        s3.delete_object(**lugar)
+        # Un archivo rechazado nunca fue un documento: su binario no se conserva (§3, paso 5). El
+        # borrado es otro trabajo, encolado en esta misma transacción: el rechazo y la tarea de
+        # borrar quedan juntos o no queda ninguno, y el borrado se reintenta por su cuenta.
+        cola.encolar(
+            conn,
+            TRABAJO_BORRAR,
+            carga={"version": str(version)},
+            consorcio_id=trabajo.consorcio_id,
+            clave_unica=f"{TRABAJO_BORRAR}:{version}",
+            maximo_intentos=INTENTOS_VERIFICAR,
+        )
     return {"estado": "rechazado" if motivo else "disponible", "motivo": motivo}
+
+
+def _lugar(origen: almacen.AlmacenDocumentos, v) -> dict[str, str]:
+    lugar = {"Bucket": origen.bucket, "Key": v["clave_objeto"]}
+    if v["version_objeto"]:
+        lugar["VersionId"] = v["version_objeto"]
+    return lugar
+
+
+@cola.REGISTRO.tipo(
+    TRABAJO_BORRAR,
+    maximo_intentos=INTENTOS_VERIFICAR,
+    retroceso_base=timedelta(minutes=1),
+    retroceso_tope=timedelta(hours=1),
+)
+def borrar_rechazado(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Borra el binario de una versión rechazada (por `VersionId` si el bucket tiene versiones).
+    Solo una versión `rechazado`: cualquier otra es un defecto y el trabajo muere sin borrar."""
+    version = UUID(trabajo.carga["version"])
+    v = _version(conn, version)
+    if v is None or v["estado"] != "rechazado":
+        raise cola.ErrorDefinitivo(f"la versión {version} no está rechazada: no se borra")
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
+    try:
+        origen.cliente().delete_object(**_lugar(origen, v))
+    except ClientError as e:
+        if e.response["Error"]["Code"] not in YA_BORRADO:
+            raise
+        return {"borrado": "ya no estaba"}
+    return {"borrado": "hecho"}
+
+
+@cola.REGISTRO.tipo("documentos.limpiar_huerfanos")
+def limpiar_huerfanos(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Borra los objetos de `cem/` que no tienen fila en la base y tienen más de
+    `ANTIGUEDAD_HUERFANO`: quedaron de una carga cuya transacción no confirmó después de subir
+    (nunca se analizaron ni se van a servir). Con versiones, borra todas las del objeto."""
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
+    s3 = origen.cliente()
+    limite = datetime.now(UTC) - ANTIGUEDAD_HUERFANO
+    paginas = s3.get_paginator("list_objects_v2").paginate(Bucket=origen.bucket, Prefix="cem/")
+    candidatas = [
+        o["Key"] for pagina in paginas for o in pagina.get("Contents", [])
+        if o["LastModified"] < limite
+    ]  # fmt: skip
+    registradas: set[str] = set()
+    for i in range(0, len(candidatas), LOTE_CLAVES):
+        registradas.update(
+            conn.execute(
+                text("select nucleo.claves_registradas(:c)"),
+                {"c": candidatas[i : i + LOTE_CLAVES]},
+            ).scalars()
+        )
+    huerfanas = [c for c in candidatas if c not in registradas]
+    con_versiones = s3.get_bucket_versioning(Bucket=origen.bucket).get("Status") == "Enabled"
+    for clave in huerfanas:
+        if not con_versiones:
+            s3.delete_object(Bucket=origen.bucket, Key=clave)
+            continue
+        listado = s3.list_object_versions(Bucket=origen.bucket, Prefix=clave)
+        for x in listado.get("Versions", []) + listado.get("DeleteMarkers", []):
+            if x["Key"] == clave:
+                s3.delete_object(Bucket=origen.bucket, Key=clave, VersionId=x["VersionId"])
+    if huerfanas:
+        log.warning("objetos sin fila borrados", extra={"cantidad": len(huerfanas)})
+    return {"revisadas": len(candidatas), "borradas": len(huerfanas)}
+
+
+# Todos los días a las 04:45 UTC.
+periodica("documentos.limpiar_huerfanos", timedelta(days=1), desfase=timedelta(hours=4, minutes=45))
 
 
 @cola.REGISTRO.tipo("documentos.vigilar_cuarentena")

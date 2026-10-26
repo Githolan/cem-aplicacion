@@ -12,10 +12,10 @@ propietario del 25-10-2026 (`Decisiones_Propietario_2026-10-25.md`, §1.3).
 - **Carga (API):** `crear_documento` y `nueva_version` exigen `documentos.cargar` vigente de la
   persona de la sesión y auditan. En este corte toda categoría se carga con `documentos.cargar`;
   `documentos.cargar_operativos` llega en 2c-2 con su política (§4).
-- **Análisis (`cem-trabajos`):** `version_para_analizar`, `resolver_version` y
-  `versiones_demoradas` solo corren sin persona en la sesión, que es como corre un trabajo; un
-  pedido de la API siempre la tiene. El
-  rechazo queda en la auditoría con origen `trabajos` (§3, paso 5).
+- **Análisis (`cem-trabajos`):** `version_para_analizar`, `resolver_version`,
+  `versiones_demoradas` y `claves_registradas` solo corren sin persona en la sesión, que es como
+  corre un trabajo; un pedido de la API siempre la tiene. El rechazo queda en la auditoría con
+  origen `trabajos` (§3, paso 5).
 - RLS forzada en las dos tablas; `cem_app` no las lee ni las escribe directo. Las funciones son
   `security definer` de `cem_migrate`, que tiene `BYPASSRLS`: cada una filtra por el consorcio
   del contexto.
@@ -304,7 +304,24 @@ create function nucleo.versiones_demoradas(demora interval)
   end
   $$;
 
+-- Para la limpieza de objetos sin fila (tarea periódica, sin consorcio): de las claves dadas,
+-- las que tienen una versión registrada. No devuelve nada más.
+create function nucleo.claves_registradas(claves text[])
+  returns setof text
+  language plpgsql stable security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if plataforma.persona_actual() is not null then
+      raise exception 'solo un trabajo limpia el almacén' using errcode = '42501';
+    end if;
+    return query
+      select x.clave_objeto from nucleo.version_documento x where x.clave_objeto = any(claves);
+  end
+  $$;
+
 revoke all on function
+  nucleo.claves_registradas(text[]),
   nucleo.versiones_demoradas(interval),
   nucleo.crear_documento(text, text, date, uuid, text),
   nucleo.nueva_version(uuid, text, integer, text, uuid, text),
@@ -313,6 +330,7 @@ revoke all on function
   nucleo.resolver_version(uuid, text, text, timestamptz)
   from public;
 grant execute on function
+  nucleo.claves_registradas(text[]),
   nucleo.versiones_demoradas(interval),
   nucleo.crear_documento(text, text, date, uuid, text),
   nucleo.nueva_version(uuid, text, integer, text, uuid, text),
@@ -332,6 +350,7 @@ begin
   end if;
 end
 $guarda$;
+drop function nucleo.claves_registradas(text[]);
 drop function nucleo.versiones_demoradas(interval);
 drop function nucleo.resolver_version(uuid, text, text, timestamptz);
 drop function nucleo.version_para_analizar(uuid);

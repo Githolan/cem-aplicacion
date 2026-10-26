@@ -590,6 +590,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - `POST …/documentos` y `POST …/documentos/{id}/versiones`: el archivo crudo, leído en tramos con tope de 20 MB (413), tipo por los primeros bytes (415), a lo sumo 2 cargas por proceso (503 a los 30 s) y un `put_object` único con la clave de documentos.
      - El trabajo `documentos.verificar` en `cem-trabajos`: vuelve a comprobar tamaño, tipo y SHA-256; rechaza el contenido activo, el cifrado y lo ilegible de un PDF (`pypdf`); pasa el archivo por `clamd`; con firmas de más de 48 horas no aprueba; un rechazado se borra del almacén (por `VersionId` si el bucket tiene versiones).
      - La tarea `documentos.vigilar_cuarentena`, cada 5 minutos, avisa a Kuma las versiones demoradas y las firmas viejas.
+     - El borrado de un rechazado es su propio trabajo (`documentos.borrar_rechazado`), encolado con el rechazo: si se pierde la reserva o falla el commit, no queda ni el rechazo ni el borrado. `documentos.limpiar_huerfanos`, cada día a las 04:45 UTC, borra con la clave de análisis los objetos de `cem/` de más de un día sin fila: los de una carga que subió y no confirmó. Los dos se reintentan solos (Codex en #127).
      - nginx: la ruta de carga con `client_max_body_size 21m` y sin búfer de pedido. Contrato 0.25.0.
    - **Para desplegar:**
      - `cem-antivirus-staging` y `cem-antivirus` en Coolify;
@@ -599,7 +600,5 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Sin lectura ni descarga:** llegan en 2c-2. Ninguna versión se sirve todavía.
    - **SIN VERIFICAR hasta desplegar:** 20 MB de punta a punta a través de nginx con su directorio de cuerpos temporales vacío (se prueba en staging); que el bucket con versiones de producción devuelva `VersionId` por la API S3 de OCI (si no, el rechazo haría un borrado simple; se prueba antes de producción).
    - **Conocido, sin resolver en este corte:**
-     - si la subida sale bien y falla algo después (el commit, por ejemplo), el objeto queda en el bucket sin fila; nunca se sirve y la clave de documentos no puede borrarlo;
      - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
-     - el análisis borra el objeto de un rechazado antes de confirmar su transacción: si después pierde la reserva o falla el commit, la versión vuelve a cuarentena sin objeto, el trabajo falla por `NoSuchKey` hasta quedar `muerto` y Kuma avisa (un objeto ausente nunca se resuelve en silencio, porque una clave mal configurada se vería igual);
      - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial.

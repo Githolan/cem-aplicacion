@@ -27,7 +27,7 @@ from sqlalchemy.exc import DBAPIError
 from app.consorcios import documentos_analisis
 from app.consorcios.documentos import TRABAJO_VERIFICAR
 from app.db import transaccion
-from app.plataforma import almacen
+from app.plataforma import almacen, cola
 from app.plataforma.trabajos import Trabajador
 from tests.conftest import clave_idempotencia
 from tests.test_contexto_mandatos import cliente
@@ -376,6 +376,9 @@ def test_lo_detectado_queda_rechazado_sin_binario(
     assert (fila["estado"], fila["motivo_rechazo"]) == ("rechazado", motivo), trabajos(
         motor_migrate
     )
+    # El rechazo encoló su borrado en la misma transacción; el objeto sigue hasta que corre.
+    assert existe(bucket_con_versiones, fila["clave_objeto"])
+    assert analizar(motor_app) == 1
     # Borrado por `VersionId`: no queda ninguna versión del objeto, tampoco una marca.
     versiones = _s3().list_object_versions(Bucket=bucket_con_versiones, Prefix=fila["clave_objeto"])
     assert versiones.get("Versions", []) == [] and versiones.get("DeleteMarkers", []) == []
@@ -637,4 +640,82 @@ def test_un_archivo_que_no_coincide_con_lo_cargado_queda_rechazado(escena, bucke
     assert analizar(motor_app) == 1
     fila = version(motor_migrate, v)
     assert (fila["estado"], fila["motivo_rechazo"]) == ("rechazado", "no_coincide")
+    assert analizar(motor_app) == 1  # el borrado, otro trabajo
     assert not existe(bucket, fila["clave_objeto"])
+
+
+def _jobs(motor_migrate, tipo):
+    with motor_migrate.connect() as c:
+        return c.execute(
+            text("select estado::text, maximo_intentos, resultado, error from plataforma.jobs"
+                 " where tipo = :t"), {"t": tipo},
+        ).all()  # fmt: skip
+
+
+def test_el_analisis_se_encola_con_sus_diez_intentos(escena, bucket, motor_migrate):
+    """El límite viaja con el trabajo: el proceso de la API no carga el registro de los trabajos."""
+    e = escena
+    subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf")
+    [(estado, maximo, _, _)] = _jobs(motor_migrate, TRABAJO_VERIFICAR)
+    assert (estado, maximo) == ("pendiente", 10)
+
+
+def test_si_el_borrado_ya_se_habia_hecho_el_trabajo_termina(escena, bucket, motor_app,
+                                                            motor_migrate):  # fmt: skip
+    """Un borrado cuya respuesta se perdió: el rechazo ya está confirmado y el objeto ya no está."""
+    e = escena
+    v = subir(e["ae"], e["cons"], documento(e), pdf(js="x"), "application/pdf").json()["id"]
+    assert analizar(motor_app) == 1
+    _s3().delete_object(Bucket=bucket, Key=version(motor_migrate, v)["clave_objeto"])
+    assert analizar(motor_app) == 1
+    [(estado, _, resultado, _)] = _jobs(motor_migrate, documentos_analisis.TRABAJO_BORRAR)
+    # Sin versiones, S3 responde 204 aunque no esté; con versiones, `NoSuchVersion`. Las dos
+    # terminan bien.
+    assert estado == "hecho" and resultado["borrado"] in ("hecho", "ya no estaba")
+
+
+def test_el_borrado_nunca_toca_una_version_que_no_esta_rechazada(escena, bucket, motor_app,
+                                                                 motor_migrate):  # fmt: skip
+    e = escena
+    v = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    assert analizar(motor_app) == 1  # disponible
+    with transaccion(motor_app, persona_id=None, consorcio_id=e["cons"]) as c:
+        cola.encolar(c, documentos_analisis.TRABAJO_BORRAR, carga={"version": v},
+                     consorcio_id=e["cons"])  # fmt: skip
+    assert analizar(motor_app) == 1
+    [(estado, _, _, error)] = _jobs(motor_migrate, documentos_analisis.TRABAJO_BORRAR)
+    assert estado == "muerto" and "no está rechazada" in error
+    assert existe(bucket, version(motor_migrate, v)["clave_objeto"])  # el objeto sigue
+
+
+def test_la_limpieza_borra_solo_los_objetos_sin_fila(escena, bucket_con_versiones, motor_app,
+                                                     motor_migrate, monkeypatch):  # fmt: skip
+    e = escena
+    v = subir(e["ae"], e["cons"], documento(e), pdf(), "application/pdf").json()["id"]
+    registrada = version(motor_migrate, v)["clave_objeto"]
+    huerfana = f"cem/{e['cons']}/{uuid4()}/{uuid4()}"
+    s3 = _s3()
+    s3.put_object(Bucket=bucket_con_versiones, Key=huerfana, Body=pdf())
+    s3.put_object(Bucket=bucket_con_versiones, Key=huerfana, Body=pdf(js="x"))  # dos versiones
+    fuera = "otro/prefijo"
+    s3.put_object(Bucket=bucket_con_versiones, Key=fuera, Body=b"x")
+    monkeypatch.setattr(documentos_analisis, "ANTIGUEDAD_HUERFANO", timedelta(0))
+    with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
+        r = documentos_analisis.limpiar_huerfanos(c, None)
+    assert r["borradas"] == 1 and r["revisadas"] >= 2
+    listado = s3.list_object_versions(Bucket=bucket_con_versiones, Prefix=huerfana)
+    assert listado.get("Versions", []) == [] and listado.get("DeleteMarkers", []) == []
+    # Control: la registrada y lo que está fuera de `cem/` siguen.
+    assert existe(bucket_con_versiones, registrada) and existe(bucket_con_versiones, fuera)
+
+
+def test_la_limpieza_respeta_la_antiguedad(escena, bucket, motor_app, motor_migrate):
+    """Con la antigüedad real (un día), un objeto sin fila recién subido (una carga en curso) no
+    se toca."""
+    e = escena
+    huerfana = f"cem/{e['cons']}/{uuid4()}/{uuid4()}"
+    _s3().put_object(Bucket=bucket, Key=huerfana, Body=pdf())
+    with transaccion(motor_app, persona_id=None, consorcio_id=None) as c:
+        r = documentos_analisis.limpiar_huerfanos(c, None)
+    assert r == {"revisadas": 0, "borradas": 0}
+    assert existe(bucket, huerfana)
