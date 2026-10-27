@@ -160,14 +160,22 @@ def controles(conn: Connection) -> Controles:
     return resultado
 
 
+def entorno_minimo() -> dict[str, str]:
+    """El entorno de las herramientas externas (`pg_dump`, `initdb`, `pg_ctl`, `age`...): solo
+    `PATH`. No heredan las claves S3, las URL de la base ni las demás variables del proceso."""
+    return {"PATH": os.environ["PATH"]}
+
+
 def _correr(
     argumentos: list[str], entorno: Mapping[str, str] | None = None, tope: float | None = None
 ) -> None:
-    """Corre una herramienta y falla con su salida de error. Con `tope` (segundos), la que se
-    pasa se mata y es un error: una herramienta colgada no deja la copia en curso para siempre."""
+    """Corre una herramienta (con `entorno`, o `entorno_minimo()`) y falla con su salida de
+    error. Con `tope` (segundos), la que se pasa se mata y es un error: una herramienta colgada
+    no deja la copia en curso para siempre."""
     try:
         hecho = subprocess.run(
-            argumentos, env=None if entorno is None else dict(entorno), capture_output=True,
+            argumentos, env=dict(entorno_minimo() if entorno is None else entorno),
+            capture_output=True,
             text=True, timeout=tope,
         )  # fmt: skip
     except subprocess.TimeoutExpired:
@@ -193,7 +201,7 @@ def volcar(url_backup: str, destino: Path) -> Controles:
                     f"--host={url.host}", *puerto,
                     f"--username={url.username}", f"--dbname={url.database}",
                 ],
-                os.environ | {"PGPASSWORD": url.password or ""},
+                entorno_minimo() | {"PGPASSWORD": url.password or ""},
             )  # fmt: skip
             esperados = controles(conn)
             conn.rollback()

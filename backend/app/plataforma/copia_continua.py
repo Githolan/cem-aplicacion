@@ -266,7 +266,7 @@ def conexion_libpq(url_texto: str) -> tuple[list[str], dict[str, str]]:
     argumentos = [f"--host={url.host}", f"--username={url.username}", "--no-password"]
     if url.port is not None:
         argumentos.append(f"--port={url.port}")
-    return argumentos, {"PATH": os.environ["PATH"], "PGPASSWORD": url.password or ""}
+    return argumentos, copias.entorno_minimo() | {"PGPASSWORD": url.password or ""}
 
 
 def _sello(momento: datetime) -> str:
@@ -519,7 +519,7 @@ def restaurada(
         hecho = subprocess.run(
             ["pg_ctl", "--pgdata", str(datos), "--wait", f"--timeout={ESPERA_RESTAURACION}",
              "--silent", "--log", str(registro), "start"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=copias.entorno_minimo(),
         )  # fmt: skip
         if hecho.returncode != 0:
             raise ErrorCopiaContinua(

@@ -511,3 +511,12 @@ def test_las_copias_leen_solo_la_clave_de_copias():
     # Ningún módulo de la aplicación lee la clave vieja.
     raiz = Path(copias.__file__).resolve().parent.parent
     assert [p for p in raiz.rglob("*.py") if "CEM_OCI_S3_" in p.read_text("utf-8")] == []
+
+
+def test_las_herramientas_no_heredan_las_variables_del_proceso(monkeypatch):
+    monkeypatch.setenv("CEM_COPIAS_S3_CLAVE_SECRETA", "no-tiene-que-pasar")
+    copias._correr(["sh", "-c", 'test -z "$CEM_COPIAS_S3_CLAVE_SECRETA" && test -n "$PATH"'])
+    # Control: si se le pasa a propósito, la ve (la prueba de arriba no pasa por accidente).
+    with pytest.raises(copias.ErrorCopia):
+        copias._correr(["sh", "-c", 'test -z "$CEM_COPIAS_S3_CLAVE_SECRETA"'],
+                       dict(os.environ))  # fmt: skip
