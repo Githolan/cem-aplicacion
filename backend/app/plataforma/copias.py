@@ -60,14 +60,17 @@ from sqlalchemy.pool import NullPool
 
 log = logging.getLogger("cem.copias")
 
+# La clave S3 de las copias es solo la de copias (H2c §3.1 del repositorio CEM): usuario
+# `cem-copias-acceso(-staging)`, variables `CEM_COPIAS_S3_*`. Nunca las de la clave vieja
+# (prefijo `CEM_OCI_S3`), que abría a la vez documentos y copias.
 VARIABLES = {
     "url_backup": "CEM_DATABASE_URL_BACKUP",
     "clave_publica": "CEM_COPIAS_CLAVE_PUBLICA",
     "bucket": "CEM_COPIAS_BUCKET",
-    "s3_endpoint": "CEM_OCI_S3_ENDPOINT",
-    "s3_region": "CEM_OCI_S3_REGION",
-    "s3_clave_id": "CEM_OCI_S3_CLAVE_ID",
-    "s3_clave_secreta": "CEM_OCI_S3_CLAVE_SECRETA",
+    "s3_endpoint": "CEM_COPIAS_S3_ENDPOINT",
+    "s3_region": "CEM_COPIAS_S3_REGION",
+    "s3_clave_id": "CEM_COPIAS_S3_CLAVE_ID",
+    "s3_clave_secreta": "CEM_COPIAS_S3_CLAVE_SECRETA",
 }
 
 VARIABLE_AVISO = "CEM_COPIAS_AVISO_URL"

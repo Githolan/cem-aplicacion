@@ -490,3 +490,24 @@ def test_la_imagen_trae_las_herramientas_de_la_version_del_servidor():
         salida = subprocess.run([programa, "--version"], check=True, capture_output=True, text=True)
         assert " 18." in salida.stdout, salida.stdout
     subprocess.run(["age", "--version"], check=True, capture_output=True)
+
+
+def test_las_copias_leen_solo_la_clave_de_copias():
+    """H2c §3.1: las copias usan `CEM_COPIAS_S3_*`; la clave vieja `CEM_OCI_S3_*` no alcanza."""
+    nuevas = {
+        "CEM_DATABASE_URL_BACKUP": "postgresql+psycopg://u:c@h/cem",
+        "CEM_COPIAS_CLAVE_PUBLICA": "age1x",
+        "CEM_COPIAS_BUCKET": "b",
+        "CEM_COPIAS_S3_ENDPOINT": "https://s3.ejemplo",
+        "CEM_COPIAS_S3_REGION": "sa-santiago-1",
+        "CEM_COPIAS_S3_CLAVE_ID": "id",
+        "CEM_COPIAS_S3_CLAVE_SECRETA": "secreta",
+    }
+    assert copias.ConfigCopias.desde_entorno(nuevas).s3_clave_id == "id"
+    viejas = {k.replace("CEM_COPIAS_S3_", "CEM_OCI_S3_"): v for k, v in nuevas.items()}
+    with pytest.raises(copias.ErrorCopia) as error:
+        copias.ConfigCopias.desde_entorno(viejas)
+    assert "CEM_COPIAS_S3_CLAVE_ID" in str(error.value)
+    # Ningún módulo de la aplicación lee la clave vieja.
+    raiz = Path(copias.__file__).resolve().parent.parent
+    assert [p for p in raiz.rglob("*.py") if "CEM_OCI_S3_" in p.read_text("utf-8")] == []
