@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 25-10-2026.
+**Actualizado:** 27-10-2026.
 
 ## Qué existe
 
@@ -111,7 +111,31 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `168f77a` (26-10-2026: staging de 23:53 a 23:56 UTC y producción de 23:58 UTC a 00:02 UTC del 27-10) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA) y `alembic current` dentro del `cem-backend` de cada entorno. Las cuatro apps de cada entorno son apps `dockerimage` que bajan de ghcr.io. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros de despliegue en su `doc/deploys/` (el último, `2026-10-26-168f77a.md`, con los dos entornos y el reintento de producción: `cd.ps1` escribe uno por día y SHA, y el del 27-10 se juntó con el del 26).
+Medido en el despliegue de `c3150c7` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, y `2026-10-27-c3150c7.md`).
+
+**Staging y producción en `c3150c7`** (27-10-2026), base `0038`, contrato 0.26.0.
+
+- **Qué es:** 2c-3, exportación por soporte (PR #132, `0038`); 2c-4, copia continua, réplica de documentos y control de tamaño (PR #133); y el mapa de despliegue con `cem-copia-continua` (PR #134 y #135). Primero se desplegó `4994f7c`, el merge de #134; `c3150c7` solo suma la app de producción al mapa. Detalle en «Próximo paso», puntos 20 y 21.
+- **Controles.** `ci.ps1` verde sobre `4994f7c` y `c3150c7`: backend 2015, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0038` en cada entorno.
+- **Staging:**
+  - Exportación de punta a punta con datos sintéticos. Control negativo: una persona sin mandato es rechazada sin escribir nada. Con un mandato de prueba: `armar`; sin la identidad no se descifra; descifrado, el manifiesto coincide con los 19 archivos; `entregar`; y la baja del mandato.
+  - Copia continua con copia base verificada.
+  - **PA26 pasó:** restauración en `postgres:18-alpine` desde el bucket hasta un momento entre dos marcas, que trae A y no B, con la cadena íntegra (1518 eventos). Tardó 26 s contra un RTO de 4 h.
+- **Producción:**
+  - `cem-copia-continua` en marcha (copia base `20261027T082540Z` verificada, WAL subiendo). El camino público no se cortó en ninguno de los dos despliegues: el monitor 10 de Kuma dio 21 latidos arriba de 07:19 a 07:39 UTC (`4994f7c`) y 19 de 08:15 a 08:33 (`c3150c7`), todos arriba; la misma consulta sí encuentra los caídos del corte de `168f77a`.
+  - **`cd.ps1` de `c3150c7` dio ROJO por una sola comprobación:** `/api/v1/health/cola` con `muertos: 1`. Es `plataforma.controlar_tamano_copias`, que corrió antes de que se cargara `CEM_COPIAS_PRESUPUESTO_BYTES`; con la variable ya cargada, el control a mano funciona.
+  - El monitor 19 de Kuma está caído por eso desde las 07:27 UTC. Reabrir el trabajo lo tiene que hacer el propietario (el clasificador no dejó a Claude escribir en la base de producción).
+  - La exportación en producción queda SIN VERIFICAR (el clasificador frenó también el control negativo).
+- **Infraestructura nueva** (en `REGISTRO_RECURSOS`):
+  - roles `cem_soporte_exportacion` y `cem_copia_continua`;
+  - `pg_hba` de replicación IPv4 + IPv6 solo para la red `coolify`;
+  - `max_slot_wal_keep_size` 5 GB;
+  - reglas de ciclo de vida de 42 días para `base/` y `wal/` y de 2 días para `wal-parcial/`;
+  - una clave S3 propia por entorno para la copia continua;
+  - `CEM_COPIAS_PRESUPUESTO_BYTES`.
+  - Las `CEM_OCI_S3_*` se quitaron de los dos `cem-trabajos`.
+
+Antes, con `168f77a`:
 
 **Staging y producción en `168f77a`** (26-10-2026), base `0037`, contrato 0.26.0.
 
@@ -512,9 +536,9 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
 4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Al 24-10-2026 hay 6 de 25 (PA31 desde el 17-10 y PA17 desde el PR #94). Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
 5. Pendientes de las copias:
    - **hecho:** primer latido de `cem-copia-diaria` (monitor 21) el 17-10 a las 03:30:10 UTC;
-   - WAL continuo (H2c);
+   - **hecho el 27-10:** WAL continuo con `cem-copia-continua` en los dos entornos (2c-4);
    - bloqueo de objeto del bucket;
-   - el primer descifrado con la identidad real.
+   - **hecho el 27-10:** el primer descifrado con la identidad real, en el ensayo PA26 de staging (identidad solo en el tmpfs de un contenedor sin red).
    - El inventario de copias de la VM y de la PC (16-10) se ordena aparte, para todos los proyectos.
 6. TB-8: falta leer las reglas de OCI para cerrarlo con prueba firme (ver "Decisiones vigentes"); para eso hay que configurar el perfil del MCP de OCI.
 7. Probar `/instalar` en un iPhone y en un Android reales. El cartel con el QR está en el repositorio CEM (#28); falta comprobar que el QR lleva a `/instalar`.
@@ -651,4 +675,24 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - La página `/documentos`: lista, descarga, carga y reintento; quien solo carga (403 en la lista) ve igual el formulario.
    - **Decisiones por defecto (para el propietario):** las versiones en cuarentena o rechazadas las ve solo quien las subió; el cambio de categoría exige la misma capacidad que el borrado; solo se guarda el último cambio de categoría.
    - **P3 abiertos** (revisiones de #129): el aviso de éxito con lista 403 nombra un botón que no está; el formulario lo ven también quienes no cargan (lo frena el servidor); el reintento no se dibuja si la lista vuelve 5xx; el disparador de la categoría no impide reescribir `categoria_*` sin cambiarla; `fecha_pedido` sin tope inferior; «Descargar» es un enlace y un error se ve como JSON fuera de la página.
-   - **Lo que sigue en 2c:** 2c-3, exportación por soporte (RF36), y 2c-4, copia continua (PA26).
+   - **Lo que sigue en 2c:** 2c-3 y 2c-4, puntos 20 y 21.
+20. **2c-3, exportación por soporte (RF36)** (PR #132, fusionado el 27-10-2026 en `9876f50`; **desplegado** en `4994f7c` y `c3150c7`; diseño en `doc/diseno/H2c_Diseno.md` del repositorio CEM, §1.1 y §5):
+   - **Qué trae:**
+     - `0038`: `plataforma.exportacion` (la constancia), las funciones `nucleo.exportar_*` que responden solo para una constancia sin armar del mismo consorcio, y `nucleo.registrar_exportacion`, que exige que quien la pidió tuviera ese día un mandato de administración o de Consejo con las cinco facultades de lectura generales;
+     - el rol `cem_soporte_exportacion` (sin `BYPASSRLS` ni `INSERT`);
+     - `scripts/exportar_consorcio.py armar|entregar`: un ZIP en tramos directo a `age`, sin copia en claro, con manifiesto SHA-256, y sin eventos de auditoría.
+   - **Riesgo residual (en el docstring de `0038`):** una lectura dentro de una transacción que vuelve atrás, hecha con la credencial del rol, no deja constancia. Se descartó `log_statement` porque escribiría datos personales en los registros.
+   - **Validado en staging de punta a punta** (ver «Desplegado»); en producción, SIN VERIFICAR.
+21. **2c-4, copia continua y PA26** (PR #133, fusionado el 27-10-2026 en `0d37a79`; mapa en #134 y #135; **desplegado** en los dos entornos; diseño en H2c §6):
+   - **`cem-copia-continua(-staging)`:**
+     - `pg_receivewal` con el slot `cem_copia_continua`; los segmentos se suben cifrados a `wal/` y los parciales cada 5 minutos a `wal-parcial/`, con relectura antes de borrar;
+     - cortes guardados en `cortes/` y medidos desde que el proceso los abre;
+     - copia base semanal con `--wal-method=stream`, verificada con `pg_verifybackup` y una restauración efímera;
+     - latido del healthcheck solo cuando copia de verdad.
+   - **Réplica diaria de documentos** (05:15 UTC) y **control de tamaño** (05:45 UTC) contra `CEM_COPIAS_PRESUPUESTO_BYTES`.
+   - **Medido:** en PostgreSQL 18 el `connection limit` del rol no cuenta las conexiones de replicación (`AmRegularBackendProcess`); el tope 4 acota solo las comunes.
+   - **Para el propietario:**
+     - crear los monitores de Kuma de empuje: copia continua (~3 min), copia base (~8 días) y tamaño (~26 h), por entorno, y cargar sus URL (`CEM_COPIA_CONTINUA_AVISO_URL`, `CEM_COPIA_BASE_AVISO_URL`, `CEM_COPIAS_TAMANO_AVISO_URL`);
+     - reabrir el trabajo muerto de producción;
+     - borrar las variables compartidas `CEM_OCI_S3_*` y la clave vieja de OCI.
+   - **P3 abiertos:** los de las revisiones de #133, #134 y #135 (reloj del corte con un corte nuevo durante la copia, lectura sin cerrojo, test de `iniciar`, docstring del CRC de gzip, comentarios de `deploy-map.ps1`).
