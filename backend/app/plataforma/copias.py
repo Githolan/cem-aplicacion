@@ -53,6 +53,7 @@ from typing import Any
 
 import boto3
 from botocore.config import Config as ConfigBotocore
+from botocore.exceptions import ClientError
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
@@ -267,6 +268,21 @@ def verificar_objeto(s3, bucket: str, clave: str, suma: str) -> None:
         raise ErrorCopia(f"el objeto subido {clave} no coincide con la copia cifrada")
 
 
+NO_EXISTE = frozenset({"404", "NoSuchKey", "NotFound"})
+"""Códigos con que el almacén responde a `head_object` de una clave que no está."""
+
+
+def metadatos(s3, bucket: str, clave: str) -> dict[str, str] | None:
+    """Los metadatos de usuario del objeto, o None si no existe. Cualquier otro error del
+    almacén (403, 5xx) se propaga: un objeto que no se puede consultar no es un objeto ausente."""
+    try:
+        return s3.head_object(Bucket=bucket, Key=clave)["Metadata"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] in NO_EXISTE:
+            return None
+        raise
+
+
 def claves_destino(base: str, ventana: datetime) -> list[str]:
     """`diarias/AAAA-MM-DD/…`; la del día 1 también va a `mensuales/AAAA-MM/…` (§17.2)."""
     nombre = f"{base}-{ventana:%Y%m%dT%H%M%SZ}.dump.age"
@@ -362,6 +378,25 @@ def empujar(destino: str, espera: float = TIEMPO_DE_ESPERA_AVISO) -> None:
         confirmado = False
     if not confirmado:
         raise ErrorAviso(f"Kuma respondió {estado} sin confirmar el latido")
+
+
+def avisar_estado(
+    variable: str, estado: str, mensaje: str, entorno: Mapping[str, str] = os.environ
+) -> str:
+    """Push a Kuma con `estado` (`up` o `down`) a la URL de `variable`. Devuelve `enviado`,
+    `fallido` o `sin_configurar`, y lo deja en los registros; nunca lanza: el aviso no forma
+    parte de lo que avisa, y un monitor sin latidos se pone rojo solo. Sin la URL en el registro:
+    lleva el token."""
+    url = entorno.get(variable)
+    if not url:
+        log.warning("sin aviso a Kuma: falta %s", variable)
+        return "sin_configurar"
+    try:
+        empujar(url_push(url, variable, estado, mensaje))
+    except ErrorAviso as e:
+        log.error("el aviso a Kuma de %s falló: %s", variable, e)
+        return "fallido"
+    return "enviado"
 
 
 def avisar_copia(resumen: Mapping[str, Any], entorno: Mapping[str, str] = os.environ) -> str:
