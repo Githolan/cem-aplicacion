@@ -22,6 +22,23 @@ una copia base física y todo el WAL desde ella. Este proceso hace las dos cosas
    no cuenta (§17.3). Solo cuenta la que tiene su marca `base/<momento>/verificada.json`, que se
    sube al final, después de releer cada objeto.
 
+Cortes, salud y parada
+----------------------
+- Un corte queda en `cortes/<momento>.json` y sigue abierto, también después de un reinicio,
+  hasta que haya una copia base verificada de un momento igual o posterior.
+- Un objeto que ya estaba en el almacén se relee entero antes de borrar el archivo local; la
+  marca de una copia base cuenta solo si se relee.
+- El latido del healthcheck se da solo si el proceso copia de verdad (ver
+  `CopiaContinua.problemas_de_salud`): sin Kuma configurado, un proceso vivo que no copia se ve
+  igual como `unhealthy`.
+- Con SIGTERM, sube lo completo y el parcial durante `TIEMPO_SUBIDA_FINAL`. Dos contenedores a
+  la vez (una actualización progresiva): `flock` del directorio de trabajo y un solo receptor
+  por slot; el nuevo espera sin avisar a Kuma.
+- Los controles de la copia restaurada no se comparan tabla por tabla con la base real: una copia
+  física termina en una posición del WAL que no coincide con ninguna instantánea de la base viva
+  sin frenar las escrituras. Se compara la cantidad de consorcios (leída al terminar la copia) y
+  se exige la cadena íntegra; la comparación completa la hace la copia diaria (`copias.py`).
+
 Compresión
 ----------
 `pg_receivewal --compress` de la imagen acepta gzip y lz4, no zstd (medido: "compression with ZSTD
