@@ -111,9 +111,16 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `58d1ea9` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md` y `2026-10-27-58d1ea9.md`).
+Medido en el despliegue de `3dfdfdb` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md` y `2026-10-27-3dfdfdb.md`).
 
-**Staging y producción en `58d1ea9`** (27-10-2026, 19:35 a 19:44 UTC), base `0039`, contrato 0.26.0.
+**Staging y producción en `3dfdfdb`** (27-10-2026, 23:15 a 23:22 UTC), base `0040`, contrato 0.26.0.
+
+- **Qué suma:** 2d-3, supresión y rectificación del nombre de RF37 (PR #140, `0040`). Detalle en «Próximo paso», punto 23.
+- **Controles.** `ci.ps1` verde sobre `44c8f9a` (la cabeza del PR) y `3dfdfdb`: backend 2063, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0040` en cada entorno.
+- **Validación en los dos entornos, sin crear datos:** suprimir, ejecutar y rectificar un caso inexistente se niegan desde la base; rectificar sin nombre se niega en el script; en staging, el plan de un caso cerrado se niega. Las 3 funciones nuevas solo las ejecuta `cem_soporte_privacidad` y las 2 internas nadie (control: `cem_app` sí ejecuta `plataforma.persona_actual()`).
+- **SIN VERIFICAR desplegado:** una supresión o una rectificación de punta a punta (necesitan un caso confirmado con el código del correo del titular; probadas en la suite).
+
+**Antes, `58d1ea9`** (27-10-2026, 19:35 a 19:44 UTC), base `0039`:
 
 - **Qué suma:** 2d-1, el expediente de privacidad de RF37 (PR #138, `0039`), sobre `c3150c7`. Detalle en «Próximo paso», punto 22.
 - **Controles.** `ci.ps1` verde sobre `cd71bc8` (la cabeza del PR) y `58d1ea9`: backend 2040, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0039` en cada entorno (en producción, 41 tablas y 1151 filas).
@@ -709,4 +716,11 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Revisión:** independiente, 0 P1/P2 sobre `cd71bc8` (Codex no completó en 30 minutos; su P2 anterior quedó resuelto con `titular_con_cuenta`).
    - **Siguiente:** 2d-3 (supresión y rectificación del nombre); 2d-2 (la copia) espera la decisión del propietario sobre el canal (§9.1 del diseño).
    - **P3 abiertos:** carrera rechazar/despachador, código guardado si el trabajo estaba en curso o el caso vence sin cerrarse, rama `codigo_usado` inalcanzable, relación con el consorcio del alcance en `abrir`, asunto y texto libres, mandato terminado o de soporte, `cola.ErrorDefinitivo` en el script, prueba de privilegios de las funciones internas.
+23. **2d-3, supresión y rectificación del nombre (RF37)** (PR #140, fusionado el 27-10-2026 en `3dfdfdb`; **desplegado** en los dos entornos; diseño en `doc/diseno/H2d_RF37_Diseno.md` del repositorio CEM, §2 y §6):
+   - `0040`: plan y ejecución de la supresión y rectificación del nombre, solo para `cem_soporte_privacidad`; exigen el caso confirmado y del derecho, y lo cierran. Se niegan si el titular invitado ya tiene cuenta (`titular_con_cuenta`) o si la persona ya se suprimió.
+   - **Supresión:** con alcance `cuenta`, borra accesos e idempotencia y anonimiza la persona solo si no tiene vínculo ni mandato sin terminar (entonces borra también sus credenciales); con un consorcio, solo lo de ese consorcio. Invitaciones pendientes, borradas; las demás, anonimizadas. Cola: borra los correos pendientes o fallidos y sus eventos. Conserva actos del consorcio, auditoría, copias y documentos, y el plan lo dice.
+   - `scripts/privacidad.py suprimir` muestra el plan y su huella; `--ejecutar <huella>` aplica solo ese plan y manda la resolución al correo leído antes de anonimizar. `rectificar` lee el nombre por stdin y no lo guarda en el caso.
+   - **Cerrojos** en el orden único del código: invitaciones, mandatos, invitaciones a mandato, `persona:<correo>`, filas del login (código, enlace, desafío, contraseña, TOTP, recuperación) y la persona al final. Dos pruebas de concurrencia.
+   - **Revisión:** independiente en cuatro vueltas, 0 P1/P2 en la última; Codex limpio sobre `44c8f9a` (sus tres P2 anteriores, resueltos).
+   - **P3 abiertos:** `identidad_persona` en el plan; la huella solo la controla el script; deadlock posible con la baja del TOTP (ya inconsistente con su alta) y con la purga de identidad; las pruebas de concurrencia cuentan cerrojos de todo el servidor; fecha de vencimiento de las copias sin valor fijo.
 
