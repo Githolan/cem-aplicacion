@@ -4,14 +4,15 @@
 FROM python:3.12-slim
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 # psql corre scripts/crear_roles.sql en conftest.py. Las copias (§17) necesitan, igual que la
-# imagen de producción, pg_dump 18, el servidor 18 para la base efímera y age (ver
-# backend/Dockerfile).
+# imagen de producción, pg_dump 18, el servidor 18 para la base efímera, age y el locale
+# en_US.UTF-8 de la copia física (ver backend/Dockerfile).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
  && sed -i 's/^#\? *create_main_cluster.*/create_main_cluster = false/' \
       /etc/postgresql-common/createcluster.conf \
  && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
- && apt-get install -y --no-install-recommends postgresql-18 age \
+ && apt-get install -y --no-install-recommends postgresql-18 age locales \
+ && localedef -i en_US -f UTF-8 en_US.UTF-8 \
  && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.prod.txt backend/requirements.txt /tmp/requisitos/
 # El paquete de contratos llega por PYTHONPATH desde el código montado, no instalado.

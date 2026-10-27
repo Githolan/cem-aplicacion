@@ -34,6 +34,7 @@ CLAVES = {
     "ro": "ro_prueba",
     "backup": "backup_prueba",
     "soporte_documentos": "soporte_documentos_prueba",
+    "copia_continua": "copia_continua_prueba",
     "soporte_exportacion": "soporte_exportacion_prueba",
 }
 
@@ -69,6 +70,7 @@ def base_de_prueba() -> None:
             "-v", f"clave_ro={CLAVES['ro']}",
             "-v", f"clave_backup={CLAVES['backup']}",
             "-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
+            "-v", f"clave_copia_continua={CLAVES['copia_continua']}",
             "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
             "-f", str(RAIZ / "scripts" / "crear_roles.sql"),
         ],

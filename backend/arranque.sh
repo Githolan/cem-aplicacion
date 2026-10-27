@@ -5,6 +5,8 @@
 #                      contenedor no arranca y Coolify conserva la versión anterior.
 #   trabajos           cem-trabajos: consume la cola. No migra.
 #   planificador       cem-planificador: despacha el outbox y encola tareas periódicas. No migra.
+#   copia_continua     cem-copia-continua: WAL continuo y copia base semanal verificada (H2c §6).
+#                      No migra. Sin sus variables no arranca.
 set -eu
 case "${CEM_PROCESO:-api}" in
   api)
@@ -26,6 +28,9 @@ case "${CEM_PROCESO:-api}" in
     ;;
   planificador)
     exec python -m app.plataforma.planificador
+    ;;
+  copia_continua)
+    exec python -m app.plataforma.copia_continua
     ;;
   *)
     echo "CEM_PROCESO desconocido: ${CEM_PROCESO}" >&2
