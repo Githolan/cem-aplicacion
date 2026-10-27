@@ -1028,7 +1028,7 @@ def test_una_copia_base_que_falla_no_frena_la_de_un_corte_nuevo(cfg, monkeypatch
 def _copia_con_wal_reciclado(monkeypatch, motor_migrate):
     """Durante `pg_basebackup` (frenado con `--max-rate`), varios segmentos de WAL nuevos, cada
     uno con su checkpoint: con `wal_keep_size` en 0, el WAL del inicio de la copia se recicla. En
-    paralelo, la consulta de la vuelta al slot, como en producción (cuatro conexiones del rol)."""
+    paralelo, la consulta de la vuelta al slot, como en producción."""
     correr = copias._correr
 
     def con_wal(argumentos, entorno=None, tope=None):
@@ -1141,3 +1141,59 @@ def test_un_corte_adoptado_se_mide_desde_que_lo_adopto_este_proceso(cfg):
     assert p.problemas_de_salud(ahora + timedelta(minutes=1)) == []
     tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
     assert p.problemas_de_salud(tarde)[0].startswith("cadena cortada desde")
+
+
+@pytest.mark.db
+def test_dos_contenedores_superpuestos_no_chocan_con_el_tope_del_rol(
+    cfg, proceso, monkeypatch, tmp_path
+):
+    """El viejo con su receptor y la copia base de un corte, el nuevo con la suya: cinco
+    walsenders del rol, más que su tope, y las dos copias terminan (las conexiones de
+    replicación no cuentan para el tope). Control: las comunes sí; la que sobra se rechaza."""
+    correr = copias._correr
+
+    def lenta(argumentos, entorno=None, tope=None):
+        if argumentos[0] == "pg_basebackup":
+            argumentos = [*argumentos, f"--max-rate={TASA_COPIA_LENTA}"]
+        return correr(argumentos, entorno, tope)
+
+    monkeypatch.setattr(copias, "_correr", lenta)
+    tope = admin("select rolconnlimit from pg_roles where rolname = 'cem_copia_continua'")[0][0]
+    p = proceso()
+    p.iniciar(datetime.now(UTC))  # el único receptor posible (el slot es exclusivo)
+    esperar_recibido(lsn_actual())
+    errores: list[BaseException] = []
+
+    def copiar(destino: Path) -> None:
+        try:
+            cc.tomar_base(cfg.url_copia_continua, destino, "stream")
+        except BaseException as e:
+            errores.append(e)
+
+    def del_rol(tipo: str) -> int:
+        return admin("select count(*) from pg_stat_activity"
+                     " where usename = 'cem_copia_continua' and backend_type = :t",
+                     t=tipo)[0][0]  # fmt: skip
+
+    hilos = [threading.Thread(target=copiar, args=(tmp_path / n,)) for n in ("vieja", "nueva")]
+    motor = create_engine(url_copia_continua())
+    abiertas = []
+    try:
+        for h in hilos:
+            h.start()
+        esperar(lambda: del_rol("walsender") == 5 or errores, segundos=30)
+        assert not errores, errores
+        assert del_rol("walsender") > tope
+        # Las consultas de los dos contenedores (y más) caben al lado; la que pasa el tope, no.
+        abiertas = [motor.connect() for _ in range(tope)]
+        with pytest.raises(OperationalError, match="too many connections for role"):
+            motor.connect()
+    finally:
+        for c in abiertas:
+            c.close()
+        for h in hilos:
+            h.join()
+        motor.dispose()
+    assert not errores, errores
+    for n in ("vieja", "nueva"):
+        assert sorted(a.name for a in (tmp_path / n).iterdir()) == sorted(cc.ARCHIVOS_BASE)

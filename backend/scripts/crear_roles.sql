@@ -10,8 +10,9 @@
 --     -v clave_soporte_exportacion="$CLAVE_SOPORTE_EXPORTACION" \
 --     -v clave_copia_continua="$CLAVE_COPIA_CONTINUA" -f scripts/crear_roles.sql
 --
--- Es idempotente: no toca roles ni bases que ya existen. En un servidor creado antes de las
--- copias, volver a correrlo solo agrega cem_backup. Los roles de soporte de documentos (2c-2), de
+-- Es idempotente: no toca roles ni bases que ya existen, salvo el tope de conexiones de
+-- cem_copia_continua, que se ajusta siempre. En un servidor creado antes de las copias, volver
+-- a correrlo solo agrega cem_backup. Los roles de soporte de documentos (2c-2), de
 -- exportación (2c-3) y de la copia continua (2c-4) están cada uno en su propio archivo, para
 -- crearlos solos en un servidor que ya existe.
 

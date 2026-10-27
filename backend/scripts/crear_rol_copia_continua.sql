@@ -3,9 +3,12 @@
 -- base semanal). Las dos herramientas solo necesitan el atributo REPLICATION y una línea
 -- `host replication` en `pg_hba`; ningún permiso sobre bases, esquemas ni tablas. Por eso no se
 -- le da `connect` a `cem` ni nada más: con REPLICATION igual lee físicamente todo el clúster, y
--- su clave es tan sensible como la de cem_backup. Cuatro conexiones: el receptor, la copia base
--- (dos: la copia y su WAL por `--wal-method=stream`) y la consulta breve al slot (sobre la base
--- `postgres`, que PUBLIC puede abrir).
+-- su clave es tan sensible como la de cem_backup. El tope de 4 conexiones vale solo para las
+-- comunes: la consulta breve al slot (sobre la base `postgres`, que PUBLIC puede abrir), una
+-- por contenedor, con margen para los dos de una actualización progresiva. Las de replicación
+-- (el receptor y las dos de cada copia base por `--wal-method=stream`) no cuentan para el tope
+-- del rol en PostgreSQL 18 (medido: con tope 2, el receptor y dos copias base a la vez, cinco
+-- walsenders, terminan, y la tercera conexión común se rechaza); las limita el servidor.
 --
 -- Lo incluye `crear_roles.sql`; en un servidor que ya existe se corre solo, con un superusuario
 -- y la clave como variable de psql (nunca en el repositorio):
@@ -15,7 +18,10 @@
 --
 -- Además, en el servidor (no lo hace este script): `pg_hba.conf` con
 -- `host replication cem_copia_continua <red interna> scram-sha-256` y
--- `max_slot_wal_keep_size = 5GB`.
+-- `max_slot_wal_keep_size = 5GB`, y `max_wal_senders` y `max_replication_slots` con lugar para
+-- dos contenedores superpuestos: hasta 6 walsenders y 3 slots de este rol (el receptor con su
+-- slot y dos copias base con su slot temporal), además de otros usos. Los valores por omisión
+-- de PostgreSQL 18 son 10 y 10.
 --
 -- Es idempotente: si el rol ya existe, solo le ajusta el tope de conexiones.
 

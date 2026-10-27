@@ -63,13 +63,16 @@ de ningún índice. El ensayo PA26 real se hace con `postgres:18-alpine` (H2c §
 Conexiones y permisos
 ---------------------
 `cem_copia_continua` tiene `REPLICATION` y nada más (`scripts/crear_rol_copia_continua.sql`),
-con un tope de 4 conexiones: el receptor, `pg_basebackup` con `--wal-method=stream` (dos: la
-copia y el WAL, con su slot temporal, así el WAL desde el inicio de la copia queda retenido
-aunque el slot del receptor siga avanzando) y una consulta breve por vuelta a
-`pg_replication_slots` y `pg_current_wal_lsn()` sobre la base que nombra
-`CEM_DATABASE_URL_COPIA_CONTINUA` (`postgres`, que PUBLIC puede abrir: el rol no tiene permiso
-de conexión a `cem`). La cantidad de consorcios de la base real la lee `cem_backup`
-(`CEM_DATABASE_URL_BACKUP`) con una consulta al terminar cada copia base.
+y usa el receptor, `pg_basebackup` con `--wal-method=stream` (dos conexiones: la copia y el
+WAL, con su slot temporal, así el WAL desde el inicio de la copia queda retenido aunque el slot
+del receptor siga avanzando) y una consulta breve por vuelta a `pg_replication_slots` y
+`pg_current_wal_lsn()` sobre la base que nombra `CEM_DATABASE_URL_COPIA_CONTINUA` (`postgres`,
+que PUBLIC puede abrir: el rol no tiene permiso de conexión a `cem`). Su tope de 4 conexiones
+cuenta solo esa consulta (una por contenedor, con margen para los dos de una actualización
+progresiva): en PostgreSQL 18 las conexiones de replicación no cuentan para el tope del rol;
+las limitan `max_wal_senders` y `max_replication_slots` del servidor. La cantidad de
+consorcios de la base real la lee `cem_backup` (`CEM_DATABASE_URL_BACKUP`) con una consulta
+al terminar cada copia base.
 
 Avisos a Kuma (opcionales; sin la variable, un WARNING al arrancar y se sigue)
 ------------------------------------------------------------------------------
@@ -608,7 +611,12 @@ def consultar_restaurada(socket: Path, url_backup: str) -> dict[str, Any]:
 
 def verificar_base(carpeta_base: Path, url_backup: str, consorcios: int) -> dict[str, Any]:
     """`pg_verifybackup` y restauración hasta el fin de la copia. Lanza `ErrorCopiaContinua` si
-    algo no coincide: la copia no cuenta."""
+    algo no coincide: la copia no cuenta.
+
+    `pg_verifybackup --no-parse-wal` controla `base.tar.gz` contra el manifiesto, no el WAL de
+    `pg_wal.tar.gz`. Ese WAL lo validan la restauración con `recovery_target=immediate` (tiene
+    que llegar al fin de la copia y promoverse), el CRC de gzip al extraerlo y, una vez subido,
+    el SHA-256 de cada archivo releído contra la marca."""
     copias._correr(
         ["pg_verifybackup", "--format=tar", "--no-parse-wal", str(carpeta_base)],
         tope=TOPE_VERIFICAR_MANIFIESTO,

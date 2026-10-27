@@ -276,7 +276,8 @@ def test_crear_roles_se_puede_volver_a_correr_sin_la_clave_nueva():
     assert hecho.returncode == 0, hecho.stderr
     assert "cem_soporte_documentos no se crea" in hecho.stdout
     assert "cem_copia_continua no se crea" in hecho.stdout
-    # Control: con las claves, también termina bien (los roles ya existen y no se tocan). La de
+    # Control: con las claves, también termina bien (los roles ya existen y no se tocan, salvo
+    # el tope de conexiones de cem_copia_continua, que se ajusta). La de
     # exportación (2c-3) va también: sin ella, su rol tampoco se crea y lo dice.
     con = comun[:-2] + ["-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
                         "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
