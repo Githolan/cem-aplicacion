@@ -7,6 +7,7 @@ lleva su control: el mismo pedido que sí cumple pasa.
 import io
 import json
 import os
+import re
 from datetime import timedelta
 
 import pytest
@@ -16,6 +17,7 @@ from sqlalchemy.exc import DBAPIError
 
 from scripts import privacidad
 from tests.conftest import url_rol
+from tests.test_modo_operacion import consorcio_con_persona
 from tests.test_privacidad_2d1 import (  # noqa: F401
     abrir,
     caso,
@@ -55,6 +57,14 @@ def suprimir(capsys, k, *extra) -> tuple[int, str, str]:
     return r, salida.out, salida.err
 
 
+def aplicar(capsys, k) -> tuple[int, str, str]:
+    """Como soporte: mira el plan y lo aplica con su huella."""
+    r, out, err = suprimir(capsys, k)
+    if r != 0:
+        return r, out, err
+    return suprimir(capsys, k, "--ejecutar", re.search(r"^huella: (\w+)$", out, re.M).group(1))
+
+
 def uno(motor_migrate, sql, **p):
     with motor_migrate.connect() as c:
         return c.execute(text(sql), p).one()
@@ -65,16 +75,47 @@ def cuenta(motor_migrate, sql, **p) -> int:
         return c.execute(text(sql), p).scalar_one()
 
 
-def accesos_y_credenciales(motor_migrate, persona) -> None:
-    """Una sesión abierta, una contraseña y una respuesta de idempotencia, cargadas después de
-    confirmar el caso (con contraseña, el caso no se confirma por correo)."""
+ACCESOS = ("sesion", "enlace_acceso", "codigo_acceso")
+CREDENCIALES = ("contrasena", "factor_totp", "codigo_recuperacion", "desafio_contrasena")
+
+
+def accesos_y_credenciales(motor_migrate, persona, cons) -> None:
+    """Una fila en cada tabla global de la persona (accesos, credenciales e idempotencia),
+    cargadas después de confirmar el caso (con contraseña, no se confirma por correo)."""
+    h = os.urandom
     with motor_migrate.begin() as c:
         c.execute(text("insert into nucleo.sesion (persona_id, token_hash, dispositivo, ip,"
                        " vence_en) values (:p, :t, gen_random_uuid(), '203.0.113.9',"
-                       " now() + interval '1 day')"),
-                  {"p": persona, "t": os.urandom(32)})  # fmt: skip
+                       " now() + interval '1 day')"), {"p": persona, "t": h(32)})  # fmt: skip
+        enlace = c.execute(text("insert into nucleo.enlace_acceso (persona_id, token_hash,"
+                                " nonce_hash, dispositivo, ip, vence_en) values (:p, :t, :n,"
+                                " gen_random_uuid(), '203.0.113.9', now() + interval '5 minutes')"
+                                " returning id"),
+                           {"p": persona, "t": h(32), "n": h(32)}).scalar_one()  # fmt: skip
+        c.execute(text("insert into nucleo.codigo_acceso (enlace_id, persona_id, codigo_hash,"
+                       " vence_en) values (:e, :p, :h, now() + interval '5 minutes')"),
+                  {"e": enlace, "p": persona, "h": h(32)})  # fmt: skip
         c.execute(text("insert into nucleo.contrasena (persona_id, hash)"
                        " values (:p, '$argon2id$v=19$prueba')"), {"p": persona})  # fmt: skip
+        c.execute(text("insert into nucleo.factor_totp (persona_id, secreto_cifrado,"
+                       " confirmado_en) values (:p, :s, now())"),
+                  {"p": persona, "s": h(48)})  # fmt: skip
+        c.execute(text("insert into nucleo.codigo_recuperacion (persona_id, codigo_hash)"
+                       " values (:p, :h)"), {"p": persona, "h": h(32)})  # fmt: skip
+        c.execute(text("insert into nucleo.desafio_contrasena (persona_id, token_hash, vence_en)"
+                       " values (:p, :t, now() + interval '2 minutes')"),
+                  {"p": persona, "t": h(32)})  # fmt: skip
+        c.execute(text("insert into plataforma.idempotencia (consorcio_id, persona_id, metodo,"
+                       " ruta, clave, huella, estado_http, respuesta, vence_en) values (:c, :p,"
+                       " 'POST', '/api/v1/x', 'k', :h, 200, '{}', now() + interval '1 day')"),
+                  {"c": cons, "p": persona, "h": h(32)})  # fmt: skip
+
+
+def filas_globales(motor_migrate, persona) -> dict[str, int]:
+    tablas = [f"nucleo.{t}" for t in ACCESOS + CREDENCIALES] + ["plataforma.idempotencia"]
+    with motor_migrate.connect() as c:
+        return {t: c.execute(text(f"select count(*) from {t} where persona_id = :p"),
+                             {"p": persona}).scalar_one() for t in tablas}  # fmt: skip
 
 
 def terminar_vinculo(motor_migrate, vinculo, cons) -> None:
@@ -140,7 +181,7 @@ def test_sin_confirmar_o_de_otro_derecho_no_hay_plan(confiable, motor_migrate, c
 
 def test_el_plan_no_cambia_nada_ni_cierra_el_caso(confiable, motor_migrate, con_url, capsys):  # noqa: F811
     k = confirmado(capsys, motor_migrate, confiable["correo"])
-    accesos_y_credenciales(motor_migrate, confiable["inq"])
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
     antes = uno(motor_migrate, "select (select count(*) from nucleo.sesion where persona_id = :p),"
                 " (select correo from nucleo.persona where id = :p),"
                 " (select count(*) from plataforma.outbox)", p=confiable["inq"])  # fmt: skip
@@ -162,24 +203,25 @@ def test_con_vinculo_vigente_se_conserva_la_persona_y_sus_credenciales(
     capsys,
 ):
     k = confirmado(capsys, motor_migrate, confiable["correo"])
-    accesos_y_credenciales(motor_migrate, confiable["inq"])
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
     eventos = cuenta(motor_migrate, "select count(*) from auditoria.eventos")
-    r, out, err = suprimir(capsys, k, "--ejecutar")
+    r, out, err = aplicar(capsys, k)
     assert r == 0, err
     persona = uno(motor_migrate, "select correo, nombre, eliminado_en from nucleo.persona"
                   " where id = :p", p=confiable["inq"])  # fmt: skip
     assert persona.correo == confiable["correo"] and persona.eliminado_en is None
-    assert cuenta(motor_migrate, "select count(*) from nucleo.contrasena where persona_id = :p",
-                  p=confiable["inq"]) == 1  # fmt: skip
-    # Las sesiones sí se borran (alcance cuenta), y la auditoría no se toca.
-    assert cuenta(motor_migrate, "select count(*) from nucleo.sesion where persona_id = :p",
-                  p=confiable["inq"]) == 0  # fmt: skip
+    # Las credenciales quedan; los accesos y la idempotencia se borran (alcance cuenta).
+    quedan = filas_globales(motor_migrate, confiable["inq"])
+    assert all(quedan[f"nucleo.{t}"] == 1 for t in CREDENCIALES), quedan
+    assert all(quedan[f"nucleo.{t}"] == 0 for t in ACCESOS), quedan
+    assert quedan["plataforma.idempotencia"] == 0
     assert cuenta(motor_migrate, "select count(*) from auditoria.eventos") == eventos
     fila = caso(motor_migrate, k)
     assert fila["estado"] == "resuelto"
     plan = fila["resolucion"]["supresion"]
     assert punto(plan, "persona: correo y nombre")["tratamiento"] == "conservar"
-    assert punto(plan, "contraseña, TOTP y códigos de recuperación")["tratamiento"] == "conservar"
+    credenciales = punto(plan, "contraseña, TOTP y códigos de recuperación")
+    assert (credenciales["tratamiento"], credenciales["filas"]) == ("conservar", len(CREDENCIALES))
 
 
 def test_sin_vinculo_ni_mandato_vigente_se_anonimiza_y_libera_el_correo(
@@ -190,17 +232,16 @@ def test_sin_vinculo_ni_mandato_vigente_se_anonimiza_y_libera_el_correo(
 ):
     k = confirmado(capsys, motor_migrate, confiable["correo"])
     terminar_vinculo(motor_migrate, confiable["v_inq"], confiable["cons"])
-    accesos_y_credenciales(motor_migrate, confiable["inq"])
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
     eventos = cuenta(motor_migrate, "select count(*) from auditoria.eventos")
-    r, out, err = suprimir(capsys, k, "--ejecutar")
+    r, out, err = aplicar(capsys, k)
     assert r == 0, err
     persona = uno(motor_migrate, "select id, correo, nombre, eliminado_en from nucleo.persona"
                   " where id = :p", p=confiable["inq"])  # fmt: skip
     assert persona.correo == f"suprimida+{persona.id}@invalid.cem"
     assert persona.nombre == "Persona suprimida" and persona.eliminado_en is not None
-    for tabla in ("contrasena", "sesion"):
-        assert cuenta(motor_migrate, f"select count(*) from nucleo.{tabla} where persona_id = :p",
-                      p=confiable["inq"]) == 0  # fmt: skip
+    quedan = filas_globales(motor_migrate, confiable["inq"])
+    assert set(quedan.values()) == {0}, quedan
     # La invitación que aceptó queda sin su correo ni su nombre; el vínculo se conserva.
     assert cuenta(motor_migrate, "select count(*) from nucleo.invitacion where correo = :c",
                   c=confiable["correo"]) == 0  # fmt: skip
@@ -244,17 +285,15 @@ def test_un_caso_de_consorcio_no_toca_nada_global(confiable, motor_migrate, con_
     k = confirmado(capsys, motor_migrate, confiable["correo"], "supresion",
                    "--consorcio", str(confiable["cons"]))  # fmt: skip
     terminar_vinculo(motor_migrate, confiable["v_inq"], confiable["cons"])
-    accesos_y_credenciales(motor_migrate, confiable["inq"])
-    globales = "select (select count(*) from nucleo.contrasena where persona_id = :p),"
-    globales += " (select count(*) from nucleo.sesion where persona_id = :p)"
-    antes = uno(motor_migrate, globales, p=confiable["inq"])
-    assert antes[0] == 1 and antes[1] >= 1  # control: hay qué tocar
-    r, _, err = suprimir(capsys, k, "--ejecutar")
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
+    antes = filas_globales(motor_migrate, confiable["inq"])
+    assert 0 not in antes.values(), antes  # control: hay qué tocar en cada tabla
+    r, _, err = aplicar(capsys, k)
     assert r == 0, err
     persona = uno(motor_migrate, "select correo, eliminado_en from nucleo.persona where id = :p",
                   p=confiable["inq"])  # fmt: skip
     assert persona.correo == confiable["correo"] and persona.eliminado_en is None
-    assert uno(motor_migrate, globales, p=confiable["inq"]) == antes
+    assert filas_globales(motor_migrate, confiable["inq"]) == antes
     # Control: lo de ese consorcio sí se trató (la invitación aceptada, anonimizada).
     assert cuenta(motor_migrate, "select count(*) from nucleo.invitacion where persona_id = :p"
                   " and nombre = 'Persona suprimida'", p=confiable["inq"]) == 1  # fmt: skip
@@ -285,7 +324,7 @@ def test_invitado_sin_cuenta_su_invitacion_pendiente_se_borra(
     assert privacidad.main(["corroborar", "--caso", k, "--texto", "Nota de la administración"]) == 0
     capsys.readouterr()
     assert confirmar_caso(k, codigo, capsys)[0] == 0
-    r, _, err = suprimir(capsys, k, "--ejecutar")
+    r, _, err = aplicar(capsys, k)
     assert r == 0, err
     assert cuenta(motor_migrate, "select count(*) from nucleo.invitacion where correo = :c",
                   c=correo) == 0  # fmt: skip
@@ -318,7 +357,7 @@ def test_la_cola_pierde_los_correos_pendientes_y_fallidos_y_no_los_en_curso(
                        " ('notificar.correo', jsonb_build_object('para', 'otra@ejemplo.com',"
                        " 'asunto', 'x', 'texto', 'y'), :k)"),
                   {"k": f"pytest-2d3-d-{k}"})  # fmt: skip
-    assert suprimir(capsys, k, "--ejecutar")[0] == 0
+    assert aplicar(capsys, k)[0] == 0
     with motor_migrate.connect() as c:
         quedan = sorted(c.execute(text("select estado::text from plataforma.jobs"
                                        " where clave_unica like :k"),
@@ -332,7 +371,9 @@ def test_la_cola_pierde_los_correos_pendientes_y_fallidos_y_no_los_en_curso(
 def test_si_el_plan_cambio_no_se_aplica_nada(confiable, motor_migrate, con_url, capsys):  # noqa: F811
     k = confirmado(capsys, motor_migrate, confiable["correo"])
     plan = plan_de(k)
-    accesos_y_credenciales(motor_migrate, confiable["inq"])  # una sesión más: el plan cambia
+    accesos_y_credenciales(
+        motor_migrate, confiable["inq"], confiable["cons"]
+    )  # una sesión más: el plan cambia
     sesiones = "select count(*) from nucleo.sesion where persona_id = :p"
     antes = cuenta(motor_migrate, sesiones, p=confiable["inq"])
     soporte = create_engine(url_rol("soporte_privacidad"))
@@ -356,8 +397,8 @@ def test_si_el_plan_cambio_no_se_aplica_nada(confiable, motor_migrate, con_url, 
 
 def test_un_caso_resuelto_no_se_suprime_de_nuevo(confiable, motor_migrate, con_url, capsys):  # noqa: F811
     k = confirmado(capsys, motor_migrate, confiable["correo"])
-    assert suprimir(capsys, k, "--ejecutar")[0] == 0
-    r, _, err = suprimir(capsys, k, "--ejecutar")
+    assert aplicar(capsys, k)[0] == 0
+    r, _, err = aplicar(capsys, k)
     assert r == 1 and "caso_cerrado" in err
 
 
@@ -454,3 +495,170 @@ def test_0040_ida_y_vuelta(base_aparte):  # noqa: F811
     assert not funcion()
     command.upgrade(cfg, "0040")  # control: vuelve a subir limpio
     assert funcion()
+
+
+# Controles de la revisión (Codex y revisión independiente de #140) ---------------------------
+
+
+def otro_consorcio(motor_migrate, persona, correo):
+    """Un segundo consorcio con una invitación pendiente al correo de la persona, un correo
+    pendiente en su cola y un vínculo importado (con nombre declarado) de la persona."""
+    cons2, u2, prop2 = consorcio_con_persona(motor_migrate)
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo,"
+                       " nombre, token_hash, invitada_por, vence_en) values (:c, :u,"
+                       " 'inquilino', :co, 'En el otro', :t, :i, now() + interval '1 day')"),
+                  {"c": cons2, "u": u2, "co": correo, "t": os.urandom(32), "i": prop2})  # fmt: skip
+        c.execute(text("insert into plataforma.jobs (tipo, consorcio_id, carga, clave_unica)"
+                       " values ('notificar.correo', :c, jsonb_build_object('para',"
+                       " cast(:co as text), 'asunto', 'x', 'texto', 'y'), :k)"),
+                  {"c": cons2, "co": correo, "k": f"pytest-2d3-otro-{cons2}"})  # fmt: skip
+        imp = c.execute(text("insert into nucleo.importacion_padron (consorcio_id, archivo_sha256,"
+                             " registrada_por) values (:c, :h, :a) returning id"),
+                        {"c": cons2, "h": os.urandom(32), "a": prop2}).scalar_one()  # fmt: skip
+        c.execute(text("insert into nucleo.vinculo (consorcio_id, unidad_id, persona_id, tipo,"
+                       " vigente_desde, fuente, origen, importacion_id, nombre_declarado)"
+                       " values (:c, :u, :p, 'inquilino', current_date - 1, 'importacion',"
+                       " 'soporte', :i, 'Nombre En El Otro')"),
+                  {"c": cons2, "u": u2, "p": persona, "i": imp})  # fmt: skip
+    return cons2
+
+
+def lo_del_otro(motor_migrate, cons2) -> tuple:
+    return tuple(uno(motor_migrate, "select (select count(*) from nucleo.invitacion where"
+                     " consorcio_id = :c and nombre = 'En el otro'), (select count(*) from"
+                     " plataforma.jobs where consorcio_id = :c), (select nombre_declarado from"
+                     " nucleo.vinculo where consorcio_id = :c and nombre_declarado is not null)",
+                     c=cons2))  # fmt: skip
+
+
+def test_ejecutar_exige_la_huella_del_plan_revisado(confiable, motor_migrate, con_url, capsys):  # noqa: F811
+    k = confirmado(capsys, motor_migrate, confiable["correo"])
+    terminar_vinculo(motor_migrate, confiable["v_inq"], confiable["cons"])
+    r, out, err = suprimir(capsys, k)
+    assert r == 0, err
+    vista = re.search(r"^huella: (\w+)$", out, re.M).group(1)
+    # Entre la revisión y la ejecución aparecen accesos y credenciales nuevos: el plan cambia.
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
+    r, _, err = suprimir(capsys, k, "--ejecutar", vista)
+    assert r == 1 and "el plan cambió" in err
+    assert caso(motor_migrate, k)["estado"] == "confirmado"
+    assert 0 not in filas_globales(motor_migrate, confiable["inq"]).values()
+    # Control: con la huella del plan de ahora, se aplica.
+    assert aplicar(capsys, k)[0] == 0
+    assert caso(motor_migrate, k)["estado"] == "resuelto"
+
+
+def test_el_invitado_que_acepto_despues_de_confirmar_no_se_resuelve_por_su_correo(
+    escena,  # noqa: F811
+    motor_migrate,
+    con_url,  # noqa: F811
+    capsys,
+):
+    correo = f"pendiente-{os.urandom(4).hex()}@ejemplo.com"
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo,"
+                       " nombre, token_hash, invitada_por, vence_en) values (:c, :u,"
+                       " 'inquilino', :co, 'Pendiente', sha256(:t), :i, now() + interval '1 day')"),
+                  {"c": escena["cons"], "u": escena["u1"], "co": correo, "t": os.urandom(32),
+                   "i": escena["admin"]})  # fmt: skip
+    k = abrir(capsys, "--correo", correo, "--derecho", "supresion")
+    codigo = codigo_del_correo(motor_migrate, k)
+    assert privacidad.main(["corroborar", "--caso", k, "--texto", "Nota de la administración"]) == 0
+    capsys.readouterr()
+    assert confirmar_caso(k, codigo, capsys)[0] == 0
+    assert suprimir(capsys, k)[0] == 0  # control: antes de tener cuenta, hay plan
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.persona (correo, nombre) values (:c, 'Ya entró')"),
+                  {"c": correo})  # fmt: skip
+    r, _, err = suprimir(capsys, k)
+    assert r == 1 and "titular_con_cuenta" in err
+
+
+def test_con_la_persona_ya_suprimida_otro_caso_no_se_resuelve(
+    confiable,  # noqa: F811
+    motor_migrate,
+    con_url,  # noqa: F811
+    capsys,
+):
+    del_consorcio = confirmado(capsys, motor_migrate, confiable["correo"], "supresion",
+                               "--consorcio", str(confiable["cons"]))  # fmt: skip
+    assert suprimir(capsys, del_consorcio)[0] == 0  # control: hay plan
+    cuenta_entera = confirmado(capsys, motor_migrate, confiable["correo"])
+    terminar_vinculo(motor_migrate, confiable["v_inq"], confiable["cons"])
+    assert aplicar(capsys, cuenta_entera)[0] == 0
+    r, _, err = suprimir(capsys, del_consorcio)
+    assert r == 1 and "titular_suprimido" in err
+
+
+def test_un_caso_de_consorcio_no_toca_otro_consorcio_ni_los_correos_de_acceso(
+    confiable,  # noqa: F811
+    motor_migrate,
+    con_url,  # noqa: F811
+    capsys,
+):
+    cons2 = otro_consorcio(motor_migrate, confiable["inq"], confiable["correo"])
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into plataforma.jobs (tipo, carga, clave_unica) values"
+                       " ('notificar.correo', jsonb_build_object('para', cast(:co as text),"
+                       " 'asunto', 'Entrar', 'texto', 'y'), :k)"),
+                  {"co": confiable["correo"], "k": f"pytest-2d3-acceso-{cons2}"})  # fmt: skip
+    otro = lo_del_otro(motor_migrate, cons2)
+    assert otro == (1, 1, "Nombre En El Otro")  # control: hay qué tocar
+    k = confirmado(capsys, motor_migrate, confiable["correo"], "supresion",
+                   "--consorcio", str(confiable["cons"]))  # fmt: skip
+    # El de la cuenta entera se confirma antes: después, la invitación aceptada queda anonimizada
+    # y el correo ya no es confiable sin corroboración.
+    entera = confirmado(capsys, motor_migrate, confiable["correo"])
+    assert aplicar(capsys, k)[0] == 0
+    assert lo_del_otro(motor_migrate, cons2) == otro
+    assert cuenta(motor_migrate, "select count(*) from plataforma.jobs where clave_unica = :k",
+                  k=f"pytest-2d3-acceso-{cons2}") == 1  # fmt: skip
+    # Control: el caso de la cuenta entera sí toca la invitación, la cola del otro consorcio y
+    # los correos de acceso.
+    assert aplicar(capsys, entera)[0] == 0
+    assert lo_del_otro(motor_migrate, cons2)[:2] == (0, 0)
+    assert cuenta(motor_migrate, "select count(*) from plataforma.jobs where clave_unica = :k",
+                  k=f"pytest-2d3-acceso-{cons2}") == 0  # fmt: skip
+
+
+def test_los_eventos_del_outbox_sin_trabajo_se_borran(confiable, motor_migrate, con_url, capsys):  # noqa: F811
+    with motor_migrate.begin() as c:
+        for para in (confiable["correo"], "otra@ejemplo.com"):
+            c.execute(text("insert into plataforma.outbox (evento, carga) values"
+                           " ('correo.solicitado', jsonb_build_object('para', cast(:p as text),"
+                           " 'asunto', 'Prueba 2d-3', 'texto', 'y'))"), {"p": para})  # fmt: skip
+    k = confirmado(capsys, motor_migrate, confiable["correo"])
+    r, out, err = suprimir(capsys, k)
+    assert r == 0, err
+    assert "eventos de correo sin trabajo en la cola (1)" in out
+    assert aplicar(capsys, k)[0] == 0
+    with motor_migrate.connect() as c:
+        quedan = sorted(c.execute(text("select carga ->> 'para' from plataforma.outbox"
+                                       " where carga ->> 'asunto' = 'Prueba 2d-3'")
+                                  ).scalars())  # fmt: skip
+    assert quedan == ["otra@ejemplo.com"]
+
+
+def test_rectificar_en_un_consorcio_no_cambia_el_nombre_en_otro(
+    confiable,  # noqa: F811
+    motor_migrate,
+    con_url,  # noqa: F811
+    capsys,
+):
+    cons2 = otro_consorcio(motor_migrate, confiable["inq"], confiable["correo"])
+    with motor_migrate.begin() as c:
+        imp = c.execute(text("insert into nucleo.importacion_padron (consorcio_id, archivo_sha256,"
+                             " registrada_por) values (:c, :h, :a) returning id"),
+                        {"c": confiable["cons"], "h": os.urandom(32),
+                         "a": confiable["admin"]}).scalar_one()  # fmt: skip
+        c.execute(text("update nucleo.vinculo set fuente = 'importacion', importacion_id = :i,"
+                       " nombre_declarado = 'Mal Escrito' where id = :v"),
+                  {"i": imp, "v": confiable["v_inq"]})  # fmt: skip
+    k = confirmado(capsys, motor_migrate, confiable["correo"], "rectificacion_nombre",
+                   "--consorcio", str(confiable["cons"]))  # fmt: skip
+    assert rectificar(capsys, k, "Bien Escrito")[0] == 0
+    assert lo_del_otro(motor_migrate, cons2)[2] == "Nombre En El Otro"
+    # Control: en el consorcio del caso sí cambió.
+    assert uno(motor_migrate, "select nombre_declarado from nucleo.vinculo where id = :v",
+               v=confiable["v_inq"]).nombre_declarado == "Bien Escrito"  # fmt: skip

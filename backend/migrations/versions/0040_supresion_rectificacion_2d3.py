@@ -30,8 +30,13 @@ el caso, nunca en `auditoria.eventos` (decisión del 26-10-2026). Las dos exigen
   `nombre_declarado` de sus vínculos en ese consorcio (el disparador de 0020 no lo impide). La
   resolución no guarda el nombre anterior ni el nuevo.
 
-Riesgo residual: el correo con la resolución queda en el outbox (y su trabajo en la cola) hasta
-que se despacha y lo purga la tarea de siempre. No lleva datos del titular, solo su dirección.
+Riesgo residual (la dirección vieja del titular sigue, con plazo o como constancia):
+- el correo con la resolución y los ya enviados o en envío, en el outbox y la cola, hasta que la
+  purga de siempre los borra a los 30 días (el plan los cuenta y la resolución lo dice);
+- si el despachador convierte un evento en trabajo justo mientras corre la supresión, el evento se
+  borra y su trabajo, nacido después de la lectura, se manda igual;
+- `caso_privacidad.sujeto_correo` de un caso de invitado: es la constancia del pedido (H2d §9,
+  punto 5) y no cambia.
 
 Revisión: 0040
 Anterior: 0039
@@ -76,6 +81,19 @@ create function plataforma.privacidad_caso_para_resolver(caso_pedido uuid, derec
       raise exception 'el titular no confirmó el caso'
         using errcode = 'P0001', hint = 'caso_sin_confirmar';
     end if;
+    -- Como al confirmar (0039): un invitado que aceptó después ya tiene cuenta, y resolver por su
+    -- correo saltearía el control de contraseña o TOTP.
+    if k.sujeto_correo is not null
+       and exists (select 1 from nucleo.persona x
+                    where x.correo = k.sujeto_correo and x.eliminado_en is null) then
+      raise exception 'el titular ya tiene cuenta: el caso se abre de nuevo para la persona'
+        using errcode = 'P0001', hint = 'titular_con_cuenta';
+    end if;
+    if exists (select 1 from nucleo.persona x
+                where x.id = k.persona_id and x.eliminado_en is not null) then
+      raise exception 'la persona ya se suprimió: no queda nada suyo que resolver por este caso'
+        using errcode = 'P0001', hint = 'titular_suprimido';
+    end if;
     return k;
   end
   $$;
@@ -104,6 +122,10 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
       raise exception 'el caso manual no tiene datos ligados que suprimir'
         using errcode = 'P0001', hint = 'caso_manual';
     end if;
+    -- El mismo cerrojo que `aceptar_invitacion` e `importar_vinculo` toman por el correo, y la
+    -- fila de la persona: nadie le da un vínculo nuevo mientras se decide si se anonimiza.
+    perform pg_advisory_xact_lock(hashtextextended('persona:' || correos[1], 0));
+    perform 1 from nucleo.persona p where p.id = k.persona_id for update;
 
     -- Lo global: la persona, sus credenciales, sus accesos y la idempotencia.
     if k.persona_id is not null and alc is null then
@@ -138,18 +160,23 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
             'necesita saber quién es'));
       end if;
 
+      select (select count(*) from nucleo.sesion s where s.persona_id = k.persona_id)
+             + (select count(*) from nucleo.enlace_acceso e where e.persona_id = k.persona_id)
+        into n;
       if ejecutar then
-        delete from nucleo.codigo_acceso where persona_id = k.persona_id;
+        -- Los códigos de acceso se van con su enlace (on delete cascade, 0006).
         delete from nucleo.enlace_acceso where persona_id = k.persona_id;
         delete from nucleo.sesion where persona_id = k.persona_id;
-        get diagnostics n = row_count;
-      else
-        select count(*) into n from nucleo.sesion where persona_id = k.persona_id;
       end if;
       plan := plan || jsonb_build_array(jsonb_build_object(
         'que', 'sesiones, enlaces y códigos de acceso', 'tratamiento', 'borrar', 'filas', n,
         'motivo', 'datos técnicos; borrarlos cierra las sesiones abiertas'));
 
+      select (select count(*) from nucleo.contrasena x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.factor_totp x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.codigo_recuperacion x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.desafio_contrasena x where x.persona_id = k.persona_id)
+        into n;
       if anonimizar then
         if ejecutar then
           delete from nucleo.contrasena where persona_id = k.persona_id;
@@ -159,11 +186,11 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
         end if;
         plan := plan || jsonb_build_array(jsonb_build_object(
           'que', 'contraseña, TOTP y códigos de recuperación', 'tratamiento', 'borrar',
-          'filas', null, 'motivo', 'la cuenta se anonimiza: ya no se puede entrar'));
+          'filas', n, 'motivo', 'la cuenta se anonimiza: ya no se puede entrar'));
       else
         plan := plan || jsonb_build_array(jsonb_build_object(
           'que', 'contraseña, TOTP y códigos de recuperación', 'tratamiento', 'conservar',
-          'filas', null, 'motivo', 'la cuenta sigue en uso: borrarlos la dejaría sin segundo '
+          'filas', n, 'motivo', 'la cuenta sigue en uso: borrarlos la dejaría sin segundo '
             'factor'));
       end if;
 
@@ -267,10 +294,6 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
        where j.carga ->> 'para' = any (correos) and j.estado in ('pendiente', 'muerto')
          and (alc is null or j.consorcio_id = alc);
       get diagnostics n = row_count;
-      delete from plataforma.outbox o
-       where o.carga ->> 'para' = any (correos) and (alc is null or o.consorcio_id = alc)
-         and not exists (select 1 from plataforma.jobs j
-                          where j.clave_unica = 'notificar.correo:' || o.id);
     else
       select count(*) into n from plataforma.jobs j
        where j.carga ->> 'para' = any (correos) and j.estado in ('pendiente', 'muerto')
@@ -280,6 +303,32 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
       'que', 'correos pendientes o fallidos en la cola', 'tratamiento', 'borrar', 'filas', n,
       'motivo', 'los enviados los purga la tarea de siempre a los 30 días; los que se están '
         'mandando quedan'));
+    -- Sus eventos del outbox, salvo los que todavía tienen un trabajo (enviado o en curso). El
+    -- plan los cuenta como quedarán después de borrar los trabajos de arriba.
+    if ejecutar then
+      delete from plataforma.outbox o
+       where o.carga ->> 'para' = any (correos) and (alc is null or o.consorcio_id = alc)
+         and not exists (select 1 from plataforma.jobs j
+                          where j.clave_unica = 'notificar.correo:' || o.id);
+      get diagnostics n = row_count;
+    else
+      select count(*) into n from plataforma.outbox o
+       where o.carga ->> 'para' = any (correos) and (alc is null or o.consorcio_id = alc)
+         and not exists (select 1 from plataforma.jobs j
+                          where j.clave_unica = 'notificar.correo:' || o.id
+                            and not (j.carga ->> 'para' = any (correos)
+                                     and j.estado in ('pendiente', 'muerto')
+                                     and (alc is null or j.consorcio_id = alc)));
+    end if;
+    plan := plan || jsonb_build_array(jsonb_build_object(
+      'que', 'eventos de correo sin trabajo en la cola', 'tratamiento', 'borrar', 'filas', n,
+      'motivo', 'el pedido de envío de un correo que ya no se va a mandar'));
+    select count(*) into n from plataforma.jobs j
+     where j.carga ->> 'para' = any (correos) and j.estado in ('hecho', 'en_curso')
+       and (alc is null or j.consorcio_id = alc);
+    plan := plan || jsonb_build_array(jsonb_build_object(
+      'que', 'correos ya enviados o que se están enviando', 'tratamiento', 'conservar',
+      'filas', n, 'motivo', 'la tarea de siempre los borra a los 30 días de enviados'));
 
     -- Lo que se conserva, con su cuenta.
     if k.persona_id is not null then

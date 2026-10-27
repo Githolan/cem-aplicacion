@@ -16,8 +16,9 @@ corre dentro del contenedor de `cem-trabajos` con su rol propio, `cem_soporte_pr
 - **rechazar:** cierra el caso con su motivo.
 - **ver:** el estado del caso, sin el código.
 - **suprimir** (2d-3, §6): muestra el plan (qué se borra, qué se anonimiza y qué se conserva, con
-  el porqué). Con `--ejecutar` lo aplica, cierra el caso y le manda al titular la resolución por
-  el mismo correo; la base se niega si el plan cambió entre que se mostró y se aplicó.
+  el porqué) y su huella. `--ejecutar <huella>` lo aplica solo si el plan de ese momento tiene la
+  misma huella que el que se revisó; cierra el caso y le manda al titular la resolución por el
+  mismo correo.
 - **rectificar** (2d-3, §2): el nombre nuevo se lee de la entrada estándar. Con alcance `cuenta`
   corrige el nombre de la persona; con un consorcio, el nombre declarado de sus vínculos allí.
 
@@ -30,7 +31,7 @@ No escribe eventos de auditoría (decisión del 26-10): la constancia queda en e
     python -m scripts.privacidad corroborar --caso <uuid> --texto "Nota de la administración"
     python -m scripts.privacidad rechazar --caso <uuid> --motivo "El titular no lo pidió"
     python -m scripts.privacidad ver --caso <uuid>
-    python -m scripts.privacidad suprimir --caso <uuid> [--ejecutar]
+    python -m scripts.privacidad suprimir --caso <uuid> [--ejecutar <huella del plan revisado>]
     python -m scripts.privacidad rectificar --caso <uuid>
 """
 
@@ -89,6 +90,8 @@ cada punto. Si tenés dudas, respondé a este correo.
 
 Equipo de Consorcio en Mano
 """
+LARGO_HUELLA = 16
+"""Caracteres hexadecimales de la huella del plan: detecta un cambio, no es un secreto."""
 VERBO = {"borrar": "Borrado", "anonimizar": "Anonimizado", "conservar": "Conservado"}
 
 
@@ -132,7 +135,12 @@ def _argumentos(argumentos: list[str] | None) -> argparse.Namespace:
     v.add_argument("--caso", type=UUID, required=True)
     s = sub.add_parser("suprimir")
     s.add_argument("--caso", type=UUID, required=True)
-    s.add_argument("--ejecutar", action="store_true")
+    s.add_argument(
+        "--ejecutar",
+        dest="huella",
+        metavar="HUELLA",
+        help="aplica el plan que se mostró con esta huella",
+    )
     n = sub.add_parser("rectificar")
     n.add_argument("--caso", type=UUID, required=True)
     return p.parse_args(argumentos)
@@ -184,12 +192,22 @@ def _detalle(plan: list[dict]) -> str:
     return "\n".join(lineas)
 
 
+def huella_plan(plan: list[dict]) -> str:
+    """Identifica el plan que vio soporte: `--ejecutar` la exige y la compara con el de ahora."""
+    canonico = json.dumps(plan, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonico.encode("utf-8")).hexdigest()[:LARGO_HUELLA]
+
+
 def _suprimir(conn, a: argparse.Namespace) -> dict:
     plan = conn.execute(
         text("select plataforma.privacidad_plan_supresion(:caso)"), {"caso": a.caso}
     ).scalar_one()
-    if not a.ejecutar:
-        return {"caso": str(a.caso), "plan (sin aplicar)": "\n" + _detalle(plan)}
+    huella = huella_plan(plan)
+    if a.huella is None:
+        return {"caso": str(a.caso), "huella": huella, "plan (sin aplicar)": "\n" + _detalle(plan)}
+    if a.huella != huella:
+        raise Negado(f"el plan cambió desde que se mostró (huella de ahora: {huella}): revisarlo"
+                     " de nuevo antes de aplicarlo")  # fmt: skip
     alcance = conn.execute(
         text("select alcance_consorcio_id from plataforma.privacidad_ver(:caso)"), {"caso": a.caso}
     ).scalar_one()
