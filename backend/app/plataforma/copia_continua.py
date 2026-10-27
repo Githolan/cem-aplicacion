@@ -249,6 +249,11 @@ class EstadoServidor:
     """Hasta dónde confirmó el receptor (con `--synchronous`, lo que escribió en disco)."""
     lsn_servidor: int
     tamano_segmento: int
+    tope_slot_mb: int | None = None
+    """`max_slot_wal_keep_size` en MB; -1 es sin tope: un receptor caído llenaría el disco de la
+    base (H2c §6 pide 5 GB)."""
+    slot_activo: bool = False
+    """El slot tiene un receptor conectado (el propio o el de otro contenedor)."""
 
 
 def estado_servidor(url_copia_continua: str) -> EstadoServidor:
@@ -259,7 +264,10 @@ def estado_servidor(url_copia_continua: str) -> EstadoServidor:
                 text(
                     "select s.slot_name is not null, s.wal_status, s.restart_lsn::text,"
                     " pg_current_wal_lsn()::text,"
-                    " (select setting::bigint from pg_settings where name = 'wal_segment_size')"
+                    " (select setting::bigint from pg_settings where name = 'wal_segment_size'),"
+                    " (select setting::bigint from pg_settings"
+                    "   where name = 'max_slot_wal_keep_size'),"
+                    " coalesce(s.active, false)"
                     " from (select 1) uno"
                     " left join pg_replication_slots s on s.slot_name = :s"
                 ),
@@ -267,10 +275,11 @@ def estado_servidor(url_copia_continua: str) -> EstadoServidor:
             ).one()
     finally:
         motor.dispose()
-    existe, wal_status, restart, actual, tamano = fila
+    existe, wal_status, restart, actual, tamano, tope, activo = fila
     return EstadoServidor(
-        existe, wal_status, lsn(restart) if restart else None, lsn(actual), int(tamano)
-    )
+        existe, wal_status, lsn(restart) if restart else None, lsn(actual), int(tamano),
+        int(tope), activo,
+    )  # fmt: skip
 
 
 def crear_slot(url_copia_continua: str) -> None:
@@ -867,6 +876,8 @@ class CopiaContinua:
             problemas.append("el slot no existe")
         elif estado.wal_status in ("unreserved", "lost"):
             problemas.append(f"slot {estado.wal_status}")
+        if estado.tope_slot_mb == -1:
+            problemas.append("max_slot_wal_keep_size sin tope en la base")
         if self.atraso > ATRASO_MAXIMO:
             problemas.append(f"receptor atrasado {int(self.atraso.total_seconds())} s")
         if self.al_dia_subida is not None and ahora - self.al_dia_subida > ATRASO_MAXIMO:

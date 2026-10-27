@@ -690,3 +690,19 @@ def test_la_copia_base_semanal_no_deja_pasar_mas_de_7_dias(cfg, monkeypatch):
     p.revisar_base(siguiente + timedelta(minutes=1))
     p.esperar_base()
     assert lanzadas == [siguiente, siguiente + timedelta(minutes=1)]
+
+
+@pytest.mark.db
+def test_un_slot_sin_tope_de_wal_es_un_problema(cfg, tope_de_slot_minimo):
+    p = cc.CopiaContinua(cfg, {})
+    p.receptor.proceso = None
+    estado = cc.estado_servidor(url_copia_continua())
+    assert estado.tope_slot_mb == 1
+    assert not any("max_slot_wal_keep_size" in x for x in p.problemas(estado, datetime.now(UTC)))
+    # El servidor de pruebas, como uno recién creado, viene sin tope (-1).
+    admin("alter system reset max_slot_wal_keep_size")
+    admin("select pg_reload_conf()")
+    estado = esperar(
+        lambda: (e := cc.estado_servidor(url_copia_continua())).tope_slot_mb == -1 and e
+    )
+    assert "max_slot_wal_keep_size sin tope en la base" in p.problemas(estado, datetime.now(UTC))
