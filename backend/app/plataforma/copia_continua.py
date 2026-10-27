@@ -667,6 +667,10 @@ class CopiaContinua:
         self.corte: str | None = None
         """Motivo del último corte de la cadena, hasta que lo cierre una copia base posterior."""
         self.cortes = 0
+        self.cerrojo = threading.Lock()
+        """Protege `corte` y `cortes`. El hilo de la copia base cierra el corte solo si no hubo
+        otro mientras copiaba; comparar y borrar tienen que ser una sola operación frente a
+        `cortar` (que corre en la vuelta): si no, un corte nuevo entre las dos se perdería."""
         self.observaciones: list[tuple[datetime, int]] = []
         self.atraso = timedelta(0)
         self.al_dia_subida: datetime | None = None
@@ -731,8 +735,9 @@ class CopiaContinua:
     def cortar(self, motivo: str, ahora: datetime) -> None:
         """La cadena de WAL quedó cortada: aviso de caída ya, y una copia base nueva en el acto,
         que vuelve a abrirla."""
-        self.corte = motivo
-        self.cortes += 1
+        with self.cerrojo:
+            self.corte = motivo
+            self.cortes += 1
         self.ultimo = None
         self.error_base = None
         log.error("cadena de WAL cortada: %s", motivo)
@@ -924,8 +929,9 @@ class CopiaContinua:
             self.avisar_base("down", f"copia base fallida: {self.error_base}")
             return
         self.ultima_base = resumen
-        if self.cortes == cortes:
-            self.corte = None
+        with self.cerrojo:
+            if self.cortes == cortes:
+                self.corte = None
         log.info(mensaje_base(resumen))
         self.avisar_base("up", mensaje_base(resumen))
 

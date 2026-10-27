@@ -15,6 +15,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -350,6 +351,7 @@ def test_una_marca_de_copia_base_que_no_se_relee_no_cuenta(cfg, evento):
 def test_un_hueco_en_la_cadena_la_corta():
     p = cc.CopiaContinua.__new__(cc.CopiaContinua)
     p.tamano_segmento, p.cortes, p.corte, p.avisa_continua = 16 * 1024 * 1024, 0, None, False
+    p.cerrojo = threading.Lock()
     p.ultimo = (1, 5)
     p.revisar_continuidad("000000010000000000000006", datetime.now(UTC))  # el siguiente
     assert (p.corte, p.ultimo) == (None, (1, 5))
@@ -706,3 +708,22 @@ def test_un_slot_sin_tope_de_wal_es_un_problema(cfg, tope_de_slot_minimo):
         lambda: (e := cc.estado_servidor(url_copia_continua())).tope_slot_mb == -1 and e
     )
     assert "max_slot_wal_keep_size sin tope en la base" in p.problemas(estado, datetime.now(UTC))
+
+
+def test_cerrar_un_corte_y_cortar_no_se_pisan(cfg, monkeypatch):
+    """El hilo de la copia base compara y borra el corte bajo el mismo cerrojo que `cortar`."""
+    p = cc.CopiaContinua(cfg, {})
+    p.corte, p.cortes = "viejo", 1
+    resumen = {"momento": "x", "consorcios": 1, "eventos": 1, "tablas": 1, "objetos": {}}
+    monkeypatch.setattr(cc, "copia_base", lambda cfg, ahora: resumen)
+    with p.cerrojo:
+        hilo = threading.Thread(target=p.hacer_base, args=(datetime.now(UTC), 1))
+        hilo.start()
+        hilo.join(0.5)
+        assert hilo.is_alive()  # espera el cerrojo: no puede borrar a mitad de un corte
+        p.corte, p.cortes = "nuevo", 2  # lo que hace `cortar` mientras tanto
+    hilo.join()
+    assert p.corte == "nuevo"
+    # Control: sin un corte en el medio, la copia base lo cierra.
+    p.hacer_base(datetime.now(UTC), 2)
+    assert p.corte is None
