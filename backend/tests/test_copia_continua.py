@@ -10,6 +10,7 @@ copia física de una base musl se restaura en esta imagen Debian, como lo hará
 """
 
 import gzip
+import hashlib
 import os
 import signal
 import subprocess
@@ -292,11 +293,58 @@ def test_un_segmento_ya_subido_con_otro_contenido_es_un_defecto(cfg, proceso, mo
     with pytest.raises(cc.ErrorCopiaContinua, match="con otro contenido"):
         p.subir_completo(falso)
     assert falso.exists()  # no se borra lo que no quedó en el almacén
-    # Control: el mismo contenido ya subido (un reinicio entre subir y borrar) se da por subido.
+    # Control: el mismo contenido ya subido (un reinicio entre subir y borrar), que se relee bien
+    # contra el SHA-256 de su cifrado, se da por subido.
     s3.put_object(Bucket=cfg.copias.bucket, Key=f"wal/{falso.name}.gz.age", Body=b"x",
-                  Metadata={"sha256-claro": copias.sha256(falso)})  # fmt: skip
+                  Metadata={"sha256-claro": copias.sha256(falso),
+                            "sha256": hashlib.sha256(b"x").hexdigest()})  # fmt: skip
     p.subir_completo(falso)
     assert not falso.exists()
+
+
+@pytest.mark.db
+def test_un_segmento_ya_subido_que_no_se_relee_no_se_borra(cfg, proceso, motor_migrate):
+    """Una subida cuya relectura falló deja el objeto en el almacén con los metadatos que puso el
+    cliente. La vuelta siguiente no puede darlo por bueno por el metadato: lo relee."""
+    p = proceso()
+    p.iniciar(datetime.now(UTC))
+    p.receptor.detener()
+    falso = p.carpeta_wal / "000000010000000000000098"
+    falso.write_bytes(bytes([2]) * 1024)
+    s3 = copias.cliente_s3(cfg.copias)
+    clave = f"wal/{falso.name}.gz.age"
+    s3.put_object(Bucket=cfg.copias.bucket, Key=clave, Body=b"cifrado alterado",
+                  Metadata={"sha256-claro": copias.sha256(falso),
+                            "sha256": hashlib.sha256(b"cifrado sano").hexdigest()})  # fmt: skip
+    with pytest.raises(copias.ErrorCopia, match="no coincide"):
+        p.subir_completo(falso)
+    assert falso.exists()
+    # Y en la vuelta es un defecto que se avisa en el acto, no a los 15 minutos.
+    p.subir(datetime.now(UTC))
+    assert falso.exists() and p.defecto is not None
+    estado = cc.EstadoServidor(True, "reserved", 0, 0, p.tamano_segmento)
+    assert any(
+        x.startswith("objeto que no coincide") for x in p.problemas(estado, datetime.now(UTC))
+    )
+
+
+@pytest.mark.db
+def test_una_marca_de_copia_base_que_no_se_relee_no_cuenta(cfg, evento):
+    momento = datetime.now(UTC)
+    resumen = cc.copia_base(cfg, momento)
+    s3 = copias.cliente_s3(cfg.copias)
+    assert cc.ultima_base_verificada(s3, cfg.copias.bucket) == momento.replace(microsecond=0)
+    clave = f"base/{resumen['momento']}/{cc.MARCA}"
+    meta = s3.head_object(Bucket=cfg.copias.bucket, Key=clave)["Metadata"]
+    cuerpo = s3.get_object(Bucket=cfg.copias.bucket, Key=clave)["Body"].read()
+    s3.put_object(Bucket=cfg.copias.bucket, Key=clave, Body=cuerpo + b" ", Metadata=meta)
+    assert cc.ultima_base_verificada(s3, cfg.copias.bucket) is None
+    # Control: la marca intacta pero un objeto que no es el que nombra, tampoco cuenta.
+    s3.put_object(Bucket=cfg.copias.bucket, Key=clave, Body=cuerpo, Metadata=meta)
+    assert cc.ultima_base_verificada(s3, cfg.copias.bucket) == momento.replace(microsecond=0)
+    objeto = resumen["objetos"]["backup_manifest"]["clave"]
+    s3.put_object(Bucket=cfg.copias.bucket, Key=objeto, Body=b"otro", Metadata={"sha256": "0"})
+    assert cc.ultima_base_verificada(s3, cfg.copias.bucket) is None
 
 
 def test_un_hueco_en_la_cadena_la_corta():

@@ -63,6 +63,7 @@ Las URL llevan el token del monitor: nunca van a un registro.
 """
 
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -343,14 +344,40 @@ def ultimo_segmento_subido(s3, bucket: str, tamano_segmento: int) -> tuple[int, 
     return max(numeros, default=None)
 
 
+def marca_releida(s3, bucket: str, clave_marca: str) -> bool:
+    """La marca se relee contra su `sha256` y cada objeto que nombra existe con el `sha256` que
+    dice la marca. Una marca cuya relectura falló al subirla queda en el almacén (no se puede
+    borrar), y así no cuenta."""
+    meta = copias.metadatos(s3, bucket, clave_marca)
+    if meta is None or "sha256" not in meta:
+        return False
+    cuerpo = s3.get_object(Bucket=bucket, Key=clave_marca)["Body"].read()
+    if hashlib.sha256(cuerpo).hexdigest() != meta["sha256"]:
+        return False
+    try:
+        objetos = json.loads(cuerpo)["objetos"]
+    except (ValueError, KeyError, TypeError):
+        return False
+    for o in objetos.values():
+        meta_objeto = copias.metadatos(s3, bucket, o["clave"])
+        if meta_objeto is None or meta_objeto.get("sha256") != o["sha256"]:
+            return False
+    return True
+
+
 def ultima_base_verificada(s3, bucket: str) -> datetime | None:
-    """El momento de la copia base más nueva con su marca de verificada, o None."""
-    momentos = []
+    """El momento de la copia base más nueva cuya marca de verificada se relee bien, o None."""
+    marcas = []
     for o in claves(s3, bucket, PREFIJO_BASE):
         partes = o["Key"].removeprefix(PREFIJO_BASE).split("/")
         if len(partes) == 2 and partes[1] == MARCA:
-            momentos.append(datetime.strptime(partes[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC))
-    return max(momentos, default=None)
+            momento = datetime.strptime(partes[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            marcas.append((momento, o["Key"]))
+    for momento, clave in sorted(marcas, reverse=True):
+        if marca_releida(s3, bucket, clave):
+            return momento
+        log.error("la marca %s no se relee: esa copia base no cuenta", clave)
+    return None
 
 
 # Copia base y su verificación ---------------------------------------------------------
@@ -635,6 +662,8 @@ class CopiaContinua:
         self.atraso = timedelta(0)
         self.al_dia_subida: datetime | None = None
         self.error_subida: str | None = None
+        self.defecto: str | None = None
+        """Un objeto del almacén que no coincide con lo que se subió: se avisa en el acto."""
         self.ultimo_parcial: datetime | None = None
         self.suma_parcial: str | None = None
         self.ultimo_aviso: datetime | None = None
@@ -775,9 +804,13 @@ class CopiaContinua:
                 self.subir_parcial(ahora)
         except Exception as e:
             self.error_subida = f"{type(e).__name__}: {e}"
+            if isinstance(e, copias.ErrorCopia):
+                # Un objeto que no coincide no es una falla de red: se avisa ya, no a los 15 min.
+                self.defecto = self.error_subida
             log.exception("no se pudo subir el WAL; se reintenta")
             return
         self.error_subida = None
+        self.defecto = None
         self.al_dia_subida = ahora
 
     def subir_completo(self, archivo: Path) -> None:
@@ -790,6 +823,13 @@ class CopiaContinua:
         elif existente.get("sha256-claro") != suma:
             # El bucket no admite sobrescribir, y un segmento no cambia: es un defecto.
             raise ErrorCopiaContinua(f"{clave} ya está en el almacén con otro contenido")
+        else:
+            # Ya estaba (un reinicio entre subir y borrar, o una subida cuya relectura falló): el
+            # metadato lo escribió este proceso y no prueba nada. Se relee entero contra el SHA-256
+            # del cifrado antes de borrar el archivo local; si no coincide, el archivo se queda.
+            if "sha256" not in existente:
+                raise ErrorCopiaContinua(f"{clave} está en el almacén sin su sha256")
+            copias.verificar_objeto(self.s3, self.cfg.copias.bucket, clave, existente["sha256"])
         archivo.unlink()
         if SEGMENTO.match(archivo.name):
             tli, numero = numero_segmento(archivo.name, self.tamano_segmento)
@@ -832,6 +872,8 @@ class CopiaContinua:
         if self.al_dia_subida is not None and ahora - self.al_dia_subida > ATRASO_MAXIMO:
             problemas.append(f"sin poder subir desde {self.al_dia_subida:%H:%M} UTC:"
                              f" {self.error_subida}")  # fmt: skip
+        if self.defecto is not None:
+            problemas.append(f"objeto que no coincide: {self.defecto}")
         if self.corte is not None:
             problemas.append(f"cadena cortada: {self.corte}")
         return problemas
