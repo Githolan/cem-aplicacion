@@ -18,8 +18,8 @@
 #   - producción: solo con -Entorno produccion -Confirmar, y solo si cd.ps1 ya
 #     desplegó y verificó esa misma SHA en staging
 #   - cada UUID del mapa se llama en Coolify como su nombre canónico, es de tipo
-#     dockerimage y usa la imagen de su función (backend, trabajos y planificador
-#     -> cem-backend; frontend -> cem-frontend)
+#     dockerimage y usa la imagen de su función (backend, trabajos, planificador y
+#     copia continua -> cem-backend; frontend -> cem-frontend)
 #
 # Copia previa a la migración (§18.3, regla 5). Se compara la última revisión de
 # Alembic de la SHA con plataforma.alembic_version de cem-postgres(-staging), leída
