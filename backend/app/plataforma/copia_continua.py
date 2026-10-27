@@ -950,6 +950,13 @@ class CopiaContinua:
         corte: lo que falta ya no está en el servidor."""
         tli, numero = numero_segmento(nombre, self.tamano_segmento)
         if self.ultimo is not None and (tli != self.ultimo[0] or numero > self.ultimo[1] + 1):
+            # Antes de cortar, `wal/` otra vez: en una actualización sin volumen, el contenedor
+            # viejo siguió subiendo segmentos mientras este esperaba el slot. Solo es un hueco si
+            # tampoco están en el almacén.
+            subido = ultimo_segmento_subido(self.s3, self.cfg.copias.bucket, self.tamano_segmento)
+            if subido is not None and subido > self.ultimo:
+                self.ultimo = subido
+        if self.ultimo is not None and (tli != self.ultimo[0] or numero > self.ultimo[1] + 1):
             self.cortar(
                 f"hueco en el WAL: llegó {nombre} y wal/ cubre hasta el segmento"
                 f" {self.ultimo[1]} de la línea de tiempo {self.ultimo[0]}",

@@ -353,11 +353,10 @@ def test_una_marca_de_copia_base_que_no_se_relee_no_cuenta(cfg, evento):
     assert cc.ultima_base_verificada(s3, cfg.copias.bucket) is None
 
 
-def test_un_hueco_en_la_cadena_la_corta():
-    p = cc.CopiaContinua.__new__(cc.CopiaContinua)
-    p.tamano_segmento, p.cortes, p.corte, p.avisa_continua = 16 * 1024 * 1024, 0, None, False
-    p.cerrojo = threading.Lock()
-    p.cortes_sin_guardar, p.guardar_cortes = [], lambda: None
+@pytest.mark.db
+def test_un_hueco_en_la_cadena_la_corta(cfg):
+    p = cc.CopiaContinua(cfg, {})
+    p.tamano_segmento = 16 * 1024 * 1024
     p.ultimo = (1, 5)
     p.revisar_continuidad("000000010000000000000006", datetime.now(UTC))  # el siguiente
     assert (p.corte, p.ultimo) == (None, (1, 5))
@@ -368,6 +367,25 @@ def test_un_hueco_en_la_cadena_la_corta():
     p.corte = None
     p.revisar_continuidad("000000020000000000000009", datetime.now(UTC))
     assert p.corte is not None
+
+
+@pytest.mark.db
+def test_lo_que_subio_otro_contenedor_mientras_se_esperaba_el_slot_no_es_un_hueco(cfg):
+    """Despliegue progresivo sin volumen: el viejo sube los segmentos 6 y 7 mientras el nuevo
+    espera el slot con `wal/` leído hasta el 5. Cuando el nuevo recibe el 8, no hay corte."""
+    p = cc.CopiaContinua(cfg, {})
+    p.tamano_segmento = 16 * 1024 * 1024
+    p.ultimo = (1, 5)
+    s3 = copias.cliente_s3(cfg.copias)
+    for n in (6, 7):
+        s3.put_object(Bucket=cfg.copias.bucket, Key=f"wal/0000000100000000000000{n:02X}.gz.age",
+                      Body=b"x")  # fmt: skip
+    p.revisar_continuidad("000000010000000000000008", datetime.now(UTC))
+    assert (p.corte, p.ultimo) == (None, (1, 7))
+    assert objetos(cfg, cc.PREFIJO_CORTES) == []
+    # Control: el 10 sigue siendo un hueco (falta el 9 también en el almacén).
+    p.revisar_continuidad("00000001000000000000000A", datetime.now(UTC))
+    assert p.corte is not None and p.corte.startswith("hueco en el WAL")
 
 
 def test_el_atraso_se_mide_en_tiempo_desde_lo_ultimo_confirmado():
