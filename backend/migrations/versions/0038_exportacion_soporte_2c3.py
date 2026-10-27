@@ -22,9 +22,10 @@ las decisiones del propietario del 25-10-2026.
   del objeto), para que el script lo lea con la clave de análisis. Es información de
   infraestructura: el script la usa y **no la escribe en el paquete**.
 - Cada función exige que el consorcio pedido sea el del contexto (`plataforma.consorcio_actual()`,
-  `42501` si no) **y una exportación de ese consorcio registrada y todavía sin armar** (`42501`
-  si no): así la capacidad no se puede saltear llamando a las funciones desde la base, y toda
-  lectura queda detrás de una constancia. Tienen `search_path` fijo, `revoke execute … from
+  `42501` si no) **y una exportación de ese consorcio registrada en la misma transacción y
+  todavía sin armar** (`42501` si no): así la capacidad no se puede saltear llamando a las
+  funciones desde la base, y toda lectura queda detrás de una constancia que se arma en la misma
+  transacción. Tienen `search_path` fijo, `revoke execute … from
   public` y se conceden **solo** a `cem_soporte_exportacion`, nunca a `cem_app`.
 - **`nucleo.registrar_exportacion(...)`:** la única forma de crear la constancia. Fija adentro
   las cinco facultades de lectura y los tipos de mandato (no los recibe de quien llama),
@@ -71,11 +72,20 @@ EXIGIR_CONSORCIO = """\
       raise exception 'el consorcio no es el del contexto' using errcode = '42501';
     end if;
 """
+# La exportación tiene que ser del consorcio, estar sin armar y haberse registrado **en esta
+# misma transacción**: si no, con la URL del rol se podría registrar una vez, confirmar y leer
+# después en otras transacciones cuantas veces se quisiera, sin armar nunca. Se compara
+# `creada_en = now()`: `now()` es el comienzo de la transacción, `creada_en` toma ese valor por
+# omisión y nadie lo puede fijar (el rol no inserta ni actualiza esa columna, y
+# `registrar_exportacion` no la recibe). Se descartó `xmin` contra el identificador de la
+# transacción: un `savepoint` (subtransacción) le da a la fila otro `xmin`, y cualquier `UPDATE`
+# posterior lo cambia.
 EXIGIR_PEDIDO = """\
     if pedido is null or not exists (
          select 1 from plataforma.exportacion x
-          where x.id = pedido and x.consorcio_id = c and x.armada_en is null) then
-      raise exception 'sin una exportación registrada y sin armar en este consorcio'
+          where x.id = pedido and x.consorcio_id = c and x.armada_en is null
+            and x.creada_en = now()) then
+      raise exception 'sin una exportación registrada en esta transacción y sin armar'
         using errcode = '42501';
     end if;
 """

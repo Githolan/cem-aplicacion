@@ -273,7 +273,7 @@ def _cifrar(conn: Connection, a: argparse.Namespace, fila, salida, cantidades: d
         paquete.escribir(MANIFIESTO, [texto])
         paquete.zip.close()
         age.stdin.close()
-    except BaseException:
+    except BaseException as e:
         tubo.cortar()
         paquete.zip.close()
         age.kill()
@@ -281,8 +281,12 @@ def _cifrar(conn: Connection, a: argparse.Namespace, fila, salida, cantidades: d
         # no tiene que tapar el error que cortó el armado.
         with contextlib.suppress(BrokenPipeError):
             age.stdin.close()
-        age.stderr.close()
+        # Si `age` murió por su cuenta (el corte fue un `BrokenPipeError` al escribirle), lo que
+        # dijo va con el error.
+        dijo = age.stderr.read().decode().strip()
         age.wait()
+        if dijo:
+            e.add_note(f"age: {dijo}")
         raise
     error = age.stderr.read()
     age.wait()
@@ -340,7 +344,7 @@ def armar(motor, a: argparse.Namespace) -> dict:
         # El archivo es de esta corrida (lo creó `xb`): cifrado e incompleto o sin constancia
         # (la transacción volvió atrás). No se entrega.
         salida.close()
-        a.salida.unlink()
+        a.salida.unlink(missing_ok=True)
         raise
     return {
         "exportacion": str(fila.id),
@@ -362,6 +366,8 @@ def armar(motor, a: argparse.Namespace) -> dict:
 def entregar(motor, a: argparse.Namespace) -> dict:
     """Registra la entrega del archivo que se entrega: su SHA-256 tiene que ser el de la
     constancia."""
+    if not a.paquete.is_file():
+        raise Negado(f"{a.paquete} no existe o no es un archivo")
     suma, _ = _sha256(a.paquete)
     with transaccion(motor, persona_id=None, consorcio_id=a.consorcio) as conn:
         _rol(conn)

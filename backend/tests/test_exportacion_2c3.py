@@ -23,7 +23,7 @@ from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
-from app.db import transaccion
+from app.db import fijar_ambito, transaccion
 from scripts import exportar_consorcio
 from tests.conftest import url_rol
 from tests.test_coeficientes_0021 import EXPENSAS, porcentajes, registrar
@@ -419,6 +419,13 @@ PERSONAS_DEL_CONSORCIO = """
                  where v.consorcio_id = :c
       union all select k::text, k.actualizado_por from nucleo.contacto_emergencia k
                  where k.consorcio_id = :c
+      union all select k::text, k.verificado_por from nucleo.contacto_emergencia k
+                 where k.consorcio_id = :c
+      union all select k::text, k.observado_por from nucleo.contacto_emergencia k
+                 where k.consorcio_id = :c
+      union all select m::text, m.registrado_por from nucleo.mandato m where m.consorcio_id = :c
+      union all select r::text, r.registrada_por from nucleo.revision_mandato r
+                 where r.consorcio_id = :c
     ) t (x, p) where p is not null
 """
 
@@ -472,6 +479,14 @@ def test_la_auditoria_lleva_exactamente_los_eventos_proyectados(
     assert por_tipo["negacion"] >= 1 and por_tipo["soporte"] >= 1
     assert len(proyectados) < sum(por_tipo.values())
     assert del_paquete == proyectados
+    # Y ninguno es una negación, aunque la proyección llegara a incluirla: ningún evento
+    # `autorizacion.denegada` de la base tiene la fecha de un evento del paquete.
+    with motor_migrate.connect() as c:
+        negaciones = set(c.execute(
+            text("select creado_en from auditoria.eventos where consorcio_id = :c"
+                 " and accion = 'autorizacion.denegada'"), {"c": e["cons"]},
+        ).scalars())  # fmt: skip
+    assert negaciones and not negaciones & {fecha for fecha, _ in del_paquete}
 
 
 def test_las_versiones_en_cuarentena_o_rechazadas_no_van(edificio, con_url, claves, tmp_path):
@@ -667,6 +682,8 @@ def test_la_entrega_se_registra_una_vez(edificio, con_url, claves, tmp_path, mot
     entregar = ["entregar", "--consorcio", str(e["cons"]), "--exportacion", str(fila["id"])]
     assert exportar_consorcio.main(entregar + ["--paquete", str(otro_archivo)]) == 1
     assert "otro SHA-256" in capsys.readouterr().err
+    assert exportar_consorcio.main(entregar + ["--paquete", str(tmp_path / "no-esta")]) == 1
+    assert "no existe o no es un archivo" in capsys.readouterr().err
     assert constancias(motor_migrate, e["cons"])[0]["entregada_en"] is None
     entregar += ["--paquete", str(salida)]
     assert exportar_consorcio.main(entregar) == 0
@@ -728,10 +745,27 @@ REGISTRAR = (
 
 
 def pedido(e, solicitante=None, cons=None) -> object:
-    """Una constancia registrada por `registrar_exportacion`, como el rol desde la base."""
+    """Una constancia registrada por `registrar_exportacion`, como el rol desde la base, en su
+    propia transacción (confirmada)."""
     cons = cons or e["cons"]
     return _como_soporte(cons, REGISTRAR, {"c": cons, "p": solicitante or e["mc"],
                                            "h": e["hoy"]}).one()  # fmt: skip
+
+
+def _registrar_en(c, e, solicitante=None):
+    """Registra en la transacción `c`, que tiene que tener el consorcio de `e` en el contexto."""
+    return c.execute(text(REGISTRAR), {"c": e["cons"], "p": solicitante or e["mc"],
+                                       "h": e["hoy"]}).one()  # fmt: skip
+
+
+def _en_una_transaccion(cons, pasos):
+    """Corre `pasos(c)` como el rol, en una sola transacción con `cons` en el contexto."""
+    motor = create_engine(url_rol("soporte_exportacion"))
+    try:
+        with transaccion(motor, persona_id=None, consorcio_id=cons) as c:
+            return pasos(c)
+    finally:
+        motor.dispose()
 
 
 @pytest.mark.parametrize("funcion", FUNCIONES)
@@ -739,41 +773,87 @@ def test_cada_funcion_exige_el_rol_el_consorcio_y_una_exportacion_sin_armar(
     sin_documentos, motor_migrate, motor_app, funcion
 ):
     """Con la URL del rol no alcanza para leer un consorcio desde la base: cada función exige una
-    constancia del consorcio del contexto, registrada (con la capacidad comprobada) y todavía sin
-    armar."""
+    constancia del consorcio del contexto, registrada (con la capacidad comprobada) en la misma
+    transacción y todavía sin armar. Cada caso registra la suya en su transacción, para que lo
+    único que falte sea lo que prueba."""
     e = sin_documentos
     otro = _edificio(motor_migrate, motor_app, con_documentos=False)
-    llamada = f"select * from nucleo.{funcion}(:c, :e)"
-    propio = pedido(e).id
+    llamada = text(f"select * from nucleo.{funcion}(:c, :e)")
     with (
         pytest.raises(DBAPIError) as error,
         transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c,
     ):
-        c.execute(text(llamada), {"c": e["cons"], "e": propio})
+        c.execute(llamada, {"c": e["cons"], "e": uuid4()})
     assert error.value.orig.sqlstate == "42501"  # cem_app, aun con el contexto correcto
-    for contexto in (None, otro["cons"]):
-        with pytest.raises(DBAPIError) as error:
-            _como_soporte(contexto, llamada, {"c": e["cons"], "e": propio})
-        assert error.value.orig.sqlstate == "42501", contexto
-    armado = pedido(e).id
-    with motor_migrate.begin() as c:
-        c.execute(text("update plataforma.exportacion set armada_en = now(),"
+
+    def con_contexto(contexto):
+        def pasos(c):
+            propio = _registrar_en(c, e).id
+            fijar_ambito(c, persona_id=None, consorcio_id=contexto)
+            return c.execute(llamada, {"c": e["cons"], "e": propio}).all()
+
+        return pasos
+
+    def con_pedido(elegir):
+        def pasos(c):
+            propio = _registrar_en(c, e).id
+            return c.execute(llamada, {"c": e["cons"], "e": elegir(c, propio)}).all()
+
+        return pasos
+
+    def de_otro_consorcio(c, _):
+        fijar_ambito(c, persona_id=None, consorcio_id=otro["cons"])
+        suyo = _registrar_en(c, otro).id
+        fijar_ambito(c, persona_id=None, consorcio_id=e["cons"])
+        return suyo
+
+    def ya_armada(c, propio):
+        c.execute(text("update plataforma.exportacion set armada_en = clock_timestamp(),"
                        " paquete_sha256 = repeat('0', 64), paquete_tamano = 1,"
-                       " cantidades = '{}' where id = :e"), {"e": armado})  # fmt: skip
-    casos = {"sin exportación": None, "una que no existe": uuid4(),
-             "la de otro consorcio": pedido(otro).id, "una ya armada": armado}  # fmt: skip
-    for caso, sin in casos.items():
+                       " cantidades = '{}' where id = :e"), {"e": propio})  # fmt: skip
+        return propio
+
+    casos = {
+        "sin consorcio en el contexto": con_contexto(None),
+        "con otro consorcio en el contexto": con_contexto(otro["cons"]),
+        "sin exportación": con_pedido(lambda c, _: None),
+        "una que no existe": con_pedido(lambda c, _: uuid4()),
+        "la de otro consorcio": con_pedido(de_otro_consorcio),
+        "una ya armada": con_pedido(ya_armada),
+    }
+    for caso, pasos in casos.items():
         with pytest.raises(DBAPIError) as error:
-            _como_soporte(e["cons"], llamada, {"c": e["cons"], "e": sin})
+            _en_una_transaccion(e["cons"], pasos)
         assert error.value.orig.sqlstate == "42501", caso
-    # Control: con la recién registrada, responde.
-    _como_soporte(e["cons"], llamada, {"c": e["cons"], "e": propio}).all()
+    # Control: con la recién registrada, en la misma transacción, responde.
+    _en_una_transaccion(e["cons"], con_pedido(lambda c, propio: propio))
+
+
+@pytest.mark.parametrize("funcion", FUNCIONES)
+def test_una_exportacion_confirmada_no_se_lee_en_otra_transaccion(sin_documentos, funcion):
+    """Registrada y confirmada, la constancia no abre las lecturas en otra transacción: si no,
+    con la URL del rol se leería el consorcio cuantas veces se quisiera, sin armar nunca."""
+    e = sin_documentos
+    llamada = text(f"select * from nucleo.{funcion}(:c, :e)")
+    confirmada = pedido(e).id
+    with pytest.raises(DBAPIError) as error:
+        _en_una_transaccion(
+            e["cons"], lambda c: c.execute(llamada, {"c": e["cons"], "e": confirmada}).all()
+        )
+    assert error.value.orig.sqlstate == "42501"
+
+    # Control: registrada en la misma transacción, responde.
+    def en_la_misma(c):
+        return c.execute(llamada, {"c": e["cons"], "e": _registrar_en(c, e).id}).all()
+
+    _en_una_transaccion(e["cons"], en_la_misma)
 
 
 def test_con_el_contexto_correcto_el_padron_vuelve_con_nombres(sin_documentos):
     e = sin_documentos
-    filas = _como_soporte(e["cons"], "select entidad, fila from nucleo.exportar_padron(:c, :e)",
-                          {"c": e["cons"], "e": pedido(e).id}).all()  # fmt: skip
+    filas = _en_una_transaccion(e["cons"], lambda c: c.execute(
+        text("select entidad, fila from nucleo.exportar_padron(:c, :e)"),
+        {"c": e["cons"], "e": _registrar_en(c, e).id}).all())  # fmt: skip
     nombres = {f.fila["nombre"] for f in filas if f.entidad == "vinculo"}
     assert {"Ana Exportada", "Marta Consejera"} <= nombres
     assert {f.entidad for f in filas} == {"consorcio", "unidad", "vinculo"}
