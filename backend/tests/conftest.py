@@ -36,6 +36,7 @@ CLAVES = {
     "soporte_documentos": "soporte_documentos_prueba",
     "copia_continua": "copia_continua_prueba",
     "soporte_exportacion": "soporte_exportacion_prueba",
+    "soporte_privacidad": "soporte_privacidad_prueba",
 }
 
 
@@ -72,6 +73,7 @@ def base_de_prueba() -> None:
             "-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
             "-v", f"clave_copia_continua={CLAVES['copia_continua']}",
             "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
+            "-v", f"clave_soporte_privacidad={CLAVES['soporte_privacidad']}",
             "-f", str(RAIZ / "scripts" / "crear_roles.sql"),
         ],
         check=True,
@@ -103,13 +105,17 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     niega a bajar si hay identidades humanas: se borran con sus vínculos y verificaciones. Y con
     0031, que se niega a bajar si hay contactos de emergencia: se borran. Y con 0035, que se
     niega a bajar si hay documentos: se borran con sus versiones. Y con 0038, que se niega a bajar
-    si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran.
+    si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran. Y con
+    0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('plataforma.caso_privacidad') is not null then"
+                "   delete from plataforma.caso_privacidad;"
+                " end if;"
                 " if to_regclass('plataforma.exportacion') is not null then"
                 "   delete from plataforma.exportacion;"
                 " end if;"

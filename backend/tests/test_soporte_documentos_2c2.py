@@ -282,6 +282,7 @@ def test_crear_roles_se_puede_volver_a_correr_sin_la_clave_nueva():
     con = comun[:-2] + ["-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
                         "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
                         "-v", f"clave_copia_continua={CLAVES['copia_continua']}",
+                        "-v", f"clave_soporte_privacidad={CLAVES['soporte_privacidad']}",
                         *comun[-2:]]  # fmt: skip
     hecho = subprocess.run(con, capture_output=True, text=True)
     assert hecho.returncode == 0 and "no se crea" not in hecho.stdout, hecho.stderr
