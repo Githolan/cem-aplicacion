@@ -77,7 +77,7 @@ CLAVES_POR_ENTIDAD = {
 }  # fmt: skip
 
 
-def _edificio(motor_migrate, motor_app, con_documentos: bool = True) -> dict:
+def _edificio(motor_migrate, motor_app, con_documentos: bool = True, externo: bool = False) -> dict:
     """Consorcio en Modo Consejo con:
     - un administrador (paquete completo) que carga los documentos;
     - un miembro del Consejo con el paquete completo (`mc`), uno limitado a `padron.ver`
@@ -104,9 +104,26 @@ def _edificio(motor_migrate, motor_app, con_documentos: bool = True) -> dict:
                       {"n": nombre, "p": p})  # fmt: skip
         return p
 
-    e["ad"] = persona("Adela Administradora")
-    e["m_ad"] = alta(motor_app, cons, None, acta, persona=e["ad"], tipo="administrador",
-                     origen="soporte")  # fmt: skip
+    if externo:
+        # La administración es un administrador externo con las cinco facultades generales. Su
+        # paquete solo trae `documentos.cargar` (`alta_mandato` niega otorgarle más), así que se
+        # le otorgan directo, como en `test_coeficientes_lectura.otorgar`. Va en lugar del
+        # administrador: hay una sola administración a la vez (A14).
+        e["ad"] = persona("Estudio Externo")
+        e["m_ad"] = alta(motor_app, cons, None, acta, persona=e["ad"],
+                         tipo="administrador_externo", nombre="Estudio Externo",
+                         cuit="20111111112", origen="soporte")  # fmt: skip
+        with motor_migrate.begin() as c:
+            for f in FACULTADES:
+                c.execute(
+                    text("insert into nucleo.facultad_otorgada (consorcio_id, mandato_id,"
+                         " facultad, decision_id) values (:c, :m, :f, :d)"),
+                    {"c": cons, "m": e["m_ad"], "f": f, "d": acta},
+                )  # fmt: skip
+    else:
+        e["ad"] = persona("Adela Administradora")
+        e["m_ad"] = alta(motor_app, cons, None, acta, persona=e["ad"], tipo="administrador",
+                         origen="soporte")  # fmt: skip
     e["mc"] = persona("Marta Consejera")
     e["m_mc"] = alta(motor_app, cons, None, acta, persona=e["mc"], tipo="miembro_consejo",
                      origen="soporte")  # fmt: skip
@@ -663,7 +680,7 @@ def test_de_las_funciones_security_definer_el_rol_ejecuta_solo_las_suyas(motor_m
                                       {"rol": "cem_soporte_documentos"}).scalars())  # fmt: skip
     assert len(de_app) > 10  # control: la búsqueda encuentra las de cem_app
     assert del_rol == {f"nucleo.{f}(uuid)" for f in FUNCIONES} | {
-        "nucleo.capacidad_del_solicitante(uuid,uuid,text[],date)"}  # fmt: skip
+        "nucleo.capacidad_para_exportar(uuid,uuid,text[],date)"}  # fmt: skip
     assert not del_rol & de_app
     assert de_documentos == {"nucleo.capacidad_del_solicitante(uuid,uuid,text[],date)"}
 
@@ -774,3 +791,57 @@ def test_un_pedido_con_fecha_futura_se_niega(edificio, con_url, claves, tmp_path
     )
     assert codigo == 1 and "fecha_futura" in capsys.readouterr().err
     assert constancias(motor_migrate, e["cons"]) == []
+
+
+@pytest.fixture
+def con_externo(motor_migrate, motor_app):
+    return _edificio(motor_migrate, motor_app, con_documentos=False, externo=True)
+
+
+def test_un_administrador_externo_con_las_cinco_se_niega(con_externo, con_url, claves, tmp_path,
+                                                         motor_migrate, capsys):  # fmt: skip
+    """§5 pide un mandato de administración o de Consejo: un administrador externo no alcanza
+    aunque tenga las cinco facultades generales."""
+    e = con_externo
+    codigo, salida = exportar(e, claves, tmp_path, solicitante=str(e["ad"]))
+    assert codigo == 1
+    assert "de administración o de Consejo" in capsys.readouterr().err
+    assert not salida.exists() and constancias(motor_migrate, e["cons"]) == []
+    # Control: el mismo pedido del Consejo con el paquete completo, en el mismo consorcio, pasa.
+    assert exportar(e, claves, tmp_path)[0] == 0
+    assert constancias(motor_migrate, e["cons"])[0]["mandato_id"] == e["m_mc"]
+
+
+def test_la_capacidad_para_exportar_solo_cuenta_administracion_o_consejo(con_externo, motor_app,
+                                                                        motor_migrate):  # fmt: skip
+    """Control de que el caso está bien sembrado: la capacidad de 0037, que no mira el tipo,
+    sí encuentra el mandato del administrador externo (tiene las cinco, generales); la de 0038
+    no. Y la de 0038 sí encuentra al Consejo y, en otro consorcio, a la administración."""
+    e = con_externo
+    datos = {"c": e["cons"], "f": FACULTADES, "h": e["hoy"]}
+    nueva = "select nucleo.capacidad_para_exportar(:c, :p, :f, :h)"
+    assert _como_soporte(e["cons"], nueva, datos | {"p": e["ad"]}).scalar_one() is None
+    motor = create_engine(url_rol("soporte_documentos"))
+    try:
+        with transaccion(motor, persona_id=None, consorcio_id=e["cons"]) as c:
+            de_0037 = c.execute(
+                text("select nucleo.capacidad_del_solicitante(:c, :p, :f, :h)"),
+                datos | {"p": e["ad"]},
+            ).scalar_one()
+    finally:
+        motor.dispose()
+    assert de_0037 == e["m_ad"]
+    assert _como_soporte(e["cons"], nueva, datos | {"p": e["mc"]}).scalar_one() == e["m_mc"]
+    o = _edificio(motor_migrate, motor_app, con_documentos=False)
+    datos_o = {"c": o["cons"], "f": FACULTADES, "h": o["hoy"], "p": o["ad"]}
+    assert _como_soporte(o["cons"], nueva, datos_o).scalar_one() == o["m_ad"]
+    # Exige el consorcio del contexto, como las funciones de exportación, y cem_app no la ejecuta.
+    with pytest.raises(DBAPIError) as error:
+        _como_soporte(None, nueva, datos | {"p": e["mc"]})
+    assert error.value.orig.sqlstate == "42501"
+    with (
+        pytest.raises(DBAPIError) as error,
+        transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c,
+    ):
+        c.execute(text(nueva), datos | {"p": e["mc"]})
+    assert error.value.orig.sqlstate == "42501"

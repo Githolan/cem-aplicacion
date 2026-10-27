@@ -10,9 +10,10 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
 - **Exige** la referencia de la solicitud, el destinatario concreto (nombre y CUIT o documento),
   quién la pidió, el día del pedido, la referencia del respaldo (el acta o el contrato que
   sostiene el pedido) y la clave pública `age` del destinatario.
-- **Comprueba la capacidad:** quien la pidió tenía ese día un mandato vigente con las cinco
-  facultades de lectura del contenido, cada una general (`nucleo.capacidad_del_solicitante`).
-  Si falta cualquiera, o alguna está acotada a un recurso, se niega sin escribir nada.
+- **Comprueba la capacidad:** quien la pidió tenía ese día un mandato vigente de administración
+  o de Consejo con las cinco facultades de lectura del contenido, cada una general
+  (`nucleo.capacidad_para_exportar`). Si falta cualquiera, alguna está acotada a un recurso o el
+  mandato es de otro tipo (un administrador externo), se niega sin escribir nada.
 - **Arma el paquete en tramos directo a `age`:** un ZIP con un JSON por entidad (de las funciones
   de exportación de `0038`), los binarios `disponible` y un `manifiesto.json` con el SHA-256 de
   cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en claro en
@@ -283,13 +284,14 @@ def armar(motor, a: argparse.Namespace) -> dict:
     with transaccion(repetible, persona_id=None, consorcio_id=a.consorcio) as conn:
         _rol(conn)
         mandato = conn.execute(
-            text("select nucleo.capacidad_del_solicitante(:c, :p, :f, :fecha)"),
+            text("select nucleo.capacidad_para_exportar(:c, :p, :f, :fecha)"),
             {"c": a.consorcio, "p": a.solicitante, "f": list(FACULTADES),
              "fecha": a.fecha_pedido},
         ).scalar_one()  # fmt: skip
         if mandato is None:
             raise Negado(
-                "quien la pidió no tenía ese día un mandato vigente con "
+                "quien la pidió no tenía ese día un mandato vigente de administración o de"
+                " Consejo con "
                 + ", ".join(FACULTADES) + " generales"
             )  # fmt: skip
         fila = conn.execute(

@@ -24,7 +24,11 @@ las decisiones del propietario del 25-10-2026.
 - Cada función exige que el consorcio pedido sea el del contexto (`plataforma.consorcio_actual()`,
   `42501` si no), tiene `search_path` fijo, `revoke execute … from public` y se concede **solo**
   a `cem_soporte_exportacion`, nunca a `cem_app`.
-- `nucleo.capacidad_del_solicitante` (`0037`) se concede también a este rol.
+- **`nucleo.capacidad_para_exportar(consorcio, persona, facultades, fecha)`:** como
+  `capacidad_del_solicitante` (`0037`), pero solo cuenta un mandato **de administración o de
+  Consejo** (`administrador` o `miembro_consejo`; nunca `administrador_externo`, aunque tenga las
+  facultades), que es lo que pide §5. Devuelve solo el identificador del mandato, o null. La de
+  `0037` no cambia y este rol no la ejecuta.
 - **`plataforma.exportacion`:** la constancia operativa (no la auditoría funcional, §1.1): el
   consorcio, la referencia de la solicitud, el destinatario (nombre y CUIT o documento), quién la
   pidió, el mandato con el que ese día tenía la capacidad y las facultades verificadas, la fecha
@@ -360,7 +364,42 @@ grant execute on function plataforma.consorcio_actual() to {ROL};
 grant execute on function plataforma.uuid_v7() to {ROL};
 grant select, insert on plataforma.exportacion to {ROL};
 grant update ({", ".join(COLUMNAS_ARMADO)}, entregada_en) on plataforma.exportacion to {ROL};
-grant execute on function nucleo.capacidad_del_solicitante(uuid, uuid, text[], date) to {ROL};
+
+-- §5: «un mandato vigente de administración o de Consejo» con todas las facultades pedidas, cada
+-- una general. La misma consulta que `capacidad_del_solicitante` (0037), acotada a esos tipos.
+create function nucleo.capacidad_para_exportar(c uuid, persona uuid, facultades text[],
+                                               fecha date)
+  returns uuid
+  language plpgsql stable security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    m uuid;
+  begin
+{EXIGIR_CONSORCIO}    if persona is null or fecha is null
+       or coalesce(cardinality(facultades), 0) = 0 then
+      raise exception 'faltan la persona, la fecha o las facultades'
+        using errcode = 'P0001', hint = 'pedido_incompleto';
+    end if;
+    if fecha > nucleo.hoy_del_consorcio(c) then
+      raise exception 'la fecha del pedido es posterior a hoy en el consorcio'
+        using errcode = 'P0001', hint = 'fecha_futura';
+    end if;
+    select x.id into m from nucleo.mandato x
+     where x.consorcio_id = c and x.persona_id = persona
+       and x.tipo in ('administrador', 'miembro_consejo')
+       and nucleo.mandato_vigente(x.id, fecha)
+       and (select count(distinct f.facultad) from nucleo.facultad_otorgada f
+             where f.consorcio_id = c and f.mandato_id = x.id and f.recurso is null
+               and f.facultad = any(facultades)) = cardinality(array(
+                 select distinct unnest(facultades)))
+     order by x.id
+     limit 1;
+    return m;
+  end
+  $$;
+revoke all on function nucleo.capacidad_para_exportar(uuid, uuid, text[], date) from public;
+grant execute on function nucleo.capacidad_para_exportar(uuid, uuid, text[], date) to {ROL};
 {"".join(_funcion(n, c) for n, c in FUNCIONES.items())}
 -- Dónde leer cada binario `disponible`: solo para el script, que no lo escribe en el paquete.
 create function nucleo.exportar_objetos_documentos(c uuid)
@@ -394,8 +433,7 @@ end
 $guarda$;
 drop function nucleo.exportar_objetos_documentos(uuid);
 {"".join(f"drop function nucleo.{n}(uuid);{chr(10)}" for n in FUNCIONES)}
-revoke execute on function nucleo.capacidad_del_solicitante(uuid, uuid, text[], date)
-  from {ROL};
+drop function nucleo.capacidad_para_exportar(uuid, uuid, text[], date);
 drop table plataforma.exportacion;
 drop function plataforma.exportacion_constancia_fija();
 revoke execute on function plataforma.uuid_v7() from {ROL};
