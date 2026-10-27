@@ -8,12 +8,13 @@
 --     -v clave_backup="$CLAVE_BACKUP" \
 --     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" \
 --     -v clave_soporte_exportacion="$CLAVE_SOPORTE_EXPORTACION" \
+--     -v clave_soporte_privacidad="$CLAVE_SOPORTE_PRIVACIDAD" \
 --     -v clave_copia_continua="$CLAVE_COPIA_CONTINUA" -f scripts/crear_roles.sql
 --
 -- Es idempotente: no toca roles ni bases que ya existen, salvo el tope de conexiones de
 -- cem_copia_continua, que se ajusta siempre. En un servidor creado antes de las copias, volver
 -- a correrlo solo agrega cem_backup. Los roles de soporte de documentos (2c-2), de
--- exportación (2c-3) y de la copia continua (2c-4) están cada uno en su propio archivo, para
+-- exportación (2c-3), de la copia continua (2c-4) y de privacidad (2d-1) están cada uno en su propio archivo, para
 -- crearlos solos en un servidor que ya existe.
 
 \set ON_ERROR_STOP on
@@ -67,6 +68,13 @@ grant connect on database :"base" to cem_app, cem_ro, cem_backup;
 \ir crear_rol_soporte_exportacion.sql
 \else
 \echo 'sin clave_soporte_exportacion: cem_soporte_exportacion no se crea (crear_rol_soporte_exportacion.sql)'
+\endif
+
+-- Lo mismo sin `clave_soporte_privacidad` (2d-1).
+\if :{?clave_soporte_privacidad}
+\ir crear_rol_soporte_privacidad.sql
+\else
+\echo 'sin clave_soporte_privacidad: cem_soporte_privacidad no se crea (crear_rol_soporte_privacidad.sql)'
 \endif
 
 -- Lo mismo sin `clave_copia_continua`: cem_copia_continua no se toca.
