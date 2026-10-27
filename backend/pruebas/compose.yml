@@ -15,6 +15,10 @@ services:
       POSTGRES_PASSWORD: postgres
     tmpfs:
       - /var/lib/postgresql
+    # Replicación física para cem_copia_continua (H2c §6): la línea de `pg_hba` que tienen las
+    # bases reales. Corre una sola vez, al crear el clúster.
+    volumes:
+      - ./postgres-replicacion.sh:/docker-entrypoint-initdb.d/replicacion.sh:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 1s

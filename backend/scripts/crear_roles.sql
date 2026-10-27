@@ -6,11 +6,13 @@
 --   psql "$URL_SUPERUSUARIO" -v base=cem \
 --     -v clave_migrate="$CLAVE_MIGRATE" -v clave_app="$CLAVE_APP" -v clave_ro="$CLAVE_RO" \
 --     -v clave_backup="$CLAVE_BACKUP" \
---     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" -f scripts/crear_roles.sql
+--     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" \
+--     -v clave_copia_continua="$CLAVE_COPIA_CONTINUA" -f scripts/crear_roles.sql
 --
 -- Es idempotente: no toca roles ni bases que ya existen. En un servidor creado antes de las
--- copias, volver a correrlo solo agrega cem_backup. El rol de soporte de documentos (2c-2) está
--- en su propio archivo, para crearlo solo en un servidor que ya existe.
+-- copias, volver a correrlo solo agrega cem_backup. Los roles de soporte de documentos (2c-2) y
+-- de la copia continua (2c-4) están en su propio archivo, para crearlos solo en un servidor que
+-- ya existe.
 
 \set ON_ERROR_STOP on
 
@@ -33,8 +35,9 @@ alter role cem_ro set default_transaction_read_only = on;
 
 -- cem_backup: copia diaria con pg_dump (§17.2). Lee todo (pg_read_all_data) y no escribe nada.
 -- BYPASSRLS es necesario: las tablas tienen RLS forzada y pg_dump se niega a volcar una tabla
--- cuyas filas filtraría una política. REPLICATION llegará con el archivo continuo del WAL
--- (cem-walreceiver), no antes. Dos conexiones: la que exporta la instantánea y la de pg_dump.
+-- cuyas filas filtraría una política. Sin REPLICATION: la copia continua del WAL tiene su propio
+-- rol, cem_copia_continua (crear_rol_copia_continua.sql). Dos conexiones: la que exporta la
+-- instantánea y la de pg_dump.
 select format(
   'create role cem_backup login bypassrls noreplication nosuperuser nocreaterole nocreatedb connection limit 2 password %L',
   :'clave_backup')
@@ -55,4 +58,11 @@ grant connect on database :"base" to cem_app, cem_ro, cem_backup;
 \ir crear_rol_soporte_documentos.sql
 \else
 \echo 'sin clave_soporte_documentos: cem_soporte_documentos no se crea (crear_rol_soporte_documentos.sql)'
+\endif
+
+-- Lo mismo sin `clave_copia_continua`: cem_copia_continua no se toca.
+\if :{?clave_copia_continua}
+\ir crear_rol_copia_continua.sql
+\else
+\echo 'sin clave_copia_continua: cem_copia_continua no se crea (crear_rol_copia_continua.sql)'
 \endif
