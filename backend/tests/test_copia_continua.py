@@ -897,3 +897,24 @@ def test_mientras_otro_receptor_tiene_el_slot_el_nuevo_espera_sin_avisar(
     assert len(kuma.pedidos) == antes + 1
     nuevo.receptor.detener()
     nuevo.esperar_base()  # la vuelta lanzó la copia base del corte inicial
+
+
+def test_las_herramientas_reciben_solo_path_y_la_clave(monkeypatch):
+    monkeypatch.setenv("CEM_COPIAS_S3_CLAVE_SECRETA", "no-tiene-que-pasar")
+    argumentos, entorno = cc.conexion_libpq("postgresql+psycopg://u:clave@h:5433/postgres")
+    assert set(entorno) == {"PATH", "PGPASSWORD"} and entorno["PGPASSWORD"] == "clave"
+    assert "clave" not in " ".join(argumentos)  # la clave nunca en los argumentos (ps)
+    assert argumentos == ["--host=h", "--username=u", "--no-password", "--port=5433"]
+
+
+def test_el_registro_del_receptor_se_recorta(tmp_path):
+    registro = tmp_path / "receptor.log"
+    contenido = os.urandom(2 * cc.TOPE_REGISTRO_RECEPTOR)
+    registro.write_bytes(contenido)
+    r = cc.Receptor("postgresql+psycopg://u:c@h/postgres", tmp_path, registro)
+    r.recortar_registro()
+    assert registro.read_bytes() == contenido[-cc.FINAL_REGISTRO_RECEPTOR :]
+    # Control: uno chico no se toca.
+    registro.write_bytes(b"corto")
+    r.recortar_registro()
+    assert registro.read_bytes() == b"corto"

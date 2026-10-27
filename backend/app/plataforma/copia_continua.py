@@ -125,6 +125,10 @@ TIEMPO_SUBIDA_FINAL = 6.0
 defecto antes de matar el contenedor: quedan unos segundos para detener el receptor y salir. Si
 se alarga la espera de parada del contenedor, se puede alargar esto."""
 ESPERA_RECEPTOR = 2
+TOPE_REGISTRO_RECEPTOR = 1024 * 1024
+"""Bytes del registro de `pg_receivewal` a partir de los cuales se recorta al rearrancarlo."""
+FINAL_REGISTRO_RECEPTOR = 256 * 1024
+"""Bytes del final del registro que se conservan al recortarlo."""
 """Segundos que se espera a que `pg_receivewal` salga después de SIGTERM."""
 NIVEL_GZIP = 6
 LARGO_MENSAJE = 200
@@ -229,12 +233,13 @@ class ConfigCopiaContinua:
 
 def conexion_libpq(url_texto: str) -> tuple[list[str], dict[str, str]]:
     """Argumentos de conexión para las herramientas de PostgreSQL y el entorno con la clave: en
-    los argumentos la vería cualquiera con `ps`."""
+    los argumentos la vería cualquiera con `ps`. El entorno lleva solo `PATH` y `PGPASSWORD`:
+    las herramientas no reciben las claves S3 ni las demás variables del proceso."""
     url = make_url(url_texto)
     argumentos = [f"--host={url.host}", f"--username={url.username}", "--no-password"]
     if url.port is not None:
         argumentos.append(f"--port={url.port}")
-    return argumentos, dict(os.environ) | {"PGPASSWORD": url.password or ""}
+    return argumentos, {"PATH": os.environ["PATH"], "PGPASSWORD": url.password or ""}
 
 
 def _sello(momento: datetime) -> str:
@@ -659,7 +664,15 @@ class Receptor:
         self.registro = registro
         self.proceso: subprocess.Popen | None = None
 
+    def recortar_registro(self) -> None:
+        """El registro del receptor (sus errores al reconectar) no crece sin fin: pasado
+        `TOPE_REGISTRO_RECEPTOR`, queda solo su final."""
+        if self.registro.exists() and self.registro.stat().st_size > TOPE_REGISTRO_RECEPTOR:
+            final = self.registro.read_bytes()[-FINAL_REGISTRO_RECEPTOR:]
+            self.registro.write_bytes(final)
+
     def arrancar(self) -> None:
+        self.recortar_registro()
         argumentos, entorno = conexion_libpq(self.url)
         with self.registro.open("ab") as salida:
             self.proceso = subprocess.Popen(
