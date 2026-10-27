@@ -19,20 +19,23 @@
 #                         del registro), para leer plataforma.alembic_version
 # ==============================================================================
 
-# Orden de despliegue: el backend primero; trabajos y planificador (misma imagen)
-# después; el frontend al final (su nginx resuelve el backend con `resolver`, AD-05).
-$CemOrdenDespliegue = @('backend', 'trabajos', 'planificador', 'frontend')
+# Orden de despliegue: el backend primero; trabajos, planificador y copia continua
+# (misma imagen) después; el frontend al final (su nginx resuelve el backend con
+# `resolver`, AD-05).
+$CemOrdenDespliegue = @('backend', 'trabajos', 'planificador', 'copia_continua', 'frontend')
 
 # Funciones que se construyen con backend/Dockerfile y leen CEM_SHA_IMAGEN en /health.
 $CemConShaImagen = @('backend', 'trabajos', 'planificador')
 
 # Imagen de ghcr.io (bajo $CemRegistroImagenes de compuertas.ps1) por función: el
-# backend y sus dos procesos usan la misma imagen (eligen qué correr con CEM_PROCESO).
+# backend y sus tres procesos usan la misma imagen (eligen qué correr con CEM_PROCESO).
+# La copia continua no sirve HTTP: no lleva CEM_SHA_IMAGEN; su salud es el latido.
 $CemImagenPorFuncion = @{
-    backend      = 'cem-backend'
-    trabajos     = 'cem-backend'
-    planificador = 'cem-backend'
-    frontend     = 'cem-frontend'
+    backend        = 'cem-backend'
+    trabajos       = 'cem-backend'
+    planificador   = 'cem-backend'
+    copia_continua = 'cem-backend'
+    frontend       = 'cem-frontend'
 }
 
 # Todas las aplicaciones son de tipo dockerimage en Coolify (decisión del 15-10-2026):
@@ -47,6 +50,8 @@ $CemEntornos = @{
             backend      = @{ Nombre = 'cem-backend-staging';      Imagen = 'cem-backend';  Uuid = 'yepjjanuzkdvtibdk1hngn21' }
             trabajos     = @{ Nombre = 'cem-trabajos-staging';     Imagen = 'cem-backend';  Uuid = 'wqndx1oq0tdsshbjutmbbifg' }
             planificador = @{ Nombre = 'cem-planificador-staging'; Imagen = 'cem-backend';  Uuid = 'lqli8onu8sojoo5ai59fyiuu' }
+            # Creada el 27-10-2026 (2c-4, H2c §6); en producción se agrega al crearla allá.
+            copia_continua = @{ Nombre = 'cem-copia-continua-staging'; Imagen = 'cem-backend'; Uuid = 'virszak1hbblkiqwgl0k36lm' }
             frontend     = @{ Nombre = 'cem-frontend-staging';     Imagen = 'cem-frontend'; Uuid = 'qor6tckbjzlenawynxxepchp' }
         }
     }
