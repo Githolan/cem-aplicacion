@@ -205,7 +205,7 @@ def test_el_rol_replica_y_no_lee_tablas(base_de_prueba):
         " from pg_roles where rolname = 'cem_copia_continua'",
         b=BASE,
     )
-    assert atributos == [(False, False, True, False, False, 3, False)]
+    assert atributos == [(False, False, True, False, False, 4, False)]
     # Sin permiso de conexión a la base de datos: ni llega a pedir una tabla.
     motor = create_engine(url_copia_continua(BASE))
     with pytest.raises(OperationalError, match="permission denied for database"):
@@ -447,7 +447,7 @@ def test_la_copia_base_se_verifica_restaurandola_y_se_sube(
     sello = f"{momento:%Y%m%dT%H%M%SZ}"
     assert objetos(cfg, cc.PREFIJO_BASE) == [
         f"base/{sello}/backup_manifest.age", f"base/{sello}/base.tar.gz.age",
-        f"base/{sello}/verificada.json",
+        f"base/{sello}/pg_wal.tar.gz.age", f"base/{sello}/verificada.json",
     ]  # fmt: skip
     s3 = copias.cliente_s3(cfg.copias)
     assert cc.ultima_base_verificada(s3, cfg.copias.bucket) == momento.replace(microsecond=0)
@@ -1007,3 +1007,55 @@ def test_una_copia_base_que_falla_no_frena_la_de_un_corte_nuevo(cfg, monkeypatch
     monkeypatch.setattr(cc, "copia_base", falla_con_corte_en_el_medio)
     p.hacer_base(ahora, cortes)
     assert p.corte == "segundo" and p.error_base is None  # la del segundo sigue siendo urgente
+
+
+def _copia_con_wal_reciclado(monkeypatch, motor_migrate):
+    """Durante `pg_basebackup` (frenado con `--max-rate`), varios segmentos de WAL nuevos, cada
+    uno con su checkpoint: con `wal_keep_size` en 0, el WAL del inicio de la copia se recicla. En
+    paralelo, la consulta de la vuelta al slot, como en producción (cuatro conexiones del rol)."""
+    correr = copias._correr
+
+    def con_wal(argumentos, entorno=None, tope=None):
+        if argumentos[0] != "pg_basebackup":
+            return correr(argumentos, entorno, tope)
+
+        def generar():
+            time.sleep(0.5)  # que la copia ya haya empezado
+            for _ in range(6):
+                with motor_migrate.begin() as c:
+                    c.execute(text("insert into plataforma.prueba_pa26 select repeat('x', 100)"
+                                   " from generate_series(1, 2000)"))  # fmt: skip
+                admin("select pg_switch_wal()")
+                admin("checkpoint")
+                cc.estado_servidor(url_copia_continua())
+
+        hilo = threading.Thread(target=generar)
+        hilo.start()
+        try:
+            correr([*argumentos, f"--max-rate={TASA_COPIA_LENTA}"], entorno, tope)
+        finally:
+            hilo.join()
+
+    monkeypatch.setattr(copias, "_correr", con_wal)
+
+
+TASA_COPIA_LENTA = "2M"
+
+
+@pytest.mark.db
+def test_la_copia_base_retiene_su_wal_aunque_se_recicle_durante_la_copia(
+    cfg, proceso, monkeypatch, motor_migrate, tabla_pa26, tmp_path
+):
+    p = proceso()
+    p.iniciar(datetime.now(UTC))  # el receptor con su slot, que sigue avanzando
+    esperar_recibido(lsn_actual())
+    assert admin("show wal_keep_size") == [("0",)]
+    _copia_con_wal_reciclado(monkeypatch, motor_migrate)
+    destino = tmp_path / "base"
+    cc.tomar_base(cfg.url_copia_continua, destino, "stream")
+    assert sorted(a.name for a in destino.iterdir()) == sorted(cc.ARCHIVOS_BASE)
+    cc.verificar_base(destino, url_rol("backup"), cc.contar_consorcios(url_rol("backup")))
+    # Control: con `fetch`, en las mismas condiciones, el WAL del inicio ya no está.
+    monkeypatch.setattr(cc, "METODO_WAL", "fetch")
+    with pytest.raises(copias.ErrorCopia, match="pg_basebackup"):
+        cc.tomar_base(cfg.url_copia_continua, tmp_path / "fetch", "fetch")

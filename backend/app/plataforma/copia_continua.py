@@ -63,8 +63,9 @@ de ningún índice. El ensayo PA26 real se hace con `postgres:18-alpine` (H2c §
 Conexiones y permisos
 ---------------------
 `cem_copia_continua` tiene `REPLICATION` y nada más (`scripts/crear_rol_copia_continua.sql`),
-con un tope de 3 conexiones: el receptor, `pg_basebackup` con `--wal-method=fetch` (una sola
-conexión; el WAL que necesita lo retiene el slot) y una consulta breve por vuelta a
+con un tope de 4 conexiones: el receptor, `pg_basebackup` con `--wal-method=stream` (dos: la
+copia y el WAL, con su slot temporal, así el WAL desde el inicio de la copia queda retenido
+aunque el slot del receptor siga avanzando) y una consulta breve por vuelta a
 `pg_replication_slots` y `pg_current_wal_lsn()` sobre la base que nombra
 `CEM_DATABASE_URL_COPIA_CONTINUA` (`postgres`, que PUBLIC puede abrir: el rol no tiene permiso
 de conexión a `cem`). La cantidad de consorcios de la base real la lee `cem_backup`
@@ -167,9 +168,12 @@ PREFIJO_BASE = "base/"
 PREFIJO_CORTES = "cortes/"
 """Cortes de la cadena todavía sin su copia base: sobreviven a un reinicio (`corte_abierto`)."""
 MARCA = "verificada.json"
-ARCHIVOS_BASE = ("base.tar.gz", "backup_manifest")
-"""Lo que deja `pg_basebackup --format=tar --gzip --wal-method=fetch` (con `fetch`, el WAL de la
-copia va dentro de `base.tar.gz`), y se sube cifrado."""
+ARCHIVOS_BASE = ("base.tar.gz", "pg_wal.tar.gz", "backup_manifest")
+"""Lo que deja `pg_basebackup --format=tar --gzip --wal-method=stream`, y se sube cifrado."""
+METODO_WAL = "stream"
+"""`stream`: el WAL de la copia llega por una segunda conexión con un slot temporal, que lo
+retiene desde el inicio de la copia. Con `fetch`, el WAL se pide al final y un checkpoint durante
+la copia puede haberlo reciclado (el slot del receptor no lo protege: sigue avanzando)."""
 
 VARIABLE_URL = "CEM_DATABASE_URL_COPIA_CONTINUA"
 VARIABLE_DIRECTORIO = "CEM_COPIA_CONTINUA_DIRECTORIO"
@@ -501,6 +505,7 @@ def restaurada(
         datos = raiz / "datos"
         datos.mkdir(mode=0o700)
         _extraer(carpeta_base / "base.tar.gz", datos)
+        _extraer(carpeta_base / "pg_wal.tar.gz", datos / "pg_wal")
         wal = carpeta_wal or raiz / "sin-wal"
         wal.mkdir(exist_ok=True)
         # Solo el socket local, sin claves: los usuarios son los de la base real.
@@ -625,12 +630,12 @@ def _rango_wal(manifiesto: Path) -> dict[str, Any]:
 
 
 def tomar_base(url_copia_continua: str, destino: Path, sello: str) -> None:
-    """`pg_basebackup` en formato tar comprimido, con el WAL de la copia dentro (`fetch`: una
-    sola conexión) y el manifiesto con SHA-256 de cada archivo."""
+    """`pg_basebackup` en formato tar comprimido, con el WAL de la copia en `pg_wal.tar.gz`
+    (`METODO_WAL`) y el manifiesto con SHA-256 de cada archivo."""
     argumentos, entorno = conexion_libpq(url_copia_continua)
     copias._correr(
         ["pg_basebackup", f"--pgdata={destino}", "--format=tar", "--gzip",
-         "--wal-method=fetch", "--checkpoint=fast", "--manifest-checksums=SHA256",
+         f"--wal-method={METODO_WAL}", "--checkpoint=fast", "--manifest-checksums=SHA256",
          f"--label=cem-copia-base-{sello}", *argumentos],
         entorno, TOPE_COPIA_FISICA,
     )  # fmt: skip
