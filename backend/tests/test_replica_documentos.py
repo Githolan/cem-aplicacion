@@ -161,10 +161,11 @@ def test_copia_solo_las_disponibles_cifradas_y_no_repite(escena, par_age):  # no
     rechazada = version(e, "rechazado", b"%PDF-1.7 rechazada")
 
     assert replica_documentos.replicar(e["cfg"], e["origen"]) == {
-        "versiones": 1, "copiadas": 1, "ya_estaban": 0, "pendientes": 0,
+        "versiones": 1, "copiadas": 1, "releidas": 0, "ya_estaban": 0, "pendientes": 0,
     }  # fmt: skip
     clave = replica_documentos.clave_replica(disponible["clave"])
-    assert replica(e) == [clave]  # control negativo: ni la de cuarentena ni la rechazada
+    # Control negativo: ni la de cuarentena ni la rechazada; solo la disponible y su marca.
+    assert replica(e) == [clave, clave + replica_documentos.MARCA]
     assert replica_documentos.clave_replica(cuarentena["clave"]) not in replica(e)
     assert replica_documentos.clave_replica(rechazada["clave"]) not in replica(e)
     cifrado = e["s3"].get_object(Bucket=e["cfg"].bucket, Key=clave)["Body"].read()
@@ -212,14 +213,49 @@ def test_un_binario_que_no_coincide_con_su_fila_no_se_copia(escena):
 
 
 @pytest.mark.db
-def test_una_corrida_larga_se_corta_y_sigue_en_la_siguiente(escena):
+def test_un_objeto_sin_marca_se_relee_y_si_no_coincide_no_cuenta(escena):
+    """Una subida cuya relectura falló deja el objeto sin su marca: la corrida siguiente lo relee
+    contra el SHA-256 de su cifrado en vez de darlo por bueno por el metadato."""
     e = escena
-    for i in range(3):
-        version(e, "disponible", f"%PDF-1.7 {i}".encode())
-    primera = replica_documentos.replicar(e["cfg"], e["origen"], timedelta(0))
-    assert (primera["copiadas"], primera["pendientes"]) == (1, 2)
+    v = version(e, "disponible", b"%PDF-1.7 original")
+    clave = replica_documentos.clave_replica(v["clave"])
+    meta = {"sha256-claro": hashlib.sha256(v["contenido"]).hexdigest(),
+            "sha256": hashlib.sha256(b"cifrado sano").hexdigest()}  # fmt: skip
+    e["s3"].put_object(Bucket=e["cfg"].bucket, Key=clave, Body=b"cifrado alterado", Metadata=meta)
+    with pytest.raises(copias.ErrorCopia, match="no coincide"):
+        replica_documentos.replicar(e["cfg"], e["origen"])
+    assert replica(e) == [clave]  # sin marca: no cuenta
+    # Control: el mismo objeto sin marca pero sano se relee, se marca y cuenta.
+    e["s3"].put_object(Bucket=e["cfg"].bucket, Key=clave, Body=b"cifrado sano", Metadata=meta)
+    resumen = replica_documentos.replicar(e["cfg"], e["origen"])
+    assert (resumen["releidas"], resumen["copiadas"]) == (1, 0)
+    assert replica(e) == [clave, clave + replica_documentos.MARCA]
+    assert replica_documentos.replicar(e["cfg"], e["origen"])["ya_estaban"] == 1
+
+
+@pytest.mark.db
+def test_una_corrida_larga_avisa_empieza_por_las_nuevas_y_sigue_en_la_siguiente(escena):
+    e = escena
+    versiones = [version(e, "disponible", f"%PDF-1.7 {i}".encode()) for i in range(3)]
+    with pytest.raises(replica_documentos.ReplicaIncompleta, match="pendientes 2"):
+        replica_documentos.replicar(e["cfg"], e["origen"], timedelta(0))
+    # La primera copiada es la más nueva.
+    nueva = replica_documentos.clave_replica(versiones[-1]["clave"])
+    assert replica(e) == [nueva, nueva + replica_documentos.MARCA]
     segunda = replica_documentos.replicar(e["cfg"], e["origen"])
-    assert segunda == {"versiones": 3, "copiadas": 2, "ya_estaban": 1, "pendientes": 0}
+    assert segunda == {"versiones": 3, "copiadas": 2, "releidas": 0, "ya_estaban": 1,
+                       "pendientes": 0}  # fmt: skip
+
+
+@pytest.mark.db
+def test_la_replica_incompleta_hace_fallar_el_trabajo_y_la_cola_la_reintenta():
+    import app.plataforma.tareas  # noqa: F401
+    from app.plataforma import cola
+
+    tipo = cola.REGISTRO.tipos["plataforma.replicar_documentos"]
+    assert tipo.maximo_intentos == 6 and tipo.retroceso_base == timedelta(minutes=1)
+    assert issubclass(replica_documentos.ReplicaIncompleta, copias.ErrorCopia)
+    assert not issubclass(replica_documentos.ReplicaIncompleta, cola.ErrorDefinitivo)
 
 
 # Control de tamaño --------------------------------------------------------------------

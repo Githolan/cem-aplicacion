@@ -56,7 +56,13 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
 
 
-@cola.REGISTRO.tipo("plataforma.replicar_documentos")
+@cola.REGISTRO.tipo(
+    "plataforma.replicar_documentos",
+    # Cada intento copia hasta 3 minutos y sigue donde quedó el anterior: seis intentos, en algo
+    # más de una hora, antes de quedar muerto y a la vista del monitor de la cola.
+    maximo_intentos=6,
+    retroceso_base=timedelta(minutes=1),
+)
 def replicar_documentos(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
     """Réplica diaria de las versiones `disponible` al prefijo `documentos/` del bucket de copias
     (H2c §6, documento 13 §17.2). Lee con `cem_backup` y la clave de análisis de documentos;
