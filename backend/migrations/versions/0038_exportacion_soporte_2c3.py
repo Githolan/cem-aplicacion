@@ -24,9 +24,14 @@ las decisiones del propietario del 25-10-2026.
 - Cada función exige que el consorcio pedido sea el del contexto (`plataforma.consorcio_actual()`,
   `42501` si no) **y una exportación de ese consorcio registrada en la misma transacción y
   todavía sin armar** (`42501` si no): así la capacidad no se puede saltear llamando a las
-  funciones desde la base, y toda lectura queda detrás de una constancia que se arma en la misma
-  transacción. Tienen `search_path` fijo, `revoke execute … from
-  public` y se conceden **solo** a `cem_soporte_exportacion`, nunca a `cem_app`.
+  funciones desde la base, y una lectura que se confirma deja su constancia. **No impide** leer
+  dentro de una transacción que después se deshace: quien tiene la credencial del rol lee y la
+  vuelta atrás borra la constancia. Eso es propio de cualquier credencial de base con lectura;
+  la protección es la custodia del secreto, que vive solo en `cem-trabajos`, como el de
+  `cem_soporte_documentos` (riesgo anotado para el propietario). Registrar las sentencias del rol
+  (`log_statement`) se descartó: llevaría a los registros el destinatario y su documento.
+  Tienen `search_path` fijo, `revoke execute … from public` y se conceden **solo** a
+  `cem_soporte_exportacion`, nunca a `cem_app`.
 - **`nucleo.registrar_exportacion(...)`:** la única forma de crear la constancia. Fija adentro
   las cinco facultades de lectura y los tipos de mandato (no los recibe de quien llama),
   comprueba la capacidad con `nucleo.capacidad_para_exportar` y recién entonces inserta la fila.
@@ -74,7 +79,8 @@ EXIGIR_CONSORCIO = """\
 """
 # La exportación tiene que ser del consorcio, estar sin armar y haberse registrado **en esta
 # misma transacción**: si no, con la URL del rol se podría registrar una vez, confirmar y leer
-# después en otras transacciones cuantas veces se quisiera, sin armar nunca. Se compara
+# después en otras transacciones cuantas veces se quisiera, sin armar nunca. (Leer y deshacer la
+# transacción no deja constancia: ver el docstring.) Se compara
 # `creada_en = now()`: `now()` es el comienzo de la transacción, `creada_en` toma ese valor por
 # omisión y nadie lo puede fijar (el rol no inserta ni actualiza esa columna, y
 # `registrar_exportacion` no la recibe). Se descartó `xmin` contra el identificador de la

@@ -885,6 +885,8 @@ def test_registrar_exportacion_fija_la_capacidad_adentro(sin_documentos, motor_m
         "select count(*) from auditoria.eventos",
         "select count(*) from nucleo.sesion",
         "delete from plataforma.exportacion",
+        # `creada_en` decide qué exportación habilita las lecturas: el rol no la puede tocar.
+        "update plataforma.exportacion set creada_en = now()",
         "insert into plataforma.exportacion (consorcio_id, solicitud_referencia,"
         " destinatario_nombre, destinatario_documento, solicitante, mandato_id,"
         " facultades_verificadas, fecha_pedido, respaldo_referencia, armada_en, paquete_sha256,"
