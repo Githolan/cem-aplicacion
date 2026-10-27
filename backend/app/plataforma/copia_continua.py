@@ -96,6 +96,9 @@ SLOT = "cem_copia_continua"
 
 INTERVALO_PARCIAL = timedelta(minutes=5)
 """Cada cuánto sube el segmento en curso (H2c §6): con el RPO de 15 minutos de RNF06."""
+REPETIR_PARCIAL = timedelta(days=1)
+"""Un parcial sin cambios se vuelve a subir pasado este plazo: `wal-parcial/` se borra a los 2
+días, y sin movimiento el segmento en curso no se completa nunca."""
 ATRASO_MAXIMO = timedelta(minutes=15)
 """Atraso del receptor, o de la subida, que se avisa como caída (H2c §6)."""
 VIGENCIA_BASE = timedelta(days=7)
@@ -714,6 +717,7 @@ class CopiaContinua:
         """Un objeto del almacén que no coincide con lo que se subió: se avisa en el acto."""
         self.ultimo_parcial: datetime | None = None
         self.suma_parcial: str | None = None
+        self.parcial_subido_en: datetime | None = None
         self.ultimo_aviso: datetime | None = None
         self.proxima_revision_base: datetime | None = None
         self.hilo_base: threading.Thread | None = None
@@ -921,12 +925,16 @@ class CopiaContinua:
             # final lo descarta la recuperación (cada registro del WAL lleva su CRC).
             shutil.copyfile(actual, foto)
             suma = copias.sha256(foto)
-            if suma != self.suma_parcial:
+            vencido = (
+                self.parcial_subido_en is None or ahora - self.parcial_subido_en >= REPETIR_PARCIAL
+            )
+            if suma != self.suma_parcial or vencido:
                 segmento = actual.name.removesuffix(".partial")
                 clave = f"{PREFIJO_PARCIAL}{segmento}-{_sello(ahora)}.partial.gz.age"
                 subir_cifrado(self.s3, self.cfg.copias, foto, clave, self.trabajo,
                               comprimir=True, metadatos={"sha256-claro": suma})  # fmt: skip
                 self.suma_parcial = suma
+                self.parcial_subido_en = ahora
                 log.info("WAL en curso subido", extra={"campos": {"segmento": segmento}})
         finally:
             foto.unlink(missing_ok=True)

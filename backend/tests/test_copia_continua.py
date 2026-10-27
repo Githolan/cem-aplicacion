@@ -769,3 +769,18 @@ def test_un_corte_sigue_abierto_despues_de_reiniciar(cfg, proceso):
     p3 = proceso()
     p3.iniciar(datetime.now(UTC))
     assert p3.corte is None
+
+
+@pytest.mark.db
+def test_un_parcial_sin_cambios_se_vuelve_a_subir_pasado_un_dia(cfg, proceso, motor_migrate):
+    p = proceso()
+    p.iniciar(datetime.now(UTC))
+    esperar_recibido(lsn_actual())
+    p.receptor.detener()
+    t = datetime.now(UTC)
+    p.subir_parcial(t)
+    assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 1
+    p.subir_parcial(t + timedelta(minutes=6))  # sin cambios: no se repite
+    assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 1
+    p.subir_parcial(t + cc.REPETIR_PARCIAL + timedelta(minutes=1))  # antes de que lo borre la regla
+    assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 2
