@@ -352,6 +352,7 @@ def test_un_hueco_en_la_cadena_la_corta():
     p = cc.CopiaContinua.__new__(cc.CopiaContinua)
     p.tamano_segmento, p.cortes, p.corte, p.avisa_continua = 16 * 1024 * 1024, 0, None, False
     p.cerrojo = threading.Lock()
+    p.cortes_sin_guardar, p.guardar_cortes = [], lambda: None
     p.ultimo = (1, 5)
     p.revisar_continuidad("000000010000000000000006", datetime.now(UTC))  # el siguiente
     assert (p.corte, p.ultimo) == (None, (1, 5))
@@ -537,8 +538,23 @@ def pedidos(kuma) -> list[tuple[str, str]]:  # noqa: F811
     ]
 
 
+@pytest.fixture
+def tope_de_slot():
+    """Como en las bases reales (H2c §6 pide 5 GB): sin tope, la copia continua avisa caída."""
+    admin("alter system set max_slot_wal_keep_size = '1GB'")
+    admin("select pg_reload_conf()")
+    yield
+    admin("alter system reset max_slot_wal_keep_size")
+    admin("select pg_reload_conf()")
+
+
 @pytest.mark.db
-def test_slot_desaparecido_avisa_caida_y_rehace_la_copia_base(cfg, proceso, kuma):  # noqa: F811
+def test_slot_desaparecido_avisa_caida_y_rehace_la_copia_base(
+    cfg,
+    proceso,
+    kuma,  # noqa: F811
+    tope_de_slot,
+):
     entorno = {cc.VARIABLE_AVISO_CONTINUA: url_push(kuma), cc.VARIABLE_AVISO_BASE: url_push(kuma)}
     p = proceso(entorno)
     t0 = datetime.now(UTC)
@@ -674,8 +690,10 @@ def test_la_copia_base_semanal_no_deja_pasar_mas_de_7_dias(cfg, monkeypatch):
     s3 = copias.cliente_s3(cfg.copias)
     ahora = datetime(2026, 10, 26, 12, tzinfo=UTC)
     vieja = ahora - cc.VIGENCIA_BASE + cc.INTERVALO_REVISAR_BASE + timedelta(minutes=1)
-    s3.put_object(Bucket=cfg.copias.bucket, Body=b"{}",
-                  Key=f"base/{vieja:%Y%m%dT%H%M%SZ}/{cc.MARCA}")  # fmt: skip
+    marca = b'{"objetos": {}}'  # una marca que se relee bien
+    s3.put_object(Bucket=cfg.copias.bucket, Body=marca,
+                  Key=f"base/{vieja:%Y%m%dT%H%M%SZ}/{cc.MARCA}",
+                  Metadata={"sha256": hashlib.sha256(marca).hexdigest()})  # fmt: skip
     p.revisar_base(ahora)
     p.esperar_base()
     assert lanzadas == []  # le falta más de una revisión para cumplir 7 días
@@ -727,3 +745,27 @@ def test_cerrar_un_corte_y_cortar_no_se_pisan(cfg, monkeypatch):
     # Control: sin un corte en el medio, la copia base lo cierra.
     p.hacer_base(datetime.now(UTC), 2)
     assert p.corte is None
+
+
+@pytest.mark.db
+def test_un_corte_sigue_abierto_despues_de_reiniciar(cfg, proceso):
+    """Codex en #133: un reinicio entre el corte y la copia base nueva no lo olvida."""
+    p1 = proceso()
+    p1.iniciar(datetime.now(UTC))
+    assert p1.corte is not None
+    p1.receptor.detener()  # se reinicia antes de hacer la copia base
+    s3 = copias.cliente_s3(cfg.copias)
+    assert [k for k in objetos(cfg, cc.PREFIJO_CORTES)]  # el corte quedó en el almacén
+    # Ya hay WAL subido: el arranque nuevo no corta por eso, solo por el corte guardado.
+    s3.put_object(Bucket=cfg.copias.bucket, Key="wal/000000010000000000000001.gz.age", Body=b"x")
+    p2 = proceso()
+    p2.iniciar(datetime.now(UTC))
+    assert p2.corte is not None and p2.corte.startswith("no hay WAL en wal/")
+    p2.vuelta(datetime.now(UTC))  # copia base en el acto
+    p2.esperar_base()
+    assert p2.corte is None
+    p2.receptor.detener()
+    # Control: con la copia base posterior al último corte, el arranque siguiente no corta.
+    p3 = proceso()
+    p3.iniciar(datetime.now(UTC))
+    assert p3.corte is None

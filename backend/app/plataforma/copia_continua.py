@@ -125,6 +125,8 @@ LARGO_MENSAJE = 200
 PREFIJO_WAL = "wal/"
 PREFIJO_PARCIAL = "wal-parcial/"
 PREFIJO_BASE = "base/"
+PREFIJO_CORTES = "cortes/"
+"""Cortes de la cadena todavía sin su copia base: sobreviven a un reinicio (`corte_abierto`)."""
 MARCA = "verificada.json"
 ARCHIVOS_BASE = ("base.tar.gz", "backup_manifest")
 """Lo que deja `pg_basebackup --format=tar --gzip --wal-method=fetch` (con `fetch`, el WAL de la
@@ -387,6 +389,38 @@ def ultima_base_verificada(s3, bucket: str) -> datetime | None:
             return momento
         log.error("la marca %s no se relee: esa copia base no cuenta", clave)
     return None
+
+
+def guardar_corte(s3, bucket: str, momento: datetime, motivo: str) -> str:
+    """Deja el corte en `cortes/<momento>.json`, releído. Un corte queda abierto mientras no haya
+    una copia base verificada de un momento posterior, también después de un reinicio."""
+    clave = f"{PREFIJO_CORTES}{momento.astimezone(UTC):%Y%m%dT%H%M%S%fZ}.json"
+    cuerpo = json.dumps({"momento": momento.isoformat(), "motivo": motivo}).encode()
+    suma = hashlib.sha256(cuerpo).hexdigest()
+    s3.put_object(Bucket=bucket, Key=clave, Body=cuerpo, Metadata={"sha256": suma})
+    copias.verificar_objeto(s3, bucket, clave, suma)
+    return clave
+
+
+def ultimo_corte(s3, bucket: str) -> tuple[datetime, str] | None:
+    """El corte más reciente de `cortes/` (momento, motivo), o None."""
+    guardados = sorted(o["Key"] for o in claves(s3, bucket, PREFIJO_CORTES))
+    if not guardados:
+        return None
+    datos = json.loads(s3.get_object(Bucket=bucket, Key=guardados[-1])["Body"].read())
+    return datetime.fromisoformat(datos["momento"]), datos["motivo"]
+
+
+def corte_abierto(s3, bucket: str) -> tuple[datetime, str] | None:
+    """El último corte, si ninguna copia base verificada es de un momento igual o posterior (la
+    copia base lanzada en la misma vuelta que el corte tiene el mismo segundo)."""
+    corte = ultimo_corte(s3, bucket)
+    if corte is None:
+        return None
+    base = ultima_base_verificada(s3, bucket)
+    if base is not None and base >= corte[0].replace(microsecond=0):
+        return None
+    return corte
 
 
 # Copia base y su verificación ---------------------------------------------------------
@@ -668,6 +702,7 @@ class CopiaContinua:
         """Motivo del último corte de la cadena, hasta que lo cierre una copia base posterior."""
         self.cortes = 0
         self.cerrojo = threading.Lock()
+        self.cortes_sin_guardar: list[tuple[datetime, str]] = []
         """Protege `corte` y `cortes`. El hilo de la copia base cierra el corte solo si no hubo
         otro mientras copiaba; comparar y borrar tienen que ser una sola operación frente a
         `cortar` (que corre en la vuelta): si no, un corte nuevo entre las dos se perdería."""
@@ -699,6 +734,15 @@ class CopiaContinua:
         estado = estado_servidor(self.cfg.url_copia_continua)
         self.tamano_segmento = estado.tamano_segmento
         self.ultimo = ultimo_segmento_subido(self.s3, self.cfg.copias.bucket, self.tamano_segmento)
+        abierto = corte_abierto(self.s3, self.cfg.copias.bucket)
+        if abierto is not None:
+            # Un corte de antes del reinicio que ninguna copia base cerró todavía: sigue abierto
+            # (Kuma en caída y copia base en el acto), aunque haya una base anterior vigente.
+            momento, motivo = abierto
+            with self.cerrojo:
+                self.corte = f"{motivo} (desde {momento:%Y-%m-%d %H:%M} UTC)"
+                self.cortes += 1
+            log.error("cadena de WAL cortada desde antes del arranque: %s", self.corte)
         if self.ultimo is None:
             self.cortar("no hay WAL en wal/: la cadena empieza ahora", ahora)
         self.asegurar_slot(estado, ahora)
@@ -740,12 +784,27 @@ class CopiaContinua:
             self.cortes += 1
         self.ultimo = None
         self.error_base = None
+        self.cortes_sin_guardar.append((ahora, motivo))
         log.error("cadena de WAL cortada: %s", motivo)
         self.avisar_continua("down", f"cadena cortada: {motivo}", ahora)
+        self.guardar_cortes()
+
+    def guardar_cortes(self) -> None:
+        """Deja en el almacén los cortes que faltan; si el almacén falla, se reintenta en cada
+        vuelta (el corte ya está abierto en memoria y avisado)."""
+        while self.cortes_sin_guardar:
+            momento, motivo = self.cortes_sin_guardar[0]
+            try:
+                guardar_corte(self.s3, self.cfg.copias.bucket, momento, motivo)
+            except Exception:
+                log.exception("no se pudo guardar el corte en el almacén; se reintenta")
+                return
+            self.cortes_sin_guardar.pop(0)
 
     # Vuelta ----------------------------------------------------------------------------
 
     def vuelta(self, ahora: datetime) -> None:
+        self.guardar_cortes()
         latido.latir()
         estado = estado_servidor(self.cfg.url_copia_continua)
         if not self.receptor.vivo():
