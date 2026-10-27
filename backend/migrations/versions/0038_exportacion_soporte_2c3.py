@@ -158,8 +158,13 @@ FUNCIONES: dict[str, str] = {
                               else coalesce(pe.nombre, m.mandatario_nombre) end,
                'cuit', case when m.tipo = 'administrador_externo' then m.mandatario_cuit end,
                'vigente_desde', m.vigente_desde, 'vigente_hasta', m.vigente_hasta,
-               'estado', nucleo.estado_mandato(m.causa_baja, m.vigente_desde, m.vigente_hasta,
-                                               hoy),
+               -- Como `mandato_detalle` desde 0023: un Consejo sin su condición habilitante
+               -- queda `pendiente_revision`, no `vigente`.
+               'estado', nucleo.estado_operativo(
+                           m.id,
+                           nucleo.estado_mandato(m.causa_baja, m.vigente_desde, m.vigente_hasta,
+                                                 hoy),
+                           hoy),
                'con_cuenta', m.persona_id is not null, 'matricula', m.matricula,
                'decision_id', m.decision_id, 'causa_baja', m.causa_baja,
                'baja_decision_id', m.baja_decision_id,

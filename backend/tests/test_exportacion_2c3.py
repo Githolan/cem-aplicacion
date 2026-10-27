@@ -26,6 +26,7 @@ from app.db import transaccion
 from scripts import exportar_consorcio
 from tests.conftest import url_rol
 from tests.test_coeficientes_0021 import EXPENSAS, porcentajes, registrar
+from tests.test_condicion_habilitante_consejo import consejo, estado  # noqa: F401  (fixture)
 from tests.test_contexto_mandatos import otra_unidad
 from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la_imagen` son fixtures)
     JPEG,
@@ -48,6 +49,7 @@ from tests.test_modo_operacion import (
     hoy_de,
 )
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
+from tests.test_vinculo_fin_0020 import finalizar
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -889,3 +891,23 @@ def test_la_capacidad_para_exportar_solo_cuenta_administracion_o_consejo(con_ext
     ):
         c.execute(text(nueva), datos | {"p": e["mc"]})
     assert error.value.orig.sqlstate == "42501"
+
+
+def test_un_consejo_sin_su_condicion_sale_pendiente_de_revision(
+    consejo,  # noqa: F811
+    con_url,
+    claves,
+    tmp_path,
+    motor_app,
+):
+    """El estado del mandato es el operativo, como en `mandato_detalle` desde 0023: sin la
+    condición habilitante, el Consejo no está `vigente`. Pide la administradora del escenario."""
+    e = consejo
+    finalizar(motor_app, e["cons"], e["adm"], e["v_prop"])
+    # Control: la API lo muestra `pendiente_revision`.
+    assert estado(e["adm"], e["cons"], e["m"]) == "pendiente_revision"
+    codigo, salida = exportar(e, claves, tmp_path, solicitante=str(e["adm"]))
+    assert codigo == 0
+    mandatos = {m["id"]: m for m in entidades(descifrar(salida, claves["privada"]))["mandato"]}
+    assert mandatos[str(e["m"])]["estado"] == "pendiente_revision"
+    assert {m["estado"] for i, m in mandatos.items() if i != str(e["m"])} == {"vigente"}
