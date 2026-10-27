@@ -840,6 +840,7 @@ def test_sin_copiar_no_hay_latido_aunque_el_proceso_siga_vivo(
     p = proceso()
     t = datetime.now(UTC)
     p.iniciar(t)
+    latido.ARCHIVO.unlink()  # el arranque late: sin esto, el control no podría fallar
     p.vuelta(t)
     assert latido.ARCHIVO.exists()  # sano (el corte inicial tiene su copia base en curso)
     p.esperar_base()
@@ -969,3 +970,40 @@ def test_un_corte_abierto_mas_que_una_copia_base_entera_cuenta_para_la_salud(cfg
     assert p.problemas_de_salud(ahora + cc.DURACION_MAXIMA_COPIA_BASE) == []
     tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
     assert p.problemas_de_salud(tarde)[0].startswith("cadena cortada desde")
+
+
+@pytest.mark.db
+def test_un_corte_con_su_copia_base_fallida_deja_sin_latido(cfg, monkeypatch, tmp_path):
+    monkeypatch.setattr(latido, "ARCHIVO", tmp_path / "latido")
+    p = cc.CopiaContinua(cfg, {})
+    ahora = datetime.now(UTC)
+    p.cortar("prueba", ahora)
+
+    def falla(cfg, momento):
+        raise copias.ErrorCopia("pg_basebackup terminó con 1")
+
+    monkeypatch.setattr(cc, "copia_base", falla)
+    p.hacer_base(ahora, p.cortes)
+    assert p.error_base is not None
+    assert p.problemas_de_salud(ahora)[0].startswith("cadena cortada y la copia base falla")
+    # Control: mientras corre otra copia base (el reintento), esa falla no cuenta.
+    p.hilo_base = threading.Thread(target=time.sleep, args=(1,))
+    p.hilo_base.start()
+    assert p.problemas_de_salud(ahora) == []
+    p.hilo_base.join()
+
+
+@pytest.mark.db
+def test_una_copia_base_que_falla_no_frena_la_de_un_corte_nuevo(cfg, monkeypatch):
+    p = cc.CopiaContinua(cfg, {})
+    ahora = datetime.now(UTC)
+    p.cortar("primero", ahora)
+    cortes = p.cortes
+
+    def falla_con_corte_en_el_medio(cfg, momento):
+        p.cortar("segundo", ahora)  # mientras la copia del primero corre
+        raise copias.ErrorCopia("pg_basebackup terminó con 1")
+
+    monkeypatch.setattr(cc, "copia_base", falla_con_corte_en_el_medio)
+    p.hacer_base(ahora, cortes)
+    assert p.corte == "segundo" and p.error_base is None  # la del segundo sigue siendo urgente

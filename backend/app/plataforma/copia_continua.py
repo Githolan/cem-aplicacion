@@ -927,7 +927,10 @@ class CopiaContinua:
             salud.append(f"receptor atrasado {int(self.atraso.total_seconds())} s")
         if self.al_dia_subida is not None and ahora - self.al_dia_subida > ATRASO_MAXIMO:
             salud.append(f"sin poder subir desde {self.al_dia_subida:%H:%M} UTC")
-        if self.corte is not None and self.base_fallida is not None:
+        en_curso = self.hilo_base is not None and self.hilo_base.is_alive()
+        if self.corte is not None and self.base_fallida is not None and not en_curso:
+            # Con una copia base en curso (el reintento, o la urgente de un corte nuevo), la falla
+            # anterior no cuenta; si se cuelga, la cubre `DURACION_MAXIMA_COPIA_BASE`.
             salud.append(f"cadena cortada y la copia base falla: {self.base_fallida}")
         if self.corte_desde is not None and ahora - self.corte_desde > DURACION_MAXIMA_COPIA_BASE:
             salud.append(f"cadena cortada desde {self.corte_desde:%Y-%m-%d %H:%M} UTC")
@@ -1114,9 +1117,14 @@ class CopiaContinua:
         try:
             resumen = copia_base(self.cfg, ahora)
         except Exception as e:
-            self.error_base = self.base_fallida = f"{type(e).__name__}: {e}"
+            self.base_fallida = f"{type(e).__name__}: {e}"
+            with self.cerrojo:
+                # Si hubo un corte nuevo mientras copiaba, su copia base tiene que ser urgente:
+                # esta falla no lo frena (no pisa el `error_base = None` de `cortar`).
+                if self.cortes == cortes:
+                    self.error_base = self.base_fallida
             log.exception("la copia base falló; no cuenta")
-            self.avisar_base("down", f"copia base fallida: {self.error_base}")
+            self.avisar_base("down", f"copia base fallida: {self.base_fallida}")
             return
         self.ultima_base = resumen
         self.base_fallida = None
