@@ -633,33 +633,78 @@ def sin_documentos(motor_migrate, motor_app):
     return _edificio(motor_migrate, motor_app, con_documentos=False)
 
 
+REGISTRAR = (
+    "select * from nucleo.registrar_exportacion(:c, 'Nota 1', 'Estudio', '30712345671',"
+    " :p, :h, 'Acta 1')"
+)
+
+
+def pedido(e, solicitante=None, cons=None) -> object:
+    """Una constancia registrada por `registrar_exportacion`, como el rol desde la base."""
+    cons = cons or e["cons"]
+    return _como_soporte(cons, REGISTRAR, {"c": cons, "p": solicitante or e["mc"],
+                                           "h": e["hoy"]}).one()  # fmt: skip
+
+
 @pytest.mark.parametrize("funcion", FUNCIONES)
-def test_cada_funcion_exige_el_rol_y_el_consorcio_del_contexto(sin_documentos, motor_migrate,
-                                                               motor_app, funcion):  # fmt: skip
+def test_cada_funcion_exige_el_rol_el_consorcio_y_una_exportacion_sin_armar(
+    sin_documentos, motor_migrate, motor_app, funcion
+):
+    """Con la URL del rol no alcanza para leer un consorcio desde la base: cada función exige una
+    constancia del consorcio del contexto, registrada (con la capacidad comprobada) y todavía sin
+    armar."""
     e = sin_documentos
-    llamada = f"select * from nucleo.{funcion}(:c)"
+    otro = _edificio(motor_migrate, motor_app, con_documentos=False)
+    llamada = f"select * from nucleo.{funcion}(:c, :e)"
+    propio = pedido(e).id
     with (
         pytest.raises(DBAPIError) as error,
         transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c,
     ):
-        c.execute(text(llamada), {"c": e["cons"]})
+        c.execute(text(llamada), {"c": e["cons"], "e": propio})
     assert error.value.orig.sqlstate == "42501"  # cem_app, aun con el contexto correcto
-    otro = consorcio_con_persona(motor_migrate)[0]
-    for contexto in (None, otro):
+    for contexto in (None, otro["cons"]):
         with pytest.raises(DBAPIError) as error:
-            _como_soporte(contexto, llamada, {"c": e["cons"]})
+            _como_soporte(contexto, llamada, {"c": e["cons"], "e": propio})
         assert error.value.orig.sqlstate == "42501", contexto
-    # Control: con el contexto correcto, responde.
-    _como_soporte(e["cons"], llamada, {"c": e["cons"]}).all()
+    armado = pedido(e).id
+    with motor_migrate.begin() as c:
+        c.execute(text("update plataforma.exportacion set armada_en = now(),"
+                       " paquete_sha256 = repeat('0', 64), paquete_tamano = 1,"
+                       " cantidades = '{}' where id = :e"), {"e": armado})  # fmt: skip
+    casos = {"sin exportación": None, "una que no existe": uuid4(),
+             "la de otro consorcio": pedido(otro).id, "una ya armada": armado}  # fmt: skip
+    for caso, sin in casos.items():
+        with pytest.raises(DBAPIError) as error:
+            _como_soporte(e["cons"], llamada, {"c": e["cons"], "e": sin})
+        assert error.value.orig.sqlstate == "42501", caso
+    # Control: con la recién registrada, responde.
+    _como_soporte(e["cons"], llamada, {"c": e["cons"], "e": propio}).all()
 
 
 def test_con_el_contexto_correcto_el_padron_vuelve_con_nombres(sin_documentos):
     e = sin_documentos
-    filas = _como_soporte(e["cons"], "select entidad, fila from nucleo.exportar_padron(:c)",
-                          {"c": e["cons"]}).all()  # fmt: skip
+    filas = _como_soporte(e["cons"], "select entidad, fila from nucleo.exportar_padron(:c, :e)",
+                          {"c": e["cons"], "e": pedido(e).id}).all()  # fmt: skip
     nombres = {f.fila["nombre"] for f in filas if f.entidad == "vinculo"}
     assert {"Ana Exportada", "Marta Consejera"} <= nombres
     assert {f.entidad for f in filas} == {"consorcio", "unidad", "vinculo"}
+
+
+def test_registrar_exportacion_fija_la_capacidad_adentro(sin_documentos, motor_migrate):
+    """Quien llama no elige las facultades ni los tipos: un solicitante sin la capacidad no deja
+    constancia. Control: el Consejo con el paquete completo sí, con las cinco verificadas."""
+    e = sin_documentos
+    for quien in ("prop", "mc_padron", "mc_acotado"):
+        with pytest.raises(DBAPIError) as error:
+            pedido(e, e[quien])
+        assert error.value.orig.diag.message_hint == "sin_capacidad", quien
+    assert constancias(motor_migrate, e["cons"]) == []
+    fila = pedido(e)
+    assert fila.mandato_id == e["m_mc"]
+    [constancia] = constancias(motor_migrate, e["cons"])
+    assert constancia["facultades_verificadas"] == FACULTADES
+    assert constancia["armada_en"] is None and constancia["entregada_en"] is None
 
 
 @pytest.mark.parametrize(
@@ -672,6 +717,12 @@ def test_con_el_contexto_correcto_el_padron_vuelve_con_nombres(sin_documentos):
         "select count(*) from auditoria.eventos",
         "select count(*) from nucleo.sesion",
         "delete from plataforma.exportacion",
+        "insert into plataforma.exportacion (consorcio_id, solicitud_referencia,"
+        " destinatario_nombre, destinatario_documento, solicitante, mandato_id,"
+        " facultades_verificadas, fecha_pedido, respaldo_referencia, armada_en, paquete_sha256,"
+        " paquete_tamano, cantidades) select consorcio_id, 'r', 'd', '1', solicitante, mandato_id,"
+        " facultades_verificadas, fecha_pedido, 'r', now(), repeat('0', 64), 1, '{}'"
+        " from plataforma.exportacion",
         "insert into auditoria.eventos (consorcio_id, origen, accion, entidad, hash_previo, hash)"
         " values (gen_random_uuid(), 'soporte', 'x', 'x', '', '')",
     ],
@@ -725,10 +776,18 @@ def test_de_las_funciones_security_definer_el_rol_ejecuta_solo_las_suyas(motor_m
         de_documentos = set(c.execute(text(consulta),
                                       {"rol": "cem_soporte_documentos"}).scalars())  # fmt: skip
     assert len(de_app) > 10  # control: la búsqueda encuentra las de cem_app
-    assert del_rol == {f"nucleo.{f}(uuid)" for f in FUNCIONES} | {
-        "nucleo.capacidad_para_exportar(uuid,uuid,text[],date)"}  # fmt: skip
+    assert del_rol == {f"nucleo.{f}(uuid,uuid)" for f in FUNCIONES} | {
+        "nucleo.registrar_exportacion(uuid,text,text,text,uuid,date,text)"}  # fmt: skip
     assert not del_rol & de_app
     assert de_documentos == {"nucleo.capacidad_del_solicitante(uuid,uuid,text[],date)"}
+    # La capacidad interna no la ejecuta nadie más que su dueño.
+    with motor_migrate.connect() as c:
+        quienes = c.execute(
+            text("select r.rolname from pg_roles r where r.rolname like 'cem\\_%' and"
+                 " has_function_privilege(r.oid,"
+                 " 'nucleo.capacidad_para_exportar(uuid,uuid,date)', 'execute')"),
+        ).scalars().all()  # fmt: skip
+    assert set(quienes) == {"cem_migrate"}
 
 
 def test_crear_roles_sin_la_clave_nueva_no_crea_el_rol_y_lo_dice():
@@ -861,35 +920,36 @@ def test_un_administrador_externo_con_las_cinco_se_niega(con_externo, con_url, c
 def test_la_capacidad_para_exportar_solo_cuenta_administracion_o_consejo(con_externo, motor_app,
                                                                         motor_migrate):  # fmt: skip
     """Control de que el caso está bien sembrado: la capacidad de 0037, que no mira el tipo,
-    sí encuentra el mandato del administrador externo (tiene las cinco, generales); la de 0038
-    no. Y la de 0038 sí encuentra al Consejo y, en otro consorcio, a la administración."""
+    sí encuentra el mandato del administrador externo (tiene las cinco, generales);
+    `registrar_exportacion` lo niega. Y sí registra al Consejo y, en otro consorcio, a la
+    administración."""
     e = con_externo
-    datos = {"c": e["cons"], "f": FACULTADES, "h": e["hoy"]}
-    nueva = "select nucleo.capacidad_para_exportar(:c, :p, :f, :h)"
-    assert _como_soporte(e["cons"], nueva, datos | {"p": e["ad"]}).scalar_one() is None
+    with pytest.raises(DBAPIError) as error:
+        pedido(e, e["ad"])
+    assert error.value.orig.diag.message_hint == "sin_capacidad"
     motor = create_engine(url_rol("soporte_documentos"))
     try:
         with transaccion(motor, persona_id=None, consorcio_id=e["cons"]) as c:
             de_0037 = c.execute(
                 text("select nucleo.capacidad_del_solicitante(:c, :p, :f, :h)"),
-                datos | {"p": e["ad"]},
+                {"c": e["cons"], "p": e["ad"], "f": FACULTADES, "h": e["hoy"]},
             ).scalar_one()
     finally:
         motor.dispose()
     assert de_0037 == e["m_ad"]
-    assert _como_soporte(e["cons"], nueva, datos | {"p": e["mc"]}).scalar_one() == e["m_mc"]
+    assert pedido(e).mandato_id == e["m_mc"]
     o = _edificio(motor_migrate, motor_app, con_documentos=False)
-    datos_o = {"c": o["cons"], "f": FACULTADES, "h": o["hoy"], "p": o["ad"]}
-    assert _como_soporte(o["cons"], nueva, datos_o).scalar_one() == o["m_ad"]
-    # Exige el consorcio del contexto, como las funciones de exportación, y cem_app no la ejecuta.
+    assert pedido(o, o["ad"]).mandato_id == o["m_ad"]
+    # Exige el consorcio del contexto, y cem_app no la ejecuta.
+    datos = {"c": e["cons"], "p": e["mc"], "h": e["hoy"]}
     with pytest.raises(DBAPIError) as error:
-        _como_soporte(None, nueva, datos | {"p": e["mc"]})
+        _como_soporte(None, REGISTRAR, datos)
     assert error.value.orig.sqlstate == "42501"
     with (
         pytest.raises(DBAPIError) as error,
         transaccion(motor_app, persona_id=e["mc"], consorcio_id=e["cons"]) as c,
     ):
-        c.execute(text(nueva), datos | {"p": e["mc"]})
+        c.execute(text(REGISTRAR), datos)
     assert error.value.orig.sqlstate == "42501"
 
 

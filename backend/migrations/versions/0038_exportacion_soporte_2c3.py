@@ -22,20 +22,26 @@ las decisiones del propietario del 25-10-2026.
   del objeto), para que el script lo lea con la clave de análisis. Es información de
   infraestructura: el script la usa y **no la escribe en el paquete**.
 - Cada función exige que el consorcio pedido sea el del contexto (`plataforma.consorcio_actual()`,
-  `42501` si no), tiene `search_path` fijo, `revoke execute … from public` y se concede **solo**
-  a `cem_soporte_exportacion`, nunca a `cem_app`.
-- **`nucleo.capacidad_para_exportar(consorcio, persona, facultades, fecha)`:** como
-  `capacidad_del_solicitante` (`0037`), pero solo cuenta un mandato **de administración o de
-  Consejo** (`administrador` o `miembro_consejo`; nunca `administrador_externo`, aunque tenga las
-  facultades), que es lo que pide §5. Devuelve solo el identificador del mandato, o null. La de
-  `0037` no cambia y este rol no la ejecuta.
+  `42501` si no) **y una exportación de ese consorcio registrada y todavía sin armar** (`42501`
+  si no): así la capacidad no se puede saltear llamando a las funciones desde la base, y toda
+  lectura queda detrás de una constancia. Tienen `search_path` fijo, `revoke execute … from
+  public` y se conceden **solo** a `cem_soporte_exportacion`, nunca a `cem_app`.
+- **`nucleo.registrar_exportacion(...)`:** la única forma de crear la constancia. Fija adentro
+  las cinco facultades de lectura y los tipos de mandato (no los recibe de quien llama),
+  comprueba la capacidad con `nucleo.capacidad_para_exportar` y recién entonces inserta la fila.
+- **`nucleo.capacidad_para_exportar(consorcio, persona, fecha)`:** como
+  `capacidad_del_solicitante` (`0037`), con las cinco facultades fijas y solo un mandato **de
+  administración o de Consejo** (`administrador` o `miembro_consejo`; nunca
+  `administrador_externo`, aunque tenga las facultades), que es lo que pide §5. Es interna: solo
+  la llama `registrar_exportacion`, y nadie más la ejecuta. La de `0037` no cambia.
 - **`plataforma.exportacion`:** la constancia operativa (no la auditoría funcional, §1.1): el
   consorcio, la referencia de la solicitud, el destinatario (nombre y CUIT o documento), quién la
   pidió, el mandato con el que ese día tenía la capacidad y las facultades verificadas, la fecha
   del pedido, la referencia del respaldo, y, al armarla, la fecha, el SHA-256 y el tamaño del
   paquete cifrado y la cantidad por parte; después, la fecha de entrega. RLS forzada por
-  `consorcio_actual()`; `cem_app` no tiene ningún permiso. El rol tiene `INSERT`, `SELECT` y
-  `UPDATE` solo de las columnas del armado y de la entrega, y un disparador no deja cambiar el
+  `consorcio_actual()`; `cem_app` no tiene ningún permiso. El rol tiene `SELECT` y `UPDATE` solo
+  de las columnas del armado y de la entrega (sin `INSERT`: la fila la crea
+  `registrar_exportacion`), y un disparador no deja cambiar el
   armado ni la entrega una vez registrados. La política no nombra rol: la copia diaria se
   verifica restaurando sin roles (`pg_restore --no-acl`).
 
@@ -55,12 +61,29 @@ depends_on = None
 
 ROL = "cem_soporte_exportacion"
 COLUMNAS_ARMADO = ("armada_en", "paquete_sha256", "paquete_tamano", "cantidades")
+FACULTADES = ("padron.ver", "documentos.ver", "auditoria.ver", "mandatos.ver", "decisiones.ver")
+"""Las facultades de lectura del contenido, todas generales (H2c §5)."""
+TIPOS = ("administrador", "miembro_consejo")
+"""Los mandatos de administración o de Consejo (§5); nunca `administrador_externo`."""
 
 EXIGIR_CONSORCIO = """\
     if c is null or c is distinct from plataforma.consorcio_actual() then
       raise exception 'el consorcio no es el del contexto' using errcode = '42501';
     end if;
 """
+EXIGIR_PEDIDO = """\
+    if pedido is null or not exists (
+         select 1 from plataforma.exportacion x
+          where x.id = pedido and x.consorcio_id = c and x.armada_en is null) then
+      raise exception 'sin una exportación registrada y sin armar en este consorcio'
+        using errcode = '42501';
+    end if;
+"""
+
+
+def _lista(valores: tuple[str, ...]) -> str:
+    return ", ".join(f"'{v}'" for v in valores)
+
 
 # El nombre que muestra el padrón (`0025`): el importado pendiente, con el de la planilla.
 NOMBRE_EN_EL_PADRON = """\
@@ -289,7 +312,7 @@ FUNCIONES: dict[str, str] = {
 
 def _funcion(nombre: str, cuerpo: str) -> str:
     return f"""
-create function nucleo.{nombre}(c uuid)
+create function nucleo.{nombre}(c uuid, pedido uuid)
   returns table (entidad text, fila jsonb)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
@@ -297,10 +320,10 @@ create function nucleo.{nombre}(c uuid)
   declare
     hoy date;
   begin
-{EXIGIR_CONSORCIO}{cuerpo}  end
+{EXIGIR_CONSORCIO}{EXIGIR_PEDIDO}{cuerpo}  end
   $$;
-revoke all on function nucleo.{nombre}(uuid) from public;
-grant execute on function nucleo.{nombre}(uuid) to {ROL};
+revoke all on function nucleo.{nombre}(uuid, uuid) from public;
+grant execute on function nucleo.{nombre}(uuid, uuid) to {ROL};
 """
 
 
@@ -368,54 +391,79 @@ create trigger exportacion_constancia_fija before update on plataforma.exportaci
 grant usage on schema nucleo, plataforma to {ROL};
 grant execute on function plataforma.consorcio_actual() to {ROL};
 grant execute on function plataforma.uuid_v7() to {ROL};
-grant select, insert on plataforma.exportacion to {ROL};
+grant select on plataforma.exportacion to {ROL};
 grant update ({", ".join(COLUMNAS_ARMADO)}, entregada_en) on plataforma.exportacion to {ROL};
 
--- §5: «un mandato vigente de administración o de Consejo» con todas las facultades pedidas, cada
--- una general. La misma consulta que `capacidad_del_solicitante` (0037), acotada a esos tipos.
-create function nucleo.capacidad_para_exportar(c uuid, persona uuid, facultades text[],
-                                               fecha date)
+-- §5: «un mandato vigente de administración o de Consejo» con las cinco facultades de lectura,
+-- cada una general. La misma consulta que `capacidad_del_solicitante` (0037), con las facultades
+-- y los tipos fijos. Interna: solo la llama `registrar_exportacion` (como su dueño).
+create function nucleo.capacidad_para_exportar(c uuid, persona uuid, fecha date)
   returns uuid
-  language plpgsql stable security definer
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select x.id from nucleo.mandato x
+     where x.consorcio_id = c and x.persona_id = persona
+       and x.tipo in ({_lista(TIPOS)})
+       and nucleo.mandato_vigente(x.id, fecha)
+       and (select count(distinct f.facultad) from nucleo.facultad_otorgada f
+             where f.consorcio_id = c and f.mandato_id = x.id and f.recurso is null
+               and f.facultad in ({_lista(FACULTADES)})) = {len(FACULTADES)}
+     order by x.id
+     limit 1
+  $$;
+revoke all on function nucleo.capacidad_para_exportar(uuid, uuid, date) from public;
+
+-- La única forma de crear una constancia: comprueba la capacidad con las facultades y los tipos
+-- fijos y recién entonces inserta. El rol no tiene `INSERT` sobre la tabla.
+create function nucleo.registrar_exportacion(c uuid, solicitud text, destinatario_nombre text,
+                                             destinatario_documento text, solicitante uuid,
+                                             fecha date, respaldo text)
+  returns table (id uuid, mandato_id uuid, creada_en timestamptz)
+  language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
   declare
     m uuid;
   begin
-{EXIGIR_CONSORCIO}    if persona is null or fecha is null
-       or coalesce(cardinality(facultades), 0) = 0 then
-      raise exception 'faltan la persona, la fecha o las facultades'
+{EXIGIR_CONSORCIO}    if solicitante is null or fecha is null then
+      raise exception 'faltan quien la pidió o la fecha del pedido'
         using errcode = 'P0001', hint = 'pedido_incompleto';
     end if;
     if fecha > nucleo.hoy_del_consorcio(c) then
       raise exception 'la fecha del pedido es posterior a hoy en el consorcio'
         using errcode = 'P0001', hint = 'fecha_futura';
     end if;
-    select x.id into m from nucleo.mandato x
-     where x.consorcio_id = c and x.persona_id = persona
-       and x.tipo in ('administrador', 'miembro_consejo')
-       and nucleo.mandato_vigente(x.id, fecha)
-       and (select count(distinct f.facultad) from nucleo.facultad_otorgada f
-             where f.consorcio_id = c and f.mandato_id = x.id and f.recurso is null
-               and f.facultad = any(facultades)) = cardinality(array(
-                 select distinct unnest(facultades)))
-     order by x.id
-     limit 1;
-    return m;
+    m := nucleo.capacidad_para_exportar(c, solicitante, fecha);
+    if m is null then
+      raise exception 'quien la pidió no tenía ese día un mandato vigente de administración o de'
+                      ' Consejo con las cinco facultades de lectura generales'
+        using errcode = 'P0001', hint = 'sin_capacidad';
+    end if;
+    return query
+      insert into plataforma.exportacion as x (consorcio_id, solicitud_referencia,
+                                               destinatario_nombre, destinatario_documento,
+                                               solicitante, mandato_id, facultades_verificadas,
+                                               fecha_pedido, respaldo_referencia)
+      values (c, btrim(solicitud), btrim(destinatario_nombre), btrim(destinatario_documento),
+              solicitante, m, array[{_lista(FACULTADES)}], fecha, btrim(respaldo))
+      returning x.id, x.mandato_id, x.creada_en;
   end
   $$;
-revoke all on function nucleo.capacidad_para_exportar(uuid, uuid, text[], date) from public;
-grant execute on function nucleo.capacidad_para_exportar(uuid, uuid, text[], date) to {ROL};
+revoke all on function nucleo.registrar_exportacion(uuid, text, text, text, uuid, date, text)
+  from public;
+grant execute on function nucleo.registrar_exportacion(uuid, text, text, text, uuid, date, text)
+  to {ROL};
 {"".join(_funcion(n, c) for n, c in FUNCIONES.items())}
 -- Dónde leer cada binario `disponible`: solo para el script, que no lo escribe en el paquete.
-create function nucleo.exportar_objetos_documentos(c uuid)
+create function nucleo.exportar_objetos_documentos(c uuid, pedido uuid)
   returns table (version_id uuid, documento_id uuid, tipo text, tamano integer, sha256 text,
                  clave_objeto text, version_objeto text)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
   begin
-{EXIGIR_CONSORCIO}    return query
+{EXIGIR_CONSORCIO}{EXIGIR_PEDIDO}    return query
       select v.id, v.documento_id, v.tipo, v.tamano, v.sha256, v.clave_objeto, v.version_objeto
         from nucleo.version_documento v
         join nucleo.documento d on d.consorcio_id = v.consorcio_id and d.id = v.documento_id
@@ -423,8 +471,8 @@ create function nucleo.exportar_objetos_documentos(c uuid)
        order by v.documento_id, v.subida_en, v.id;
   end
   $$;
-revoke all on function nucleo.exportar_objetos_documentos(uuid) from public;
-grant execute on function nucleo.exportar_objetos_documentos(uuid) to {ROL};
+revoke all on function nucleo.exportar_objetos_documentos(uuid, uuid) from public;
+grant execute on function nucleo.exportar_objetos_documentos(uuid, uuid) to {ROL};
 """
 
 DOWNGRADE = f"""
@@ -437,9 +485,10 @@ begin
   end if;
 end
 $guarda$;
-drop function nucleo.exportar_objetos_documentos(uuid);
-{"".join(f"drop function nucleo.{n}(uuid);{chr(10)}" for n in FUNCIONES)}
-drop function nucleo.capacidad_para_exportar(uuid, uuid, text[], date);
+drop function nucleo.exportar_objetos_documentos(uuid, uuid);
+{"".join(f"drop function nucleo.{n}(uuid, uuid);{chr(10)}" for n in FUNCIONES)}
+drop function nucleo.registrar_exportacion(uuid, text, text, text, uuid, date, text);
+drop function nucleo.capacidad_para_exportar(uuid, uuid, date);
 drop table plataforma.exportacion;
 drop function plataforma.exportacion_constancia_fija();
 revoke execute on function plataforma.uuid_v7() from {ROL};

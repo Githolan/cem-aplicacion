@@ -10,10 +10,12 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
 - **Exige** la referencia de la solicitud, el destinatario concreto (nombre y CUIT o documento),
   quién la pidió, el día del pedido, la referencia del respaldo (el acta o el contrato que
   sostiene el pedido) y la clave pública `age` del destinatario.
-- **Comprueba la capacidad:** quien la pidió tenía ese día un mandato vigente de administración
-  o de Consejo con las cinco facultades de lectura del contenido, cada una general
-  (`nucleo.capacidad_para_exportar`). Si falta cualquiera, alguna está acotada a un recurso o el
-  mandato es de otro tipo (un administrador externo), se niega sin escribir nada.
+- **Comprueba la capacidad en la base:** `nucleo.registrar_exportacion` exige que quien la pidió
+  tuviera ese día un mandato vigente de administración o de Consejo con las cinco facultades de
+  lectura del contenido, cada una general, y recién entonces crea la constancia. Si falta
+  cualquiera, alguna está acotada a un recurso o el mandato es de otro tipo (un administrador
+  externo), se niega sin escribir nada. Las funciones de exportación solo responden para esa
+  constancia, todavía sin armar.
 - **Arma el paquete en tramos directo a `age`:** un ZIP con un JSON por entidad (de las funciones
   de exportación de `0038`), los binarios `disponible` y un `manifiesto.json` con el SHA-256 de
   cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en claro en
@@ -153,11 +155,13 @@ def _json_en_tramos(filas, cantidad: list[int]):
     yield b"\n]\n"
 
 
-def _parte(conn: Connection, paquete: _Paquete, consorcio: UUID, parte: str) -> dict[str, int]:
+def _parte(
+    conn: Connection, paquete: _Paquete, consorcio: UUID, pedido: UUID, parte: str
+) -> dict[str, int]:
     """Escribe un archivo por entidad de la parte, en el orden que las devuelve la función."""
     resultado = conn.execute(
-        text(f"select entidad, fila from nucleo.exportar_{parte}(:c)"),
-        {"c": consorcio},
+        text(f"select entidad, fila from nucleo.exportar_{parte}(:c, :e)"),
+        {"c": consorcio, "e": pedido},
         execution_options={"yield_per": FILAS_POR_TRAMO},
     )
     filas = iter(resultado)
@@ -184,9 +188,12 @@ def _parte(conn: Connection, paquete: _Paquete, consorcio: UUID, parte: str) -> 
     return cantidades
 
 
-def _binarios(conn: Connection, paquete: _Paquete, consorcio: UUID, versiones: int) -> int:
+def _binarios(
+    conn: Connection, paquete: _Paquete, consorcio: UUID, pedido: UUID, versiones: int
+) -> int:
     objetos = conn.execute(
-        text("select * from nucleo.exportar_objetos_documentos(:c)"), {"c": consorcio}
+        text("select * from nucleo.exportar_objetos_documentos(:c, :e)"),
+        {"c": consorcio, "e": pedido},
     ).mappings().all()  # fmt: skip
     if len(objetos) != versiones:
         raise RuntimeError(f"{len(objetos)} objetos para {versiones} versiones disponibles")
@@ -247,8 +254,10 @@ def _cifrar(conn: Connection, a: argparse.Namespace, fila, salida, cantidades: d
     paquete = _Paquete(tubo)
     try:
         for parte in PARTES:
-            cantidades |= _parte(conn, paquete, a.consorcio, parte)
-        cantidades["archivos"] = _binarios(conn, paquete, a.consorcio, cantidades["version"])
+            cantidades |= _parte(conn, paquete, a.consorcio, fila.id, parte)
+        cantidades["archivos"] = _binarios(
+            conn, paquete, a.consorcio, fila.id, cantidades["version"]
+        )
         manifiesto = {
             "exportacion": str(fila.id),
             "consorcio": str(a.consorcio),
@@ -273,6 +282,24 @@ def _cifrar(conn: Connection, a: argparse.Namespace, fila, salida, cantidades: d
         raise RuntimeError(f"age terminó con {age.returncode}: {error.decode()}")
 
 
+def _registrar(conn: Connection, a: argparse.Namespace):
+    """La constancia, por `nucleo.registrar_exportacion`, que comprueba la capacidad."""
+    try:
+        return conn.execute(
+            text("select * from nucleo.registrar_exportacion(:c, :sol, :dn, :dd, :p, :fp, :r)"),
+            {"c": a.consorcio, "sol": a.referencia_solicitud, "dn": a.destinatario_nombre,
+             "dd": a.destinatario_documento, "p": a.solicitante, "fp": a.fecha_pedido,
+             "r": a.referencia_respaldo},
+        ).one()  # fmt: skip
+    except DBAPIError as e:
+        if e.orig.diag.message_hint == "sin_capacidad":
+            raise Negado(
+                "quien la pidió no tenía ese día un mandato vigente de administración o de"
+                " Consejo con " + ", ".join(FACULTADES) + " generales"
+            ) from e
+        raise
+
+
 def armar(motor, a: argparse.Namespace) -> dict:
     """Todo en una transacción de lectura repetible: el paquete sale de una sola foto de la base,
     y si algo falla no queda la fila ni el archivo."""
@@ -283,29 +310,8 @@ def armar(motor, a: argparse.Namespace) -> dict:
     repetible = motor.execution_options(isolation_level="REPEATABLE READ")
     with transaccion(repetible, persona_id=None, consorcio_id=a.consorcio) as conn:
         _rol(conn)
-        mandato = conn.execute(
-            text("select nucleo.capacidad_para_exportar(:c, :p, :f, :fecha)"),
-            {"c": a.consorcio, "p": a.solicitante, "f": list(FACULTADES),
-             "fecha": a.fecha_pedido},
-        ).scalar_one()  # fmt: skip
-        if mandato is None:
-            raise Negado(
-                "quien la pidió no tenía ese día un mandato vigente de administración o de"
-                " Consejo con "
-                + ", ".join(FACULTADES) + " generales"
-            )  # fmt: skip
-        fila = conn.execute(
-            text(
-                "insert into plataforma.exportacion (consorcio_id, solicitud_referencia,"
-                " destinatario_nombre, destinatario_documento, solicitante, mandato_id,"
-                " facultades_verificadas, fecha_pedido, respaldo_referencia) values"
-                " (:c, btrim(:sol), btrim(:dn), btrim(:dd), :p, :m, :f, :fp, btrim(:r))"
-                " returning id, creada_en"
-            ),
-            {"c": a.consorcio, "sol": a.referencia_solicitud, "dn": a.destinatario_nombre,
-             "dd": a.destinatario_documento, "p": a.solicitante, "m": mandato,
-             "f": list(FACULTADES), "fp": a.fecha_pedido, "r": a.referencia_respaldo},
-        ).one()  # fmt: skip
+        fila = _registrar(conn, a)
+        mandato = fila.mandato_id
         cantidades: dict[str, int] = {}
         try:
             with a.salida.open("xb") as salida:
