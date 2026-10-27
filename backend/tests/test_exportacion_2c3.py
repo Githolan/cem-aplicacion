@@ -14,7 +14,7 @@ import os
 import subprocess
 import zipfile
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -378,7 +378,6 @@ def _lo_que_nunca_va_buscado(motor_migrate, e) -> dict[str, list[str]]:
         "hashes de la cadena": hashes,
         "hash de la contraseña": [HASH_CONTRASENA.lower()],
         "token de la sesión": [e["token"]],
-        "negaciones": ["autorizacion.denegada"],
         "referencia del consentimiento": [CONSENTIMIENTO.lower()],
         "claves de los objetos": objetos,
         "antivirus": ["clamav"],
@@ -442,6 +441,37 @@ def test_ningun_identificador_de_persona_va_en_el_paquete(edificio, con_url, cla
     # Control: la misma búsqueda, en las filas de la base que los nombran, los encuentra todos.
     base = " ".join(f.x for f in filas)
     assert {p for p in personas if p in base} == personas
+
+
+def test_la_auditoria_lleva_exactamente_los_eventos_proyectados(
+    edificio, con_url, claves, tmp_path, motor_migrate
+):
+    """El paquete muestra el texto de la acción, no su código: buscar `autorizacion.denegada` en
+    él no puede fallar. Esto sí: los eventos del paquete son, uno por uno y en orden, los de la
+    base con una acción de la proyección y que no son de soporte; la negación sembrada y los
+    eventos de soporte quedan afuera."""
+    e = edificio
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 0
+    del_paquete = [(datetime.fromisoformat(ev["fecha"]), ev["accion"])
+                   for ev in entidades(descifrar(salida, claves["privada"]))["evento"]]  # fmt: skip
+    with motor_migrate.connect() as c:
+        proyectados = [tuple(f) for f in c.execute(
+            text("select e.creado_en, p.texto from auditoria.eventos e"
+                 " join auditoria.proyeccion p on p.accion = e.accion"
+                 " where e.consorcio_id = :c and e.origen <> 'soporte'"
+                 " order by e.creado_en, e.secuencia"), {"c": e["cons"]},
+        )]  # fmt: skip
+        por_tipo = dict(c.execute(
+            text("select case when e.accion = 'autorizacion.denegada' then 'negacion'"
+                 " when e.origen = 'soporte' then 'soporte' else 'otro' end, count(*)"
+                 " from auditoria.eventos e where e.consorcio_id = :c group by 1"),
+            {"c": e["cons"]},
+        ).all())  # fmt: skip
+    # Control: hay qué dejar afuera (la negación de la propietaria y lo que cargó el equipo).
+    assert por_tipo["negacion"] >= 1 and por_tipo["soporte"] >= 1
+    assert len(proyectados) < sum(por_tipo.values())
+    assert del_paquete == proyectados
 
 
 def test_las_versiones_en_cuarentena_o_rechazadas_no_van(edificio, con_url, claves, tmp_path):
