@@ -121,13 +121,14 @@ Medido en el despliegue de `168f77a` (26-10-2026: staging de 23:53 a 23:56 UTC y
 - **Staging:** smoke `11bdc43c` con 39 controles, 10 de ellos de 2c-2 por HTTP a través de nginx:
   - la lista muestra la versión limpia `disponible` y la del EICAR `rechazado` a quien las subió;
   - una propietaria nueva no ve la categoría restringida y su descarga da 404 auditado; el Consejo sí la ve;
-  - la descarga da 302 a una URL firmada de OCI por 300 s, con `no-store`, el archivo de 20 MB coincide con su SHA-256 y OCI respeta el `Content-Disposition` firmado (control: sin la firma, 404);
+  - la descarga da 302 a una URL firmada de OCI por 300 s (control: sin la firma, 404), con `no-store`; el archivo de 20 MB coincide con su SHA-256 y OCI respeta el `Content-Disposition` firmado;
+  - la versión rechazada da 409 `version_no_disponible`;
   - el Consejo carga un acta (201) y no un seguro (403).
   - El script de soporte, corrido en `cem-trabajos-staging` mientras el smoke esperaba: niega al Consejo, y con la administración cambia la categoría y borra; el acta conserva la fila y su versión, y tiene 0 eventos de soporte. La cadena de auditoría tiene 1432 eventos y 0 rotos.
 - **Producción:**
   - el primer intento falló al bajar la imagen de `cem-planificador` (`unable to lease content`, transitorio de Docker); el reintento con la misma SHA quedó en verde;
   - 0 documentos; el script de soporte conecta con su rol (llega a «el documento no existe»); `/documentos` responde 200 y la API sin sesión da 401;
-  - Kuma: el monitor de `cem-backend` dio 502/503 entre las 00:01 y las 00:04 UTC, durante los redespliegues, y volvió a verde a las 00:05.
+  - Kuma: el monitor 10 (`cem-backend`) dio 502, 503 y un *timeout* entre las 00:01 y las 00:04 UTC, desde el redespliegue de `cem-backend` del reintento, y volvió a verde a las 00:05.
 - **SIN VERIFICAR:** una carga, una descarga y un pedido de soporte reales en producción (validados en staging con la misma imagen); la alerta de Kuma de ese corte.
 
 Antes, **`2ea0aca`** (26-10-2026: staging de 15:53 a 15:56 UTC y producción de 19:03 a 19:06 UTC), base `0035`, contrato 0.25.0.
@@ -146,9 +147,9 @@ Antes, **`2ea0aca`** (26-10-2026: staging de 15:53 a 15:56 UTC y producción de 
   - Aparte del smoke, en la validación del despliegue: 22 MB los corta nginx (su registro) y nginx no escribe cuerpos a disco (`/tmp/client_temp` vacío).
 - **Producción:**
   - `documentos.limpiar_huerfanos` corre con la clave de análisis;
-  - `vigilar_cuarentena` detectó firmas viejas en su resultado de las 19:05 y las 19:10 UTC, mientras `clamd` tenía las de la imagen, y ya no a las 19:15, después de la recarga de las 19:13. No fue un aviso: a Kuma no llegó nada, porque falta el monitor;
+  - `vigilar_cuarentena` detectó firmas viejas en su resultado de las 19:05 y las 19:10 UTC, mientras `clamd` tenía las de la imagen, y ya no a las 19:15, después de la recarga de las 19:13. No fue un aviso: a Kuma no llegó nada, porque el monitor todavía no existía (se creó de 19:58 a 20:05 UTC, CEM #97);
   - 0 documentos.
-- **SIN VERIFICAR:** una carga real en producción (no hay pantalla hasta 2c-2), y el aviso a Kuma del análisis (falta el monitor push, `CEM_DOCUMENTOS_AVISO_URL`).
+- **SIN VERIFICAR:** una carga real en producción (no hay pantalla hasta 2c-2), y el aviso a Kuma del análisis (el monitor push y `CEM_DOCUMENTOS_AVISO_URL` se crearon después, de 19:58 a 20:05 UTC, con su primer latido en verde: CEM #97).
 
 Antes, **`bfab68b`**, base `0034`:
 
@@ -629,7 +630,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - La tarea `documentos.vigilar_cuarentena`, cada 5 minutos, avisa a Kuma las versiones demoradas y las firmas viejas.
      - El borrado de un rechazado es su propio trabajo (`documentos.borrar_rechazado`), encolado con el rechazo: si se pierde la reserva o falla el commit, no queda ni el rechazo ni el borrado. `documentos.limpiar_huerfanos`, cada día a las 04:45 UTC, borra con la clave de análisis los objetos de `cem/` de más de un día sin fila: los de una carga que subió y no confirmó. Es un borrado simple (con versiones, la versión queda 35 días y se recupera si la base estaba atrasada), y con más de 20 huérfanos falla sin borrar nada. Los dos se reintentan solos (Codex en #127).
      - nginx: la ruta de carga con `client_max_body_size 21m` y sin búfer de pedido. Contrato 0.25.0.
-   - **Para desplegar (hecho el 26-10, salvo el monitor de Kuma):**
+   - **Para desplegar (hecho el 26-10; el monitor de Kuma, de 19:58 a 20:05 UTC, CEM #97):**
      - `cem-antivirus-staging` y `cem-antivirus` en Coolify;
      - en `cem-backend`, `CEM_DOCUMENTOS_S3_ENDPOINT`/`_REGION`; en `cem-trabajos`, `CEM_DOCUMENTOS_ANALISIS_S3_ENDPOINT`/`_REGION`; en las dos, `CEM_DOCUMENTOS_BUCKET`;
      - en `cem-trabajos`, `CEM_ANTIVIRUS_SERVIDOR`/`_PUERTO` y `CEM_DOCUMENTOS_AVISO_URL` con su monitor de Kuma.
@@ -642,11 +643,11 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Conocido, sin resolver en este corte:**
      - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
      - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial;
-     - cada redespliegue de `cem-antivirus(-staging)` arranca con las firmas de la imagen (más de 48 horas): cuando exista el monitor de `vigilar_cuarentena`, va a marcar caído unos 10 minutos, con una alerta por redespliegue. Se puede resolver en código (un margen tras el arranque de `clamd`, o actualizar las firmas antes de arrancarlo) o aceptarlo (revisión de CEM #97).
+     - cada redespliegue de `cem-antivirus(-staging)` arranca con las firmas de la imagen (más de 48 horas): el monitor de `vigilar_cuarentena` (24 y 25 en Kuma) marca caído unos 10 minutos, con una alerta por redespliegue. Se puede resolver en código (un margen tras el arranque de `clamd`, o actualizar las firmas antes de arrancarlo) o aceptarlo (revisión de CEM #97).
 19. **2c-2, lista, descarga y soporte de documentos** (PR #129, fusionado el 26-10-2026 en `168f77a`, head `b371166`; **desplegado** en staging y en producción, ver «Desplegado»; diseño en `doc/diseno/H2c_Diseno.md` del repositorio CEM, §1.1 y §4):
    - **Qué trae:**
-     - `0036`: `GET …/documentos` (lista con segunda barrera en la base) y `GET …/documentos/{d}/versiones/{v}/descargar` (302 a una URL firmada de 300 s, con `Content-Disposition` y sin caché; 404 si no se puede ver, 409 si la versión propia no está disponible, 410 si falta el objeto). Categorías restringidas (`contratos_proveedores`, `otros`) solo con `documentos.ver` (política `documentos.ver_restringidos`); el Consejo carga las operativas (actas, presupuestos, mantenimiento) con `documentos.cargar_operativos`, que entra en su paquete. Contrato 0.26.0.
-     - `0037`: el rol `cem_soporte_documentos` (sin `BYPASSRLS`; `UPDATE` solo de las columnas del borrado y de la categoría) y `scripts/documento_soporte.py`, que borra o cambia la categoría de un documento a pedido de alguien con `documentos.ver` y `documentos.cargar` generales vigentes el día del pedido. Sin eventos funcionales: la constancia queda en la fila (solicitante, mandato, día del pedido, referencia y, en el cambio, la categoría anterior). La política del rol no lo nombra: un `TO` rompería la verificación de la copia diaria, que restaura con `--no-acl`.
+     - `0036`: `GET …/documentos` (lista con segunda barrera en la base) y `GET …/documentos/{d}/versiones/{v}/descargar` (302 a una URL firmada de 300 s, con `Content-Disposition` y sin caché; 403 sin `documentos.ver`; 404 si no existe, si es de categoría restringida sin la facultad o si es una versión ajena no disponible; 409 si la versión propia no está disponible; 410 si falta el objeto). Categorías restringidas (`contratos_proveedores`, `otros`) solo con `documentos.ver` (política `documentos.ver_restringidos`); el Consejo carga las operativas (actas, presupuestos, mantenimiento) con `documentos.cargar_operativos`, que entra en el paquete de los mandatos nuevos del Consejo (los que ya existían no la reciben). Contrato 0.26.0.
+     - `0037`: el rol `cem_soporte_documentos` (sin `BYPASSRLS`; `UPDATE` solo de las columnas del borrado y de la categoría) y `scripts/documento_soporte.py`, que borra o cambia la categoría de un documento a pedido de alguien con `documentos.ver` y `documentos.cargar` generales vigentes el día del pedido. Sin eventos funcionales: la constancia queda en la fila (solicitante, mandato, día del pedido, referencia, motivo y, en el cambio, la categoría anterior). La política del rol no lo nombra: un `TO` rompería la verificación de la copia diaria, que restaura con `--no-acl`.
      - La página `/documentos`: lista, descarga, carga y reintento; quien solo carga (403 en la lista) ve igual el formulario.
    - **Decisiones por defecto (para el propietario):** las versiones en cuarentena o rechazadas las ve solo quien las subió; el cambio de categoría exige la misma capacidad que el borrado; solo se guarda el último cambio de categoría.
    - **P3 abiertos** (revisiones de #129): el aviso de éxito con lista 403 nombra un botón que no está; el formulario lo ven también quienes no cargan (lo frena el servidor); el reintento no se dibuja si la lista vuelve 5xx; el disparador de la categoría no impide reescribir `categoria_*` sin cambiarla; `fecha_pedido` sin tope inferior; «Descargar» es un enlace y un error se ve como JSON fuera de la página.
