@@ -390,10 +390,12 @@ export function Documentos() {
         return;
       }
       cerrar();
-      setAviso({
-        texto: `Listo: subimos el archivo de «${titulo}». Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible.`,
-        ok: true,
-      });
+      // Sin acceso a la lista no hay «Actualizar»: quien solo carga no ve el resultado del análisis.
+      const despues =
+        lectura.tipo === "sin_permiso"
+          ? "Queda «En revisión» mientras lo analizamos."
+          : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible.";
+      setAviso({ texto: `Listo: subimos el archivo de «${titulo}». ${despues}`, ok: true });
       // Lo que se ve lo decide la API: la lista se vuelve a pedir.
       volverAPedir();
     } catch (e: unknown) {
@@ -459,8 +461,11 @@ export function Documentos() {
           </section>
 
           {/* También sin acceso a la lista: el administrador externo solo carga (documento 08 §4). Quién puede
-              cargar cada categoría lo decide el servidor. */}
-          {(lectura.tipo === "ok" || lectura.tipo === "sin_permiso") && (
+              cargar cada categoría lo decide el servidor. Con la lista caída, solo si queda un archivo por
+              reintentar: el documento ya existe y no se pierde el segundo paso. */}
+          {(lectura.tipo === "ok" ||
+            lectura.tipo === "sin_permiso" ||
+            (lectura.tipo === "sin_servicio" && abierto?.tipo === "subir")) && (
             <section aria-labelledby={`${id}-carga`} className="tarjeta">
               <h2 id={`${id}-carga`}>Cargar un documento</h2>
               {abierto?.tipo === "nuevo" ? (
