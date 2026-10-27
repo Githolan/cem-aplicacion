@@ -50,7 +50,7 @@ $CemEntornos = @{
             backend      = @{ Nombre = 'cem-backend-staging';      Imagen = 'cem-backend';  Uuid = 'yepjjanuzkdvtibdk1hngn21' }
             trabajos     = @{ Nombre = 'cem-trabajos-staging';     Imagen = 'cem-backend';  Uuid = 'wqndx1oq0tdsshbjutmbbifg' }
             planificador = @{ Nombre = 'cem-planificador-staging'; Imagen = 'cem-backend';  Uuid = 'lqli8onu8sojoo5ai59fyiuu' }
-            # Creada el 27-10-2026 (2c-4, H2c §6); en producción se agrega al crearla allá.
+            # Creada el 27-10-2026 (2c-4, H2c §6).
             copia_continua = @{ Nombre = 'cem-copia-continua-staging'; Imagen = 'cem-backend'; Uuid = 'virszak1hbblkiqwgl0k36lm' }
             frontend     = @{ Nombre = 'cem-frontend-staging';     Imagen = 'cem-frontend'; Uuid = 'qor6tckbjzlenawynxxepchp' }
         }
@@ -65,6 +65,8 @@ $CemEntornos = @{
             backend      = @{ Nombre = 'cem-backend';      Imagen = 'cem-backend';  Uuid = 'xqm5yub6sbfygenrsd1nxo3w' }
             trabajos     = @{ Nombre = 'cem-trabajos';     Imagen = 'cem-backend';  Uuid = 'hlt2qkoijhrq9slhxmxplkih' }
             planificador = @{ Nombre = 'cem-planificador'; Imagen = 'cem-backend';  Uuid = '1c1y4dkwcyic4hknug92y7mt' }
+            # Creada el 27-10-2026 (2c-4, H2c §6), después del ensayo PA26 en staging.
+            copia_continua = @{ Nombre = 'cem-copia-continua'; Imagen = 'cem-backend'; Uuid = '6y0zook9mqqeslim6z84ad2o' }
             frontend     = @{ Nombre = 'cem-frontend';     Imagen = 'cem-frontend'; Uuid = '53rot1nz8zmpjppgz3yib6tq' }
         }
     }
