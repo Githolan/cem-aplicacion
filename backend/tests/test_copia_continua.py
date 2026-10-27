@@ -936,3 +936,36 @@ def test_el_registro_del_receptor_se_recorta(tmp_path):
     registro.write_bytes(b"corto")
     r.recortar_registro()
     assert registro.read_bytes() == b"corto"
+
+
+def test_una_herramienta_colgada_se_corta_por_su_tope():
+    inicio = time.monotonic()
+    with pytest.raises(copias.ErrorCopia, match="sleep pasó su tope de 0.3 s"):
+        copias._correr(["sleep", "5"], tope=0.3)
+    assert time.monotonic() - inicio < 3
+    copias._correr(["sleep", "0"], tope=5)  # control: dentro del tope, pasa
+
+
+def test_pg_basebackup_y_pg_verifybackup_corren_con_tope(monkeypatch, tmp_path):
+    topes = {}
+
+    def correr(argumentos, entorno=None, tope=None):
+        topes[argumentos[0]] = tope
+
+    monkeypatch.setattr(copias, "_correr", correr)
+    cc.tomar_base("postgresql+psycopg://u:c@h/postgres", tmp_path / "b", "x")
+    with pytest.raises(FileNotFoundError):  # sigue a la restauración, que acá no hay
+        cc.verificar_base(tmp_path / "b", "postgresql+psycopg://u:c@h/cem", 1)
+    assert topes == {"pg_basebackup": cc.TOPE_COPIA_FISICA,
+                     "pg_verifybackup": cc.TOPE_VERIFICAR_MANIFIESTO}  # fmt: skip
+
+
+@pytest.mark.db
+def test_un_corte_abierto_mas_que_una_copia_base_entera_cuenta_para_la_salud(cfg):
+    p = cc.CopiaContinua(cfg, {})
+    ahora = datetime.now(UTC)
+    p.cortar("prueba", ahora)
+    p.hilo_base = threading.Thread(target=lambda: None)  # como una copia base en curso
+    assert p.problemas_de_salud(ahora + cc.DURACION_MAXIMA_COPIA_BASE) == []
+    tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
+    assert p.problemas_de_salud(tarde)[0].startswith("cadena cortada desde")

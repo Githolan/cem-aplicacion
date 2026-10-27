@@ -160,10 +160,18 @@ def controles(conn: Connection) -> Controles:
     return resultado
 
 
-def _correr(argumentos: list[str], entorno: Mapping[str, str] | None = None) -> None:
-    hecho = subprocess.run(
-        argumentos, env=None if entorno is None else dict(entorno), capture_output=True, text=True
-    )
+def _correr(
+    argumentos: list[str], entorno: Mapping[str, str] | None = None, tope: float | None = None
+) -> None:
+    """Corre una herramienta y falla con su salida de error. Con `tope` (segundos), la que se
+    pasa se mata y es un error: una herramienta colgada no deja la copia en curso para siempre."""
+    try:
+        hecho = subprocess.run(
+            argumentos, env=None if entorno is None else dict(entorno), capture_output=True,
+            text=True, timeout=tope,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        raise ErrorCopia(f"{argumentos[0]} pasó su tope de {tope} s y se detuvo") from None
     if hecho.returncode != 0:
         raise ErrorCopia(f"{argumentos[0]} terminó con {hecho.returncode}: {hecho.stderr.strip()}")
 

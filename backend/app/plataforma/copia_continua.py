@@ -132,7 +132,17 @@ INTERVALO_AVISO = timedelta(minutes=1)
 INTERVALO_VUELTA = 10.0
 """Segundos entre vueltas: subir lo completo, mirar el slot y el atraso, latir."""
 ESPERA_RESTAURACION = 3600
-"""Segundos que `pg_ctl` espera a que la base restaurada termine de aplicar el WAL."""
+"""Segundos que `pg_ctl` espera a que la base restaurada arranque, y otros tantos a que termine
+de aplicar el WAL y se promueva."""
+TOPE_COPIA_FISICA = 2 * 3600
+"""Segundos para `pg_basebackup`; pasado el tope se mata y la copia base falla."""
+TOPE_VERIFICAR_MANIFIESTO = 3600
+"""Segundos para `pg_verifybackup`."""
+DURACION_MAXIMA_COPIA_BASE = timedelta(
+    seconds=TOPE_COPIA_FISICA + TOPE_VERIFICAR_MANIFIESTO + 2 * ESPERA_RESTAURACION + 3600
+)
+"""Lo más que puede durar una copia base con sus topes, más una hora para cifrar y subir. Un corte
+abierto por más tiempo cuenta para la salud aunque su copia base figure en curso (colgada)."""
 ESPERA_SONDEO = 0.2
 """Segundos entre miradas a `postmaster.pid` mientras la copia restaurada aplica el WAL."""
 POSICION_ESTADO = 7
@@ -582,7 +592,10 @@ def consultar_restaurada(socket: Path, url_backup: str) -> dict[str, Any]:
 def verificar_base(carpeta_base: Path, url_backup: str, consorcios: int) -> dict[str, Any]:
     """`pg_verifybackup` y restauración hasta el fin de la copia. Lanza `ErrorCopiaContinua` si
     algo no coincide: la copia no cuenta."""
-    copias._correr(["pg_verifybackup", "--format=tar", "--no-parse-wal", str(carpeta_base)])
+    copias._correr(
+        ["pg_verifybackup", "--format=tar", "--no-parse-wal", str(carpeta_base)],
+        tope=TOPE_VERIFICAR_MANIFIESTO,
+    )
     with restaurada(carpeta_base, {"recovery_target": "immediate"}) as socket:
         resultado = consultar_restaurada(socket, url_backup)
     problemas = []
@@ -619,7 +632,7 @@ def tomar_base(url_copia_continua: str, destino: Path, sello: str) -> None:
         ["pg_basebackup", f"--pgdata={destino}", "--format=tar", "--gzip",
          "--wal-method=fetch", "--checkpoint=fast", "--manifest-checksums=SHA256",
          f"--label=cem-copia-base-{sello}", *argumentos],
-        entorno,
+        entorno, TOPE_COPIA_FISICA,
     )  # fmt: skip
 
 
@@ -739,6 +752,7 @@ class CopiaContinua:
         self.corte: str | None = None
         """Motivo del último corte de la cadena, hasta que lo cierre una copia base posterior."""
         self.cortes = 0
+        self.corte_desde: datetime | None = None
         self.cerrojo = threading.Lock()
         self.cortes_sin_guardar: list[tuple[datetime, str]] = []
         """Protege `corte` y `cortes`. El hilo de la copia base cierra el corte solo si no hubo
@@ -787,6 +801,7 @@ class CopiaContinua:
             momento, motivo = abierto
             with self.cerrojo:
                 self.corte = f"{motivo} (desde {momento:%Y-%m-%d %H:%M} UTC)"
+                self.corte_desde = momento
                 self.cortes += 1
             log.error("cadena de WAL cortada desde antes del arranque: %s", self.corte)
         if self.ultimo is None:
@@ -828,6 +843,7 @@ class CopiaContinua:
         que vuelve a abrirla."""
         with self.cerrojo:
             self.corte = motivo
+            self.corte_desde = ahora
             self.cortes += 1
         self.ultimo = None
         self.error_base = None
@@ -913,6 +929,8 @@ class CopiaContinua:
             salud.append(f"sin poder subir desde {self.al_dia_subida:%H:%M} UTC")
         if self.corte is not None and self.base_fallida is not None:
             salud.append(f"cadena cortada y la copia base falla: {self.base_fallida}")
+        if self.corte_desde is not None and ahora - self.corte_desde > DURACION_MAXIMA_COPIA_BASE:
+            salud.append(f"cadena cortada desde {self.corte_desde:%Y-%m-%d %H:%M} UTC")
         return salud
 
     def atender_receptor(self, estado: EstadoServidor, ahora: datetime) -> None:
@@ -1104,7 +1122,7 @@ class CopiaContinua:
         self.base_fallida = None
         with self.cerrojo:
             if self.cortes == cortes:
-                self.corte = None
+                self.corte = self.corte_desde = None
         log.info(mensaje_base(resumen))
         self.avisar_base("up", mensaje_base(resumen))
 
