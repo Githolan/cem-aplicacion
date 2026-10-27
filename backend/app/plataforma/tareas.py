@@ -58,8 +58,9 @@ periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=
 
 @cola.REGISTRO.tipo(
     "plataforma.replicar_documentos",
-    # Cada intento copia hasta 3 minutos y sigue donde quedó el anterior: seis intentos, en algo
-    # más de una hora, antes de quedar muerto y a la vista del monitor de la cola.
+    # Cada intento copia hasta 3 minutos y sigue donde quedó el anterior: seis intentos, con
+    # esperas de 1, 2, 4, 8 y 16 minutos entre ellos, unos 50 minutos en total, antes de quedar
+    # muerto y a la vista del monitor de la cola.
     maximo_intentos=6,
     retroceso_base=timedelta(minutes=1),
 )

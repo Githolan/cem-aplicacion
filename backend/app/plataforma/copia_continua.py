@@ -152,11 +152,11 @@ TIEMPO_SUBIDA_FINAL = 6.0
 defecto antes de matar el contenedor: quedan unos segundos para detener el receptor y salir. Si
 se alarga la espera de parada del contenedor, se puede alargar esto."""
 ESPERA_RECEPTOR = 2
+"""Segundos que se espera a que `pg_receivewal` salga después de SIGTERM."""
 TOPE_REGISTRO_RECEPTOR = 1024 * 1024
 """Bytes del registro de `pg_receivewal` a partir de los cuales se recorta al rearrancarlo."""
 FINAL_REGISTRO_RECEPTOR = 256 * 1024
 """Bytes del final del registro que se conservan al recortarlo."""
-"""Segundos que se espera a que `pg_receivewal` salga después de SIGTERM."""
 NIVEL_GZIP = 6
 LARGO_MENSAJE = 200
 """Caracteres del mensaje a Kuma, que viaja en la URL del push."""
@@ -753,19 +753,23 @@ class CopiaContinua:
         """Motivo del último corte de la cadena, hasta que lo cierre una copia base posterior."""
         self.cortes = 0
         self.corte_desde: datetime | None = None
+        """Desde cuándo está abierto el corte (cuenta para la salud pasado
+        `DURACION_MAXIMA_COPIA_BASE`)."""
         self.cerrojo = threading.Lock()
-        self.cortes_sin_guardar: list[tuple[datetime, str]] = []
         """Protege `corte` y `cortes`. El hilo de la copia base cierra el corte solo si no hubo
         otro mientras copiaba; comparar y borrar tienen que ser una sola operación frente a
         `cortar` (que corre en la vuelta): si no, un corte nuevo entre las dos se perdería."""
+        self.cortes_sin_guardar: list[tuple[datetime, str]] = []
+        """Cortes todavía no guardados en `cortes/` (el almacén falló); se reintenta en cada
+        vuelta."""
         self.observaciones: list[tuple[datetime, int]] = []
         self.atraso = timedelta(0)
         self.al_dia_subida: datetime | None = None
         self.error_subida: str | None = None
         self.defecto: str | None = None
+        """Un objeto del almacén que no coincide con lo que se subió: se avisa en el acto."""
         self.error_servidor: str | None = None
         self.error_servidor_desde: datetime | None = None
-        """Un objeto del almacén que no coincide con lo que se subió: se avisa en el acto."""
         self.ultimo_parcial: datetime | None = None
         self.suma_parcial: str | None = None
         self.parcial_subido_en: datetime | None = None

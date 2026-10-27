@@ -108,7 +108,11 @@ def replicar(
                 # Sin su marca: una subida cuya relectura falló, o que se cortó antes de marcarla.
                 # El metadato lo puso este código y no prueba nada: se relee entero.
                 existente = copias.metadatos(destino, cfg.bucket, clave)
-                if existente is None or existente.get("sha256-claro") != v.sha256:
+                if existente is None:
+                    raise copias.ErrorCopia(
+                        f"{clave} estaba en la lista de la réplica y ya no está en el almacén"
+                    )
+                if existente.get("sha256-claro") != v.sha256:
                     raise copias.ErrorCopia(f"{clave} ya está en la réplica con otro contenido")
                 if "sha256" not in existente:
                     raise copias.ErrorCopia(f"{clave} está en la réplica sin su sha256")
