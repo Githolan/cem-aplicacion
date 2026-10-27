@@ -128,7 +128,7 @@ Medido en el despliegue de `168f77a` (26-10-2026: staging de 23:53 a 23:56 UTC y
 - **Producción:**
   - el primer intento falló al bajar la imagen de `cem-planificador` (`unable to lease content`, transitorio de Docker); el reintento con la misma SHA quedó en verde;
   - 0 documentos; el script de soporte conecta con su rol (llega a «el documento no existe»); `/documentos` responde 200 y la API sin sesión da 401;
-  - Kuma: el monitor 10 (`cem-backend`) dio 502, 503 y un *timeout* entre las 00:01 y las 00:04 UTC, desde el redespliegue de `cem-backend` del reintento, y volvió a verde a las 00:05.
+  - Kuma: el monitor 10 (`cem-backend`) dio 502, 503 y un *timeout* entre las 00:01 y las 00:04 UTC (caído a las 00:04:16, con 3 reintentos), desde el redespliegue de `cem-backend` del reintento, y volvió a verde a las 00:05.
 - **SIN VERIFICAR:** una carga, una descarga y un pedido de soporte reales en producción (validados en staging con la misma imagen); la alerta de Kuma de ese corte.
 
 Antes, **`2ea0aca`** (26-10-2026: staging de 15:53 a 15:56 UTC y producción de 19:03 a 19:06 UTC), base `0035`, contrato 0.25.0.
@@ -643,7 +643,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Conocido, sin resolver en este corte:**
      - un trabajo que agota los 10 intentos (`clamd` caído más de ~4 horas) queda `muerto` y nadie lo vuelve a encolar: Kuma avisa (`vigilar_cuarentena`) y el reencolado es manual;
      - rechazar todo `/OpenAction`, como pide el diseño, también rechaza PDFs que solo fijan la vista inicial;
-     - cada redespliegue de `cem-antivirus(-staging)` arranca con las firmas de la imagen (más de 48 horas): el monitor de `vigilar_cuarentena` (24 y 25 en Kuma) marca caído unos 10 minutos, con una alerta por redespliegue. Se puede resolver en código (un margen tras el arranque de `clamd`, o actualizar las firmas antes de arrancarlo) o aceptarlo (revisión de CEM #97).
+     - cada redespliegue de `cem-antivirus(-staging)` arranca con las firmas de la imagen (más de 48 horas): el monitor de `vigilar_cuarentena` (24 y 25 en Kuma) va a marcar caído unos 10 minutos, con una alerta por redespliegue (SIN VERIFICAR: todavía no hubo un redespliegue con el monitor). Se puede resolver en código (un margen tras el arranque de `clamd`, o actualizar las firmas antes de arrancarlo) o aceptarlo (revisión de CEM #97).
 19. **2c-2, lista, descarga y soporte de documentos** (PR #129, fusionado el 26-10-2026 en `168f77a`, head `b371166`; **desplegado** en staging y en producción, ver «Desplegado»; diseño en `doc/diseno/H2c_Diseno.md` del repositorio CEM, §1.1 y §4):
    - **Qué trae:**
      - `0036`: `GET …/documentos` (lista con segunda barrera en la base) y `GET …/documentos/{d}/versiones/{v}/descargar` (302 a una URL firmada de 300 s, con `Content-Disposition` y sin caché; 403 sin `documentos.ver`; 404 si no existe, si es de categoría restringida sin la facultad o si es una versión ajena no disponible; 409 si la versión propia no está disponible; 410 si falta el objeto). Categorías restringidas (`contratos_proveedores`, `otros`) solo con `documentos.ver` (política `documentos.ver_restringidos`); el Consejo carga las operativas (actas, presupuestos, mantenimiento) con `documentos.cargar_operativos`, que entra en el paquete de los mandatos nuevos del Consejo (los que ya existían no la reciben). Contrato 0.26.0.
