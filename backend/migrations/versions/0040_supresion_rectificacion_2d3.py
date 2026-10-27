@@ -113,6 +113,7 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
     anonimizar boolean := false;
     plan jsonb := '[]'::jsonb;
     n integer;
+    n_credenciales integer;
   begin
     if k.persona_id is not null then
       correos := array[(select p.correo from nucleo.persona p where p.id = k.persona_id)];
@@ -124,8 +125,9 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
     end if;
     -- Cerrojos en el orden único del código (0025): las invitaciones que se van a tocar (las de
     -- mandato después de su mandato, como `aceptar_invitacion_mandato`, 0015), la persona por su
-    -- correo (el mismo cerrojo que `aceptar_invitacion` e `importar_vinculo`) y su fila: nadie le
-    -- da un vínculo nuevo ni acepta una invitación mientras se decide si se anonimiza.
+    -- correo (el mismo cerrojo que `aceptar_invitacion`, `importar_vinculo` y `alta_mandato`):
+    -- nadie le da un vínculo o un mandato nuevo ni acepta una invitación mientras se decide si
+    -- se anonimiza.
     perform 1 from nucleo.invitacion i
      where (alc is null or i.consorcio_id = alc)
        and (i.correo = any (correos) or i.persona_id = k.persona_id)
@@ -140,7 +142,24 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
        and (i.correo = any (correos) or i.persona_id = k.persona_id)
      order by i.id for update;
     perform pg_advisory_xact_lock(hashtextextended('persona:' || correos[1], 0));
-    perform 1 from nucleo.persona p where p.id = k.persona_id for update;
+    -- Con alcance cuenta, después: las filas que el login tiene mientras inserta su sesión, en el
+    -- orden del código de identidad (código y enlace, `canjear_codigo` de 0006; desafío, 0009;
+    -- contraseña; TOTP y recuperación, segundo factor), y al final la fila de la persona. Así
+    -- ningún login espera la persona teniendo algo que la supresión necesita (Codex en #140), y
+    -- ningún mandato nuevo se le da mientras se decide (no todas las altas toman el cerrojo de
+    -- arriba: la de administrador no lo toma).
+    if k.persona_id is not null and alc is null then
+      perform 1 from nucleo.codigo_acceso x where x.persona_id = k.persona_id
+       order by x.id for update;
+      perform 1 from nucleo.enlace_acceso x where x.persona_id = k.persona_id
+       order by x.id for update;
+      perform 1 from nucleo.desafio_contrasena x where x.persona_id = k.persona_id for update;
+      perform 1 from nucleo.contrasena x where x.persona_id = k.persona_id for update;
+      perform 1 from nucleo.factor_totp x where x.persona_id = k.persona_id for update;
+      perform 1 from nucleo.codigo_recuperacion x where x.persona_id = k.persona_id
+       order by x.id for update;
+      perform 1 from nucleo.persona p where p.id = k.persona_id for update;
+    end if;
 
     -- Lo global: la persona, sus credenciales, sus accesos y la idempotencia.
     if k.persona_id is not null and alc is null then
@@ -178,27 +197,30 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
       select (select count(*) from nucleo.sesion s where s.persona_id = k.persona_id)
              + (select count(*) from nucleo.enlace_acceso e where e.persona_id = k.persona_id)
         into n;
+      select (select count(*) from nucleo.contrasena x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.factor_totp x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.codigo_recuperacion x where x.persona_id = k.persona_id)
+             + (select count(*) from nucleo.desafio_contrasena x where x.persona_id = k.persona_id)
+        into n_credenciales;
+      -- En el orden en que los toma el código de identidad: código y enlace (`canjear_codigo`,
+      -- 0006), desafío (0009), TOTP y recuperación (segundo factor) y, al final, las sesiones.
       if ejecutar then
-        -- Los códigos de acceso se van con su enlace (on delete cascade, 0006).
+        delete from nucleo.codigo_acceso where persona_id = k.persona_id;
         delete from nucleo.enlace_acceso where persona_id = k.persona_id;
+        if anonimizar then
+          delete from nucleo.desafio_contrasena where persona_id = k.persona_id;
+          delete from nucleo.contrasena where persona_id = k.persona_id;
+          delete from nucleo.factor_totp where persona_id = k.persona_id;
+          delete from nucleo.codigo_recuperacion where persona_id = k.persona_id;
+        end if;
         delete from nucleo.sesion where persona_id = k.persona_id;
       end if;
       plan := plan || jsonb_build_array(jsonb_build_object(
         'que', 'sesiones, enlaces y códigos de acceso', 'tratamiento', 'borrar', 'filas', n,
         'motivo', 'datos técnicos; borrarlos cierra las sesiones abiertas'));
 
-      select (select count(*) from nucleo.contrasena x where x.persona_id = k.persona_id)
-             + (select count(*) from nucleo.factor_totp x where x.persona_id = k.persona_id)
-             + (select count(*) from nucleo.codigo_recuperacion x where x.persona_id = k.persona_id)
-             + (select count(*) from nucleo.desafio_contrasena x where x.persona_id = k.persona_id)
-        into n;
+      n := n_credenciales;
       if anonimizar then
-        if ejecutar then
-          delete from nucleo.contrasena where persona_id = k.persona_id;
-          delete from nucleo.factor_totp where persona_id = k.persona_id;
-          delete from nucleo.codigo_recuperacion where persona_id = k.persona_id;
-          delete from nucleo.desafio_contrasena where persona_id = k.persona_id;
-        end if;
         plan := plan || jsonb_build_array(jsonb_build_object(
           'que', 'contraseña, TOTP y códigos de recuperación', 'tratamiento', 'borrar',
           'filas', n, 'motivo', 'la cuenta se anonimiza: ya no se puede entrar'));

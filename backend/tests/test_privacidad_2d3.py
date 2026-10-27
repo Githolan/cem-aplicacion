@@ -701,3 +701,43 @@ def test_bloquea_la_invitacion_antes_que_la_persona(confiable, motor_migrate, co
             otro.rollback()
             hilo.join()
     assert punto(resultado["plan"], "persona: correo y nombre")["tratamiento"] == "conservar"
+
+
+def test_un_login_a_mitad_de_camino_no_se_traba_con_la_supresion(
+    confiable,  # noqa: F811
+    motor_migrate,
+    con_url,  # noqa: F811
+    capsys,
+):
+    """`canjear_codigo` tiene el código y el enlace y después inserta la sesión (clave foránea a la
+    persona). La supresión espera por el código sin haber tomado la persona: el login termina
+    (Codex en #140)."""
+    k = confirmado(capsys, motor_migrate, confiable["correo"])
+    accesos_y_credenciales(motor_migrate, confiable["inq"], confiable["cons"])
+    resultado = {}
+
+    def suprimir_en_paralelo():
+        resultado["plan"] = plan_de(k)
+
+    with motor_migrate.connect() as login:
+        login.execute(text("select 1 from nucleo.codigo_acceso where persona_id = :p"
+                           " for update"), {"p": confiable["inq"]})  # fmt: skip
+        hilo = threading.Thread(target=suprimir_en_paralelo)
+        hilo.start()
+        try:
+            with motor_migrate.connect() as c:
+                for _ in range(ESPERAS):
+                    esperando = c.execute(text(
+                        "select count(*) from pg_locks where locktype = 'transactionid'"
+                        " and not granted")).scalar_one()  # fmt: skip
+                    if esperando:
+                        break
+                    time.sleep(INTERVALO)
+                assert esperando == 1  # control: la supresión quedó esperando el código
+                # Lo que haría el login a continuación: la clave foránea de su sesión nueva.
+                c.execute(text("select 1 from nucleo.persona where id = :p for key share nowait"),
+                          {"p": confiable["inq"]})  # fmt: skip
+        finally:
+            login.rollback()
+            hilo.join()
+    assert punto(resultado["plan"], "persona: correo y nombre")["tratamiento"] == "conservar"
