@@ -489,21 +489,22 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 6)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 8)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
-    # Sin las variables de las copias, la copia y el control de índices fallan y lo dicen; no
-    # se saltean en silencio. La vigilancia de la cuarentena termina y anota que no llega a
-    # `clamd` (sin aviso a Kuma configurado, solo informa), y la limpieza de objetos sin fila falla
-    # porque no tiene las variables del almacén de documentos.
+    # Sin las variables de las copias, la copia, la réplica de documentos, el control de tamaño de
+    # las copias y el control de índices fallan y lo dicen; no se saltean en silencio. La
+    # vigilancia de la cuarentena termina y anota que no llega a `clamd` (sin aviso a Kuma
+    # configurado, solo informa), y la limpieza de objetos sin fila falla porque no tiene las
+    # variables del almacén de documentos.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
                         " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena')"
                         " or error like '%faltan variables de las copias%'"
                         " or error like '%falta CEM_DATABASE_URL_BACKUP%'"
                         " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'")
-           == 6)  # fmt: skip
+           == 8)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -525,8 +526,10 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
             ("consorcio.revocar_por_vencimiento",),
             ("documentos.limpiar_huerfanos",),
             ("documentos.vigilar_cuarentena",),
+            ("plataforma.controlar_tamano_copias",),
             ("plataforma.copia_diaria",),
             ("plataforma.purgar_cola",),
+            ("plataforma.replicar_documentos",),
             ("plataforma.verificar_indices",),
         ]
 

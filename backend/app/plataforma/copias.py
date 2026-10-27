@@ -53,20 +53,24 @@ from typing import Any
 
 import boto3
 from botocore.config import Config as ConfigBotocore
+from botocore.exceptions import ClientError
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
 log = logging.getLogger("cem.copias")
 
+# La clave S3 de las copias es solo la de copias (H2c §3.1 del repositorio CEM): usuario
+# `cem-copias-acceso(-staging)`, variables `CEM_COPIAS_S3_*`. Nunca las de la clave vieja
+# (prefijo `CEM_OCI_S3`), que abría a la vez documentos y copias.
 VARIABLES = {
     "url_backup": "CEM_DATABASE_URL_BACKUP",
     "clave_publica": "CEM_COPIAS_CLAVE_PUBLICA",
     "bucket": "CEM_COPIAS_BUCKET",
-    "s3_endpoint": "CEM_OCI_S3_ENDPOINT",
-    "s3_region": "CEM_OCI_S3_REGION",
-    "s3_clave_id": "CEM_OCI_S3_CLAVE_ID",
-    "s3_clave_secreta": "CEM_OCI_S3_CLAVE_SECRETA",
+    "s3_endpoint": "CEM_COPIAS_S3_ENDPOINT",
+    "s3_region": "CEM_COPIAS_S3_REGION",
+    "s3_clave_id": "CEM_COPIAS_S3_CLAVE_ID",
+    "s3_clave_secreta": "CEM_COPIAS_S3_CLAVE_SECRETA",
 }
 
 VARIABLE_AVISO = "CEM_COPIAS_AVISO_URL"
@@ -156,10 +160,26 @@ def controles(conn: Connection) -> Controles:
     return resultado
 
 
-def _correr(argumentos: list[str], entorno: Mapping[str, str] | None = None) -> None:
-    hecho = subprocess.run(
-        argumentos, env=None if entorno is None else dict(entorno), capture_output=True, text=True
-    )
+def entorno_minimo() -> dict[str, str]:
+    """El entorno de las herramientas externas (`pg_dump`, `initdb`, `pg_ctl`, `age`...): solo
+    `PATH`. No heredan las claves S3, las URL de la base ni las demás variables del proceso."""
+    return {"PATH": os.environ["PATH"]}
+
+
+def _correr(
+    argumentos: list[str], entorno: Mapping[str, str] | None = None, tope: float | None = None
+) -> None:
+    """Corre una herramienta (con `entorno`, o `entorno_minimo()`) y falla con su salida de
+    error. Con `tope` (segundos), la que se pasa se mata y es un error: una herramienta colgada
+    no deja la copia en curso para siempre."""
+    try:
+        hecho = subprocess.run(
+            argumentos, env=dict(entorno_minimo() if entorno is None else entorno),
+            capture_output=True,
+            text=True, timeout=tope,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        raise ErrorCopia(f"{argumentos[0]} pasó su tope de {tope} s y se detuvo") from None
     if hecho.returncode != 0:
         raise ErrorCopia(f"{argumentos[0]} terminó con {hecho.returncode}: {hecho.stderr.strip()}")
 
@@ -181,7 +201,7 @@ def volcar(url_backup: str, destino: Path) -> Controles:
                     f"--host={url.host}", *puerto,
                     f"--username={url.username}", f"--dbname={url.database}",
                 ],
-                os.environ | {"PGPASSWORD": url.password or ""},
+                entorno_minimo() | {"PGPASSWORD": url.password or ""},
             )  # fmt: skip
             esperados = controles(conn)
             conn.rollback()
@@ -265,6 +285,21 @@ def verificar_objeto(s3, bucket: str, clave: str, suma: str) -> None:
         leida.update(trozo)
     if leida.hexdigest() != suma:
         raise ErrorCopia(f"el objeto subido {clave} no coincide con la copia cifrada")
+
+
+NO_EXISTE = frozenset({"404", "NoSuchKey", "NotFound"})
+"""Códigos con que el almacén responde a `head_object` de una clave que no está."""
+
+
+def metadatos(s3, bucket: str, clave: str) -> dict[str, str] | None:
+    """Los metadatos de usuario del objeto, o None si no existe. Cualquier otro error del
+    almacén (403, 5xx) se propaga: un objeto que no se puede consultar no es un objeto ausente."""
+    try:
+        return s3.head_object(Bucket=bucket, Key=clave)["Metadata"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] in NO_EXISTE:
+            return None
+        raise
 
 
 def claves_destino(base: str, ventana: datetime) -> list[str]:
@@ -362,6 +397,25 @@ def empujar(destino: str, espera: float = TIEMPO_DE_ESPERA_AVISO) -> None:
         confirmado = False
     if not confirmado:
         raise ErrorAviso(f"Kuma respondió {estado} sin confirmar el latido")
+
+
+def avisar_estado(
+    variable: str, estado: str, mensaje: str, entorno: Mapping[str, str] = os.environ
+) -> str:
+    """Push a Kuma con `estado` (`up` o `down`) a la URL de `variable`. Devuelve `enviado`,
+    `fallido` o `sin_configurar`, y lo deja en los registros; nunca lanza: el aviso no forma
+    parte de lo que avisa, y un monitor sin latidos se pone rojo solo. Sin la URL en el registro:
+    lleva el token."""
+    url = entorno.get(variable)
+    if not url:
+        log.warning("sin aviso a Kuma: falta %s", variable)
+        return "sin_configurar"
+    try:
+        empujar(url_push(url, variable, estado, mensaje))
+    except ErrorAviso as e:
+        log.error("el aviso a Kuma de %s falló: %s", variable, e)
+        return "fallido"
+    return "enviado"
 
 
 def avisar_copia(resumen: Mapping[str, Any], entorno: Mapping[str, str] = os.environ) -> str:
