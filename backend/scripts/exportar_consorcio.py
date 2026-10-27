@@ -28,10 +28,12 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
         --referencia-solicitud "Nota 3/2026" --destinatario-nombre "Estudio Nuevo SRL" \\
         --destinatario-documento 30712345671 --solicitante <persona> --fecha-pedido 2026-10-27 \\
         --referencia-respaldo "Acta 45, libro 3" --clave-publica age1... --salida /tmp/x.zip.age
-    python -m scripts.exportar_consorcio entregar --consorcio <uuid> --exportacion <uuid>
+    python -m scripts.exportar_consorcio entregar --consorcio <uuid> --exportacion <uuid> \\
+        --paquete /tmp/x.zip.age
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -94,6 +96,7 @@ def _argumentos(argumentos: list[str] | None) -> argparse.Namespace:
     e = sub.add_parser("entregar")
     e.add_argument("--consorcio", type=UUID, required=True)
     e.add_argument("--exportacion", type=UUID, required=True)
+    e.add_argument("--paquete", type=Path, required=True, help="el archivo cifrado que se entrega")
     return p.parse_args(argumentos)
 
 
@@ -269,15 +272,20 @@ def _cifrar(conn: Connection, a: argparse.Namespace, fila, salida, cantidades: d
         texto = json.dumps(manifiesto, ensure_ascii=False, indent=1).encode()
         paquete.escribir(MANIFIESTO, [texto])
         paquete.zip.close()
+        age.stdin.close()
     except BaseException:
         tubo.cortar()
         paquete.zip.close()
         age.kill()
-        raise
-    finally:
-        age.stdin.close()
-        error = age.stderr.read()
+        # `age` ya no lee: cerrar su entrada puede dar `BrokenPipeError` al vaciar el búfer, y eso
+        # no tiene que tapar el error que cortó el armado.
+        with contextlib.suppress(BrokenPipeError):
+            age.stdin.close()
+        age.stderr.close()
         age.wait()
+        raise
+    error = age.stderr.read()
+    age.wait()
     if age.returncode != 0:
         raise RuntimeError(f"age terminó con {age.returncode}: {error.decode()}")
 
@@ -301,20 +309,23 @@ def _registrar(conn: Connection, a: argparse.Namespace):
 
 
 def armar(motor, a: argparse.Namespace) -> dict:
-    """Todo en una transacción de lectura repetible: el paquete sale de una sola foto de la base,
-    y si algo falla no queda la fila ni el archivo."""
+    """Todo en una transacción de lectura repetible: el paquete sale de una sola foto de la base.
+    El archivo se crea con `xb` (nunca pisa uno ajeno, tampoco si aparece en el medio) y se da
+    por bueno recién después de confirmar la transacción: si algo falla, incluido el commit, se
+    borra el archivo que creó esta corrida y no queda la fila."""
     _exigir_texto(a)
-    if a.salida.exists():
-        raise Negado(f"{a.salida} ya existe: no se sobrescribe")
     _exigir_clave_age(a.clave_publica.strip())
-    repetible = motor.execution_options(isolation_level="REPEATABLE READ")
-    with transaccion(repetible, persona_id=None, consorcio_id=a.consorcio) as conn:
-        _rol(conn)
-        fila = _registrar(conn, a)
-        mandato = fila.mandato_id
-        cantidades: dict[str, int] = {}
-        try:
-            with a.salida.open("xb") as salida:
+    try:
+        salida = a.salida.open("xb")
+    except FileExistsError as e:
+        raise Negado(f"{a.salida} ya existe: no se sobrescribe") from e
+    try:
+        repetible = motor.execution_options(isolation_level="REPEATABLE READ")
+        with transaccion(repetible, persona_id=None, consorcio_id=a.consorcio) as conn:
+            _rol(conn)
+            fila = _registrar(conn, a)
+            cantidades: dict[str, int] = {}
+            with salida:
                 _cifrar(conn, a, fila, salida, cantidades)
             suma, tamano = _sha256(a.salida)
             armada = conn.execute(
@@ -325,18 +336,19 @@ def armar(motor, a: argparse.Namespace) -> dict:
                 ),
                 {"s": suma, "t": tamano, "q": json.dumps(cantidades), "id": fila.id},
             ).scalar_one()
-        except BaseException:
-            # Lo que quedó está cifrado y sin constancia (la transacción vuelve atrás): no se
-            # entrega.
-            a.salida.unlink(missing_ok=True)
-            raise
+    except BaseException:
+        # El archivo es de esta corrida (lo creó `xb`): cifrado e incompleto o sin constancia
+        # (la transacción volvió atrás). No se entrega.
+        salida.close()
+        a.salida.unlink()
+        raise
     return {
         "exportacion": str(fila.id),
         "consorcio": str(a.consorcio),
         "solicitud": a.referencia_solicitud.strip(),
         "destinatario": f"{a.destinatario_nombre.strip()} ({a.destinatario_documento.strip()})",
         "solicitante": str(a.solicitante),
-        "mandato": str(mandato),
+        "mandato": str(fila.mandato_id),
         "fecha_pedido": a.fecha_pedido.isoformat(),
         "respaldo": a.referencia_respaldo.strip(),
         "armada_en": armada.isoformat(),
@@ -348,22 +360,32 @@ def armar(motor, a: argparse.Namespace) -> dict:
 
 
 def entregar(motor, a: argparse.Namespace) -> dict:
+    """Registra la entrega del archivo que se entrega: su SHA-256 tiene que ser el de la
+    constancia."""
+    suma, _ = _sha256(a.paquete)
     with transaccion(motor, persona_id=None, consorcio_id=a.consorcio) as conn:
         _rol(conn)
-        entregada = conn.execute(
+        registrada = conn.execute(
             text(
-                "update plataforma.exportacion set entregada_en = now()"
-                " where id = :e and armada_en is not null returning entregada_en, paquete_sha256"
+                "select paquete_sha256 from plataforma.exportacion"
+                " where id = :e and armada_en is not null for update"
             ),
             {"e": a.exportacion},
-        ).one_or_none()
-        if entregada is None:
+        ).scalar_one_or_none()
+        if registrada is None:
             raise Negado("la exportación no existe en este consorcio o no está armada")
+        if registrada != suma:
+            raise Negado(f"{a.paquete} no es el paquete de esta exportación (otro SHA-256)")
+        entregada = conn.execute(
+            text("update plataforma.exportacion set entregada_en = now() where id = :e"
+                 " returning entregada_en"),
+            {"e": a.exportacion},
+        ).scalar_one()  # fmt: skip
     return {
         "exportacion": str(a.exportacion),
         "consorcio": str(a.consorcio),
-        "sha256": entregada.paquete_sha256,
-        "entregada_en": entregada.entregada_en.isoformat(),
+        "sha256": suma,
+        "entregada_en": entregada.isoformat(),
     }
 
 

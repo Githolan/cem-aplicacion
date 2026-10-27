@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import zipfile
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -543,6 +544,54 @@ def test_no_sobrescribe_un_archivo(edificio, con_url, claves, tmp_path, motor_mi
     assert salida.read_bytes() == b"otro" and constancias(motor_migrate, e["cons"]) == []
 
 
+def test_un_archivo_que_aparece_en_el_medio_no_se_toca(
+    edificio, con_url, claves, tmp_path, motor_migrate, monkeypatch, capsys
+):
+    """Otro proceso crea el archivo de salida justo antes de que el script lo abra: se niega, el
+    archivo ajeno queda intacto y no hay constancia."""
+    e = edificio
+    salida = tmp_path / "carrera.zip.age"
+    original = exportar_consorcio._exigir_clave_age
+
+    def y_aparece(clave):
+        original(clave)
+        salida.write_bytes(b"de otro proceso")
+
+    monkeypatch.setattr(exportar_consorcio, "_exigir_clave_age", y_aparece)
+    assert exportar_consorcio.main(argumentos(e, claves, salida)) == 1
+    assert "ya existe" in capsys.readouterr().err
+    assert salida.read_bytes() == b"de otro proceso"
+    assert constancias(motor_migrate, e["cons"]) == []
+    # Control: sin el otro proceso, la misma salida (libre) se arma.
+    salida.unlink()
+    monkeypatch.setattr(exportar_consorcio, "_exigir_clave_age", original)
+    assert exportar_consorcio.main(argumentos(e, claves, salida)) == 0
+    assert salida.read_bytes().startswith(b"age-encryption.org/v1")
+
+
+def test_si_el_commit_falla_no_queda_el_paquete(edificio, con_url, claves, tmp_path,
+                                                motor_migrate, monkeypatch, capsys):  # fmt: skip
+    """La transacción falla al terminar, después de armar y de registrar el armado: no queda la
+    fila, y tampoco el archivo cifrado (se da por bueno recién después del commit)."""
+    e = edificio
+    original = exportar_consorcio.transaccion
+
+    @contextmanager
+    def falla_al_confirmar(motor, **ambito):
+        with original(motor, **ambito) as conn:
+            yield conn
+            conn.execute(text("select 1 / 0"))  # una falla de la base al cerrar la transacción
+
+    monkeypatch.setattr(exportar_consorcio, "transaccion", falla_al_confirmar)
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 1 and "no se escribió nada" in capsys.readouterr().err
+    assert not salida.exists() and constancias(motor_migrate, e["cons"]) == []
+    # Control: sin la falla, el mismo pedido deja el archivo y la fila.
+    monkeypatch.setattr(exportar_consorcio, "transaccion", original)
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 0 and salida.exists() and len(constancias(motor_migrate, e["cons"])) == 1
+
+
 def test_un_binario_que_no_coincide_no_deja_paquete_ni_constancia(edificio, con_url, claves,
                                                                   tmp_path, motor_migrate,
                                                                   bucket):  # noqa: F811  # fmt: skip
@@ -579,9 +628,17 @@ def test_sin_la_variable_no_corre(edificio, monkeypatch, claves, tmp_path, capsy
 def test_la_entrega_se_registra_una_vez(edificio, con_url, claves, tmp_path, motor_migrate,
                                         capsys):  # fmt: skip
     e = edificio
-    assert exportar(e, claves, tmp_path)[0] == 0
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 0
     [fila] = constancias(motor_migrate, e["cons"])
+    # Otro archivo (otro SHA-256) no se da por entregado.
+    otro_archivo = tmp_path / "otro.zip.age"
+    otro_archivo.write_bytes(b"no es el paquete")
     entregar = ["entregar", "--consorcio", str(e["cons"]), "--exportacion", str(fila["id"])]
+    assert exportar_consorcio.main(entregar + ["--paquete", str(otro_archivo)]) == 1
+    assert "otro SHA-256" in capsys.readouterr().err
+    assert constancias(motor_migrate, e["cons"])[0]["entregada_en"] is None
+    entregar += ["--paquete", str(salida)]
     assert exportar_consorcio.main(entregar) == 0
     assert f"sha256: {fila['paquete_sha256']}" in capsys.readouterr().out
     entregada = constancias(motor_migrate, e["cons"])[0]["entregada_en"]
@@ -590,10 +647,11 @@ def test_la_entrega_se_registra_una_vez(edificio, con_url, claves, tmp_path, mot
     assert "entrega_registrada" in capsys.readouterr().err
     assert constancias(motor_migrate, e["cons"])[0]["entregada_en"] == entregada
     # Una exportación que no existe en el consorcio del contexto.
-    assert exportar_consorcio.main(entregar[:3] + ["--exportacion", str(uuid4())]) == 1
+    assert exportar_consorcio.main(entregar[:3] + ["--exportacion", str(uuid4()),
+                                                   "--paquete", str(salida)]) == 1  # fmt: skip
     otro = consorcio_con_persona(motor_migrate)[0]
     assert exportar_consorcio.main(["entregar", "--consorcio", str(otro), "--exportacion",
-                                    str(fila["id"])]) == 1  # fmt: skip
+                                    str(fila["id"]), "--paquete", str(salida)]) == 1  # fmt: skip
     assert "no existe en este consorcio" in capsys.readouterr().err
 
 
