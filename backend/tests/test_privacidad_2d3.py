@@ -8,6 +8,8 @@ import io
 import json
 import os
 import re
+import threading
+import time
 from datetime import timedelta
 
 import pytest
@@ -30,6 +32,9 @@ from tests.test_vinculo_0014 import base_aparte, cadena_rota, escena  # noqa: F4
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
+ESPERAS = 50
+INTERVALO = 0.1
+"""Hasta 5 s para ver la supresión esperando el cerrojo de la persona."""
 NUEVAS = (
     "plataforma.privacidad_plan_supresion(uuid)",
     "plataforma.privacidad_ejecutar_supresion(uuid, jsonb, text, text)",
@@ -662,3 +667,37 @@ def test_rectificar_en_un_consorcio_no_cambia_el_nombre_en_otro(
     # Control: en el consorcio del caso sí cambió.
     assert uno(motor_migrate, "select nombre_declarado from nucleo.vinculo where id = :v",
                v=confiable["v_inq"]).nombre_declarado == "Bien Escrito"  # fmt: skip
+
+
+def test_bloquea_la_invitacion_antes_que_la_persona(confiable, motor_migrate, con_url, capsys):  # noqa: F811
+    """Orden único (0025): invitación y después `persona:<correo>`, como `aceptar_invitacion`.
+    Con el cerrojo de la persona tomado por otro, la supresión espera ya dueña de la invitación;
+    al revés, una aceptación a la vez se trabaría con ella (Codex en #140)."""
+    k = confirmado(capsys, motor_migrate, confiable["correo"])
+    clave = "select pg_advisory_xact_lock(hashtextextended('persona:' || cast(:c as text), 0))"
+    resultado = {}
+
+    def suprimir_en_paralelo():
+        resultado["plan"] = plan_de(k)
+
+    with motor_migrate.connect() as otro:
+        otro.execute(text(clave), {"c": confiable["correo"]})
+        hilo = threading.Thread(target=suprimir_en_paralelo)
+        hilo.start()
+        try:
+            with motor_migrate.connect() as c:
+                for _ in range(ESPERAS):
+                    esperando = c.execute(text(
+                        "select count(*) from pg_locks where locktype = 'advisory'"
+                        " and not granted")).scalar_one()  # fmt: skip
+                    if esperando:
+                        break
+                    time.sleep(INTERVALO)
+                assert esperando == 1  # control: la supresión quedó esperando a la persona
+                with pytest.raises(DBAPIError, match="could not obtain lock"):
+                    c.execute(text("select 1 from nucleo.invitacion where persona_id = :p"
+                                   " for update nowait"), {"p": confiable["inq"]})  # fmt: skip
+        finally:
+            otro.rollback()
+            hilo.join()
+    assert punto(resultado["plan"], "persona: correo y nombre")["tratamiento"] == "conservar"

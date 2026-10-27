@@ -122,8 +122,23 @@ create function plataforma.privacidad_supresion(k plataforma.caso_privacidad, ej
       raise exception 'el caso manual no tiene datos ligados que suprimir'
         using errcode = 'P0001', hint = 'caso_manual';
     end if;
-    -- El mismo cerrojo que `aceptar_invitacion` e `importar_vinculo` toman por el correo, y la
-    -- fila de la persona: nadie le da un vínculo nuevo mientras se decide si se anonimiza.
+    -- Cerrojos en el orden único del código (0025): las invitaciones que se van a tocar (las de
+    -- mandato después de su mandato, como `aceptar_invitacion_mandato`, 0015), la persona por su
+    -- correo (el mismo cerrojo que `aceptar_invitacion` e `importar_vinculo`) y su fila: nadie le
+    -- da un vínculo nuevo ni acepta una invitación mientras se decide si se anonimiza.
+    perform 1 from nucleo.invitacion i
+     where (alc is null or i.consorcio_id = alc)
+       and (i.correo = any (correos) or i.persona_id = k.persona_id)
+     order by i.id for update;
+    perform 1 from nucleo.mandato m
+     where m.id in (select i.mandato_id from nucleo.invitacion_mandato i
+                     where (alc is null or i.consorcio_id = alc)
+                       and (i.correo = any (correos) or i.persona_id = k.persona_id))
+     order by m.id for update;
+    perform 1 from nucleo.invitacion_mandato i
+     where (alc is null or i.consorcio_id = alc)
+       and (i.correo = any (correos) or i.persona_id = k.persona_id)
+     order by i.id for update;
     perform pg_advisory_xact_lock(hashtextextended('persona:' || correos[1], 0));
     perform 1 from nucleo.persona p where p.id = k.persona_id for update;
 
