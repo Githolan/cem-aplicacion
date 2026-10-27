@@ -34,6 +34,7 @@ CLAVES = {
     "ro": "ro_prueba",
     "backup": "backup_prueba",
     "soporte_documentos": "soporte_documentos_prueba",
+    "soporte_exportacion": "soporte_exportacion_prueba",
 }
 
 
@@ -68,6 +69,7 @@ def base_de_prueba() -> None:
             "-v", f"clave_ro={CLAVES['ro']}",
             "-v", f"clave_backup={CLAVES['backup']}",
             "-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
+            "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
             "-f", str(RAIZ / "scripts" / "crear_roles.sql"),
         ],
         check=True,
@@ -98,13 +100,17 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     padrón o invitaciones que nombran su vínculo: se les quita y se borran. Y con 0026, que se
     niega a bajar si hay identidades humanas: se borran con sus vínculos y verificaciones. Y con
     0031, que se niega a bajar si hay contactos de emergencia: se borran. Y con 0035, que se
-    niega a bajar si hay documentos: se borran con sus versiones.
+    niega a bajar si hay documentos: se borran con sus versiones. Y con 0038, que se niega a bajar
+    si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
         c.execute(
             text(
                 "do $$ begin"
+                " if to_regclass('plataforma.exportacion') is not null then"
+                "   delete from plataforma.exportacion;"
+                " end if;"
                 " if to_regclass('nucleo.documento') is not null then"
                 "   delete from nucleo.version_documento;"
                 "   delete from nucleo.documento;"

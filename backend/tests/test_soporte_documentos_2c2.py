@@ -275,8 +275,10 @@ def test_crear_roles_se_puede_volver_a_correr_sin_la_clave_nueva():
     hecho = subprocess.run(comun, capture_output=True, text=True)
     assert hecho.returncode == 0, hecho.stderr
     assert "cem_soporte_documentos no se crea" in hecho.stdout
-    # Control: con la clave, también termina bien (el rol ya existe y no se toca).
+    # Control: con las claves, también termina bien (los roles ya existen y no se tocan). La de
+    # exportación (2c-3) va también: sin ella, su rol tampoco se crea y lo dice.
     con = comun[:-2] + ["-v", f"clave_soporte_documentos={CLAVES['soporte_documentos']}",
+                        "-v", f"clave_soporte_exportacion={CLAVES['soporte_exportacion']}",
                         *comun[-2:]]  # fmt: skip
     hecho = subprocess.run(con, capture_output=True, text=True)
     assert hecho.returncode == 0 and "no se crea" not in hecho.stdout, hecho.stderr

@@ -6,11 +6,13 @@
 --   psql "$URL_SUPERUSUARIO" -v base=cem \
 --     -v clave_migrate="$CLAVE_MIGRATE" -v clave_app="$CLAVE_APP" -v clave_ro="$CLAVE_RO" \
 --     -v clave_backup="$CLAVE_BACKUP" \
---     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" -f scripts/crear_roles.sql
+--     -v clave_soporte_documentos="$CLAVE_SOPORTE_DOCUMENTOS" \
+--     -v clave_soporte_exportacion="$CLAVE_SOPORTE_EXPORTACION" -f scripts/crear_roles.sql
 --
 -- Es idempotente: no toca roles ni bases que ya existen. En un servidor creado antes de las
--- copias, volver a correrlo solo agrega cem_backup. El rol de soporte de documentos (2c-2) está
--- en su propio archivo, para crearlo solo en un servidor que ya existe.
+-- copias, volver a correrlo solo agrega cem_backup. Los roles de soporte de documentos (2c-2) y
+-- de exportación (2c-3) están cada uno en su propio archivo, para crearlos solos en un servidor
+-- que ya existe.
 
 \set ON_ERROR_STOP on
 
@@ -55,4 +57,11 @@ grant connect on database :"base" to cem_app, cem_ro, cem_backup;
 \ir crear_rol_soporte_documentos.sql
 \else
 \echo 'sin clave_soporte_documentos: cem_soporte_documentos no se crea (crear_rol_soporte_documentos.sql)'
+\endif
+
+-- Lo mismo sin `clave_soporte_exportacion` (2c-3).
+\if :{?clave_soporte_exportacion}
+\ir crear_rol_soporte_exportacion.sql
+\else
+\echo 'sin clave_soporte_exportacion: cem_soporte_exportacion no se crea (crear_rol_soporte_exportacion.sql)'
 \endif
