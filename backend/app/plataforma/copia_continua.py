@@ -62,6 +62,7 @@ Avisos a Kuma (opcionales; sin la variable, un WARNING al arrancar y se sigue)
 Las URL llevan el token del monitor: nunca van a un registro.
 """
 
+import fcntl
 import gzip
 import hashlib
 import json
@@ -119,7 +120,11 @@ ESPERA_SONDEO = 0.2
 """Segundos entre miradas a `postmaster.pid` mientras la copia restaurada aplica el WAL."""
 POSICION_ESTADO = 7
 """Línea (desde 0) de `postmaster.pid` con el estado del servidor (`LOCK_FILE_LINE_PM_STATUS`)."""
-ESPERA_RECEPTOR = 10
+TIEMPO_SUBIDA_FINAL = 6.0
+"""Segundos para la última subida al recibir SIGTERM. Docker (y Coolify) esperan 10 segundos por
+defecto antes de matar el contenedor: quedan unos segundos para detener el receptor y salir. Si
+se alarga la espera de parada del contenedor, se puede alargar esto."""
+ESPERA_RECEPTOR = 2
 """Segundos que se espera a que `pg_receivewal` salga después de SIGTERM."""
 NIVEL_GZIP = 6
 LARGO_MENSAJE = 200
@@ -728,6 +733,8 @@ class CopiaContinua:
         self.base_fallida: str | None = None
         """La última copia base falló (se borra solo con una que verifica)."""
         self.receptor_caido_desde: datetime | None = None
+        self.bloqueo: Any = None
+        """El archivo con el `flock` del directorio de trabajo, mientras este proceso lo usa."""
         self.avisa_continua = bool(entorno.get(VARIABLE_AVISO_CONTINUA))
         self.avisa_base = bool(entorno.get(VARIABLE_AVISO_BASE))
 
@@ -815,7 +822,8 @@ class CopiaContinua:
 
     def vuelta(self, ahora: datetime) -> None:
         self.guardar_cortes()
-        if self.receptor.vivo():
+        caido = not self.receptor.vivo()
+        if not caido:
             self.receptor_caido_desde = None
         elif self.receptor_caido_desde is None:
             self.receptor_caido_desde = ahora
@@ -838,7 +846,12 @@ class CopiaContinua:
                 self.revisar_base(ahora)
             except Exception:
                 log.exception("no se pudo revisar base/; se reintenta")
-        if self.ultimo_aviso is None or ahora - self.ultimo_aviso >= INTERVALO_AVISO:
+        esperando = caido and estado is not None and estado.slot_activo
+        if esperando:
+            # Otro receptor tiene el slot: el contenedor anterior durante una actualización. El
+            # nuevo reintenta en cada vuelta y no avisa; el que copia es el que avisa.
+            log.info("otro receptor tiene el slot %s; se espera", SLOT)
+        elif self.ultimo_aviso is None or ahora - self.ultimo_aviso >= INTERVALO_AVISO:
             problemas = self.problemas(estado, ahora)
             if problemas:
                 self.avisar_continua("down", "; ".join(problemas), ahora)
@@ -1077,9 +1090,59 @@ class CopiaContinua:
 
     # Ciclo -----------------------------------------------------------------------------
 
-    def ejecutar(self, detener: threading.Event) -> None:
-        self.iniciar(datetime.now(UTC))
+    def tomar_directorio(self) -> bool:
+        """Bloqueo exclusivo del directorio de trabajo (`flock`): con un volumen compartido, dos
+        contenedores a la vez (una actualización progresiva) no suben el mismo directorio. Sin
+        volumen cada contenedor tiene el suyo, y el slot, que admite un solo receptor, hace que
+        el nuevo reintente hasta que el viejo se detenga."""
+        self.cfg.directorio.mkdir(parents=True, exist_ok=True)
+        archivo = (self.cfg.directorio / "bloqueo").open("a")
         try:
+            fcntl.flock(archivo, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            archivo.close()
+            return False
+        self.bloqueo = archivo
+        return True
+
+    def soltar_directorio(self) -> None:
+        if self.bloqueo is not None:
+            self.bloqueo.close()  # cerrar suelta el flock
+            self.bloqueo = None
+
+    def subir_final(self, limite: float) -> None:
+        """Al detenerse: los segmentos completos y el parcial (aunque no hayan pasado los 5
+        minutos), mientras quede tiempo hasta `limite` (`time.monotonic()`). Lo que no llegue
+        sigue en el disco y en el slot."""
+        for archivo in sorted(self.carpeta_wal.iterdir()):
+            if time.monotonic() >= limite:
+                log.warning("sin tiempo para subir todo el WAL al detenerse")
+                return
+            if SEGMENTO.match(archivo.name) or HISTORIA.match(archivo.name):
+                try:
+                    self.subir_completo(archivo)
+                except Exception:
+                    log.exception("no se pudo subir %s al detenerse", archivo.name)
+                    return
+        if time.monotonic() < limite:
+            try:
+                self.subir_parcial(datetime.now(UTC))
+            except Exception:
+                log.exception("no se pudo subir el WAL en curso al detenerse")
+
+    def cerrar(self) -> None:
+        """Detiene el receptor y sube lo que haya, con tope `TIEMPO_SUBIDA_FINAL`."""
+        self.receptor.detener()
+        self.subir_final(time.monotonic() + TIEMPO_SUBIDA_FINAL)
+
+    def ejecutar(self, detener: threading.Event) -> None:
+        while not self.tomar_directorio():
+            log.info("otro proceso usa %s; se espera", self.cfg.directorio)
+            latido.latir()  # esperar es sano: el otro está copiando
+            if detener.wait(INTERVALO_VUELTA):
+                return
+        try:
+            self.iniciar(datetime.now(UTC))
             while not detener.is_set():
                 try:
                     self.vuelta(datetime.now(UTC))
@@ -1088,8 +1151,10 @@ class CopiaContinua:
                     # Sin vuelta no hay latido a Kuma, que se pone rojo solo.
                     log.exception("vuelta de la copia continua fallida; se reintenta")
                 detener.wait(INTERVALO_VUELTA)
+            self.cerrar()
         finally:
             self.receptor.detener()
+            self.soltar_directorio()
         log.info("cem-copia-continua detenido")
 
 

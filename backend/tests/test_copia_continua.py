@@ -838,3 +838,62 @@ def test_sin_copiar_no_hay_latido_aunque_el_proceso_siga_vivo(
     latido.ARCHIVO.unlink()
     p.al_dia_subida = t - cc.ATRASO_MAXIMO - timedelta(minutes=5)
     assert p.problemas_de_salud(t)[0].startswith("sin poder subir")
+
+
+@pytest.mark.db
+def test_al_detenerse_sube_lo_completo_y_el_parcial(cfg, proceso, motor_migrate, tabla_pa26):
+    p = proceso()
+    t = datetime.now(UTC)
+    p.iniciar(t)
+    esperar_recibido(lsn_actual(), p.carpeta_wal)
+    p.subir(t)  # el primer parcial
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into plataforma.prueba_pa26 values ('antes de parar')"))
+    admin("select pg_switch_wal()")
+    esperar(lambda: any(cc.SEGMENTO.match(a.name) for a in p.carpeta_wal.iterdir()))
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into plataforma.prueba_pa26 values ('en curso')"))
+    esperar_recibido(lsn_actual())
+    parciales = len(objetos(cfg, cc.PREFIJO_PARCIAL))
+    assert objetos(cfg, cc.PREFIJO_WAL) == []
+    p.cerrar()  # SIGTERM: antes de los 5 minutos del parcial siguiente
+    assert len(objetos(cfg, cc.PREFIJO_WAL)) == 1
+    assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == parciales + 1
+    assert not any(cc.SEGMENTO.match(a.name) for a in p.carpeta_wal.iterdir())
+
+
+def test_dos_procesos_no_usan_el_mismo_directorio(cfg):
+    p1, p2 = cc.CopiaContinua(cfg, {}), cc.CopiaContinua(cfg, {})
+    assert p1.tomar_directorio()
+    assert not p2.tomar_directorio()
+    p1.soltar_directorio()
+    assert p2.tomar_directorio()  # control: suelto, el otro lo toma
+    p2.soltar_directorio()
+
+
+@pytest.mark.db
+def test_mientras_otro_receptor_tiene_el_slot_el_nuevo_espera_sin_avisar(
+    cfg,
+    proceso,
+    kuma,  # noqa: F811
+    tmp_path,
+):
+    viejo = proceso()
+    viejo.iniciar(datetime.now(UTC))
+    esperar(lambda: cc.estado_servidor(url_copia_continua()).slot_activo)
+    otra = dataclasses.replace(cfg, directorio=tmp_path / "otro-directorio")
+    nuevo = cc.CopiaContinua(otra, {cc.VARIABLE_AVISO_CONTINUA: url_push(kuma)})
+    nuevo.iniciar(datetime.now(UTC))
+    esperar(lambda: not nuevo.receptor.vivo())  # el slot está ocupado: el receptor sale
+    antes = len(kuma.pedidos)
+    nuevo.vuelta(datetime.now(UTC) + timedelta(minutes=2))
+    assert len(kuma.pedidos) == antes  # no avisa una caída que no es
+    # Control: con el viejo detenido, el nuevo toma el slot y avisa.
+    viejo.receptor.detener()
+    # El slot queda libre, o ya lo tomó el receptor que la vuelta anterior volvió a lanzar.
+    esperar(lambda: nuevo.receptor.vivo()
+            or not cc.estado_servidor(url_copia_continua()).slot_activo)  # fmt: skip
+    nuevo.vuelta(datetime.now(UTC) + timedelta(minutes=4))
+    assert len(kuma.pedidos) == antes + 1
+    nuevo.receptor.detener()
+    nuevo.esperar_base()  # la vuelta lanzó la copia base del corte inicial
