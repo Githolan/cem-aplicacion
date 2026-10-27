@@ -247,8 +247,46 @@ describe("página /documentos", () => {
     // El administrador externo solo carga (documento 08 §4): el formulario sigue disponible.
     await completarNuevo();
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-    expect(await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/)).toBeTruthy();
+    const listo = await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/);
+    // Sin lista no hay botón «Actualizar», y el aviso no lo nombra.
+    expect(listo.textContent).not.toMatch(/Actualizar/);
+    expect(screen.queryByRole("button", { name: "Actualizar" })).toBeNull();
     expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
+  });
+
+  it("si la lista se cae después de crear y falla el archivo, el reintento sigue a mano", async () => {
+    let creado = false;
+    let intentos = 0;
+    const simulado = conLista({
+      // La lista anda hasta que se crea el documento; después se cae.
+      [`GET ${BASE}`]: () => (creado ? error("error_interno", 500) : Response.json(LISTA)),
+      [`POST ${BASE}`]: () => {
+        creado = true;
+        return Response.json({ id: D3 }, { status: 201 });
+      },
+      [`POST ${versiones(D3)}`]: () =>
+        ++intentos === 1
+          ? error("error_interno", 500)
+          : Response.json(
+              { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+              { status: 201 },
+            ),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await tarjeta("Acta de asamblea ordinaria");
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
+    expect(reintento.tagName).toBe("H3");
+    elegir(pdf());
+    fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
+    const listo = await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/);
+    // Con la lista caída sí está «Actualizar», y el aviso lo nombra (control del caso sin lista).
+    expect(listo.textContent).toMatch(/tocá «Actualizar»/);
+    expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(2);
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
   });
 
   it("sin acceso a la lista, si falla el archivo se reintenta igual, sin crear otro documento", async () => {

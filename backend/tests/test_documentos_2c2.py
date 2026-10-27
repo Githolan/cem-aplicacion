@@ -5,6 +5,7 @@ el almacén S3 de pruebas y ClamAV (las versiones se aprueban con el análisis d
 negación lleva su control: el mismo pedido de quien sí puede pasa.
 """
 
+import asyncio
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
@@ -14,6 +15,10 @@ from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.autorizacion.evaluador import Decision
+from app.autorizacion.requiere import Permiso
+from app.consorcios import documentos as rutas
+from app.consorcios.padron import Discrepancia
 from app.db import transaccion
 from tests import test_documentos_2c1 as carga
 from tests.test_condicion_habilitante_consejo import unidad, vinculo
@@ -385,3 +390,52 @@ def test_0036_ida_y_vuelta_y_se_niega_con_la_facultad_otorgada(base_aparte):  # 
     with pytest.raises(DBAPIError) as error:
         command.downgrade(cfg, "0035")
     assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+
+
+# Ajustes de la revisión de #129 -----------------------------------------------------------
+
+
+def _en_el_bucle() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def test_la_autorizacion_de_la_carga_corre_fuera_del_bucle_de_eventos(escena, bucket,
+                                                                       monkeypatch):  # fmt: skip
+    """`subir_version` es `async`: la lectura de la categoría abre una transacción sincrónica y
+    tiene que correr en un hilo, no en el bucle de eventos (Codex en #129)."""
+
+    async def dentro() -> bool:
+        return _en_el_bucle()
+
+    assert asyncio.run(dentro()) is True  # control: la prueba distingue el bucle de un hilo
+    e = escena
+    original = rutas._categoria_para_cargar
+    llamadas: list[bool] = []
+
+    def espia(*args, **kwargs):
+        llamadas.append(_en_el_bucle())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(rutas, "_categoria_para_cargar", espia)
+    actas = crear(e["mc"], e["cons"], categoria="actas_y_decisiones").json()["id"]
+    assert subir(e["mc"], e["cons"], actas, pdf(), "application/pdf").status_code == 201
+    assert llamadas == [False]
+
+
+def test_si_la_base_niega_la_descarga_y_el_evaluador_concede_falla_fuerte(escena, bucket,
+                                                                          motor_app,
+                                                                          monkeypatch):  # fmt: skip
+    """La base niega leer documentos sin la pista de categoría restringida y el evaluador
+    concede: es una discrepancia (500), nunca un 403 ni un 404."""
+    e = escena
+    doc, v, _ = documento_con_archivo(e, motor_app, "institucional")
+    assert descargar(e["ae"], e["cons"], doc, v).status_code == 403  # control: sin el parche
+    monkeypatch.setattr(
+        Permiso, "decidir", lambda self, entidad=None: Decision(True, 200, "concedido_por_facultad")
+    )
+    with pytest.raises(Discrepancia, match="la base niega leer documentos"):
+        descargar(e["ae"], e["cons"], doc, v)

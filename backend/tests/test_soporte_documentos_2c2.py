@@ -19,12 +19,10 @@ from tests.test_contexto_mandatos import cliente
 from tests.test_documentos_2c1 import crear, url
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
-from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo
+from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo, hoy_de
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
-
-HOY = date.today()
 
 
 def _edificio(motor_migrate, motor_app) -> dict:
@@ -37,7 +35,10 @@ def _edificio(motor_migrate, motor_app) -> dict:
     m_ad = alta(motor_app, cons, None, acta, persona=ad, tipo="administrador", origen="soporte")
     mc = otra_persona(motor_migrate, cons)
     alta(motor_app, cons, None, acta, persona=mc, tipo="miembro_consejo", origen="soporte")
-    return {"cons": cons, "prop": prop, "ad": ad, "m_ad": m_ad, "mc": mc}
+    # El día del pedido se compara con el del consorcio (Buenos Aires), no con el del contenedor
+    # (UTC): entre las 21 y las 24 de Argentina son días distintos.
+    hoy = hoy_de(motor_app, cons)
+    return {"cons": cons, "prop": prop, "ad": ad, "m_ad": m_ad, "mc": mc, "hoy": hoy}
 
 
 @pytest.fixture
@@ -56,7 +57,8 @@ def documento(e, categoria="actas_y_decisiones") -> str:
     return r.json()["id"]
 
 
-def correr(e, accion, doc, solicitante, *, fecha=HOY, categoria=None, consorcio=None) -> int:
+def correr(e, accion, doc, solicitante, *, fecha=None, categoria=None, consorcio=None) -> int:
+    fecha = fecha or e["hoy"]
     argumentos = [
         accion, "--consorcio", str(consorcio or e["cons"]), "--documento", str(doc),
         "--solicitante", str(solicitante), "--fecha-pedido", fecha.isoformat(),
@@ -106,7 +108,7 @@ def test_el_administrador_pide_y_soporte_borra_sin_eventos(edificio, con_url, mo
     assert (f["estado"], f["borrado_motivo"], f["borrado_referencia"]) == (
         "borrado", "Cargado por error", "Nota 12/2026")  # fmt: skip
     assert (f["borrado_solicitado_por"], f["borrado_mandato"], f["borrado_fecha_pedido"]) == (
-        e["ad"], e["m_ad"], HOY)  # fmt: skip
+        e["ad"], e["m_ad"], e["hoy"])  # fmt: skip
     assert eventos(motor_migrate, e["cons"]) == antes  # soporte no escribe en la auditoría
     assert doc not in visibles(e["prop"], e["cons"])
     assert doc not in visibles(e["mc"], e["cons"])
@@ -127,7 +129,7 @@ def test_la_capacidad_se_mide_el_dia_del_pedido(edificio, con_url, motor_migrate
     doc = documento(e)
     # Antes del mandato (desde el 1-1-2026, `DESDE` de las pruebas) no tenía la capacidad.
     assert correr(e, "borrar", doc, e["ad"], fecha=date(2025, 12, 31)) == 1
-    assert correr(e, "borrar", doc, e["ad"], fecha=HOY + timedelta(days=2)) == 1
+    assert correr(e, "borrar", doc, e["ad"], fecha=e["hoy"] + timedelta(days=2)) == 1
     assert "fecha_futura" in capsys.readouterr().err
     assert fila(motor_migrate, doc)["estado"] == "vigente"
     assert correr(e, "borrar", doc, e["ad"], fecha=date(2026, 1, 1)) == 0  # control
@@ -169,7 +171,7 @@ def test_cambiar_la_categoria_deja_la_anterior_en_la_fila(edificio, con_url, mot
     f = fila(motor_migrate, doc)
     cambio = (f["categoria"], f["categoria_anterior"], f["categoria_mandato"],
               f["categoria_fecha_pedido"])  # fmt: skip
-    assert cambio == ("otros", "actas_y_decisiones", e["m_ad"], HOY)
+    assert cambio == ("otros", "actas_y_decisiones", e["m_ad"], e["hoy"])
     assert eventos(motor_migrate, e["cons"]) == antes
     # Ahora es restringida: la propietaria ya no la ve; el Consejo, con la facultad, sí.
     assert doc not in visibles(e["prop"], e["cons"])
@@ -299,7 +301,12 @@ def test_la_capacidad_exige_el_consorcio_del_contexto_y_no_la_ejecuta_cem_app(ed
                                                                             motor_app):  # fmt: skip
     e = edificio
     capacidad = "select nucleo.capacidad_del_solicitante(:c, :p, :f, :h)"
-    datos = {"c": e["cons"], "p": e["ad"], "f": ["documentos.ver", "documentos.cargar"], "h": HOY}
+    datos = {
+        "c": e["cons"],
+        "p": e["ad"],
+        "f": ["documentos.ver", "documentos.cargar"],
+        "h": e["hoy"],
+    }
     with pytest.raises(DBAPIError) as error:
         _como_soporte(None, capacidad, datos)
     assert error.value.orig.sqlstate == "42501"

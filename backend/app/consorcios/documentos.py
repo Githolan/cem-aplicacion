@@ -300,8 +300,9 @@ async def subir_version(
                 Bucket=destino.bucket, Key=fila.clave_objeto, Body=cuerpo,
                 ContentType=tipo.value, Metadata={"sha256": suma},
             )  # fmt: skip
-            # Un bucket con versiones (producción) devuelve el `VersionId` con el que el análisis
-            # borra un rechazado; uno sin versiones (staging) no devuelve ninguno.
+            # El `VersionId` es con el que el análisis borra un rechazado. OCI lo devuelve también
+            # en un bucket sin versiones (staging, visto el 26-10); un almacén que no lo devuelve
+            # deja la versión sin él, y el análisis borra por la clave.
             if subida.get("VersionId"):
                 _escribir(
                     conn,
