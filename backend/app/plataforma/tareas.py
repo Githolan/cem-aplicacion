@@ -11,7 +11,7 @@ from sqlalchemy import Connection, text
 
 from app.consorcios import documentos_analisis  # noqa: F401 (registra sus tipos)
 from app.identidad import sesiones
-from app.plataforma import cola, copias, correo, indices, outbox
+from app.plataforma import almacen, cola, copias, correo, indices, outbox, replica_documentos
 from app.plataforma.planificador import periodica
 
 CONSERVACION = timedelta(days=30)
@@ -54,6 +54,38 @@ def copia_diaria(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
 
 # Todos los días a las 03:30 UTC, después de la ventana de Coolify (§17.2).
 periodica("plataforma.copia_diaria", timedelta(days=1), desfase=timedelta(hours=3, minutes=30))
+
+
+@cola.REGISTRO.tipo("plataforma.replicar_documentos")
+def replicar_documentos(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Réplica diaria de las versiones `disponible` al prefijo `documentos/` del bucket de copias
+    (H2c §6, documento 13 §17.2). Lee con `cem_backup` y la clave de análisis de documentos;
+    escribe con la clave de copias."""
+    return replica_documentos.replicar(
+        copias.ConfigCopias.desde_entorno(),
+        almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS),
+    )
+
+
+# Todos los días a las 05:15 UTC: después de la copia de las 03:30, del control de índices de las
+# 04:15 y de la limpieza de objetos sin fila de las 04:45 (no compite por las dos conexiones de
+# cem_backup con la copia ni por el almacén con la limpieza), y antes de la purga de las 06:00.
+periodica(
+    "plataforma.replicar_documentos", timedelta(days=1), desfase=timedelta(hours=5, minutes=15)
+)
+
+
+@cola.REGISTRO.tipo("plataforma.controlar_tamano_copias")
+def controlar_tamano_copias(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Tamaño de `base/`, `wal/`, `wal-parcial/` y `documentos/` contra
+    `CEM_COPIAS_PRESUPUESTO_BYTES`, con aviso a Kuma (H2c §6)."""
+    return replica_documentos.controlar_tamano(copias.ConfigCopias.desde_entorno())
+
+
+# Todos los días a las 05:45 UTC, después de la réplica: mide lo que dejó.
+periodica(
+    "plataforma.controlar_tamano_copias", timedelta(days=1), desfase=timedelta(hours=5, minutes=45)
+)
 
 
 @cola.REGISTRO.tipo("plataforma.verificar_indices")
