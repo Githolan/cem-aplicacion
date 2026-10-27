@@ -391,6 +391,15 @@ def claves(s3, bucket: str, prefijo: str) -> Iterator[dict[str, Any]]:
         yield from pagina.get("Contents", [])
 
 
+def segmentos_subidos(s3, bucket: str, tamano_segmento: int) -> set[tuple[int, int]]:
+    """Los segmentos completos de `wal/` (línea de tiempo, número)."""
+    return {
+        numero_segmento(nombre, tamano_segmento)
+        for o in claves(s3, bucket, PREFIJO_WAL)
+        if SEGMENTO.match(nombre := o["Key"].removeprefix(PREFIJO_WAL).removesuffix(".gz.age"))
+    }
+
+
 def ultimo_segmento_subido(s3, bucket: str, tamano_segmento: int) -> tuple[int, int] | None:
     """El segmento completo más alto de `wal/` (línea de tiempo, número), o None si no hay."""
     numeros = [
@@ -984,11 +993,16 @@ class CopiaContinua:
         tli, numero = numero_segmento(nombre, self.tamano_segmento)
         if self.ultimo is not None and (tli != self.ultimo[0] or numero > self.ultimo[1] + 1):
             # Antes de cortar, `wal/` otra vez: en una actualización sin volumen, el contenedor
-            # viejo siguió subiendo segmentos mientras este esperaba el slot. Solo es un hueco si
-            # tampoco están en el almacén.
-            subido = ultimo_segmento_subido(self.s3, self.cfg.copias.bucket, self.tamano_segmento)
-            if subido is not None and subido > self.ultimo:
-                self.ultimo = subido
+            # viejo siguió subiendo segmentos mientras este esperaba el slot. Se adopta solo la
+            # tira continua que sigue a lo que ya se cubría, en la misma línea de tiempo: un
+            # salto en el almacén también es un hueco.
+            subidos = segmentos_subidos(self.s3, self.cfg.copias.bucket, self.tamano_segmento)
+            linea, cubierto = self.ultimo
+            while (linea, cubierto + 1) in subidos:
+                cubierto += 1
+            self.ultimo = (linea, cubierto)
+            # Y el viejo pudo haber guardado un corte mientras este esperaba.
+            self.adoptar_corte_guardado()
         if self.ultimo is not None and (tli != self.ultimo[0] or numero > self.ultimo[1] + 1):
             self.cortar(
                 f"hueco en el WAL: llegó {nombre} y wal/ cubre hasta el segmento"
@@ -998,6 +1012,21 @@ class CopiaContinua:
         if self.ultimo is None:
             # El primer archivo de una cadena nueva: desde acá, sin huecos.
             self.ultimo = (tli, numero - 1)
+
+    def adoptar_corte_guardado(self) -> None:
+        """Si en `cortes/` hay uno abierto que este proceso no conoce (lo guardó otro
+        contenedor), queda abierto acá también; no se vuelve a guardar."""
+        if self.corte is not None:
+            return
+        abierto = corte_abierto(self.s3, self.cfg.copias.bucket)
+        if abierto is None:
+            return
+        momento, motivo = abierto
+        with self.cerrojo:
+            self.corte = f"{motivo} (guardado por otro proceso, {momento:%Y-%m-%d %H:%M} UTC)"
+            self.cortes += 1
+            self.error_base = None
+        log.error("cadena de WAL cortada por otro proceso: %s", self.corte)
 
     def subir(self, ahora: datetime) -> None:
         """Los segmentos completos, en orden, y cada `INTERVALO_PARCIAL` el segmento en curso.

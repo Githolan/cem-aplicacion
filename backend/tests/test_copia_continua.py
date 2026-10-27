@@ -1075,3 +1075,33 @@ def test_la_copia_base_retiene_su_wal_aunque_se_recicle_durante_la_copia(
     monkeypatch.setattr(cc, "METODO_WAL", "fetch")
     with pytest.raises(copias.ErrorCopia, match="pg_basebackup"):
         cc.tomar_base(cfg.url_copia_continua, tmp_path / "fetch", "fetch")
+
+
+@pytest.mark.db
+def test_un_salto_en_lo_que_subio_otro_contenedor_es_un_hueco(cfg):
+    p = cc.CopiaContinua(cfg, {})
+    p.tamano_segmento = 16 * 1024 * 1024
+    p.ultimo = (1, 5)
+    s3 = copias.cliente_s3(cfg.copias)
+    for n in (6, 8):  # falta el 7
+        s3.put_object(Bucket=cfg.copias.bucket, Key=f"wal/0000000100000000000000{n:02X}.gz.age",
+                      Body=b"x")  # fmt: skip
+    p.revisar_continuidad("000000010000000000000009", datetime.now(UTC))
+    assert p.corte is not None and "wal/ cubre hasta el segmento 6" in p.corte
+    # Control (con la tira completa no corta): test_lo_que_subio_otro_contenedor_...
+
+
+@pytest.mark.db
+def test_un_corte_que_guardo_otro_contenedor_mientras_se_esperaba_queda_abierto(cfg):
+    p = cc.CopiaContinua(cfg, {})
+    p.tamano_segmento = 16 * 1024 * 1024
+    p.ultimo = (1, 5)
+    s3 = copias.cliente_s3(cfg.copias)
+    for n in (6, 7):
+        s3.put_object(Bucket=cfg.copias.bucket, Key=f"wal/0000000100000000000000{n:02X}.gz.age",
+                      Body=b"x")  # fmt: skip
+    cc.guardar_corte(s3, cfg.copias.bucket, datetime.now(UTC), "slot perdido en el viejo")
+    p.revisar_continuidad("000000010000000000000008", datetime.now(UTC))
+    assert p.ultimo == (1, 7)  # sin hueco
+    assert p.corte is not None and p.corte.startswith("slot perdido en el viejo")
+    assert len(objetos(cfg, cc.PREFIJO_CORTES)) == 1  # no se guarda otra vez
