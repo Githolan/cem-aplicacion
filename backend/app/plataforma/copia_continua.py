@@ -725,6 +725,9 @@ class CopiaContinua:
         self.hilo_base: threading.Thread | None = None
         self.ultima_base: dict[str, Any] | None = None
         self.error_base: str | None = None
+        self.base_fallida: str | None = None
+        """La última copia base falló (se borra solo con una que verifica)."""
+        self.receptor_caido_desde: datetime | None = None
         self.avisa_continua = bool(entorno.get(VARIABLE_AVISO_CONTINUA))
         self.avisa_base = bool(entorno.get(VARIABLE_AVISO_BASE))
 
@@ -754,6 +757,7 @@ class CopiaContinua:
         self.asegurar_slot(estado, ahora)
         self.al_dia_subida = ahora
         self.receptor.arrancar()
+        latido.latir()
 
     def asegurar_slot(self, estado: EstadoServidor, ahora: datetime) -> None:
         """Crea el slot si falta y lo rehace si está perdido. En los dos casos la cadena quedó
@@ -811,7 +815,10 @@ class CopiaContinua:
 
     def vuelta(self, ahora: datetime) -> None:
         self.guardar_cortes()
-        latido.latir()
+        if self.receptor.vivo():
+            self.receptor_caido_desde = None
+        elif self.receptor_caido_desde is None:
+            self.receptor_caido_desde = ahora
         # Lo ya recibido se sube primero: con la base caída, el WAL que está en disco igual llega
         # al almacén. Subir no consulta la base.
         self.subir(ahora)
@@ -827,7 +834,10 @@ class CopiaContinua:
             self.error_servidor = self.error_servidor_desde = None
             self.atender_receptor(estado, ahora)
             self.medir_atraso(estado, ahora)
-            self.revisar_base(ahora)
+            try:
+                self.revisar_base(ahora)
+            except Exception:
+                log.exception("no se pudo revisar base/; se reintenta")
         if self.ultimo_aviso is None or ahora - self.ultimo_aviso >= INTERVALO_AVISO:
             problemas = self.problemas(estado, ahora)
             if problemas:
@@ -836,6 +846,31 @@ class CopiaContinua:
                 self.avisar_continua(
                     "up", f"al día: atraso {int(self.atraso.total_seconds())} s", ahora
                 )
+        # Sin monitor de Kuma configurado, un proceso vivo que no copia tiene que verse igual: el
+        # healthcheck del contenedor solo ve el latido, y el latido solo se da si está sano.
+        salud = self.problemas_de_salud(ahora)
+        if salud:
+            log.error("copia continua enferma, sin latido: %s", "; ".join(salud))
+        else:
+            latido.latir()
+
+    def problemas_de_salud(self, ahora: datetime) -> list[str]:
+        """Lo que deja al contenedor sin latido (y `unhealthy`): que no copie de verdad durante
+        más de `ATRASO_MAXIMO`, o un corte cuya copia base falla. Un corte con su copia base en
+        curso no cuenta, para no tumbar el primer despliegue mientras se hace la primera; Kuma
+        avisa todo igual y en el acto."""
+        salud = []
+        if self.receptor_caido_desde and ahora - self.receptor_caido_desde > ATRASO_MAXIMO:
+            salud.append(f"receptor caído desde {self.receptor_caido_desde:%H:%M} UTC")
+        if self.error_servidor_desde and ahora - self.error_servidor_desde > ATRASO_MAXIMO:
+            salud.append(f"base sin responder desde {self.error_servidor_desde:%H:%M} UTC")
+        if self.atraso > ATRASO_MAXIMO:
+            salud.append(f"receptor atrasado {int(self.atraso.total_seconds())} s")
+        if self.al_dia_subida is not None and ahora - self.al_dia_subida > ATRASO_MAXIMO:
+            salud.append(f"sin poder subir desde {self.al_dia_subida:%H:%M} UTC")
+        if self.corte is not None and self.base_fallida is not None:
+            salud.append(f"cadena cortada y la copia base falla: {self.base_fallida}")
+        return salud
 
     def atender_receptor(self, estado: EstadoServidor, ahora: datetime) -> None:
         """Rearranca el receptor si terminó, y rehace el slot si falta o se perdió."""
@@ -1011,11 +1046,12 @@ class CopiaContinua:
         try:
             resumen = copia_base(self.cfg, ahora)
         except Exception as e:
-            self.error_base = f"{type(e).__name__}: {e}"
+            self.error_base = self.base_fallida = f"{type(e).__name__}: {e}"
             log.exception("la copia base falló; no cuenta")
             self.avisar_base("down", f"copia base fallida: {self.error_base}")
             return
         self.ultima_base = resumen
+        self.base_fallida = None
         with self.cerrojo:
             if self.cortes == cortes:
                 self.corte = None

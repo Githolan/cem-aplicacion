@@ -135,9 +135,13 @@ def lsn_actual() -> int:
     return cc.lsn(admin("select pg_current_wal_lsn()::text")[0][0])
 
 
-def esperar_recibido(posicion: int) -> None:
-    """Hasta que el receptor confirma (`restart_lsn`, con `--synchronous`) `posicion`."""
+def esperar_recibido(posicion: int, carpeta: Path | None = None) -> None:
+    """Hasta que el receptor confirma (`restart_lsn`, con `--synchronous`) `posicion` y, si se
+    da la carpeta, hasta que su `.partial` existe (el slot toma posición al empezar a recibir,
+    un instante antes de que el receptor cree el archivo)."""
     esperar(lambda: (cc.estado_servidor(url_copia_continua()).restart_lsn or 0) >= posicion)
+    if carpeta is not None:
+        esperar(lambda: any(carpeta.glob("*.partial")))
 
 
 def descifrar(identidad: Path, cifrado: bytes) -> bytes:
@@ -240,7 +244,7 @@ def test_un_segmento_y_un_parcial_llegan_cifrados_y_se_descifran_iguales(
     assert p.corte == "no hay WAL en wal/: la cadena empieza ahora"
     with motor_migrate.begin() as c:
         c.execute(text("insert into plataforma.prueba_pa26 values ('uno')"))
-    esperar_recibido(lsn_actual())
+    esperar_recibido(lsn_actual(), p.carpeta_wal)
     p.receptor.detener()  # quieto, para comparar el parcial con lo que se subió
     [parcial] = list(p.carpeta_wal.glob("*.partial"))
     local = parcial.read_bytes()
@@ -776,7 +780,7 @@ def test_un_corte_sigue_abierto_despues_de_reiniciar(cfg, proceso):
 def test_un_parcial_sin_cambios_se_vuelve_a_subir_pasado_un_dia(cfg, proceso, motor_migrate):
     p = proceso()
     p.iniciar(datetime.now(UTC))
-    esperar_recibido(lsn_actual())
+    esperar_recibido(lsn_actual(), p.carpeta_wal)
     p.receptor.detener()
     t = datetime.now(UTC)
     p.subir_parcial(t)
@@ -796,7 +800,7 @@ def test_con_la_base_caida_el_wal_recibido_igual_se_sube_y_se_avisa(
 ):
     p = proceso({cc.VARIABLE_AVISO_CONTINUA: url_push(kuma)})
     p.iniciar(datetime.now(UTC))
-    esperar_recibido(lsn_actual())
+    esperar_recibido(lsn_actual(), p.carpeta_wal)
     p.receptor.detener()
     assert objetos(cfg, cc.PREFIJO_PARCIAL) == []
     # La base deja de responder (otro puerto: conexión rechazada).
@@ -807,3 +811,30 @@ def test_con_la_base_caida_el_wal_recibido_igual_se_sube_y_se_avisa(
     assert p.error_servidor is not None
     estado, mensaje = pedidos(kuma)[-1]
     assert estado == "down" and "no se puede consultar la base" in mensaje
+
+
+@pytest.mark.db
+def test_sin_copiar_no_hay_latido_aunque_el_proceso_siga_vivo(
+    cfg, proceso, monkeypatch, tmp_path, tope_de_slot
+):
+    """Sin monitor de Kuma, el healthcheck es lo único que ve un proceso vivo que no copia."""
+    monkeypatch.setattr(latido, "ARCHIVO", tmp_path / "latido")
+    p = proceso()
+    t = datetime.now(UTC)
+    p.iniciar(t)
+    p.vuelta(t)
+    assert latido.ARCHIVO.exists()  # sano (el corte inicial tiene su copia base en curso)
+    p.esperar_base()
+    latido.ARCHIVO.unlink()
+    p.receptor.detener()
+    p.receptor_caido_desde = t - cc.ATRASO_MAXIMO - timedelta(minutes=1)
+    p.vuelta(t + timedelta(minutes=1))
+    assert not latido.ARCHIVO.exists()
+    assert p.problemas_de_salud(t + timedelta(minutes=1))[0].startswith("receptor caído")
+    # Control: con el receptor de nuevo en marcha (lo rearrancó la vuelta), vuelve el latido.
+    p.vuelta(t + timedelta(minutes=2))
+    assert latido.ARCHIVO.exists()
+    # Y una subida atrasada también lo corta.
+    latido.ARCHIVO.unlink()
+    p.al_dia_subida = t - cc.ATRASO_MAXIMO - timedelta(minutes=5)
+    assert p.problemas_de_salud(t)[0].startswith("sin poder subir")
