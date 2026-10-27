@@ -40,7 +40,13 @@ from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la
 )
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
-from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo, hoy_de
+from tests.test_modo_operacion import (
+    cambiar,
+    consorcio_con_persona,
+    decidir,
+    decidir_equipo,
+    hoy_de,
+)
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
@@ -60,13 +66,12 @@ CLAVES_POR_ENTIDAD = {
                 "vigente_hasta", "confirmado"},
     "documento": {"id", "categoria", "titulo", "fecha", "cargado_en"},
     "version": {"id", "documento_id", "tipo", "tamano", "sha256", "subida_en", "archivo"},
-    "decision": {"id", "tipo", "fecha", "descripcion", "referencia_acta", "sha256_acta", "origen",
-                 "registrada_por"},
+    "decision": {"id", "tipo", "fecha", "descripcion", "referencia_acta", "sha256_acta"},
     "mandato": {"id", "tipo", "nombre", "cuit", "vigente_desde", "vigente_hasta", "estado",
                 "con_cuenta", "matricula", "decision_id", "causa_baja", "baja_decision_id",
-                "instrumento_referencia", "motivo_fin", "finalizado_en", "origen"},
-    "facultad": {"mandato_id", "facultad", "recurso", "decision_id", "otorgada_en"},
-    "revision": {"id", "mandato_id", "decision_id", "eficaz_desde", "origen"},
+                "instrumento_referencia", "motivo_fin", "finalizado_en"},
+    "facultad": {"mandato_id", "facultad", "recurso"},
+    "revision": {"id", "mandato_id", "decision_id", "eficaz_desde"},
     "modo": {"modo", "vigente_desde", "vigente_hasta", "decision_id"},
     "coeficiente": {"esquema_id", "grupo", "version", "vigente_desde", "vigente_hasta",
                     "unidad_id", "designacion", "porcentaje"},
@@ -124,6 +129,8 @@ def _edificio(motor_migrate, motor_app, con_documentos: bool = True, externo: bo
         e["ad"] = persona("Adela Administradora")
         e["m_ad"] = alta(motor_app, cons, None, acta, persona=e["ad"], tipo="administrador",
                          origen="soporte")  # fmt: skip
+        # Una decisión que registra una persona: `registrada_por` es su identificador.
+        e["decision_ad"] = decidir(motor_app, cons, e["ad"])
     e["mc"] = persona("Marta Consejera")
     e["m_mc"] = alta(motor_app, cons, None, acta, persona=e["mc"], tipo="miembro_consejo",
                      origen="soporte")  # fmt: skip
@@ -395,6 +402,43 @@ def test_lo_que_nunca_va_no_esta_en_el_paquete_y_si_en_la_base(
     datos = entidades(descifrar(salida, claves["privada"]))
     assert any(ev["accion"] == "Registró una decisión" and ev["actor"] == "persona"
                for ev in datos["evento"]), datos["evento"]  # fmt: skip
+
+
+PERSONAS_DEL_CONSORCIO = """
+    select x::text, p from (
+      select v::text as x, v.persona_id as p from nucleo.vinculo v where v.consorcio_id = :c
+      union all select m::text, m.persona_id from nucleo.mandato m where m.consorcio_id = :c
+      union all select d::text, d.registrada_por from nucleo.decision_formal d
+                 where d.consorcio_id = :c
+      union all select e::text, e.actor_persona_id from auditoria.eventos e
+                 where e.consorcio_id = :c
+      union all select d::text, d.cargado_por from nucleo.documento d where d.consorcio_id = :c
+      union all select v::text, v.subida_por from nucleo.version_documento v
+                 where v.consorcio_id = :c
+      union all select k::text, k.actualizado_por from nucleo.contacto_emergencia k
+                 where k.consorcio_id = :c
+    ) t (x, p) where p is not null
+"""
+
+
+def test_ningun_identificador_de_persona_va_en_el_paquete(edificio, con_url, claves, tmp_path,
+                                                         motor_migrate):  # fmt: skip
+    """La API no muestra el identificador de las personas (salvo a quien da un alta): cruzado
+    entre consorcios, identifica a la misma cuenta. Ninguno de los que nombran las tablas de las
+    que sale el paquete va en él."""
+    e = edificio
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 0
+    with motor_migrate.connect() as c:
+        filas = c.execute(text(PERSONAS_DEL_CONSORCIO), {"c": e["cons"]}).all()
+    personas = {str(f.p) for f in filas}
+    # La búsqueda tiene qué buscar: la decisión que registró la administradora, entre otros.
+    assert {str(e["ad"]), str(e["mc"]), str(e["prop"])} <= personas
+    paquete = _textos_del_paquete(descifrar(salida, claves["privada"]))
+    assert {p for p in personas if p in paquete} == set()
+    # Control: la misma búsqueda, en las filas de la base que los nombran, los encuentra todos.
+    base = " ".join(f.x for f in filas)
+    assert {p for p in personas if p in base} == personas
 
 
 def test_las_versiones_en_cuarentena_o_rechazadas_no_van(edificio, con_url, claves, tmp_path):

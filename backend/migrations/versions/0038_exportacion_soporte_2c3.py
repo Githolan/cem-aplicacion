@@ -130,13 +130,14 @@ FUNCIONES: dict[str, str] = {
        order by v.documento_id, v.subida_en, v.id;
 """,
     "exportar_decisiones": """
+    -- Sin quién la registró (la API no lo muestra: A15, y es el identificador de una persona) ni
+    -- su origen (si la cargó el equipo: §1.1).
     return query
       select 'decision'::text,
              jsonb_build_object('id', d.id, 'tipo', d.tipo, 'fecha', d.fecha,
                                 'descripcion', d.descripcion,
                                 'referencia_acta', d.referencia_acta,
-                                'sha256_acta', d.sha256_acta, 'origen', d.origen,
-                                'registrada_por', d.registrada_por)
+                                'sha256_acta', d.sha256_acta)
         from nucleo.decision_formal d
        where d.consorcio_id = c
        order by d.fecha, d.id;
@@ -144,7 +145,10 @@ FUNCIONES: dict[str, str] = {
     "exportar_mandatos": """
     hoy := nucleo.hoy_del_consorcio(c);
     -- Como `mandato_detalle`: sin el identificador de la persona del mandato, su correo ni las
-    -- invitaciones; el CUIT, solo del administrador externo.
+    -- invitaciones; el CUIT, solo del administrador externo. Sin el origen del mandato, de la
+    -- revisión ni la decisión y la fecha de cada facultad, que la API no muestra y dejarían ver
+    -- las intervenciones del equipo (§1.1). El recurso de cada facultad sí: sin él, una facultad
+    -- acotada se leería como general.
     return query
       select 'mandato'::text,
              jsonb_build_object(
@@ -160,8 +164,7 @@ FUNCIONES: dict[str, str] = {
                'decision_id', m.decision_id, 'causa_baja', m.causa_baja,
                'baja_decision_id', m.baja_decision_id,
                'instrumento_referencia', m.instrumento_referencia,
-               'motivo_fin', m.motivo_fin, 'finalizado_en', m.finalizado_en,
-               'origen', m.origen)
+               'motivo_fin', m.motivo_fin, 'finalizado_en', m.finalizado_en)
         from nucleo.mandato m
         left join nucleo.persona pe on pe.id = m.persona_id
        where m.consorcio_id = c
@@ -169,16 +172,14 @@ FUNCIONES: dict[str, str] = {
     return query
       select 'facultad'::text,
              jsonb_build_object('mandato_id', f.mandato_id, 'facultad', f.facultad,
-                                'recurso', f.recurso, 'decision_id', f.decision_id,
-                                'otorgada_en', f.otorgada_en)
+                                'recurso', f.recurso)
         from nucleo.facultad_otorgada f
        where f.consorcio_id = c
        order by f.mandato_id, f.facultad, f.recurso;
     return query
       select 'revision'::text,
              jsonb_build_object('id', r.id, 'mandato_id', r.mandato_id,
-                                'decision_id', r.decision_id, 'eficaz_desde', r.eficaz_desde,
-                                'origen', r.origen)
+                                'decision_id', r.decision_id, 'eficaz_desde', r.eficaz_desde)
         from nucleo.revision_mandato r
        where r.consorcio_id = c
        order by r.eficaz_desde, r.id;
