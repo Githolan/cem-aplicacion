@@ -124,8 +124,8 @@ Medido en el despliegue de `c3150c7` (27-10-2026) por `cd.ps1` (estado, imagen y
 - **Producción:**
   - `cem-copia-continua` en marcha (copia base `20261027T082540Z` verificada, WAL subiendo). El camino público no se cortó en ninguno de los dos despliegues: el monitor 10 de Kuma dio 21 latidos arriba de 07:19 a 07:39 UTC (`4994f7c`) y 19 de 08:15 a 08:33 (`c3150c7`), todos arriba; la misma consulta sí encuentra los caídos del corte de `168f77a`.
   - **`cd.ps1` de `c3150c7` dio ROJO por una sola comprobación:** `/api/v1/health/cola` con `muertos: 1`. Es `plataforma.controlar_tamano_copias`, que corrió antes de que se cargara `CEM_COPIAS_PRESUPUESTO_BYTES`; con la variable ya cargada, el control a mano funciona.
-  - El monitor 19 de Kuma está caído por eso desde las 07:27 UTC. Reabrir el trabajo lo tiene que hacer el propietario (el clasificador no dejó a Claude escribir en la base de producción).
-  - La exportación en producción queda SIN VERIFICAR (el clasificador frenó también el control negativo).
+  - El monitor 19 de Kuma estuvo caído por eso de 07:27 a 14:22 UTC: el propietario reabrió el trabajo, terminó en `hecho` y la cola quedó sin muertos.
+  - Exportación en producción: el control negativo pasó (27-10, 16:40 UTC; rechaza sin mandato y no escribe nada). Armar y entregar un paquete real queda SIN VERIFICAR, porque producción no tiene consorcios.
 - **Infraestructura nueva** (en `REGISTRO_RECURSOS`):
   - roles `cem_soporte_exportacion` y `cem_copia_continua`;
   - `pg_hba` de replicación IPv4 + IPv6 solo para la red `coolify`;
@@ -133,7 +133,8 @@ Medido en el despliegue de `c3150c7` (27-10-2026) por `cd.ps1` (estado, imagen y
   - reglas de ciclo de vida de 42 días para `base/` y `wal/` y de 2 días para `wal-parcial/`;
   - una clave S3 propia por entorno para la copia continua;
   - `CEM_COPIAS_PRESUPUESTO_BYTES`.
-  - Las `CEM_OCI_S3_*` se quitaron de los dos `cem-trabajos`.
+  - Las `CEM_OCI_S3_*` se quitaron de los dos `cem-trabajos`; el 27-10 se borraron también las variables compartidas y las claves viejas de OCI.
+  - Monitores push de Kuma 26 a 31: copia continua, copia base y tamaño de las copias, por entorno, con sus variables cargadas.
 
 Antes, con `168f77a`:
 
@@ -682,17 +683,14 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - el rol `cem_soporte_exportacion` (sin `BYPASSRLS` ni `INSERT`);
      - `scripts/exportar_consorcio.py armar|entregar`: un ZIP en tramos directo a `age`, sin copia en claro, con manifiesto SHA-256, y sin eventos de auditoría.
    - **Riesgo residual (en el docstring de `0038`):** una lectura dentro de una transacción que vuelve atrás, hecha con la credencial del rol, no deja constancia. Se descartó `log_statement` porque escribiría datos personales en los registros.
-   - **Validado en staging de punta a punta** (ver «Desplegado»); en producción, SIN VERIFICAR.
+   - **Validado en staging de punta a punta** (ver «Desplegado»); en producción, solo el control negativo (no hay consorcios).
 21. **2c-4, copia continua y PA26** (PR #133, fusionado el 27-10-2026 en `0d37a79`; mapa en #134 y #135; **desplegado** en los dos entornos; diseño en H2c §6):
    - **`cem-copia-continua(-staging)`:**
      - `pg_receivewal` con el slot `cem_copia_continua`; los segmentos se suben cifrados a `wal/` y los parciales cada 5 minutos a `wal-parcial/`, con relectura antes de borrar;
-     - cortes guardados en `cortes/` y medidos desde que el proceso los abre;
+     - cortes guardados en `cortes/` y medidos desde que el proceso los abre o adopta;
      - copia base semanal con `--wal-method=stream`, verificada con `pg_verifybackup` y una restauración efímera;
      - latido del healthcheck solo cuando copia de verdad.
    - **Réplica diaria de documentos** (05:15 UTC) y **control de tamaño** (05:45 UTC) contra `CEM_COPIAS_PRESUPUESTO_BYTES`.
    - **Medido:** en PostgreSQL 18 el `connection limit` del rol no cuenta las conexiones de replicación (`AmRegularBackendProcess`); el tope 4 acota solo las comunes.
-   - **Para el propietario:**
-     - crear los monitores de Kuma de empuje: copia continua (~3 min), copia base (~8 días) y tamaño (~26 h), por entorno, y cargar sus URL (`CEM_COPIA_CONTINUA_AVISO_URL`, `CEM_COPIA_BASE_AVISO_URL`, `CEM_COPIAS_TAMANO_AVISO_URL`);
-     - reabrir el trabajo muerto de producción;
-     - borrar las variables compartidas `CEM_OCI_S3_*` y la clave vieja de OCI.
+   - **Hecho el 27-10:** monitores de empuje 26 a 31 en Kuma con sus URL cargadas, trabajo muerto de producción reabierto, y variables compartidas `CEM_OCI_S3_*` y claves viejas de OCI borradas. Falta el primer latido de copia base (semanal).
    - **P3 abiertos:** los de las revisiones de #133, #134 y #135 (reloj del corte con un corte nuevo durante la copia, lectura sin cerrojo, test de `iniciar`, docstring del CRC de gzip, comentarios de `deploy-map.ps1`).
