@@ -122,7 +122,7 @@ Medido en el despliegue de `c3150c7` (27-10-2026) por `cd.ps1` (estado, imagen y
   - Copia continua con copia base verificada.
   - **PA26 pasó:** restauración en `postgres:18-alpine` desde el bucket hasta un momento entre dos marcas, que trae A y no B, con la cadena íntegra (1518 eventos). Tardó 26 s contra un RTO de 4 h.
 - **Producción:**
-  - `cem-copia-continua` en marcha (copia base `20261027T082540Z` verificada, WAL subiendo); el camino público no se cortó.
+  - `cem-copia-continua` en marcha (copia base `20261027T082540Z` verificada, WAL subiendo). El camino público no se cortó en ninguno de los dos despliegues: el monitor 10 de Kuma dio 21 latidos arriba de 07:19 a 07:39 UTC (`4994f7c`) y 19 de 08:15 a 08:33 (`c3150c7`), todos arriba; la misma consulta sí encuentra los caídos del corte de `168f77a`.
   - **`cd.ps1` de `c3150c7` dio ROJO por una sola comprobación:** `/api/v1/health/cola` con `muertos: 1`. Es `plataforma.controlar_tamano_copias`, que corrió antes de que se cargara `CEM_COPIAS_PRESUPUESTO_BYTES`; con la variable ya cargada, el control a mano funciona.
   - El monitor 19 de Kuma está caído por eso desde las 07:27 UTC. Reabrir el trabajo lo tiene que hacer el propietario (el clasificador no dejó a Claude escribir en la base de producción).
   - La exportación en producción queda SIN VERIFICAR (el clasificador frenó también el control negativo).
