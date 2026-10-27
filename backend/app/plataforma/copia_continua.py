@@ -714,6 +714,8 @@ class CopiaContinua:
         self.al_dia_subida: datetime | None = None
         self.error_subida: str | None = None
         self.defecto: str | None = None
+        self.error_servidor: str | None = None
+        self.error_servidor_desde: datetime | None = None
         """Un objeto del almacén que no coincide con lo que se subió: se avisa en el acto."""
         self.ultimo_parcial: datetime | None = None
         self.suma_parcial: str | None = None
@@ -810,7 +812,33 @@ class CopiaContinua:
     def vuelta(self, ahora: datetime) -> None:
         self.guardar_cortes()
         latido.latir()
-        estado = estado_servidor(self.cfg.url_copia_continua)
+        # Lo ya recibido se sube primero: con la base caída, el WAL que está en disco igual llega
+        # al almacén. Subir no consulta la base.
+        self.subir(ahora)
+        try:
+            estado = estado_servidor(self.cfg.url_copia_continua)
+        except Exception as e:
+            estado = None
+            if self.error_servidor is None:
+                self.error_servidor_desde = ahora
+            self.error_servidor = f"{type(e).__name__}: {e}"
+            log.exception("no se pudo consultar la base; se reintenta")
+        else:
+            self.error_servidor = self.error_servidor_desde = None
+            self.atender_receptor(estado, ahora)
+            self.medir_atraso(estado, ahora)
+            self.revisar_base(ahora)
+        if self.ultimo_aviso is None or ahora - self.ultimo_aviso >= INTERVALO_AVISO:
+            problemas = self.problemas(estado, ahora)
+            if problemas:
+                self.avisar_continua("down", "; ".join(problemas), ahora)
+            else:
+                self.avisar_continua(
+                    "up", f"al día: atraso {int(self.atraso.total_seconds())} s", ahora
+                )
+
+    def atender_receptor(self, estado: EstadoServidor, ahora: datetime) -> None:
+        """Rearranca el receptor si terminó, y rehace el slot si falta o se perdió."""
         if not self.receptor.vivo():
             if self.receptor.proceso is not None:
                 log.error(
@@ -824,17 +852,6 @@ class CopiaContinua:
             self.receptor.detener()
             self.asegurar_slot(estado, ahora)
             self.receptor.arrancar()
-        self.medir_atraso(estado, ahora)
-        self.subir(ahora)
-        self.revisar_base(ahora)
-        if self.ultimo_aviso is None or ahora - self.ultimo_aviso >= INTERVALO_AVISO:
-            problemas = self.problemas(estado, ahora)
-            if problemas:
-                self.avisar_continua("down", "; ".join(problemas), ahora)
-            else:
-                self.avisar_continua(
-                    "up", f"al día: atraso {int(self.atraso.total_seconds())} s", ahora
-                )
 
     def medir_atraso(self, estado: EstadoServidor, ahora: datetime) -> None:
         """Atraso en tiempo: desde el último momento cuya posición del servidor ya confirmó el
@@ -940,15 +957,18 @@ class CopiaContinua:
             foto.unlink(missing_ok=True)
         self.ultimo_parcial = ahora
 
-    def problemas(self, estado: EstadoServidor, ahora: datetime) -> list[str]:
+    def problemas(self, estado: EstadoServidor | None, ahora: datetime) -> list[str]:
+        """Todo lo que se avisa a Kuma como caída. `estado` es None si la base no respondió."""
         problemas = []
         if not self.receptor.vivo():
             problemas.append("el receptor de WAL no está corriendo")
-        if not estado.slot_existe:
+        if self.error_servidor is not None:
+            problemas.append(f"no se puede consultar la base: {self.error_servidor}")
+        if estado is not None and not estado.slot_existe:
             problemas.append("el slot no existe")
-        elif estado.wal_status in ("unreserved", "lost"):
+        elif estado is not None and estado.wal_status in ("unreserved", "lost"):
             problemas.append(f"slot {estado.wal_status}")
-        if estado.tope_slot_mb == -1:
+        if estado is not None and estado.tope_slot_mb == -1:
             problemas.append("max_slot_wal_keep_size sin tope en la base")
         if self.atraso > ATRASO_MAXIMO:
             problemas.append(f"receptor atrasado {int(self.atraso.total_seconds())} s")

@@ -9,6 +9,7 @@ copia física de una base musl se restaura en esta imagen Debian, como lo hará
 `cem-copia-continua`.
 """
 
+import dataclasses
 import gzip
 import hashlib
 import os
@@ -784,3 +785,25 @@ def test_un_parcial_sin_cambios_se_vuelve_a_subir_pasado_un_dia(cfg, proceso, mo
     assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 1
     p.subir_parcial(t + cc.REPETIR_PARCIAL + timedelta(minutes=1))  # antes de que lo borre la regla
     assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 2
+
+
+@pytest.mark.db
+def test_con_la_base_caida_el_wal_recibido_igual_se_sube_y_se_avisa(
+    cfg,
+    proceso,
+    kuma,  # noqa: F811
+    motor_migrate,
+):
+    p = proceso({cc.VARIABLE_AVISO_CONTINUA: url_push(kuma)})
+    p.iniciar(datetime.now(UTC))
+    esperar_recibido(lsn_actual())
+    p.receptor.detener()
+    assert objetos(cfg, cc.PREFIJO_PARCIAL) == []
+    # La base deja de responder (otro puerto: conexión rechazada).
+    caida = make_url(cfg.url_copia_continua).set(port=1).render_as_string(hide_password=False)
+    p.cfg = dataclasses.replace(cfg, url_copia_continua=caida)
+    p.vuelta(datetime.now(UTC) + timedelta(minutes=2))
+    assert len(objetos(cfg, cc.PREFIJO_PARCIAL)) == 1  # lo recibido llegó al almacén
+    assert p.error_servidor is not None
+    estado, mensaje = pedidos(kuma)[-1]
+    assert estado == "down" and "no se puede consultar la base" in mensaje
