@@ -111,9 +111,18 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `c3150c7` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, y `2026-10-27-c3150c7.md`).
+Medido en el despliegue de `58d1ea9` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md` y `2026-10-27-58d1ea9.md`).
 
-**Staging y producción en `c3150c7`** (27-10-2026), base `0038`, contrato 0.26.0.
+**Staging y producción en `58d1ea9`** (27-10-2026, 19:35 a 19:44 UTC), base `0039`, contrato 0.26.0.
+
+- **Qué suma:** 2d-1, el expediente de privacidad de RF37 (PR #138, `0039`), sobre `c3150c7`. Detalle en «Próximo paso», punto 22.
+- **Controles.** `ci.ps1` verde sobre `cd71bc8` (la cabeza del PR) y `58d1ea9`: backend 2040, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0039` en producción (41 tablas, 1151 filas).
+- **Rol nuevo** `cem_soporte_privacidad` en los dos entornos, con `CEM_DATABASE_URL_SOPORTE_PRIVACIDAD` en `cem-trabajos(-staging)` (clave distinta por entorno; la nueva conecta y una al azar es rechazada).
+- **Staging:** caso manual (sin correo) abierto, leído y rechazado; confirmar sin código se niega (`sin_codigo`) y rechazar dos veces también (`caso_cerrado`).
+- **Producción:** sin casos de prueba (son inmutables). `ver` y `rechazar` sobre un caso inexistente se niegan desde la base, con el rol propio; sin la variable el script se niega. En los dos entornos `cem_app` no ejecuta ninguna de las 8 funciones y el rol de soporte solo las 6 expuestas.
+- **SIN VERIFICAR desplegado:** el envío del código y la confirmación con código (probados en la suite).
+
+**Antes, `c3150c7`** (27-10-2026), base `0038`:
 
 - **Qué es:** 2c-3, exportación por soporte (PR #132, `0038`); 2c-4, copia continua, réplica de documentos y control de tamaño (PR #133); y el mapa de despliegue con `cem-copia-continua` (PR #134 y #135). Primero se desplegó `4994f7c`, el merge de #134; `c3150c7` solo suma la app de producción al mapa. Detalle en «Próximo paso», puntos 20 y 21.
 - **Controles.** `ci.ps1` verde sobre `4994f7c` y `c3150c7`: backend 2015, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0038` en cada entorno.
@@ -694,3 +703,10 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Medido:** en PostgreSQL 18 el `connection limit` del rol no cuenta las conexiones de replicación (`AmRegularBackendProcess`); el tope 4 acota solo las comunes.
    - **Hecho el 27-10:** monitores de empuje 26 a 31 en Kuma con sus URL cargadas, trabajo muerto de producción reabierto, y variables compartidas `CEM_OCI_S3_*` y claves viejas de OCI borradas. Falta el primer latido de copia base (semanal).
    - **P3 abiertos:** los de las revisiones de #133, #134 y #135 (reloj del corte con un corte nuevo durante la copia, lectura sin cerrojo, test de `iniciar`, docstring del CRC de gzip, comentarios de `deploy-map.ps1`).
+22. **2d-1, expediente de privacidad (RF37)** (PR #138, fusionado el 27-10-2026 en `58d1ea9`; **desplegado** en los dos entornos; diseño en `doc/diseno/H2d_RF37_Diseno.md` del repositorio CEM, §4 y §7):
+   - `0039`: `plataforma.caso_privacidad` (RLS forzada sin políticas, inmutable al cerrarse) y funciones `privacidad_*` solo para `cem_soporte_privacidad`; `scripts/privacidad.py` en la imagen (abrir, confirmar con el código por stdin, corroborar, rechazar, ver).
+   - El código va solo al correo del titular, que decide la base; no se imprime ni se audita, y al cerrar se borran su evento y su trabajo. Quien tiene contraseña o TOTP confirma por la aplicación (`requiere_aplicacion`); el correo es confiable solo con una invitación aceptada a ese correo en el consorcio del caso y un vínculo o mandato allí; si no, hace falta corroboración.
+   - **Revisión:** independiente, 0 P1/P2 sobre `cd71bc8` (Codex no completó en 30 minutos; su P2 anterior quedó resuelto con `titular_con_cuenta`).
+   - **Siguiente:** 2d-3 (supresión y rectificación del nombre); 2d-2 (la copia) espera la decisión del propietario sobre el canal (§9.1 del diseño).
+   - **P3 abiertos:** carrera rechazar/despachador, código guardado si el trabajo estaba en curso o el caso vence sin cerrarse, rama `codigo_usado` inalcanzable, relación con el consorcio del alcance en `abrir`, asunto y texto libres, mandato terminado o de soporte, `cola.ErrorDefinitivo` en el script, prueba de privilegios de las funciones internas.
+
