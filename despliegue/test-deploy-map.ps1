@@ -6,7 +6,7 @@
 # Para cada aplicación de deploy-map.ps1 lee GET /applications/<uuid> y exige:
 #   - nombre en Coolify == nombre canónico del mapa
 #   - build_pack == dockerimage y docker_registry_image_name == la imagen de ghcr.io
-#     de su función (backend, trabajos, planificador -> cem-backend; frontend ->
+#     de su función (backend, trabajos, planificador, copia_continua -> cem-backend; frontend ->
 #     cem-frontend), con la misma función que usa cd.ps1
 # Y para la base de cada entorno, GET /databases/<uuid>: nombre == nombre canónico.
 # Controles (si un control falla, ningún verde vale):

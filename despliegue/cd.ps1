@@ -34,7 +34,7 @@
 # En -SoloVerificar solo se informa la decisión; nunca se copia.
 #
 # Despliegue: por cada aplicación del entorno en deploy-map.ps1, en orden
-# (backend; trabajos y planificador si existen; frontend): PATCH de
+# (backend; trabajos, planificador y copia continua si existen; frontend): PATCH de
 # docker_registry_image_tag = SHA (leído de vuelta), CEM_SHA_IMAGEN donde
 # corresponde, pide el despliegue y espera que termine. Un despliegue fallido
 # detiene todo.
