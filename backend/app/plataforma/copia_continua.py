@@ -143,9 +143,10 @@ DURACION_MAXIMA_COPIA_BASE = timedelta(
     seconds=TOPE_COPIA_FISICA + TOPE_VERIFICAR_MANIFIESTO + 2 * ESPERA_RESTAURACION + 3600
 )
 """Lo más que puede durar una copia base con sus topes, más una hora para cifrar y subir. Una
-copia base en curso desde hace más (colgada) cuenta para la salud. Se mide desde que arrancó el
-hilo de la copia actual, no desde el corte: un corte viejo guardado no deja `unhealthy` al
-contenedor que recién empieza su copia base."""
+copia base en curso desde hace más (colgada) cuenta para la salud, y también una cadena cortada
+desde hace más en este proceso (copias que fallan tarde y se relanzan). Se mide desde que
+arrancó el hilo de la copia actual y desde que este proceso abrió o adoptó el corte, no desde el
+momento guardado: un corte viejo no deja `unhealthy` al contenedor que recién empieza."""
 ESPERA_SONDEO = 0.2
 """Segundos entre miradas a `postmaster.pid` mientras la copia restaurada aplica el WAL."""
 POSICION_ESTADO = 7
@@ -791,6 +792,10 @@ class CopiaContinua:
         self.hilo_base: threading.Thread | None = None
         self.base_iniciada_en: datetime | None = None
         """Cuándo arrancó el hilo de la copia base actual (para `DURACION_MAXIMA_COPIA_BASE`)."""
+        self.corte_abierto_en: datetime | None = None
+        """Desde cuándo ESTE proceso tiene la cadena cortada (la abrió o adoptó un corte
+        guardado), hasta que una copia base la cierra. No es el momento guardado del corte: uno
+        viejo no deja `unhealthy` al contenedor que recién arranca."""
         self.ultima_base: dict[str, Any] | None = None
         self.error_base: str | None = None
         self.base_fallida: str | None = None
@@ -821,6 +826,7 @@ class CopiaContinua:
             with self.cerrojo:
                 self.corte = f"{motivo} (desde {momento:%Y-%m-%d %H:%M} UTC)"
                 self.cortes += 1
+                self.corte_abierto_en = ahora
             log.error("cadena de WAL cortada desde antes del arranque: %s", self.corte)
         if self.ultimo is None:
             self.cortar("no hay WAL en wal/: la cadena empieza ahora", ahora)
@@ -862,6 +868,9 @@ class CopiaContinua:
         with self.cerrojo:
             self.corte = motivo
             self.cortes += 1
+            if self.corte_abierto_en is None:
+                # Un corte sobre otro abierto no reinicia la cuenta: la cadena sigue cortada.
+                self.corte_abierto_en = ahora
         self.ultimo = None
         self.error_base = None
         self.cortes_sin_guardar.append((ahora, motivo))
@@ -955,6 +964,14 @@ class CopiaContinua:
             and ahora - self.base_iniciada_en > DURACION_MAXIMA_COPIA_BASE
         ):
             salud.append(f"copia base colgada desde {self.base_iniciada_en:%Y-%m-%d %H:%M} UTC")
+        if (
+            self.corte_abierto_en is not None
+            and ahora - self.corte_abierto_en > DURACION_MAXIMA_COPIA_BASE
+        ):
+            # Aunque cada intento tenga su copia en curso (falla tarde y se relanza antes de que
+            # la vuelta mire), la cadena no puede quedar cortada para siempre con el contenedor
+            # sano: más que una copia base completa con sus topes, es una falla.
+            salud.append(f"cadena cortada desde {self.corte_abierto_en:%Y-%m-%d %H:%M} UTC")
         return salud
 
     def atender_receptor(self, estado: EstadoServidor, ahora: datetime) -> None:
@@ -1002,7 +1019,7 @@ class CopiaContinua:
                 cubierto += 1
             self.ultimo = (linea, cubierto)
             # Y el viejo pudo haber guardado un corte mientras este esperaba.
-            self.adoptar_corte_guardado()
+            self.adoptar_corte_guardado(ahora)
         if self.ultimo is not None and (tli != self.ultimo[0] or numero > self.ultimo[1] + 1):
             self.cortar(
                 f"hueco en el WAL: llegó {nombre} y wal/ cubre hasta el segmento"
@@ -1013,7 +1030,7 @@ class CopiaContinua:
             # El primer archivo de una cadena nueva: desde acá, sin huecos.
             self.ultimo = (tli, numero - 1)
 
-    def adoptar_corte_guardado(self) -> None:
+    def adoptar_corte_guardado(self, ahora: datetime) -> None:
         """Si en `cortes/` hay uno abierto que este proceso no conoce (lo guardó otro
         contenedor), queda abierto acá también; no se vuelve a guardar."""
         if self.corte is not None:
@@ -1025,6 +1042,7 @@ class CopiaContinua:
         with self.cerrojo:
             self.corte = f"{motivo} (guardado por otro proceso, {momento:%Y-%m-%d %H:%M} UTC)"
             self.cortes += 1
+            self.corte_abierto_en = ahora
             self.error_base = None
         log.error("cadena de WAL cortada por otro proceso: %s", self.corte)
 
@@ -1173,6 +1191,7 @@ class CopiaContinua:
         with self.cerrojo:
             if self.cortes == cortes:
                 self.corte = None
+                self.corte_abierto_en = None
         log.info(mensaje_base(resumen))
         self.avisar_base("up", mensaje_base(resumen))
 

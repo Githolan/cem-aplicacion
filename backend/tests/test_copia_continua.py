@@ -600,7 +600,7 @@ def test_slot_desaparecido_avisa_caida_y_rehace_la_copia_base(
     marcas = [k for k in objetos(cfg, cc.PREFIJO_BASE) if k.endswith(cc.MARCA)]
     assert len(marcas) == 2 and set(bases) < set(objetos(cfg, cc.PREFIJO_BASE))
     assert pedidos(kuma)[-1][0] == "up" and "verificada" in pedidos(kuma)[-1][1]
-    assert p.corte is None
+    assert p.corte is None and p.corte_abierto_en is None  # cerrada, con su cuenta
     p.vuelta(t1 + timedelta(minutes=2))
     assert pedidos(kuma)[-1][0] == "up" and pedidos(kuma)[-1][1].startswith("al día")
 
@@ -1105,3 +1105,39 @@ def test_un_corte_que_guardo_otro_contenedor_mientras_se_esperaba_queda_abierto(
     assert p.ultimo == (1, 7)  # sin hueco
     assert p.corte is not None and p.corte.startswith("slot perdido en el viejo")
     assert len(objetos(cfg, cc.PREFIJO_CORTES)) == 1  # no se guarda otra vez
+
+
+@pytest.mark.db
+def test_un_corte_cuyas_copias_fallan_tarde_y_se_relanzan_deja_sin_latido(cfg):
+    """Cada intento falla cerca de su tope y la revisión lo relanza antes de que la vuelta mire
+    la salud: siempre hay una copia en curso, ninguna colgada. Lo que cuenta es el corte."""
+    p = cc.CopiaContinua(cfg, {})
+    ahora = datetime.now(UTC)
+    p.cortar("prueba", ahora)
+    fin = threading.Event()
+    p.hilo_base = threading.Thread(target=fin.wait)  # el intento de turno, en curso de verdad
+    p.hilo_base.start()
+    try:
+        p.base_fallida = "ErrorCopia: pg_basebackup pasó su tope"
+        tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
+        p.base_iniciada_en = tarde - timedelta(hours=1)  # relanzada hace una hora
+        assert p.problemas_de_salud(tarde) == [f"cadena cortada desde {ahora:%Y-%m-%d %H:%M} UTC"]
+        # Control: antes del tope, el mismo corte con su copia en curso no cuenta.
+        assert p.problemas_de_salud(ahora + cc.DURACION_MAXIMA_COPIA_BASE) == []
+    finally:
+        fin.set()
+        p.hilo_base.join()
+
+
+@pytest.mark.db
+def test_un_corte_adoptado_se_mide_desde_que_lo_adopto_este_proceso(cfg):
+    p = cc.CopiaContinua(cfg, {})
+    s3 = copias.cliente_s3(cfg.copias)
+    hace_mucho = datetime.now(UTC) - 3 * cc.DURACION_MAXIMA_COPIA_BASE
+    cc.guardar_corte(s3, cfg.copias.bucket, hace_mucho, "corte del viejo")
+    ahora = datetime.now(UTC)
+    p.adoptar_corte_guardado(ahora)
+    assert p.corte is not None and p.corte_abierto_en == ahora
+    assert p.problemas_de_salud(ahora + timedelta(minutes=1)) == []
+    tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
+    assert p.problemas_de_salud(tarde)[0].startswith("cadena cortada desde")
