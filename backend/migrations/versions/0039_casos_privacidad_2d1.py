@@ -17,9 +17,10 @@ auditoría funcional.
 - **Quién puede confirmar por correo (§4.2):** solo si el correo es el único factor de la persona.
   Con contraseña o con TOTP dado de alta (`nucleo.tiene_segundo_factor`), `confirmar_caso` se niega
   (`requiere_aplicacion`): eso espera la decisión del canal (§9.1).
-- **Correo confiable (§4.2, punto 4):** la persona aceptó una invitación a ese correo (evento
-  `identidad.invitacion.aceptar` con origen `api`) y tiene, en el mismo consorcio, un vínculo
-  confirmado por un tercero (P4) o un mandato; en el alcance `cuenta`, en algún consorcio. Si no
+- **Correo confiable (§4.2, punto 4):** la persona aceptó una invitación a ese correo (la
+  invitación lleva su `persona_id`, que escribe la aceptación junto con su evento) y tiene, en
+  el mismo consorcio, un vínculo confirmado por un tercero (P4) o un mandato; en el alcance
+  `cuenta`, en algún consorcio. Si no
   (también `sujeto_correo`, siempre), hace falta además la corroboración de la administración o
   del Consejo. Un titular sin correo (`sujeto_descripcion`) no se confirma en este corte: queda
   como caso manual.
@@ -127,7 +128,10 @@ create trigger caso_privacidad_fijo before update on plataforma.caso_privacidad
   for each row execute function plataforma.caso_privacidad_fijo();
 -- §4.2, punto 4: el correo de la persona es confiable si aceptó una invitación a ese correo y
 -- tiene, en el mismo consorcio, un vínculo confirmado por un tercero o un mandato. `c` nulo es
--- el alcance `cuenta`: alcanza con un consorcio donde se cumplan las dos cosas. Interna.
+-- el alcance `cuenta`: alcanza con un consorcio donde se cumplan las dos cosas. La aceptación se
+-- lee de la invitación: `aceptar_invitacion` (0007, 0014) escribe `persona_id` y el evento
+-- `identidad.invitacion.aceptar` en la misma transacción, y un check de 0007 ata `persona_id` a
+-- `aceptada_en`. Interna.
 create function plataforma.privacidad_correo_confiable(p uuid, c uuid)
   returns boolean
   language sql stable
@@ -136,17 +140,14 @@ create function plataforma.privacidad_correo_confiable(p uuid, c uuid)
     select exists (
       select 1
         from nucleo.persona per
-        join auditoria.eventos e
-          on e.actor_persona_id = per.id and e.origen = 'api'
-         and e.accion = 'identidad.invitacion.aceptar' and e.entidad = 'invitacion'
-        join nucleo.invitacion i on i.id = e.entidad_id and i.correo = per.correo
+        join nucleo.invitacion i on i.persona_id = per.id and i.correo = per.correo
        where per.id = p and per.eliminado_en is null
-         and (c is null or e.consorcio_id = c)
+         and (c is null or i.consorcio_id = c)
          and (exists (select 1 from nucleo.vinculo v
-                       where v.consorcio_id = e.consorcio_id and v.persona_id = p
+                       where v.consorcio_id = i.consorcio_id and v.persona_id = p
                          and v.confirmado_en is not null)
               or exists (select 1 from nucleo.mandato m
-                          where m.consorcio_id = e.consorcio_id and m.persona_id = p)))
+                          where m.consorcio_id = i.consorcio_id and m.persona_id = p)))
   $$;
 revoke all on function plataforma.privacidad_correo_confiable(uuid, uuid) from public;
 
@@ -313,6 +314,14 @@ create function plataforma.privacidad_confirmar(caso_pedido uuid, hash bytea, co
     if hash is distinct from k.codigo_hash then
       raise exception 'el código no es el del caso'
         using errcode = 'P0001', hint = 'codigo_incorrecto';
+    end if;
+    -- Un invitado que aceptó después de abrir el caso ya tiene cuenta: el caso por su correo no
+    -- vale (saltearía el control de contraseña o TOTP). Se rechaza y se abre uno para la persona.
+    if k.sujeto_correo is not null
+       and exists (select 1 from nucleo.persona x
+                    where x.correo = k.sujeto_correo and x.eliminado_en is null) then
+      raise exception 'el titular ya tiene cuenta: el caso se abre de nuevo para la persona'
+        using errcode = 'P0001', hint = 'titular_con_cuenta';
     end if;
     if k.persona_id is not null
        and (exists (select 1 from nucleo.contrasena x where x.persona_id = k.persona_id)

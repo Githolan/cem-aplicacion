@@ -15,10 +15,18 @@ from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
+import app.plataforma.tareas  # noqa: F401  (registra la ruta correo.solicitado → notificar.correo)
+from app.plataforma import outbox
 from scripts import privacidad
 from tests.conftest import url_rol
+from tests.test_mandatos_0012 import alta
 from tests.test_modo_operacion import consorcio_con_persona
-from tests.test_vinculo_0014 import base_aparte, confirmar, escena  # noqa: F401
+from tests.test_vinculo_0014 import (  # noqa: F401
+    base_aparte,
+    confirmar,
+    escena,
+    invitar_y_aceptar,
+)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -251,12 +259,26 @@ def test_totp_dado_de_alta_tambien_va_por_la_aplicacion(confiable, motor_migrate
 def test_sin_invitacion_aceptada_hace_falta_la_corroboracion(
     escena,  # noqa: F811
     motor_migrate,
+    motor_app,
     con_url,
     capsys,
 ):
-    """La propietaria la cargó el equipo y nunca aceptó una invitación; aunque haya entrado una
-    vez (tiene sesión), su correo no es confiable por sí solo."""
+    """La propietaria la cargó el equipo y nunca aceptó una invitación (tiene una pendiente a su
+    correo). Aunque su vínculo esté confirmado por un tercero (P4) y haya entrado una vez (tiene
+    sesión), su correo no es confiable por sí solo: falla por la invitación, no por el vínculo."""
+    confirmar(motor_app, escena["cons"], escena["mc"], escena["v_prop"])
+    correo = correo_de(motor_migrate, escena["prop"])
     with motor_migrate.begin() as c:
+        # Una invitación a su correo que nunca aceptó tampoco alcanza.
+        c.execute(
+            text(
+                "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
+                " token_hash, invitada_por, vence_en) values (:c, :u, 'inquilino', :co,"
+                " 'Pendiente', sha256(:t), :i, now() + interval '1 day')"
+            ),
+            {"c": escena["cons"], "u": escena["u1"], "co": correo, "t": os.urandom(32),
+             "i": escena["admin"]},
+        )  # fmt: skip
         c.execute(
             text(
                 "insert into nucleo.sesion (persona_id, token_hash, dispositivo, ip,"
@@ -328,6 +350,45 @@ def test_un_invitado_que_no_acepto_es_sujeto_por_correo_y_pide_corroboracion(
     assert confirmar_caso(k, codigo, capsys)[0] == 0
 
 
+def test_si_el_invitado_acepto_despues_el_caso_por_correo_no_vale(
+    escena,  # noqa: F811
+    motor_migrate,
+    con_url,
+    capsys,
+):
+    correo = f"acepta-{os.urandom(4).hex()}@ejemplo.com"
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre,"
+                " token_hash, invitada_por, vence_en) values (:c, :u, 'inquilino', :co,"
+                " 'Pendiente', sha256(:t), :i, now() + interval '1 day')"
+            ),
+            {"c": escena["cons"], "u": escena["u1"], "co": correo, "t": os.urandom(32),
+             "i": escena["admin"]},
+        )  # fmt: skip
+    k = abrir(capsys, "--correo", correo, "--derecho", "supresion")
+    codigo = codigo_del_correo(motor_migrate, k)
+    assert privacidad.main(["corroborar", "--caso", k, "--texto", "Nota de la administración"]) == 0
+    capsys.readouterr()
+    # Después de abrir el caso, el invitado tiene cuenta (aceptó y puso contraseña).
+    with motor_migrate.begin() as c:
+        p = c.execute(
+            text("insert into nucleo.persona (correo, nombre) values (:c, 'Acepta') returning id"),
+            {"c": correo},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.contrasena (persona_id, hash)"
+                " values (:p, '$argon2id$v=19$prueba')"
+            ),
+            {"p": p},
+        )
+    r, err = confirmar_caso(k, codigo, capsys)
+    assert r == 1 and "titular_con_cuenta" in err
+    assert caso(motor_migrate, k)["estado"] == "abierto"
+
+
 def test_sin_correo_es_un_caso_manual_que_no_se_confirma(motor_migrate, con_url, capsys):
     assert privacidad.main(["abrir", "--descripcion", "Mandatario externo de la nota 3/2026",
                             "--derecho", "acceso", "--origen", "administracion",
@@ -397,3 +458,97 @@ def test_0039_ida_y_vuelta_y_se_niega_con_un_caso(base_aparte):  # noqa: F811
                        " 'titular', 'Prueba')"))  # fmt: skip
     with pytest.raises(DBAPIError, match="downgrade_con_datos"):
         command.downgrade(cfg, "0038")
+
+
+def test_con_invitacion_aceptada_y_un_mandato_el_correo_es_confiable(
+    escena,  # noqa: F811
+    motor_migrate,
+    motor_app,
+    con_url,
+    capsys,
+):
+    """La otra rama del criterio: sin vínculo confirmado, pero con un mandato en el consorcio (el
+    del Consejo: la administración ya está ocupada)."""
+    v = invitar_y_aceptar(motor_migrate, escena["cons"], escena["u1"], escena["admin"])
+    with motor_migrate.connect() as c:
+        p = c.execute(
+            text("select persona_id from nucleo.vinculo where id = :v"), {"v": v}
+        ).scalar_one()
+    k = abrir(capsys, "--correo", correo_de(motor_migrate, p), "--derecho", "acceso")
+    r, err = confirmar_caso(k, codigo_del_correo(motor_migrate, k), capsys)
+    assert r == 1 and "requiere_corroboracion" in err  # control: sin el mandato no alcanza
+    alta(motor_app, escena["cons"], None, escena["acta"], tipo="miembro_consejo", persona=p,
+         origen="soporte", con_vinculo=False)  # fmt: skip
+    k2 = abrir(capsys, "--correo", correo_de(motor_migrate, p), "--derecho", "acceso")
+    r, err = confirmar_caso(k2, codigo_del_correo(motor_migrate, k2), capsys)
+    assert r == 0, err
+
+
+def despachar_todo(motor_app) -> None:
+    """Como `cem-planificador`, con `cem_app`. Toma de a 100: quedan eventos de otras pruebas."""
+    while outbox.despachar(motor_app):
+        pass
+
+
+def trabajo_del_correo(motor_migrate, evento) -> list[str]:
+    with motor_migrate.connect() as c:
+        return list(
+            c.execute(
+                text("select estado::text from plataforma.jobs where clave_unica = :k"),
+                {"k": f"notificar.correo:{evento}"},
+            ).scalars()
+        )
+
+
+@pytest.mark.parametrize("accion", ["confirmar", "rechazar"])
+def test_al_cerrar_se_borran_el_evento_y_el_trabajo_del_correo(
+    confiable, motor_migrate, motor_app, con_url, capsys, accion
+):
+    """Como en la realidad: el despachador ya convirtió el evento en el trabajo que mandó el
+    correo (con el código en su carga)."""
+    k = abrir(capsys, "--correo", confiable["correo"], "--derecho", "acceso")
+    evento = caso(motor_migrate, k)["codigo_evento_id"]
+    codigo = codigo_del_correo(motor_migrate, k)
+    despachar_todo(motor_app)
+    assert len(trabajo_del_correo(motor_migrate, evento)) == 1  # control: el trabajo existe
+    if accion == "confirmar":
+        assert confirmar_caso(k, codigo, capsys)[0] == 0
+    else:
+        assert privacidad.main(["rechazar", "--caso", k, "--motivo", "Duplicado"]) == 0
+    assert trabajo_del_correo(motor_migrate, evento) == []
+    with motor_migrate.connect() as c:
+        assert c.execute(text("select count(*) from plataforma.outbox where id = :e"),
+                         {"e": evento}).scalar_one() == 0  # fmt: skip
+
+
+def test_un_trabajo_en_curso_no_se_borra(confiable, motor_migrate, motor_app, con_url, capsys):
+    k = abrir(capsys, "--correo", confiable["correo"], "--derecho", "acceso")
+    evento = caso(motor_migrate, k)["codigo_evento_id"]
+    codigo = codigo_del_correo(motor_migrate, k)
+    despachar_todo(motor_app)
+    with motor_migrate.begin() as c:
+        c.execute(text("update plataforma.jobs set estado = 'en_curso', bloqueado_por = 'pytest',"
+                 " bloqueado_hasta = now() + interval '5 minutes', intentos = 1"
+                 " where clave_unica = :k"),
+                  {"k": f"notificar.correo:{evento}"})  # fmt: skip
+    assert confirmar_caso(k, codigo, capsys)[0] == 0
+    assert trabajo_del_correo(motor_migrate, evento) == ["en_curso"]
+    with motor_migrate.connect() as c:
+        # El evento queda mientras su trabajo exista: el trabajador lo está mandando.
+        assert c.execute(text("select count(*) from plataforma.outbox where id = :e"),
+                         {"e": evento}).scalar_one() == 1  # fmt: skip
+
+
+def test_una_invitacion_aceptada_a_otro_correo_no_hace_confiable_el_suyo(
+    confiable, motor_migrate, con_url, capsys
+):
+    """La invitación que aceptó se había mandado a otro correo: controlar ese otro no dice nada
+    del correo de su cuenta."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.invitacion set correo = :o where persona_id = :p"),
+            {"o": f"otro-{os.urandom(4).hex()}@ejemplo.com", "p": confiable["inq"]},
+        )
+    k = abrir(capsys, "--correo", confiable["correo"], "--derecho", "acceso")
+    r, err = confirmar_caso(k, codigo_del_correo(motor_migrate, k), capsys)
+    assert r == 1 and "requiere_corroboracion" in err
