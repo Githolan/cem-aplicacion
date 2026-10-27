@@ -962,14 +962,30 @@ def test_pg_basebackup_y_pg_verifybackup_corren_con_tope(monkeypatch, tmp_path):
 
 
 @pytest.mark.db
-def test_un_corte_abierto_mas_que_una_copia_base_entera_cuenta_para_la_salud(cfg):
+def test_una_copia_base_colgada_cuenta_para_la_salud_desde_que_arranco(cfg):
     p = cc.CopiaContinua(cfg, {})
     ahora = datetime.now(UTC)
-    p.cortar("prueba", ahora)
-    p.hilo_base = threading.Thread(target=lambda: None)  # como una copia base en curso
-    assert p.problemas_de_salud(ahora + cc.DURACION_MAXIMA_COPIA_BASE) == []
-    tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
-    assert p.problemas_de_salud(tarde)[0].startswith("cadena cortada desde")
+    fin = threading.Event()
+    p.hilo_base = threading.Thread(target=fin.wait)  # una copia base en curso de verdad
+    p.hilo_base.start()
+    try:
+        # Un corte guardado hace mucho (de antes de un reinicio) y su copia base recién empieza:
+        # sano. Medir desde el corte trabaría el despliegue del contenedor nuevo.
+        with p.cerrojo:
+            p.corte, p.cortes = "corte viejo", 1
+        p.base_iniciada_en = ahora
+        assert p.problemas_de_salud(ahora + timedelta(minutes=1)) == []
+        assert p.problemas_de_salud(ahora + cc.DURACION_MAXIMA_COPIA_BASE) == []
+        # La misma copia, en curso más que el tope: colgada.
+        tarde = ahora + cc.DURACION_MAXIMA_COPIA_BASE + timedelta(minutes=1)
+        assert p.problemas_de_salud(tarde)[0].startswith("copia base colgada desde")
+        # Y aunque lleguen cortes nuevos (cada uno reemplaza al anterior), el tope sigue
+        # contando desde que arrancó la copia en curso.
+        p.cortar("corte nuevo", tarde)
+        assert p.problemas_de_salud(tarde)[0].startswith("copia base colgada desde")
+    finally:
+        fin.set()
+        p.hilo_base.join()
 
 
 @pytest.mark.db

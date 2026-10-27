@@ -142,8 +142,10 @@ TOPE_VERIFICAR_MANIFIESTO = 3600
 DURACION_MAXIMA_COPIA_BASE = timedelta(
     seconds=TOPE_COPIA_FISICA + TOPE_VERIFICAR_MANIFIESTO + 2 * ESPERA_RESTAURACION + 3600
 )
-"""Lo más que puede durar una copia base con sus topes, más una hora para cifrar y subir. Un corte
-abierto por más tiempo cuenta para la salud aunque su copia base figure en curso (colgada)."""
+"""Lo más que puede durar una copia base con sus topes, más una hora para cifrar y subir. Una
+copia base en curso desde hace más (colgada) cuenta para la salud. Se mide desde que arrancó el
+hilo de la copia actual, no desde el corte: un corte viejo guardado no deja `unhealthy` al
+contenedor que recién empieza su copia base."""
 ESPERA_SONDEO = 0.2
 """Segundos entre miradas a `postmaster.pid` mientras la copia restaurada aplica el WAL."""
 POSICION_ESTADO = 7
@@ -757,9 +759,6 @@ class CopiaContinua:
         self.corte: str | None = None
         """Motivo del último corte de la cadena, hasta que lo cierre una copia base posterior."""
         self.cortes = 0
-        self.corte_desde: datetime | None = None
-        """Desde cuándo está abierto el corte (cuenta para la salud pasado
-        `DURACION_MAXIMA_COPIA_BASE`)."""
         self.cerrojo = threading.Lock()
         """Protege `corte` y `cortes`. El hilo de la copia base cierra el corte solo si no hubo
         otro mientras copiaba; comparar y borrar tienen que ser una sola operación frente a
@@ -781,6 +780,8 @@ class CopiaContinua:
         self.ultimo_aviso: datetime | None = None
         self.proxima_revision_base: datetime | None = None
         self.hilo_base: threading.Thread | None = None
+        self.base_iniciada_en: datetime | None = None
+        """Cuándo arrancó el hilo de la copia base actual (para `DURACION_MAXIMA_COPIA_BASE`)."""
         self.ultima_base: dict[str, Any] | None = None
         self.error_base: str | None = None
         self.base_fallida: str | None = None
@@ -810,7 +811,6 @@ class CopiaContinua:
             momento, motivo = abierto
             with self.cerrojo:
                 self.corte = f"{motivo} (desde {momento:%Y-%m-%d %H:%M} UTC)"
-                self.corte_desde = momento
                 self.cortes += 1
             log.error("cadena de WAL cortada desde antes del arranque: %s", self.corte)
         if self.ultimo is None:
@@ -852,7 +852,6 @@ class CopiaContinua:
         que vuelve a abrirla."""
         with self.cerrojo:
             self.corte = motivo
-            self.corte_desde = ahora
             self.cortes += 1
         self.ultimo = None
         self.error_base = None
@@ -941,8 +940,12 @@ class CopiaContinua:
             # Con una copia base en curso (el reintento, o la urgente de un corte nuevo), la falla
             # anterior no cuenta; si se cuelga, la cubre `DURACION_MAXIMA_COPIA_BASE`.
             salud.append(f"cadena cortada y la copia base falla: {self.base_fallida}")
-        if self.corte_desde is not None and ahora - self.corte_desde > DURACION_MAXIMA_COPIA_BASE:
-            salud.append(f"cadena cortada desde {self.corte_desde:%Y-%m-%d %H:%M} UTC")
+        if (
+            en_curso
+            and self.base_iniciada_en is not None
+            and ahora - self.base_iniciada_en > DURACION_MAXIMA_COPIA_BASE
+        ):
+            salud.append(f"copia base colgada desde {self.base_iniciada_en:%Y-%m-%d %H:%M} UTC")
         return salud
 
     def atender_receptor(self, estado: EstadoServidor, ahora: datetime) -> None:
@@ -1114,6 +1117,7 @@ class CopiaContinua:
             if ultima is not None and ahora - ultima < VIGENCIA_BASE - INTERVALO_REVISAR_BASE:
                 return
         self.error_base = None
+        self.base_iniciada_en = ahora
         self.hilo_base = threading.Thread(
             target=self.hacer_base, args=(ahora, self.cortes), name="copia-base", daemon=True
         )
@@ -1139,7 +1143,7 @@ class CopiaContinua:
         self.base_fallida = None
         with self.cerrojo:
             if self.cortes == cortes:
-                self.corte = self.corte_desde = None
+                self.corte = None
         log.info(mensaje_base(resumen))
         self.avisar_base("up", mensaje_base(resumen))
 
