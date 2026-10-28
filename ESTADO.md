@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 27-10-2026.
+**Actualizado:** 28-10-2026.
 
 ## Qué existe
 
@@ -111,9 +111,16 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `3dfdfdb` (27-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md` y `2026-10-27-3dfdfdb.md`).
+Medido en el despliegue de `c9d611d` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md` y `2026-10-28-c9d611d.md`).
 
-**Staging y producción en `3dfdfdb`** (27-10-2026, 23:15 a 23:22 UTC), base `0040`, contrato 0.26.0.
+**Staging y producción en `c9d611d`** (28-10-2026, 02:08 a 02:15 UTC), base `0041`, contrato 0.26.0.
+
+- **Qué suma:** 0041, los residuales de la revisión de 2d-3 (PR #142). Detalle en «Próximo paso», punto 24.
+- **Controles.** `ci.ps1` verde sobre `3890c04` (la cabeza del PR) y sobre `c9d611d`: backend 2067, contratos 58, frontend 378 y e2e 177. La primera corrida sobre `3890c04` dio ROJO por E33 (plazo agotado; al mismo tiempo corría una medición); repetida sin nada más corriendo, verde. Copia previa verificada antes de `0041` en cada entorno.
+- **Validación en los dos entornos, sin dejar cambios:** base en `0041`; las definiciones tienen el orden nuevo de la purga y la identidad en el plan; permisos sin cambio. La purga corrió dentro de un ROLLBACK, lo que prueba que corre, no lo que borra, y suprimir un caso inexistente se sigue negando. Control: antes del despliegue, el validador contra staging dio `0040`.
+- **SIN VERIFICAR desplegado:** la baja del TOTP en el orden nuevo (hace falta una cuenta con TOTP) y la purga borrando filas (en ningún entorno se contó lo borrado dentro de la transacción).
+
+**Antes, `3dfdfdb`** (27-10-2026, 23:15 a 23:22 UTC), base `0040`:
 
 - **Qué suma:** 2d-3, supresión y rectificación del nombre de RF37 (PR #140, `0040`). Detalle en «Próximo paso», punto 23.
 - **Controles.** `ci.ps1` verde sobre `44c8f9a` (la cabeza del PR) y `3dfdfdb`: backend 2063, contratos 58, frontend 378 y e2e 177. Copia previa verificada antes de `0040` en cada entorno.
@@ -723,4 +730,12 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Cerrojos** en el orden único del código: invitaciones, mandatos, invitaciones a mandato, `persona:<correo>`, filas del login (código, enlace, desafío, contraseña, TOTP, recuperación) y la persona al final. Dos pruebas de concurrencia.
    - **Revisión:** independiente en cuatro vueltas, 0 P1/P2 en la última; Codex limpio sobre `44c8f9a` (sus tres P2 anteriores, resueltos).
    - **P3 abiertos:** `identidad_persona` en el plan; la huella solo la controla el script; deadlock posible con la baja del TOTP (ya inconsistente con su alta) y con la purga de identidad; las pruebas de concurrencia cuentan cerrojos de todo el servidor; fecha de vencimiento de las copias sin valor fijo.
+24. **0041, residuales de la revisión de 2d-3** (PR #142, fusionado el 28-10-2026 en `c9d611d`; **desplegado** en los dos entornos):
+   - `nucleo.purgar_identidad` borra código, enlace y sesión, el orden único del código. Antes iba sesión, enlace y código (por la cascada).
+   - La baja del TOTP (`segundo_factor.py`) borra el TOTP y después los códigos de recuperación, como `confirmar` y la supresión.
+   - El plan de la supresión suma «identidad humana de la cuenta» (`nucleo.identidad_persona`) como `conservar`, contado por alcance. Un plan mirado antes de `0041` y ejecutado después se niega con `plan_cambio`: hay que volver a pedirlo.
+   - **Pruebas:** `test_cerrojos_0041.py`, con pruebas de orden con `nowait` filtradas por `pid` y 5 mutaciones detectadas.
+   - **Revisión:** independiente, 0 P1/P2; Codex limpio sobre `3890c04`.
+   - **Cierra** tres P3 del punto 23: `identidad_persona` en el plan, el deadlock posible con la baja del TOTP y con la purga, y las pruebas de concurrencia que contaban cerrojos de todo el servidor (las nuevas filtran por `pid`; las de 2d-3 siguen igual).
+   - **P3 abiertos:** la ida y vuelta de la migración compara subcadenas y no la definición entera; borrados de varias filas sin `order by` (ya pasaba en 0005); el plan tampoco nombra `nucleo.identidad_humana`, la tabla de la huella; las esperas de las pruebas de orden pueden quedar cortas con la CPU cargada.
 
