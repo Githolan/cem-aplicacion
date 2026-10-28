@@ -21,7 +21,7 @@ from app.db import transaccion
 from app.identidad import contrasena as ct
 from app.identidad import router, sesiones
 from app.identidad import segundo_factor as sf
-from tests.conftest import alembic_config, vaciar_mandatos
+from tests.conftest import alembic_config, vaciar_mandatos, volver_a_subir
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     SESION,
     app,
@@ -575,5 +575,5 @@ def test_la_migracion_0009_baja_y_sube(base_de_prueba, motor_migrate):
     vaciar_mandatos(motor_migrate)
     command.downgrade(cfg, "0008")
     assert existe() == (False, False, True)  # la 0008 queda
-    command.upgrade(cfg, "head")
+    volver_a_subir(cfg, motor_migrate)
     assert existe() == (True, True, True)
