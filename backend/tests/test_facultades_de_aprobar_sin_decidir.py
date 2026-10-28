@@ -183,3 +183,40 @@ def test_0044_no_sube_si_ya_hay_una_facultad_sin_decidir(base_aparte):  # noqa: 
         )
     command.upgrade(cfg, "0044")  # control: sin la fila, sube
     assert _funcion(motor)
+
+
+def test_0044_no_sube_si_un_mandato_ya_tiene_una_facultad_sin_decidir(base_aparte):  # noqa: F811
+    """La rama de `facultad_otorgada`, que tiene FORCE RLS: el bloque corre como `cem_migrate`
+    (BYPASSRLS) y ve la fila aunque no haya consorcio en el ámbito."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0043")
+    with motor.begin() as c:
+        cons = c.execute(
+            text("insert into nucleo.consorcio (nombre) values ('SINTETICO') returning id")
+        ).scalar_one()
+        acta = c.execute(
+            text(
+                "insert into nucleo.decision_formal (consorcio_id, tipo, fecha, descripcion,"
+                " referencia_acta, origen) values (:c, 'asamblea', current_date, 'SINTETICO',"
+                " 'Acta SINTETICA', 'soporte') returning id"
+            ),
+            {"c": cons},
+        ).scalar_one()
+        mandato = c.execute(
+            text(
+                "insert into nucleo.mandato (consorcio_id, tipo, mandatario_nombre,"
+                " mandatario_cuit, decision_id, vigente_desde, origen) values (:c,"
+                " 'administrador_externo', 'SINTETICO', '30000000007', :d, current_date,"
+                " 'soporte') returning id"
+            ),
+            {"c": cons, "d": acta},
+        ).scalar_one()
+        c.execute(text(OTORGAR), {"c": cons, "m": mandato, "f": "liquidacion.aprobar", "d": acta})
+    with pytest.raises(DBAPIError, match="ya hay una facultad de aprobar sin decidir"):
+        command.upgrade(cfg, "0044")
+    with motor.begin() as c:
+        c.execute(
+            text("delete from nucleo.facultad_otorgada where mandato_id = :m"), {"m": mandato}
+        )
+    command.upgrade(cfg, "0044")  # control: sin la fila, sube
+    assert _funcion(motor)

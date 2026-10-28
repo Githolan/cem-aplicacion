@@ -4,9 +4,11 @@ propietario.
 Diseño: `doc/diseno/H3_Paquete_Decisiones_Economicas.md` del repositorio CEM, «Infraestructura
 común a todas las opciones», primera fila que se hace: «ningún paquete de facultades contiene
 `egresos.aprobar_orden`, `liquidacion.aprobar` ni `coeficientes.aprobar`». Es la decisión 7 del
-propietario del 21-10 («Ningún paquete recibe las facultades de aprobar hasta que decida»),
-llevada a la base como segunda barrera. No decide quién las recibe: la migración que lo decida
-saca la facultad de la lista, en el mismo PR que la asigna.
+propietario del 21-10 (`Decisiones_Propietario_2026-10-21.md` §2.2: «no se asignan todavía
+`liquidacion.aprobar`, `egresos.aprobar_orden` ni `coeficientes.aprobar` a ningún paquete»),
+llevada a la base como segunda barrera. Cubre también los mandatos, que solo reciben facultades
+de su paquete (`facultad_fuera_de_paquete`, 0016). No decide quién las recibe: la migración
+que lo decida saca la facultad de la lista, en el mismo PR que la asigna.
 
 - **Paquetes** (`nucleo.paquete_facultad`) y **mandatos** (`nucleo.facultad_otorgada`): un
   trigger niega la fila con una de las tres facultades (`facultad_sin_decidir`).
