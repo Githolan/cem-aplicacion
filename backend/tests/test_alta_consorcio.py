@@ -238,15 +238,13 @@ def test_otro_consorcio_no_ve_lo_creado(correr, motor_app, datos):
     consultas = {
         "consorcio": "select count(*) from nucleo.consorcio where id = :c",
         "unidad": "select count(*) from nucleo.unidad where consorcio_id = :c",
-        "eventos": "select count(*) from auditoria.eventos where consorcio_id = :c",
-    }
+    }  # Sin eventos: el alta de soporte no los escribe desde S2b (0043).
     with transaccion(motor_app, persona_id=None, consorcio_id=datos.consorcio_a) as conn:
         assert {
             k: conn.execute(text(q), {"c": cid}).scalar_one() for k, q in consultas.items()
         } == {
             "consorcio": 0,
             "unidad": 0,
-            "eventos": 0,
         }
     # Control: con su propio consorcio en el ámbito, las mismas consultas sí lo ven.
     with transaccion(motor_app, persona_id=None, consorcio_id=cid) as conn:
@@ -255,7 +253,6 @@ def test_otro_consorcio_no_ve_lo_creado(correr, motor_app, datos):
         } == {
             "consorcio": 1,
             "unidad": len(UNIDADES),
-            "eventos": 1 + len(UNIDADES),
         }
 
 

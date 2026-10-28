@@ -611,7 +611,9 @@ def test_e31_los_eventos_de_mandatos_y_decisiones_no_llevan_texto_libre_ni_nombr
                        "consorcio.decision.registrar")
         for ev in eventos(motor_migrate, cons, accion)
     ]  # fmt: skip
-    assert len(todos) == 6  # dos altas y una decisión en la escena, la baja, el externo y su acta
+    # Por la API: el alta del externo y la baja. Lo que cargó el equipo en la escena (dos altas y
+    # una decisión) y el acta del externo no dejan evento desde S2b (0043).
+    assert sorted(ev["origen"] for ev in todos) == ["api", "api"]
     for ev in todos:
         for clave in CLAVES_E31:
             assert clave not in (ev["despues"] or {}), (clave, ev)
