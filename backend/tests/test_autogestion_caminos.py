@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from scripts import alta_consorcio, alta_mandato
 from scripts import invitar as script_invitar
@@ -200,8 +201,7 @@ def test_camino_a_dos_administradores_a_la_vez_se_niega(correr, motor_migrate):
     otra = otra_persona(motor_migrate, cons)
     datos = arranque(cons, ACTA_1, acta, "autogestion", acta,
                      [administrador(prop, acta), administrador(otra, acta)])  # fmt: skip
-    codigo, _, err = correr(datos)
-    assert codigo == 1 and "no se escribió nada" in err, err
+    negado(correr(datos), "administracion_ocupada")
     assert filas(motor_migrate, cons) == (0, 0, 0)
 
 
@@ -275,12 +275,13 @@ def test_camino_b_la_misma_decision_no_respalda_dos_modos(motor_migrate, motor_a
             text("select decision_id from nucleo.modo_operacion where consorcio_id = :c"),
             {"c": cons},
         ).scalar_one()
-    with pytest.raises(Exception, match="decision_ya_usada"):
+    with pytest.raises(DBAPIError) as e:
         with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
             c.execute(
                 text("select nucleo.cambiar_modo('autogestion', :d, :h, null, 'soporte')"),
                 {"d": primera, "h": h},
             )
+    assert e.value.orig.diag.message_hint == "decision_ya_usada"
     assert len(periodos(motor_migrate, cons)) == 1
     # Control: con su propia decisión (el segundo tiempo del script), pasa.
     assert correr(segundo_tiempo(cons, prop, h))[0] == 0
@@ -318,13 +319,14 @@ def test_camino_b_con_un_externo_que_ya_termino_pasa(correr, motor_migrate):
     assert codigo == 0, err
 
 
-def test_camino_b_decision_posterior_al_modo_se_niega(correr, motor_migrate):
-    """Una decisión fechada después del día en que rige el cambio no lo respalda."""
+def test_camino_b_decision_futura_se_niega(correr, motor_migrate):
+    """En B el cambio rige desde hoy, así que una decisión posterior al modo es siempre futura: la
+    frena `registrar_decision` (`fecha_futura`, 0019). La regla de 0027 «el modo no empieza antes
+    de su decisión» se prueba en el camino A (`antes_de_la_decision`)."""
     cons, prop, h, _ = en_consejo_desde(correr, motor_migrate, 30)
     datos = segundo_tiempo(cons, prop, h)
     datos["decision"]["fecha"] = (h + timedelta(days=1)).isoformat()
-    codigo, _, err = correr(datos)
-    assert codigo != 0, err
+    negado(correr(datos), "fecha_futura")
     assert filas(motor_migrate, cons) == (1, 1, 1)
 
 
@@ -333,8 +335,9 @@ def test_camino_b_mandato_incoherente_se_niega(correr, motor_migrate):
     cons, prop, h, _ = en_consejo_desde(correr, motor_migrate, 30)
     datos = segundo_tiempo(cons, prop, h)
     datos["mandatos"][0]["hasta"] = (h - timedelta(days=1)).isoformat()
-    codigo, _, err = correr(datos)
-    assert codigo != 0, err
+    negado(correr(datos), "vigencia_invalida")
+    # El rechazo llega en el mandato, después de que la misma transacción escribió la decisión y el
+    # modo: que sigan siendo los del primer tiempo prueba que se deshizo todo.
     assert filas(motor_migrate, cons) == (1, 1, 1)
 
 
