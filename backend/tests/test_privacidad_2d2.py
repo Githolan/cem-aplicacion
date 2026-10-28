@@ -6,6 +6,7 @@ enlace; y el TOTP verificado si está activo). Cada negación lleva su control: 
 sí cumple pasa.
 """
 
+import os
 import re
 from datetime import timedelta
 from pathlib import Path
@@ -17,6 +18,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
 from app.identidad import contrasena, sesiones
+from app.identidad import privacidad as privacidad_api
 from app.identidad import segundo_factor as sf
 from scripts import privacidad
 from tests.test_identidad import app, csrf  # noqa: F401  (`app` es un fixture)
@@ -84,6 +86,11 @@ def falta(r) -> str:
     return r.json()["detalle"]["falta"]
 
 
+def vaciar_cupo(redis) -> None:
+    for clave in redis.scan_iter(f"cem:rl:*{privacidad_api.LIMITE_NOMBRE}*"):
+        redis.delete(clave)
+
+
 def eventos_totales(motor_migrate) -> int:
     with motor_migrate.connect() as conn:
         return conn.execute(text("select count(*) from auditoria.eventos")).scalar_one()
@@ -115,11 +122,11 @@ def test_un_caso_de_otra_persona_no_existe_para_ella(app, motor_migrate, capsys)
 def test_sin_sesion_no_hay_ruta(app, motor_migrate, capsys):  # noqa: F811
     _, _, c, k, codigo = titular(app, motor_migrate, capsys)
     sin_sesion = app.abrir(None)
-    assert sin_sesion.get(BASE).status_code == 401
-    assert sin_sesion.post(f"{BASE}/{k}/confirmar", json={"codigo": codigo}).status_code in (
-        401,
-        403,
-    )
+    r = sin_sesion.get(BASE)
+    assert r.status_code == 401 and r.json()["codigo"] == "no_autenticado"
+    for ruta, cuerpo in (("confirmar", {"codigo": codigo}), ("copia", {}), ("recibida", None)):
+        r = sin_sesion.post(f"{BASE}/{k}/{ruta}", json=cuerpo)
+        assert r.status_code == 401 and r.json()["codigo"] == "no_autenticado", ruta
     assert caso(motor_migrate, k)["estado"] == "abierto"
 
 
@@ -267,7 +274,7 @@ def test_confirma_supresion_y_borra_el_correo_sin_auditar(app, motor_migrate, ca
 
 
 @pytest.mark.usefixtures("con_url")
-def test_la_copia_de_la_cuenta_se_entrega_una_vez_sin_secretos(app, motor_migrate, capsys):  # noqa: F811
+def test_la_copia_de_la_cuenta_en_dos_pasos(app, motor_migrate, capsys, redis_limpio):  # noqa: F811
     persona, correo, c, k, codigo = titular(app, motor_migrate, capsys)
     con_contrasena(motor_migrate, persona)
     # Sin confirmar no hay copia.
@@ -299,14 +306,44 @@ def test_la_copia_de_la_cuenta_se_entrega_una_vez_sin_secretos(app, motor_migrat
         ).first()[0]
     assert guardado not in r.text and "argon2" not in r.text and token_sesion not in r.text
     assert "Nota del Consejo" not in r.text and "codigo_hash" not in r.text
-    assert eventos_totales(motor_migrate) == antes
+    # Entregada no es resuelta: si el navegador no la guardó, se pide de nuevo.
+    k_ = caso(motor_migrate, k)
+    assert k_["estado"] == "confirmado" and k_["copia_primera_entrega_en"] is not None
+    primera = k_["copia_primera_entrega_en"]
+    assert c.get(BASE).json()["elementos"][0]["copia_entregada_en"] is not None
+    assert pedir_copia(c, k, contrasena=CONTRASENA).status_code == 200
+    k_ = caso(motor_migrate, k)
+    assert k_["copia_primera_entrega_en"] == primera
+    assert k_["copia_ultima_entrega_en"] > primera
+    # El titular avisa que la guardó: queda resuelto, sin los datos en la resolución.
+    assert c.post(f"{BASE}/{k}/recibida", headers=csrf(c)).status_code == 204
     k_ = caso(motor_migrate, k)
     assert k_["estado"] == "resuelto"
     assert k_["resolucion"]["partes"] == sorted(datos)
+    assert k_["resolucion"]["primera_entrega_en"] is not None
     assert correo not in str(k_["resolucion"])
-    # Una sola entrega por caso.
+    assert eventos_totales(motor_migrate) == antes
+    # Resuelto, ya no hay copia ni otro cierre. (Se vacía el cupo de 5 intentos por minuto: esta
+    # prueba ya hizo 5; el cupo tiene su prueba propia.)
+    vaciar_cupo(redis_limpio)
     r = pedir_copia(c, k, contrasena=CONTRASENA)
     assert r.status_code == 409 and r.json()["codigo"] == "caso_no_disponible"
+    assert c.post(f"{BASE}/{k}/recibida", headers=csrf(c)).status_code == 409
+
+
+@pytest.mark.usefixtures("con_url")
+def test_no_se_cierra_sin_haber_entregado_ni_un_caso_ajeno(app, motor_migrate, capsys):  # noqa: F811
+    _, _, c, k, codigo = titular(app, motor_migrate, capsys)
+    assert confirmar(c, k, codigo).status_code == 204
+    r = c.post(f"{BASE}/{k}/recibida", headers=csrf(c))
+    assert r.status_code == 409 and r.json()["codigo"] == "caso_no_disponible"
+    assert pedir_copia(c, k).status_code == 200
+    _, otro = nueva_persona(motor_migrate)
+    ajena = entrar_como(app, motor_migrate, otro)
+    assert ajena.post(f"{BASE}/{k}/recibida", headers=csrf(ajena)).status_code == 404
+    assert caso(motor_migrate, k)["estado"] == "confirmado"
+    # Control: el titular sí lo cierra.
+    assert c.post(f"{BASE}/{k}/recibida", headers=csrf(c)).status_code == 204
 
 
 @pytest.mark.usefixtures("con_url")
@@ -314,6 +351,14 @@ def test_copia_de_un_consorcio_sin_terceros(app, confiable, motor_migrate, capsy
     """PA30: la copia del inquilino trae lo suyo en el consorcio y nada que identifique al
     administrador, al Consejo ni a la propietaria (ids, correos ni nombres)."""
     cons, inq = confiable["cons"], confiable["inq"]
+    terceros = {confiable["admin"]: "Tercero Administrador", confiable["mc"]: "Tercero Consejo",
+                confiable["prop"]: "Tercero Propietaria"}  # fmt: skip
+    with motor_migrate.begin() as conn:
+        for persona, nombre in terceros.items():
+            conn.execute(
+                text("update nucleo.persona set nombre = :n where id = :p"),
+                {"n": nombre, "p": persona},
+            )
     # Un acto de otra persona sobre el titular, con su IP y un motivo que la nombra: de él sale
     # solo que fue «otra persona».
     with motor_migrate.begin() as conn:
@@ -337,8 +382,9 @@ def test_copia_de_un_consorcio_sin_terceros(app, confiable, motor_migrate, capsy
     datos = r.json()["datos"]
     assert r.json()["alcance_consorcio_id"] == str(cons)
     assert set(datos) == {
-        "alcance", "consorcio_id", "vinculos", "mandatos", "invitaciones", "eventos",
-        "documentos", "versiones_subidas", "identidad_humana",
+        "alcance", "consorcio_id", "vinculos", "mandatos", "invitaciones",
+        "invitaciones_mandato", "desasociaciones_mandato", "eventos", "documentos",
+        "versiones_subidas", "identidad_humana",
     }  # fmt: skip
     assert [v["tipo"] for v in datos["vinculos"]] == ["inquilino"]
     assert datos["vinculos"][0]["confirmado_en"] is not None
@@ -363,8 +409,9 @@ def test_copia_de_un_consorcio_sin_terceros(app, confiable, motor_migrate, capsy
             {"a": confiable["admin"], "m": confiable["mc"], "p": confiable["prop"]},
         ).all()
     assert len(otras) == 3
-    for id_, correo, _ in otras:
-        assert id_ not in r.text and correo not in r.text
+    for id_, correo, nombre in otras:
+        assert id_ not in r.text and correo not in r.text and nombre not in r.text
+    assert "Tercero" not in r.text
     assert str(inq) not in r.text  # tampoco su propio id interno: no hace falta
 
 
@@ -374,6 +421,7 @@ def test_cem_app_sigue_sin_la_tabla_y_sin_las_funciones_internas(motor_app):
             conn.execute(text("select * from plataforma.caso_privacidad"))
     for funcion in (
         "plataforma.privacidad_copia(null::uuid, null::uuid)",
+        "plataforma.privacidad_caso_propio(null::uuid)",
         "plataforma.privacidad_reautenticacion(null::uuid, null::uuid, true)",
         "plataforma.privacidad_confirmar(null::uuid, null::bytea, 'x')",
     ):
@@ -402,3 +450,82 @@ def test_0042_ida_y_vuelta(base_aparte):  # noqa: F811
     assert not existe()
     command.upgrade(cfg, "0042")  # control: vuelve a subir limpio
     assert existe()
+
+
+@pytest.mark.usefixtures("con_url")
+def test_la_reautenticacion_exige_la_sesion_vigente_de_la_persona(app, motor_migrate, capsys):  # noqa: F811
+    """La API pasa siempre la sesión de la petición; la base igual la controla. Sin cada parte
+    del control, la función acepta una sesión ajena, revocada o vencida."""
+    persona, correo = nueva_persona(motor_migrate)
+    entrar_como(app, motor_migrate, correo)
+    otra, correo_otra = nueva_persona(motor_migrate)
+    entrar_como(app, motor_migrate, correo_otra)
+
+    def motivo(p, sesion) -> str | None:
+        with motor_migrate.connect() as conn:
+            return conn.execute(
+                text("select plataforma.privacidad_reautenticacion(:p, :s, false)"),
+                {"p": p, "s": sesion},
+            ).scalar_one()
+
+    def sesion_de(p):
+        with motor_migrate.connect() as conn:
+            return conn.execute(
+                text("select id from nucleo.sesion where persona_id = :p"), {"p": p}
+            ).scalar_one()
+
+    propia, ajena = sesion_de(persona), sesion_de(otra)
+    assert motivo(persona, propia) is None  # control: la propia, recién abierta, alcanza
+    assert motivo(persona, ajena) == "sesion_invalida"
+    with motor_migrate.begin() as conn:
+        conn.execute(text("update nucleo.sesion set revocada_en = now() where id = :s"),
+                     {"s": propia})  # fmt: skip
+    assert motivo(persona, propia) == "sesion_invalida"
+    with motor_migrate.begin() as conn:
+        conn.execute(
+            text("update nucleo.sesion set revocada_en = null,"
+                 " vence_en = now() - interval '1 second',"
+                 " creada_en = now() - interval '2 seconds', ultimo_uso_en = now() - interval"
+                 " '2 seconds' where id = :s"),
+            {"s": propia},
+        )  # fmt: skip
+    assert motivo(persona, propia) == "sesion_invalida"
+
+
+def test_cem_app_no_inserta_una_invitacion_ya_aceptada(confiable, motor_migrate, motor_app):  # noqa: F811
+    """El correo confiable se apoya en la aceptación: `cem_app` no puede fabricarla."""
+    cons, admin, inq = confiable["cons"], confiable["admin"], confiable["inq"]
+    with motor_migrate.connect() as conn:
+        unidad = conn.execute(
+            text("select unidad_id from nucleo.vinculo where id = :v"), {"v": confiable["v_inq"]}
+        ).scalar_one()
+    base = (
+        "insert into nucleo.invitacion (consorcio_id, unidad_id, tipo, correo, nombre, token_hash,"
+        " invitada_por, vence_en{extra}) values (:c, :u, 'inquilino', 'nueva@ejemplo.com', 'N',"
+        " :h, :a, now() + interval '1 day'{valores})"
+    )
+    datos = {"c": cons, "u": unidad, "a": admin, "p": inq}
+    with transaccion(motor_app, persona_id=admin, consorcio_id=cons) as conn:
+        with pytest.raises(DBAPIError, match="permission denied"):
+            conn.execute(
+                text(base.format(extra=", persona_id, aceptada_en", valores=", :p, now()")),
+                datos | {"h": os.urandom(32)},
+            )
+    # Control: con las columnas de la API, la misma inserción pasa.
+    with transaccion(motor_app, persona_id=admin, consorcio_id=cons) as conn:
+        conn.execute(text(base.format(extra="", valores="")), datos | {"h": os.urandom(32)})
+
+
+@pytest.mark.usefixtures("con_url")
+def test_el_cupo_de_intentos_frena_al_sexto_en_el_minuto(app, motor_migrate, capsys, redis_limpio):  # noqa: F811
+    """5 por minuto por persona, con contraseña buena o mala: el sexto recibe 429 sin llegar a la
+    base. Control: con el cupo vacío, el mismo pedido vuelve a responder."""
+    persona, _, c, k, codigo = titular(app, motor_migrate, capsys)
+    con_contrasena(motor_migrate, persona)
+    for _ in range(5):
+        assert falta(confirmar(c, k, codigo, contrasena="otra frase que no es")) == "contrasena"
+    r = confirmar(c, k, codigo, contrasena=CONTRASENA)
+    assert r.status_code == 429 and r.json()["codigo"] == "demasiadas_peticiones"
+    assert caso(motor_migrate, k)["estado"] == "abierto"
+    vaciar_cupo(redis_limpio)
+    assert confirmar(c, k, codigo, contrasena=CONTRASENA).status_code == 204

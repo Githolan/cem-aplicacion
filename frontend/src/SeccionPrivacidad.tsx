@@ -15,14 +15,17 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // Cada pedido pide reautenticación reciente y el backend decide: la contraseña si la tiene, haber
 // entrado hace menos de 10 minutos si no, y el segundo factor verificado si lo activó
 // (403 `reautenticacion_requerida`, `detalle.falta`). La copia se guarda como archivo en el
-// dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir, y se entrega una
-// sola vez. Sin casos pendientes, la sección no se muestra.
+// dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir. Si el navegador no
+// la guardó, se vuelve a pedir; el caso se cierra cuando la persona avisa que la guardó
+// (`…/recibida`). Sin casos pendientes, la sección no se muestra.
 
 type Caso = components["schemas"]["CasoPrivacidad"];
 
 const ESTADO_SIN_SESION = 401;
 const ESTADO_DEMASIADOS = 429;
 const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
+/** Lo que se espera antes de liberar el archivo local: el navegador ya empezó a guardarlo. */
+const ESPERA_LIBERAR_MS = 60_000;
 const NOMBRE_DERECHO: Record<Caso["derecho"], string> = {
   acceso: "Copia de tus datos",
   rectificacion_nombre: "Corregir tu nombre",
@@ -56,15 +59,22 @@ function avisoDeError(error: unknown, status: number): Aviso {
   return { tipo: "error", texto: SIN_CONEXION };
 }
 
-/** Guarda la copia como archivo del dispositivo; el enlace es local y se descarta enseguida. */
+/**
+ * Guarda la copia como archivo del dispositivo. El enlace es local (`blob:`), va dentro del
+ * documento mientras se hace el clic (algunos navegadores ignoran uno suelto) y se libera más
+ * tarde: liberarlo en el acto corta la descarga en algunos navegadores.
+ */
 function guardarArchivo(contenido: unknown, caso: string) {
   const blob = new Blob([JSON.stringify(contenido, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = `mis-datos-consorcio-en-mano-${caso}.json`;
+  a.hidden = true;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), ESPERA_LIBERAR_MS);
 }
 
 interface Props {
@@ -144,9 +154,31 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           guardarArchivo(data, caso.id);
-          actualizar(caso.id, { estado: "resuelto", resuelto_en: data.generada_en });
+          actualizar(caso.id, { copia_entregada_en: caso.copia_entregada_en ?? data.generada_en });
           setClave("");
-          setAviso({ tipo: "ok", texto: "Listo: guardamos la copia de tus datos en este dispositivo." });
+          setAviso({
+            tipo: "ok",
+            texto: "Te mandamos la copia. Revisá que el archivo se haya guardado y avisanos.",
+          });
+        } else if (response.status === ESTADO_SIN_SESION) sinSesion();
+        else setAviso(avisoDeError(error, response.status));
+      })
+      .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
+      .finally(() => setEnviando(false));
+  }
+
+  function recibida(caso: Caso) {
+    setEnviando(true);
+    setAviso(null);
+    void api
+      .POST("/api/v1/privacidad/casos/{caso_id}/recibida", {
+        params: { path: { caso_id: caso.id } },
+        headers: encabezadoCsrf(),
+      })
+      .then(({ error, response }) => {
+        if (response.status === 204) {
+          actualizar(caso.id, { estado: "resuelto" });
+          setAviso({ tipo: "ok", texto: "Listo: cerramos tu pedido." });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
         else setAviso(avisoDeError(error, response.status));
       })
@@ -198,13 +230,24 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
               </button>
             </form>
           ) : (
-            <form className="formulario" onSubmit={(e) => descargar(e, caso)} noValidate>
-              <p>La copia se entrega una sola vez y queda guardada en este dispositivo.</p>
-              {campoClave(caso.id)}
-              <button type="submit" disabled={enviando}>
-                Descargar la copia de mis datos
-              </button>
-            </form>
+            <>
+              <form className="formulario" onSubmit={(e) => descargar(e, caso)} noValidate>
+                <p>
+                  {caso.copia_entregada_en
+                    ? "Si el archivo no se guardó, podés descargarlo de nuevo."
+                    : "La copia se guarda como archivo en este dispositivo."}
+                </p>
+                {campoClave(caso.id)}
+                <button type="submit" disabled={enviando}>
+                  {caso.copia_entregada_en ? "Descargar de nuevo" : "Descargar la copia de mis datos"}
+                </button>
+              </form>
+              {caso.copia_entregada_en && (
+                <button type="button" disabled={enviando} onClick={() => recibida(caso)}>
+                  Ya la guardé: cerrar el pedido
+                </button>
+              )}
+            </>
           )}
         </article>
       ))}

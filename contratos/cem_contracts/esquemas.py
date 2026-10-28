@@ -83,7 +83,6 @@ from cem_contracts.padron import (
     VinculoConfirmado,
     VinculoFinalizado,
 )
-from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.privacidad import (
     CasoPrivacidad,
     ConfirmacionCaso,
@@ -91,6 +90,7 @@ from cem_contracts.privacidad import (
     ListaCasosPrivacidad,
     PedidoCopia,
 )
+from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
 from cem_contracts.segundo_factor import (
     AltaTotp,
     CodigosRecuperacion,

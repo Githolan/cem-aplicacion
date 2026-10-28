@@ -22,24 +22,38 @@ descarga para reenviarla y no puede actuar por el titular.
   confiable o corroboración), más la reautenticación. Sirve para cualquier derecho y es el camino
   de quien tiene contraseña o TOTP, que por correo se rechaza (`requiere_aplicacion`).
 - **`privacidad_entregar_copia`:** con el caso de acceso confirmado y la reautenticación, arma la
-  copia (§5) y cierra el caso como resuelto en la misma transacción. La resolución dice cuándo y
-  por dónde se entregó y qué partes llevaba, nunca los datos. Una sola entrega por caso: otra
-  copia es otro caso.
+  copia (§5) y anota la primera y la última entrega en el caso. Mientras el caso siga confirmado
+  se puede volver a pedir (siempre con reautenticación): una descarga que el navegador no guardó
+  no obliga a abrir otro caso.
+- **`privacidad_cerrar_copia`:** el titular dice que guardó la copia y el caso queda resuelto. La
+  resolución dice por dónde y cuándo se entregó y qué partes llevaba, nunca los datos. No pide
+  reautenticación: cerrar no da acceso a nada.
 - **`privacidad_mis_casos`:** los casos del titular, sin el código, la corroboración ni la
-  referencia del pedido (texto de soporte).
+  referencia del pedido (texto de soporte), con la primera entrega de la copia.
 - **Qué lleva la copia** (§5, columna por columna): con alcance `cuenta`, la persona, las
   sesiones que la base conserva (se purgan a los 90 días, `0005`), si tiene contraseña y TOTP (sí
   o no, sin hashes ni secretos) y sus casos; con un consorcio, sus vínculos, mandatos,
   invitaciones a su correo, eventos como actor o como entidad, los documentos y versiones que
-  cargó y si su identidad humana está verificada. **No lleva** datos de otras personas: de un
+  cargó, sus invitaciones a mandatos y desasociaciones, y si su identidad humana está verificada.
+  **No lleva** datos de otras personas: de un
   evento sale quién actuó solo como «titular», «otra persona» o el proceso (`soporte`,
   `trabajos`, `planificador`), sin `antes`, `despues` ni `motivo` (pueden nombrar a terceros), y la
-  IP solo si actuó el titular; tampoco quién invitó, confirmó o verificó, el motivo de la baja de
-  un mandato, la huella, el operador ni los contactos de emergencia que cargó (PA30).
+  IP solo si actuó el titular; tampoco quién invitó, aprobó, confirmó o verificó, las referencias
+  y motivos en texto libre, el motivo de la baja de un mandato, la huella, el operador ni los
+  contactos de emergencia que cargó (PA30). Los eventos son los del titular como actor o como
+  entidad (`entidad_id` = la persona), como dice §5; los actos de otros sobre sus vínculos o
+  mandatos están en esas mismas partes, con sus fechas.
 - **No escribe en `auditoria.eventos`:** la constancia queda en el caso, como en `0039`.
 
-`cem_app` recibe `EXECUTE` sobre las tres funciones y nada sobre la tabla: sigue sin poder leerla
-ni escribirla directamente.
+`cem_app` recibe `EXECUTE` sobre las cuatro funciones y nada sobre la tabla: sigue sin poder
+leerla ni escribirla directamente.
+
+**Invitaciones (P3 35, reclasificado por privacidad).** El correo confiable (`0039`) se apoya en
+una invitación aceptada (`persona_id` con `aceptada_en`). `cem_app` podía insertar una invitación
+con esas columnas ya llenas, aunque la API nunca lo hace: con SQL arbitrario como `cem_app` se
+fabricaba la aceptación. Ahora `cem_app` inserta solo las columnas que usa
+`app/identidad/invitaciones.py`; la aceptación sigue siendo la de `aceptar_invitacion`
+(`security definer`). Downgrade: vuelve el `INSERT` de toda la tabla.
 
 Revisión: 0042
 Anterior: 0041
@@ -56,9 +70,19 @@ FUNCIONES_APP = (
     "plataforma.privacidad_mis_casos()",
     "plataforma.privacidad_confirmar_en_app(uuid, bytea, uuid, boolean)",
     "plataforma.privacidad_entregar_copia(uuid, uuid, boolean)",
+    "plataforma.privacidad_cerrar_copia(uuid)",
 )
 
 UPGRADE = """
+alter table plataforma.caso_privacidad
+  add column copia_primera_entrega_en timestamptz,
+  add column copia_ultima_entrega_en timestamptz,
+  add constraint caso_privacidad_entregas
+    check ((copia_primera_entrega_en is null) = (copia_ultima_entrega_en is null)
+           and copia_ultima_entrega_en >= copia_primera_entrega_en),
+  add constraint caso_privacidad_entregas_solo_acceso
+    check (copia_primera_entrega_en is null or derecho = 'acceso');
+
 -- La reautenticación reciente del titular. Devuelve el motivo del rechazo, o nulo si alcanza.
 -- `contrasena_ok` lo decide la API comparando el hash; sin contraseña no se mira. Interna.
 create function plataforma.privacidad_reautenticacion(p uuid, s uuid, contrasena_ok boolean)
@@ -117,7 +141,8 @@ revoke all on function plataforma.privacidad_caso_propio(uuid) from public;
 create function plataforma.privacidad_mis_casos()
   returns table (id uuid, alcance_consorcio_id uuid, derecho text, estado text,
                  abierto_en timestamptz, codigo_vence_en timestamptz,
-                 confirmado_en timestamptz, resuelto_en timestamptz)
+                 confirmado_en timestamptz, copia_entregada_en timestamptz,
+                 resuelto_en timestamptz)
   language plpgsql stable security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -130,7 +155,7 @@ create function plataforma.privacidad_mis_casos()
     return query
       select k.id, k.alcance_consorcio_id, k.derecho, k.estado, k.abierto_en,
              case when k.codigo_usado_en is null then k.codigo_vence_en end,
-             k.confirmado_en, k.resuelto_en
+             k.confirmado_en, k.copia_primera_entrega_en, k.resuelto_en
         from plataforma.caso_privacidad k
        where k.persona_id = p
        order by k.abierto_en desc, k.id desc;
@@ -263,6 +288,24 @@ create function plataforma.privacidad_copia(p uuid, c uuid)
             from auditoria.eventos e
            where e.consorcio_id = c and (e.actor_persona_id = p or e.entidad_id = p)),
           '[]'::jsonb),
+        'invitaciones_mandato', coalesce((
+          select jsonb_agg(jsonb_build_object(
+                   'mandato', m.tipo, 'correo', im.correo, 'creada_en', im.creada_en,
+                   'aprobada_en', im.aprobada_en, 'vence_en', im.vence_en,
+                   'aceptada_en', im.aceptada_en, 'revocada_en', im.revocada_en)
+                 order by im.creada_en, im.id)
+            from nucleo.invitacion_mandato im
+            join nucleo.mandato m on m.consorcio_id = im.consorcio_id and m.id = im.mandato_id
+           where im.consorcio_id = c
+             and (im.persona_id = p
+                  or im.correo = (select x.correo from nucleo.persona x where x.id = p))),
+          '[]'::jsonb),
+        'desasociaciones_mandato', coalesce((
+          select jsonb_agg(jsonb_build_object('mandato', m.tipo, 'creada_en', dm.creada_en)
+                 order by dm.creada_en, dm.id)
+            from nucleo.desasociacion_mandato dm
+            join nucleo.mandato m on m.consorcio_id = dm.consorcio_id and m.id = dm.mandato_id
+           where dm.consorcio_id = c and dm.persona_id = p), '[]'::jsonb),
         'documentos', coalesce((
           select jsonb_agg(jsonb_build_object(
                    'titulo', d.titulo, 'categoria', d.categoria, 'fecha', d.fecha,
@@ -313,28 +356,76 @@ create function plataforma.privacidad_entregar_copia(caso_pedido uuid, sesion uu
     end if;
     copia := plataforma.privacidad_copia(k.persona_id, k.alcance_consorcio_id);
     update plataforma.caso_privacidad
-       set estado = 'resuelto', resuelto_en = now(),
-           resolucion = jsonb_build_object(
-             'entrega', 'aplicación, al titular autenticado',
-             'entregada_en', now(),
-             'partes', (select jsonb_agg(x order by x) from jsonb_object_keys(copia) x))
+       set copia_primera_entrega_en = coalesce(copia_primera_entrega_en, now()),
+           copia_ultima_entrega_en = now()
      where id = caso_pedido;
     return copia || jsonb_build_object('caso_id', k.id, 'generada_en', now());
   end
   $$;
+
+create function plataforma.privacidad_cerrar_copia(caso_pedido uuid)
+  returns void
+  language plpgsql security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    k plataforma.caso_privacidad := plataforma.privacidad_caso_propio(caso_pedido);
+  begin
+    if k.derecho <> 'acceso' then
+      raise exception 'el caso no es un pedido de copia'
+        using errcode = 'P0001', hint = 'derecho_no_acceso';
+    end if;
+    if k.estado <> 'confirmado' then
+      raise exception 'el caso no está confirmado o ya se resolvió'
+        using errcode = 'P0001', hint = 'caso_no_confirmado';
+    end if;
+    if k.copia_primera_entrega_en is null then
+      raise exception 'la copia todavía no se entregó'
+        using errcode = 'P0001', hint = 'copia_no_entregada';
+    end if;
+    update plataforma.caso_privacidad
+       set estado = 'resuelto', resuelto_en = now(),
+           resolucion = jsonb_build_object(
+             'entrega', 'aplicación, al titular autenticado',
+             'primera_entrega_en', k.copia_primera_entrega_en,
+             'ultima_entrega_en', k.copia_ultima_entrega_en,
+             'recibida_en', now(),
+             'partes', (select jsonb_agg(x order by x)
+                          from jsonb_object_keys(
+                                 plataforma.privacidad_copia(k.persona_id,
+                                                             k.alcance_consorcio_id)) x))
+     where id = caso_pedido;
+  end
+  $$;
 """
+
+INSERCION_INVITACION = (
+    "consorcio_id, unidad_id, tipo, correo, nombre, token_hash, invitada_por, vence_en"
+)
+"""Las columnas del `insert` de `app/identidad/invitaciones.py`."""
 
 for _f in FUNCIONES_APP:
     UPGRADE += f"revoke all on function {_f} from public;\n"
     UPGRADE += f"grant execute on function {_f} to cem_app;\n"
+UPGRADE += f"""revoke insert on nucleo.invitacion from cem_app;
+grant insert ({INSERCION_INVITACION}) on nucleo.invitacion to cem_app;
+"""
 
 DOWNGRADE = f"""
+revoke insert ({INSERCION_INVITACION}) on nucleo.invitacion from cem_app;
+grant insert on nucleo.invitacion to cem_app;
+drop function {FUNCIONES_APP[3]};
 drop function {FUNCIONES_APP[2]};
 drop function {FUNCIONES_APP[1]};
 drop function {FUNCIONES_APP[0]};
 drop function plataforma.privacidad_copia(uuid, uuid);
 drop function plataforma.privacidad_caso_propio(uuid);
 drop function plataforma.privacidad_reautenticacion(uuid, uuid, boolean);
+alter table plataforma.caso_privacidad
+  drop constraint caso_privacidad_entregas_solo_acceso,
+  drop constraint caso_privacidad_entregas,
+  drop column copia_ultima_entrega_en,
+  drop column copia_primera_entrega_en;
 """
 
 

@@ -17,6 +17,7 @@ function caso(estado: string, derecho = "acceso") {
     abierto_en: "2026-10-28T12:00:00Z",
     codigo_vence_en: estado === "abierto" ? "2026-10-31T12:00:00Z" : null,
     confirmado_en: null,
+    copia_entregada_en: null,
     resuelto_en: null,
   };
 }
@@ -75,15 +76,23 @@ describe("sección de pedidos sobre los datos", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("confirma con el código y la contraseña, y después descarga la copia una vez", async () => {
+  it("confirma, descarga (de nuevo si hace falta) y cierra cuando la guardó", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const creado = vi.fn(() => "blob:local");
-    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: creado, revokeObjectURL: vi.fn() }));
-    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const liberado = vi.fn();
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: creado, revokeObjectURL: liberado }));
+    let enDocumento = false;
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      enDocumento = document.body.contains(this);
+    });
     const simulado = backend({
       [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
       [`POST ${CASOS}/${CASO}/confirmar`]: () => new Response(null, { status: 204 }),
       [`POST ${CASOS}/${CASO}/copia`]: () =>
         Response.json({ caso_id: CASO, generada_en: "2026-10-28T12:05:00Z", alcance_consorcio_id: null, datos: {} }),
+      [`POST ${CASOS}/${CASO}/recibida`]: () => new Response(null, { status: 204 }),
     });
     vi.stubGlobal("fetch", simulado);
     mostrar();
@@ -101,10 +110,24 @@ describe("sección de pedidos sobre los datos", () => {
     expect(campo.value).toBe("");
     fireEvent.change(campo, { target: { value: "una frase larga" } });
     fireEvent.click(screen.getByRole("button", { name: "Descargar la copia de mis datos" }));
-    expect(await screen.findByText("Listo: guardamos la copia de tus datos en este dispositivo.")).toBeTruthy();
+    expect(
+      await screen.findByText("Te mandamos la copia. Revisá que el archivo se haya guardado y avisanos."),
+    ).toBeTruthy();
     expect(creado).toHaveBeenCalledTimes(1);
     expect(clic).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: "Descargar la copia de mis datos" })).toBeNull();
+    // El enlace estaba en el documento al hacer clic y se libera después, no en el acto.
+    expect(enDocumento).toBe(true);
+    expect(liberado).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(60_000);
+    expect(liberado).toHaveBeenCalledWith("blob:local");
+    // Puede descargarla de nuevo y después cerrar el pedido.
+    fireEvent.change(screen.getByLabelText("Tu contraseña"), { target: { value: "una frase larga" } });
+    fireEvent.click(screen.getByRole("button", { name: "Descargar de nuevo" }));
+    await waitFor(() => expect(creado).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Ya la guardé: cerrar el pedido" }));
+    expect(await screen.findByText("Listo: cerramos tu pedido.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Descargar de nuevo" })).toBeNull();
+    vi.useRealTimers();
   });
 
   it("sin contraseña no la pide y explica que hay que volver a entrar", async () => {

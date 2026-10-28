@@ -362,6 +362,19 @@
             ],
             "title": "Confirmado En"
           },
+          "copia_entregada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primera entrega de la copia; se puede volver a pedir.",
+            "title": "Copia Entregada En"
+          },
           "derecho": {
             "$ref": "#/components/schemas/DerechoPrivacidad"
           },
@@ -1107,7 +1120,7 @@
         "type": "object"
       },
       "CopiaDatosPropios": {
-        "description": "La copia de los datos propios (§5). Se entrega una vez: el caso queda resuelto.\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`, `eventos`,\n`documentos`, `versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
+        "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
         "properties": {
           "alcance_consorcio_id": {
             "anyOf": [
@@ -8149,7 +8162,64 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Recibir la copia de mis datos (una vez por caso)",
+        "summary": "Recibir la copia de mis datos",
+        "tags": [
+          "privacidad"
+        ]
+      }
+    },
+    "/api/v1/privacidad/casos/{caso_id}/recibida": {
+      "post": {
+        "description": "Cerrar no da acceso a nada: no pide reautenticación.",
+        "operationId": "recibida_api_v1_privacidad_casos__caso_id__recibida_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "caso_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Caso Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay un caso así de esta persona."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El caso no es de copia o la copia no se entregó."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Avisar que guardé la copia: el caso queda resuelto",
         "tags": [
           "privacidad"
         ]

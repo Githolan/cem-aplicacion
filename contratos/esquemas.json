@@ -311,6 +311,20 @@
         "default": null,
         "title": "Confirmado En"
       },
+      "copia_entregada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Primera entrega de la copia; se puede volver a pedir.",
+        "title": "Copia Entregada En"
+      },
       "derecho": {
         "$ref": "#/$defs/DerechoPrivacidad"
       },
@@ -521,7 +535,7 @@
     "type": "object"
   },
   "CopiaDatosPropios": {
-    "description": "La copia de los datos propios (§5). Se entrega una vez: el caso queda resuelto.\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`, `eventos`,\n`documentos`, `versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
+    "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
     "properties": {
       "alcance_consorcio_id": {
         "anyOf": [
@@ -2224,6 +2238,20 @@
             ],
             "default": null,
             "title": "Confirmado En"
+          },
+          "copia_entregada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Primera entrega de la copia; se puede volver a pedir.",
+            "title": "Copia Entregada En"
           },
           "derecho": {
             "$ref": "#/$defs/DerechoPrivacidad"

@@ -53,6 +53,9 @@ class CasoPrivacidad(BaseModel):
         description="Hasta cuándo sirve el código del correo; nulo si no hay o ya se usó."
     )
     confirmado_en: datetime | None = None
+    copia_entregada_en: datetime | None = Field(
+        default=None, description="Primera entrega de la copia; se puede volver a pedir."
+    )
     resuelto_en: datetime | None = None
 
 
@@ -91,11 +94,13 @@ class PedidoCopia(Reautenticacion):
 
 
 class CopiaDatosPropios(BaseModel):
-    """La copia de los datos propios (§5). Se entrega una vez: el caso queda resuelto.
+    """La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga
+    confirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).
 
     `datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y
-    `casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`, `eventos`,
-    `documentos`, `versiones_subidas` e `identidad_humana`. Nunca datos de otras personas."""
+    `casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,
+    `invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,
+    `versiones_subidas` e `identidad_humana`. Nunca datos de otras personas."""
 
     model_config = ConfigDict(frozen=True)
 

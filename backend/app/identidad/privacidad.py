@@ -9,7 +9,9 @@ soporte: abre, corrobora y resuelve los demás casos con `scripts.privacidad`.
 - **`POST …/{caso_id}/confirmar`:** el código que llegó al correo de la cuenta, con
   reautenticación reciente.
 - **`POST …/{caso_id}/copia`:** con el caso de acceso confirmado y reautenticación reciente,
-  devuelve la copia y el caso queda resuelto. Una sola entrega: otra copia es otro caso.
+  devuelve la copia. Se puede volver a pedir mientras el caso siga confirmado: una descarga que el
+  navegador no guardó no obliga a abrir otro caso.
+- **`POST …/{caso_id}/recibida`:** el titular guardó la copia y el caso queda resuelto.
 
 **Reautenticación reciente.** Si la persona tiene contraseña, la escribe en el pedido y se
 compara acá con su hash (la base no puede comparar Argon2id: recibe solo si coincidió). La base
@@ -67,11 +69,14 @@ MENSAJE_REAUTENTICACION = (
     " con el enlace del correo si no tenés contraseña, y confirmá con tu aplicación de"
     " autenticación si la activaste."
 )
+SESION_INVALIDA = "sesion_invalida"
+"""La sesión se revocó o venció entre la identidad de la petición y la función: 401."""
 CODIGO_INCORRECTO = {"sin_codigo", "codigo_usado", "codigo_vencido", "codigo_incorrecto"}
 CASO_NO_DISPONIBLE = {
     "caso_no_abierto": "El caso ya no espera confirmación.",
-    "caso_no_confirmado": "El caso no está confirmado o ya se entregó la copia.",
+    "caso_no_confirmado": "El caso no está confirmado o ya se resolvió.",
     "derecho_no_acceso": "Ese caso no es un pedido de copia de tus datos.",
+    "copia_no_entregada": "Primero descargá la copia.",
     "requiere_corroboracion": (
         "Falta que la administración o el Consejo corroboren el pedido: el equipo te va a escribir."
     ),
@@ -119,6 +124,8 @@ def _traducir(e: DBAPIError, persona_id: UUID, caso_id: UUID) -> ErrorApi | None
     campos = {"persona_id": str(persona_id), "caso_id": str(caso_id), "motivo": motivo}
     if motivo == "caso_inexistente":
         return ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    if motivo == SESION_INVALIDA:
+        return ErrorApi(401, CodigoError.NO_AUTENTICADO, "Tu sesión terminó: entrá de nuevo.")
     if motivo in FALTA:
         log.info("caso de privacidad rechazado", extra={"campos": campos})
         return ErrorApi(
@@ -189,7 +196,7 @@ async def confirmar(
 @router.post(
     "/casos/{caso_id}/copia",
     response_model=CopiaDatosPropios,
-    summary="Recibir la copia de mis datos (una vez por caso)",
+    summary="Recibir la copia de mis datos",
     responses={
         403: {"model": Error, "description": "Falta la reautenticación reciente."},
         404: {"model": Error, "description": "No hay un caso así de esta persona."},
@@ -228,3 +235,30 @@ async def copia(
         alcance_consorcio_id=datos.get("consorcio_id"),
         datos=datos,
     )
+
+
+@router.post(
+    "/casos/{caso_id}/recibida",
+    status_code=204,
+    response_class=Response,
+    summary="Avisar que guardé la copia: el caso queda resuelto",
+    responses={
+        404: {"model": Error, "description": "No hay un caso así de esta persona."},
+        409: {"model": Error, "description": "El caso no es de copia o la copia no se entregó."},
+    },
+)
+def recibida(caso_id: UUID, identidad: IdentidadDep, motor: MotorDep) -> Response:
+    """Cerrar no da acceso a nada: no pide reautenticación."""
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        try:
+            conn.execute(text("select plataforma.privacidad_cerrar_copia(:k)"), {"k": caso_id})
+        except DBAPIError as e:
+            error = _traducir(e, identidad.persona_id, caso_id)
+            if error is None:
+                raise
+            raise error from e
+    log.info(
+        "caso de copia resuelto por el titular",
+        extra={"campos": {"persona_id": str(identidad.persona_id), "caso_id": str(caso_id)}},
+    )
+    return Response(status_code=204)

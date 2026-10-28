@@ -221,6 +221,8 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
  */
 async function simularCuenta(pagina: Page, baseURL: string, respuestaPut: { status: number; json: object }) {
   const puts: { csrf: string | null; cuerpo: unknown }[] = [];
+  // La sección de pedidos sobre los datos (2d-2) consulta sus casos: sin casos no se muestra.
+  await pagina.route("**/api/v1/privacidad/casos", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
   await pagina.route("**/api/v1/auth/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
