@@ -25,6 +25,7 @@ from tests.conftest import (
     url_rol,
     vaciar_mandatos,
     verificar_en_el_consorcio,
+    volver_a_subir,
 )
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
@@ -465,5 +466,5 @@ def test_la_migracion_0011_baja_y_sube(base_de_prueba, motor_migrate):
     cfg = alembic_config()
     command.downgrade(cfg, "0010")
     assert existe() == (False, False, True)  # la 0010 queda
-    command.upgrade(cfg, "head")
+    volver_a_subir(cfg, motor_migrate)
     assert existe() == (True, True, True)

@@ -17,7 +17,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import transaccion
-from tests.conftest import alembic_config, vaciar_mandatos, verificar_en_el_consorcio
+from tests.conftest import (
+    alembic_config,
+    vaciar_mandatos,
+    verificar_en_el_consorcio,
+    volver_a_subir,
+)
 from tests.test_mandatos_0012 import alta
 
 pytestmark = pytest.mark.db
@@ -222,7 +227,7 @@ def test_el_downgrade_restaura_las_tres_funciones_y_el_upgrade_las_vuelve_a_atar
         # Antes de 0013 el actor ajeno pasaba: es exactamente el defecto del issue.
         registrar(motor_app, cons, p, otra, "api")
     finally:
-        command.upgrade(cfg, "head")
+        volver_a_subir(cfg, motor_migrate)
     assert con_el_control(motor_migrate) == todas
     with pytest.raises(DBAPIError, match="actor_no_coincide"):
         registrar(motor_app, cons, p, otra, "api")
