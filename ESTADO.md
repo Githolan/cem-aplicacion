@@ -111,9 +111,32 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `c9d611d` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md` y `2026-10-28-c9d611d.md`).
+Medido en el despliegue de `f835fe3` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2 y `2026-10-28-f835fe3.md` con la de S2b).
 
-**Staging y producción en `c9d611d`** (28-10-2026, 02:08 a 02:15 UTC), base `0041`, contrato 0.26.0.
+**Staging y producción en `f835fe3`** (28-10-2026; staging de 09:26 a 09:30 UTC y producción de 09:31 a 09:34 UTC), base `0043`, contrato 0.27.0.
+
+- **Qué suma:** S2b, por el que soporte deja de escribir los eventos de clase B (PR #146, `0043`). Detalle en «Próximo paso», punto 26.
+- **Controles.** `ci.ps1` verde sobre `de452ed` (la cabeza del PR) y sobre `f835fe3`: backend 2089, contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0043` en cada entorno.
+- **Validación en los dos entornos, en solo lectura:**
+  - base en `0043`;
+  - las 6 funciones de clase B con `origen_pedido <> 'soporte'`;
+  - la columna `vigente_hasta_antes_baja`;
+  - `cem_app` sin UPDATE ni DELETE sobre consorcio y unidad (control: conserva INSERT);
+  - los eventos de soporte, iguales antes y después: 687 en staging, de las pruebas de humo, y 0 en producción;
+  - la guarda del downgrade no encuentra ninguna baja que la frene (control: 159 bajas en staging).
+- **SIN VERIFICAR desplegado:** un acto de soporte sin evento. No se ejecutó ninguno en los entornos; queda verificado por las definiciones y la CI.
+
+**Antes, `45c9659`** (28-10-2026; staging de 07:25 a 07:28 UTC y producción de 07:29 a 07:32 UTC), base `0042`, contrato 0.27.0:
+
+- **Qué suma:** 2d-2, la copia de los datos propios dentro de la aplicación (PR #145, `0042`). Detalle en «Próximo paso», punto 25.
+- **Controles.** `ci.ps1` verde sobre `c360b47` y sobre `45c9659`: backend 2085, contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0042` en cada entorno.
+- **Validación en los dos entornos:**
+  - base en `0042` y columnas de entrega;
+  - `cem_app` sin INSERT de `aceptada_en` ni `persona_id` en `invitacion` (control: `correo` sí), y sin ejecución de la función interna de la copia;
+  - `GET /api/v1/privacidad/casos` sin sesión da 401 (control: 404 en una ruta inexistente).
+- **SIN VERIFICAR desplegado:** la entrega a un titular real, porque no hay casos reales ni se fabricaron.
+
+**Antes, `c9d611d`** (28-10-2026, 02:08 a 02:15 UTC), base `0041`, contrato 0.26.0.
 
 - **Qué suma:** 0041, los residuales de la revisión de 2d-3 (PR #142). Detalle en «Próximo paso», punto 24.
 - **Controles.** `ci.ps1` verde sobre `3890c04` (la cabeza del PR) y sobre `c9d611d`: backend 2067, contratos 58, frontend 378 y e2e 177. La primera corrida sobre `3890c04` dio ROJO por E33 (plazo agotado; al mismo tiempo corría una medición); repetida sin nada más corriendo, verde. Copia previa verificada antes de `0041` en cada entorno.
@@ -738,4 +761,27 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Revisión:** independiente, 0 P1/P2; Codex limpio sobre `3890c04`.
    - **Cierra** tres P3 del punto 23: `identidad_persona` en el plan, el deadlock posible con la baja del TOTP y con la purga, y las pruebas de concurrencia que contaban cerrojos de todo el servidor (las nuevas filtran por `pid`; las de 2d-3 siguen igual).
    - **P3 abiertos:** la ida y vuelta de la migración compara subcadenas y no la definición entera; borrados de varias filas sin `order by` (ya pasaba en 0005); el plan tampoco nombra `nucleo.identidad_humana`, la tabla de la huella; las esperas de las pruebas de orden pueden quedar cortas con la CPU cargada.
+25. **2d-2, la copia de los datos propios (RF37; decisión del propietario del 28-10-2026, opción (a))** (PR #145, fusionado el 28-10-2026 en `45c9659`, head `c360b47`; **desplegado** en los dos entornos; diseño en `doc/diseno/H2d_RF37_Diseno.md` del repositorio CEM, §5 y §9):
+   - **Canal:** la copia se entrega solo dentro de la aplicación y solo al titular autenticado. No va por correo, no tiene URL pública, soporte no la descarga ni puede suplantar al titular. Quien tiene contraseña o TOTP confirma su caso en la aplicación.
+   - **`0042`:**
+     - la reautenticación reciente: la contraseña se compara en la API; sin contraseña, una sesión de menos de 10 minutos; con TOTP, uno verificado hace menos de 10 minutos; la sesión tiene que ser de la persona y estar vigente;
+     - el caso propio, `FOR UPDATE`;
+     - la copia con alcance `cuenta` o de un consorcio, sin datos de terceros;
+     - la entrega en dos pasos: entregar, que se puede repetir, y «Ya la guardé», que cierra;
+     - el INSERT de `nucleo.invitacion` por columnas, que cierra el P3 35, reclasificado como de privacidad.
+   - **API:** `/api/v1/privacidad` (casos, confirmar, copia, recibida), sin caché. Los intentos tienen el cupo del segundo factor y la transacción corre en `run_in_threadpool`. **Frontend:** la sección «Pedidos sobre tus datos» en Cuenta. Contrato 0.27.0.
+   - **Pruebas:** `test_privacidad_2d2.py` (18) y 5 de frontend. Hay 13 mutaciones detectadas, y 2 más sobre los arreglos de la revisión: el downgrade y la comparación fuera del bucle.
+   - **Revisión:** independiente, 0 P1/P2 sobre la cabeza final. Codex limpio sobre `c360b47`; sus P2 anteriores (el downgrade de 0042 y Argon2 en el bucle de eventos) quedaron resueltos.
+   - **P3 abiertos:** un caso entregado puede no cerrarse nunca si el titular no avisa; `cerrar_copia` arma la copia entera para listar sus partes; detalles de las pruebas. Están en `doc/tracker/P3_PENDIENTES.md` del repositorio CEM (46 a 48).
+26. **S2b, soporte sin eventos de clase B (decisión del propietario del 28-10-2026)** (PR #146, fusionado el 28-10-2026 en `f835fe3`, head `de452ed`; **desplegado** en los dos entornos; diseño en `doc/diseno/Soporte_Fuera_de_la_Auditoria.md` del repositorio CEM, §5.1):
+   - **`0043`:** `registrar_decision`, `cambiar_modo`, `alta_mandato`, `resolver_revision_mandato`, `registrar_esquema_coeficientes` y `baja_mandato` no escriben evento cuando el origen es soporte. Es hacia adelante: los eventos viejos no se tocan. `alta_consorcio` y la prueba de humo dejan de escribir los suyos.
+   - **Historia:** el fin previsto antes de la baja pasa a `nucleo.mandato.vigente_hasta_antes_baja`, y las bajas `error_carga` anteriores se completan. El downgrade se niega si una baja de soporte que no sea `error_carga` no tiene evento.
+   - **Endurecimiento:** `cem_app` pierde UPDATE y DELETE sobre consorcio y unidad. No hay auditoría paralela ni cuenta de soporte, y RF35 no cambia.
+   - **Pruebas:** 0 eventos por soporte en cada acto, con su control por la API; la ida y vuelta; la guarda y el completado; la invariante de que `cem_app` no puede cambiar `consorcio_id` en ninguna tabla. Hay 13 mutaciones detectadas.
+   - **Revisión:** independiente en tres vueltas, 0 P1/P2 en la última. Codex limpio sobre `de452ed`; su P2 anterior, una baja de un mandato sin fin previsto que la guarda no veía, quedó resuelto.
+   - **P3 abiertos:** `unidad` no tiene `origen`; queda el comentario «S2a» en la línea marcada de la baja; la guarda compara solo por `entidad_id` y `accion`; falta una baja anterior con evento real en la prueba de la guarda (49 a 51 del tracker).
+27. **Autogestión: pruebas técnicas de los caminos A y B** (PR #147, fusionado el 28-10-2026 en `2d0a0a9`, head `c4b7ef8`; solo pruebas, no cambia lo desplegado):
+   - `test_autogestion_caminos.py`: el camino A, el camino B, sus negativos con el motivo exacto, la secuencia alta → invitación → aceptación → arranque, y dos skipped (RPA y administrador propietario). Hay 5 mutaciones de `cambiar_modo` detectadas.
+   - **Staging:** `alta_mandato --simular` de AA → AG sobre el consorcio sintético de las pruebas de humo pasó sin escribir nada (conteos iguales antes y después). El mismo pedido, retroactivo, se niega con `fecha_invalida`. No se hizo ninguna escritura real: no hay un procedimiento de limpieza probado.
+   - **Ningún consorcio real** se activó ni se migró. Los resultados y la recomendación A/B están en `doc/diseno/Autogestion_Preparacion_2026-10-28.md` del repositorio CEM, §5.
 
