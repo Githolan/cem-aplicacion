@@ -65,6 +65,8 @@ def test_el_fixture_esta_marcado_como_no_real_y_sin_datos_de_personas():
 # El ensayo -----------------------------------------------------------------------------------
 
 
+@pytest.mark.db
+@pytest.mark.redis
 def test_el_ensayo_recorre_los_dos_caminos_y_queda_como_fixture(
     servidor,  # noqa: F811
     entorno,  # noqa: F811
@@ -119,6 +121,8 @@ def test_el_ensayo_recorre_los_dos_caminos_y_queda_como_fixture(
     assert codigo == 4 and "ya existe" in error
 
 
+@pytest.mark.db
+@pytest.mark.redis
 def test_la_guarda_se_niega_fuera_de_staging_sin_escribir(
     servidor,  # noqa: F811
     entorno,  # noqa: F811
@@ -149,6 +153,7 @@ def test_la_guarda_se_niega_fuera_de_staging_sin_escribir(
     assert creados == 0
 
 
+@pytest.mark.db
 @pytest.mark.parametrize("motivo", [None, "fecha_invalida"])
 def test_un_error_sin_el_motivo_no_pasa_por_negativo_ni_por_control(motor_app, motivo):
     """Revisión independiente de #149: un error cualquiera (sin hint, otro SQLSTATE) no puede
