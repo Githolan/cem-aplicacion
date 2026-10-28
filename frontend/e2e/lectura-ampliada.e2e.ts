@@ -264,6 +264,116 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     },
   },
   {
+    ruta: "/padron",
+    url: "/padron",
+    cargada: "1° A: Beto Pérez",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/padron`]: {
+        elementos: [
+          // Un nombre del largo que admite la base: la tarjeta no puede ensanchar la página.
+          { nombre: "Anahí Florencia de los Santos Echeverría Bustamante", tipo: "propietario", vigente_desde: "2025-03-01", vigente_hasta: null, confirmado: true, iniciado: true },
+          { nombre: "Beto Pérez", tipo: "inquilino", vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", confirmado: false, iniciado: true },
+        ].map((f, i) => ({
+          ...f,
+          vinculo_id: `5555555${i}-5555-4555-8555-555555555555`,
+          unidad_id: "44444444-4444-4444-8444-444444444444",
+          designacion: "1° A",
+          correo: CORREO_LARGO,
+          telefono: "+54 11 4321-9876",
+        })),
+      },
+    },
+  },
+  {
+    ruta: "/contactos",
+    url: "/contactos",
+    cargada: "Emergencias: Ascensores del Sur",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/contactos`]: {
+        elementos: [
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            funcion: "emergencias",
+            naturaleza: "empresa",
+            nombre: "Ascensores del Sur",
+            telefono: "0800-555-1234",
+            indicaciones: "De 8 a 20; fuera de hora, el número de guardia que atiende los fines de semana",
+            vigente_desde: "2026-01-01",
+            vigente_hasta: null,
+            actualizado_en: "2026-10-20T15:00:00Z",
+            verificado_en: null,
+            observado: false,
+          },
+        ],
+        actualizada_en: "2026-10-20T15:00:00Z",
+        zona_horaria: "America/Argentina/Buenos_Aires",
+      },
+    },
+  },
+  {
+    ruta: "/contactos/gestion",
+    url: "/contactos/gestion",
+    cargada: "Emergencias: Plomería Rápida",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/contactos/gestion`]: {
+        elementos: [
+          {
+            id: "33333333-3333-4333-8333-333333333333",
+            funcion: "emergencias",
+            naturaleza: "servicio",
+            nombre: "Plomería Rápida",
+            telefono: "0800-555-1234",
+            indicaciones: "De 8 a 20; fuera de hora, el número de guardia",
+            vigente_desde: "2026-10-01",
+            vigente_hasta: null,
+            actualizado_en: "2026-10-20T15:00:00Z",
+            verificado_en: null,
+            observado: true,
+            consentimiento_referencia: "Nota firmada del 20-10",
+            observacion: "El teléfono no atiende",
+            actualizado_por: "99999999-9999-4999-8999-999999999999",
+            verificado_por: null,
+            observado_por: "99999999-9999-4999-8999-999999999999",
+          },
+        ],
+      },
+    },
+  },
+  {
+    ruta: "/documentos",
+    url: "/documentos",
+    cargada: "Acta de asamblea ordinaria",
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      [`GET /api/v1/consorcios/${C1}/documentos`]: {
+        documentos: [
+          {
+            id: "66666666-6666-4666-8666-666666666666",
+            categoria: "actas_y_decisiones",
+            titulo: "Acta de asamblea ordinaria",
+            fecha: "2026-10-15",
+            cargado_en: "2026-10-20T15:00:00Z",
+            // La nueva en revisión y la anterior disponible: los dos estados que más texto suman.
+            versiones: [
+              { estado: "en_cuarentena", tamano: 2048 },
+              { estado: "disponible", tamano: 1_258_291 },
+            ].map((v, i) => ({
+              ...v,
+              id: `7777777${i}-7777-4777-8777-777777777777`,
+              motivo_rechazo: null,
+              tipo: "application/pdf",
+              sha256: "a".repeat(64),
+              subida_en: "2026-10-20T15:00:00Z",
+            })),
+          },
+        ],
+      },
+    },
+  },
+  {
     ruta: "/invitacion",
     url: `/invitacion#token=${TOKEN_ENLACE}`,
     cargada: "Aceptar la invitación",
