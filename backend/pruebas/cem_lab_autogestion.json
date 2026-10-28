@@ -1,0 +1,53 @@
+{
+  "aviso": "SINTETICO - PRUEBA - NO REAL - NO USAR COMO EVIDENCIA DE PILOTO REAL. Consorcios, personas, correos, actas y matrícula son ficticios. La forma del edificio (37 unidades: PB con 4, pisos 1, 3 y 4 con 6, pisos 2 y 5 con una unidad unificada cada uno, piso 6 con 5) y el esquema piso-letra de las designaciones, con prefijo LAB, se tomaron del edificio de referencia que nombra el consorcio (nombre elegido por el propietario); ningún nombre, correo, documento, importe ni dato de sus personas.",
+  "uso": "Cobertura técnica, no decisión de negocio: administrador propietario, acta y RPA son supuestos del ensayo, no la política real. Solo staging; nunca producción.",
+  "zona_horaria": "America/Argentina/Buenos_Aires",
+  "unidades": [
+    "LAB PB-A", "LAB PB-B", "LAB PB-C", "LAB PB-D",
+    "LAB 1-A", "LAB 1-B", "LAB 1-C", "LAB 1-D", "LAB 1-E", "LAB 1-F",
+    "LAB 2-A", "LAB 2-B", "LAB 2-C", "LAB 2-D", "LAB 2-E/F",
+    "LAB 3-A", "LAB 3-B", "LAB 3-C", "LAB 3-D", "LAB 3-E", "LAB 3-F",
+    "LAB 4-A", "LAB 4-B", "LAB 4-C", "LAB 4-D", "LAB 4-E", "LAB 4-F",
+    "LAB 5-A/B", "LAB 5-C", "LAB 5-D", "LAB 5-E", "LAB 5-F",
+    "LAB 6-A", "LAB 6-B", "LAB 6-C", "LAB 6-D", "LAB 6-E"
+  ],
+  "caminos": {
+    "A": {
+      "consorcio_id": "a989b734-4bea-4191-89f3-5480d165453b",
+      "nombre": "CEM LAB — Autogestión Sintética Pareja — camino A (SINTETICO, PRUEBA, NO REAL)",
+      "personas": {
+        "propietario01": {"nombre": "Propietario Sintético 01 (LAB, NO REAL)", "correo": "cem-lab-a-propietario01@example.invalid", "unidad": "LAB 1-A"},
+        "propietario02": {"nombre": "Propietario Sintético 02 (LAB, NO REAL)", "correo": "cem-lab-a-propietario02@example.invalid", "unidad": "LAB 1-B"}
+      },
+      "actas": {
+        "TEST-AG-001": {
+          "dias_antes_de_hoy": 7,
+          "descripcion": "SINTETICO / PRUEBA / NO REAL: designa administrador al Propietario Sintético 01 y adopta el Modo Autogestión (camino A)",
+          "referencia": "ACTA SINTETICA DE PRUEBA — SIN VALIDEZ JURIDICA — número TEST-AG-001, libro LAB, folio TEST-001"
+        }
+      },
+      "matricula_rpa": "RPA-TEST-0001 (SIN VALIDEZ / SOLO PRUEBA)"
+    },
+    "B": {
+      "consorcio_id": "f7289eda-227a-4bc1-bdb7-ed5f574301f2",
+      "nombre": "CEM LAB — Autogestión Sintética Pareja — camino B (SINTETICO, PRUEBA, NO REAL)",
+      "personas": {
+        "consejero01": {"nombre": "Consejero Sintético 01 (LAB, NO REAL)", "correo": "cem-lab-b-consejero01@example.invalid", "unidad": "LAB 2-A"},
+        "consejero02": {"nombre": "Consejero Sintético 02 (LAB, NO REAL)", "correo": "cem-lab-b-consejero02@example.invalid", "unidad": "LAB 2-B"},
+        "propietario03": {"nombre": "Propietario Sintético 03 (LAB, NO REAL)", "correo": "cem-lab-b-propietario03@example.invalid", "unidad": "LAB 2-C"}
+      },
+      "actas": {
+        "TEST-AG-002": {
+          "dias_antes_de_hoy": 14,
+          "descripcion": "SINTETICO / PRUEBA / NO REAL: designa el Consejo (Consejeros Sintéticos 01 y 02) y adopta el Modo Consejo (camino B, primer tiempo)",
+          "referencia": "ACTA SINTETICA DE PRUEBA — SIN VALIDEZ JURIDICA — número TEST-AG-002, libro LAB, folio TEST-002"
+        },
+        "TEST-AG-003": {
+          "dias_antes_de_hoy": 0,
+          "descripcion": "SINTETICO / PRUEBA / NO REAL: adopta el Modo Autogestión y designa administrador al Propietario Sintético 03 (camino B, segundo tiempo)",
+          "referencia": "ACTA SINTETICA DE PRUEBA — SIN VALIDEZ JURIDICA — número TEST-AG-003, libro LAB, folio TEST-003"
+        }
+      }
+    }
+  }
+}
