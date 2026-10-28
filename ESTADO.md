@@ -837,3 +837,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - `ejecutar_pago` sin respaldo (`sin_respaldo`);
    - el comportamiento actual de `ejecutar_pago` con respaldo y sin aprobadores: concedido, porque el evaluador no cuenta aprobadores (exigirlos, y qué respaldo tiene lo rutinario, es la decisión 1);
    - `fondo_reserva.autorizar` en AA y AG.
+34. **Interfaz de H2, pruebas sobre las pantallas que ya existen** (PR #157, fusionado en `0ea7491`, head `b64cb04`; solo pruebas, no cambia lo desplegado):
+   - **Lectura ampliada a 360 px con datos** en `/padron`, `/contactos`, `/contactos/gestion` y `/documentos` (`lectura-ampliada.e2e.ts`): sin desplazamiento horizontal, AA y AAA, en claro y oscuro. Los datos siguen el contrato y los topes de la base: un nombre de 100 caracteres, el contacto profesional con constancia y el rechazo con más texto.
+   - **Estados en Vitest:** carga y vacía en `/contactos`; vacía y sin red en gestión; carga, vacía y sin red en documentos.
+   - **Controles:** con un nombre de 90 letras sin espacios, `/padron` desborda y la e2e falla (P3 72 del repositorio CEM: falta `overflow-wrap`). Un texto cambiado en cada pantalla hace fallar su prueba de Vitest.
+   - **Revisión:** independiente en dos vueltas, 0 P1/P2. Codex limpio sobre `b64cb04`. `ci.ps1` verde sobre `b64cb04`.
