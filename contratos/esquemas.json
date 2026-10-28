@@ -243,6 +243,124 @@
     "title": "CanjeEnlace",
     "type": "object"
   },
+  "CasoPrivacidad": {
+    "$defs": {
+      "DerechoPrivacidad": {
+        "enum": [
+          "acceso",
+          "rectificacion_nombre",
+          "supresion"
+        ],
+        "title": "DerechoPrivacidad",
+        "type": "string"
+      },
+      "EstadoCaso": {
+        "enum": [
+          "abierto",
+          "confirmado",
+          "resuelto",
+          "rechazado"
+        ],
+        "title": "EstadoCaso",
+        "type": "string"
+      }
+    },
+    "description": "Un caso del titular, sin el código, la corroboración ni la referencia del pedido.",
+    "properties": {
+      "abierto_en": {
+        "format": "date-time",
+        "title": "Abierto En",
+        "type": "string"
+      },
+      "alcance_consorcio_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Nulo: el alcance es la cuenta (los datos globales de la persona).",
+        "title": "Alcance Consorcio Id"
+      },
+      "codigo_vence_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Hasta cuándo sirve el código del correo; nulo si no hay o ya se usó.",
+        "title": "Codigo Vence En"
+      },
+      "confirmado_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Confirmado En"
+      },
+      "copia_entregada_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Primera entrega de la copia; se puede volver a pedir.",
+        "title": "Copia Entregada En"
+      },
+      "derecho": {
+        "$ref": "#/$defs/DerechoPrivacidad"
+      },
+      "estado": {
+        "$ref": "#/$defs/EstadoCaso"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "resuelto_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resuelto En"
+      }
+    },
+    "required": [
+      "id",
+      "alcance_consorcio_id",
+      "derecho",
+      "estado",
+      "abierto_en",
+      "codigo_vence_en"
+    ],
+    "title": "CasoPrivacidad",
+    "type": "object"
+  },
   "CodigoEntrada": {
     "description": "`POST /api/v1/auth/contrasena/segundo-factor`: el código de la aplicación o uno de\nrecuperación (que queda gastado).",
     "properties": {
@@ -297,6 +415,40 @@
       "codigos"
     ],
     "title": "CodigosRecuperacion",
+    "type": "object"
+  },
+  "ConfirmacionCaso": {
+    "description": "`POST /api/v1/privacidad/casos/{caso_id}/confirmar`.",
+    "properties": {
+      "codigo": {
+        "description": "El código que llegó al correo de la cuenta.",
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Codigo",
+        "type": "string"
+      },
+      "contrasena": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Obligatoria si la persona tiene contraseña.",
+        "format": "password",
+        "title": "Contrasena",
+        "writeOnly": true
+      }
+    },
+    "required": [
+      "codigo"
+    ],
+    "title": "ConfirmacionCaso",
     "type": "object"
   },
   "ConfirmacionVinculo": {
@@ -380,6 +532,46 @@
       "sesiones_cerradas"
     ],
     "title": "ContrasenaGuardada",
+    "type": "object"
+  },
+  "CopiaDatosPropios": {
+    "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
+    "properties": {
+      "alcance_consorcio_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Alcance Consorcio Id"
+      },
+      "caso_id": {
+        "format": "uuid",
+        "title": "Caso Id",
+        "type": "string"
+      },
+      "datos": {
+        "additionalProperties": true,
+        "title": "Datos",
+        "type": "object"
+      },
+      "generada_en": {
+        "format": "date-time",
+        "title": "Generada En",
+        "type": "string"
+      }
+    },
+    "required": [
+      "caso_id",
+      "generada_en",
+      "alcance_consorcio_id",
+      "datos"
+    ],
+    "title": "CopiaDatosPropios",
     "type": "object"
   },
   "DecisionDetalle": {
@@ -729,7 +921,10 @@
           "archivo_demasiado_grande",
           "tipo_no_admitido",
           "version_no_disponible",
-          "archivo_vencido"
+          "archivo_vencido",
+          "reautenticacion_requerida",
+          "codigo_caso_invalido",
+          "caso_no_disponible"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -1995,6 +2190,141 @@
     "title": "ListaCandidatos",
     "type": "object"
   },
+  "ListaCasosPrivacidad": {
+    "$defs": {
+      "CasoPrivacidad": {
+        "description": "Un caso del titular, sin el código, la corroboración ni la referencia del pedido.",
+        "properties": {
+          "abierto_en": {
+            "format": "date-time",
+            "title": "Abierto En",
+            "type": "string"
+          },
+          "alcance_consorcio_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo: el alcance es la cuenta (los datos globales de la persona).",
+            "title": "Alcance Consorcio Id"
+          },
+          "codigo_vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hasta cuándo sirve el código del correo; nulo si no hay o ya se usó.",
+            "title": "Codigo Vence En"
+          },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Confirmado En"
+          },
+          "copia_entregada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Primera entrega de la copia; se puede volver a pedir.",
+            "title": "Copia Entregada En"
+          },
+          "derecho": {
+            "$ref": "#/$defs/DerechoPrivacidad"
+          },
+          "estado": {
+            "$ref": "#/$defs/EstadoCaso"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "resuelto_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resuelto En"
+          }
+        },
+        "required": [
+          "id",
+          "alcance_consorcio_id",
+          "derecho",
+          "estado",
+          "abierto_en",
+          "codigo_vence_en"
+        ],
+        "title": "CasoPrivacidad",
+        "type": "object"
+      },
+      "DerechoPrivacidad": {
+        "enum": [
+          "acceso",
+          "rectificacion_nombre",
+          "supresion"
+        ],
+        "title": "DerechoPrivacidad",
+        "type": "string"
+      },
+      "EstadoCaso": {
+        "enum": [
+          "abierto",
+          "confirmado",
+          "resuelto",
+          "rechazado"
+        ],
+        "title": "EstadoCaso",
+        "type": "string"
+      }
+    },
+    "description": "`GET /api/v1/privacidad/casos`: los más nuevos primero.",
+    "properties": {
+      "elementos": {
+        "items": {
+          "$ref": "#/$defs/CasoPrivacidad"
+        },
+        "title": "Elementos",
+        "type": "array"
+      }
+    },
+    "required": [
+      "elementos"
+    ],
+    "title": "ListaCasosPrivacidad",
+    "type": "object"
+  },
   "ListaDecisiones": {
     "$defs": {
       "DecisionResumen": {
@@ -3148,6 +3478,30 @@
       "elementos"
     ],
     "title": "Padron",
+    "type": "object"
+  },
+  "PedidoCopia": {
+    "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
+    "properties": {
+      "contrasena": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Obligatoria si la persona tiene contraseña.",
+        "format": "password",
+        "title": "Contrasena",
+        "writeOnly": true
+      }
+    },
+    "title": "PedidoCopia",
     "type": "object"
   },
   "PedidoEnlace": {

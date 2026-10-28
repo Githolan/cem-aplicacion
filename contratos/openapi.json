@@ -316,6 +316,100 @@
         "title": "CanjeEnlace",
         "type": "object"
       },
+      "CasoPrivacidad": {
+        "description": "Un caso del titular, sin el código, la corroboración ni la referencia del pedido.",
+        "properties": {
+          "abierto_en": {
+            "format": "date-time",
+            "title": "Abierto En",
+            "type": "string"
+          },
+          "alcance_consorcio_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo: el alcance es la cuenta (los datos globales de la persona).",
+            "title": "Alcance Consorcio Id"
+          },
+          "codigo_vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hasta cuándo sirve el código del correo; nulo si no hay o ya se usó.",
+            "title": "Codigo Vence En"
+          },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado En"
+          },
+          "copia_entregada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Primera entrega de la copia; se puede volver a pedir.",
+            "title": "Copia Entregada En"
+          },
+          "derecho": {
+            "$ref": "#/components/schemas/DerechoPrivacidad"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoCaso"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "resuelto_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resuelto En"
+          }
+        },
+        "required": [
+          "id",
+          "alcance_consorcio_id",
+          "derecho",
+          "estado",
+          "abierto_en",
+          "codigo_vence_en"
+        ],
+        "title": "CasoPrivacidad",
+        "type": "object"
+      },
       "CategoriaDocumento": {
         "description": "Las 8 categorías de §4. Quién ve y quién carga cada una: `ACCION_DE_LECTURA` y\n`ACCIONES_DE_CARGA`.",
         "enum": [
@@ -424,7 +518,10 @@
           "archivo_demasiado_grande",
           "tipo_no_admitido",
           "version_no_disponible",
-          "archivo_vencido"
+          "archivo_vencido",
+          "reautenticacion_requerida",
+          "codigo_caso_invalido",
+          "caso_no_disponible"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -570,6 +667,39 @@
           "hay_esquema_vigente"
         ],
         "title": "CoeficientesGrupo",
+        "type": "object"
+      },
+      "ConfirmacionCaso": {
+        "description": "`POST /api/v1/privacidad/casos/{caso_id}/confirmar`.",
+        "properties": {
+          "codigo": {
+            "description": "El código que llegó al correo de la cuenta.",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Codigo",
+            "type": "string"
+          },
+          "contrasena": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligatoria si la persona tiene contraseña.",
+            "format": "password",
+            "title": "Contrasena",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "codigo"
+        ],
+        "title": "ConfirmacionCaso",
         "type": "object"
       },
       "ConfirmacionVinculo": {
@@ -989,6 +1119,46 @@
         "title": "ContrasenaGuardada",
         "type": "object"
       },
+      "CopiaDatosPropios": {
+        "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
+        "properties": {
+          "alcance_consorcio_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alcance Consorcio Id"
+          },
+          "caso_id": {
+            "format": "uuid",
+            "title": "Caso Id",
+            "type": "string"
+          },
+          "datos": {
+            "additionalProperties": true,
+            "title": "Datos",
+            "type": "object"
+          },
+          "generada_en": {
+            "format": "date-time",
+            "title": "Generada En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "caso_id",
+          "generada_en",
+          "alcance_consorcio_id",
+          "datos"
+        ],
+        "title": "CopiaDatosPropios",
+        "type": "object"
+      },
       "DatosContacto": {
         "additionalProperties": false,
         "description": "Lo que se carga o se corrige.",
@@ -1211,6 +1381,15 @@
         ],
         "title": "DecisionResumen",
         "type": "object"
+      },
+      "DerechoPrivacidad": {
+        "enum": [
+          "acceso",
+          "rectificacion_nombre",
+          "supresion"
+        ],
+        "title": "DerechoPrivacidad",
+        "type": "string"
       },
       "Desasociacion": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/desasociar-persona`.",
@@ -1478,6 +1657,16 @@
         ],
         "title": "EsquemaCoeficientes",
         "type": "object"
+      },
+      "EstadoCaso": {
+        "enum": [
+          "abierto",
+          "confirmado",
+          "resuelto",
+          "rechazado"
+        ],
+        "title": "EstadoCaso",
+        "type": "string"
       },
       "EstadoCola": {
         "description": "Respuesta de `GET /api/v1/health/cola` (documento 13, §16.2 y §16.3).\n\nSolo totales: ningún dato de un consorcio. Kuma alerta cuando `estado` es `alerta`.",
@@ -2666,6 +2855,23 @@
         "title": "ListaCandidatos",
         "type": "object"
       },
+      "ListaCasosPrivacidad": {
+        "description": "`GET /api/v1/privacidad/casos`: los más nuevos primero.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/CasoPrivacidad"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaCasosPrivacidad",
+        "type": "object"
+      },
       "ListaContactos": {
         "properties": {
           "actualizada_en": {
@@ -3450,6 +3656,29 @@
           "elementos"
         ],
         "title": "Padron",
+        "type": "object"
+      },
+      "PedidoCopia": {
+        "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
+        "properties": {
+          "contrasena": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligatoria si la persona tiene contraseña.",
+            "format": "password",
+            "title": "Contrasena",
+            "writeOnly": true
+          }
+        },
+        "title": "PedidoCopia",
         "type": "object"
       },
       "PedidoEnlace": {
@@ -7746,6 +7975,253 @@
         "summary": "Aceptar con mi sesión una invitación dirigida a mi correo",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/privacidad/casos": {
+      "get": {
+        "operationId": "listar_api_v1_privacidad_casos_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaCasosPrivacidad"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mis casos de privacidad",
+        "tags": [
+          "privacidad"
+        ]
+      }
+    },
+    "/api/v1/privacidad/casos/{caso_id}/confirmar": {
+      "post": {
+        "operationId": "confirmar_api_v1_privacidad_casos__caso_id__confirmar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "caso_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Caso Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmacionCaso"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El código no sirve."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta la reautenticación reciente."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay un caso así de esta persona."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El caso no admite confirmarse."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar mi caso de privacidad con el código del correo",
+        "tags": [
+          "privacidad"
+        ]
+      }
+    },
+    "/api/v1/privacidad/casos/{caso_id}/copia": {
+      "post": {
+        "operationId": "copia_api_v1_privacidad_casos__caso_id__copia_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "caso_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Caso Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoCopia"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopiaDatosPropios"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta la reautenticación reciente."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay un caso así de esta persona."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El caso no es de copia o no está confirmado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recibir la copia de mis datos",
+        "tags": [
+          "privacidad"
+        ]
+      }
+    },
+    "/api/v1/privacidad/casos/{caso_id}/recibida": {
+      "post": {
+        "description": "Cerrar no da acceso a nada: no pide reautenticación.",
+        "operationId": "recibida_api_v1_privacidad_casos__caso_id__recibida_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "caso_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Caso Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay un caso así de esta persona."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "El caso no es de copia o la copia no se entregó."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Avisar que guardé la copia: el caso queda resuelto",
+        "tags": [
+          "privacidad"
         ]
       }
     },

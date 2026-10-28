@@ -186,6 +186,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
       },
       "GET /api/v1/auth/totp": TOTP_ACTIVO,
       "GET /api/v1/auth/contrasena": { definida: true, cambiada_en: "2026-10-10T15:30:00Z" },
+      "GET /api/v1/privacidad/casos": { elementos: [] },
     },
   },
   {

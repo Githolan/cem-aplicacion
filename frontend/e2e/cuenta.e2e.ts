@@ -50,6 +50,8 @@ function vigilarErrores(pagina: Page): string[] {
  */
 async function simularApi(pagina: Page, baseURL: string): Promise<Record<string, string | null>> {
   const csrf: Record<string, string | null> = {};
+  // La sección de pedidos sobre los datos (2d-2) consulta sus casos: sin casos no se muestra.
+  await pagina.route("**/api/v1/privacidad/casos", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
   await pagina.route("**/api/v1/auth/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
