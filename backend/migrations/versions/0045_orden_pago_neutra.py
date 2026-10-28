@@ -237,6 +237,13 @@ create trigger historia_orden_pago_version before update or delete
 create trigger historia_orden_pago_aprobacion before update or delete
   on nucleo.orden_pago_aprobacion
   for each row execute function nucleo.negar_cambio_historia_orden_pago();
+-- TRUNCATE no dispara los triggers por fila: también se niega.
+create trigger historia_orden_pago_version_truncate before truncate
+  on nucleo.orden_pago_version
+  for each statement execute function nucleo.negar_cambio_historia_orden_pago();
+create trigger historia_orden_pago_aprobacion_truncate before truncate
+  on nucleo.orden_pago_aprobacion
+  for each statement execute function nucleo.negar_cambio_historia_orden_pago();
 
 -- R10 y las políticas de egresos. Devuelve la identidad humana de quien actúa.
 create function nucleo.exigir_acto_economico(c uuid, actor uuid, sesion uuid, codigo text,
@@ -592,7 +599,18 @@ _todas = (
 UPGRADE += "".join(f"revoke all on function {f} from public;\n" for f in _todas)
 
 DOWNGRADE = (
-    "".join(f"drop function {f};\n" for f in FUNCIONES)
+    """
+do $guarda$
+begin
+  if exists (select 1 from nucleo.orden_pago) then
+    raise exception 'el downgrade de 0045 se niega: hay órdenes de pago'
+      using errcode = 'P0001', hint = 'downgrade_con_datos',
+            detail = 'bajar borraría las versiones y las aprobaciones, que la auditoría no guarda';
+  end if;
+end
+$guarda$;
+"""
+    + "".join(f"drop function {f};\n" for f in FUNCIONES)
     + """
 drop function nucleo.exigir_decision_sobre_orden(uuid, nucleo.orden_pago, integer, uuid);
 drop function nucleo.auditar_orden_pago(uuid, text, uuid, uuid, jsonb, jsonb);

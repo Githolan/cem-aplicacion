@@ -25,7 +25,11 @@ from tests.conftest import misma_identidad
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
 from tests.test_modo_operacion import cambiar, consorcio_con_persona, decidir_equipo
-from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
+from tests.test_vinculo_0014 import (  # noqa: F401  (`base_aparte` es un fixture)
+    _consorcio_y_unidad,
+    _persona,
+    base_aparte,
+)
 
 pytestmark = pytest.mark.db
 
@@ -418,27 +422,31 @@ def test_solo_se_aprueba_una_orden_en_revision(motor_migrate, e):
 # Separación de funciones ---------------------------------------------------------------------
 
 
-def test_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_app, e):
-    o = preparada(motor_migrate, e, en_revision=True)
-    h = huella(motor_migrate, o, 1)
-    # El administrador recibe aprobar solo para esta prueba: igual no aprueba lo que preparó.
+def _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e) -> UUID:
+    """El administrador (que prepara) recibe aprobar solo para la prueba, y también otra cuenta
+    del mismo ser humano, en el Consejo. Devuelve esa otra cuenta."""
     with motor_migrate.connect() as c:
-        m_adm = c.execute(
-            text("select id from nucleo.mandato where consorcio_id = :c and persona_id = :p"),
+        m_adm, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"),
             {"c": e.cons, "p": e.adm},
-        ).scalar_one()
-        acta = c.execute(
-            text("select decision_id from nucleo.mandato where id = :m"), {"m": m_adm}
-        ).scalar_one()
+        ).one()  # fmt: skip
     otorgar(motor_migrate, e.cons, m_adm, acta, "egresos.aprobar_orden")
-    niega(motor_migrate, e, e.adm, APROBAR, "no_es_quien_preparo", orden=o, version=1, huella=h)
-    # Otra cuenta del mismo ser humano que preparó, en el Consejo y con aprobar.
     otra = otra_persona(motor_migrate, e.cons, verificada=False)
     misma_identidad(motor_migrate, e.cons, e.adm, otra)
     m_otra = alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
     otorgar(motor_migrate, e.cons, m_otra, acta, "egresos.aprobar_orden")
     e.sesion[otra] = nueva_sesion(motor_migrate, otra)
-    niega(motor_migrate, e, otra, APROBAR, "no_es_quien_preparo", orden=o, version=1, huella=h)
+    return otra
+
+
+def test_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_app, e):
+    o = preparada(motor_migrate, e, en_revision=True)
+    h = huella(motor_migrate, o, 1)
+    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
+    for quien in (e.adm, otra):
+        niega(motor_migrate, e, quien, APROBAR, "no_es_quien_preparo", orden=o, version=1,
+              huella=h)  # fmt: skip
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
 
 
@@ -458,11 +466,16 @@ def test_quien_preparo_una_version_anterior_tampoco_aprueba(motor_migrate, e):
 
 
 def test_rechazar_tambien_exige_no_haber_preparado_y_guarda_el_motivo_fuera_del_evento(
-    motor_migrate, e
+    motor_migrate, motor_app, e
 ):
     o = preparada(motor_migrate, e, en_revision=True)
     motivo = "SINTETICO: el presupuesto no coincide"
     niega(motor_migrate, e, e.adm, RECHAZAR, "42501", orden=o, version=1, motivo=motivo)
+    # Con la facultad de aprobar, quien preparó (con cualquiera de sus cuentas) tampoco rechaza.
+    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
+    for quien in (e.adm, otra):
+        niega(motor_migrate, e, quien, RECHAZAR, "no_es_quien_preparo", orden=o, version=1,
+              motivo=motivo)  # fmt: skip
     llamar(motor_migrate, e, e.mc1, RECHAZAR, orden=o, version=1, motivo=motivo)
     o_ = orden(motor_migrate, o)
     assert (o_["estado"], o_["motivo_rechazo"]) == ("rechazada", motivo)
@@ -652,7 +665,7 @@ def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
                 text("select has_table_privilege('cem_app', :t, :p)"), {"t": t, "p": p}
             ).scalar_one()
             for t in tablas
-            for p in ("SELECT", "INSERT", "UPDATE", "DELETE")
+            for p in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
         ]
         funciones = c.execute(
             text(
@@ -693,3 +706,65 @@ def test_0045_ida_y_vuelta(base_aparte):  # noqa: F811
     assert not existe() and restos == 0 and tipo is None
     command.upgrade(cfg, "0045")  # control: vuelve a subir limpio
     assert existe()
+
+
+def test_0045_no_baja_si_hay_ordenes(base_aparte):  # noqa: F811
+    """Bajar borraría la historia de órdenes, versiones y aprobaciones. Control: sin la orden,
+    baja."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0045")
+    cons, _ = _consorcio_y_unidad(motor)
+    quien = _persona(motor, "Sintetica")
+    with motor.begin() as c:
+        orden = c.execute(
+            text(
+                "insert into nucleo.orden_pago (consorcio_id, version_vigente, preparada_por)"
+                " values (:c, 1, :p) returning id"
+            ),
+            {"c": cons, "p": quien},
+        ).scalar_one()
+    with pytest.raises(DBAPIError) as e:
+        command.downgrade(cfg, "0044")
+    assert e.value.orig.diag.message_hint == "downgrade_con_datos"
+    with motor.connect() as c:
+        assert c.execute(text("select to_regclass('nucleo.orden_pago')")).scalar_one()
+    with motor.begin() as c:
+        c.execute(text("delete from nucleo.orden_pago where id = :o"), {"o": orden})
+    command.downgrade(cfg, "0044")
+    with motor.connect() as c:
+        assert c.execute(text("select to_regclass('nucleo.orden_pago')")).scalar_one() is None
+
+
+def test_ninguna_funcion_lleva_la_orden_a_aprobada(motor_migrate):
+    """Cuántas aprobaciones hacen falta es la decisión 2: ninguna función pone «aprobada». Alarma
+    por inventario: las únicas que nombran el estado lo leen (modificar devuelve a revisión,
+    emitir parte de ahí). Una función nueva que lo nombre hace fallar esta prueba y obliga a
+    revisarla."""
+    with motor_migrate.connect() as c:
+        nombran = set(
+            c.execute(
+                text(
+                    "select p.proname from pg_proc p join pg_namespace n on n.oid ="
+                    " p.pronamespace where n.nspname = 'nucleo' and p.prosrc like '%orden_pago%'"
+                    " and p.prosrc like '%''aprobada''%'"
+                )
+            ).scalars()
+        )
+    assert nombran == {"modificar_orden_pago", "emitir_orden_pago"}
+
+
+def test_truncate_tampoco_borra_la_historia(motor_migrate, e):
+    """Control: la tabla tiene filas, así que el TRUNCATE las borraría sin el trigger."""
+    o = preparada(motor_migrate, e)
+    for tabla in ("nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion"):
+        with pytest.raises(DBAPIError) as err:
+            with motor_migrate.begin() as c:
+                c.execute(text(f"truncate {tabla} cascade"))
+        assert err.value.orig.diag.message_hint == "historia_inmutable"
+    with motor_migrate.connect() as c:
+        assert (
+            c.execute(
+                text("select count(*) from nucleo.orden_pago_version where orden_id = :o"), {"o": o}
+            ).scalar_one()
+            == 1
+        )
