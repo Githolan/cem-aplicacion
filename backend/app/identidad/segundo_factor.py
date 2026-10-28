@@ -450,8 +450,9 @@ def baja(identidad: SegundoFactorRecienteDep, motor: MotorDep) -> Response:
     dispositivo olvidado abierto) no puede sacar el segundo factor. Borra el secreto y los
     códigos de recuperación y avisa por correo."""
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
-        conn.execute(text("delete from nucleo.codigo_recuperacion"))
+        # TOTP y después recuperación, el orden de `confirmar` y de la supresión (0040).
         conn.execute(text("delete from nucleo.factor_totp"))
+        conn.execute(text("delete from nucleo.codigo_recuperacion"))
         conn.execute(
             text("update nucleo.sesion set segundo_factor_en = null where persona_id = :p"),
             {"p": identidad.persona_id},
