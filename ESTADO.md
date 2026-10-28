@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 27-10-2026.
+**Actualizado:** 28-10-2026.
 
 ## Qué existe
 
@@ -116,9 +116,9 @@ Medido en el despliegue de `c9d611d` (28-10-2026) por `cd.ps1` (estado, imagen y
 **Staging y producción en `c9d611d`** (28-10-2026, 02:08 a 02:15 UTC), base `0041`, contrato 0.26.0.
 
 - **Qué suma:** 0041, los residuales de la revisión de 2d-3 (PR #142). Detalle en «Próximo paso», punto 24.
-- **Controles.** `ci.ps1` verde sobre `3890c04` (la cabeza del PR) y sobre `c9d611d`: backend 2067, contratos 58, frontend 378 y e2e 177. La primera corrida sobre `3890c04` dio ROJO por E33, con la CPU cargada; repetida sin carga, verde. Copia previa verificada antes de `0041` en cada entorno.
-- **Validación en los dos entornos, sin dejar cambios:** base en `0041`, purga en el orden nuevo, identidad en el plan y permisos sin cambio. La purga corrió dentro de un ROLLBACK, y suprimir un caso inexistente se sigue negando. Control: antes del despliegue, el validador contra staging dio `0040`.
-- **SIN VERIFICAR desplegado:** la baja del TOTP en el orden nuevo (hace falta una cuenta con TOTP) y la purga borrando filas en producción (no tiene filas viejas).
+- **Controles.** `ci.ps1` verde sobre `3890c04` (la cabeza del PR) y sobre `c9d611d`: backend 2067, contratos 58, frontend 378 y e2e 177. La primera corrida sobre `3890c04` dio ROJO por E33 (plazo agotado; al mismo tiempo corría una medición); repetida sin nada más corriendo, verde. Copia previa verificada antes de `0041` en cada entorno.
+- **Validación en los dos entornos, sin dejar cambios:** base en `0041`; las definiciones tienen el orden nuevo de la purga y la identidad en el plan; permisos sin cambio. La purga corrió dentro de un ROLLBACK, lo que prueba que corre, no lo que borra, y suprimir un caso inexistente se sigue negando. Control: antes del despliegue, el validador contra staging dio `0040`.
+- **SIN VERIFICAR desplegado:** la baja del TOTP en el orden nuevo (hace falta una cuenta con TOTP) y la purga borrando filas (en ningún entorno se contó lo borrado dentro de la transacción).
 
 **Antes, `3dfdfdb`** (27-10-2026, 23:15 a 23:22 UTC), base `0040`:
 
@@ -736,5 +736,6 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - El plan de la supresión suma «identidad humana de la cuenta» (`nucleo.identidad_persona`) como `conservar`, contado por alcance. Un plan mirado antes de `0041` y ejecutado después se niega con `plan_cambio`: hay que volver a pedirlo.
    - **Pruebas:** `test_cerrojos_0041.py`, con pruebas de orden con `nowait` filtradas por `pid` y 5 mutaciones detectadas.
    - **Revisión:** independiente, 0 P1/P2; Codex limpio sobre `3890c04`.
+   - **Cierra** tres P3 del punto 23: `identidad_persona` en el plan, el deadlock posible con la baja del TOTP y con la purga, y las pruebas de concurrencia que contaban cerrojos de todo el servidor (las nuevas filtran por `pid`; las de 2d-3 siguen igual).
    - **P3 abiertos:** la ida y vuelta de la migración compara subcadenas y no la definición entera; borrados de varias filas sin `order by` (ya pasaba en 0005); el plan tampoco nombra `nucleo.identidad_humana`, la tabla de la huella; las esperas de las pruebas de orden pueden quedar cortas con la CPU cargada.
 
