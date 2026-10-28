@@ -6,13 +6,15 @@ Las pruebas de cada acto (con su control por la API) están junto a las de la fu
 `test_alta_consorcio.py`. Aquí, la ida y vuelta de la migración y la columna nueva.
 """
 
+from datetime import date, timedelta
+
 import pytest
 from alembic import command
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from tests.test_mandatos_0012 import alta, baja, escena  # noqa: F401  (`escena` es un fixture)
-from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
+from tests.test_vinculo_0014 import _consorcio_y_unidad, base_aparte  # noqa: F401
 
 pytestmark = pytest.mark.db
 
@@ -98,3 +100,70 @@ def test_el_fin_previo_solo_existe_en_un_mandato_dado_de_baja(escena, motor_migr
     baja(motor_app, e["cons"], e["per"], m)
     with motor_migrate.begin() as c:
         assert c.execute(poner, {"m": m}).rowcount == 1
+
+
+def _externo_por_soporte(c, cons, acta, hasta: str):
+    return c.execute(
+        text(
+            "select nucleo.alta_mandato('administrador_externo', null, 'Estudio sintético',"
+            " '30500010912', null, :a, '2024-01-01', cast(:h as date), null, null, 'soporte')"
+        ),
+        {"a": acta, "h": hasta},
+    ).scalar_one()
+
+
+def _baja_por_soporte(c, mandato, causa: str):
+    c.execute(
+        text(
+            "select nucleo.baja_mandato(:m, cast(:k as nucleo.causa_baja), null, 'Nota sintética',"
+            " 'Prueba de S2b', null, 'soporte')"
+        ),
+        {"m": mandato, "k": causa},
+    )
+
+
+def test_0043_completa_error_carga_y_no_baja_si_el_fin_previo_vive_solo_en_la_fila(base_aparte):  # noqa: F811
+    """Al subir, las bajas por `error_carga` ya hechas (sin evento desde 0033) quedan con su fin
+    previo, que esa causa no cambia. Al bajar, se niega si una baja de soporte posterior dejó su
+    fin previo solo en la columna. Control: sin ese dato, baja."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0042")
+    cons, _ = _consorcio_y_unidad(motor)
+    with motor.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(cons)})
+        acta = c.execute(
+            text(
+                "select nucleo.registrar_decision('asamblea', '2024-01-01', 'Designa',"
+                " 'Acta sintética 1', null, 'soporte')"
+            )
+        ).scalar_one()
+        malo = _externo_por_soporte(c, cons, acta, "2030-01-01")
+        _baja_por_soporte(c, malo, "error_carga")
+    command.upgrade(cfg, "0043")
+
+    def columna(m):
+        with motor.connect() as c:
+            return c.execute(
+                text(
+                    "select vigente_hasta_antes_baja, vigente_hasta from nucleo.mandato"
+                    " where id = :m"
+                ),
+                {"m": m},
+            ).one()
+
+    assert tuple(columna(malo)) == (date(2030, 1, 1), date(2030, 1, 1))
+    hasta = date.today() + timedelta(days=400)
+    with motor.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(cons)})
+        bueno = _externo_por_soporte(c, cons, acta, hasta.isoformat())
+        _baja_por_soporte(c, bueno, "renuncia")
+    assert columna(bueno)[0] == hasta
+    with pytest.raises(DBAPIError) as error:
+        command.downgrade(cfg, "0042")
+    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    with motor.begin() as c:  # control: sin ese dato, baja
+        c.execute(
+            text("update nucleo.mandato set vigente_hasta_antes_baja = null where id = :m"),
+            {"m": bueno},
+        )
+    command.downgrade(cfg, "0042")

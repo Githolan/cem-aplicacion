@@ -501,7 +501,7 @@ def test_error_carga_por_soporte_no_escribe_evento(escena, motor_migrate, motor_
     por_api = alta(motor_app, e["cons"], e["per"], e["acta"], persona=e["p1"])
     baja(motor_app, e["cons"], e["per"], por_api, "error_carga", instrumento="Corrección")
     assert eventos_de(por_api) == ["api"]
-    hasta = date(2027, 3, 1)
+    hasta = date.today() + timedelta(days=400)  # siempre futura: la renuncia la acorta a hoy
     renuncia = alta(motor_app, e["cons"], None, e["acta"], persona=e["p2"], origen="soporte",
                     hasta=hasta)  # fmt: skip
     baja(motor_app, e["cons"], None, renuncia, origen="soporte")

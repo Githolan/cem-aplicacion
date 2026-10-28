@@ -16,14 +16,17 @@ igual que antes.
   tipo, fecha, referencia del acta y origen; el modo con su decisión y su vigencia, y el anterior
   cerrado en su propia fila; el mandato con su decisión, vigencia y facultades; la revisión con su
   decisión y desde cuándo rige; el esquema de coeficientes con su versión, decisión, vigencia y
-  filas. `cem_app` solo tiene `SELECT` sobre esas tablas y las cambian únicamente estas funciones,
-  que no reescriben historia: el modo cierra la vigencia del anterior e inserta otro, la baja se
-  niega sobre un mandato ya dado de baja (`mandato_ya_dado_de_baja`), y decisiones, revisiones y
-  coeficientes no se actualizan nunca.
+  filas. `cem_app` solo tiene `SELECT` sobre esas tablas; las cambian funciones `security definer`
+  que no reescriben historia (estas y, sobre el mandato, la aceptación de su invitación, la
+  desasociación, que guarda a la persona anterior, y el vencimiento de `0017`): el modo cierra la
+  vigencia del anterior e inserta otro, la baja se niega sobre un mandato ya dado de baja
+  (`mandato_ya_dado_de_baja`), y decisiones, revisiones y coeficientes no se actualizan nunca.
 - **Lo único que vivía solo en el evento:** el fin previsto del mandato antes de la baja
   (`antes.vigente_hasta`), que la baja reemplaza por la fecha en que termina. Nueva columna
   `nucleo.mandato.vigente_hasta_antes_baja`, que la baja llena en la misma sentencia, con un check
-  que la ata a `finalizado_en`. Las bajas anteriores quedan con nulo: su valor está en su evento.
+  que la ata a `finalizado_en`. Las bajas por `error_carga` ya hechas se completan al subir: esa
+  causa conserva el fin (`hasta_nuevo = vigente_hasta`), y las de soporte desde `0033` no tienen
+  evento. Las demás bajas anteriores quedan con nulo: su valor está en su evento.
 - **`consorcio` y `unidad`:** el alta del equipo (`scripts/alta_consorcio.py`) deja de escribir sus
   eventos. `cem_app` tenía `UPDATE` y `DELETE` sobre las dos tablas y ningún código los usa: se
   revocan, así nombre, CUIT, zona horaria y designación no se pueden reescribir desde la
@@ -32,6 +35,9 @@ igual que antes.
 No se crea una auditoría paralela de soporte ni una cuenta de soporte, y soporte sigue fuera de
 RF35 (`0032`). La restricción `auditoria.eventos.origen` conserva `soporte`: las filas viejas lo
 usan.
+
+Downgrade: se niega (`downgrade_con_datos`) si alguna baja posterior a `0043` dejó su fin previo
+solo en la columna (una baja de soporte que no sea `error_carga`): borrarla perdería ese dato.
 
 Revisión: 0043
 Anterior: 0042
@@ -120,7 +126,10 @@ alter table nucleo.mandato
   add constraint mandato_vigente_hasta_antes_baja
     check (vigente_hasta_antes_baja is null or finalizado_en is not null);
 comment on column nucleo.mandato.vigente_hasta_antes_baja is
-  'Fin previsto antes de la baja (0043, S2b): la baja reemplaza vigente_hasta';
+  'Fin previsto antes de la baja (0043, S2b): la baja reemplaza vigente_hasta. Nulo en una baja '
+  'anterior a 0043 que no sea error_carga: el valor está en su evento';
+update nucleo.mandato set vigente_hasta_antes_baja = vigente_hasta
+ where causa_baja = 'error_carga' and finalizado_en is not null;
 revoke update, delete on nucleo.consorcio, nucleo.unidad from cem_app;
 """
     )
@@ -133,6 +142,24 @@ revoke update, delete on nucleo.consorcio, nucleo.unidad from cem_app;
 
 
 def downgrade() -> None:
+    op.execute(
+        """
+do $$
+begin
+  if exists (select 1 from nucleo.mandato m
+              where m.vigente_hasta_antes_baja is not null
+                and m.causa_baja <> 'error_carga'
+                and not exists (select 1 from auditoria.eventos e
+                                 where e.entidad_id = m.id
+                                   and e.accion = 'consorcio.mandato.baja')) then
+    raise exception 'el downgrade de 0043 se niega: hay bajas cuyo fin previo vive solo en la fila'
+      using errcode = 'P0001', hint = 'downgrade_con_datos',
+            detail = 'vigente_hasta_antes_baja es la única constancia de esas bajas de soporte';
+  end if;
+end
+$$;
+"""
+    )
     baja = _definicion(BAJA)
     baja = _reemplazar_una_vez(BAJA, baja, BAJA_DESPUES, BAJA_ANTES)
     baja = _reemplazar_una_vez(BAJA, baja, CONDICION_S2B, CONDICION_S2A)

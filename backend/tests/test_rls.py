@@ -65,6 +65,33 @@ def test_pa15_no_se_puede_escribir_en_otro_consorcio(motor_app, datos):
             )
 
 
+def test_pa15_cem_app_no_puede_cambiar_el_consorcio_de_ninguna_fila(motor_migrate):
+    """Desde 0043 `cem_app` no tiene `UPDATE` sobre `consorcio` ni `unidad`, y en ninguna tabla con
+    `consorcio_id` puede cambiar esa columna: mover una fila de consorcio no llega ni a la RLS.
+    Control: el mismo chequeo ve el `UPDATE` que sí tiene (`invitacion.revocada_en`)."""
+    with motor_migrate.connect() as c:
+        tablas = (
+            c.execute(
+                text(
+                    "select a.attrelid::regclass::text from pg_attribute a"
+                    " join pg_class k on k.oid = a.attrelid and k.relkind = 'r'"
+                    " where a.attname = 'consorcio_id' and not a.attisdropped"
+                    " and k.relnamespace::regnamespace::text"
+                    " in ('nucleo', 'plataforma', 'auditoria')"
+                    " and has_column_privilege('cem_app', a.attrelid, a.attnum, 'UPDATE')"
+                )
+            )
+            .scalars()
+            .all()
+        )
+        control = c.execute(
+            text("select has_column_privilege('cem_app', 'nucleo.invitacion', 'revocada_en',"
+                 " 'UPDATE')")
+        ).scalar_one()  # fmt: skip
+    assert tablas == []
+    assert control
+
+
 def test_pa15_no_se_puede_mover_una_fila_a_otro_consorcio(motor_app, datos):
     # Desde 0043 (S2b) `cem_app` ni siquiera tiene UPDATE sobre `unidad`: antes la frenaba la RLS.
     with pytest.raises(ProgrammingError, match="permission denied"):
