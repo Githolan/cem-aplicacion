@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import text
 
 from pruebas import ensayo_autogestion_staging as ensayo
@@ -136,9 +137,27 @@ def test_la_guarda_se_niega_fuera_de_staging_sin_escribir(
     datos["caminos"]["A"]["nombre"] = "Edificio real"
     codigo, _, error = correr(servidor, entorno, datos, capsys)
     assert codigo == 3 and "marcas" in error
+    datos["caminos"]["A"]["nombre"] += " LAB SINTETICO NO REAL"
+    datos["unidades"][0] = "PB-A"
+    codigo, _, error = correr(servidor, entorno, datos, capsys)
+    assert codigo == 3 and "una unidad no lleva las marcas" in error
     with motor_migrate.connect() as c:
         creados = c.execute(
             text("select count(*) from nucleo.consorcio where id = any(:c)"),
             {"c": [x["consorcio_id"] for x in datos["caminos"].values()]},
         ).scalar_one()
     assert creados == 0
+
+
+@pytest.mark.parametrize("motivo", [None, "fecha_invalida"])
+def test_un_error_sin_el_motivo_no_pasa_por_negativo_ni_por_control(motor_app, motivo):
+    """Revisión independiente de #149: un error cualquiera (sin hint, otro SQLSTATE) no puede
+    contar como el rechazo esperado ni como el control positivo «el cambio pasa»."""
+    e = ensayo.Ensayo(motor_app, {}, "", "", "", None)
+
+    def roto(c):
+        c.execute(text("select 1 / 0"))
+
+    with pytest.raises(ensayo.Fallo):
+        e.negado_en_transaccion(uuid4(), lambda c: None, roto, motivo, "control")
+    assert e.controles == []

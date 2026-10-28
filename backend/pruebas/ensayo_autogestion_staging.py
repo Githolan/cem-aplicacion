@@ -296,11 +296,14 @@ class Ensayo:
         comprobar(despues == antes, f"{que}: quedó escrito algo ({antes} -> {despues})")
         self.ok(f"{que}: {motivo}, sin escribir nada (decisiones, modos, mandatos = {despues})")
 
-    def negado_en_transaccion(self, cons: UUID, preparar, intento, motivo: str, que: str) -> None:
+    def negado_en_transaccion(
+        self, cons: UUID, preparar, intento, motivo: str | None, que: str
+    ) -> None:
         """Prepara un estado, intenta y comprueba el motivo, todo en una transacción que se
-        deshace entera. Después comprueba que los conteos del consorcio no cambiaron."""
+        deshace entera. Después comprueba que los conteos del consorcio no cambiaron. Con
+        `motivo` None es un control positivo: el intento no puede fallar de ningún modo."""
         antes = self.filas(cons)
-        hint = None
+        error = None
         try:
             with self.tx(cons) as c:
                 preparar(c)
@@ -308,14 +311,24 @@ class Ensayo:
                     with c.begin_nested():
                         intento(c)
                 except DBAPIError as e:
-                    hint = e.orig.diag.message_hint
+                    error = e
                 raise _Deshacer()
         except _Deshacer:
             pass
-        comprobar(hint == motivo, f"{que}: se esperaba {motivo}, salió {hint}")
+        if motivo is None:
+            comprobar(error is None, f"{que}: se esperaba que pasara, falló: {error}")
+            resultado = "pasa"
+        else:
+            comprobar(
+                error is not None
+                and error.orig.sqlstate == "P0001"
+                and error.orig.diag.message_hint == motivo,
+                f"{que}: se esperaba {motivo}, salió {error}",
+            )
+            resultado = motivo
         despues = self.filas(cons)
         comprobar(despues == antes, f"{que}: quedó escrito algo ({antes} -> {despues})")
-        self.ok(f"{que}: {motivo}; la transacción se deshizo y no quedó nada ({despues})")
+        self.ok(f"{que}: {resultado}; la transacción se deshizo y no quedó nada ({despues})")
 
     def arranque(
         self,
@@ -898,6 +911,15 @@ def main(argumentos: list[str] | None = None) -> int:
         if not all(x["correo"].endswith(".invalid") for x in c["personas"].values()):
             print("negado: un correo no es .invalid", file=sys.stderr)
             return 3
+        if not all("NO REAL" in x["nombre"] for x in c["personas"].values()):
+            print("negado: una persona no lleva las marcas", file=sys.stderr)
+            return 3
+        if not all("SIN VALIDEZ JURIDICA" in x["referencia"] for x in c["actas"].values()):
+            print("negado: un acta no lleva las marcas", file=sys.stderr)
+            return 3
+    if not all(u.startswith("LAB ") for u in datos["unidades"]):
+        print("negado: una unidad no lleva las marcas", file=sys.stderr)
+        return 3
     contexto = None
     if a.sin_verificar_certificado:
         contexto = ssl.create_default_context()
