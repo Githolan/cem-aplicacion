@@ -157,6 +157,18 @@ class CodigoError(StrEnum):
     ARCHIVO_VENCIDO = "archivo_vencido"
     """El archivo de la versión ya no está en el almacén (staging lo borra a los 30 días; 2c-2)."""
 
+    REAUTENTICACION_REQUERIDA = "reautenticacion_requerida"
+    """Para un caso de privacidad hay que volver a autenticarse (2d-2): escribir la contraseña,
+    entrar de nuevo con el enlace si no se tiene contraseña (10 minutos), y verificar el segundo
+    factor si está activo (10 minutos). `detalle.falta` dice cuál."""
+    CODIGO_CASO_INVALIDO = "codigo_caso_invalido"
+    """El código del caso de privacidad no sirve: incorrecto, vencido o ya usado (2d-2). Todas las
+    causas responden igual: la diferencia solo va a los registros."""
+    CASO_NO_DISPONIBLE = "caso_no_disponible"
+    """El caso de privacidad no admite eso en su estado: no está abierto para confirmarse, no está
+    confirmado para entregar la copia, no es un pedido de copia, o falta la corroboración de la
+    administración o del Consejo (2d-2)."""
+
 
 class Error(BaseModel):
     codigo: CodigoError

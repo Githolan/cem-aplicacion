@@ -83,6 +83,7 @@ function conSesion(extra: Respuestas = {}, totp: object = TOTP_INACTIVO, contras
     "GET /api/v1/auth/sesiones": () => Response.json({ elementos: SESIONES }),
     "GET /api/v1/auth/totp": () => Response.json(totp),
     "GET /api/v1/auth/contrasena": () => Response.json(contrasena),
+    "GET /api/v1/privacidad/casos": () => Response.json({ elementos: [] }),
     ...extra,
   });
 }

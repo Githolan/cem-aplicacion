@@ -128,20 +128,15 @@ def test_api_con_la_persona_de_la_sesion_sigue_funcionando(motor_migrate, motor_
         cambiar(motor_app, cons, p, decision, p, "api")
     # Control: el equipo lo registra con esa decisión.
     cambiar(motor_app, cons, None, decision, None, "soporte")
-    assert eventos(motor_migrate, cons) == [
-        ("consorcio.decision.registrar", "api", p),
-        ("consorcio.modo.cambiar", "soporte", None),
-    ]
+    # S2b (0043): el modo lo cambió soporte y no deja evento; la decisión por la API, sí.
+    assert eventos(motor_migrate, cons) == [("consorcio.decision.registrar", "api", p)]
 
 
 def test_soporte_sin_sesion_ni_actor_sigue_funcionando(motor_migrate, motor_app):
     cons, _, _ = consorcio_con_dos_personas(motor_migrate)
     decision = registrar(motor_app, cons, None, None, "soporte")
     cambiar(motor_app, cons, None, decision, None, "soporte")
-    assert eventos(motor_migrate, cons) == [
-        ("consorcio.decision.registrar", "soporte", None),
-        ("consorcio.modo.cambiar", "soporte", None),
-    ]
+    assert eventos(motor_migrate, cons) == []  # S2b (0043)
 
 
 def dar_de_baja_por_soporte(motor_app, cons, mandato, actor):

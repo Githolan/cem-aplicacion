@@ -482,8 +482,8 @@ def test_baja_ordinaria_corta_hoy_revoca_y_no_admite_otra(escena, motor_migrate,
 def test_error_carga_por_soporte_no_escribe_evento(escena, motor_migrate, motor_app):
     """S2a (0033): la baja por `error_carga` hecha por soporte (cualquiera haya cargado el
     mandato) no escribe evento; la constancia es `causa_baja` e `instrumento_referencia` en la
-    fila. Controles: la misma causa por la API y una renuncia registrada por soporte (clase B,
-    S2b) sí lo escriben."""
+    fila. Desde S2b (0043) tampoco una renuncia registrada por soporte (clase B): el fin previsto
+    que reemplaza la baja queda en `vigente_hasta_antes_baja`. Control: por la API, sí."""
     e = escena
 
     def eventos_de(m):
@@ -501,9 +501,18 @@ def test_error_carga_por_soporte_no_escribe_evento(escena, motor_migrate, motor_
     por_api = alta(motor_app, e["cons"], e["per"], e["acta"], persona=e["p1"])
     baja(motor_app, e["cons"], e["per"], por_api, "error_carga", instrumento="Corrección")
     assert eventos_de(por_api) == ["api"]
-    renuncia = alta(motor_app, e["cons"], None, e["acta"], persona=e["p2"], origen="soporte")
+    hasta = date.today() + timedelta(days=400)  # siempre futura: la renuncia la acorta a hoy
+    renuncia = alta(motor_app, e["cons"], None, e["acta"], persona=e["p2"], origen="soporte",
+                    hasta=hasta)  # fmt: skip
     baja(motor_app, e["cons"], None, renuncia, origen="soporte")
-    assert eventos_de(renuncia) == ["soporte"]
+    assert eventos_de(renuncia) == []
+    with motor_migrate.connect() as c:
+        f = c.execute(
+            text("select vigente_hasta, vigente_hasta_antes_baja, causa_baja::text"
+                 " from nucleo.mandato where id = :m"), {"m": renuncia},
+        ).one()  # fmt: skip
+    assert (f.vigente_hasta_antes_baja, f.causa_baja) == (hasta, "renuncia")
+    assert f.vigente_hasta < hasta  # la baja la reemplazó: el valor previo vive solo en la columna
 
 
 def test_error_carga_conserva_fechas_y_no_vale_para_ninguna_fecha(escena, motor_migrate, motor_app):

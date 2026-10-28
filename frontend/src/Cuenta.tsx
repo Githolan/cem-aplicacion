@@ -7,6 +7,7 @@ import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
+import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
@@ -260,6 +261,13 @@ export function Cuenta() {
               // Cambiar una existente cierra las sesiones de los otros dispositivos.
               if (guardada.sesiones_cerradas > 0) quitar((s) => s.actual);
             }}
+            sinSesion={aEntrar}
+          />
+
+          <SeccionPrivacidad
+            contrasena={pantalla.contrasena.definida}
+            segundoFactor={pantalla.segundoFactor}
+            fecha={fecha}
             sinSesion={aEntrar}
           />
         </>
