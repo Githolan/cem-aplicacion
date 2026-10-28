@@ -60,6 +60,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $ProyectoCompose   = 'cem-ci'
 $ServicioPruebas   = 'cem-backend-pruebas'
+$ServicioPostgres  = 'cem-postgres-pruebas'
 $ImagenFrontend    = 'cem-frontend-ci'
 $ComposeRelativo   = 'backend/pruebas/compose.yml'
 $PruebaImagen      = 'frontend/scripts/probar-imagen.sh'
@@ -317,6 +318,29 @@ catch {
 finally {
     # Solo si esta corrida levantó el proyecto: un `down` ajeno cortaría otra corrida.
     if ($composeUsado) {
+        # Con el backend en rojo, las consultas de los dos lados de un deadlock solo quedan en el
+        # registro de PostgreSQL, que el `down` borra: se copian antes (deadlock intermitente de
+        # las pruebas de migración, tracker).
+        if ($etapas['backend'] -and $etapas['backend'] -ne 'ok') {
+            # Cada deadlock con todo lo que su proceso escribe a continuación: el DETAIL lista las
+            # consultas de los procesos (truncadas en track_activity_query_size) y el STATEMENT trae
+            # entera la del abortado. Una línea nueva de otro proceso, o de otro nivel, lo cierra.
+            $registro = @(docker @composeArgs logs --no-color --no-log-prefix $ServicioPostgres 2>&1 | ForEach-Object { "$_" })
+            $leido = $LASTEXITCODE
+            $lineas = @(); $pid_ = $null; $cuantos = 0
+            foreach ($l in $registro) {
+                $entrada = [regex]::Match($l, '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ \S+ \[(\d+)\] (\w+):')
+                if ($entrada.Success) {
+                    if ($l -match 'ERROR:  deadlock detected') { $pid_ = $entrada.Groups[1].Value; $cuantos++ }
+                    elseif ($pid_ -ne $entrada.Groups[1].Value -or
+                            $entrada.Groups[2].Value -notin 'DETAIL', 'HINT', 'CONTEXT', 'STATEMENT') { $pid_ = $null }
+                }
+                if ($pid_) { $lineas += $l }
+            }
+            $titulo = if ($leido -eq 0) { "$cuantos deadlock(s)" } else { "no se pudo leer (código $leido)" }
+            (@("=== Registro de $ServicioPostgres`: $titulo ===") + $lineas) |
+                Tee-Object -FilePath $log -Append | Out-Host
+        }
         docker @composeArgs down --remove-orphans 2>&1 | Out-File -Append -Encoding utf8 $log
     }
     # El script de e2e borra lo suyo con un trap; si lo cortaron antes, se borra acá
