@@ -1,9 +1,9 @@
-"""H3, infraestructura común (`0044`): ningún paquete ni mandato acumula las etapas que la
-separación de funciones reparte, y nadie tiene todavía una facultad económica de aprobar.
+"""H3, infraestructura común (`0044`): nadie recibe una facultad económica de aprobar hasta que
+decida el propietario (decisión 7 del 21-10).
 
 Diseño: `doc/diseno/H3_Paquete_Decisiones_Economicas.md` del repositorio CEM, «Infraestructura
-común a todas las opciones». Las guardas son diferidas: se prueban con `set constraints all
-immediate` y la transacción se deshace, para no dejar el catálogo cambiado.
+común a todas las opciones». La migración que decida quién aprueba saca la facultad de
+`SIN_DECIDIR` y cambia estas pruebas en el mismo PR.
 """
 
 import pytest
@@ -16,32 +16,34 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.db
 
-# Decisión 7 del 21-10: hasta que decida el propietario, ningún paquete las tiene. La migración
-# que lo decida cambia esta lista en el mismo PR.
-APROBAR_SIN_DECIDIR = ("egresos.aprobar_orden", "liquidacion.aprobar", "coeficientes.aprobar")
+SIN_DECIDIR = ("egresos.aprobar_orden", "liquidacion.aprobar", "coeficientes.aprobar")
 
 
-def _probar(motor, *sentencias, params=None) -> None:
-    """Corre las sentencias, fuerza las guardas diferidas y deshace siempre."""
+def _probar(motor, sentencia, params=None) -> None:
+    """Corre la sentencia y deshace siempre: no deja el catálogo cambiado."""
     with motor.connect() as c:
         tx = c.begin()
         try:
-            for s in sentencias:
-                c.execute(text(s), params or {})
-            c.execute(text("set constraints all immediate"))
+            c.execute(text(sentencia), params or {})
         finally:
             tx.rollback()
 
 
-def _niega(motor, motivo, *sentencias, params=None) -> None:
+def _niega(motor, sentencia, params=None) -> None:
     with pytest.raises(DBAPIError) as error:
-        _probar(motor, *sentencias, params=params)
+        _probar(motor, sentencia, params)
     assert error.value.orig.diag.sqlstate == "P0001"
-    assert error.value.orig.diag.message_hint == motivo
+    assert error.value.orig.diag.message_hint == "facultad_sin_decidir"
 
 
 def _paquete(tipo, facultad) -> str:
     return f"insert into nucleo.paquete_facultad (tipo, facultad) values ('{tipo}', '{facultad}')"
+
+
+OTORGAR = (
+    "insert into nucleo.facultad_otorgada (consorcio_id, mandato_id, facultad, decision_id)"
+    " values (:c, :m, :f, :d)"
+)
 
 
 def test_ningun_paquete_ni_mandato_tiene_una_facultad_de_aprobar_sin_decidir(
@@ -54,129 +56,130 @@ def test_ningun_paquete_ni_mandato_tiene_una_facultad_de_aprobar_sin_decidir(
     for tipo, persona in (("administrador", e["p1"]), ("miembro_consejo", e["p2"])):
         alta(motor_app, e["cons"], e["per"], e["acta"], tipo=tipo, persona=persona)
     with motor_migrate.connect() as c:
-        en_paquetes = c.execute(
-            text("select facultad from nucleo.paquete_facultad where facultad = any(:f)"),
-            {"f": list(APROBAR_SIN_DECIDIR)},
-        ).all()
-        otorgadas = c.execute(
-            text("select facultad from nucleo.facultad_otorgada where facultad = any(:f)"),
-            {"f": list(APROBAR_SIN_DECIDIR)},
+        en_uso = c.execute(
+            text(
+                "select facultad from nucleo.paquete_facultad where facultad = any(:f)"
+                " union all select facultad from nucleo.facultad_otorgada where facultad = any(:f)"
+            ),
+            {"f": list(SIN_DECIDIR)},
         ).all()
         catalogo = c.execute(
             text("select count(*) from nucleo.facultad where codigo = any(:f) and economica"),
-            {"f": list(APROBAR_SIN_DECIDIR)},
+            {"f": list(SIN_DECIDIR)},
         ).scalar_one()
-        del_mandato = c.execute(
-            text("select count(*) from nucleo.facultad_otorgada f join nucleo.mandato m"
-                 " on m.id = f.mandato_id where m.consorcio_id = :c"),
+        del_consorcio = c.execute(
+            text("select count(*) from nucleo.facultad_otorgada where consorcio_id = :c"),
             {"c": e["cons"]},
-        ).scalar_one()  # fmt: skip
-    assert en_paquetes == [] and otorgadas == []
+        ).scalar_one()
+    assert en_uso == []
     assert catalogo == 3  # control: las tres existen en el catálogo como económicas
-    assert del_mandato > 0  # control: las altas sí otorgaron facultades
+    assert del_consorcio > 0  # control: las altas sí otorgaron facultades
 
 
-def test_el_paquete_no_acumula_preparar_y_aprobar_la_liquidacion(motor_migrate):
-    _niega(
-        motor_migrate, "paquete_acumula_etapas", _paquete("administrador", "liquidacion.aprobar")
-    )
-    # Control: el Consejo no prepara, así que la guarda no lo frena (la decisión es otra cosa).
-    _probar(motor_migrate, _paquete("miembro_consejo", "liquidacion.aprobar"))
+@pytest.mark.parametrize("facultad", SIN_DECIDIR)
+@pytest.mark.parametrize("tipo", ["administrador", "miembro_consejo"])
+def test_la_base_niega_agregarla_a_un_paquete(motor_migrate, tipo, facultad):
+    _niega(motor_migrate, _paquete(tipo, facultad))
 
 
-def test_el_paquete_no_acumula_el_ciclo_de_egresos(motor_migrate):
-    _niega(
-        motor_migrate, "paquete_acumula_etapas", _paquete("administrador", "egresos.aprobar_orden")
-    )
-    # Controles: dos de las tres etapas no frenan (el administrador ya tiene preparar y ejecutar)
-    # y aprobar en un paquete sin las otras tampoco.
-    _probar(motor_migrate, _paquete("miembro_consejo", "egresos.aprobar_orden"))
-    _probar(
-        motor_migrate,
-        _paquete("miembro_consejo", "egresos.aprobar_orden"),
-        _paquete("miembro_consejo", "egresos.ejecutar_pago"),
-    )
-
-
-def test_cambiar_una_facultad_del_paquete_tambien_pasa_por_la_guarda(motor_migrate):
+def test_la_base_niega_cambiar_una_facultad_del_paquete_por_una_sin_decidir(motor_migrate):
     _niega(
         motor_migrate,
-        "paquete_acumula_etapas",
-        "update nucleo.paquete_facultad set facultad = 'liquidacion.aprobar'"
-        " where tipo = 'administrador' and facultad = 'coeficientes.proponer'",
+        "update nucleo.paquete_facultad set facultad = 'egresos.aprobar_orden'"
+        " where tipo = 'miembro_consejo' and facultad = 'liquidacion.revisar'",
     )
 
 
-def test_la_guarda_mira_el_resultado_al_final_de_la_transaccion(motor_migrate):
-    """Diferida: una migración que mueve facultades en dos pasos solo falla si el final viola."""
-    _probar(
-        motor_migrate,
-        _paquete("administrador", "egresos.aprobar_orden"),
-        "delete from nucleo.paquete_facultad"
-        " where tipo = 'administrador' and facultad = 'egresos.ejecutar_pago'",
-    )
+def test_las_demas_facultades_siguen_entrando(motor_migrate):
+    """Control: la guarda mira solo las tres. `fondo_reserva.autorizar` ya está decidida."""
+    _probar(motor_migrate, _paquete("miembro_consejo", "documentos.cargar"))
+    _probar(motor_migrate, _paquete("administrador", "fondo_reserva.autorizar"))
 
 
-def test_un_mandato_no_acumula_el_ciclo_de_egresos(motor_migrate, motor_app, escena):  # noqa: F811
+def test_la_base_niega_otorgarla_a_un_mandato(motor_migrate, motor_app, escena):  # noqa: F811
     e = escena
-    adm = alta(motor_app, e["cons"], e["per"], e["acta"], persona=e["p1"])
     mc = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p2"])
-    otorgar = (
-        "insert into nucleo.facultad_otorgada (consorcio_id, mandato_id, facultad, decision_id)"
-        " values (:c, :m, 'egresos.aprobar_orden', :d)"
+    datos = {"c": e["cons"], "m": mc, "d": e["acta"]}
+    for f in SIN_DECIDIR:
+        _niega(motor_migrate, OTORGAR, {**datos, "f": f})
+    _niega(
+        motor_migrate,
+        "update nucleo.facultad_otorgada set facultad = 'liquidacion.aprobar'"
+        " where mandato_id = :m and facultad = 'liquidacion.revisar'",
+        datos,
     )
-    _niega(motor_migrate, "mandato_acumula_etapas", otorgar,
-           params={"c": e["cons"], "m": adm, "d": e["acta"]})  # fmt: skip
-    _probar(motor_migrate, otorgar, params={"c": e["cons"], "m": mc, "d": e["acta"]})  # control
+    _probar(motor_migrate, OTORGAR, {**datos, "f": "documentos.cargar"})  # control
 
 
-def test_cem_app_no_toca_el_catalogo_ni_las_guardas(motor_migrate):
+def test_cem_app_no_escribe_el_catalogo_ni_las_facultades(motor_migrate):
+    tablas = ("nucleo.paquete_facultad", "nucleo.facultad_otorgada", "nucleo.facultad")
+    privilegios = ("SELECT", "INSERT", "UPDATE", "DELETE")
     with motor_migrate.connect() as c:
-        privilegios = {
+        tiene = {
             (t, p): c.execute(
                 text("select has_table_privilege('cem_app', :t, :p)"), {"t": t, "p": p}
             ).scalar_one()
-            for t in ("nucleo.paquete_facultad", "nucleo.facultad_otorgada", "nucleo.facultad")
-            for p in ("SELECT", "INSERT", "UPDATE", "DELETE")
+            for t in tablas
+            for p in privilegios
         }
-        funciones = [
-            c.execute(
-                text("select has_function_privilege('cem_app', :f, 'EXECUTE')"), {"f": f}
-            ).scalar_one()
-            for f in (
-                "nucleo.paquete_que_acumula_etapas()",
-                "nucleo.exigir_paquete_sin_etapas_acumuladas()",
-                "nucleo.exigir_mandato_sin_ciclo_de_egresos()",
+        ejecuta = c.execute(
+            text(
+                "select has_function_privilege('cem_app', 'nucleo.negar_facultad_sin_decidir()',"
+                " 'EXECUTE')"
             )
-        ]
-    assert privilegios == {
-        (t, p): p == "SELECT"
-        for t in ("nucleo.paquete_facultad", "nucleo.facultad_otorgada", "nucleo.facultad")
-        for p in ("SELECT", "INSERT", "UPDATE", "DELETE")
-    }
-    assert funciones == [False, False, False]
+        ).scalar_one()
+    assert tiene == {(t, p): p == "SELECT" for t in tablas for p in privilegios}
+    assert not ejecuta
+
+
+def _triggers(motor) -> list[str]:
+    with motor.connect() as c:
+        return sorted(
+            c.execute(
+                text(
+                    "select tgname from pg_trigger where tgname in"
+                    " ('paquete_sin_facultad_sin_decidir', 'mandato_sin_facultad_sin_decidir')"
+                )
+            ).scalars()
+        )
+
+
+def _funcion(motor) -> bool:
+    with motor.connect() as c:
+        return c.execute(
+            text("select to_regprocedure('nucleo.negar_facultad_sin_decidir()') is not null")
+        ).scalar_one()
 
 
 def test_0044_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
-
-    def triggers() -> list[str]:
-        with motor.connect() as c:
-            return sorted(
-                c.execute(
-                    text(
-                        "select tgname from pg_trigger where tgname in"
-                        " ('paquete_sin_etapas_acumuladas', 'mandato_sin_ciclo_de_egresos')"
-                    )
-                ).scalars()
-            )
-
     command.upgrade(cfg, "0043")
-    assert triggers() == []
+    assert _triggers(motor) == [] and not _funcion(motor)
     command.upgrade(cfg, "0044")
-    assert triggers() == ["mandato_sin_ciclo_de_egresos", "paquete_sin_etapas_acumuladas"]
+    assert _triggers(motor) == [
+        "mandato_sin_facultad_sin_decidir",
+        "paquete_sin_facultad_sin_decidir",
+    ]
     command.downgrade(cfg, "0043")
-    assert triggers() == []
-    _probar(motor, _paquete("administrador", "liquidacion.aprobar"))  # sin la guarda, pasa
+    assert _triggers(motor) == [] and not _funcion(motor)
+    _probar(motor, _paquete("administrador", "liquidacion.aprobar"))  # sin la guarda, entra
     command.upgrade(cfg, "0044")  # control: vuelve a subir limpio
-    _niega(motor, "paquete_acumula_etapas", _paquete("administrador", "liquidacion.aprobar"))
+    _niega(motor, _paquete("administrador", "liquidacion.aprobar"))
+
+
+def test_0044_no_sube_si_ya_hay_una_facultad_sin_decidir(base_aparte):  # noqa: F811
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0043")
+    with motor.begin() as c:
+        c.execute(text(_paquete("miembro_consejo", "coeficientes.aprobar")))
+    with pytest.raises(DBAPIError, match="ya hay una facultad de aprobar sin decidir"):
+        command.upgrade(cfg, "0044")
+    with motor.begin() as c:
+        c.execute(
+            text(
+                "delete from nucleo.paquete_facultad"
+                " where tipo = 'miembro_consejo' and facultad = 'coeficientes.aprobar'"
+            )
+        )
+    command.upgrade(cfg, "0044")  # control: sin la fila, sube
+    assert _funcion(motor)
