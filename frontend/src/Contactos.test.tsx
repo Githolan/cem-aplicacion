@@ -217,6 +217,35 @@ describe("página /contactos", () => {
     expect(await screen.findByText(/Este dispositivo no tiene contactos guardados/)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
   });
+
+  it("mientras llega la lista del edificio dice «Consultando…», sin lista ni copia", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: () => new Promise<Response>(() => undefined),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    // Control: ya se pidió la lista del edificio, así que es su carga y no la de los edificios.
+    await waitFor(() =>
+      expect(simulado.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname === RUTA(C1))).toBe(true),
+    );
+    expect(screen.getByText("Consultando…")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
+    expect(copiaGuardada()).toBeNull();
+  });
+
+  it("un edificio sin contactos lo dice, y guarda la copia vacía", async () => {
+    const vacia: Lista = { elementos: [], actualizada_en: null, zona_horaria: ZONA };
+    vi.stubGlobal(
+      "fetch",
+      backend({ "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS), [`GET ${RUTA(C1)}`]: () => Response.json(vacia) }),
+    );
+    abrir();
+    expect(await screen.findByText("El edificio no tiene contactos de emergencia cargados.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
+    // Sin conexión, después, se ve «sin contactos» y no una copia vieja.
+    expect((copiaGuardada() as { lista: Lista }).lista).toEqual(vacia);
+  });
 });
 
 describe("página /contactos: lo que no tiene que pasar", () => {

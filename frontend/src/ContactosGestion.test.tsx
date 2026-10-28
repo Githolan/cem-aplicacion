@@ -9,6 +9,7 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { App } from "./App";
 import { mensajeDeError, PATRON_TELEFONO } from "./ContactosGestion";
+import { SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -170,6 +171,25 @@ describe("página /contactos/gestion", () => {
     // Control: la página sí pidió la lista de gestión y no la general.
     expect(pedidos(simulado, "GET", GESTION)).toHaveLength(1);
     expect(pedidos(simulado, "GET", BASE)).toHaveLength(0);
+  });
+
+  it("un edificio sin contactos lo dice y deja agregar el primero", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => Response.json({ elementos: [] }) }));
+    abrir();
+    expect(await screen.findByText("El edificio no tiene contactos de emergencia cargados.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
+  });
+
+  it("sin conexión al pedir la lista lo dice, sin lista ni botón para agregar", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => Promise.reject(new TypeError("Failed to fetch")) }));
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    expect(screen.getByText(SIN_CONEXION)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
+    // La gestión nunca guarda nada en el dispositivo, tampoco cuando falla.
+    expect(Object.keys(localStorage)).toEqual([]);
   });
 
   it("sin `contactos.gestionar` (403) lo dice, sin lista ni botón para agregar", async () => {
