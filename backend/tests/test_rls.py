@@ -66,7 +66,8 @@ def test_pa15_no_se_puede_escribir_en_otro_consorcio(motor_app, datos):
 
 
 def test_pa15_no_se_puede_mover_una_fila_a_otro_consorcio(motor_app, datos):
-    with pytest.raises(ProgrammingError, match="row-level security"):
+    # Desde 0043 (S2b) `cem_app` ni siquiera tiene UPDATE sobre `unidad`: antes la frenaba la RLS.
+    with pytest.raises(ProgrammingError, match="permission denied"):
         with transaccion(
             motor_app, persona_id=datos.persona_a, consorcio_id=datos.consorcio_a
         ) as c:

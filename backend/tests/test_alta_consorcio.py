@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 from app.db import transaccion
 from scripts import alta_consorcio
@@ -91,28 +92,31 @@ def test_crea_el_consorcio_y_sus_unidades_e_imprime_los_ids(correr, motor_migrat
     assert en_base == impresas
 
 
-def test_la_auditoria_queda_encadenada_con_origen_soporte(correr, motor_migrate):
+def test_el_alta_no_deja_eventos_y_las_filas_no_se_reescriben(correr, motor_migrate, motor_app):
+    """S2b (0043): el alta la hace soporte y no escribe eventos; la constancia son las filas, que
+    `cem_app` ya no puede modificar ni borrar. Control: el mismo `cem_app` las ve y las inserta."""
     cid = uuid4()
     assert correr(contenido(cid))[0] == 0
     with motor_migrate.connect() as conn:
-        eventos = conn.execute(
-            text(
-                "select origen, actor_persona_id, accion, entidad, entidad_id, despues,"
-                " hash_previo, hash from auditoria.eventos where consorcio_id = :c"
-                " order by secuencia"
-            ),
-            {"c": cid},
-        ).all()
-    assert [e.accion for e in eventos] == ["consorcios.consorcio.crear"] + [
-        "consorcios.unidad.crear"
-    ] * len(UNIDADES)
-    assert {(e.origen, e.actor_persona_id) for e in eventos} == {("soporte", None)}
-    assert (eventos[0].entidad, eventos[0].entidad_id) == ("consorcio", cid)
-    assert [e.despues["designacion"] for e in eventos[1:]] == UNIDADES
-    # Cadena: el primero del consorcio arranca vacío y cada uno guarda el hash del anterior.
-    assert eventos[0].hash_previo == ""
-    for anterior, siguiente in zip(eventos, eventos[1:], strict=False):
-        assert siguiente.hash_previo == anterior.hash
+        assert (
+            conn.execute(
+                text("select count(*) from auditoria.eventos where consorcio_id = :c"), {"c": cid}
+            ).scalar_one()
+            == 0
+        )
+    with transaccion(motor_app, persona_id=None, consorcio_id=cid) as c:
+        assert c.execute(
+            text("select count(*) from nucleo.unidad where consorcio_id = :c"), {"c": cid}
+        ).scalar_one() == len(UNIDADES)
+    for sentencia in (
+        "update nucleo.consorcio set nombre = 'Otro' where id = :c",
+        "delete from nucleo.consorcio where id = :c",
+        "update nucleo.unidad set designacion = 'Otra' where consorcio_id = :c",
+        "delete from nucleo.unidad where consorcio_id = :c",
+    ):
+        with pytest.raises(ProgrammingError, match="permission denied"):
+            with transaccion(motor_app, persona_id=None, consorcio_id=cid) as c:
+                c.execute(text(sentencia), {"c": cid})
 
 
 def test_correrlo_dos_veces_no_duplica_nada(correr, motor_migrate):

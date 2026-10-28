@@ -119,10 +119,8 @@ def test_los_porcentajes_se_guardan_exactos_aunque_sumen_99_96(edificio, motor_m
         ).one()
     assert tuple(fila) == (1, "expensas_comunes", FUENTE, "soporte", None, 1,
                            "proporcional_a_coeficientes", "restos_mayores")  # fmt: skip
-    [ev] = eventos(motor_migrate, e["cons"], "consorcio.coeficientes.registrar")
-    assert ev["entidad_id"] == esquema and ev["origen"] == "soporte"
-    assert (ev["despues"]["suma"], ev["despues"]["unidades"]) == ("99.960000", 5)
-    assert "Reglamento" not in json.dumps(ev, default=str)  # E31: la fuente queda en la fila
+    # S2b (0043): soporte no escribe el evento; versión, fuente, decisión y filas quedan arriba.
+    assert eventos(motor_migrate, e["cons"], "consorcio.coeficientes.registrar") == []
 
 
 def test_tres_grupos_independientes_y_el_cero_es_valido(edificio, motor_migrate, motor_app):
