@@ -6,8 +6,9 @@ común a todas las opciones», primera fila que se hace: «ningún paquete de fa
 `egresos.aprobar_orden`, `liquidacion.aprobar` ni `coeficientes.aprobar`». Es la decisión 7 del
 propietario del 21-10 (`Decisiones_Propietario_2026-10-21.md` §2.2: «no se asignan todavía
 `liquidacion.aprobar`, `egresos.aprobar_orden` ni `coeficientes.aprobar` a ningún paquete»),
-llevada a la base como segunda barrera. Cubre también los mandatos, que solo reciben facultades
-de su paquete (`facultad_fuera_de_paquete`, 0016). No decide quién las recibe: la migración
+llevada a la base como segunda barrera. Cubre también los mandatos con su propio trigger: el
+alta (0016) ya rechaza lo que no está en el paquete, pero esa regla vive en la función y un
+insert directo la saltea. No decide quién las recibe: la migración
 que lo decida saca la facultad de la lista, en el mismo PR que la asigna.
 
 - **Paquetes** (`nucleo.paquete_facultad`) y **mandatos** (`nucleo.facultad_otorgada`): un
