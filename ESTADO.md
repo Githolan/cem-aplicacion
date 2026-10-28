@@ -141,7 +141,12 @@ Medido en el despliegue de `f835fe3` (28-10-2026) por `cd.ps1` (estado, imagen y
 - **Qué suma:** 0041, los residuales de la revisión de 2d-3 (PR #142). Detalle en «Próximo paso», punto 24.
 - **Controles.** `ci.ps1` verde sobre `3890c04` (la cabeza del PR) y sobre `c9d611d`: backend 2067, contratos 58, frontend 378 y e2e 177. La primera corrida sobre `3890c04` dio ROJO por E33 (plazo agotado; al mismo tiempo corría una medición); repetida sin nada más corriendo, verde. Copia previa verificada antes de `0041` en cada entorno.
 - **Validación en los dos entornos, sin dejar cambios:** base en `0041`; las definiciones tienen el orden nuevo de la purga y la identidad en el plan; permisos sin cambio. La purga corrió dentro de un ROLLBACK, lo que prueba que corre, no lo que borra, y suprimir un caso inexistente se sigue negando. Control: antes del despliegue, el validador contra staging dio `0040`.
-- **SIN VERIFICAR desplegado:** la baja del TOTP en el orden nuevo (hace falta una cuenta con TOTP) y la purga borrando filas (en ningún entorno se contó lo borrado dentro de la transacción).
+- **SIN VERIFICAR desplegado:** la baja del TOTP en el orden nuevo (hace falta una cuenta con TOTP; la cubre la CI con mutación).
+- **Verificado el 28-10-2026 en staging, sobre `f835fe3`:** la purga borra filas. Se ejecutó dentro de una transacción revertida con retención 0:
+  - devolvió 224 sesiones y 6 enlaces, iguales a las purgables contadas antes;
+  - se borraron también los 4 códigos de esos enlaces;
+  - quedaron las 2 sesiones vigentes (control);
+  - después del ROLLBACK los totales volvieron a 226, 6 y 4.
 
 **Antes, `3dfdfdb`** (27-10-2026, 23:15 a 23:22 UTC), base `0040`:
 
