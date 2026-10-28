@@ -454,6 +454,19 @@ def test_el_equipo_revisa_sin_actor_y_no_a_nombre_de_alguien(pendiente, motor_ap
             {"m": e["m"]},
         ).one()
     assert (fila.registrada_por, fila.origen) == (None, "soporte")
+    # S2b (0043): soporte no escribe el evento; la constancia es la fila de arriba. El control por
+    # la API, que sí lo escribe, es la prueba de la revisión desde hoy.
+    with motor_migrate.connect() as c:
+        assert (
+            c.execute(
+                text(
+                    "select count(*) from auditoria.eventos"
+                    " where accion = 'consorcio.mandato.revision' and entidad_id = :m"
+                ),
+                {"m": e["m"]},
+            ).scalar_one()
+            == 0
+        )
 
 
 @pytest.mark.parametrize(

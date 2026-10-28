@@ -23,6 +23,7 @@ from alembic import command
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import DBAPIError
 
+from app import auditoria
 from app.db import fijar_ambito, transaccion
 from scripts import exportar_consorcio
 from tests.conftest import url_rol
@@ -458,6 +459,12 @@ def test_la_auditoria_lleva_exactamente_los_eventos_proyectados(
     base con una acción de la proyección y que no son de soporte; la negación sembrada y los
     eventos de soporte quedan afuera."""
     e = edificio
+    # Desde S2b (0043) soporte ya no escribe eventos, pero los anteriores siguen en la base (en
+    # staging, por ejemplo): se siembra uno, con una acción de la proyección.
+    with motor_migrate.begin() as c:
+        auditoria.registrar(c, consorcio_id=e["cons"], actor=None, origen="soporte",
+                            accion="consorcio.decision.registrar", entidad="decision",
+                            entidad_id=uuid4(), despues={"tipo": "asamblea"})  # fmt: skip
     codigo, salida = exportar(e, claves, tmp_path)
     assert codigo == 0
     del_paquete = [(datetime.fromisoformat(ev["fecha"]), ev["accion"])

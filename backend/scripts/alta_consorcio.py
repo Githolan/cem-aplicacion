@@ -23,8 +23,10 @@ El archivo es JSON y no admite campos que la base todavía no guarda:
 forma de saber si ya existe es buscarlo por su identificador. Si falta, el script no escribe
 nada y propone uno nuevo (uuid v7 de la base) para pegar en el archivo. `cuit` es opcional.
 
-Todo va en una sola transacción, con el consorcio en el ámbito, y deja un evento de auditoría
-por consorcio y por unidad con origen `soporte` y sin persona. Es idempotente: si el consorcio
+Todo va en una sola transacción, con el consorcio en el ámbito. No escribe eventos de auditoría:
+lo opera soporte de plataforma y, desde la decisión del propietario del 28-10-2026 (S2b, `0043`),
+soporte no deja eventos de clase B; la constancia son las filas del consorcio y sus unidades,
+que `cem_app` ya no puede modificar ni borrar. Es idempotente: si el consorcio
 ya existe con los mismos datos y las mismas unidades, no escribe nada y vuelve a imprimir los
 identificadores; si algo difiere (un dato del consorcio, una unidad de más o de menos), falla
 con la lista de diferencias y no escribe nada. Corregir un consorcio existente queda para la
@@ -42,11 +44,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from sqlalchemy import Connection, text
 
-from app import auditoria
 from app.config import cargar
 from app.db import crear_motor, transaccion
 
-ORIGEN = "soporte"
 ESTADOS = {
     "creado": "creado",
     "existente": "ya existía igual; no se escribió nada",
@@ -178,16 +178,6 @@ def crear(conn: Connection, archivo: Archivo, consorcio_id: UUID) -> dict[str, U
         ),
         {"id": consorcio_id, "n": c.nombre, "cuit": c.cuit, "z": c.zona_horaria},
     )
-    auditoria.registrar(
-        conn,
-        consorcio_id=consorcio_id,
-        actor=None,
-        origen=ORIGEN,
-        accion="consorcios.consorcio.crear",
-        entidad="consorcio",
-        entidad_id=consorcio_id,
-        despues={"nombre": c.nombre, "cuit": c.cuit, "zona_horaria": c.zona_horaria},
-    )
     unidades: dict[str, UUID] = {}
     for u in archivo.unidades:
         unidad_id = conn.execute(
@@ -196,16 +186,6 @@ def crear(conn: Connection, archivo: Archivo, consorcio_id: UUID) -> dict[str, U
             ),
             {"c": consorcio_id, "d": u.designacion},
         ).scalar_one()
-        auditoria.registrar(
-            conn,
-            consorcio_id=consorcio_id,
-            actor=None,
-            origen=ORIGEN,
-            accion="consorcios.unidad.crear",
-            entidad="unidad",
-            entidad_id=unidad_id,
-            despues={"designacion": u.designacion},
-        )
         unidades[u.designacion] = unidad_id
     return unidades
 

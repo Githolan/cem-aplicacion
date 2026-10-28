@@ -413,14 +413,7 @@ def test_script_simular_no_escribe_y_el_real_registra_todo(correr, motor_migrate
 
     codigo, out, _ = correr(arranque(cons, per))
     assert codigo == 0 and "Acta 7, libro 2, folio 15" in out
-    assert contar(motor_migrate, cons) == (1, 1, 2, 4)
-    with motor_migrate.connect() as c:
-        origenes = set(
-            c.execute(
-                text("select origen from auditoria.eventos where consorcio_id = :c"), {"c": cons}
-            ).scalars()
-        )
-    assert origenes == {"soporte"}
+    assert contar(motor_migrate, cons) == (1, 1, 2, 0)  # S2b (0043): soporte no deja eventos
 
 
 def test_script_correrlo_dos_veces_falla_y_no_duplica(correr, motor_migrate):
@@ -428,7 +421,7 @@ def test_script_correrlo_dos_veces_falla_y_no_duplica(correr, motor_migrate):
     assert correr(arranque(cons, per))[0] == 0
     codigo, _, err = correr(arranque(cons, per))
     assert codigo == 1 and "no se escribió nada" in err
-    assert contar(motor_migrate, cons) == (1, 1, 2, 4)
+    assert contar(motor_migrate, cons) == (1, 1, 2, 0)  # S2b (0043): soporte no deja eventos
 
 
 @pytest.mark.parametrize(

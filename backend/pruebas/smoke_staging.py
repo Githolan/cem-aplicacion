@@ -73,7 +73,6 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from app import auditoria
 from app.config import cargar
 from app.db import crear_motor, transaccion
 from app.identidad import invitaciones, sesiones
@@ -133,10 +132,6 @@ def asegurar_consorcio(conn: Connection, consorcio: UUID) -> bool:
         text("insert into nucleo.consorcio (id, nombre, zona_horaria) values (:c, :n, :z)"),
         {"c": consorcio, "n": NOMBRE_CONSORCIO, "z": ZONA},
     )
-    auditoria.registrar(conn, consorcio_id=consorcio, actor=None, origen=SOPORTE,
-                        accion="consorcios.consorcio.crear", entidad="consorcio",
-                        entidad_id=consorcio,
-                        despues={"nombre": NOMBRE_CONSORCIO, "zona_horaria": ZONA})  # fmt: skip
     return True
 
 
@@ -239,9 +234,6 @@ def unidades(corrida: Corrida) -> dict[str, UUID]:
                 text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, :d)"
                      " returning id"), {"c": corrida.consorcio, "d": designacion},
             ).scalar_one()  # fmt: skip
-            auditoria.registrar(conn, consorcio_id=corrida.consorcio, actor=None, origen=SOPORTE,
-                                accion="consorcios.unidad.crear", entidad="unidad",
-                                entidad_id=u, despues={"designacion": designacion})  # fmt: skip
             salida[letra] = u
     return salida
 
@@ -318,9 +310,6 @@ def una_unidad(corrida: Corrida, letra: str) -> UUID:
             text("insert into nucleo.unidad (consorcio_id, designacion) values (:c, :d)"
                  " returning id"), {"c": corrida.consorcio, "d": designacion},
         ).scalar_one()  # fmt: skip
-        auditoria.registrar(conn, consorcio_id=corrida.consorcio, actor=None, origen=SOPORTE,
-                            accion="consorcios.unidad.crear", entidad="unidad",
-                            entidad_id=u, despues={"designacion": designacion})  # fmt: skip
     return u
 
 

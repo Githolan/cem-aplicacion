@@ -145,12 +145,8 @@ def test_cambio_valido_cierra_el_anterior_y_audita(motor_migrate, motor_app):
             text("select accion from auditoria.eventos where consorcio_id = :c order by secuencia"),
             {"c": cons},
         ).scalars()
-        assert list(acciones) == [
-            "consorcio.decision.registrar",
-            "consorcio.modo.cambiar",
-            "consorcio.decision.registrar",
-            "consorcio.modo.cambiar",
-        ]
+        # S2b (0043): las decisiones por la API dejan evento; los modos, que cambia soporte, no.
+        assert list(acciones) == ["consorcio.decision.registrar", "consorcio.decision.registrar"]
 
 
 @pytest.mark.parametrize("tipo", ["consejo", "contrato_administracion", "inscripcion_rpa"])
