@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 28-10-2026.
+**Actualizado:** 28-10-2026 (noche).
 
 ## Qué existe
 
@@ -111,9 +111,22 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `f835fe3` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2 y `2026-10-28-f835fe3.md` con la de S2b).
+Medido en el despliegue de `6b391ed` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b y `2026-10-28-6b391ed.md` con la de 0044 y 0045).
 
-**Staging y producción en `f835fe3`** (28-10-2026; staging de 09:26 a 09:30 UTC y producción de 09:31 a 09:34 UTC), base `0043`, contrato 0.27.0.
+**Staging y producción en `6b391ed`** (28-10-2026; staging a las 22:02 UTC y producción a las 22:07 UTC), base `0045`, contrato 0.27.0.
+
+- **Qué suma:** infraestructura común de H3, sin habilitar ningún gasto. Son la guarda de la decisión 7 (PR #153, `0044`) y la orden de pago versionada, sin rutas (PR #155, `0045`). Detalle en «Próximo paso», puntos 31 y 32.
+- **Controles.** `ci.ps1` verde sobre `d3f4d9f` (la cabeza del PR) y sobre `6b391ed`. Hubo copia previa verificada antes de `0044` y `0045` en cada entorno.
+- **Validación en los dos entornos, en solo lectura:**
+  - base en `0045`;
+  - 0 órdenes, versiones y aprobaciones, y las 12 transiciones;
+  - 0 facultades de aprobar en paquetes y en mandatos (control: el catálogo tiene 34 filas visibles);
+  - los 7 triggers;
+  - `cem_app` sin permisos sobre las 4 tablas ni las 14 funciones (control: conserva SELECT sobre consorcio);
+  - producción sigue con 0 consorcios.
+- **Sonda en staging** (con ROLLBACK): dar `egresos.aprobar_orden` a un paquete se niega con `facultad_sin_decidir`, y una facultad permitida entra (después quedan las mismas 34 filas). En producción no se escribe nada.
+
+**Antes: staging y producción en `f835fe3`** (28-10-2026; staging de 09:26 a 09:30 UTC y producción de 09:31 a 09:34 UTC), base `0043`, contrato 0.27.0.
 
 - **Qué suma:** S2b, por el que soporte deja de escribir los eventos de clase B (PR #146, `0043`). Detalle en «Próximo paso», punto 26.
 - **Controles.** `ci.ps1` verde sobre `de452ed` (la cabeza del PR) y sobre `f835fe3`: backend 2089, contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0043` en cada entorno.
@@ -802,3 +815,25 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **PA30:** la prueba que ya existía pasa a llamarse `test_pa30_…`.
    - **Controles:** `ci.ps1` verde sobre `c1f3d95` (cobertura P0-piloto 9 de 25, con PA29 y PA30); una mutación que no vence la sesión hace fallar las dos de PA29. Codex limpio; revisión independiente en dos vueltas, 0 P1/P2.
    - **H2 completo:** con esto, lo único que falta es la interfaz del 02 al 08-11 (después de G3). Detalle en `doc/diseno/H2_Verificacion_de_Cierre_2026-10-28.md` del repositorio CEM.
+
+30. **E58 en tres pruebas de migración** (PR #154, fusionado en `7ca604c`; solo pruebas): `test_contrasena.py`, `test_decision_y_modo_actor.py` y `test_mandatos.py` vuelven a subir con `volver_a_subir`, que reconstruye los índices GiST. La CI de `8e87cb0` había dado 173 fallidas y 606 errores en cascada por el índice GiST de `vinculo`.
+31. **H3, guarda de la decisión 7** (PR #153, fusionado en `5f2de41`, head `d867239`; **desplegado** en los dos entornos):
+   - **`0044`:** dos triggers niegan `egresos.aprobar_orden`, `liquidacion.aprobar` y `coeficientes.aprobar` en `nucleo.paquete_facultad` y en `nucleo.facultad_otorgada` (hint `facultad_sin_decidir`). La subida se niega si ya había alguna.
+   - **Por qué así:** la primera versión, combinatoria, decidía política (bloqueaba la opción 4.1B), y se descartó en la revisión.
+   - **Pruebas:** `test_facultades_de_aprobar_sin_decidir.py` (14), con 9 mutaciones detectadas.
+   - **Revisión:** independiente, 0 P1/P2. Codex limpio. P3 59 a 61 del tracker.
+32. **H3, orden de pago versionada, sin rutas** (PR #155, fusionado en `6b391ed`, head `d3f4d9f`; **desplegado** en los dos entornos):
+   - **`0045`:** la orden, sus versiones y aprobaciones de solo agregado (también contra `TRUNCATE`), con la huella SHA-256 de los datos esenciales y las transiciones del diagrama 4 del documento 08.
+   - **Cada acto exige:**
+     - R10, la facultad vigente y el modo AA o AG;
+     - la separación por ser humano: quien preparó no decide y quien aprobó no emite. Compara la identidad actual y también la guardada al preparar y al aprobar.
+   - **Lo que no hace:** ninguna función lleva la orden a «aprobada», porque cuántas aprobaciones hacen falta es la decisión 2. `cem_app` no tiene permisos. El downgrade se niega con órdenes.
+   - **Pruebas:** `test_orden_pago_neutra.py` (45), con concurrencia real y revinculación. 12 mutaciones detectadas, más 5 sobre los arreglos.
+   - **Revisión:** independiente en dos vueltas, 0 P1/P2. Codex limpio sobre `d3f4d9f`; su P2 anterior, el downgrade sin guarda, quedó resuelto.
+   - **P3 abiertos:** 64 a 71 del tracker. El 65 (proveedor y cuenta destino) queda diferido a la decisión 7, y el 69 (una aprobación repetida tras una corrección de identidad) va con la decisión 2.
+33. **Tabla de verdad, casos económicos de H3** (este PR; solo datos de prueba):
+   - las tres facultades de aprobar sin concesión;
+   - egresos y `liquidacion.aprobar` en Consejo (`modo_no_admitido`);
+   - `ejecutar_pago` sin respaldo (`sin_respaldo`);
+   - el comportamiento actual de `ejecutar_pago` sin aprobadores: concedido, porque exigir un aprobador es la decisión 1;
+   - `fondo_reserva.autorizar` en AA y AG.
