@@ -403,6 +403,12 @@ INSERCION_INVITACION = (
     "consorcio_id, unidad_id, tipo, correo, nombre, token_hash, invitada_por, vence_en"
 )
 """Las columnas del `insert` de `app/identidad/invitaciones.py`."""
+INSERCION_INVITACION_0025 = (
+    "id, consorcio_id, unidad_id, tipo, correo, nombre, token_hash, invitada_por, creada_en,"
+    " vence_en, aceptada_en, persona_id, revocada_en"
+)
+"""El permiso que dejó `0025` (todas las columnas de `0007`, sin `vinculo_id`): al que vuelve el
+downgrade."""
 
 for _f in FUNCIONES_APP:
     UPGRADE += f"revoke all on function {_f} from public;\n"
@@ -413,7 +419,7 @@ grant insert ({INSERCION_INVITACION}) on nucleo.invitacion to cem_app;
 
 DOWNGRADE = f"""
 revoke insert ({INSERCION_INVITACION}) on nucleo.invitacion from cem_app;
-grant insert on nucleo.invitacion to cem_app;
+grant insert ({INSERCION_INVITACION_0025}) on nucleo.invitacion to cem_app;
 drop function {FUNCIONES_APP[3]};
 drop function {FUNCIONES_APP[2]};
 drop function {FUNCIONES_APP[1]};
