@@ -27,6 +27,7 @@ from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     navegador,
 )
 from tests.test_identidad_cierre_y_purga import entrar_como
+from tests.test_importado_pendiente import correo_de
 from tests.test_mandatos import otra_persona, sesiones_abiertas
 from tests.test_mandatos_0012 import CUIT_X, alta, baja, externo
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
@@ -903,14 +904,7 @@ def _vencer_sesion(motor_migrate, c) -> None:
         )
 
 
-def correo_de(motor_migrate, persona) -> str:
-    with motor_migrate.connect() as c:
-        return c.execute(
-            text("select correo from nucleo.persona where id = :p"), {"p": persona}
-        ).scalar_one()
-
-
-def correos_a(motor_migrate, correo) -> int:
+def cuantos_correos_a(motor_migrate, correo) -> int:
     with motor_migrate.connect() as c:
         return c.execute(
             text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
@@ -924,9 +918,10 @@ def _estado_por_api(e, i) -> str:
 
 
 def test_pa29_sesion_vencida_durante_la_aprobacion_no_aprueba(app, motor_migrate, escena):  # noqa: F811
-    """PA29 (08 §15, RF04): quien aprueba vio la invitación con su sesión, la sesión vence antes
-    de aprobar: no se aprueba, no sale el correo ni queda evento; con una sesión nueva se
-    aprueba (control positivo con la misma persona y la misma invitación)."""
+    """PA29 (08 §15), parte de RF04: quien aprueba vio la invitación con su sesión, la sesión
+    vence antes de aprobar: no se aprueba, no sale el correo ni queda evento; con una sesión
+    nueva se aprueba (control positivo con la misma persona y la misma invitación). La parte
+    de RF14 (autorizar un pago) se prueba cuando existan los pagos (H3)."""
     e = escena
     correo = correo_nuevo()
     i = emitir(e["mc1"], e["cons"], e["ae"], correo).json()["id"]
@@ -937,22 +932,28 @@ def test_pa29_sesion_vencida_durante_la_aprobacion_no_aprueba(app, motor_migrate
     r = mc2.post(url, headers={**csrf(mc2), **clave_idempotencia()})
     assert es_401(r, "no_autenticado"), r.text
     assert _estado_por_api(e, i) == "por_aprobar"
-    assert correos_a(motor_migrate, correo) == 0
+    assert cuantos_correos_a(motor_migrate, correo) == 0
     assert "consorcio.mandato.aprobar_invitacion" not in [
         x["accion"] for x in eventos(motor_migrate, e["cons"])
     ]
     nueva = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
     r = nueva.post(url, headers={**csrf(nueva), **clave_idempotencia()})
     assert r.status_code == 200, r.text
-    assert _estado_por_api(e, i) == "pendiente" and correos_a(motor_migrate, correo) == 1
+    assert _estado_por_api(e, i) == "pendiente" and cuantos_correos_a(motor_migrate, correo) == 1
+    assert "consorcio.mandato.aprobar_invitacion" in [
+        x["accion"] for x in eventos(motor_migrate, e["cons"])
+    ]  # control del nombre del evento
 
 
 def test_pa29_con_la_sesion_nueva_se_vuelve_a_validar(app, motor_migrate, escena):  # noqa: F811
     """PA29, «volver a validar»: si mientras la sesión estaba vencida quien emitió reemplazó la
-    invitación, reautenticarse no aprueba lo que se vio antes (404); la nueva sí (control)."""
+    invitación, reautenticarse no aprueba lo que se vio antes (404); la nueva sí (control). Es
+    la misma revalidación del caso 27 (`test_no_se_aprueba_una_invitacion_reemplazada`), que el
+    servidor hace en cada pedido: acá se prueba que la sesión nueva no la saltea."""
     e = escena
     vista = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
     mc2 = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
+    assert vista in mc2.get(url_mandato(e["cons"], e["ae"], "/invitaciones")).text  # la vio
     _vencer_sesion(motor_migrate, mc2)
     r = mc2.post(url_invitacion(e["cons"], vista, "aprobar"),
                  headers={**csrf(mc2), **clave_idempotencia()})  # fmt: skip
