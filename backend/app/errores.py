@@ -36,12 +36,14 @@ class ErrorApi(Exception):
         codigo: CodigoError,
         mensaje: str,
         encabezados: dict[str, str] | None = None,
+        detalle: dict[str, object] | None = None,
     ) -> None:
         self.estado, self.codigo, self.mensaje = estado, codigo, mensaje
         self.encabezados = encabezados or {}
+        self.detalle = detalle
 
     def respuesta(self) -> JSONResponse:
-        respuesta = respuesta_error(self.estado, self.codigo, self.mensaje)
+        respuesta = respuesta_error(self.estado, self.codigo, self.mensaje, self.detalle)
         respuesta.headers.update(self.encabezados)
         return respuesta
 

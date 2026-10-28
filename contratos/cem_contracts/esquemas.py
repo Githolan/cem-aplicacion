@@ -84,6 +84,13 @@ from cem_contracts.padron import (
     VinculoFinalizado,
 )
 from cem_contracts.salud import EstadoCola, Salud, SaludDependencias
+from cem_contracts.privacidad import (
+    CasoPrivacidad,
+    ConfirmacionCaso,
+    CopiaDatosPropios,
+    ListaCasosPrivacidad,
+    PedidoCopia,
+)
 from cem_contracts.segundo_factor import (
     AltaTotp,
     CodigosRecuperacion,
@@ -167,6 +174,11 @@ MODELOS: tuple[type[BaseModel], ...] = (
     VinculoAnulado,
     VinculoConfirmado,
     VinculoFinalizado,
+    CasoPrivacidad,
+    ConfirmacionCaso,
+    CopiaDatosPropios,
+    ListaCasosPrivacidad,
+    PedidoCopia,
 )
 
 

@@ -1,0 +1,154 @@
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import axe from "axe-core";
+import { MemoryRouter } from "react-router";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { SeccionPrivacidad } from "./SeccionPrivacidad";
+
+const CASO = "01a18105-0000-7000-8000-000000000001";
+const CASOS = "/api/v1/privacidad/casos";
+
+function caso(estado: string, derecho = "acceso") {
+  return {
+    id: CASO,
+    alcance_consorcio_id: null,
+    derecho,
+    estado,
+    abierto_en: "2026-10-28T12:00:00Z",
+    codigo_vence_en: estado === "abierto" ? "2026-10-31T12:00:00Z" : null,
+    confirmado_en: null,
+    resuelto_en: null,
+  };
+}
+
+function error(codigo: string, status: number, detalle: object | null = null) {
+  return Response.json({ codigo, mensaje: "El código no sirve.", detalle, id_correlacion: "c" }, { status });
+}
+
+type Respuestas = Record<string, () => Response>;
+
+function backend(respuestas: Respuestas) {
+  return vi.fn(async (pedido: Request) => {
+    const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
+    const respuesta = respuestas[clave];
+    if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
+    return respuesta();
+  });
+}
+
+function cuerpos(simulado: ReturnType<typeof vi.fn>, metodo: string): Promise<unknown>[] {
+  return simulado.mock.calls
+    .map((c) => (c as unknown as [Request])[0])
+    .filter((p) => p.method === metodo)
+    .map((p) => p.clone().json());
+}
+
+function mostrar(contrasena = true, segundoFactor = false) {
+  return render(
+    <MemoryRouter>
+      <SeccionPrivacidad
+        contrasena={contrasena}
+        segundoFactor={segundoFactor}
+        fecha={(iso) => iso.slice(0, 10)}
+        sinSesion={() => undefined}
+      />
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe("sección de pedidos sobre los datos", () => {
+  it("sin casos pendientes no se muestra", async () => {
+    const simulado = backend({ [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("resuelto")] }) });
+    vi.stubGlobal("fetch", simulado);
+    const { container } = mostrar();
+    await waitFor(() => expect(simulado).toHaveBeenCalled());
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("confirma con el código y la contraseña, y después descarga la copia una vez", async () => {
+    const creado = vi.fn(() => "blob:local");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: creado, revokeObjectURL: vi.fn() }));
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const simulado = backend({
+      [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+      [`POST ${CASOS}/${CASO}/confirmar`]: () => new Response(null, { status: 204 }),
+      [`POST ${CASOS}/${CASO}/copia`]: () =>
+        Response.json({ caso_id: CASO, generada_en: "2026-10-28T12:05:00Z", alcance_consorcio_id: null, datos: {} }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    mostrar();
+    fireEvent.change(await screen.findByLabelText("Código que te llegó por correo"), {
+      target: { value: "ABCDE-FGHIJ" },
+    });
+    fireEvent.change(screen.getByLabelText("Tu contraseña"), { target: { value: "una frase larga" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+    expect(await screen.findByText("Listo: confirmaste tu pedido.")).toBeTruthy();
+    expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([
+      { codigo: "ABCDE-FGHIJ", contrasena: "una frase larga" },
+    ]);
+    // La contraseña se vacía: para descargar se vuelve a escribir.
+    const campo = screen.getByLabelText("Tu contraseña") as HTMLInputElement;
+    expect(campo.value).toBe("");
+    fireEvent.change(campo, { target: { value: "una frase larga" } });
+    fireEvent.click(screen.getByRole("button", { name: "Descargar la copia de mis datos" }));
+    expect(await screen.findByText("Listo: guardamos la copia de tus datos en este dispositivo.")).toBeTruthy();
+    expect(creado).toHaveBeenCalledTimes(1);
+    expect(clic).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Descargar la copia de mis datos" })).toBeNull();
+  });
+
+  it("sin contraseña no la pide y explica que hay que volver a entrar", async () => {
+    const simulado = backend({
+      [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("confirmado")] }),
+      [`POST ${CASOS}/${CASO}/copia`]: () =>
+        error("reautenticacion_requerida", 403, { falta: "entrar_de_nuevo" }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    mostrar(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Descargar la copia de mis datos" }));
+    expect(screen.queryByLabelText("Tu contraseña")).toBeNull();
+    const enlace = await screen.findByRole("link", { name: "volvé a entrar con el enlace del correo" });
+    expect(enlace.getAttribute("href")).toBe("/entrar");
+    expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([{ contrasena: null }]);
+  });
+
+  it("con segundo factor sin verificar lleva a su página", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("confirmado")] }),
+        [`POST ${CASOS}/${CASO}/copia`]: () => error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
+      }),
+    );
+    mostrar(true, true);
+    fireEvent.change(await screen.findByLabelText("Tu contraseña"), { target: { value: "x" } });
+    fireEvent.click(screen.getByRole("button", { name: "Descargar la copia de mis datos" }));
+    expect(await screen.findByRole("link", { name: "verificá un código en la página del segundo factor" })).toBeTruthy();
+  });
+
+  it("un código que no sirve muestra el mensaje del backend y es accesible", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto", "supresion")] }),
+        [`POST ${CASOS}/${CASO}/confirmar`]: () => error("codigo_caso_invalido", 400),
+      }),
+    );
+    const { container } = mostrar();
+    expect(await screen.findByRole("heading", { name: "Suprimir tus datos: espera tu confirmación" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+    expect(await screen.findByText("El código no sirve.")).toBeTruthy();
+    const resultado = await axe.run(container);
+    expect(resultado.violations).toEqual([]);
+  });
+});

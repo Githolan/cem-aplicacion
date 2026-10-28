@@ -40,7 +40,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import secrets
 import sys
 from uuid import UUID
@@ -49,6 +48,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.db import crear_motor, transaccion
+from app.identidad.privacidad import hash_codigo
 from app.plataforma import correo
 
 VARIABLE_URL = "CEM_DATABASE_URL_SOPORTE_PRIVACIDAD"
@@ -103,12 +103,6 @@ def codigo_nuevo() -> str:
     """128 bits en base32, en grupos de cinco: se lee y se dicta sin confundir letras."""
     crudo = base64.b32encode(secrets.token_bytes(16)).decode("ascii").rstrip("=")
     return "-".join(crudo[i : i + 5] for i in range(0, len(crudo), 5))
-
-
-def hash_codigo(codigo: str) -> bytes:
-    """El código se compara sin guiones, espacios ni mayúsculas: como lo escriba la persona."""
-    normal = re.sub(r"[^A-Z2-7]", "", codigo.upper())
-    return hashlib.sha256(normal.encode("ascii")).digest()
 
 
 def _argumentos(argumentos: list[str] | None) -> argparse.Namespace:
