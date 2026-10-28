@@ -6,6 +6,7 @@ enlace; y el TOTP verificado si está activo). Cada negación lleva su control: 
 sí cumple pasa.
 """
 
+import asyncio
 import os
 import re
 from datetime import timedelta
@@ -539,3 +540,35 @@ def test_el_cupo_de_intentos_frena_al_sexto_en_el_minuto(app, motor_migrate, cap
     assert caso(motor_migrate, k)["estado"] == "abierto"
     vaciar_cupo(redis_limpio)
     assert confirmar(c, k, codigo, contrasena=CONTRASENA).status_code == 204
+
+
+@pytest.mark.usefixtures("con_url")
+def test_la_contrasena_se_compara_fuera_del_bucle(app, motor_migrate, capsys, monkeypatch):  # noqa: F811
+    """Argon2id y la transacción de confirmar y entregar no frenan otras peticiones: corren en un
+    hilo sin bucle de eventos. Control: la ruta en sí corre en el bucle."""
+    persona, _, c, k, codigo = titular(app, motor_migrate, capsys)
+    con_contrasena(motor_migrate, persona)
+    verificar = contrasena.verificar
+    en_el_bucle: list[bool] = []
+
+    def espia(*args):
+        try:
+            asyncio.get_running_loop()
+            en_el_bucle.append(True)
+        except RuntimeError:
+            en_el_bucle.append(False)
+        return verificar(*args)
+
+    monkeypatch.setattr(contrasena, "verificar", espia)
+    consumir = privacidad_api._consumir_intento
+    ruta_en_el_bucle: list[bool] = []
+
+    async def espia_ruta(*args):
+        ruta_en_el_bucle.append(asyncio.get_running_loop() is not None)
+        return await consumir(*args)
+
+    monkeypatch.setattr(privacidad_api, "_consumir_intento", espia_ruta)
+    assert confirmar(c, k, codigo, contrasena=CONTRASENA).status_code == 204
+    assert pedir_copia(c, k, contrasena=CONTRASENA).status_code == 200
+    assert en_el_bucle == [False, False]
+    assert ruta_en_el_bucle == [True, True]

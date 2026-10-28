@@ -40,7 +40,8 @@ from cem_contracts.privacidad import (
     Reautenticacion,
 )
 from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import Connection, text
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import Connection, Engine, text
 from sqlalchemy.exc import DBAPIError
 
 from app import limite
@@ -147,6 +148,30 @@ def _traducir(e: DBAPIError, persona_id: UUID, caso_id: UUID) -> ErrorApi | None
     return None
 
 
+def _con_reautenticacion(
+    motor: Engine,
+    identidad: Identidad,
+    caso_id: UUID,
+    pedido: Reautenticacion,
+    sentencia: str,
+    parametros: dict,
+):
+    """La transacción entera de confirmar o entregar, fuera del bucle de eventos (la comparación
+    Argon2id y la espera del bloqueo del caso no frenan otras peticiones): la contraseña se
+    compara y la función de `0042` corre en la misma transacción."""
+    with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        ok = _contrasena_ok(conn, identidad, pedido)
+        try:
+            return conn.execute(
+                text(sentencia), {**parametros, "k": caso_id, "s": identidad.sesion_id, "c": ok}
+            ).scalar_one()
+        except DBAPIError as e:
+            error = _traducir(e, identidad.persona_id, caso_id)
+            if error is None:
+                raise
+            raise error from e
+
+
 @router.get("/casos", response_model=ListaCasosPrivacidad, summary="Mis casos de privacidad")
 def listar(identidad: IdentidadDep, motor: MotorDep) -> ListaCasosPrivacidad:
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
@@ -174,18 +199,15 @@ async def confirmar(
     motor: MotorDep,
 ) -> Response:
     await _consumir_intento(request, identidad)
-    with transaccion(motor, persona_id=identidad.persona_id) as conn:
-        ok = _contrasena_ok(conn, identidad, pedido)
-        try:
-            conn.execute(
-                text("select plataforma.privacidad_confirmar_en_app(:k, :h, :s, :c)"),
-                {"k": caso_id, "h": hash_codigo(pedido.codigo), "s": identidad.sesion_id, "c": ok},
-            )
-        except DBAPIError as e:
-            error = _traducir(e, identidad.persona_id, caso_id)
-            if error is None:
-                raise
-            raise error from e
+    await run_in_threadpool(
+        _con_reautenticacion,
+        motor,
+        identidad,
+        caso_id,
+        pedido,
+        "select plataforma.privacidad_confirmar_en_app(:k, :h, :s, :c)",
+        {"h": hash_codigo(pedido.codigo)},
+    )
     log.info(
         "caso de privacidad confirmado en la aplicación",
         extra={"campos": {"persona_id": str(identidad.persona_id), "caso_id": str(caso_id)}},
@@ -211,18 +233,15 @@ async def copia(
     motor: MotorDep,
 ) -> CopiaDatosPropios:
     await _consumir_intento(request, identidad)
-    with transaccion(motor, persona_id=identidad.persona_id) as conn:
-        ok = _contrasena_ok(conn, identidad, pedido)
-        try:
-            datos = conn.execute(
-                text("select plataforma.privacidad_entregar_copia(:k, :s, :c)"),
-                {"k": caso_id, "s": identidad.sesion_id, "c": ok},
-            ).scalar_one()
-        except DBAPIError as e:
-            error = _traducir(e, identidad.persona_id, caso_id)
-            if error is None:
-                raise
-            raise error from e
+    datos = await run_in_threadpool(
+        _con_reautenticacion,
+        motor,
+        identidad,
+        caso_id,
+        pedido,
+        "select plataforma.privacidad_entregar_copia(:k, :s, :c)",
+        {},
+    )
     log.info(
         "copia de datos propios entregada",
         extra={"campos": {"persona_id": str(identidad.persona_id), "caso_id": str(caso_id)}},
