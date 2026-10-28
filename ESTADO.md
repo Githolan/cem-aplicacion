@@ -582,8 +582,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - TOTP obligatorio para roles de dinero: en el evaluador desde 2b-6a (R10, app #111); se ejerce cuando lleguen las rutas económicas (H3);
      - la ayuda por persona autorizada (RF53, 2b);
      - la cuenta de solo carga;
-     - borradores fuera de línea (PA16);
-     - PA29.
+     - borradores fuera de línea (PA16; diferidos al corte de reclamos por decisión del 25-10);
+     - PA29, la parte de RF14 (autorizar un pago con la sesión vencida): va con los pagos de H3. La parte de RF04 está probada desde #151 (punto 29); que `cobertura_pa` cuente PA29 no la da por cerrada.
    - Passkeys pueden ir en H6.
 4. **Hecho el 16-10 (PR #40):** `ci.ps1` guarda la cobertura de PA en la constancia (campo `cobertura_pa`) y en el `.log`. Al 24-10-2026 hay 6 de 25 (PA31 desde el 17-10 y PA17 desde el PR #94). Toda prueba nueva que cubra una PA lleva el prefijo `test_paNN_`.
 5. Pendientes de las copias:
@@ -797,3 +797,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Staging, 28-10-2026, imagen `f835fe3`:** después de una copia verificada (`diarias/2026-10-28/cem-20261028T140809Z.dump.age`, 42 tablas, 11329 filas), 31 de 31 controles y 0 sesiones abiertas al cerrar. Quedan como **fixture persistente de staging** los consorcios `a989b734…` (A: Autogestión desde el 21-10) y `f7289eda…` (B: Consejo del 14-10 al 28-10 y Autogestión desde el 28-10). Los identificadores están en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM. Producción no se tocó.
    - **Salvedad (revisión independiente de #149):** la corrida de staging usó la versión `4f91239` del script, en la que el control positivo «con un externo que ya terminó, el cambio pasa» daba por bueno también un error sin motivo. En staging ese control **no quedó probado** (los negativos con motivo sí); lo prueba la suite con la versión final (`b0a3e4a`, fusionada en `9c54daf`). El ensayo no se repite en staging porque los consorcios ya existen.
 
+29. **PA29 y PA30 en la cobertura (verificación formal de H2, 28-10-2026)** (PR #151, fusionado en `155fb27`, head `c1f3d95`; solo pruebas, no cambia lo desplegado):
+   - **PA29** («sesión vencida durante aprobación», criterio de salida de H2) no tenía prueba. Se prueba sobre la aprobación de cuatro ojos de invitaciones de mandato con una sesión real: con la sesión vencida no se aprueba, no sale el correo ni queda evento; con una sesión nueva se aprueba; si mientras tanto la invitación se reemplazó, la sesión nueva vuelve a validar (404). Cubre la parte de RF04; la de RF14 va con los pagos de H3.
+   - **PA30:** la prueba que ya existía pasa a llamarse `test_pa30_…`.
+   - **Controles:** `ci.ps1` verde sobre `c1f3d95` (cobertura P0-piloto 9 de 25, con PA29 y PA30); una mutación que no vence la sesión hace fallar las dos de PA29. Codex limpio; revisión independiente en dos vueltas, 0 P1/P2.
+   - **H2 completo:** con esto, lo único que falta es la interfaz del 02 al 08-11 (después de G3). Detalle en `doc/diseno/H2_Verificacion_de_Cierre_2026-10-28.md` del repositorio CEM.
