@@ -13,6 +13,7 @@ from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
+from app import auditoria
 from tests.test_mandatos_0012 import alta, baja, escena  # noqa: F401  (`escena` es un fixture)
 from tests.test_vinculo_0014 import _consorcio_y_unidad, base_aparte  # noqa: F401
 
@@ -125,7 +126,8 @@ def _baja_por_soporte(c, mandato, causa: str):
 def test_0043_completa_error_carga_y_no_baja_si_el_fin_previo_vive_solo_en_la_fila(base_aparte):  # noqa: F811
     """Al subir, las bajas por `error_carga` ya hechas (sin evento desde 0033) quedan con su fin
     previo, que esa causa no cambia. Al bajar, se niega si una baja de soporte posterior dejó su
-    fin previo solo en la columna. Control: sin ese dato, baja."""
+    fin previo solo en la columna, también cuando es nulo (mandato sin fin previsto). Control:
+    con el evento de cada una, baja."""
     cfg, motor = base_aparte
     command.upgrade(cfg, "0042")
     cons, _ = _consorcio_y_unidad(motor)
@@ -158,12 +160,35 @@ def test_0043_completa_error_carga_y_no_baja_si_el_fin_previo_vive_solo_en_la_fi
         bueno = _externo_por_soporte(c, cons, acta, hasta.isoformat())
         _baja_por_soporte(c, bueno, "renuncia")
     assert columna(bueno)[0] == hasta
-    with pytest.raises(DBAPIError) as error:
-        command.downgrade(cfg, "0042")
-    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
-    with motor.begin() as c:  # control: sin ese dato, baja
-        c.execute(
-            text("update nucleo.mandato set vigente_hasta_antes_baja = null where id = :m"),
-            {"m": bueno},
-        )
-    command.downgrade(cfg, "0042")
+    otro, _ = _consorcio_y_unidad(motor)  # el abierto, en otro consorcio: un administrador a la vez
+    with motor.begin() as c:
+        c.execute(text("select set_config('app.consorcio_id', :c, true)"), {"c": str(otro)})
+        acta_otro = c.execute(
+            text(
+                "select nucleo.registrar_decision('asamblea', '2024-01-01', 'Designa',"
+                " 'Acta sintética 2', null, 'soporte')"
+            )
+        ).scalar_one()
+        abierto = _externo_por_soporte(c, otro, acta_otro, None)
+        _baja_por_soporte(c, abierto, "renuncia")
+    assert columna(abierto)[0] is None
+
+    def bajar_se_niega() -> bool:
+        try:
+            command.downgrade(cfg, "0042")
+        except DBAPIError as e:
+            assert e.orig.diag.message_hint == "downgrade_con_datos"
+            return True
+        return False
+
+    def con_evento(cons_id, mandato) -> None:
+        with motor.begin() as c:
+            auditoria.registrar(c, consorcio_id=cons_id, actor=None, origen="soporte",
+                                accion="consorcio.mandato.baja", entidad="mandato",
+                                entidad_id=mandato, despues={})  # fmt: skip
+
+    assert bajar_se_niega()
+    con_evento(cons, bueno)
+    assert bajar_se_niega()  # el abierto solo también la frena
+    con_evento(otro, abierto)
+    assert not bajar_se_niega()  # control: con el evento de cada una, baja

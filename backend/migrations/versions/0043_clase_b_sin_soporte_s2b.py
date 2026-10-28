@@ -36,8 +36,9 @@ No se crea una auditoría paralela de soporte ni una cuenta de soporte, y soport
 RF35 (`0032`). La restricción `auditoria.eventos.origen` conserva `soporte`: las filas viejas lo
 usan.
 
-Downgrade: se niega (`downgrade_con_datos`) si alguna baja posterior a `0043` dejó su fin previo
-solo en la columna (una baja de soporte que no sea `error_carga`): borrarla perdería ese dato.
+Downgrade: se niega (`downgrade_con_datos`) si hay una baja que no sea `error_carga` sin su
+evento: solo puede ser una de soporte posterior a `0043` (antes, toda baja así escribía evento), y
+su fin previo vive solo en la columna, también cuando es nulo (el mandato no tenía fin previsto).
 
 Revisión: 0043
 Anterior: 0042
@@ -126,8 +127,9 @@ alter table nucleo.mandato
   add constraint mandato_vigente_hasta_antes_baja
     check (vigente_hasta_antes_baja is null or finalizado_en is not null);
 comment on column nucleo.mandato.vigente_hasta_antes_baja is
-  'Fin previsto antes de la baja (0043, S2b): la baja reemplaza vigente_hasta. Nulo en una baja '
-  'anterior a 0043 que no sea error_carga: el valor está en su evento';
+  'Fin previsto antes de la baja (0043, S2b): la baja reemplaza vigente_hasta. En una baja que '
+  'no sea error_carga, nulo con evento de baja: el valor está en el evento (anterior a 0043); '
+  'nulo sin evento: el mandato no tenía fin previsto';
 update nucleo.mandato set vigente_hasta_antes_baja = vigente_hasta
  where causa_baja = 'error_carga' and finalizado_en is not null;
 revoke update, delete on nucleo.consorcio, nucleo.unidad from cem_app;
@@ -147,7 +149,7 @@ def downgrade() -> None:
 do $$
 begin
   if exists (select 1 from nucleo.mandato m
-              where m.vigente_hasta_antes_baja is not null
+              where m.finalizado_en is not null
                 and m.causa_baja <> 'error_carga'
                 and not exists (select 1 from auditoria.eventos e
                                  where e.entidad_id = m.id
