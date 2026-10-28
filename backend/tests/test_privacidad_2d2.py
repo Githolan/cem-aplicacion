@@ -348,7 +348,7 @@ def test_no_se_cierra_sin_haber_entregado_ni_un_caso_ajeno(app, motor_migrate, c
 
 
 @pytest.mark.usefixtures("con_url")
-def test_copia_de_un_consorcio_sin_terceros(app, confiable, motor_migrate, capsys):  # noqa: F811
+def test_pa30_copia_de_un_consorcio_sin_terceros(app, confiable, motor_migrate, capsys):  # noqa: F811
     """PA30: la copia del inquilino trae lo suyo en el consorcio y nada que identifique al
     administrador, al Consejo ni a la propietaria (ids, correos ni nombres)."""
     cons, inq = confiable["cons"], confiable["inq"]

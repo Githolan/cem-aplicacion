@@ -15,12 +15,15 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 from app.db import transaccion
+from app.identidad import sesiones
 from scripts import mandato_soporte
 from tests.conftest import clave_idempotencia, misma_identidad, url_rol
 from tests.test_contexto_mandatos import cliente, denegaciones, otra_unidad
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
     app,
     csrf,
+    es_401,
+    h,
     navegador,
 )
 from tests.test_identidad_cierre_y_purga import entrar_como
@@ -882,3 +885,84 @@ def test_toda_ruta_de_a7_verifica_la_politica(escena, motor_app):
             assert r.status_code == 403, (url, r.text)
     acciones = [d["accion"] for d in denegaciones(motor_app, e["cons"], e["mc1"], e["prop"])]
     assert acciones == ["mandatos.asociar_persona", "mandatos.revocar_asociacion"]
+
+
+# PA29: sesión vencida durante una aprobación ---------------------------------------------------
+
+
+def _vencer_sesion(motor_migrate, c) -> None:
+    """Como `test_una_sesion_vencida_no_entra`: la sesión del navegador queda vencida."""
+    with motor_migrate.begin() as conn:
+        conn.execute(
+            text(
+                "update nucleo.sesion set creada_en = creada_en - interval '31 days',"
+                " ultimo_uso_en = ultimo_uso_en - interval '31 days',"
+                " vence_en = vence_en - interval '31 days' where token_hash = :t"
+            ),
+            {"t": h(c.cookies[sesiones.COOKIE_SESION])},
+        )
+
+
+def correo_de(motor_migrate, persona) -> str:
+    with motor_migrate.connect() as c:
+        return c.execute(
+            text("select correo from nucleo.persona where id = :p"), {"p": persona}
+        ).scalar_one()
+
+
+def correos_a(motor_migrate, correo) -> int:
+    with motor_migrate.connect() as c:
+        return c.execute(
+            text("select count(*) from plataforma.outbox where carga->>'para' = :p"),
+            {"p": correo},
+        ).scalar_one()
+
+
+def _estado_por_api(e, i) -> str:
+    filas = listar(e["mc2"], e["cons"], e["ae"]).json()["elementos"]
+    return {x["id"]: x["estado"] for x in filas}[i]
+
+
+def test_pa29_sesion_vencida_durante_la_aprobacion_no_aprueba(app, motor_migrate, escena):  # noqa: F811
+    """PA29 (08 §15, RF04): quien aprueba vio la invitación con su sesión, la sesión vence antes
+    de aprobar: no se aprueba, no sale el correo ni queda evento; con una sesión nueva se
+    aprueba (control positivo con la misma persona y la misma invitación)."""
+    e = escena
+    correo = correo_nuevo()
+    i = emitir(e["mc1"], e["cons"], e["ae"], correo).json()["id"]
+    mc2 = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
+    url = url_invitacion(e["cons"], i, "aprobar")
+    assert i in mc2.get(url_mandato(e["cons"], e["ae"], "/invitaciones")).text  # la vio
+    _vencer_sesion(motor_migrate, mc2)
+    r = mc2.post(url, headers={**csrf(mc2), **clave_idempotencia()})
+    assert es_401(r, "no_autenticado"), r.text
+    assert _estado_por_api(e, i) == "por_aprobar"
+    assert correos_a(motor_migrate, correo) == 0
+    assert "consorcio.mandato.aprobar_invitacion" not in [
+        x["accion"] for x in eventos(motor_migrate, e["cons"])
+    ]
+    nueva = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
+    r = nueva.post(url, headers={**csrf(nueva), **clave_idempotencia()})
+    assert r.status_code == 200, r.text
+    assert _estado_por_api(e, i) == "pendiente" and correos_a(motor_migrate, correo) == 1
+
+
+def test_pa29_con_la_sesion_nueva_se_vuelve_a_validar(app, motor_migrate, escena):  # noqa: F811
+    """PA29, «volver a validar»: si mientras la sesión estaba vencida quien emitió reemplazó la
+    invitación, reautenticarse no aprueba lo que se vio antes (404); la nueva sí (control)."""
+    e = escena
+    vista = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    mc2 = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
+    _vencer_sesion(motor_migrate, mc2)
+    r = mc2.post(url_invitacion(e["cons"], vista, "aprobar"),
+                 headers={**csrf(mc2), **clave_idempotencia()})  # fmt: skip
+    assert es_401(r, "no_autenticado"), r.text
+    otra = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
+    nueva = entrar_como(app, motor_migrate, correo_de(motor_migrate, e["mc2"]))
+    r = nueva.post(url_invitacion(e["cons"], vista, "aprobar"),
+                   headers={**csrf(nueva), **clave_idempotencia()})  # fmt: skip
+    assert (r.status_code, r.json()["codigo"]) == (404, "invitacion_invalida")
+    assert (_estado_por_api(e, vista), _estado_por_api(e, otra)) == ("revocada", "por_aprobar")
+    r = nueva.post(url_invitacion(e["cons"], otra, "aprobar"),
+                   headers={**csrf(nueva), **clave_idempotencia()})  # fmt: skip
+    assert r.status_code == 200, r.text
