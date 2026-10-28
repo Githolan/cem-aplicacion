@@ -514,6 +514,79 @@ def test_quien_aprobo_no_emite_ni_con_otra_cuenta(motor_migrate, motor_app, e):
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
 
 
+def _revincular(motor_migrate, cons: UUID, persona: UUID) -> None:
+    """Como haría soporte al corregir un vínculo: la cuenta deja su identidad y pasa a otra
+    nueva (SINTETICA)."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.identidad_persona set desvinculada_en = now()"
+                " where consorcio_id = :c and persona_id = :p and desvinculada_en is null"
+            ),
+            {"c": cons, "p": persona},
+        )
+    with motor_migrate.begin() as c:
+        nueva = c.execute(
+            text(
+                "insert into nucleo.identidad_humana (consorcio_id, huella, clave_version)"
+                " values (:c, sha256(convert_to(gen_random_uuid()::text, 'UTF8')), 1) returning id"
+            ),
+            {"c": cons},
+        ).scalar_one()
+        c.execute(
+            text(
+                "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
+                " values (:c, :p, :i)"
+            ),
+            {"c": cons, "p": persona, "i": nueva},
+        )
+
+
+def test_la_separacion_usa_la_identidad_de_quien_preparo_aunque_se_revincule(
+    motor_migrate, motor_app, e
+):
+    """Quien preparó cambia de identidad después; su otra cuenta, que sigue en la identidad con
+    la que preparó, tampoco aprueba ni rechaza. Control: sin la identidad guardada, la
+    comparación actual (cuentas en identidades distintas) la dejaría pasar."""
+    o = preparada(motor_migrate, e, en_revision=True)
+    h = huella(motor_migrate, o, 1)
+    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
+    _revincular(motor_migrate, e.cons, e.adm)
+    with motor_migrate.connect() as c:
+        distintas = c.execute(
+            text(
+                "select nucleo.identidad_humana_de(:c, :a) is distinct from"
+                " nucleo.identidad_humana_de(:c, :o)"
+            ),
+            {"c": e.cons, "a": e.adm, "o": otra},
+        ).scalar_one()
+    assert distintas  # control: hoy las dos cuentas están en identidades distintas
+    niega(motor_migrate, e, otra, APROBAR, "no_es_quien_preparo", orden=o, version=1, huella=h)
+    niega(motor_migrate, e, otra, RECHAZAR, "no_es_quien_preparo", orden=o, version=1,
+          motivo="SINTETICO")  # fmt: skip
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
+
+
+def test_quien_aprobo_no_emite_aunque_se_revincule(motor_migrate, motor_app, e):
+    """mc1 aprueba y después cambia de identidad; su otra cuenta, en la identidad con la que
+    aprobó, no emite."""
+    o = _aprobada(motor_migrate, e)
+    with motor_migrate.connect() as c:
+        m = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"),
+            {"c": e.cons, "p": e.mc1},
+        ).one()  # fmt: skip
+    otra = otra_persona(motor_migrate, e.cons, verificada=False)
+    misma_identidad(motor_migrate, e.cons, e.mc1, otra)
+    m_otra = alta(motor_app, e.cons, e.prop, m.decision_id, tipo="miembro_consejo", persona=otra)
+    otorgar(motor_migrate, e.cons, m_otra, m.decision_id, "egresos.ejecutar_pago")
+    e.sesion[otra] = nueva_sesion(motor_migrate, otra)
+    _revincular(motor_migrate, e.cons, e.mc1)
+    niega(motor_migrate, e, otra, EMITIR, "no_es_quien_aprobo", orden=o, version=1)
+    llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=1)  # control
+
+
 def test_emitir_dos_veces_no_emite_dos_veces(motor_migrate, e):
     o = _aprobada(motor_migrate, e)
     llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=1)

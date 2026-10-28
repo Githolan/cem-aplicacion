@@ -107,7 +107,7 @@ INTERNAS = (
     "nucleo.huella_orden_pago(uuid, integer, bigint, text, text, text, text, boolean)",
     "nucleo.orden_pago_bloqueada(uuid, uuid)",
     "nucleo.nueva_version_orden_pago(uuid, uuid, integer, bigint, text, text, text, text, boolean,"
-    " uuid)",
+    " uuid, uuid)",
     "nucleo.auditar_orden_pago(uuid, text, uuid, uuid, jsonb, jsonb)",
     "nucleo.exigir_transicion_orden_pago()",
     "nucleo.negar_cambio_historia_orden_pago()",
@@ -155,8 +155,13 @@ create table nucleo.orden_pago_version (
   usa_fondo_reserva  boolean not null,
   huella             bytea not null check (length(huella) = 32),
   preparada_por      uuid not null references nucleo.persona (id),
+  -- La identidad humana de quien preparó, al preparar: la separación la compara aunque después
+  -- se revincule la cuenta.
+  identidad_preparo  uuid not null,
   creada_en          timestamptz not null default now(),
   primary key (orden_id, numero),
+  foreign key (consorcio_id, identidad_preparo)
+    references nucleo.identidad_humana (consorcio_id, id),
   unique (orden_id, numero, huella),
   foreign key (consorcio_id, orden_id) references nucleo.orden_pago (consorcio_id, id)
 );
@@ -249,7 +254,7 @@ create trigger historia_orden_pago_aprobacion_truncate before truncate
 create function nucleo.exigir_acto_economico(c uuid, actor uuid, sesion uuid, codigo text,
                                              origen_pedido text)
   returns uuid
-  language plpgsql stable
+  language plpgsql volatile
   set search_path = pg_catalog, pg_temp
   as $$
   declare
@@ -290,6 +295,11 @@ create function nucleo.exigir_acto_economico(c uuid, actor uuid, sesion uuid, co
       raise exception 'hace falta el segundo factor reciente' using errcode = 'P0001',
         hint = 'requiere_segundo_factor_reciente';
     end if;
+    -- El vínculo queda bloqueado hasta el fin de la transacción: la identidad que se registra es
+    -- la que se comprobó.
+    perform 1 from nucleo.identidad_persona ip
+     where ip.consorcio_id = c and ip.persona_id = actor and ip.desvinculada_en is null
+       for share;
     identidad := nucleo.identidad_humana_de(c, actor);
     if identidad is null then
       raise exception 'hace falta la identidad humana verificada' using errcode = 'P0001',
@@ -331,7 +341,7 @@ create function nucleo.orden_pago_bloqueada(c uuid, orden uuid)
   $$;
 
 create function nucleo.nueva_version_orden_pago(c uuid, orden uuid, numero integer,
-                                                {ESENCIALES}, actor uuid)
+                                                {ESENCIALES}, actor uuid, identidad uuid)
   returns bytea
   language plpgsql
   set search_path = pg_catalog, pg_temp
@@ -343,9 +353,10 @@ create function nucleo.nueva_version_orden_pago(c uuid, orden uuid, numero integ
   begin
     insert into nucleo.orden_pago_version
       (consorcio_id, orden_id, numero, importe_centavos, moneda, concepto, beneficiario,
-       comprobante, usa_fondo_reserva, huella, preparada_por)
+       comprobante, usa_fondo_reserva, huella, preparada_por, identidad_preparo)
     values (c, orden, numero, importe_nuevo, moneda_nueva, btrim(concepto_nuevo),
-            btrim(beneficiario_nuevo), btrim(comprobante_nuevo), usa_reserva, h, actor);
+            btrim(beneficiario_nuevo), btrim(comprobante_nuevo), usa_reserva, h, actor,
+            identidad);
     return h;
   end
   $$;
@@ -372,13 +383,14 @@ create function nucleo.preparar_orden_pago({ESENCIALES}, actor uuid, origen_pedi
     c uuid := plataforma.consorcio_actual();
     o uuid := plataforma.uuid_v7();
     h bytea;
+    identidad uuid;
   begin
-    perform nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.preparar_orden',
-                                         origen_pedido);
+    identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.preparar_orden',
+                                              origen_pedido);
     insert into nucleo.orden_pago (consorcio_id, id, version_vigente, preparada_por)
     values (c, o, 1, actor);
     h := nucleo.nueva_version_orden_pago(c, o, 1, importe_nuevo, moneda_nueva, concepto_nuevo,
-           beneficiario_nuevo, comprobante_nuevo, usa_reserva, actor);
+           beneficiario_nuevo, comprobante_nuevo, usa_reserva, actor, identidad);
     perform nucleo.auditar_orden_pago(c, 'consorcio.orden_pago.preparar', o, actor, null,
       jsonb_build_object('estado', 'borrador', 'version', 1, 'huella', encode(h, 'hex'),
                          'importe_centavos', importe_nuevo, 'moneda', moneda_nueva,
@@ -399,9 +411,10 @@ create function nucleo.modificar_orden_pago(orden uuid, version_esperada integer
     v nucleo.orden_pago_version;
     h bytea;
     estado_nuevo nucleo.estado_orden_pago;
+    identidad uuid;
   begin
-    perform nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.preparar_orden',
-                                         origen_pedido);
+    identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.preparar_orden',
+                                              origen_pedido);
     o := nucleo.orden_pago_bloqueada(c, orden);
     if o.estado not in ('borrador', 'en_revision', 'aprobada', 'fallida') then
       raise exception 'la orden ya no se puede modificar' using errcode = 'P0001',
@@ -423,7 +436,7 @@ create function nucleo.modificar_orden_pago(orden uuid, version_esperada integer
     end if;
     h := nucleo.nueva_version_orden_pago(c, orden, o.version_vigente + 1, importe_nuevo,
            moneda_nueva, concepto_nuevo, beneficiario_nuevo, comprobante_nuevo, usa_reserva,
-           actor);
+           actor, identidad);
     estado_nuevo := case when o.estado = 'borrador' then 'borrador'::nucleo.estado_orden_pago
                          else 'en_revision'::nucleo.estado_orden_pago end;
     update nucleo.orden_pago
@@ -467,9 +480,10 @@ create function nucleo.enviar_orden_a_revision(orden uuid, version_esperada inte
   $$;
 
 -- Quien decide sobre una orden en revisión: la versión vigente, nadie que haya preparado alguna
--- versión (comparando seres humanos). Devuelve la identidad de quien decide.
+-- versión (comparando seres humanos: la identidad guardada al preparar y la actual).
 create function nucleo.exigir_decision_sobre_orden(c uuid, o nucleo.orden_pago,
-                                                   version_vista integer, actor uuid)
+                                                   version_vista integer, actor uuid,
+                                                   identidad uuid)
   returns void
   language plpgsql
   set search_path = pg_catalog, pg_temp
@@ -484,6 +498,11 @@ create function nucleo.exigir_decision_sobre_orden(c uuid, o nucleo.orden_pago,
     if version_vista is distinct from o.version_vigente then
       raise exception 'esa versión ya no es la vigente' using errcode = 'P0001',
         hint = 'version_desactualizada';
+    end if;
+    if exists (select 1 from nucleo.orden_pago_version x
+                where x.orden_id = o.id and x.identidad_preparo = identidad) then
+      raise exception 'la misma persona no puede ocupar los dos lugares de esta separación'
+        using errcode = 'P0001', hint = 'no_es_quien_preparo';
     end if;
     for p in select distinct x.preparada_por from nucleo.orden_pago_version x
               where x.orden_id = o.id loop
@@ -508,7 +527,7 @@ create function nucleo.registrar_aprobacion_orden_pago(orden uuid, version_vista
     identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.aprobar_orden',
                                               origen_pedido);
     o := nucleo.orden_pago_bloqueada(c, orden);
-    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor);
+    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor, identidad);
     if not exists (select 1 from nucleo.orden_pago_version x
                     where x.orden_id = orden and x.numero = version_vista
                       and x.huella = huella_vista)
@@ -541,11 +560,12 @@ create function nucleo.rechazar_orden_pago(orden uuid, version_vista integer, mo
   declare
     c uuid := plataforma.consorcio_actual();
     o nucleo.orden_pago;
+    identidad uuid;
   begin
-    perform nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.aprobar_orden',
-                                         origen_pedido);
+    identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.aprobar_orden',
+                                              origen_pedido);
     o := nucleo.orden_pago_bloqueada(c, orden);
-    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor);
+    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor, identidad);
     update nucleo.orden_pago
        set estado = 'rechazada', motivo_rechazo = btrim(motivo), actualizada_en = now()
      where id = orden;
@@ -565,9 +585,10 @@ create function nucleo.emitir_orden_pago(orden uuid, version_vista integer, acto
     c uuid := plataforma.consorcio_actual();
     o nucleo.orden_pago;
     p uuid;
+    identidad uuid;
   begin
-    perform nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.ejecutar_pago',
-                                         origen_pedido);
+    identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.ejecutar_pago',
+                                              origen_pedido);
     o := nucleo.orden_pago_bloqueada(c, orden);
     if o.estado <> 'aprobada' then
       raise exception 'solo se emite una orden aprobada' using errcode = 'P0001',
@@ -577,7 +598,14 @@ create function nucleo.emitir_orden_pago(orden uuid, version_vista integer, acto
       raise exception 'esa versión ya no es la vigente' using errcode = 'P0001',
         hint = 'version_desactualizada';
     end if;
-    -- A5: quien emite no es ninguno de los que aprobaron la versión vigente.
+    -- A5: quien emite no es ninguno de los que aprobaron la versión vigente, ni por la identidad
+    -- guardada al aprobar ni por la actual.
+    if exists (select 1 from nucleo.orden_pago_aprobacion x
+                where x.orden_id = orden and x.version = version_vista
+                  and x.identidad_id = identidad) then
+      raise exception 'la misma persona no puede ocupar los dos lugares de esta separación'
+        using errcode = 'P0001', hint = 'no_es_quien_aprobo';
+    end if;
     for p in select x.persona_id from nucleo.orden_pago_aprobacion x
               where x.orden_id = orden and x.version = version_vista loop
       perform nucleo.exigir_separacion_humana(c, actor, p, 'no_es_quien_aprobo');
@@ -594,7 +622,7 @@ create function nucleo.emitir_orden_pago(orden uuid, version_vista integer, acto
 _todas = (
     FUNCIONES
     + INTERNAS
-    + ("nucleo.exigir_decision_sobre_orden(uuid, nucleo.orden_pago, integer, uuid)",)
+    + ("nucleo.exigir_decision_sobre_orden(uuid, nucleo.orden_pago, integer, uuid, uuid)",)
 )
 UPGRADE += "".join(f"revoke all on function {f} from public;\n" for f in _todas)
 
@@ -612,10 +640,11 @@ $guarda$;
 """
     + "".join(f"drop function {f};\n" for f in FUNCIONES)
     + """
-drop function nucleo.exigir_decision_sobre_orden(uuid, nucleo.orden_pago, integer, uuid);
+drop function nucleo.exigir_decision_sobre_orden(uuid, nucleo.orden_pago, integer, uuid,
+                                                 uuid);
 drop function nucleo.auditar_orden_pago(uuid, text, uuid, uuid, jsonb, jsonb);
 drop function nucleo.nueva_version_orden_pago(uuid, uuid, integer, bigint, text, text, text, text,
-                                              boolean, uuid);
+                                              boolean, uuid, uuid);
 drop function nucleo.orden_pago_bloqueada(uuid, uuid);
 drop function nucleo.huella_orden_pago(uuid, integer, bigint, text, text, text, text, boolean);
 drop function nucleo.exigir_acto_economico(uuid, uuid, uuid, text, text);
