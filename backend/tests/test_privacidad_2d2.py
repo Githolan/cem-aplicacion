@@ -445,11 +445,21 @@ def test_0042_ida_y_vuelta(base_aparte):  # noqa: F811
                      " boolean)') is not null")
             ).scalar_one()  # fmt: skip
 
+    def puede_insertar(columna: str) -> bool:
+        with motor.connect() as conn:
+            return conn.execute(
+                text("select has_column_privilege('cem_app', 'nucleo.invitacion', :c, 'INSERT')"),
+                {"c": columna},
+            ).scalar_one()
+
     assert existe()
+    assert not puede_insertar("aceptada_en") and puede_insertar("correo")
     command.downgrade(cfg, "0041")
     assert not existe()
+    # Vuelve al permiso de 0025: las columnas de 0007, nunca `vinculo_id`.
+    assert puede_insertar("aceptada_en") and not puede_insertar("vinculo_id")
     command.upgrade(cfg, "0042")  # control: vuelve a subir limpio
-    assert existe()
+    assert existe() and not puede_insertar("aceptada_en")
 
 
 @pytest.mark.usefixtures("con_url")
