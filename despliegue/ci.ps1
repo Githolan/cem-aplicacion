@@ -322,15 +322,23 @@ finally {
         # registro de PostgreSQL, que el `down` borra: se copian antes (deadlock intermitente de
         # las pruebas de migración, tracker).
         if ($etapas['backend'] -and $etapas['backend'] -ne 'ok') {
-            # Cada deadlock, desde su línea hasta el HINT: el DETAIL lista las consultas de todos
-            # los procesos, y la de una migración puede ocupar cientos de líneas.
-            $lineas = @(); $dentro = $false; $cuantos = 0
-            foreach ($l in (docker @composeArgs logs --no-color $ServicioPostgres 2>&1 | ForEach-Object { "$_" })) {
-                if ($l -match 'deadlock detected') { $dentro = $true; $cuantos++ }
-                if ($dentro) { $lineas += $l }
-                if ($dentro -and $l -match '\] HINT:') { $dentro = $false }
+            # Cada deadlock con todo lo que su proceso escribe a continuación: el DETAIL lista las
+            # consultas de los procesos (truncadas en track_activity_query_size) y el STATEMENT trae
+            # entera la del abortado. Una línea nueva de otro proceso, o de otro nivel, lo cierra.
+            $registro = @(docker @composeArgs logs --no-color --no-log-prefix $ServicioPostgres 2>&1 | ForEach-Object { "$_" })
+            $leido = $LASTEXITCODE
+            $lineas = @(); $pid_ = $null; $cuantos = 0
+            foreach ($l in $registro) {
+                $entrada = [regex]::Match($l, '^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+ \S+ \[(\d+)\] (\w+):')
+                if ($entrada.Success) {
+                    if ($l -match 'ERROR:  deadlock detected') { $pid_ = $entrada.Groups[1].Value; $cuantos++ }
+                    elseif ($pid_ -ne $entrada.Groups[1].Value -or
+                            $entrada.Groups[2].Value -notin 'DETAIL', 'HINT', 'CONTEXT', 'STATEMENT') { $pid_ = $null }
+                }
+                if ($pid_) { $lineas += $l }
             }
-            (@("=== Registro de $ServicioPostgres`: $cuantos deadlock(s) ===") + $lineas) |
+            $titulo = if ($leido -eq 0) { "$cuantos deadlock(s)" } else { "no se pudo leer (código $leido)" }
+            (@("=== Registro de $ServicioPostgres`: $titulo ===") + $lineas) |
                 Tee-Object -FilePath $log -Append | Out-Host
         }
         docker @composeArgs down --remove-orphans 2>&1 | Out-File -Append -Encoding utf8 $log
