@@ -449,7 +449,8 @@ H3,egresos.preparar_orden,Fac(egresos.preparar_orden),C,cuenta:X,vigente,si,,403
 H3,egresos.aprobar_orden,Fac(egresos.aprobar_orden),C,cuenta:X,vigente,si,preparo=otro,403,modo_no_admitido,egresos no se aprueban en Consejo
 H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),C,cuenta:X,vigente,si,aprobaron=otro;respaldo=si,403,modo_no_admitido,egresos no se ejecutan en Consejo
 H3,liquidacion.aprobar,Fac(liquidacion.aprobar),C,,vigente,si,preparo=otro,403,modo_no_admitido,la liquidación no se aprueba en Consejo
+H3,liquidacion.revisar,Fac(liquidacion.revisar),C,,vigente,si,preparo=otro,403,modo_no_admitido,la liquidación no se revisa en Consejo
 H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,aprobaron=otro,403,sin_respaldo,sin la orden aprobada como respaldo no se ejecuta (R9)
-H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,respaldo=si,200,concedido_por_facultad,comportamiento actual: sin aprobadores registrados el evaluador no lo exige (decisión 1; con 1A un pago rutinario no los tiene)
+H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,respaldo=si,200,concedido_por_facultad,comportamiento actual: con respaldo y sin aprobadores; el evaluador no cuenta aprobadores (exigirlos y el respaldo de lo rutinario son la decisión 1)
 H3,fondo_reserva.autorizar,MC,AA,,vigente,si,solicito=otro,200,concedido_por_facultad,económica que admite todos los modos: también en Administrador Aumentado
 H3,fondo_reserva.autorizar,MC,AG,,vigente,si,solicito=otro,200,concedido_por_facultad,económica que admite todos los modos: también en Autogestión

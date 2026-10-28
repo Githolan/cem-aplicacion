@@ -113,10 +113,10 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 Medido en el despliegue de `6b391ed` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b y `2026-10-28-6b391ed.md` con la de 0044 y 0045).
 
-**Staging y producción en `6b391ed`** (28-10-2026; staging a las 22:02 UTC y producción a las 22:07 UTC), base `0045`, contrato 0.27.0.
+**Staging y producción en `6b391ed`** (28-10-2026; staging de 22:02 a 22:06 UTC y producción de 22:06 a 22:10 UTC), base `0045`, contrato 0.27.0.
 
 - **Qué suma:** infraestructura común de H3, sin habilitar ningún gasto. Son la guarda de la decisión 7 (PR #153, `0044`) y la orden de pago versionada, sin rutas (PR #155, `0045`). Detalle en «Próximo paso», puntos 31 y 32.
-- **Controles.** `ci.ps1` verde sobre `d3f4d9f` (la cabeza del PR) y sobre `6b391ed`. Hubo copia previa verificada antes de `0044` y `0045` en cada entorno.
+- **Controles.** `ci.ps1` verde sobre `d3f4d9f` (la cabeza del PR) y sobre `6b391ed`: backend 2169 (2 omitidas), contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0044` y `0045` en cada entorno.
 - **Validación en los dos entornos, en solo lectura:**
   - base en `0045`;
   - 0 órdenes, versiones y aprobaciones, y las 12 transiciones;
@@ -833,7 +833,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **P3 abiertos:** 64 a 71 del tracker. El 65 (proveedor y cuenta destino) queda diferido a la decisión 7, y el 69 (una aprobación repetida tras una corrección de identidad) va con la decisión 2.
 33. **Tabla de verdad, casos económicos de H3** (este PR; solo datos de prueba):
    - las tres facultades de aprobar sin concesión;
-   - egresos y `liquidacion.aprobar` en Consejo (`modo_no_admitido`);
+   - egresos, `liquidacion.revisar` y `liquidacion.aprobar` en Consejo (`modo_no_admitido`);
    - `ejecutar_pago` sin respaldo (`sin_respaldo`);
-   - el comportamiento actual de `ejecutar_pago` sin aprobadores: concedido, porque exigir un aprobador es la decisión 1;
+   - el comportamiento actual de `ejecutar_pago` con respaldo y sin aprobadores: concedido, porque el evaluador no cuenta aprobadores (exigirlos, y qué respaldo tiene lo rutinario, es la decisión 1);
    - `fondo_reserva.autorizar` en AA y AG.
