@@ -60,6 +60,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $ProyectoCompose   = 'cem-ci'
 $ServicioPruebas   = 'cem-backend-pruebas'
+$ServicioPostgres  = 'cem-postgres-pruebas'
 $ImagenFrontend    = 'cem-frontend-ci'
 $ComposeRelativo   = 'backend/pruebas/compose.yml'
 $PruebaImagen      = 'frontend/scripts/probar-imagen.sh'
@@ -317,6 +318,21 @@ catch {
 finally {
     # Solo si esta corrida levantó el proyecto: un `down` ajeno cortaría otra corrida.
     if ($composeUsado) {
+        # Con el backend en rojo, las consultas de los dos lados de un deadlock solo quedan en el
+        # registro de PostgreSQL, que el `down` borra: se copian antes (deadlock intermitente de
+        # las pruebas de migración, tracker).
+        if ($etapas['backend'] -and $etapas['backend'] -ne 'ok') {
+            # Cada deadlock, desde su línea hasta el HINT: el DETAIL lista las consultas de todos
+            # los procesos, y la de una migración puede ocupar cientos de líneas.
+            $lineas = @(); $dentro = $false; $cuantos = 0
+            foreach ($l in (docker @composeArgs logs --no-color $ServicioPostgres 2>&1 | ForEach-Object { "$_" })) {
+                if ($l -match 'deadlock detected') { $dentro = $true; $cuantos++ }
+                if ($dentro) { $lineas += $l }
+                if ($dentro -and $l -match '\] HINT:') { $dentro = $false }
+            }
+            (@("=== Registro de $ServicioPostgres`: $cuantos deadlock(s) ===") + $lineas) |
+                Tee-Object -FilePath $log -Append | Out-Host
+        }
         docker @composeArgs down --remove-orphans 2>&1 | Out-File -Append -Encoding utf8 $log
     }
     # El script de e2e borra lo suyo con un trap; si lo cortaron antes, se borra acá
