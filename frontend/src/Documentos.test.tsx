@@ -10,6 +10,7 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { App } from "./App";
 import { ACEPTA, mensajeDeError, tamano, TOPE_BYTES } from "./Documentos";
+import { SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -215,6 +216,32 @@ describe("página /documentos", () => {
     // Control: en toda la página hay una sola descarga, y la descarga nunca se pidió con fetch.
     expect(screen.getAllByRole("link", { name: "Descargar" })).toHaveLength(1);
     expect(simulado.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/descargar"))).toBe(false);
+  });
+
+  it("mientras llega la lista dice «Consultando…», sin documentos", async () => {
+    const simulado = conLista({ [`GET ${BASE}`]: () => new Promise<Response>(() => undefined) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    // Control: ya se pidió la lista, así que es su carga y no la de los edificios.
+    await waitFor(() => expect(pedidos(simulado, "GET", BASE)).toHaveLength(1));
+    expect(screen.getByText("Consultando…")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
+  });
+
+  it("un edificio sin documentos lo dice, sin categorías vacías, y deja cargar el primero", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}`]: () => Response.json({ documentos: [] }) }));
+    abrir();
+    expect(await screen.findByText("El edificio todavía no tiene documentos cargados.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 3 })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cargar un documento" })).toBeTruthy();
+  });
+
+  it("sin conexión al pedir la lista lo dice, sin documentos", async () => {
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}`]: () => Promise.reject(new TypeError("Failed to fetch")) }));
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    expect(screen.getByText(SIN_CONEXION)).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
   });
 
   it("«Actualizar» vuelve a pedir la lista (sin repetir solo)", async () => {
