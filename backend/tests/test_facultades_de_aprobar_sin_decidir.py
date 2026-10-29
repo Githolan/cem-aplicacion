@@ -3,7 +3,8 @@ decida el propietario (decisión 7 del 21-10).
 
 Diseño: `doc/diseno/H3_Paquete_Decisiones_Economicas.md` del repositorio CEM, «Infraestructura
 común a todas las opciones». La migración que decida quién aprueba saca la facultad de
-`SIN_DECIDIR` y cambia estas pruebas en el mismo PR.
+`SIN_DECIDIR` y cambia estas pruebas en el mismo PR: `0046` lo hizo con `egresos.aprobar_orden`,
+que pasó al paquete del Consejo (decisión 2 del propietario, 29-10-2026).
 """
 
 import pytest
@@ -16,7 +17,7 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
 pytestmark = pytest.mark.db
 
-SIN_DECIDIR = ("egresos.aprobar_orden", "liquidacion.aprobar", "coeficientes.aprobar")
+SIN_DECIDIR = ("liquidacion.aprobar", "coeficientes.aprobar")
 
 
 def _probar(motor, sentencia, params=None) -> None:
@@ -72,7 +73,7 @@ def test_ningun_paquete_ni_mandato_tiene_una_facultad_de_aprobar_sin_decidir(
             {"c": e["cons"]},
         ).scalar_one()
     assert en_uso == []
-    assert catalogo == 3  # control: las tres existen en el catálogo como económicas
+    assert catalogo == 2  # control: las dos existen en el catálogo como económicas
     assert del_consorcio > 0  # control: las altas sí otorgaron facultades
 
 
@@ -85,15 +86,44 @@ def test_la_base_niega_agregarla_a_un_paquete(motor_migrate, tipo, facultad):
 def test_la_base_niega_cambiar_una_facultad_del_paquete_por_una_sin_decidir(motor_migrate):
     _niega(
         motor_migrate,
-        "update nucleo.paquete_facultad set facultad = 'egresos.aprobar_orden'"
+        "update nucleo.paquete_facultad set facultad = 'coeficientes.aprobar'"
         " where tipo = 'miembro_consejo' and facultad = 'liquidacion.revisar'",
     )
 
 
 def test_las_demas_facultades_siguen_entrando(motor_migrate):
-    """Control: la guarda mira solo las tres. `fondo_reserva.autorizar` ya está decidida."""
+    """Control: la guarda mira solo las dos. `fondo_reserva.autorizar` y `egresos.aprobar_orden`
+    ya están decididas."""
     _probar(motor_migrate, _paquete("miembro_consejo", "documentos.cargar"))
     _probar(motor_migrate, _paquete("administrador", "fondo_reserva.autorizar"))
+    _probar(motor_migrate, _paquete("administrador", "egresos.aprobar_orden"))
+
+
+def test_aprobar_ordenes_esta_solo_en_el_paquete_del_consejo(
+    motor_migrate,
+    motor_app,
+    escena,  # noqa: F811
+):
+    """Decisión 2 (29-10-2026, `0046`): el consejero la recibe con su alta; el administrador no."""
+    e = escena
+    with motor_migrate.connect() as c:
+        tipos = c.execute(
+            text("select tipo::text from nucleo.paquete_facultad"
+                 " where facultad = 'egresos.aprobar_orden'")
+        ).scalars().all()  # fmt: skip
+    assert tipos == ["miembro_consejo"]
+    mc = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="miembro_consejo", persona=e["p2"])
+    adm = alta(motor_app, e["cons"], e["per"], e["acta"], tipo="administrador", persona=e["p1"])
+    with motor_migrate.connect() as c:
+        tiene = dict(
+            c.execute(
+                text("select m.id, bool_or(f.facultad = 'egresos.aprobar_orden')"
+                     " from nucleo.mandato m join nucleo.facultad_otorgada f on f.mandato_id = m.id"
+                     " where m.id in (:mc, :adm) group by m.id"),
+                {"mc": mc, "adm": adm},
+            ).all()
+        )  # fmt: skip
+    assert tiene == {mc: True, adm: False}
 
 
 def test_la_base_niega_otorgarla_a_un_mandato(motor_migrate, motor_app, escena):  # noqa: F811

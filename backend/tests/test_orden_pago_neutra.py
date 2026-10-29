@@ -1,16 +1,14 @@
-"""H3, infraestructura común (`0045`): orden de pago versionada, aprobaciones por versión y
-barreras de la base. Datos SINTETICOS / PRUEBA / NO REAL.
+"""H3: orden de pago versionada, aprobaciones por versión y barreras de la base (`0045`), con
+la aprobación del Consejo y su cantidad configurable (`0046`). Datos SINTETICOS / PRUEBA / NO
+REAL.
 
-Diseño: `doc/diseno/H3_Paquete_Decisiones_Economicas.md` del repositorio CEM. Nadie tiene
-`egresos.aprobar_orden` (decisión 7 del 21-10, guarda de `0044`): para probar la aprobación, la
-escena se la otorga a dos consejeros deshabilitando la guarda dentro de la transacción de la
-prueba, como haría la migración de la decisión futura. Que exista una aprobación no lleva la
-orden a «aprobada»: cuántas hacen falta es la decisión 2, así que las pruebas de emitir fuerzan
-ese estado con una actualización directa (permitida por la tabla de transiciones).
+Diseño: `doc/diseno/H3_Paquete_Decisiones_Economicas.md` del repositorio CEM y la decisión 2 del
+propietario (29-10-2026): `egresos.aprobar_orden` está en el paquete de `miembro_consejo`, así que
+los dos consejeros de la escena la reciben con su alta. Sin configuración hace falta una
+aprobación; las pruebas que necesitan dos las cargan como soporte (`exigir`).
 """
 
 import threading
-from collections.abc import Iterator
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -86,7 +84,8 @@ def nueva_sesion(motor_migrate, persona, *, horas_atras=0, totp_min_atras: int |
 
 
 def otorgar(motor_migrate, cons, mandato, decision, facultad) -> None:
-    """La facultad para la prueba. Las de aprobar pasan por encima de la guarda de `0044`."""
+    """Una facultad fuera del paquete del mandato, para la prueba (pasa por encima de la guarda de
+    `0044`, que sigue negando las de aprobar sin decidir)."""
     with motor_migrate.begin() as c:
         c.execute(text("alter table nucleo.facultad_otorgada disable trigger"
                        " mandato_sin_facultad_sin_decidir"))  # fmt: skip
@@ -108,34 +107,29 @@ def escena_economica(motor_migrate, motor_app, *, con_modo=True) -> Escena:
         cambiar(motor_app, cons, "administrador_aumentado", acta)
     adm, mc1, mc2 = (otra_persona(motor_migrate, cons) for _ in range(3))
     alta(motor_app, cons, prop, acta, persona=adm)
-    mandatos = {
-        p: alta(motor_app, cons, prop, acta, tipo="miembro_consejo", persona=p) for p in (mc1, mc2)
-    }
-    for m in mandatos.values():
-        otorgar(motor_migrate, cons, m, acta, "egresos.aprobar_orden")
+    for p in (mc1, mc2):
+        alta(motor_app, cons, prop, acta, tipo="miembro_consejo", persona=p)
     return Escena(
         cons, prop, adm, mc1, mc2, {p: nueva_sesion(motor_migrate, p) for p in (adm, mc1, mc2)}
     )
 
 
-def sin_facultades_de_aprobar(motor_migrate, cons) -> None:
-    """Al terminar, la base compartida vuelve a cumplir la decisión 7 (`0044`)."""
-    with motor_migrate.begin() as c:
+def exigir(motor_app, cons, cantidad: int) -> None:
+    """Como soporte (`scripts/aprobaciones_orden_pago.py`): la cantidad rige desde hoy."""
+    acta = decidir_equipo(motor_app, cons)
+    with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
         c.execute(
             text(
-                "delete from nucleo.facultad_otorgada where consorcio_id = :c"
-                " and facultad in ('egresos.aprobar_orden', 'liquidacion.aprobar',"
-                " 'coeficientes.aprobar')"
+                "select nucleo.fijar_aprobaciones_orden_pago(cast(:n as smallint),"
+                " nucleo.hoy_del_consorcio(:c), :d, null, 'soporte')"
             ),
-            {"c": cons},
+            {"n": cantidad, "c": cons, "d": acta},
         )
 
 
 @pytest.fixture
-def e(motor_migrate, motor_app) -> Iterator[Escena]:
-    escena = escena_economica(motor_migrate, motor_app)
-    yield escena
-    sin_facultades_de_aprobar(motor_migrate, escena.cons)
+def e(motor_migrate, motor_app) -> Escena:
+    return escena_economica(motor_migrate, motor_app)
 
 
 def llamar(motor, e: Escena, actor, sentencia, sesion=None, origen="api", **extra):
@@ -257,21 +251,15 @@ def test_las_vigencias_de_r10_son_las_de_la_api(motor_migrate):
 
 def test_sin_un_modo_que_admita_egresos_no_se_prepara(motor_migrate, motor_app):
     e = escena_economica(motor_migrate, motor_app, con_modo=False)
-    try:
-        niega(motor_migrate, e, e.adm, PREPARAR, "modo_no_admitido")
-        cambiar(motor_app, e.cons, "administrador_aumentado", decidir_equipo(motor_app, e.cons))
-        assert llamar(motor_migrate, e, e.adm, PREPARAR) is not None  # control
-    finally:
-        sin_facultades_de_aprobar(motor_migrate, e.cons)
+    niega(motor_migrate, e, e.adm, PREPARAR, "modo_no_admitido")
+    cambiar(motor_app, e.cons, "administrador_aumentado", decidir_equipo(motor_app, e.cons))
+    assert llamar(motor_migrate, e, e.adm, PREPARAR) is not None  # control
 
 
 def test_en_modo_consejo_no_se_prepara(motor_migrate, motor_app):
     e = escena_economica(motor_migrate, motor_app, con_modo=False)
-    try:
-        cambiar(motor_app, e.cons, "consejo", decidir_equipo(motor_app, e.cons))
-        niega(motor_migrate, e, e.adm, PREPARAR, "modo_no_admitido")
-    finally:
-        sin_facultades_de_aprobar(motor_migrate, e.cons)
+    cambiar(motor_app, e.cons, "consejo", decidir_equipo(motor_app, e.cons))
+    niega(motor_migrate, e, e.adm, PREPARAR, "modo_no_admitido")
 
 
 @pytest.mark.parametrize(
@@ -375,55 +363,98 @@ def test_la_historia_de_versiones_y_aprobaciones_solo_se_agrega(motor_migrate, e
 # Aprobación por versión ----------------------------------------------------------------------
 
 
-def test_aprobar_registra_la_version_y_no_cambia_el_estado(motor_migrate, e):
+def test_sin_configuracion_una_aprobacion_deja_la_orden_aprobada(motor_migrate, e):
+    """Decisión 2 (29-10-2026): sin configuración aprueba un consejero distinto de quien preparó."""
     o = preparada(motor_migrate, e, en_revision=True)
+    assert versiones(motor_migrate, o)[0]["aprobaciones_requeridas"] == 1
     h = huella(motor_migrate, o, 1)
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)
-    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)  # N aprobaciones
-    assert aprobaciones(motor_migrate, o) == [(1, e.mc1), (1, e.mc2)]
-    assert orden(motor_migrate, o)["estado"] == "en_revision"  # la cantidad es la decisión 2
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+    ev = eventos(motor_migrate, o)[-1]
+    assert ev["accion"] == "consorcio.orden_pago.aprobar"
+    assert {k: ev["despues"][k] for k in ("aprobaciones", "requeridas", "estado")} == {
+        "aprobaciones": 1, "requeridas": 1, "estado": "aprobada",
+    }  # fmt: skip
+    # Ya aprobada, otro consejero no suma: la orden no está en revisión.
+    niega(motor_migrate, e, e.mc2, APROBAR, "estado_invalido", orden=o, version=1, huella=h)
+    assert aprobaciones(motor_migrate, o) == [(1, e.mc1)]
+
+
+def test_con_dos_requeridas_la_primera_no_aprueba_y_la_segunda_si(motor_migrate, motor_app, e):
+    exigir(motor_app, e.cons, 2)
+    o = preparada(motor_migrate, e, en_revision=True)
+    assert versiones(motor_migrate, o)[0]["aprobaciones_requeridas"] == 2
+    h = huella(motor_migrate, o, 1)
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
+    assert eventos(motor_migrate, o)[-1]["despues"]["estado"] == "en_revision"
     niega(motor_migrate, e, e.mc1, APROBAR, "aprobacion_repetida", orden=o, version=1, huella=h)
+    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+    assert aprobaciones(motor_migrate, o) == [(1, e.mc1), (1, e.mc2)]
     acciones = [x["accion"] for x in eventos(motor_migrate, o)]
     assert acciones.count("consorcio.orden_pago.aprobar") == 2
 
 
-def test_el_modelo_soporta_una_o_dos_aprobaciones(motor_migrate, motor_app, e):
-    """2A y 2B del paquete H3 sin elegir: «hacen falta N» es contar identidades humanas distintas
-    sobre la versión vigente. La cuenta da 1 y después 2; otra cuenta del mismo humano no suma, y
-    ninguna cantidad pone «aprobada» (esa transición espera la decisión 2)."""
+def test_cada_version_guarda_la_cantidad_del_dia_en_que_se_preparo(motor_migrate, motor_app, e):
+    """Un cambio de configuración no altera lo ya preparado; modificar toma la del día."""
+    antes = preparada(motor_migrate, e, en_revision=True)
+    exigir(motor_app, e.cons, 2)
+    despues = preparada(motor_migrate, e, en_revision=True)
+    assert versiones(motor_migrate, antes)[0]["aprobaciones_requeridas"] == 1
+    assert versiones(motor_migrate, despues)[0]["aprobaciones_requeridas"] == 2
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=antes, version=1,
+           huella=huella(motor_migrate, antes, 1))  # fmt: skip
+    assert orden(motor_migrate, antes)["estado"] == "aprobada"  # con la cantidad que tenía
+    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=antes, version=1, importe=4_321)
+    assert versiones(motor_migrate, antes)[1]["aprobaciones_requeridas"] == 2
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=antes, version=2,
+           huella=huella(motor_migrate, antes, 2))  # fmt: skip
+    assert orden(motor_migrate, antes)["estado"] == "en_revision"
+
+
+def test_otra_cuenta_del_mismo_humano_no_suma_la_segunda(motor_migrate, motor_app, e):
+    exigir(motor_app, e.cons, 2)
     o = preparada(motor_migrate, e, en_revision=True)
     h = huella(motor_migrate, o, 1)
-
-    def identidades_que_aprobaron() -> int:
-        with motor_migrate.connect() as c:
-            return c.execute(
-                text(
-                    "select count(distinct a.identidad_id) from nucleo.orden_pago_aprobacion a"
-                    " join nucleo.orden_pago o on o.id = a.orden_id"
-                    " where o.id = :o and a.version = o.version_vigente"
-                ),
-                {"o": o},
-            ).scalar_one()
-
-    assert identidades_que_aprobaron() == 0
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)
-    assert identidades_que_aprobaron() == 1  # alcanza con 2A
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    niega(motor_migrate, e, otra, APROBAR, "aprobacion_repetida", orden=o, version=1, huella=h)
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
+    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)  # control
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+
+
+def test_p3_69_tampoco_suma_si_soporte_corrige_la_identidad_despues(motor_migrate, motor_app, e):
+    """P3 69: mc1 aprueba con su identidad; después soporte corrige su cuenta a la identidad de
+    otra persona del Consejo (son el mismo ser humano). Esa otra no suma la segunda aprobación,
+    aunque la identidad guardada en la aprobación sea la vieja. Control: mc2, otro humano, sí."""
+    exigir(motor_app, e.cons, 2)
+    o = preparada(motor_migrate, e, en_revision=True)
+    h = huella(motor_migrate, o, 1)
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)
+    otra = otra_persona(motor_migrate, e.cons)
     with motor_migrate.connect() as c:
         acta = c.execute(
             text("select decision_id from nucleo.mandato where consorcio_id = :c"
-                 " and persona_id = :p"),
-            {"c": e.cons, "p": e.mc1},
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc1},
         ).scalar_one()  # fmt: skip
-    otra = otra_persona(motor_migrate, e.cons, verificada=False)
-    misma_identidad(motor_migrate, e.cons, e.mc1, otra)
-    m_otra = alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
-    otorgar(motor_migrate, e.cons, m_otra, acta, "egresos.aprobar_orden")
+        de_otra = c.execute(
+            text("select nucleo.identidad_humana_de(:c, :p)"), {"c": e.cons, "p": otra}
+        ).scalar_one()
+    alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
     e.sesion[otra] = nueva_sesion(motor_migrate, otra)
+    _revincular(motor_migrate, e.cons, e.mc1, a=de_otra)
+    with motor_migrate.connect() as c:
+        guardada = c.execute(
+            text("select identidad_id from nucleo.orden_pago_aprobacion where orden_id = :o"),
+            {"o": o},
+        ).scalar_one()
+    assert de_otra is not None and guardada != de_otra  # control: la guardada no la delata
     niega(motor_migrate, e, otra, APROBAR, "aprobacion_repetida", orden=o, version=1, huella=h)
-    assert identidades_que_aprobaron() == 1
-    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)
-    assert identidades_que_aprobaron() == 2  # alcanza con 2B
     assert orden(motor_migrate, o)["estado"] == "en_revision"
+    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
 
 
 def test_un_cambio_esencial_invalida_lo_aprobado_y_permite_aprobar_la_version_nueva(
@@ -440,12 +471,11 @@ def test_un_cambio_esencial_invalida_lo_aprobado_y_permite_aprobar_la_version_nu
     niega(motor_migrate, e, e.mc1, APROBAR, "huella_distinta", orden=o, version=2, huella=h1)
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=2, huella=h2)
     assert aprobaciones(motor_migrate, o) == [(1, e.mc1), (2, e.mc1)]
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
 
 
 def test_una_orden_aprobada_que_cambia_vuelve_a_revision(motor_migrate, e):
-    o = preparada(motor_migrate, e, en_revision=True)
-    with motor_migrate.begin() as c:
-        c.execute(text("update nucleo.orden_pago set estado = 'aprobada' where id = :o"), {"o": o})
+    o = _aprobada(motor_migrate, e)
     llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, beneficiario="Otro SINTETICO")
     assert (orden(motor_migrate, o)["estado"], orden(motor_migrate, o)["version_vigente"]) == (
         "en_revision", 2,
@@ -454,14 +484,9 @@ def test_una_orden_aprobada_que_cambia_vuelve_a_revision(motor_migrate, e):
 
 def test_pa12_cambiar_el_beneficiario_tras_aprobar_invalida_y_vuelve_a_revision(motor_migrate, e):
     """PA12 (documento 08, RN12): cambiar el beneficiario de una orden aprobada invalida la
-    autorización y la devuelve a revisión. Llevarla a «Aprobada» no tiene camino todavía (la
-    decisión 2), así que la prueba la pone a mano. Parcial: la base; la ruta y la pantalla
-    esperan a H3."""
-    o = preparada(motor_migrate, e, en_revision=True)
+    autorización y la devuelve a revisión. Parcial: la base; la ruta y la pantalla esperan a H3."""
+    o = _aprobada(motor_migrate, e)
     h1 = huella(motor_migrate, o, 1)
-    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h1)
-    with motor_migrate.begin() as c:
-        c.execute(text("update nucleo.orden_pago set estado = 'aprobada' where id = :o"), {"o": o})
     llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1,
            beneficiario="Otro proveedor SINTETICO")  # fmt: skip
     despues = orden(motor_migrate, o)
@@ -486,9 +511,25 @@ def test_solo_se_aprueba_una_orden_en_revision(motor_migrate, e):
 # Separación de funciones ---------------------------------------------------------------------
 
 
+def otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, de: UUID) -> UUID:
+    """Otra cuenta del mismo ser humano que `de`, con mandato del Consejo (y por eso con
+    `egresos.aprobar_orden`) y sesión. Devuelve esa cuenta."""
+    with motor_migrate.connect() as c:
+        acta = c.execute(
+            text("select decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": de},
+        ).scalar_one()  # fmt: skip
+    otra = otra_persona(motor_migrate, e.cons, verificada=False)
+    misma_identidad(motor_migrate, e.cons, de, otra)
+    alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
+    e.sesion[otra] = nueva_sesion(motor_migrate, otra)
+    return otra
+
+
 def _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e) -> UUID:
-    """El administrador (que prepara) recibe aprobar solo para la prueba, y también otra cuenta
-    del mismo ser humano, en el Consejo. Devuelve esa otra cuenta."""
+    """El administrador (que prepara) recibe aprobar solo para la prueba (la decisión 6 sigue
+    abierta), y también otra cuenta del mismo ser humano, en el Consejo. Devuelve esa otra
+    cuenta."""
     with motor_migrate.connect() as c:
         m_adm, acta = c.execute(
             text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
@@ -496,12 +537,7 @@ def _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e) -> UUI
             {"c": e.cons, "p": e.adm},
         ).one()  # fmt: skip
     otorgar(motor_migrate, e.cons, m_adm, acta, "egresos.aprobar_orden")
-    otra = otra_persona(motor_migrate, e.cons, verificada=False)
-    misma_identidad(motor_migrate, e.cons, e.adm, otra)
-    m_otra = alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
-    otorgar(motor_migrate, e.cons, m_otra, acta, "egresos.aprobar_orden")
-    e.sesion[otra] = nueva_sesion(motor_migrate, otra)
-    return otra
+    return otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
 
 
 def test_pa14_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_app, e):
@@ -550,11 +586,10 @@ def test_rechazar_tambien_exige_no_haber_preparado_y_guarda_el_motivo_fuera_del_
 
 
 def _aprobada(motor_migrate, e) -> UUID:
-    """Aprobada por mc1; el paso a «aprobada» lo fuerza la prueba (decisión 2 pendiente)."""
+    """Aprobada por mc1, que alcanza sin configuración (decisión 2)."""
     o = preparada(motor_migrate, e, en_revision=True)
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=huella(motor_migrate, o, 1))
-    with motor_migrate.begin() as c:
-        c.execute(text("update nucleo.orden_pago set estado = 'aprobada' where id = :o"), {"o": o})
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
     return o
 
 
@@ -580,9 +615,9 @@ def test_quien_aprobo_no_emite_ni_con_otra_cuenta(motor_migrate, motor_app, e):
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
 
 
-def _revincular(motor_migrate, cons: UUID, persona: UUID) -> None:
-    """Como haría soporte al corregir un vínculo: la cuenta deja su identidad y pasa a otra
-    nueva (SINTETICA)."""
+def _revincular(motor_migrate, cons: UUID, persona: UUID, a: UUID | None = None) -> None:
+    """Como haría soporte al corregir un vínculo: la cuenta deja su identidad y pasa a `a` o, si
+    no se dice, a otra nueva (SINTETICA)."""
     with motor_migrate.begin() as c:
         c.execute(
             text(
@@ -592,19 +627,21 @@ def _revincular(motor_migrate, cons: UUID, persona: UUID) -> None:
             {"c": cons, "p": persona},
         )
     with motor_migrate.begin() as c:
-        nueva = c.execute(
-            text(
-                "insert into nucleo.identidad_humana (consorcio_id, huella, clave_version)"
-                " values (:c, sha256(convert_to(gen_random_uuid()::text, 'UTF8')), 1) returning id"
-            ),
-            {"c": cons},
-        ).scalar_one()
+        if a is None:
+            a = c.execute(
+                text(
+                    "insert into nucleo.identidad_humana (consorcio_id, huella, clave_version)"
+                    " values (:c, sha256(convert_to(gen_random_uuid()::text, 'UTF8')), 1)"
+                    " returning id"
+                ),
+                {"c": cons},
+            ).scalar_one()
         c.execute(
             text(
                 "insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
                 " values (:c, :p, :i)"
             ),
-            {"c": cons, "p": persona, "i": nueva},
+            {"c": cons, "p": persona, "i": a},
         )
 
 
@@ -772,24 +809,16 @@ def test_dos_emisiones_simultaneas_emiten_una_sola_vez(motor_migrate, e):
 
 
 def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate, motor_app, e):
+    exigir(motor_app, e.cons, 2)  # con una, la segunda chocaría con «aprobada», no con la repetida
     o = preparada(motor_migrate, e, en_revision=True)
     h1 = huella(motor_migrate, o, 1)
-    with motor_migrate.connect() as c:
-        acta = c.execute(
-            text("select decision_id from nucleo.mandato where consorcio_id = :c"
-                 " and persona_id = :p"),
-            {"c": e.cons, "p": e.mc1},
-        ).scalar_one()  # fmt: skip
-    otra = otra_persona(motor_migrate, e.cons, verificada=False)
-    misma_identidad(motor_migrate, e.cons, e.mc1, otra)
-    m_otra = alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
-    otorgar(motor_migrate, e.cons, m_otra, acta, "egresos.aprobar_orden")
-    e.sesion[otra] = nueva_sesion(motor_migrate, otra)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
     r = _en_paralelo(motor_migrate, e,
                      (e.mc1, APROBAR, {"orden": o, "version": 1, "huella": h1}),
                      (otra, APROBAR, {"orden": o, "version": 1, "huella": h1}))  # fmt: skip
     assert r == {"esperaba": True, "motivo": "aprobacion_repetida"}
     assert aprobaciones(motor_migrate, o) == [(1, e.mc1)]
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
 
 
 # Permisos e ida y vuelta ---------------------------------------------------------------------
@@ -797,7 +826,7 @@ def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate
 
 def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
     tablas = ("nucleo.orden_pago", "nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion",
-              "nucleo.transicion_orden_pago")  # fmt: skip
+              "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago")  # fmt: skip
     with motor_migrate.connect() as c:
         tabla = [
             c.execute(
@@ -813,10 +842,17 @@ def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
                 " p.pronamespace where n.nspname = 'nucleo' and (p.proname like '%orden_pago%'"
                 " or p.proname in ('exigir_acto_economico', 'enviar_orden_a_revision',"
                 " 'exigir_decision_sobre_orden'))"
+                " and p.proname <> 'fijar_aprobaciones_orden_pago'"
             )
         ).one()
+        # La carga de soporte corre como `cem_app` (como los coeficientes): solo esa función.
+        fijar = c.execute(
+            text("select has_function_privilege('cem_app', 'nucleo.fijar_aprobaciones_orden_pago("
+                 "smallint, date, uuid, uuid, text)', 'EXECUTE')")
+        ).scalar_one()  # fmt: skip
     assert not any(tabla)
-    assert funciones[0] == 0 and funciones[1] >= 13  # control: las funciones existen
+    assert funciones[0] == 0 and funciones[1] >= 14  # control: las funciones existen
+    assert fijar
 
 
 def test_0045_ida_y_vuelta(base_aparte):  # noqa: F811
@@ -874,11 +910,11 @@ def test_0045_no_baja_si_hay_ordenes(base_aparte):  # noqa: F811
         assert c.execute(text("select to_regclass('nucleo.orden_pago')")).scalar_one() is None
 
 
-def test_ninguna_funcion_lleva_la_orden_a_aprobada(motor_migrate):
-    """Cuántas aprobaciones hacen falta es la decisión 2: ninguna función pone «aprobada». Alarma
-    por inventario: las únicas que nombran el estado lo leen (modificar devuelve a revisión,
-    emitir parte de ahí). Una función nueva que lo nombre hace fallar esta prueba y obliga a
-    revisarla. Mira todos los esquemas propios, no solo `nucleo` (P3 70)."""
+def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
+    """Desde la decisión 2 (`0046`), solo `registrar_aprobacion_orden_pago` pone «aprobada», al
+    llegar a la cantidad. Alarma por inventario: las otras que nombran el estado lo leen (modificar
+    devuelve a revisión, emitir parte de ahí). Una función nueva que lo nombre hace fallar esta
+    prueba y obliga a revisarla. Mira todos los esquemas propios, no solo `nucleo` (P3 70)."""
     with motor_migrate.connect() as c:
         nombran = set(
             c.execute(
@@ -890,7 +926,10 @@ def test_ninguna_funcion_lleva_la_orden_a_aprobada(motor_migrate):
                 )
             ).scalars()
         )
-    assert nombran == {"nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago"}
+    assert nombran == {
+        "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
+        "nucleo.registrar_aprobacion_orden_pago",
+    }  # fmt: skip
 
 
 def test_truncate_tampoco_borra_la_historia(motor_migrate, e):
