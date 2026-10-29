@@ -512,21 +512,25 @@ def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
     from limits import parse
 
     from app import limite
+    from app.identidad.invitaciones import LIMITE_INVITAR
 
     monkeypatch.setattr(
         "app.limite.LIMITES_INVITACIONES_PERSONA", (parse("5/hour"), parse("50/day"))
     )
     original = limite.consumir
-    # El cupo se pide con el bloqueo de la clave tomado: cuando el primero llega acá, ya lo
-    # tiene. El segundo sale recién entonces; con una espera fija, una CPU cargada podía dejar
-    # que el segundo tomara el bloqueo antes y la prueba fallaba sin defecto (rojo de 9223ed5).
+    # El cupo de invitar se pide con el bloqueo de la clave tomado: cuando el primero llega ahí,
+    # ya lo tiene. El segundo sale recién entonces; con una espera fija, una CPU cargada podía
+    # dejar que el segundo tomara el bloqueo antes y la prueba fallaba sin defecto (rojo de
+    # 9223ed5). El middleware también llama a `consumir` (el cupo general, antes de enrutar):
+    # esas llamadas no cuentan (Codex en #159).
     en_el_cupo: list[asyncio.Event] = []
 
-    async def consumir_lento(*args, **kwargs):
-        # El primero espera el cupo (sin frenar el bucle) cuando llega el segundo.
-        en_el_cupo[0].set()
-        await asyncio.sleep(0.5)
-        return await original(*args, **kwargs)
+    async def consumir_lento(limitador, limite_, nombre, clave):
+        if nombre == LIMITE_INVITAR:
+            # El primero espera el cupo (sin frenar el bucle) cuando llega el segundo.
+            en_el_cupo[0].set()
+            await asyncio.sleep(0.5)
+        return await original(limitador, limite_, nombre, clave)
 
     monkeypatch.setattr(limite, "consumir", consumir_lento)
     e = escena
