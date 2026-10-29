@@ -808,6 +808,19 @@ def test_dos_emisiones_simultaneas_emiten_una_sola_vez(motor_migrate, e):
     assert r == {"esperaba": True, "motivo": "estado_invalido"}
 
 
+def test_dos_humanos_aprobando_a_la_vez_con_dos_requeridas_la_aprueban(motor_migrate, motor_app, e):
+    """La segunda espera el bloqueo de la orden y, al seguir, cuenta la primera ya confirmada."""
+    exigir(motor_app, e.cons, 2)
+    o = preparada(motor_migrate, e, en_revision=True)
+    h1 = huella(motor_migrate, o, 1)
+    r = _en_paralelo(motor_migrate, e,
+                     (e.mc1, APROBAR, {"orden": o, "version": 1, "huella": h1}),
+                     (e.mc2, APROBAR, {"orden": o, "version": 1, "huella": h1}))  # fmt: skip
+    assert r["esperaba"] and "ok" in r, r
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+    assert sorted(p for _, p in aprobaciones(motor_migrate, o)) == sorted([e.mc1, e.mc2])
+
+
 def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate, motor_app, e):
     exigir(motor_app, e.cons, 2)  # con una, la segunda chocaría con «aprobada», no con la repetida
     o = preparada(motor_migrate, e, en_revision=True)

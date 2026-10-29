@@ -39,8 +39,8 @@ COPY --chown=cem backend/alembic.ini backend/arranque.sh ./
 # (RF02), identidad humana (A13-C), borrado y recategorización de documentos (2c-2), exportación
 # de un consorcio (2c-3, RF36) y cantidad de aprobaciones de las órdenes de pago (H3). Las demás
 # (roles, OpenAPI, cobertura de PA) y el smoke de staging (`backend/pruebas/`) corren fuera de la
-# imagen. `tests/test_scripts_en_la_imagen.py` falla si
-# un script que dice correr dentro del contenedor no está en esta lista.
+# imagen. `tests/test_scripts_en_la_imagen.py` falla si un script que dice correr dentro del
+# contenedor no está en esta lista.
 COPY --chown=cem backend/scripts/__init__.py backend/scripts/alta_consorcio.py \
      backend/scripts/invitar.py backend/scripts/alta_mandato.py \
      backend/scripts/mandato_soporte.py backend/scripts/cargar_coeficientes.py \

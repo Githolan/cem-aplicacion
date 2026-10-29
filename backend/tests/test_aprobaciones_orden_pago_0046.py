@@ -201,9 +201,28 @@ def _guarda_niega_aprobar_ordenes(motor) -> bool:
     return False
 
 
+FUNCIONES_CAMBIADAS = (
+    "nucleo.negar_facultad_sin_decidir()",
+    "nucleo.nueva_version_orden_pago(uuid, uuid, integer, bigint, text, text, text, text, boolean,"
+    " uuid, uuid)",
+    "nucleo.registrar_aprobacion_orden_pago(uuid, integer, bytea, uuid, text, uuid)",
+)
+
+
+def _definiciones(motor) -> list[str]:
+    with motor.connect() as c:
+        return [
+            c.execute(
+                text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": f}
+            ).scalar_one()
+            for f in FUNCIONES_CAMBIADAS
+        ]
+
+
 def test_0046_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
     command.upgrade(cfg, "0045")
+    en_0045 = _definiciones(motor)
     assert (_existe(motor), _paquete_del_consejo(motor), _guarda_niega_aprobar_ordenes(motor)) == (
         False, False, True,
     )  # fmt: skip
@@ -211,6 +230,8 @@ def test_0046_ida_y_vuelta(base_aparte):  # noqa: F811
     assert (_existe(motor), _paquete_del_consejo(motor), _guarda_niega_aprobar_ordenes(motor)) == (
         True, True, False,
     )  # fmt: skip
+    # Control: las tres cambian al subir (si no, la igualdad de abajo no probaría nada).
+    assert all(a != b for a, b in zip(en_0045, _definiciones(motor), strict=True))
     command.downgrade(cfg, "0045")
     with motor.connect() as c:
         columna = c.execute(
@@ -222,15 +243,11 @@ def test_0046_ida_y_vuelta(base_aparte):  # noqa: F811
             text("select count(*) from pg_proc where proname in"
                  " ('fijar_aprobaciones_orden_pago', 'aprobaciones_requeridas_orden_pago')")
         ).scalar_one()  # fmt: skip
-        aprobar = c.execute(
-            text("select pg_get_functiondef('nucleo.registrar_aprobacion_orden_pago(uuid, integer,"
-                 " bytea, uuid, text, uuid)'::regprocedure)")
-        ).scalar_one()  # fmt: skip
     assert (_existe(motor), _paquete_del_consejo(motor), _guarda_niega_aprobar_ordenes(motor)) == (
         False, False, True,
     )  # fmt: skip
     assert (columna, funciones) == (0, 0)
-    assert "'aprobada'" not in aprobar and "identidad_humana_de" not in aprobar
+    assert _definiciones(motor) == en_0045  # las tres vuelven exactamente a como estaban
     command.upgrade(cfg, "0046")  # control: vuelve a subir limpio
     assert _existe(motor) and _paquete_del_consejo(motor)
 
