@@ -442,7 +442,7 @@ RF05,coeficientes.ver_propia_unidad,MC,C,unidad:3A,vigente,si,,403,sin_concesion
 2c-2,documentos.cargar_operativos,AE,C,,vigente,si,,403,sin_concesion,el administrador externo carga con documentos.cargar
 2c-2,documentos.cargar_operativos,P,C,,sin_mandato,si,,403,sin_concesion,el propietario no carga
 2c-2,documentos.cargar_operativos,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo no corre
-H3,egresos.aprobar_orden,Fac(egresos.preparar_orden),AA,cuenta:X,vigente,si,preparo=otro,403,sin_concesion,preparar no da aprobar: nadie tiene egresos.aprobar_orden (decisión 7)
+H3,egresos.aprobar_orden,Fac(egresos.preparar_orden),AA,cuenta:X,vigente,si,preparo=otro,403,sin_concesion,preparar no da aprobar: egresos.aprobar_orden es del Consejo (decisión 2 del 29-10)
 H3,liquidacion.aprobar,Fac(liquidacion.preparar),AA,,vigente,si,preparo=otro,403,sin_concesion,preparar no da aprobar: nadie tiene liquidacion.aprobar (decisión 7)
 H3,coeficientes.aprobar,Fac(coeficientes.proponer),AA,grupo:agua,vigente,si,propuso=otro;respaldo=si,403,sin_concesion,proponer no da aprobar: nadie tiene coeficientes.aprobar (decisión 7)
 H3,egresos.preparar_orden,Fac(egresos.preparar_orden),C,cuenta:X,vigente,si,,403,modo_no_admitido,egresos no se preparan en Consejo

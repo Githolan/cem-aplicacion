@@ -40,6 +40,7 @@ PAQUETE_CONSEJO = sorted(
         "decisiones.ver",
         "documentos.cargar_operativos",
         "documentos.ver",
+        "egresos.aprobar_orden",
         "fiscalizacion.ver_panel",
         "fondo_reserva.autorizar",
         "invitaciones.crear",
