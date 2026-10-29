@@ -1,11 +1,12 @@
 """Fija cuántas aprobaciones necesita una orden de pago en un consorcio, en nombre del equipo
 (decisión 2 del propietario, 29-10-2026; 0046).
 
-Sin configuración rige una. El equipo carga 1 o 2 con la decisión que lo respalda (acta, ya
-registrada con `nucleo.registrar_decision`), desde hoy o una fecha posterior: nunca hacia atrás, y
-nunca se modifica una carga (un cambio es otra con una fecha posterior). Las órdenes ya preparadas
-conservan la cantidad que tenían. Corre dentro del contenedor de `cem-backend`, con su
-`CEM_DATABASE_URL` (`cem_app`, sujeto a la RLS):
+Sin configuración rige una. El equipo carga 1 o 2 con el acta que lo respalda, ya registrada con
+`nucleo.registrar_decision`: de asamblea o del Consejo, otro tipo de decisión se rechaza (P3 80,
+0047). Rige desde hoy o una fecha posterior, nunca hacia atrás, y nunca se modifica una carga (un
+cambio es otra con una fecha posterior). Las órdenes ya preparadas conservan la cantidad que
+tenían. Corre dentro del contenedor de `cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`, sujeto
+a la RLS):
 
     python -m scripts.aprobaciones_orden_pago --consorcio <uuid> --cantidad 2 \\
         --desde 2026-11-01 --decision <uuid>

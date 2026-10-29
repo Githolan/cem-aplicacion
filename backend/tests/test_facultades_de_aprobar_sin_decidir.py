@@ -92,11 +92,11 @@ def test_la_base_niega_cambiar_una_facultad_del_paquete_por_una_sin_decidir(moto
 
 
 def test_las_demas_facultades_siguen_entrando(motor_migrate):
-    """Control: la guarda mira solo las dos. `fondo_reserva.autorizar` y `egresos.aprobar_orden`
-    ya están decididas."""
+    """Control: la guarda mira solo las dos. `fondo_reserva.autorizar` ya está decidida;
+    `egresos.aprobar_orden`, también, pero solo para el Consejo (`0047`,
+    `test_aprobaciones_orden_pago_0047.py`)."""
     _probar(motor_migrate, _paquete("miembro_consejo", "documentos.cargar"))
     _probar(motor_migrate, _paquete("administrador", "fondo_reserva.autorizar"))
-    _probar(motor_migrate, _paquete("administrador", "egresos.aprobar_orden"))
 
 
 def test_aprobar_ordenes_esta_solo_en_el_paquete_del_consejo(
