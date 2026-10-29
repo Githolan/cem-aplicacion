@@ -43,7 +43,11 @@ finalizado: desde la primera, staging no baja de `0021` ni de `0020`, que se nie
 (autorización del propietario del 21-10-2026). Desde 2b-6a, soporte verifica la identidad
 humana de las cuentas de la corrida (A13-C) con huellas al azar, porque son cuentas `.invalid`
 sin documento, y la referencia lo dice: staging no baja de `0026`, que se niega con identidades.
-Nunca en producción.
+Desde el 29-10-2026, la propietaria de la corrida da de alta y de baja un TOTP: quedan los dos
+avisos en la cola (a `.invalid`, no salen) y, si la corrida falla entre la confirmación y la
+baja, el TOTP queda activo en esa cuenta de prueba, sin sesiones. Una corrida hace 13 pedidos
+de autenticación desde la IP de prueba: dos corridas dentro del mismo minuto pasan el cupo de 20
+por minuto (`LIMITE_AUTENTICACION_IP`) y la segunda falla con 429. Nunca en producción.
 
 `--sin-verificar-certificado` existe porque dentro de la red de Docker el certificado de
 Traefik no es el del dominio (el TLS público lo termina Cloudflare); el tráfico no sale de la
@@ -659,7 +663,7 @@ def recorrer(corrida: Corrida) -> None:
 
 
 def soporte_sin_eventos(corrida: Corrida, inicio) -> None:
-    """S2b clase B (0033 y 0034): la corrida hizo actos de soporte (invitaciones, decisión, altas
+    """S2a y S2b (0033 y 0043): la corrida hizo actos de soporte (invitaciones, decisión, altas
     y bajas de mandatos, identidades) y ninguno escribió evento. Control: los actos por HTTP de la
     misma corrida sí escribieron, así que la consulta ve los eventos de la corrida."""
     with corrida.tx() as conn:

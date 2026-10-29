@@ -18,9 +18,9 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // (403 `reautenticacion_requerida`, `detalle.falta`). La copia se guarda como archivo en el
 // dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir. Si el navegador no
 // la guardó, se vuelve a pedir; el caso se cierra cuando la persona avisa que la guardó
-// (`…/recibida`). Sin casos pendientes, la sección no se muestra; mientras se consulta tampoco (la
-// página ya mostró su «Consultando…»). Si la consulta falla, sí: esconderla dejaría sin camino a
-// quien tiene un caso abierto.
+// (`…/recibida`). Sin casos pendientes, la sección no se muestra; mientras se consulta tampoco (no
+// tiene indicador propio: P3 77 del repositorio CEM). Si la consulta falla, sí: esconderla dejaría
+// sin camino a quien tiene un caso abierto.
 
 type Caso = components["schemas"]["CasoPrivacidad"];
 
