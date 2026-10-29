@@ -812,28 +812,42 @@ def test_ninguna_funcion_lleva_la_orden_a_aprobada(motor_migrate):
     """Cuántas aprobaciones hacen falta es la decisión 2: ninguna función pone «aprobada». Alarma
     por inventario: las únicas que nombran el estado lo leen (modificar devuelve a revisión,
     emitir parte de ahí). Una función nueva que lo nombre hace fallar esta prueba y obliga a
-    revisarla."""
+    revisarla. Mira todos los esquemas propios, no solo `nucleo` (P3 70)."""
     with motor_migrate.connect() as c:
         nombran = set(
             c.execute(
                 text(
-                    "select p.proname from pg_proc p join pg_namespace n on n.oid ="
-                    " p.pronamespace where n.nspname = 'nucleo' and p.prosrc like '%orden_pago%'"
-                    " and p.prosrc like '%''aprobada''%'"
+                    "select n.nspname || '.' || p.proname from pg_proc p join pg_namespace n"
+                    " on n.oid = p.pronamespace"
+                    " where n.nspname not in ('pg_catalog', 'information_schema')"
+                    " and p.prosrc like '%orden_pago%' and p.prosrc like '%''aprobada''%'"
                 )
             ).scalars()
         )
-    assert nombran == {"modificar_orden_pago", "emitir_orden_pago"}
+    assert nombran == {"nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago"}
 
 
 def test_truncate_tampoco_borra_la_historia(motor_migrate, e):
-    """Control: la tabla tiene filas, así que el TRUNCATE las borraría sin el trigger."""
+    """Control: la tabla tiene filas, así que el TRUNCATE las borraría sin el trigger.
+
+    Cada trigger se prueba solo (P3 68). La versión no se puede truncar sin `cascade` (la
+    aprobación la referencia), y con `cascade` el trigger de la aprobación daría el mismo hint:
+    se apaga dentro de la transacción, que se deshace con el error."""
     o = preparada(motor_migrate, e)
-    for tabla in ("nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion"):
-        with pytest.raises(DBAPIError) as err:
-            with motor_migrate.begin() as c:
-                c.execute(text(f"truncate {tabla} cascade"))
-        assert err.value.orig.diag.message_hint == "historia_inmutable"
+    with pytest.raises(DBAPIError) as err:
+        with motor_migrate.begin() as c:
+            c.execute(
+                text(
+                    "alter table nucleo.orden_pago_aprobacion"
+                    " disable trigger historia_orden_pago_aprobacion_truncate"
+                )
+            )
+            c.execute(text("truncate nucleo.orden_pago_version cascade"))
+    assert err.value.orig.diag.message_hint == "historia_inmutable"
+    with pytest.raises(DBAPIError) as err:
+        with motor_migrate.begin() as c:
+            c.execute(text("truncate nucleo.orden_pago_aprobacion"))
+    assert err.value.orig.diag.message_hint == "historia_inmutable"
     with motor_migrate.connect() as c:
         assert (
             c.execute(

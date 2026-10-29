@@ -40,7 +40,13 @@ diagrama 4) y RN12 (un cambio esencial invalida la aprobación).
   compara los valores);
 - la identidad humana verificada en el consorcio (A13-C).
 La separación (quien aprueba o rechaza no preparó ninguna versión; quien emite no aprobó) usa
-`exigir_separacion_humana`: compara seres humanos, no cuentas.
+`exigir_separacion_humana`: compara seres humanos, no cuentas. Cada versión guarda la identidad
+humana de quien la preparó (`identidad_preparo`) y cada aprobación la de quien aprobó: la
+separación compara también esa identidad guardada, así que una corrección posterior del vínculo
+de una cuenta con su identidad no la saltea.
+
+**Downgrade.** Se niega (`downgrade_con_datos`) si hay alguna orden de pago: bajar borraría la
+historia que los triggers protegen.
 
 **Lo que no hace.** No asigna `egresos.aprobar_orden` a ningún paquete (decisión 7 del 21-10), no
 fija umbral, franjas ni cantidad de aprobaciones, no conoce proveedores (el beneficiario es un
