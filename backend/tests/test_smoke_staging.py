@@ -15,10 +15,12 @@ import uvicorn
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
+from app import limite
 from app.config import Config
 from app.main import crear_app
 from pruebas import smoke_staging
 from tests.conftest import REDIS_URL, url_rol
+from tests.test_identidad import CLAVE_CODIGO
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -31,9 +33,10 @@ def servidor():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         puerto = s.getsockname()[1]
+    # Con la clave del segundo factor, como en staging: el smoke da de alta y de baja un TOTP.
     app = crear_app(
         Config(url_rol("app"), "0.1.0", "sha", "sha", redis_url=REDIS_URL,
-               origen_publico=ORIGEN_STAGING)
+               origen_publico=ORIGEN_STAGING, codigo_clave=CLAVE_CODIGO)
     )  # fmt: skip
     servidor = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=puerto, log_level="warning")
@@ -72,14 +75,14 @@ def contar(motor_migrate, consorcio) -> tuple[int, int]:
 
 
 def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
-    servidor, entorno, capsys, motor_migrate
+    servidor, entorno, capsys, motor_migrate, redis_limpio
 ):
     consorcio = uuid4()
     codigo, resumen, error = correr(servidor, entorno, consorcio, capsys)
     assert codigo == 0, error
     assert resumen["sesiones_abiertas_al_cerrar"] == 0
     assert resumen["navegadores_que_siguen_entrando"] == []
-    assert len(resumen["controles"]) == 14
+    assert len(resumen["controles"]) == 16  # con el TOTP y los actos de soporte sin eventos (29-10)
     assert set(resumen["personas"]) == {
         "propietaria", "consejo1", "consejo2", "administracion", "externo", "saliente",
     }  # fmt: skip
@@ -107,7 +110,11 @@ def test_el_smoke_recorre_todo_y_deja_las_sesiones_revocadas(
         ).scalar_one()  # fmt: skip
     assert verificadas == 3  # A13-C: el Consejo y la propietaria, con la referencia de la prueba
 
-    # El consorcio es permanente: una segunda corrida lo reusa.
+    # El consorcio es permanente: una segunda corrida lo reusa. Es otra corrida, como en staging
+    # (una por vez): sin el cupo de la primera. Las dos juntas pasan los 20 pedidos por minuto
+    # de autenticación por IP (`LIMITE_AUTENTICACION_IP`), y una sola usa 13.
+    for clave in redis_limpio.scan_iter(f"{limite.PREFIJO}:*"):
+        redis_limpio.delete(clave)
     codigo, resumen, error = correr(servidor, entorno, consorcio, capsys)
     assert codigo == 0, error
     assert contar(motor_migrate, consorcio) == (1, 10)  # cinco unidades por corrida

@@ -6,6 +6,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Sección "Tus pedidos sobre tus datos" de /cuenta (RF37, corte 2d-2). Decisión del propietario
@@ -17,13 +18,14 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // (403 `reautenticacion_requerida`, `detalle.falta`). La copia se guarda como archivo en el
 // dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir. Si el navegador no
 // la guardó, se vuelve a pedir; el caso se cierra cuando la persona avisa que la guardó
-// (`…/recibida`). Sin casos pendientes, la sección no se muestra.
+// (`…/recibida`). Sin casos pendientes, la sección no se muestra; mientras se consulta tampoco (no
+// tiene indicador propio: P3 77 del repositorio CEM). Si la consulta falla, sí: esconderla dejaría
+// sin camino a quien tiene un caso abierto.
 
 type Caso = components["schemas"]["CasoPrivacidad"];
 
 const ESTADO_SIN_SESION = 401;
 const ESTADO_DEMASIADOS = 429;
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 /** Lo que se espera antes de liberar el archivo local: el navegador ya empezó a guardarlo. */
 const ESPERA_LIBERAR_MS = 60_000;
 const NOMBRE_DERECHO: Record<Caso["derecho"], string> = {
@@ -87,6 +89,8 @@ interface Props {
 export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion }: Props) {
   const id = useId();
   const [casos, setCasos] = useState<Caso[] | null>(null);
+  const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
+  const [consulta, setConsulta] = useState(0);
   const [codigos, setCodigos] = useState<Record<string, string>>({});
   const [clave, setClave] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -96,16 +100,36 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
     let vigente = true;
     void api
       .GET("/api/v1/privacidad/casos")
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         if (!vigente) return;
         if (response.status === ESTADO_SIN_SESION) sinSesion();
-        else setCasos(data?.elementos ?? []);
+        else if (data !== undefined) setCasos(data.elementos);
+        else setFallaConsulta(mensajeDeFalla(response.status, codigoDe(error)));
       })
-      .catch(() => vigente && setCasos([]));
+      .catch(() => vigente && setFallaConsulta(SIN_CONEXION));
     return () => {
       vigente = false;
     };
-  }, [sinSesion]);
+  }, [sinSesion, consulta]);
+
+  if (fallaConsulta !== null)
+    return (
+      <section aria-labelledby={`${id}-titulo`} className="tarjeta">
+        <h2 id={`${id}-titulo`}>Tus pedidos sobre tus datos</h2>
+        <p className="aviso-error" role="alert">
+          {fallaConsulta}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setFallaConsulta(null);
+            setConsulta((n) => n + 1);
+          }}
+        >
+          Consultar de nuevo
+        </button>
+      </section>
+    );
 
   const pendientes = (casos ?? []).filter(
     (c) => c.estado === "abierto" || (c.estado === "confirmado" && c.derecho === "acceso"),

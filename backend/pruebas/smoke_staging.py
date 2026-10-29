@@ -5,7 +5,8 @@ pruebas de la PC cubren por equivalencia y no por ejecución: un vínculo que en
 con su 403 auditado, confirmar un vínculo, crear, listar y revocar una invitación, un mandato
 que da ámbito, la invitación de mandato con cuatro ojos (A7) y desasociar; y, desde 2b-5, un
 esquema de coeficientes cargado con `scripts.cargar_coeficientes` y repartido, con el bloqueo
-de PA02, y el fin de un vínculo por HTTP (PA17). Al final comprueba la
+de PA02, y el fin de un vínculo por HTTP (PA17); y, desde el 29-10-2026, el alta, la
+confirmación y la baja del TOTP (0041), con lo que queda en la base. Al final comprueba la
 cadena de auditoría del consorcio y revoca todas las sesiones de prueba.
 
 **No va en la imagen de la aplicación** (emite sesiones de prueba: en producción sería una
@@ -42,7 +43,11 @@ finalizado: desde la primera, staging no baja de `0021` ni de `0020`, que se nie
 (autorización del propietario del 21-10-2026). Desde 2b-6a, soporte verifica la identidad
 humana de las cuentas de la corrida (A13-C) con huellas al azar, porque son cuentas `.invalid`
 sin documento, y la referencia lo dice: staging no baja de `0026`, que se niega con identidades.
-Nunca en producción.
+Desde el 29-10-2026, la propietaria de la corrida da de alta y de baja un TOTP: quedan los dos
+avisos en la cola (a `.invalid`, no salen) y, si la corrida falla entre la confirmación y la
+baja, el TOTP queda activo en esa cuenta de prueba, sin sesiones. Una corrida hace 13 pedidos
+de autenticación desde la IP de prueba: dos corridas dentro del mismo minuto pasan el cupo de 20
+por minuto (`LIMITE_AUTENTICACION_IP`) y la segunda falla con 429. Nunca en producción.
 
 `--sin-verificar-certificado` existe porque dentro de la red de Docker el certificado de
 Traefik no es el del dominio (el TLS público lo termina Cloudflare); el tráfico no sale de la
@@ -51,6 +56,7 @@ y aun así revoca las sesiones y da de baja los mandatos que haya creado.
 """
 
 import argparse
+import base64
 import contextlib
 import io
 import json
@@ -76,6 +82,7 @@ from sqlalchemy.exc import DBAPIError
 from app.config import cargar
 from app.db import crear_motor, transaccion
 from app.identidad import invitaciones, sesiones
+from app.identidad import segundo_factor as segundo_factor_app
 from app.liquidacion.esquemas import repartir_por_esquema
 from app.liquidacion.reparto import RepartoBloqueado
 from app.plataforma.idempotencia import ENCABEZADO, ENCABEZADO_REPETIDA
@@ -414,13 +421,59 @@ def fin_de_vinculo(corrida: Corrida, esquema: UUID, adm: Navegador, mc1: Navegad
                " fuera de la auditoría y del alcance de cem_app")  # fmt: skip
 
 
+def segundo_factor(corrida: Corrida, rol: str) -> None:
+    """Alta, confirmación y baja del TOTP por HTTP, y lo que queda en la base después de cada
+    paso (0041: la baja borra TOTP → recuperación). El código sale del secreto que devuelve el
+    alta, como lo calcularía la aplicación de autenticación. Los avisos van a `.invalid`."""
+    n = corrida.navegadores[rol]
+    persona = corrida.personas[rol]
+
+    def en_base() -> tuple[int, int, int]:
+        with transaccion(corrida.motor, persona_id=persona) as conn:
+            return conn.execute(
+                text("select (select count(*) from nucleo.factor_totp where confirmado_en"
+                     " is not null), (select count(*) from nucleo.codigo_recuperacion),"
+                     " (select count(*) from nucleo.sesion where persona_id = :p"
+                     " and segundo_factor_en is not null)"), {"p": persona},
+            ).one()  # fmt: skip
+
+    r = n.pedir("POST", "/api/v1/auth/totp/baja", csrf=True)
+    comprobar(r.estado == 403 and r.cuerpo["codigo"] == "segundo_factor_requerido",
+              f"baja sin verificación reciente: {r.texto}")  # fmt: skip
+    r = n.pedir("POST", "/api/v1/auth/totp/alta", csrf=True)
+    comprobar(r.estado == 200, f"alta del TOTP: {r.texto}")
+    clave = r.cuerpo["secreto"]
+    secreto = base64.b32decode(clave + "=" * (-len(clave) % 8))
+    codigo = segundo_factor_app.codigo_en(secreto, segundo_factor_app.paso_actual())
+    otro = f"{(int(codigo) + 1) % 10 ** len(codigo):0{len(codigo)}d}"
+    r = n.pedir("POST", "/api/v1/auth/totp/confirmar", {"codigo": otro}, csrf=True)
+    comprobar(r.estado == 400, f"confirmar con un código que no es: {r.texto}")
+    comprobar(en_base() == (0, 0, 0), "el alta pendiente no activa nada")
+    r = n.pedir("POST", "/api/v1/auth/totp/confirmar", {"codigo": codigo}, csrf=True)
+    comprobar(r.estado == 200 and len(r.cuerpo["codigos"]) == len(set(r.cuerpo["codigos"])) > 0,
+              f"confirmar el TOTP: {r.texto}")  # fmt: skip
+    recuperacion = len(r.cuerpo["codigos"])
+    comprobar(en_base() == (1, recuperacion, 1), "activo, con sus códigos y la sesión verificada")
+    r = n.pedir("POST", "/api/v1/auth/totp/baja", csrf=True)
+    comprobar(r.estado == 204, f"baja del TOTP: {r.texto}")
+    comprobar(en_base() == (0, 0, 0), "la baja borra el TOTP, la recuperación y la verificación")
+    r = n.pedir("GET", "/api/v1/auth/totp")
+    comprobar(r.estado == 200 and r.cuerpo["activo"] is False
+              and r.cuerpo["codigos_recuperacion_restantes"] == 0,
+              f"estado final: {r.texto}")  # fmt: skip
+    corrida.ok("TOTP: alta, confirmación y baja por HTTP; la base queda sin factor ni códigos")
+
+
 def recorrer(corrida: Corrida) -> None:
+    with corrida.tx() as conn:
+        inicio = conn.execute(text("select clock_timestamp()")).scalar_one()
     u = unidades(corrida)
     prop = entra_por_invitacion(corrida, "propietaria", u["A"])
     mc1 = entra_por_invitacion(corrida, "consejo1", u["B"])
     mc2 = entra_por_invitacion(corrida, "consejo2", u["C"])
     adm = entra_por_invitacion(corrida, "administracion", u["D"])
     corrida.ok("cuatro vínculos entran por invitación, con cuenta nueva y sesión")
+    segundo_factor(corrida, "propietaria")
 
     with corrida.tx() as conn:
         hoy = conn.execute(
@@ -606,6 +659,24 @@ def recorrer(corrida: Corrida) -> None:
     r = externo.pedir("GET", "/api/v1/me/consorcios")
     comprobar(r.estado == 401, f"después de desasociar, la sesión del externo no vale: {r.texto}")
     corrida.ok("desasociar revoca la sesión y conserva el mandato")
+    soporte_sin_eventos(corrida, inicio)
+
+
+def soporte_sin_eventos(corrida: Corrida, inicio) -> None:
+    """S2a y S2b (0033 y 0043): la corrida hizo actos de soporte (invitaciones, decisión, altas
+    y bajas de mandatos, identidades) y ninguno escribió evento. Control: los actos por HTTP de la
+    misma corrida sí escribieron, así que la consulta ve los eventos de la corrida."""
+    with corrida.tx() as conn:
+        por_origen = dict(
+            conn.execute(
+                text("select origen, count(*) from auditoria.eventos where consorcio_id = :c"
+                     " and creado_en >= :i group by origen"),
+                {"c": corrida.consorcio, "i": inicio},
+            ).all()
+        )  # fmt: skip
+    comprobar(por_origen.get("api", 0) > 0, f"la corrida dejó eventos por HTTP: {por_origen}")
+    comprobar("soporte" not in por_origen, f"soporte no escribe eventos: {por_origen}")
+    corrida.ok(f"actos de soporte sin eventos (control: {por_origen['api']} eventos por HTTP)")
 
 
 def cadena(corrida: Corrida) -> tuple[int, int, int, int]:
