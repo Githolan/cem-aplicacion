@@ -111,9 +111,31 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `6b391ed` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b y `2026-10-28-6b391ed.md` con la de 0044 y 0045).
+Medido en el despliegue de `f2a7cfa` (29-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md` y `2026-10-29-f2a7cfa.md` con la de 0046).
 
-**Staging y producción en `6b391ed`** (28-10-2026; staging de 22:02 a 22:06 UTC y producción de 22:06 a 22:10 UTC), base `0045`, contrato 0.27.0.
+**Staging y producción en `f2a7cfa`** (29-10-2026; staging de 16:12 a 16:15 UTC y producción de 16:17 a 16:20 UTC), base `0046`, contrato 0.27.0.
+
+- **Qué suma:** la decisión 2 de H3 del 29-10 (PR #162, `0046`): el Consejo aprueba las órdenes de pago y la cantidad (1 o 2) se configura por consorcio; la carga soporte, sin configuración rige 1. Detalle en «Próximo paso», punto 37.
+- **Controles.** `ci.ps1` verde sobre `d64cb08` (la cabeza del PR) y sobre `f2a7cfa`: backend 2200 (2 omitidas), contratos 58, frontend 394 y e2e 193. Copia previa verificada antes de `0046` en cada entorno.
+- **Antes de desplegar (solo lectura):** los dos entornos en `0045`, con 0 órdenes y 0 mandatos con `egresos.aprobar_orden` (si hubiera órdenes, `0046` no sube). Control: staging veía sus 4 consorcios.
+- **Validación en los dos entornos, en solo lectura:**
+  - base en `0046`;
+  - `egresos.aprobar_orden` solo en el paquete de `miembro_consejo`, en 0 mandatos;
+  - la guarda de `0044` sin ella y con `liquidacion.aprobar`;
+  - las funciones de aprobar y de versión con lo nuevo;
+  - la columna de la cantidad;
+  - 0 cargas y 0 órdenes;
+  - `cem_app` solo con EXECUTE sobre la carga de soporte;
+  - producción sigue con 0 consorcios.
+- **Staging, además:**
+  - carga de soporte en el consorcio sintético con ROLLBACK: `fecha_invalida`, `origen_invalido`, la positiva carga y después quedan 0;
+  - smoke `27083c1c`: salida 0, 16 controles, 0 sesiones abiertas.
+- **Registros:** 0 `ERROR` y 0 `Traceback` en los diez contenedores nuevos (todas las líneas `INFO`).
+- **Kuma:** ningún monitor activo de CEM caído (el 9, excluido).
+
+**Antes: staging y producción en `b1bbcc7`** (29-10-2026; staging de 05:21 a 05:25 UTC y producción de 05:26 a 05:30 UTC), base `0045`: Privacidad (RF37) en `/cuenta` y el smoke con el TOTP (PR #160, punto 36). Validación en `2026-10-29-b1bbcc7.md` del repositorio CEM.
+
+**Antes: staging y producción en `6b391ed`** (28-10-2026; staging de 22:02 a 22:06 UTC y producción de 22:06 a 22:10 UTC), base `0045`, contrato 0.27.0.
 
 - **Qué suma:** infraestructura común de H3, sin habilitar ningún gasto. Son la guarda de la decisión 7 (PR #153, `0044`) y la orden de pago versionada, sin rutas (PR #155, `0045`). Detalle en «Próximo paso», puntos 31 y 32.
 - **Controles.** `ci.ps1` verde sobre `d3f4d9f` (la cabeza del PR) y sobre `6b391ed`: backend 2169 (2 omitidas), contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0044` y `0045` en cada entorno.
@@ -848,8 +870,27 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - P3 68, 70 y 71 de 0045 (CEM): cada trigger de TRUNCATE se prueba solo, el inventario de «aprobada» mira todos los esquemas y el docstring suma la identidad guardada y la guarda del downgrade.
    - **H3, sin decidir nada:** `test_el_modelo_soporta_una_o_dos_aprobaciones` (2A y 2B son una consulta sobre las filas de 0045), PA12 (cambiar el beneficiario tras aprobar invalida y vuelve a revisión) y PA14 (quien preparó no aprueba, renombrada). Cobertura de PA del conjunto P0-piloto: de 9 a 11 de 25.
    - **Revisión:** independiente en dos vueltas (un P2, la espera sin tope, corregido; P3 73 a 75 de CEM sin mover la cabeza). Codex limpio sobre `ecffe13`. `ci.ps1` verde sobre `ecffe13` (backend 2183, contratos 58, frontend 390, e2e 193).
-36. **Privacidad (RF37) en `/cuenta`, P3 72 y smoke de staging** (este PR):
+36. **Privacidad (RF37) en `/cuenta`, P3 72 y smoke de staging** (PR #160, fusionado en `b1bbcc7`, desplegado en los dos entornos):
    - **La sección de Privacidad ya no se esconde si la consulta falla:** antes, sin red o con un error del servicio, quien tenía un caso abierto no veía nada (un `catch` mudo). Ahora muestra el mensaje de `fallas.ts` y deja consultar de nuevo. Pruebas de carga (no se muestra), 401 (lleva a entrar), sin red (alerta, axe y reintento) y servicio caído. Mutación: con el comportamiento viejo fallan dos.
    - **Lectura ampliada a 360 px de `/cuenta` con dos casos pendientes reales** (uno abierto y una copia entregada), en vez de la lista vacía.
    - **P3 72:** `overflow-wrap` en el título de las tarjetas; la e2e del padrón suma una palabra de 90 letras sin espacios.
    - **Smoke de staging:** suma el TOTP de punta a punta (403 sin verificación reciente, 400 con un código equivocado, alta, confirmación, baja y la base en cero) y el control de que los actos de soporte no escriben eventos (S2a y S2b, 0033 y 0043), con los eventos por HTTP como control. Corridas `a3f90889` y `24129bae` en staging (29-10, 02:11 y 02:14 UTC; la primera, sin el control de soporte): salida 0, 15 y 16 controles, 0 sesiones abiertas y 0 correos enviados (los 9 de cada corrida, `no_enviado = dominio_reservado`).
+37. **Decisión 2 de H3: el Consejo aprueba las órdenes de pago, con la cantidad configurable** (PR #162, fusionado en `f2a7cfa`, head `d64cb08`; desplegado en los dos entornos el 29-10):
+   - **La decisión del propietario (29-10-2026):** por defecto aprueba 1 consejero distinto de quien preparó. Soporte CEM carga 1 o 2 por consorcio con su acta y nunca aprueba. El propietario dio el sí explícito para crear la facultad.
+   - **`0046`:**
+     - `egresos.aprobar_orden` entra al paquete de `miembro_consejo` y sale de la guarda de `0044`. No se otorga a mandatos existentes: la reciben los que se den de alta desde ahora.
+     - `nucleo.aprobaciones_orden_pago`, de solo agregado, y `fijar_aprobaciones_orden_pago` (solo soporte, desde hoy, con una decisión del consorcio). Se usan con `scripts/aprobaciones_orden_pago.py`, que está en la imagen.
+     - Cada versión guarda `aprobaciones_requeridas` al prepararse. `registrar_aprobacion_orden_pago` lleva la orden a «aprobada» cuando aprueba esa cantidad de identidades humanas distintas.
+     - P3 69: la aprobación repetida se reconoce también por la identidad actual.
+     - El upgrade se niega con órdenes; el downgrade, con órdenes, cargas o mandatos con la facultad.
+   - **Pruebas:**
+     - la carga y sus negativos, el script, la ida y vuelta con las funciones exactas y las guardas;
+     - una aprobación alcanza sin carga y hacen falta dos con carga 2;
+     - la cantidad queda guardada por versión;
+     - otra cuenta del mismo humano no suma, tampoco tras una corrección (P3 69);
+     - dos humanos a la vez aprueban.
+     - Se quitaron las actualizaciones que forzaban «aprobada».
+     - Mutaciones detectadas: sin la cláusula de P3 69; `>` en vez de `>=`; por defecto 2; aceptar ayer.
+   - **Un rojo de la CI, corregido:** la prueba nueva corre antes que las idas y vueltas de migraciones y dejaba órdenes que citan identidades. `conftest.vaciar_mandatos` ahora vacía órdenes y cargas. Control: sin eso, `test_contrasena` falla en el mismo orden.
+   - **Revisión:** independiente sobre `2d53e7c` y sobre el delta hasta `d64cb08`, 0 P1/P2. Quedan los P3 80 a 88 en el repositorio CEM; el 80 y el 81 los decide el propietario. Codex limpio sobre `d64cb08`. `ci.ps1` verde sobre `d64cb08` y `f2a7cfa`.
+   - **Sigue abierto:** decisión 1 (qué órdenes necesitan aprobación; hoy toda orden pasa por revisión) y decisión 6 (administrador que además es consejero). No hay rutas: nadie prepara ni aprueba por la API.
