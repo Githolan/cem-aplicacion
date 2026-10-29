@@ -134,6 +134,44 @@ def test_un_mandato_que_aprueba_no_cambia_de_tipo(motor_migrate, e):  # noqa: F8
     assert _intenta(motor_migrate, cambiar, {"t": tipo_adm, "m": m_adm}) is None
 
 
+def test_tampoco_se_saca_del_consejo_con_un_update(motor_migrate, e):  # noqa: F811
+    """Revisión de app #164: el trigger mira todas las columnas, no solo `facultad`."""
+    m_adm, _, _ = _mandato_de(motor_migrate, e.cons, e.adm)
+    m_mc, _, _ = _mandato_de(motor_migrate, e.cons, e.mc1)
+    with motor_migrate.connect() as c:
+        filas = c.execute(
+            text("select count(*) from nucleo.facultad_otorgada where (mandato_id = :adm"
+                 " and facultad = 'egresos.preparar_orden') or (mandato_id = :mc"
+                 " and facultad = :f)"), {"adm": m_adm, "mc": m_mc, "f": FACULTAD},
+        ).scalar_one()  # fmt: skip
+    assert filas == 2  # control: los UPDATE de abajo tocan una fila cada uno
+    casos = {
+        "facultad nueva en un mandato del administrador": (
+            "update nucleo.facultad_otorgada set facultad = :f"
+            " where mandato_id = :adm and facultad = 'egresos.preparar_orden'"
+        ),
+        "la del Consejo movida a otro mandato": (
+            "update nucleo.facultad_otorgada set mandato_id = :adm"
+            " where mandato_id = :mc and facultad = :f"
+        ),
+        "la fila del paquete pasada a otro tipo": (
+            "update nucleo.paquete_facultad set tipo = 'administrador'"
+            " where tipo = 'miembro_consejo' and facultad = :f"
+        ),
+    }
+    for caso, sentencia in casos.items():
+        motivo = _intenta(motor_migrate, sentencia, {"f": FACULTAD, "adm": m_adm, "mc": m_mc})
+        assert motivo == "facultad_solo_consejo", caso
+    # Control: el mismo UPDATE con una facultad que el mandato no tiene pasa (con una que ya
+    # tiene chocaría con la unicidad, que también da None como motivo).
+    assert _intenta(
+        motor_migrate,
+        "update nucleo.facultad_otorgada set facultad = 'fiscalizacion.ver_panel'"
+        " where mandato_id = :adm and facultad = 'egresos.preparar_orden'",
+        {"adm": m_adm},
+    ) is None  # fmt: skip
+
+
 # Migración -----------------------------------------------------------------------------------
 
 FIJAR = "nucleo.fijar_aprobaciones_orden_pago(smallint, date, uuid, uuid, text)"
@@ -207,4 +245,35 @@ def test_0047_no_sube_con_aprobar_ordenes_fuera_del_consejo(base_aparte):  # noq
         c.execute(text("delete from nucleo.paquete_facultad where tipo = 'administrador'"
                        " and facultad = :f"), {"f": FACULTAD})  # fmt: skip
     command.upgrade(cfg, "0047")  # control: sin esa fila, sube
+    assert _guardas(motor) == 3
+
+
+def test_0047_no_sube_con_aprobar_ordenes_en_un_mandato_que_no_es_del_consejo(
+    base_aparte,  # noqa: F811
+):
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0046")
+    cons, _ = _consorcio_y_unidad(motor)
+    acta = _decision(motor, cons, "asamblea")
+    with motor.begin() as c:
+        mandato = c.execute(
+            # Sin cuenta, como en las pruebas de 0044 (el Consejo exige una persona).
+            text("insert into nucleo.mandato (consorcio_id, tipo, mandatario_nombre,"
+                 " mandatario_cuit, decision_id, vigente_desde, origen) values (:c,"
+                 " 'administrador_externo', 'SINTETICO', '30000000007', :d, current_date,"
+                 " 'soporte') returning id"),
+            {"c": cons, "d": acta},
+        ).scalar_one()  # fmt: skip
+        c.execute(
+            text("insert into nucleo.facultad_otorgada (consorcio_id, mandato_id, facultad,"
+                 " decision_id) values (:c, :m, :f, :d)"),
+            {"c": cons, "m": mandato, "f": FACULTAD, "d": acta},
+        )  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        command.upgrade(cfg, "0047")
+    assert error.value.orig.diag.message_hint == "upgrade_con_datos"
+    with motor.begin() as c:
+        c.execute(text("delete from nucleo.facultad_otorgada where mandato_id = :m"),
+                  {"m": mandato})  # fmt: skip
+    command.upgrade(cfg, "0047")  # control: sin esa facultad, sube
     assert _guardas(motor) == 3

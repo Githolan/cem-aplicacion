@@ -13,8 +13,9 @@ consorcio, también un `contrato_administracion` o una `inscripcion_rpa`.
   compuesta de la tabla), la decisión existe (`decision_invalida`), la carga rige desde hoy en
   adelante (`fecha_invalida`), solo se agregan filas, la carga solo soporte (`origen_invalido`) y
   soporte no aprueba (no tiene ninguna facultad). La referencia del acta y su fecha son columnas
-  obligatorias de `decision_formal` (`0010`), y la fecha nunca es futura (`0019`), así que el acta
-  siempre es anterior o igual al día desde el que rige la cantidad.
+  obligatorias de `decision_formal` (`0010`), y `registrar_decision`, la única vía de escritura de
+  la aplicación, no admite una fecha futura (`0019`; es una regla de esa función, no de la tabla):
+  el acta es anterior o igual al día en que se carga, y por eso al día desde el que rige.
 
 P3 81, misma decisión (puntos 3, 4 y 8): `egresos.aprobar_orden` queda **solo** en el paquete de
 `miembro_consejo`, y la facultad proviene exclusivamente de un mandato de ese tipo. Hasta acá lo
@@ -70,6 +71,11 @@ CAMBIOS = [
 ]
 
 GUARDA = f"""
+-- Nada se escribe en estas tablas entre la guarda y el cambio (revisión de app #164): una carga o
+-- una facultad confirmada después de mirar quedaría fuera de la regla.
+lock table nucleo.aprobaciones_orden_pago, nucleo.paquete_facultad, nucleo.facultad_otorgada,
+  nucleo.mandato in share row exclusive mode;
+
 do $$
 begin
   if exists (select 1 from nucleo.aprobaciones_orden_pago a
