@@ -41,6 +41,8 @@ from tests.test_vinculo_0014 import invitar_y_aceptar
 pytestmark = pytest.mark.db
 
 REFERENCIA = "Escritura 1234, registro notarial 56"
+ESPERA_MAXIMA_S = 10
+"""Tope de las esperas entre pedidos concurrentes: si se traba, la prueba falla sin colgar la CI."""
 # Los datos de D6 y `iniciado` (corte 4, contrato 0.18.0), que no es un dato de la persona.
 COLUMNAS_D6 = {"vinculo_id", "unidad_id", "designacion", "nombre", "tipo", "vigente_desde",
                "vigente_hasta", "confirmado", "iniciado"}  # fmt: skip
@@ -526,8 +528,9 @@ def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
     en_el_cupo: list[asyncio.Event] = []
 
     async def consumir_lento(limitador, limite_, nombre, clave):
-        if nombre == LIMITE_INVITAR:
-            # El primero espera el cupo (sin frenar el bucle) cuando llega el segundo.
+        # Solo la primera llamada del cupo de invitar (son dos, hora y día): el primero espera
+        # el cupo (sin frenar el bucle) cuando llega el segundo, sin comerse la espera de la clave.
+        if nombre == LIMITE_INVITAR and not en_el_cupo[0].is_set():
             en_el_cupo[0].set()
             await asyncio.sleep(0.5)
         return await original(limitador, limite_, nombre, clave)
@@ -548,7 +551,15 @@ def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
             url = invitaciones_url(e["cons"])
             en_el_cupo.append(asyncio.Event())
             primero = asyncio.create_task(c.post(url, json=cuerpo, headers=clave))
-            await en_el_cupo[0].wait()
+            listo = asyncio.create_task(en_el_cupo[0].wait())
+            # Si el primero termina sin llegar al cupo (un 4xx, un 429), la prueba falla con su
+            # respuesta en vez de quedarse esperando.
+            await asyncio.wait({primero, listo}, return_when=asyncio.FIRST_COMPLETED,
+                               timeout=ESPERA_MAXIMA_S)  # fmt: skip
+            if not listo.done():
+                listo.cancel()
+                r = await primero if primero.done() else None
+                pytest.fail(f"el primero no llegó al cupo: {r.text if r else 'sin respuesta'}")
             segundo = await c.post(url, json=cuerpo, headers=clave)
             return await primero, segundo
 

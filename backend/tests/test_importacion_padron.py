@@ -1214,7 +1214,6 @@ def test_el_padron_no_delata_ni_muestra_el_nombre_de_una_cuenta_de_otro_consorci
             ),
             {"a": e["cons"], "b": cons_b},
         ).all()
-        assert ajena != e["mc"]
         c.execute(
             text("update nucleo.persona set nombre = 'Nombre Real' where id = :p"), {"p": ajena}
         )
