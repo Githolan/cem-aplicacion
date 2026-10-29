@@ -56,13 +56,14 @@ def test_los_tipos_de_decision_son_los_que_conoce_la_prueba(motor_migrate):
 
 
 def _intenta(motor, sentencia, params=None) -> str | None:
-    """Corre la sentencia y deshace siempre. Devuelve el motivo del rechazo, o None."""
+    """Corre la sentencia y deshace siempre. Devuelve el motivo del rechazo (o su sqlstate, si no
+    tiene motivo: un choque de unicidad no pasa por None), o None si se ejecutó."""
     with motor.connect() as c:
         tx = c.begin()
         try:
             c.execute(text(sentencia), params or {})
         except DBAPIError as error:
-            return error.orig.diag.message_hint
+            return error.orig.diag.message_hint or error.orig.diag.sqlstate
         finally:
             tx.rollback()
     return None
@@ -109,10 +110,10 @@ def test_solo_un_mandato_del_consejo_recibe_aprobar_ordenes(motor_migrate, e):  
     assert _intenta(
         motor_migrate, OTORGAR, {"c": e.cons, "m": m_adm, "f": FACULTAD, "d": acta}
     ) == "facultad_solo_consejo"  # fmt: skip
-    # Control: otra facultad al mismo mandato pasa (la guarda mira solo aprobar órdenes).
+    # Control: otra facultad que el mandato no tiene pasa (la guarda mira solo aprobar órdenes).
     assert _intenta(
         motor_migrate, OTORGAR,
-        {"c": e.cons, "m": m_adm, "f": "egresos.ejecutar_pago", "d": acta},
+        {"c": e.cons, "m": m_adm, "f": "liquidacion.revisar", "d": acta},
     ) is None  # fmt: skip
 
 
@@ -144,7 +145,7 @@ def test_tampoco_se_saca_del_consejo_con_un_update(motor_migrate, e):  # noqa: F
                  " and facultad = 'egresos.preparar_orden') or (mandato_id = :mc"
                  " and facultad = :f)"), {"adm": m_adm, "mc": m_mc, "f": FACULTAD},
         ).scalar_one()  # fmt: skip
-    assert filas == 2  # control: los UPDATE de abajo tocan una fila cada uno
+    assert filas == 2  # control: los UPDATE de abajo tocan una fila cada uno (índice único)
     casos = {
         "facultad nueva en un mandato del administrador": (
             "update nucleo.facultad_otorgada set facultad = :f"
@@ -162,11 +163,10 @@ def test_tampoco_se_saca_del_consejo_con_un_update(motor_migrate, e):  # noqa: F
     for caso, sentencia in casos.items():
         motivo = _intenta(motor_migrate, sentencia, {"f": FACULTAD, "adm": m_adm, "mc": m_mc})
         assert motivo == "facultad_solo_consejo", caso
-    # Control: el mismo UPDATE con una facultad que el mandato no tiene pasa (con una que ya
-    # tiene chocaría con la unicidad, que también da None como motivo).
+    # Control: el mismo UPDATE con una facultad que el mandato no tiene pasa.
     assert _intenta(
         motor_migrate,
-        "update nucleo.facultad_otorgada set facultad = 'fiscalizacion.ver_panel'"
+        "update nucleo.facultad_otorgada set facultad = 'liquidacion.revisar'"
         " where mandato_id = :adm and facultad = 'egresos.preparar_orden'",
         {"adm": m_adm},
     ) is None  # fmt: skip

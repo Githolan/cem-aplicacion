@@ -73,8 +73,9 @@ CAMBIOS = [
 GUARDA = f"""
 -- Nada se escribe en estas tablas entre la guarda y el cambio (revisión de app #164): una carga o
 -- una facultad confirmada después de mirar quedaría fuera de la regla.
-lock table nucleo.aprobaciones_orden_pago, nucleo.paquete_facultad, nucleo.facultad_otorgada,
-  nucleo.mandato in share row exclusive mode;
+-- `mandato` antes que `facultad_otorgada`, en el orden en que escribe `alta_mandato`.
+lock table nucleo.aprobaciones_orden_pago, nucleo.paquete_facultad, nucleo.mandato,
+  nucleo.facultad_otorgada in share row exclusive mode;
 
 do $$
 begin
