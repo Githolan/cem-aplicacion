@@ -3,6 +3,7 @@ import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
 
 const CASO = "01a18105-0000-7000-8000-000000000001";
@@ -44,14 +45,14 @@ function cuerpos(simulado: ReturnType<typeof vi.fn>, metodo: string): Promise<un
     .map((p) => p.clone().json());
 }
 
-function mostrar(contrasena = true, segundoFactor = false) {
+function mostrar(contrasena = true, segundoFactor = false, sinSesion: () => void = () => undefined) {
   return render(
     <MemoryRouter>
       <SeccionPrivacidad
         contrasena={contrasena}
         segundoFactor={segundoFactor}
         fecha={(iso) => iso.slice(0, 10)}
-        sinSesion={() => undefined}
+        sinSesion={sinSesion}
       />
     </MemoryRouter>,
   );
@@ -173,5 +174,54 @@ describe("sección de pedidos sobre los datos", () => {
     expect(await screen.findByText("El código no sirve.")).toBeTruthy();
     const resultado = await axe.run(container);
     expect(resultado.violations).toEqual([]);
+  });
+
+  it("mientras consulta no muestra nada y después muestra el caso", async () => {
+    let responder: (r: Response) => void = () => undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>((r) => (responder = r))),
+    );
+    const { container } = mostrar();
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(container.innerHTML).toBe("");
+    responder(Response.json({ elementos: [caso("abierto")] }));
+    expect(await screen.findByRole("heading", { name: "Copia de tus datos: espera tu confirmación" })).toBeTruthy();
+  });
+
+  it("con la sesión vencida lleva a entrar y no muestra nada", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => error("no_autenticado", 401) }));
+    const sinSesion = vi.fn();
+    const { container } = mostrar(true, false, sinSesion);
+    await waitFor(() => expect(sinSesion).toHaveBeenCalledOnce());
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("sin red no se esconde: avisa, es accesible y deja consultar de nuevo", async () => {
+    let intentos = 0;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${CASOS}`]: () => {
+          intentos += 1;
+          if (intentos === 1) throw new TypeError("Failed to fetch");
+          return Response.json({ elementos: [caso("confirmado")] });
+        },
+      }),
+    );
+    const { container } = mostrar();
+    expect((await screen.findByRole("alert")).textContent).toBe(SIN_CONEXION);
+    expect(screen.getByRole("heading", { name: "Tus pedidos sobre tus datos" })).toBeTruthy();
+    expect((await axe.run(container)).violations).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await screen.findByRole("button", { name: "Descargar la copia de mis datos" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(intentos).toBe(2);
+  });
+
+  it("con el servicio caído lo dice, sin culpar a la conexión", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => error("error_interno", 500) }));
+    mostrar();
+    expect((await screen.findByRole("alert")).textContent).toBe(SERVICIO_NO_DISPONIBLE);
   });
 });

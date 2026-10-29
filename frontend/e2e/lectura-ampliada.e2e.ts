@@ -154,8 +154,8 @@ interface PaginaConDatos {
   ruta: string;
   /** La URL que se abre (las invitaciones, con el token en el fragmento, como desde el correo). */
   url: string;
-  /** Un texto que solo aparece con los datos ya cargados. */
-  cargada: string;
+  /** Los textos que solo aparecen con los datos ya cargados (uno por pedido que llena la página). */
+  cargada: string | readonly string[];
   /** Respuesta por «MÉTODO camino»; lo que no está acá se corta y la prueba falla. */
   api: Respuestas;
 }
@@ -164,7 +164,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/cuenta",
     url: "/cuenta",
-    cargada: "Dónde tenés la sesión abierta",
+    cargada: ["Dónde tenés la sesión abierta", "Copia de tus datos: confirmado"],
     api: {
       "GET /api/v1/auth/sesion": {
         persona_id: "99999999-9999-4999-8999-999999999999",
@@ -186,7 +186,21 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
       },
       "GET /api/v1/auth/totp": TOTP_ACTIVO,
       "GET /api/v1/auth/contrasena": { definida: true, cambiada_en: "2026-10-10T15:30:00Z" },
-      "GET /api/v1/privacidad/casos": { elementos: [] },
+      // Los dos casos pendientes que más texto suman: uno abierto (con su código y la contraseña)
+      // y una copia ya entregada (descargar de nuevo y cerrar).
+      "GET /api/v1/privacidad/casos": {
+        elementos: [
+          { derecho: "rectificacion_nombre", estado: "abierto", codigo_vence_en: "2026-10-31T12:00:00Z", copia_entregada_en: null },
+          { derecho: "acceso", estado: "confirmado", codigo_vence_en: null, copia_entregada_en: "2026-10-28T13:00:00Z" },
+        ].map((c, i) => ({
+          ...c,
+          id: `6666666${i}-6666-4666-8666-666666666666`,
+          alcance_consorcio_id: null,
+          abierto_en: "2026-10-28T12:00:00Z",
+          confirmado_en: c.estado === "confirmado" ? "2026-10-28T12:30:00Z" : null,
+          resuelto_en: null,
+        })),
+      },
     },
   },
   {
@@ -272,8 +286,9 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
       [`GET /api/v1/consorcios/${C1}/padron`]: {
         elementos: [
           // Un nombre de 100 caracteres, el tope de la base: la tarjeta no puede ensanchar la página.
-          // Una palabra sin cortes de ese largo sí la ensancha (P3 72 del repositorio CEM).
           { nombre: "María de los Ángeles Florencia Anahí de los Santos Echeverría Bustamante y Fernández Oyarzábal Pazos", tipo: "propietario", vigente_desde: "2025-03-01", vigente_hasta: null, confirmado: true, iniciado: true },
+          // Una palabra de 90 letras sin espacios tampoco (P3 72 del repositorio CEM).
+          { nombre: "Bustamante".repeat(9), tipo: "propietario", vigente_desde: "2025-03-01", vigente_hasta: null, confirmado: true, iniciado: true },
           { nombre: "Beto Pérez", tipo: "inquilino", vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", confirmado: false, iniciado: true },
         ].map((f, i) => ({
           ...f,
@@ -446,7 +461,8 @@ test.describe("modo lectura ampliada en las páginas con datos", () => {
         await prender(page);
         const imprevistos = await simular(page, api);
         await page.goto(url);
-        await expect(page.getByText(cargada, { exact: true })).toBeVisible();
+        for (const texto of typeof cargada === "string" ? [cargada] : cargada)
+          await expect(page.getByText(texto, { exact: true })).toBeVisible();
         await expect(page.locator("html"), ruta).toHaveClass(CLASE);
         const { ancho, visible } = await page.evaluate(() => ({
           ancho: document.documentElement.scrollWidth,

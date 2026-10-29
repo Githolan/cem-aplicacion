@@ -216,6 +216,8 @@ button:focus-visible {
 .sesiones h3 {
   margin: 0 0 0.5rem;
   font-size: 1.05rem;
+  /* Un nombre largo sin espacios no puede ensanchar la página a 360 px (P3 72 del repositorio CEM). */
+  overflow-wrap: anywhere;
 }
 
 .sesiones .detalles {
