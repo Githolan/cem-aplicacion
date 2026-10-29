@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
@@ -18,9 +18,11 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // (403 `reautenticacion_requerida`, `detalle.falta`). La copia se guarda como archivo en el
 // dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir. Si el navegador no
 // la guardó, se vuelve a pedir; el caso se cierra cuando la persona avisa que la guardó
-// (`…/recibida`). Sin casos pendientes, la sección no se muestra; mientras se consulta tampoco (no
-// tiene indicador propio: P3 77 del repositorio CEM). Si la consulta falla, sí: esconderla dejaría
-// sin camino a quien tiene un caso abierto.
+// (`…/recibida`). Sin casos pendientes, la sección no se muestra, y en la primera consulta tampoco
+// (la página ya cargó: sin caso no tiene nada que decir). Si la consulta falla, sí: esconderla
+// dejaría sin camino a quien tiene un caso abierto. Desde que la persona pide consultar de nuevo,
+// la sección queda a la vista con su estado (consultando, sin pedidos o los pedidos) y el foco va
+// a su título, para no perderlo cuando desaparece el botón (P3 77 del repositorio CEM).
 
 type Caso = components["schemas"]["CasoPrivacidad"];
 
@@ -91,6 +93,8 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
   const [casos, setCasos] = useState<Caso[] | null>(null);
   const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
   const [consulta, setConsulta] = useState(0);
+  const [reconsulta, setReconsulta] = useState(false);
+  const titulo = useRef<HTMLHeadingElement>(null);
   const [codigos, setCodigos] = useState<Record<string, string>>({});
   const [clave, setClave] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -112,30 +116,17 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
     };
   }, [sinSesion, consulta]);
 
-  if (fallaConsulta !== null)
-    return (
-      <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-        <h2 id={`${id}-titulo`}>Tus pedidos sobre tus datos</h2>
-        <p className="aviso-error" role="alert">
-          {fallaConsulta}
-        </p>
-        <button
-          type="button"
-          onClick={() => {
-            setFallaConsulta(null);
-            setConsulta((n) => n + 1);
-          }}
-        >
-          Consultar de nuevo
-        </button>
-      </section>
-    );
+  useEffect(() => {
+    if (reconsulta) titulo.current?.focus();
+  }, [reconsulta, consulta]);
 
   const pendientes = (casos ?? []).filter(
     (c) => c.estado === "abierto" || (c.estado === "confirmado" && c.derecho === "acceso"),
   );
-  // Sin pendientes no se muestra, salvo para dejar a la vista el aviso del último paso.
-  if (pendientes.length === 0 && aviso === null) return null;
+  const conPedidos = pendientes.length > 0 || aviso !== null;
+  // Sin pendientes no se muestra, salvo para dejar a la vista el aviso del último paso, la falla
+  // de la consulta o lo que pasó después de consultar de nuevo.
+  if (!conPedidos && fallaConsulta === null && !reconsulta) return null;
 
   function actualizar(caso: string, cambio: Partial<Caso>) {
     setCasos((actuales) => (actuales ?? []).map((c) => (c.id === caso ? { ...c, ...cambio } : c)));
@@ -226,12 +217,37 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-      <h2 id={`${id}-titulo`}>Tus pedidos sobre tus datos</h2>
-      <p>
-        Por seguridad, cada paso pide volver a confirmar que sos vos
-        {contrasena ? " con tu contraseña" : ": si entraste hace más de 10 minutos, salí y volvé a entrar"}
-        {segundoFactor ? ", y haber verificado tu segundo factor en los últimos 10 minutos" : ""}.
-      </p>
+      <h2 id={`${id}-titulo`} ref={titulo} tabIndex={-1}>
+        Tus pedidos sobre tus datos
+      </h2>
+      {fallaConsulta !== null && (
+        <>
+          <p className="aviso-error" role="alert">
+            {fallaConsulta}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setFallaConsulta(null);
+              setReconsulta(true);
+              setConsulta((n) => n + 1);
+            }}
+          >
+            Consultar de nuevo
+          </button>
+        </>
+      )}
+      {fallaConsulta === null && casos === null && <p role="status">Consultando tus pedidos…</p>}
+      {fallaConsulta === null && casos !== null && !conPedidos && (
+        <p role="status">No tenés pedidos pendientes sobre tus datos.</p>
+      )}
+      {conPedidos && (
+        <p>
+          Por seguridad, cada paso pide volver a confirmar que sos vos
+          {contrasena ? " con tu contraseña" : ": si entraste hace más de 10 minutos, salí y volvé a entrar"}
+          {segundoFactor ? ", y haber verificado tu segundo factor en los últimos 10 minutos" : ""}.
+        </p>
+      )}
       {pendientes.map((caso) => (
         <article key={caso.id} aria-labelledby={`${id}-${caso.id}`}>
           <h3 id={`${id}-${caso.id}`}>

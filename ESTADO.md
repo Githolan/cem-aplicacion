@@ -111,9 +111,20 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `6b391ed` (28-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b y `2026-10-28-6b391ed.md` con la de 0044 y 0045).
+Medido en el despliegue de `b1bbcc7` (29-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b `2026-10-28-6b391ed.md` con la de 0044 y 0045 y `2026-10-29-b1bbcc7.md` con la de #160).
 
-**Staging y producción en `6b391ed`** (28-10-2026; staging de 22:02 a 22:06 UTC y producción de 22:06 a 22:10 UTC), base `0045`, contrato 0.27.0.
+**Staging y producción en `b1bbcc7`** (29-10-2026; staging de 05:21 a 05:25 UTC y producción de 05:26 a 05:30 UTC), base `0045`, contrato 0.27.0.
+
+- **Qué suma:** la sección de Privacidad de `/cuenta` ya no se esconde si falla la consulta, y el `overflow-wrap` de las tarjetas (PR #160); las pruebas de #159 no cambian lo desplegado. Detalle en «Próximo paso», puntos 35 y 36.
+- **Controles.** `ci.ps1` verde sobre `a977a22` (la cabeza del PR) y sobre `b1bbcc7`, en la segunda corrida: la primera falló solo por la e2e intermitente `versiones.e2e.ts:42` (E33), con el mismo árbol. Backend 2183 (2 omitidas), contratos 58, frontend 394 y e2e 193.
+- **Validación:**
+  - smoke de staging `6e7c6380`: salida 0, 16 controles, con el TOTP y soporte sin eventos;
+  - el bundle servido en los dos entornos (`index-Cwr_N8Ay.js`) trae «Consultar de nuevo» y el CSS 3 `overflow-wrap:anywhere` (control: antes, 0 y 2);
+  - 0 errores en los registros del backend de los dos entornos desde el despliegue;
+  - Kuma arriba;
+  - producción con 0 consorcios.
+
+**Antes: staging y producción en `6b391ed`** (28-10-2026; staging de 22:02 a 22:06 UTC y producción de 22:06 a 22:10 UTC), base `0045`, contrato 0.27.0.
 
 - **Qué suma:** infraestructura común de H3, sin habilitar ningún gasto. Son la guarda de la decisión 7 (PR #153, `0044`) y la orden de pago versionada, sin rutas (PR #155, `0045`). Detalle en «Próximo paso», puntos 31 y 32.
 - **Controles.** `ci.ps1` verde sobre `d3f4d9f` (la cabeza del PR) y sobre `6b391ed`: backend 2169 (2 omitidas), contratos 58, frontend 383 y e2e 177. Hubo copia previa verificada antes de `0044` y `0045` en cada entorno.
@@ -848,8 +859,12 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - P3 68, 70 y 71 de 0045 (CEM): cada trigger de TRUNCATE se prueba solo, el inventario de «aprobada» mira todos los esquemas y el docstring suma la identidad guardada y la guarda del downgrade.
    - **H3, sin decidir nada:** `test_el_modelo_soporta_una_o_dos_aprobaciones` (2A y 2B son una consulta sobre las filas de 0045), PA12 (cambiar el beneficiario tras aprobar invalida y vuelve a revisión) y PA14 (quien preparó no aprueba, renombrada). Cobertura de PA del conjunto P0-piloto: de 9 a 11 de 25.
    - **Revisión:** independiente en dos vueltas (un P2, la espera sin tope, corregido; P3 73 a 75 de CEM sin mover la cabeza). Codex limpio sobre `ecffe13`. `ci.ps1` verde sobre `ecffe13` (backend 2183, contratos 58, frontend 390, e2e 193).
-36. **Privacidad (RF37) en `/cuenta`, P3 72 y smoke de staging** (este PR):
+36. **Privacidad (RF37) en `/cuenta`, P3 72 y smoke de staging** (PR #160, fusionado en `b1bbcc7`, head `a977a22`; **desplegado** en los dos entornos):
    - **La sección de Privacidad ya no se esconde si la consulta falla:** antes, sin red o con un error del servicio, quien tenía un caso abierto no veía nada (un `catch` mudo). Ahora muestra el mensaje de `fallas.ts` y deja consultar de nuevo. Pruebas de carga (no se muestra), 401 (lleva a entrar), sin red (alerta, axe y reintento) y servicio caído. Mutación: con el comportamiento viejo fallan dos.
    - **Lectura ampliada a 360 px de `/cuenta` con dos casos pendientes reales** (uno abierto y una copia entregada), en vez de la lista vacía.
    - **P3 72:** `overflow-wrap` en el título de las tarjetas; la e2e del padrón suma una palabra de 90 letras sin espacios.
    - **Smoke de staging:** suma el TOTP de punta a punta (403 sin verificación reciente, 400 con un código equivocado, alta, confirmación, baja y la base en cero) y el control de que los actos de soporte no escriben eventos (S2a y S2b, 0033 y 0043), con los eventos por HTTP como control. Corridas `a3f90889` y `24129bae` en staging (29-10, 02:11 y 02:14 UTC; la primera, sin el control de soporte): salida 0, 15 y 16 controles, 0 sesiones abiertas y 0 correos enviados (los 9 de cada corrida, `no_enviado = dominio_reservado`).
+37. **Privacidad: el foco y el estado al consultar de nuevo** (P3 77 del repositorio CEM; este PR):
+   - Al tocar «Consultar de nuevo» el botón desaparece y el foco iba al cuerpo de la página. Ahora va al título de la sección.
+   - Desde ese momento la sección queda a la vista con su estado: «Consultando tus pedidos…», los pedidos o «No tenés pedidos pendientes sobre tus datos». En la primera consulta sigue sin mostrarse si no hay nada.
+   - Pruebas: el foco en el título y el estado intermedio con la respuesta demorada, más axe. Mutaciones: sin el foco fallan dos; sin el estado de reconsulta, dos.
