@@ -130,7 +130,7 @@ Medido en el despliegue de `f2a7cfa` (29-10-2026) por `cd.ps1` (estado, imagen y
 - **Staging, además:**
   - carga de soporte en el consorcio sintético con ROLLBACK: `fecha_invalida`, `origen_invalido`, la positiva carga y después quedan 0;
   - smoke `27083c1c`: salida 0, 16 controles, 0 sesiones abiertas.
-- **Registros:** 0 `ERROR` y 0 `Traceback` en los diez contenedores nuevos (todas las líneas `INFO`).
+- **Registros:** 0 `ERROR`, 0 `CRITICAL` y 0 `Traceback` en los diez contenedores nuevos de los dos entornos (en backend, trabajos y planificador de staging, todas las líneas son `INFO`).
 - **Kuma:** ningún monitor activo de CEM caído (el 9, excluido).
 
 **Antes: staging y producción en `b1bbcc7`** (29-10-2026; staging de 05:21 a 05:25 UTC y producción de 05:26 a 05:30 UTC), base `0045`: Privacidad (RF37) en `/cuenta` y el smoke con el TOTP (PR #160, punto 36). Validación en `2026-10-29-b1bbcc7.md` del repositorio CEM.
