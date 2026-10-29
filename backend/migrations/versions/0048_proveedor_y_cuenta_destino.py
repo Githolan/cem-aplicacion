@@ -29,6 +29,11 @@ aprobación anterior y, si falta algo necesario, se cierra.
   se carga otra versión del proveedor (otra cuenta, otra razón social o la baja), la orden se
   modifica, lo que crea una versión nueva y la vuelve a revisión. Un proveedor que no está
   `activo` no recibe órdenes nuevas ni pagos (`proveedor_inactivo`).
+- **Quien cargó la cuenta no aprueba el pago** (`no_es_quien_cargo_la_cuenta`, revisión de app
+  #165): la separación de la orden suma a quien cargó, en cualquier versión del proveedor hasta la
+  que fija la orden, la cuenta que la orden paga (por la cuenta, la identidad guardada y la
+  actual). Solo aprobar: rechazar sigue abierto, es la acción segura. No decide la 6: alcanza al
+  ser humano que tiene las dos facultades, por el camino que sea.
 - **Quién:** el alta y las versiones del proveedor, con `egresos.preparar_orden` y las mismas
   barreras de la orden (`exigir_acto_economico`: modo, sesión reciente con segundo factor e
   identidad verificada). Es el «facultad de preparar = según paquete vigente» del punto 8; una
@@ -71,6 +76,7 @@ NUEVA_VERSION = "nucleo.nueva_version_orden_pago(uuid, uuid, integer, {}, uuid, 
 PREPARAR = "nucleo.preparar_orden_pago({}, uuid, text, uuid)"
 MODIFICAR = "nucleo.modificar_orden_pago(uuid, integer, {}, uuid, text, uuid)"
 EMITIR = "nucleo.emitir_orden_pago(uuid, integer, uuid, text, uuid)"
+APROBAR = "nucleo.registrar_aprobacion_orden_pago(uuid, integer, bytea, uuid, text, uuid)"
 
 FIRMA = ("beneficiario_nuevo text", "proveedor_nuevo uuid")
 
@@ -97,7 +103,7 @@ CAMBIOS = {
     pv nucleo.proveedor_version := nucleo.proveedor_vigente(c, proveedor_nuevo);
     h bytea;
   begin
-    if pv.estado <> 'activo' then
+    if pv.estado is distinct from 'activo' then
       raise exception 'el proveedor no está activo' using errcode = 'P0001',
         hint = 'proveedor_inactivo';
     end if;
@@ -136,6 +142,16 @@ CAMBIOS = {
                              btrim(comprobante_nuevo), usa_reserva)""",
         ),
     ],
+    APROBAR: [
+        (
+            "    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor,"
+            " identidad);\n    if not exists (select 1 from nucleo.orden_pago_version x",
+            "    perform nucleo.exigir_decision_sobre_orden(c, o, version_vista, actor,"
+            " identidad);\n"
+            "    perform nucleo.exigir_no_cargo_la_cuenta(c, orden, version_vista, actor,"
+            " identidad);\n    if not exists (select 1 from nucleo.orden_pago_version x",
+        ),
+    ],
     EMITIR: [
         (
             "    -- A5: quien emite no es ninguno",
@@ -157,12 +173,13 @@ $$;
 """
 
 UPGRADE = f"""
--- CBU o CVU: 22 dígitos; el 8 verifica el primer bloque y el 22 el segundo (BCRA).
+-- CBU o CVU: 22 dígitos; el 8 verifica el primer bloque y el 22 el segundo (BCRA). Entidad y
+-- sucursal en cero no existen (un CVU lleva 000 y el código del proveedor de pagos).
 create function nucleo.cbu_valido(c text) returns boolean
   language sql immutable strict parallel safe
   set search_path = pg_catalog, pg_temp
   as $$
-    select case when c ~ '^[0-9]{{22}}$' then
+    select case when c ~ '^[0-9]{{22}}$' and substr(c, 1, 7) <> '0000000' then
         (10 - (select sum(substr(c, i::int, 1)::int * w)
                  from unnest(array[7,1,3,9,7,1,3]) with ordinality as t(w, i)) % 10) % 10
           = substr(c, 8, 1)::int
@@ -306,13 +323,40 @@ create function nucleo.exigir_proveedor_sin_cambios(c uuid, orden uuid, numero i
     select * into v from nucleo.orden_pago_version x
      where x.orden_id = orden and x.numero = exigir_proveedor_sin_cambios.numero;
     pv := nucleo.proveedor_vigente(c, v.proveedor_id);
-    if pv.numero <> v.proveedor_version then
+    if pv.numero is distinct from v.proveedor_version then
       raise exception 'el proveedor cambió después de preparar la orden' using errcode = 'P0001',
         hint = 'proveedor_cambiado';
     end if;
-    if pv.estado <> 'activo' then
+    if pv.estado is distinct from 'activo' then
       raise exception 'el proveedor no está activo' using errcode = 'P0001',
         hint = 'proveedor_inactivo';
+    end if;
+  end
+  $$;
+
+-- Revisión de app #165: quien cargó la cuenta que paga la orden (en cualquier versión del
+-- proveedor hasta la que fija la orden) no la aprueba. Compara la cuenta, la identidad guardada
+-- y la actual, como la separación de la orden.
+create function nucleo.exigir_no_cargo_la_cuenta(c uuid, orden uuid, numero integer, actor uuid,
+                                                 identidad uuid)
+  returns void
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if exists (
+         select 1
+           from nucleo.orden_pago_version v
+           join nucleo.proveedor_version fija
+             on fija.proveedor_id = v.proveedor_id and fija.numero = v.proveedor_version
+           join nucleo.proveedor_version x
+             on x.proveedor_id = v.proveedor_id and x.numero <= fija.numero
+            and x.cuenta_destino is not distinct from fija.cuenta_destino
+          where v.orden_id = orden and v.numero = exigir_no_cargo_la_cuenta.numero
+            and (x.preparada_por = actor or x.identidad_preparo = identidad
+                 or nucleo.identidad_humana_de(c, x.preparada_por) = identidad)) then
+      raise exception 'quien cargó la cuenta del proveedor no aprueba este pago'
+        using errcode = 'P0001', hint = 'no_es_quien_cargo_la_cuenta';
     end if;
   end
   $$;
@@ -454,6 +498,7 @@ INTERNAS = (
     "nucleo.proveedor_vigente(uuid, uuid)",
     "nucleo.condicion_beneficiario(uuid, uuid, nucleo.proveedor_version)",
     "nucleo.exigir_proveedor_sin_cambios(uuid, uuid, integer)",
+    "nucleo.exigir_no_cargo_la_cuenta(uuid, uuid, integer, uuid, uuid)",
     "nucleo.auditar_proveedor(uuid, text, uuid, uuid, jsonb, jsonb)",
     "nucleo.insertar_version_proveedor(uuid, uuid, integer, text, text, text, text,"
     " nucleo.estado_proveedor, uuid, text, uuid, uuid)",
@@ -487,6 +532,7 @@ drop function nucleo.alta_proveedor(text, text, text, text, uuid, text, uuid, te
 drop function nucleo.insertar_version_proveedor(uuid, uuid, integer, text, text, text, text,
   nucleo.estado_proveedor, uuid, text, uuid, uuid);
 drop function nucleo.auditar_proveedor(uuid, text, uuid, uuid, jsonb, jsonb);
+drop function nucleo.exigir_no_cargo_la_cuenta(uuid, uuid, integer, uuid, uuid);
 drop function nucleo.exigir_proveedor_sin_cambios(uuid, uuid, integer);
 drop function nucleo.condicion_beneficiario(uuid, uuid, nucleo.proveedor_version);
 drop function nucleo.proveedor_vigente(uuid, uuid);

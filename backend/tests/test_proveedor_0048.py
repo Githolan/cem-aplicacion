@@ -15,9 +15,11 @@ from sqlalchemy.exc import DBAPIError
 from tests.test_orden_pago_neutra import (  # noqa: F401  (`e` es un fixture)
     APROBAR,
     EMITIR,
+    ENVIAR,
     MODIFICAR,
     PREPARAR,
     RAZON_SOCIAL,
+    RECHAZAR,
     _aprobada,
     cbu_sintetico,
     e,
@@ -28,6 +30,8 @@ from tests.test_orden_pago_neutra import (  # noqa: F401  (`e` es un fixture)
     niega,
     nuevo_proveedor,
     orden,
+    otorgar,
+    otra_cuenta_en_el_consejo,
     preparada,
     versiones,
 )
@@ -97,6 +101,7 @@ def test_cbu_valido_comprueba_los_dos_verificadores(motor_migrate):
         "21 dígitos": bueno[:21],
         "letras": "ABC" + bueno[3:],
         "alias": "PROVEEDOR.SINTETICO.CEM",
+        "entidad y sucursal en cero": "0" * 22,  # los dos verificadores dan 0
     }
     with motor_migrate.connect() as c:
 
@@ -174,6 +179,15 @@ def test_una_version_nueva_cambia_la_cuenta_con_historia(motor_migrate, e):  # n
     assert nueva not in ev["todo"] and DATOS["cuenta"] not in ev["todo"]
 
 
+# El CASCADE arrastra la versión de la orden y sus aprobaciones (FK): sus triggers de TRUNCATE se
+# apagan para que el que responda sea el del proveedor (revisión de app #165).
+SIN_TRUNCATE_DE_ORDENES = (
+    "alter table nucleo.orden_pago_version disable trigger historia_orden_pago_version_truncate;"
+    " alter table nucleo.orden_pago_aprobacion disable trigger"
+    " historia_orden_pago_aprobacion_truncate;"
+)
+
+
 def test_el_proveedor_y_sus_versiones_solo_se_agregan(motor_migrate, e):  # noqa: F811
     p = alta(motor_migrate, e)
     for sentencia in (
@@ -183,11 +197,9 @@ def test_el_proveedor_y_sus_versiones_solo_se_agregan(motor_migrate, e):  # noqa
         "delete from nucleo.proveedor_version where proveedor_id = :p",
         # Cada trigger de TRUNCATE solo (como P3 68): se apagan los de las tablas que el
         # CASCADE arrastra; el error deshace también esos ALTER.
-        "alter table nucleo.orden_pago_version disable trigger"
-        " historia_orden_pago_version_truncate; truncate nucleo.proveedor_version cascade",
-        "alter table nucleo.orden_pago_version disable trigger"
-        " historia_orden_pago_version_truncate; alter table nucleo.proveedor_version disable"
-        " trigger historia_proveedor_version_truncate;"
+        SIN_TRUNCATE_DE_ORDENES + " truncate nucleo.proveedor_version cascade",
+        SIN_TRUNCATE_DE_ORDENES + " alter table nucleo.proveedor_version disable trigger"
+        " historia_proveedor_version_truncate;"
         " truncate nucleo.proveedor cascade",
     ):
         with pytest.raises(DBAPIError) as error:
@@ -222,6 +234,16 @@ def test_la_orden_guarda_la_version_del_proveedor_y_su_condicion(motor_migrate, 
     # Control: otro proveedor, sin órdenes aprobadas, es nuevo.
     cuarta = llamar(motor_migrate, e, e.adm, PREPARAR, proveedor=e.otro)
     assert versiones(motor_migrate, cuarta)[0]["condicion_beneficiario"] == "nuevo"
+
+
+def test_cambiar_solo_la_razon_social_sigue_conocido(motor_migrate, e):  # noqa: F811
+    """La condición mira la cuenta, no el número de versión."""
+    _aprobada(motor_migrate, e)
+    llamar(motor_migrate, e, e.adm, VERSION, **{**DATOS, "proveedor": e.proveedor, "version": 1,
+           "razon": "Otra razón SINTETICA", "cuenta": cbu_sintetico(1), "cuit": None})  # fmt: skip
+    o = preparada(motor_migrate, e)
+    [v] = versiones(motor_migrate, o)
+    assert (v["proveedor_version"], v["condicion_beneficiario"]) == (2, "conocido")
 
 
 def test_un_borrador_no_hace_conocido_al_proveedor(motor_migrate, e):  # noqa: F811
@@ -354,3 +376,42 @@ def test_0048_no_sube_con_ordenes(base_aparte):  # noqa: F811
         c.execute(text("delete from nucleo.orden_pago where id = :o"), {"o": o})
     command.upgrade(cfg, "0048")  # control
     assert _existe(motor)
+
+
+# Quien cargó la cuenta no aprueba (revisión de app #165) --------------------------------------
+
+
+def test_quien_cargo_la_cuenta_no_aprueba_el_pago(motor_migrate, motor_app, e):  # noqa: F811
+    """El administrador carga el proveedor; otro prepara la orden; la otra cuenta del
+    administrador en el Consejo no la aprueba. Tampoco después de que un tercero cambie el rubro
+    sin tocar la cuenta. Control: otro consejero aprueba."""
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    with motor_migrate.connect() as c:
+        m, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+        ).one()  # fmt: skip
+    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+    llamar(motor_migrate, e, e.mc2, VERSION, **{**DATOS, "proveedor": e.proveedor, "version": 1,
+           "razon": RAZON_SOCIAL, "rubro": "Otro rubro", "cuenta": cbu_sintetico(1)})  # fmt: skip
+    o = llamar(motor_migrate, e, e.mc2, PREPARAR)
+    llamar(motor_migrate, e, e.mc2, ENVIAR, orden=o, version=1)
+    h = huella(motor_migrate, o, 1)
+    niega(motor_migrate, e, otra, APROBAR, "no_es_quien_cargo_la_cuenta", orden=o, version=1,
+          huella=h)  # fmt: skip
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+
+
+def test_rechazar_sigue_abierto_para_quien_cargo_la_cuenta(motor_migrate, motor_app, e):  # noqa: F811
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    with motor_migrate.connect() as c:
+        m, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+        ).one()  # fmt: skip
+    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+    o = llamar(motor_migrate, e, e.mc2, PREPARAR)
+    llamar(motor_migrate, e, e.mc2, ENVIAR, orden=o, version=1)
+    llamar(motor_migrate, e, otra, RECHAZAR, orden=o, version=1, motivo="SINTETICO")
+    assert orden(motor_migrate, o)["estado"] == "rechazada"
