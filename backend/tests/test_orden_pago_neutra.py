@@ -387,6 +387,45 @@ def test_aprobar_registra_la_version_y_no_cambia_el_estado(motor_migrate, e):
     assert acciones.count("consorcio.orden_pago.aprobar") == 2
 
 
+def test_el_modelo_soporta_una_o_dos_aprobaciones(motor_migrate, motor_app, e):
+    """2A y 2B del paquete H3 sin elegir: «hacen falta N» es contar identidades humanas distintas
+    sobre la versión vigente. La cuenta da 1 y después 2; otra cuenta del mismo humano no suma, y
+    ninguna cantidad pone «aprobada» (esa transición espera la decisión 2)."""
+    o = preparada(motor_migrate, e, en_revision=True)
+    h = huella(motor_migrate, o, 1)
+
+    def identidades_que_aprobaron() -> int:
+        with motor_migrate.connect() as c:
+            return c.execute(
+                text(
+                    "select count(distinct a.identidad_id) from nucleo.orden_pago_aprobacion a"
+                    " join nucleo.orden_pago o on o.id = a.orden_id"
+                    " where o.id = :o and a.version = o.version_vigente"
+                ),
+                {"o": o},
+            ).scalar_one()
+
+    assert identidades_que_aprobaron() == 0
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)
+    assert identidades_que_aprobaron() == 1  # alcanza con 2A
+    with motor_migrate.connect() as c:
+        acta = c.execute(
+            text("select decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"),
+            {"c": e.cons, "p": e.mc1},
+        ).scalar_one()  # fmt: skip
+    otra = otra_persona(motor_migrate, e.cons, verificada=False)
+    misma_identidad(motor_migrate, e.cons, e.mc1, otra)
+    m_otra = alta(motor_app, e.cons, e.prop, acta, tipo="miembro_consejo", persona=otra)
+    otorgar(motor_migrate, e.cons, m_otra, acta, "egresos.aprobar_orden")
+    e.sesion[otra] = nueva_sesion(motor_migrate, otra)
+    niega(motor_migrate, e, otra, APROBAR, "aprobacion_repetida", orden=o, version=1, huella=h)
+    assert identidades_que_aprobaron() == 1
+    llamar(motor_migrate, e, e.mc2, APROBAR, orden=o, version=1, huella=h)
+    assert identidades_que_aprobaron() == 2  # alcanza con 2B
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
+
+
 def test_un_cambio_esencial_invalida_lo_aprobado_y_permite_aprobar_la_version_nueva(
     motor_migrate, e
 ):
@@ -411,6 +450,31 @@ def test_una_orden_aprobada_que_cambia_vuelve_a_revision(motor_migrate, e):
     assert (orden(motor_migrate, o)["estado"], orden(motor_migrate, o)["version_vigente"]) == (
         "en_revision", 2,
     )  # fmt: skip
+
+
+def test_pa12_cambiar_el_beneficiario_tras_aprobar_invalida_y_vuelve_a_revision(motor_migrate, e):
+    """PA12 (documento 08, RN12): cambiar el beneficiario de una orden aprobada invalida la
+    autorización y la devuelve a revisión. Llevarla a «Aprobada» no tiene camino todavía (la
+    decisión 2), así que la prueba la pone a mano. Parcial: la base; la ruta y la pantalla
+    esperan a H3."""
+    o = preparada(motor_migrate, e, en_revision=True)
+    h1 = huella(motor_migrate, o, 1)
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h1)
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.orden_pago set estado = 'aprobada' where id = :o"), {"o": o})
+    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1,
+           beneficiario="Otro proveedor SINTETICO")  # fmt: skip
+    despues = orden(motor_migrate, o)
+    assert (despues["estado"], despues["version_vigente"]) == ("en_revision", 2)
+    assert huella(motor_migrate, o, 2) != h1
+    with motor_migrate.connect() as c:
+        vigentes = c.execute(
+            text("select count(*) from nucleo.orden_pago_aprobacion where orden_id = :o"
+                 " and version = 2"), {"o": o},
+        ).scalar_one()  # fmt: skip
+    assert vigentes == 0  # la aprobación de la versión 1 queda como historia, sin contar
+    assert aprobaciones(motor_migrate, o) == [(1, e.mc1)]
+    niega(motor_migrate, e, e.mc1, APROBAR, "huella_distinta", orden=o, version=2, huella=h1)
 
 
 def test_solo_se_aprueba_una_orden_en_revision(motor_migrate, e):
@@ -440,7 +504,9 @@ def _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e) -> UUI
     return otra
 
 
-def test_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_app, e):
+def test_pa14_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_app, e):
+    """PA14 (documento 08): el solicitante como segundo aprobador queda bloqueado. Parcial: la
+    base; la ruta y la pantalla esperan a las decisiones de H3."""
     o = preparada(motor_migrate, e, en_revision=True)
     h = huella(motor_migrate, o, 1)
     otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
@@ -812,28 +878,52 @@ def test_ninguna_funcion_lleva_la_orden_a_aprobada(motor_migrate):
     """Cuántas aprobaciones hacen falta es la decisión 2: ninguna función pone «aprobada». Alarma
     por inventario: las únicas que nombran el estado lo leen (modificar devuelve a revisión,
     emitir parte de ahí). Una función nueva que lo nombre hace fallar esta prueba y obliga a
-    revisarla."""
+    revisarla. Mira todos los esquemas propios, no solo `nucleo` (P3 70)."""
     with motor_migrate.connect() as c:
         nombran = set(
             c.execute(
                 text(
-                    "select p.proname from pg_proc p join pg_namespace n on n.oid ="
-                    " p.pronamespace where n.nspname = 'nucleo' and p.prosrc like '%orden_pago%'"
-                    " and p.prosrc like '%''aprobada''%'"
+                    "select n.nspname || '.' || p.proname from pg_proc p join pg_namespace n"
+                    " on n.oid = p.pronamespace"
+                    " where n.nspname not in ('pg_catalog', 'information_schema')"
+                    " and p.prosrc like '%orden_pago%' and p.prosrc like '%''aprobada''%'"
                 )
             ).scalars()
         )
-    assert nombran == {"modificar_orden_pago", "emitir_orden_pago"}
+    assert nombran == {"nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago"}
 
 
 def test_truncate_tampoco_borra_la_historia(motor_migrate, e):
-    """Control: la tabla tiene filas, así que el TRUNCATE las borraría sin el trigger."""
+    """Control: la versión tiene filas, así que el TRUNCATE las borraría sin el trigger (el de
+    la aprobación es por sentencia: se dispara aunque esté vacía).
+
+    Cada trigger se prueba solo (P3 68). La versión no se puede truncar sin `cascade` (la
+    aprobación la referencia), y con `cascade` el trigger de la aprobación daría el mismo hint:
+    se apaga dentro de la transacción. Las dos transacciones se deshacen siempre: si un trigger
+    faltara, la prueba falla sin dejar la base truncada ni el trigger apagado."""
     o = preparada(motor_migrate, e)
-    for tabla in ("nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion"):
-        with pytest.raises(DBAPIError) as err:
-            with motor_migrate.begin() as c:
-                c.execute(text(f"truncate {tabla} cascade"))
-        assert err.value.orig.diag.message_hint == "historia_inmutable"
+
+    def hint_al_truncar(*sentencias: str) -> str | None:
+        with motor_migrate.connect() as c:
+            transaccion_ = c.begin()
+            try:
+                for s in sentencias:
+                    c.execute(text(s))
+            except DBAPIError as error:
+                return error.orig.diag.message_hint
+            finally:
+                transaccion_.rollback()
+        return None
+
+    assert (
+        hint_al_truncar(
+            "alter table nucleo.orden_pago_aprobacion"
+            " disable trigger historia_orden_pago_aprobacion_truncate",
+            "truncate nucleo.orden_pago_version cascade",
+        )
+        == "historia_inmutable"
+    )
+    assert hint_al_truncar("truncate nucleo.orden_pago_aprobacion") == "historia_inmutable"
     with motor_migrate.connect() as c:
         assert (
             c.execute(
