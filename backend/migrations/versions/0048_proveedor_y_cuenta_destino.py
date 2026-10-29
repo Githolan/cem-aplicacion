@@ -29,10 +29,10 @@ aprobación anterior y, si falta algo necesario, se cierra.
   se carga otra versión del proveedor (otra cuenta, otra razón social o la baja), la orden se
   modifica, lo que crea una versión nueva y la vuelve a revisión. Un proveedor que no está
   `activo` no recibe órdenes nuevas ni pagos (`proveedor_inactivo`).
-- **Quien cargó la cuenta no aprueba el pago** (`no_es_quien_cargo_la_cuenta`, revisión de app
-  #165): la separación de la orden suma a quien cargó, en cualquier versión del proveedor hasta la
-  que fija la orden, la cuenta que la orden paga (por la cuenta, la identidad guardada y la
-  actual). Solo aprobar: rechazar sigue abierto, es la acción segura. No decide la 6: alcanza al
+- **Quien firmó la cuenta no aprueba el pago** (`no_es_quien_cargo_la_cuenta`, revisión de app
+  #165): la separación de la orden suma a quien firmó cualquier versión del proveedor, hasta la
+  que fija la orden, que lleve la cuenta que la orden paga, aunque en esa versión solo haya
+  cambiado otro dato (por la cuenta, la identidad guardada y la actual). Solo aprobar: rechazar sigue abierto, es la acción segura. No decide la 6: alcanza al
   ser humano que tiene las dos facultades, por el camino que sea.
 - **Quién:** el alta y las versiones del proveedor, con `egresos.preparar_orden` y las mismas
   barreras de la orden (`exigir_acto_economico`: modo, sesión reciente con segundo factor e

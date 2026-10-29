@@ -308,6 +308,7 @@ CAMBIADAS_0047 = (
     "nucleo.modificar_orden_pago(uuid, integer, bigint, text, text, text, text, boolean, uuid,"
     " text, uuid)",
     "nucleo.emitir_orden_pago(uuid, integer, uuid, text, uuid)",
+    "nucleo.registrar_aprobacion_orden_pago(uuid, integer, bytea, uuid, text, uuid)",
 )
 
 
@@ -415,3 +416,24 @@ def test_rechazar_sigue_abierto_para_quien_cargo_la_cuenta(motor_migrate, motor_
     llamar(motor_migrate, e, e.mc2, ENVIAR, orden=o, version=1)
     llamar(motor_migrate, e, otra, RECHAZAR, orden=o, version=1, motivo="SINTETICO")
     assert orden(motor_migrate, o)["estado"] == "rechazada"
+
+
+def test_quien_firmo_una_version_con_la_cuenta_no_aprueba_aunque_no_prepare(
+    motor_migrate,
+    e,  # noqa: F811
+):
+    """La rama por cuenta: mc2 firma una versión que mantiene la cuenta (cambia el rubro); el
+    administrador prepara; mc2 no aprueba. Control: mc1 aprueba."""
+    with motor_migrate.connect() as c:
+        m, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+        ).one()  # fmt: skip
+    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+    llamar(motor_migrate, e, e.mc2, VERSION, **{**DATOS, "proveedor": e.proveedor, "version": 1,
+           "razon": RAZON_SOCIAL, "rubro": "Otro rubro", "cuenta": cbu_sintetico(1)})  # fmt: skip
+    o = preparada(motor_migrate, e, en_revision=True)
+    h = huella(motor_migrate, o, 1)
+    niega(motor_migrate, e, e.mc2, APROBAR, "no_es_quien_cargo_la_cuenta", orden=o, version=1,
+          huella=h)  # fmt: skip
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
