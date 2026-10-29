@@ -894,3 +894,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Un rojo de la CI, corregido:** la prueba nueva corre antes que las idas y vueltas de migraciones y dejaba órdenes que citan identidades. `conftest.vaciar_mandatos` ahora vacía órdenes y cargas. Control: sin eso, `test_contrasena` falla en el mismo orden.
    - **Revisión:** independiente sobre `2d53e7c` y sobre el delta hasta `d64cb08`, 0 P1/P2. Quedan los P3 80 a 88 en el repositorio CEM; el 80 y el 81 los decide el propietario. Codex limpio sobre `d64cb08`. `ci.ps1` verde sobre `d64cb08` y `f2a7cfa`.
    - **Sigue abierto:** decisión 1 (qué órdenes necesitan aprobación; hoy toda orden pasa por revisión) y decisión 6 (administrador que además es consejero). No hay rutas: nadie prepara ni aprueba por la API.
+38. **Privacidad: el foco y el estado al consultar de nuevo** (P3 77 del repositorio CEM; este PR):
+   - Al tocar «Consultar de nuevo» el botón desaparece y el foco iba al cuerpo de la página. Ahora va al título de la sección.
+   - Desde ese momento la sección queda a la vista con su estado: «Consultando tus pedidos…», los pedidos o «No tenés pedidos pendientes sobre tus datos». En la primera consulta sigue sin mostrarse si no hay nada.
+   - Pruebas: el foco en el título y el estado intermedio con la respuesta demorada, más axe. Mutaciones: sin el foco fallan dos; sin el estado de reconsulta, dos.

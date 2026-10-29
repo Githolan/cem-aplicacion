@@ -214,9 +214,32 @@ describe("sección de pedidos sobre los datos", () => {
     expect(screen.getByRole("heading", { name: "Tus pedidos sobre tus datos" })).toBeTruthy();
     expect((await axe.run(container)).violations).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    // El botón desaparece: el foco va al título de la sección, no al cuerpo de la página (P3 77).
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Tus pedidos sobre tus datos" }));
     expect(await screen.findByRole("button", { name: "Descargar la copia de mis datos" })).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(intentos).toBe(2);
+  });
+
+  it("al consultar de nuevo muestra que consulta y, sin pedidos, lo dice en vez de desaparecer", async () => {
+    let responder: (r: Response) => void = () => undefined;
+    let intentos = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        intentos += 1;
+        if (intentos === 1) return Promise.reject(new TypeError("Failed to fetch"));
+        return new Promise<Response>((r) => (responder = r));
+      }),
+    );
+    const { container } = mostrar();
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    expect(screen.getByText("Consultando tus pedidos…").getAttribute("role")).toBe("status");
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Tus pedidos sobre tus datos" }));
+    responder(Response.json({ elementos: [caso("resuelto")] }));
+    expect(await screen.findByText("No tenés pedidos pendientes sobre tus datos.")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((await axe.run(container)).violations).toEqual([]);
   });
 
   it("con el servicio caído lo dice, sin culpar a la conexión", async () => {
