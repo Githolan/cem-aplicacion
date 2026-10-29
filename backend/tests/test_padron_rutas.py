@@ -517,9 +517,14 @@ def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
         "app.limite.LIMITES_INVITACIONES_PERSONA", (parse("5/hour"), parse("50/day"))
     )
     original = limite.consumir
+    # El cupo se pide con el bloqueo de la clave tomado: cuando el primero llega acá, ya lo
+    # tiene. El segundo sale recién entonces; con una espera fija, una CPU cargada podía dejar
+    # que el segundo tomara el bloqueo antes y la prueba fallaba sin defecto (rojo de 9223ed5).
+    en_el_cupo: list[asyncio.Event] = []
 
     async def consumir_lento(*args, **kwargs):
         # El primero espera el cupo (sin frenar el bucle) cuando llega el segundo.
+        en_el_cupo[0].set()
         await asyncio.sleep(0.5)
         return await original(*args, **kwargs)
 
@@ -537,8 +542,9 @@ def test_dos_pedidos_en_el_mismo_bucle_con_la_misma_clave_no_se_traban(
         transporte = httpx.ASGITransport(app=aplicacion, client=("198.51.100.31", 40000))
         async with httpx.AsyncClient(transport=transporte, base_url="http://cem") as c:
             url = invitaciones_url(e["cons"])
+            en_el_cupo.append(asyncio.Event())
             primero = asyncio.create_task(c.post(url, json=cuerpo, headers=clave))
-            await asyncio.sleep(0.1)
+            await en_el_cupo[0].wait()
             segundo = await c.post(url, json=cuerpo, headers=clave)
             return await primero, segundo
 

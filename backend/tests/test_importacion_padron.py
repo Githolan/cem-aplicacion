@@ -1201,13 +1201,20 @@ def test_el_padron_no_delata_ni_muestra_el_nombre_de_una_cuenta_de_otro_consorci
     hoy = _hoy(motor_migrate, e["cons"])
     cons_b, _ = segundo_consorcio_con_mandato(motor_migrate, motor_app, e["mc"])
     with motor_migrate.begin() as c:
-        ajena, correo = c.execute(
+        # cons_b tiene dos vínculos: el del Consejo (mc, que también está en el padrón de A) y el
+        # de su propietaria. Un `limit 1` sin orden elegía a cualquiera de los dos; con mc, «Nombre
+        # Real» aparecía en A por su propio vínculo y la prueba fallaba sin que hubiera fuga. La
+        # sonda tiene que ser alguien que solo existe en cons_b.
+        [(ajena, correo)] = c.execute(
             text(
                 "select p.id, p.correo from nucleo.vinculo v"
-                " join nucleo.persona p on p.id = v.persona_id where v.consorcio_id = :c limit 1"
+                " join nucleo.persona p on p.id = v.persona_id where v.consorcio_id = :b"
+                " and not exists (select 1 from nucleo.vinculo a"
+                "   where a.persona_id = p.id and a.consorcio_id = :a)"
             ),
-            {"c": cons_b},
-        ).one()
+            {"a": e["cons"], "b": cons_b},
+        ).all()
+        assert ajena != e["mc"]
         c.execute(
             text("update nucleo.persona set nombre = 'Nombre Real' where id = :p"), {"p": ajena}
         )
