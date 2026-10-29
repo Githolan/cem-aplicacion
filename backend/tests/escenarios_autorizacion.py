@@ -137,6 +137,12 @@ ADICIONES_0036 = {
     "administrador": [],
     "administrador_externo": [],
 }
+# `0046` (decisión 2 de H3, 29-10-2026): aprobar órdenes de pago, solo para MC.
+ADICIONES_0046 = {
+    "miembro_consejo": ["egresos.aprobar_orden"],
+    "administrador": [],
+    "administrador_externo": [],
+}
 PAQUETES: dict[str, list[str]] = {
     tipo: list(_M0011.PAQUETES[tipo])
     + ADICIONES_0012[tipo]
@@ -144,6 +150,7 @@ PAQUETES: dict[str, list[str]] = {
     + ADICIONES_0028[tipo]
     + ADICIONES_0031[tipo]
     + ADICIONES_0036[tipo]
+    + ADICIONES_0046[tipo]
     for tipo in FIGURAS_MANDATO.values()
 }
 

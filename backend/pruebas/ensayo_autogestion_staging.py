@@ -147,7 +147,8 @@ REFERENCIA_IDENTIDAD = (
     "SINTETICO / PRUEBA / NO REAL: cuenta LAB sin documento, huella al azar (ensayo de Autogestión)"
 )
 SIN_PAQUETE = {"egresos.aprobar_orden", "liquidacion.aprobar", "coeficientes.aprobar"}
-"""Ningún paquete las tiene (decisión 7 del 21-10): tampoco el administrador en Autogestión."""
+"""El administrador no tiene ninguna, tampoco en Autogestión: aprobar órdenes es del Consejo
+(`0046`) y las otras dos no están en ningún paquete (decisión 7 del 21-10)."""
 
 
 class _Deshacer(Exception):

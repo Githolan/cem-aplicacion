@@ -161,7 +161,8 @@ def test_camino_a_primer_modo_autogestion_con_el_administrador(correr, motor_mig
     assert periodos(motor_migrate, cons) == [("autogestion", acta, None)]
     m = mandato_administrador(motor_migrate, cons)
     assert (m["persona_id"], m["vigente_desde"], m["origen"]) == (prop, acta, "soporte")
-    # El paquete entero del administrador, y ninguna facultad de aprobar dinero (decisión 7).
+    # El paquete entero del administrador, y ninguna facultad de aprobar dinero: las de
+    # liquidación y coeficientes esperan (decisión 7) y aprobar órdenes es del Consejo (0046).
     assert m["facultades"] == m["paquete"]
     assert "egresos.preparar_orden" in m["facultades"]
     assert (
