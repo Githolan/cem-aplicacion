@@ -526,17 +526,10 @@ def otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, de: UUID) -> UUID:
     return otra
 
 
-def _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e) -> UUID:
-    """El administrador (que prepara) recibe aprobar solo para la prueba (la decisión 6 sigue
-    abierta), y también otra cuenta del mismo ser humano, en el Consejo. Devuelve esa otra
-    cuenta."""
-    with motor_migrate.connect() as c:
-        m_adm, acta = c.execute(
-            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
-                 " and persona_id = :p"),
-            {"c": e.cons, "p": e.adm},
-        ).one()  # fmt: skip
-    otorgar(motor_migrate, e.cons, m_adm, acta, "egresos.aprobar_orden")
+def _quien_preparo_tambien_en_el_consejo(motor_migrate, motor_app, e) -> UUID:
+    """El ser humano que prepara (el administrador) tiene además otra cuenta con mandato del
+    Consejo, y por eso con `egresos.aprobar_orden`. Desde `0047` es la única forma de que tenga
+    la facultad (P3 81): su mandato de administrador no la recibe. Devuelve esa otra cuenta."""
     return otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
 
 
@@ -545,10 +538,9 @@ def test_pa14_quien_preparo_no_aprueba_ni_con_otra_cuenta(motor_migrate, motor_a
     base; la ruta y la pantalla esperan a las decisiones de H3."""
     o = preparada(motor_migrate, e, en_revision=True)
     h = huella(motor_migrate, o, 1)
-    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
-    for quien in (e.adm, otra):
-        niega(motor_migrate, e, quien, APROBAR, "no_es_quien_preparo", orden=o, version=1,
-              huella=h)  # fmt: skip
+    otra = _quien_preparo_tambien_en_el_consejo(motor_migrate, motor_app, e)
+    niega(motor_migrate, e, e.adm, APROBAR, "42501", orden=o, version=1, huella=h)
+    niega(motor_migrate, e, otra, APROBAR, "no_es_quien_preparo", orden=o, version=1, huella=h)
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
 
 
@@ -573,11 +565,11 @@ def test_rechazar_tambien_exige_no_haber_preparado_y_guarda_el_motivo_fuera_del_
     o = preparada(motor_migrate, e, en_revision=True)
     motivo = "SINTETICO: el presupuesto no coincide"
     niega(motor_migrate, e, e.adm, RECHAZAR, "42501", orden=o, version=1, motivo=motivo)
-    # Con la facultad de aprobar, quien preparó (con cualquiera de sus cuentas) tampoco rechaza.
-    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
-    for quien in (e.adm, otra):
-        niega(motor_migrate, e, quien, RECHAZAR, "no_es_quien_preparo", orden=o, version=1,
-              motivo=motivo)  # fmt: skip
+    # Con la facultad de aprobar (por su otra cuenta, en el Consejo), quien preparó tampoco
+    # rechaza.
+    otra = _quien_preparo_tambien_en_el_consejo(motor_migrate, motor_app, e)
+    niega(motor_migrate, e, otra, RECHAZAR, "no_es_quien_preparo", orden=o, version=1,
+          motivo=motivo)  # fmt: skip
     llamar(motor_migrate, e, e.mc1, RECHAZAR, orden=o, version=1, motivo=motivo)
     o_ = orden(motor_migrate, o)
     assert (o_["estado"], o_["motivo_rechazo"]) == ("rechazada", motivo)
@@ -653,7 +645,7 @@ def test_la_separacion_usa_la_identidad_de_quien_preparo_aunque_se_revincule(
     comparación actual (cuentas en identidades distintas) la dejaría pasar."""
     o = preparada(motor_migrate, e, en_revision=True)
     h = huella(motor_migrate, o, 1)
-    otra = _quien_preparo_con_aprobar_y_otra_cuenta(motor_migrate, motor_app, e)
+    otra = _quien_preparo_tambien_en_el_consejo(motor_migrate, motor_app, e)
     _revincular(motor_migrate, e.cons, e.adm)
     with motor_migrate.connect() as c:
         distintas = c.execute(
