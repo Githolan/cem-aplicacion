@@ -28,6 +28,7 @@ from tests.test_orden_pago_neutra import (
     escena_economica,
     nueva_sesion,
     nuevo_proveedor,
+    otorgar,
     otra_cuenta_en_el_consejo,
 )
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
@@ -271,7 +272,8 @@ def test_una_orden_inexistente_es_404(e):
 
 def test_cada_rol_en_su_lugar(e):
     """P3 81: el administrador prepara y no lee la revisión ni aprueba; el Consejo aprueba y no
-    prepara. Soporte no tiene ninguna ruta: no tiene ámbito en el consorcio."""
+    prepara. (Soporte no entra por estas rutas: actúa por `scripts/` y Access, sin sesión en el
+    consorcio.)"""
     o = enviada(e)
     h = huella(e, o, 1)
     assert codigo(get(e, e.adm, "ordenes-pago/revision")) == (403, "sin_permiso")
@@ -360,3 +362,73 @@ def test_0049_ida_y_vuelta(base_aparte):  # noqa: F811
     assert _rutas(motor) == (0, 0)
     command.upgrade(cfg, "0049")  # control: vuelve a subir limpio
     assert _rutas(motor) == (4, 11)
+
+
+def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
+    with motor_migrate.connect() as c:
+        m, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+        ).one()  # fmt: skip
+    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+
+
+def test_quien_preparo_una_version_posterior_no_aprueba(motor_migrate, e):
+    """El evaluador compara con quien creó la orden; quien preparó la versión 2 lo frena la base
+    (`no_es_quien_preparo`), y la ruta lo dice."""
+    _mc2_tambien_prepara(motor_migrate, e)
+    o = enviada(e)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/versiones",
+             ORDEN | {"proveedor_id": str(e.proveedor), "importe_centavos": 777,
+                      "version_esperada": 1})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    h2 = huella(e, o, 2)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 2, "huella": h2})
+    assert codigo(r) == (403, "no_es_quien_preparo")
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 2, "huella": h2})
+    assert r.status_code == 201, r.json()  # control
+
+
+def test_quien_cargo_la_cuenta_no_aprueba_el_pago(motor_migrate, e):
+    _mc2_tambien_prepara(motor_migrate, e)
+    r = post(e, e.mc2, f"proveedores/{e.proveedor}/versiones",
+             {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
+              "cuenta_destino": cbu_sintetico(1), "estado": "activo",
+              "version_esperada": 1})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    o = enviada(e)
+    h = huella(e, o, 1)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert codigo(r) == (403, "no_es_quien_cargo_la_cuenta")
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert r.status_code == 201, r.json()  # control
+
+
+def test_el_consejo_no_lee_los_proveedores_por_su_cuenta(e):
+    assert codigo(get(e, e.mc1, "proveedores")) == (403, "sin_permiso")
+    assert codigo(get(e, e.mc1, f"proveedores/{e.proveedor}")) == (403, "sin_permiso")
+    assert get(e, e.adm, f"proveedores/{e.proveedor}").status_code == 200  # control
+
+
+def test_un_proveedor_inexistente_en_la_ruta_es_404(e):
+    cuerpo = PROVEEDOR | {"estado": "activo", "version_esperada": 1}
+    assert codigo(post(e, e.adm, f"proveedores/{uuid4()}/versiones", cuerpo)) == (
+        404, "no_encontrado")  # fmt: skip
+    r = post(e, e.adm, f"proveedores/{e.proveedor}/versiones", cuerpo)
+    assert r.status_code == 200, r.json()  # control: el que existe
+
+
+@pytest.mark.parametrize(
+    "cuerpo",
+    [{"version_esperada": 2**31}, {"version_esperada": 0}],
+)
+def test_lo_que_la_base_no_recibe_es_422(e, cuerpo):
+    """Una versión fuera de `integer` o un carácter de control no llegan a la base (500)."""
+    o = preparar(e)
+    r = post(e, e.adm, f"ordenes-pago/{o}/enviar-a-revision", cuerpo)
+    assert codigo(r) == (422, "peticion_invalida")
+    r = post(e, e.adm, "ordenes-pago",
+             ORDEN | {"proveedor_id": str(e.proveedor), "concepto": "Bomba\x00"})  # fmt: skip
+    assert codigo(r) == (422, "peticion_invalida")
+    r = post(e, e.adm, f"ordenes-pago/{o}/enviar-a-revision", {"version_esperada": 2**31 - 1})
+    assert codigo(r) == (409, "version_desactualizada")  # control: el tope sí llega a la base

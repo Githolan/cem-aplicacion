@@ -127,9 +127,10 @@ RESPUESTAS_ESCRITURA = RESPUESTAS_LECTURA | {
 }
 
 
-def _ejecutar(conn: Connection, permiso: Permiso, sql: str, parametros: dict):
+def _ejecutar(conn: Connection, permiso: Permiso, sql: str, parametros: dict, errores=None):
     """Llama a una función de la base con la persona y la sesión de la petición, y traduce sus
-    motivos a errores de la API."""
+    motivos a errores de la API (`errores` cambia la traducción de algunos, para esta ruta)."""
+    errores = ERRORES | (errores or {})
     ctx = permiso.ctx
     try:
         return conn.execute(
@@ -139,8 +140,8 @@ def _ejecutar(conn: Connection, permiso: Permiso, sql: str, parametros: dict):
         if isinstance(e.orig, InsufficientPrivilege):
             raise Discrepancia(f"la base niega {permiso.accion} y el evaluador lo concede") from e
         motivo = e.orig.diag.message_hint
-        if motivo in ERRORES:
-            raise ErrorApi(*ERRORES[motivo]) from e
+        if motivo in errores:
+            raise ErrorApi(*errores[motivo]) from e
         raise
 
 
@@ -265,6 +266,8 @@ def versionar_proveedor(
             " cast(:estado as nucleo.estado_proveedor), :doc, :cuenta, :actor, 'api', :sesion)",
             {"p": proveedor_id, "esperada": datos.version_esperada, "estado": datos.estado.value,
              **_datos_proveedor(datos)},
+            # El proveedor viene en la ruta: si no existe es 404, como al verlo.
+            {"proveedor_inexistente": ERRORES["no_encontrado"]},
         ).scalar_one()  # fmt: skip
         return 200, ProveedorCreado(id=proveedor_id, version=version)
 

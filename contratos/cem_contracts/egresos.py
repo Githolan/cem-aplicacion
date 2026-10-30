@@ -29,6 +29,10 @@ FORMATO_MONEDA = r"^[A-Z]{3}$"
 FORMATO_CUIT = r"^[0-9]{11}$"
 """Once dígitos, sin guiones; el dígito verificador lo comprueba la base (`cuit_valido`)."""
 FORMATO_CUENTA = r"^[0-9]{22}$"
+VERSION_MAXIMA = 2**31 - 1
+"""Las versiones son `integer` en la base: una mayor no encontraría la función (500)."""
+SIN_CONTROLES = r"^[^\x00-\x1f\x7f]*$"
+"""Ningún carácter de control: el nulo, por ejemplo, lo rechaza el controlador de la base."""
 FORMATO_HUELLA = r"^[0-9a-f]{64}$"
 """SHA-256 en hexadecimal, en minúsculas, como lo devuelve la lectura."""
 PESOS_BLOQUE_1 = (7, 1, 3, 9, 7, 1, 3)
@@ -54,7 +58,10 @@ def _cuenta_valida(cuenta: str) -> str:
 def _texto(minimo: int, maximo: int):
     """Se recorta antes de validar: la base guarda `btrim` y lo controla con su largo."""
     return Annotated[
-        str, StringConstraints(strip_whitespace=True, min_length=minimo, max_length=maximo)
+        str,
+        StringConstraints(
+            strip_whitespace=True, min_length=minimo, max_length=maximo, pattern=SIN_CONTROLES
+        ),
     ]
 
 
@@ -72,7 +79,7 @@ Comprobante = _texto(1, 200)
 Motivo = _texto(1, 500)
 Importe = Annotated[int, Field(gt=0, le=IMPORTE_MAXIMO_CENTAVOS, description="En centavos.")]
 Moneda = Annotated[str, Field(pattern=FORMATO_MONEDA, examples=["ARS"])]
-Version = Annotated[int, Field(gt=0)]
+Version = Annotated[int, Field(gt=0, le=VERSION_MAXIMA)]
 
 
 class EstadoProveedor(StrEnum):
