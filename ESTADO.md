@@ -111,9 +111,37 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `6153cbe` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048 y `2026-10-30-6153cbe.md` con la de 0049).
+Medido en el despliegue de `71cf09f` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050 y `2026-10-30-71cf09f.md` con la de 0051).
 
-**Staging y producción en `6153cbe`** (30-10-2026; contenedores nuevos de staging de 06:40 a 06:42 UTC y de producción de 06:45 a 06:46 UTC), base `0049`, contrato 0.28.0.
+**Staging y producción en `71cf09f`** (30-10-2026, de 22:11 a 22:20 UTC), base `0051`, contrato 0.29.0.
+
+- **Qué suma `0051` (PR #170):** la ejecución lógica del pago, sin riel real.
+  - Hay una ejecución por versión emitida, con la clave de idempotencia para el riel.
+  - Los trabajos son `egresos.ordenar_pago`, con un solo intento, y `egresos.verificar_pago`, que solo consulta.
+  - Un resultado incierto nunca se reintenta a ciegas.
+  - Ordenar y verificar no pueden correr a la vez sobre el mismo pago: los separa un bloqueo de la ejecución.
+  - Los requisitos del riel están en `RielDePago`. **No hay riel configurado: nada mueve dinero.**
+- **Qué sumó `59bc3d0` (PR #169, `0050`):** la decisión 1A del propietario (30-10):
+  - umbral por acta y por moneda;
+  - contratos confirmados por un consejero;
+  - franjas con precedencia y fraccionamiento como alerta;
+  - 7 días con renovación;
+  - emisión con huella.
+
+  También trae las pantallas aprobadas: `/egresos/proveedores`, `/egresos/ordenes` y `/egresos/revision`, con selector de edificio, TOTP que reintenta con la misma clave y recarga ante 409.
+- **Compuertas:**
+  - **CI:** `ci.ps1` verde sobre las cabezas finales (`bf6ed46`, `9d42ef8`) y sobre `59bc3d0` y `71cf09f`: backend 2313 (2 omitidas) y frontend 424.
+  - **Codex** sin hallazgos sobre las cabezas finales.
+  - **Revisión independiente:** sin P1 ni P2 en las cabezas finales.
+  - **Mutaciones:** 11 de `0050`, 9 de `0051` y las del frontend, todas detectadas.
+- **Validación en los dos entornos, en solo lectura:**
+  - base en `0051`, con las tablas de `0050` y `0051`;
+  - `cem_app` ejecuta solo las funciones de las rutas, las dos cargas de soporte y las dos de los trabajos de pago (estas solo como trabajo);
+  - `public` no ejecuta ninguna y `cem_app` no tiene tablas de egresos;
+  - 0 órdenes, umbrales, contratos, ejecuciones y trabajos de pago. Producción: solo código, ningún dato.
+- **SIN VERIFICAR con usuario real:** el flujo autenticado de las pantallas de egresos y cualquier riel de pago.
+
+**Antes, el 30-10: `6153cbe`** (contenedores nuevos de staging de 06:40 a 06:42 UTC y de producción de 06:45 a 06:46 UTC), base `0049`, contrato 0.28.0.
 
 - **Qué suma:** las rutas de proveedores y órdenes de pago (PR #167, `0049`; punto 41). Sin ruta para emitir ni pagar.
 - **Controles:** `ci.ps1` verde sobre `83c9a26`, sobre `946e765` (la cabeza final del PR) y sobre `6153cbe`. Resultado: backend 2268 (2 omitidas), contratos 58, frontend 395 y e2e 193.
