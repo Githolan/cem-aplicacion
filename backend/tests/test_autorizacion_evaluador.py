@@ -325,8 +325,9 @@ def test_las_acciones_de_la_tabla():
     # 5 de §2.1, 24 de §2.2, las 5 de A7 (2b-4, PR 4), las 3 de lectura (2b-4c) y la revisión
     # del mandato pendiente (E62), la historia de modos (RF41-C, 2b-6b), las 2 de la auditoría
     # (RF35-B, 2b-6c), las 2 de la lectura de coeficientes (RF05) y las 2 de documentos de 2c-2
-    # (`documentos.ver_restringidos` y `documentos.cargar_operativos`)
-    assert len(POLITICAS) == 48
+    # (`documentos.ver_restringidos` y `documentos.cargar_operativos`) y la lectura de la revisión
+    # de órdenes de pago (`egresos.revisar_orden`, H3)
+    assert len(POLITICAS) == 49
 
 
 def _archivo(tmp_path, nombre, politicas):

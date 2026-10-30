@@ -924,7 +924,20 @@
           "archivo_vencido",
           "reautenticacion_requerida",
           "codigo_caso_invalido",
-          "caso_no_disponible"
+          "caso_no_disponible",
+          "sesion_reciente_requerida",
+          "version_desactualizada",
+          "sin_cambios",
+          "orden_no_admite",
+          "huella_distinta",
+          "aprobacion_repetida",
+          "no_es_quien_preparo",
+          "no_es_quien_cargo_la_cuenta",
+          "identidad_no_verificada",
+          "proveedor_inexistente",
+          "proveedor_inactivo",
+          "cuit_repetido",
+          "documento_invalido"
         ],
         "title": "CodigoError",
         "type": "string"

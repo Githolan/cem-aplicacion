@@ -153,6 +153,56 @@
         "title": "AnulacionVinculo",
         "type": "object"
       },
+      "Aprobacion": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/aprobaciones`: la versión y la huella que se vieron.",
+        "properties": {
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "huella"
+        ],
+        "title": "Aprobacion",
+        "type": "object"
+      },
+      "AprobacionRegistrada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id",
+          "version"
+        ],
+        "title": "AprobacionRegistrada",
+        "type": "object"
+      },
       "BajaMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/baja`.",
         "properties": {
@@ -521,7 +571,20 @@
           "archivo_vencido",
           "reautenticacion_requerida",
           "codigo_caso_invalido",
-          "caso_no_disponible"
+          "caso_no_disponible",
+          "sesion_reciente_requerida",
+          "version_desactualizada",
+          "sin_cambios",
+          "orden_no_admite",
+          "huella_distinta",
+          "aprobacion_repetida",
+          "no_es_quien_preparo",
+          "no_es_quien_cargo_la_cuenta",
+          "identidad_no_verificada",
+          "proveedor_inexistente",
+          "proveedor_inactivo",
+          "cuit_repetido",
+          "documento_invalido"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -668,6 +731,16 @@
         ],
         "title": "CoeficientesGrupo",
         "type": "object"
+      },
+      "CondicionBeneficiario": {
+        "description": "Calculada al preparar cada versión (`0048`). Qué control pide cada una es la decisión 1:\nhoy toda orden pasa por revisión.",
+        "enum": [
+          "nuevo",
+          "cuenta_cambiada",
+          "conocido"
+        ],
+        "title": "CondicionBeneficiario",
+        "type": "string"
       },
       "ConfirmacionCaso": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/confirmar`.",
@@ -1562,6 +1635,22 @@
         "title": "EntradaContrasena",
         "type": "object"
       },
+      "EnvioARevision": {
+        "additionalProperties": false,
+        "properties": {
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_esperada"
+        ],
+        "title": "EnvioARevision",
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "codigo": {
@@ -1774,6 +1863,31 @@
           "error_carga"
         ],
         "title": "EstadoMandato",
+        "type": "string"
+      },
+      "EstadoOrdenPago": {
+        "description": "Los estados del diagrama 4 del documento 08 (`0045`).",
+        "enum": [
+          "borrador",
+          "en_revision",
+          "rechazada",
+          "aprobada",
+          "en_ejecucion",
+          "en_verificacion",
+          "pagada",
+          "fallida",
+          "conciliada"
+        ],
+        "title": "EstadoOrdenPago",
+        "type": "string"
+      },
+      "EstadoProveedor": {
+        "enum": [
+          "activo",
+          "suspendido",
+          "baja"
+        ],
+        "title": "EstadoProveedor",
         "type": "string"
       },
       "EstadoSegundoFactor": {
@@ -3120,6 +3234,38 @@
         "title": "ListaModos",
         "type": "object"
       },
+      "ListaOrdenesPago": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/OrdenPago"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaOrdenesPago",
+        "type": "object"
+      },
+      "ListaProveedores": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Proveedor"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaProveedores",
+        "type": "object"
+      },
       "ListaSesiones": {
         "description": "`GET /api/v1/auth/sesiones`: las sesiones vigentes, la de uso más reciente primero.",
         "properties": {
@@ -3632,6 +3778,278 @@
         "title": "NuevaContrasena",
         "type": "object"
       },
+      "OrdenPago": {
+        "description": "La orden con su versión vigente.",
+        "properties": {
+          "actualizada_en": {
+            "format": "date-time",
+            "title": "Actualizada En",
+            "type": "string"
+          },
+          "aprobaciones": {
+            "description": "Las que ya tiene la versión vigente.",
+            "title": "Aprobaciones",
+            "type": "integer"
+          },
+          "aprobaciones_requeridas": {
+            "description": "Las que pide la versión vigente.",
+            "title": "Aprobaciones Requeridas",
+            "type": "integer"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "condicion_beneficiario": {
+            "$ref": "#/components/schemas/CondicionBeneficiario"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo_rechazo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Rechazo"
+          },
+          "preparada_por": {
+            "format": "uuid",
+            "title": "Preparada Por",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "usa_fondo_reserva": {
+            "title": "Usa Fondo Reserva",
+            "type": "boolean"
+          },
+          "version_vigente": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Vigente",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "estado",
+          "version_vigente",
+          "preparada_por",
+          "creada_en",
+          "actualizada_en",
+          "motivo_rechazo",
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "proveedor_id",
+          "razon_social",
+          "condicion_beneficiario",
+          "usa_fondo_reserva",
+          "aprobaciones_requeridas",
+          "aprobaciones"
+        ],
+        "title": "OrdenPago",
+        "type": "object"
+      },
+      "OrdenPagoCambiada": {
+        "description": "Respuesta de toda escritura sobre una orden: su id y la versión vigente.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "OrdenPagoCambiada",
+        "type": "object"
+      },
+      "OrdenPagoConVersiones": {
+        "properties": {
+          "orden": {
+            "$ref": "#/components/schemas/OrdenPago"
+          },
+          "versiones": {
+            "items": {
+              "$ref": "#/components/schemas/VersionOrdenPago"
+            },
+            "title": "Versiones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "orden",
+          "versiones"
+        ],
+        "title": "OrdenPagoConVersiones",
+        "type": "object"
+      },
+      "OrdenPagoNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago`. Queda en borrador, versión 1.",
+        "properties": {
+          "comprobante": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante"
+          },
+          "concepto": {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Concepto",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "description": "En centavos.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "usa_fondo_reserva": {
+            "title": "Usa Fondo Reserva",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "proveedor_id",
+          "usa_fondo_reserva"
+        ],
+        "title": "OrdenPagoNueva",
+        "type": "object"
+      },
+      "OrdenPagoVersionNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/versiones`. Si la orden estaba aprobada vuelve a revisión, y las\naprobaciones de la versión anterior quedan como historia sin contar.",
+        "properties": {
+          "comprobante": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante"
+          },
+          "concepto": {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Concepto",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "description": "En centavos.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "usa_fondo_reserva": {
+            "title": "Usa Fondo Reserva",
+            "type": "boolean"
+          },
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "proveedor_id",
+          "usa_fondo_reserva",
+          "version_esperada"
+        ],
+        "title": "OrdenPagoVersionNueva",
+        "type": "object"
+      },
       "OrigenEvento": {
         "description": "De dónde vino el evento, en términos funcionales.",
         "enum": [
@@ -3770,6 +4188,354 @@
           "mensaje"
         ],
         "title": "Problema",
+        "type": "object"
+      },
+      "Proveedor": {
+        "description": "La versión vigente del proveedor.",
+        "properties": {
+          "actualizado_en": {
+            "format": "date-time",
+            "title": "Actualizado En",
+            "type": "string"
+          },
+          "alta_por": {
+            "format": "uuid",
+            "title": "Alta Por",
+            "type": "string"
+          },
+          "contacto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contacto"
+          },
+          "creado_en": {
+            "format": "date-time",
+            "title": "Creado En",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Destino"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuit"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documento Id"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoProveedor"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubro"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "cuit",
+          "version",
+          "razon_social",
+          "rubro",
+          "contacto",
+          "estado",
+          "documento_id",
+          "cuenta_destino",
+          "huella",
+          "alta_por",
+          "creado_en",
+          "actualizado_en"
+        ],
+        "title": "Proveedor",
+        "type": "object"
+      },
+      "ProveedorConVersiones": {
+        "properties": {
+          "proveedor": {
+            "$ref": "#/components/schemas/Proveedor"
+          },
+          "versiones": {
+            "items": {
+              "$ref": "#/components/schemas/VersionProveedor"
+            },
+            "title": "Versiones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proveedor",
+          "versiones"
+        ],
+        "title": "ProveedorConVersiones",
+        "type": "object"
+      },
+      "ProveedorCreado": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version"
+        ],
+        "title": "ProveedorCreado",
+        "type": "object"
+      },
+      "ProveedorNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/proveedores`. Queda `activo` en su versión 1.",
+        "properties": {
+          "contacto": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contacto"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "description": "CBU o CVU de 22 dígitos. El alias no se admite.",
+                "pattern": "^[0-9]{22}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Destino"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{11}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si se carga, es único en el consorcio.",
+            "title": "Cuit"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Un documento vigente del consorcio que respalda los datos.",
+            "title": "Documento Id"
+          },
+          "razon_social": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubro"
+          }
+        },
+        "required": [
+          "razon_social"
+        ],
+        "title": "ProveedorNuevo",
+        "type": "object"
+      },
+      "ProveedorVersionNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.",
+        "properties": {
+          "contacto": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contacto"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "description": "CBU o CVU de 22 dígitos. El alias no se admite.",
+                "pattern": "^[0-9]{22}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Destino"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Un documento vigente del consorcio que respalda los datos.",
+            "title": "Documento Id"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoProveedor"
+          },
+          "razon_social": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubro"
+          },
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "razon_social",
+          "version_esperada",
+          "estado"
+        ],
+        "title": "ProveedorVersionNueva",
+        "type": "object"
+      },
+      "Rechazo": {
+        "additionalProperties": false,
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "motivo"
+        ],
+        "title": "Rechazo",
         "type": "object"
       },
       "ReglaReparto": {
@@ -4311,6 +5077,221 @@
           "subida_en"
         ],
         "title": "VersionEnLista",
+        "type": "object"
+      },
+      "VersionOrdenPago": {
+        "description": "Cada versión con el proveedor exacto que fija: razón social, CUIT y cuenta de esa versión\ndel proveedor, no de la vigente.",
+        "properties": {
+          "aprobaciones_requeridas": {
+            "title": "Aprobaciones Requeridas",
+            "type": "integer"
+          },
+          "aprobada_por": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Aprobada Por",
+            "type": "array"
+          },
+          "comprobante": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "condicion_beneficiario": {
+            "$ref": "#/components/schemas/CondicionBeneficiario"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Destino"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuit"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Numero",
+            "type": "integer"
+          },
+          "preparada_por": {
+            "format": "uuid",
+            "title": "Preparada Por",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "proveedor_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Proveedor Version",
+            "type": "integer"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "usa_fondo_reserva": {
+            "title": "Usa Fondo Reserva",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "numero",
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "comprobante",
+          "usa_fondo_reserva",
+          "huella",
+          "preparada_por",
+          "creada_en",
+          "aprobaciones_requeridas",
+          "proveedor_id",
+          "proveedor_version",
+          "condicion_beneficiario",
+          "razon_social",
+          "cuit",
+          "cuenta_destino",
+          "aprobada_por"
+        ],
+        "title": "VersionOrdenPago",
+        "type": "object"
+      },
+      "VersionProveedor": {
+        "properties": {
+          "contacto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contacto"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Destino"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Documento Id"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoProveedor"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "preparada_por": {
+            "format": "uuid",
+            "title": "Preparada Por",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubro"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "razon_social",
+          "rubro",
+          "contacto",
+          "estado",
+          "documento_id",
+          "cuenta_destino",
+          "huella",
+          "preparada_por",
+          "creada_en"
+        ],
+        "title": "VersionProveedor",
         "type": "object"
       },
       "VinculoAnulado": {
@@ -7344,6 +8325,610 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago": {
+      "get": {
+        "operationId": "listar_ordenes_api_v1_consorcios__consorcio_id__ordenes_pago_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaOrdenesPago"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Órdenes de pago del consorcio, borradores incluidos (preparación)",
+        "tags": [
+          "egresos"
+        ]
+      },
+      "post": {
+        "operationId": "preparar_orden_api_v1_consorcios__consorcio_id__ordenes_pago_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrdenPagoNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "El proveedor no existe."
+          }
+        },
+        "summary": "Preparar una orden de pago (queda en borrador, versión 1)",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/revision": {
+      "get": {
+        "operationId": "listar_ordenes_revision_api_v1_consorcios__consorcio_id__ordenes_pago_revision_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaOrdenesPago"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Órdenes de pago ya enviadas a revisión (quien aprueba)",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}": {
+      "get": {
+        "operationId": "ver_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoConVersiones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Una orden con todas sus versiones (preparación)",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/aprobaciones": {
+      "post": {
+        "operationId": "aprobar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__aprobaciones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Aprobacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AprobacionRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Aprobar una versión: con la versión y la huella que se vieron",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/enviar-a-revision": {
+      "post": {
+        "operationId": "enviar_a_revision_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__enviar_a_revision_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnvioARevision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enviar un borrador a revisión",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/rechazar": {
+      "post": {
+        "operationId": "rechazar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__rechazar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Rechazo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rechazar la versión vigente, con el motivo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/revision": {
+      "get": {
+        "operationId": "ver_orden_revision_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__revision_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoConVersiones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe o es un borrador."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Una orden enviada a revisión, con la huella de cada versión para aprobarla",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/versiones": {
+      "post": {
+        "operationId": "modificar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__versiones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrdenPagoVersionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "El proveedor no existe."
+          }
+        },
+        "summary": "Modificar una orden: crea una versión nueva y la vuelve a revisión si hacía falta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/padron": {
       "get": {
         "description": "Unidad, nombre, carácter, vigencia y si el vínculo está confirmado (D6). Sin correo ni\nteléfono, sin vínculos terminados. Una facultad acotada a unidades ve solo esas.",
@@ -7510,6 +9095,253 @@
         "summary": "Informe previo de una importación de padrón (RF02); no escribe nada",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores": {
+      "get": {
+        "operationId": "listar_proveedores_api_v1_consorcios__consorcio_id__proveedores_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaProveedores"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Proveedores del consorcio, cada uno en su versión vigente",
+        "tags": [
+          "egresos"
+        ]
+      },
+      "post": {
+        "operationId": "crear_proveedor_api_v1_consorcios__consorcio_id__proveedores_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProveedorNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProveedorCreado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "CUIT o documento inválido."
+          }
+        },
+        "summary": "Dar de alta un proveedor (queda activo, versión 1)",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}": {
+      "get": {
+        "operationId": "ver_proveedor_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProveedorConVersiones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Un proveedor con toda su historia: cada cambio de cuenta es una versión",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/versiones": {
+      "post": {
+        "operationId": "versionar_proveedor_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__versiones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProveedorVersionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProveedorCreado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "Documento inválido."
+          }
+        },
+        "summary": "Cambiar los datos de un proveedor: crea una versión nueva, nunca en silencio",
+        "tags": [
+          "egresos"
         ]
       }
     },

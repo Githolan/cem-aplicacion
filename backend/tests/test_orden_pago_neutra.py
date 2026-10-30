@@ -876,7 +876,16 @@ def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate
 # Permisos e ida y vuelta ---------------------------------------------------------------------
 
 
-def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
+RUTAS_0049 = {
+    "alta_proveedor", "enviar_orden_a_revision", "modificar_orden_pago",
+    "nueva_version_proveedor", "orden_pago_versiones_lectura", "ordenes_pago_lectura",
+    "preparar_orden_pago", "proveedor_versiones_lectura", "proveedores_lectura",
+    "rechazar_orden_pago", "registrar_aprobacion_orden_pago",
+}  # fmt: skip
+"""Lo único que `cem_app` ejecuta desde `0049`: las funciones de las rutas. Emitir no."""
+
+
+def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
     tablas = ("nucleo.orden_pago", "nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion",
               "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago",
               "nucleo.proveedor", "nucleo.proveedor_version")  # fmt: skip
@@ -888,24 +897,29 @@ def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
             for t in tablas
             for p in ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
         ]
-        funciones = c.execute(
+        filas = c.execute(
             text(
-                "select count(*) filter (where has_function_privilege('cem_app', p.oid,"
-                " 'EXECUTE')), count(*) from pg_proc p join pg_namespace n on n.oid ="
-                " p.pronamespace where n.nspname = 'nucleo' and (p.proname like '%orden_pago%'"
-                " or p.proname like '%proveedor%'"
+                "select p.proname, has_function_privilege('cem_app', p.oid, 'EXECUTE')"
+                " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                " where n.nspname = 'nucleo' and (p.proname like '%orden_pago%'"
+                " or p.proname like '%ordenes_pago%' or p.proname like '%proveedor%'"
+                " or p.proname like '%egresos%'"
                 " or p.proname in ('exigir_acto_economico', 'enviar_orden_a_revision',"
                 " 'exigir_decision_sobre_orden'))"
                 " and p.proname <> 'fijar_aprobaciones_orden_pago'"
             )
-        ).one()
+        ).all()
         # La carga de soporte corre como `cem_app` (como los coeficientes): solo esa función.
         fijar = c.execute(
             text("select has_function_privilege('cem_app', 'nucleo.fijar_aprobaciones_orden_pago("
                  "smallint, date, uuid, uuid, text)', 'EXECUTE')")
         ).scalar_one()  # fmt: skip
     assert not any(tabla)
-    assert funciones[0] == 0 and funciones[1] >= 21  # control: las funciones existen
+    assert {nombre for nombre, puede in filas if puede} == RUTAS_0049
+    nombres = {nombre for nombre, _ in filas}
+    # Controles: las demás existen y no se ejecutan, entre ellas emitir y la barrera de lectura.
+    assert {"emitir_orden_pago", "exigir_lectura_egresos", "exigir_acto_economico"} <= nombres
+    assert len(filas) >= 26
     assert fijar
 
 

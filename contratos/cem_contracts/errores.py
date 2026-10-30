@@ -168,6 +168,33 @@ class CodigoError(StrEnum):
     """El caso de privacidad no admite eso en su estado: no está abierto para confirmarse, no está
     confirmado para entregar la copia, no es un pedido de copia, o falta la corroboración de la
     administración o del Consejo (2d-2)."""
+    SESION_RECIENTE_REQUERIDA = "sesion_reciente_requerida"
+    """Una acción económica pide una sesión de menos de 12 horas: hay que volver a entrar (R10)."""
+    VERSION_DESACTUALIZADA = "version_desactualizada"
+    """La orden o el proveedor ya tienen otra versión: hay que volver a leerlos (H3)."""
+    SIN_CAMBIOS = "sin_cambios"
+    """La versión nueva es igual a la vigente: no se crea (H3)."""
+    ORDEN_NO_ADMITE = "orden_no_admite"
+    """La orden de pago no admite eso en su estado (diagrama 4 del documento 08)."""
+    HUELLA_DISTINTA = "huella_distinta"
+    """Lo que se aprobó no es la versión vigente: la orden cambió mientras se revisaba (RN12)."""
+    APROBACION_REPETIDA = "aprobacion_repetida"
+    """La misma persona, con una o con dos cuentas, ya aprobó esa versión."""
+    NO_ES_QUIEN_PREPARO = "no_es_quien_preparo"
+    """Quien preparó alguna versión de la orden no la aprueba ni la rechaza (D2)."""
+    NO_ES_QUIEN_CARGO_LA_CUENTA = "no_es_quien_cargo_la_cuenta"
+    """Quien cargó la cuenta destino del proveedor no aprueba un pago a esa cuenta (H3)."""
+    IDENTIDAD_NO_VERIFICADA = "identidad_no_verificada"
+    """Falta la identidad humana verificada en el consorcio, propia o de la otra parte de una
+    separación (A13-C). Hasta que soporte la verifique, se niega."""
+    PROVEEDOR_INEXISTENTE = "proveedor_inexistente"
+    """El proveedor no existe en este consorcio."""
+    PROVEEDOR_INACTIVO = "proveedor_inactivo"
+    """El proveedor está suspendido o dado de baja: no recibe órdenes nuevas."""
+    CUIT_REPETIDO = "cuit_repetido"
+    """Ya hay un proveedor con ese CUIT en este consorcio."""
+    DOCUMENTO_INVALIDO = "documento_invalido"
+    """El documento de respaldo no existe en este consorcio o no está vigente."""
 
 
 class Error(BaseModel):

@@ -63,6 +63,9 @@ class Contexto:
     """La sesión empezó hace menos de 12 horas (R10)."""
     identidades: Mapping[UUID, UUID] = field(default_factory=dict)
     """Las identidades de otras personas que necesita la acción; las agrega `Permiso`."""
+    sesion_id: UUID | None = None
+    """La sesión de la petición: las funciones económicas de la base la vuelven a comprobar
+    (`exigir_acto_economico`). None solo en las pruebas que reemplazan la identidad."""
 
     @property
     def autorizacion(self) -> ContextoAutorizacion:
@@ -223,6 +226,7 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         identidad_humana=identidad_humana,
         segundo_factor_reciente=controles is not None and controles.segundo_factor,
         sesion_reciente=controles is not None and controles.reciente,
+        sesion_id=identidad.sesion_id,
     )
 
 

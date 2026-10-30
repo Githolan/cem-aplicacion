@@ -29,6 +29,20 @@
       "fuente_normativa": "D2 (egresos.aprobar_orden, económica; quien preparó no aprueba ese mismo ítem); R10"
     },
     {
+      "accion": "egresos.revisar_orden",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "egresos.aprobar_orden",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["cuenta", "grupo"], "general": true},
+      "separacion": [],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "Decisión 2 del propietario (29-10-2026): aprobar es del Consejo, y quien aprueba lee la versión y la huella que aprueba (0045: la aprobación exige la huella vista). Solo lee las órdenes ya enviadas a revisión (0049); la separación se aplica al aprobar o rechazar, no al leer"
+    },
+    {
       "accion": "egresos.ejecutar_pago",
       "concede_por_vinculo": null,
       "concede_por_ambito": false,

@@ -23,7 +23,13 @@ from fastapi import Depends, Request
 from sqlalchemy import text
 
 from app import auditoria
-from app.autorizacion.evaluador import Decision, Entidad, evaluar, separa_seres_humanos
+from app.autorizacion.evaluador import (
+    Decision,
+    Entidad,
+    Motivo,
+    evaluar,
+    separa_seres_humanos,
+)
 from app.autorizacion.politicas import POLITICAS
 from app.contexto import Contexto, MotorDep, require_scope
 from app.db import transaccion
@@ -34,6 +40,18 @@ log = logging.getLogger(__name__)
 
 NO_ENCONTRADO = "No encontramos lo que buscás."
 SIN_PERMISO = "No tenés permiso para hacer esto."
+RENOVAR = {
+    Motivo.REQUIERE_SEGUNDO_FACTOR_RECIENTE: (
+        CodigoError.SEGUNDO_FACTOR_REQUERIDO,
+        "Para esto tenés que confirmar con el código de tu aplicación de autenticación.",
+    ),
+    Motivo.REQUIERE_SESION_RECIENTE: (
+        CodigoError.SESION_RECIENTE_REQUERIDA,
+        "Para esto tenés que volver a entrar.",
+    ),
+}
+"""Las negaciones de R10 que la persona resuelve renovando la sesión. Se dicen tal cual porque el
+evaluador las mira al final (`_filtrar`): solo llegan acá si todo lo demás ya concedía."""
 
 
 @dataclass(frozen=True)
@@ -83,6 +101,8 @@ class Permiso:
         self._auditar(decision)
         if estado_negado == 404:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        if decision.motivo_interno in RENOVAR:
+            raise ErrorApi(403, *RENOVAR[decision.motivo_interno])
         raise ErrorApi(403, CodigoError.SIN_PERMISO, SIN_PERMISO)
 
     def _auditar(self, decision: Decision) -> None:
