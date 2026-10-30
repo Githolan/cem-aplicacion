@@ -1,16 +1,19 @@
-"""Órdenes de pago y proveedores (H3; documento 08 §6; migraciones `0045` a `0049`).
+"""Órdenes de pago, proveedores y contratos (H3; documento 08 §6; migraciones `0045` a `0050`).
 
-Diseño: `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, «Rutas», con las
-decisiones del propietario del 29-10-2026: aprobar es del Consejo (decisión 2), preparar sigue el
-paquete vigente y no se fija umbral, franjas ni plazo (decisión 1). Hoy toda orden pasa por
-revisión. No hay ruta para emitir ni pagar.
+Diseño: `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, «Rutas» y
+«Decisión 1A», con las decisiones del propietario: aprobar es del Consejo (decisión 2), preparar
+sigue el paquete vigente, y la franja de cada versión dice si pide aprobación (decisión 1A,
+30-10-2026). Emitir deja la orden en ejecución; no hay ruta que mueva dinero.
 
-- **Preparación** (`egresos.preparar_orden`): leer, dar de alta y versionar proveedores; leer,
-  preparar, modificar y enviar a revisión órdenes.
+- **Preparación** (`egresos.preparar_orden`): leer, dar de alta y versionar proveedores; registrar
+  y dar de baja contratos; leer, preparar, modificar, enviar a revisión y renovar órdenes.
 - **Revisión** (`egresos.revisar_orden`, con la facultad `egresos.aprobar_orden`): leer las
-  órdenes ya enviadas, con el proveedor exacto de cada versión.
-- **Aprobar y rechazar** (`egresos.aprobar_orden`): la ruta verifica primero la revisión, lee
-  quién preparó la orden y recién entonces evalúa la separación con esa persona.
+  órdenes ya enviadas, con el proveedor exacto de cada versión, y los contratos.
+- **Aprobar, rechazar y confirmar contratos** (`egresos.aprobar_orden`): la ruta verifica primero
+  la revisión, lee quién preparó la orden (o registró el contrato) y recién entonces evalúa la
+  separación con esa persona.
+- **Emitir** (`egresos.ejecutar_pago`): lee la orden como quien prepara y evalúa la separación con
+  quienes aprobaron la versión vigente (A5).
 
 Toda acción es económica (R10): sesión de menos de 12 horas, segundo factor de menos de 10
 minutos e identidad humana verificada. Las funciones de la base vuelven a exigir todo eso con la
@@ -24,11 +27,19 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.egresos import (
+    VIGENCIA_APROBACION,
     Aprobacion,
     AprobacionRegistrada,
+    Confirmacion,
+    Contrato,
+    ContratoCambiado,
+    ContratoNuevo,
     DatosOrdenPago,
     DatosProveedor,
+    Emision,
     EnvioARevision,
+    EstadoOrdenPago,
+    ListaContratos,
     ListaOrdenesPago,
     ListaProveedores,
     OrdenPago,
@@ -42,6 +53,7 @@ from cem_contracts.egresos import (
     ProveedorNuevo,
     ProveedorVersionNueva,
     Rechazo,
+    Renovacion,
     VersionOrdenPago,
     VersionProveedor,
 )
@@ -64,6 +76,12 @@ router = APIRouter(prefix="/api/v1", tags=["egresos"], dependencies=[Depends(sin
 PREPARAR = "egresos.preparar_orden"
 REVISAR = "egresos.revisar_orden"
 APROBAR = "egresos.aprobar_orden"
+EJECUTAR = "egresos.ejecutar_pago"
+RESPALDADAS = {
+    EstadoOrdenPago.APROBADA, EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION,
+    EstadoOrdenPago.PAGADA, EstadoOrdenPago.CONCILIADA,
+}  # fmt: skip
+"""Las órdenes que ya pasaron una aprobación completa (`APROBADAS` de `0048`)."""
 LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR}
 """La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`)."""
 
@@ -110,11 +128,52 @@ ERRORES = {
         422, CodigoError.DOCUMENTO_INVALIDO,
         "El documento no existe en este consorcio o no está vigente.",
     ),
+    "aprobacion_vencida": (
+        409, CodigoError.APROBACION_VENCIDA,
+        "La aprobación tiene más de 7 días: renová la orden para que vuelva a revisión.",
+    ),
+    "aprobacion_vigente": (
+        409, CodigoError.APROBACION_VIGENTE, "La aprobación todavía rige: no hay que renovarla.",
+    ),
+    "aprobaciones_insuficientes": (
+        409, CodigoError.APROBACIONES_INSUFICIENTES,
+        "La versión no tiene las aprobaciones que pide.",
+    ),
+    "contrato_no_vigente": (
+        409, CodigoError.CONTRATO_NO_VIGENTE,
+        "El contrato que respaldaba la orden ya no rige: renovala para evaluarla de nuevo.",
+    ),
+    "contrato_ya_confirmado": (
+        409, CodigoError.CONTRATO_YA_CONFIRMADO, "El contrato ya está confirmado.",
+    ),
+    "contrato_dado_de_baja": (
+        409, CodigoError.CONTRATO_DADO_DE_BAJA, "El contrato está dado de baja.",
+    ),
+    "proveedor_cambiado": (
+        409, CodigoError.PROVEEDOR_CAMBIADO,
+        "El proveedor cambió después de preparar la orden: modificala para que vuelva a revisión.",
+    ),
+    "proveedor_sin_cuenta": (
+        409, CodigoError.PROVEEDOR_SIN_CUENTA, "El proveedor no tiene cuenta destino.",
+    ),
+    "no_es_quien_aprobo": (
+        403, CodigoError.NO_ES_QUIEN_APROBO, "Quien aprobó la orden no la emite.",
+    ),
+    "no_es_quien_registro": (
+        403, CodigoError.NO_ES_QUIEN_REGISTRO, "Quien registró el contrato no lo confirma.",
+    ),
+    "fecha_invalida": (
+        422, CodigoError.FECHA_INVALIDA,
+        "La vigencia no es válida: termina antes de empezar o antes de hoy.",
+    ),
+    "decision_invalida": (
+        422, CodigoError.DECISION_INVALIDA, "La decisión no existe en este consorcio.",
+    ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
     "requiere_sesion_reciente": (403, *RENOVAR["requiere_sesion_reciente"]),
     "sesion_invalida": (403, *RENOVAR["requiere_sesion_reciente"]),
 }  # fmt: skip
-"""Motivos de las funciones de `0045` a `0049`. Los que el contrato ya impide (razón social,
+"""Motivos de las funciones de `0045` a `0050`. Los que el contrato ya impide (razón social,
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de
 R10 pueden llegar si la sesión venció entre el evaluador y la base."""
 
@@ -152,10 +211,29 @@ def _lectura(permiso: Permiso, motor) -> Iterator[Connection]:
         yield c
 
 
+def _evaluaciones(c: Connection, permiso: Permiso, orden: UUID | None) -> dict:
+    """La franja de cada versión (`0050`), por `(orden, número)`. Se lee **después** de las
+    órdenes o las versiones: las versiones solo se agregan, así que toda versión ya leída está."""
+    sql = "select * from nucleo.orden_pago_evaluaciones_lectura(:o, :f, :actor, 'api', :sesion)"
+    filas = _ejecutar(c, permiso, sql, {"o": orden, "f": LEE_COMO[permiso.accion]})
+    return {(f["orden_id"], f["numero"]): f for f in filas.mappings()}
+
+
 def _ordenes(c: Connection, permiso: Permiso, orden: UUID | None) -> list[OrdenPago]:
     sql = "select * from nucleo.ordenes_pago_lectura(:o, :f, :actor, 'api', :sesion)"
-    filas = _ejecutar(c, permiso, sql, {"o": orden, "f": LEE_COMO[permiso.accion]})
-    return [OrdenPago(**f) for f in filas.mappings()]
+    filas = list(_ejecutar(c, permiso, sql, {"o": orden, "f": LEE_COMO[permiso.accion]}).mappings())
+    evaluaciones = _evaluaciones(c, permiso, orden)
+    ordenes = []
+    for f in filas:
+        ev = evaluaciones[(f["id"], f["version_vigente"])]
+        aprobada_en = ev["aprobada_en"]
+        aprobada = f["estado"] == "aprobada" and aprobada_en is not None
+        ordenes.append(OrdenPago(
+            **f, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
+            aprobada_en=aprobada_en,
+            aprobacion_vence_en=aprobada_en + VIGENCIA_APROBACION if aprobada else None,
+        ))  # fmt: skip
+    return ordenes
 
 
 def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID) -> OrdenPagoConVersiones:
@@ -164,8 +242,18 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID) -> OrdenPagoCo
         if not ordenes:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         sql = "select * from nucleo.orden_pago_versiones_lectura(:o, :f, :actor, 'api', :sesion)"
-        filas = _ejecutar(c, permiso, sql, {"o": orden_id, "f": LEE_COMO[permiso.accion]})
-        versiones = [VersionOrdenPago(**f) for f in filas.mappings()]
+        filas = list(
+            _ejecutar(c, permiso, sql, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
+        )
+        evaluaciones = _evaluaciones(c, permiso, orden_id)
+        versiones = []
+        for f in filas:
+            ev = evaluaciones[(orden_id, f["numero"])]
+            versiones.append(VersionOrdenPago(
+                **f, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
+                umbral_importe_centavos=ev["umbral_importe_centavos"],
+                umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
+            ))  # fmt: skip
     return OrdenPagoConVersiones(orden=ordenes[0], versiones=versiones)
 
 
@@ -485,5 +573,189 @@ def rechazar_orden(
             {"o": orden_id, "version": rechazo.version, "motivo": rechazo.motivo},
         )  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=rechazo.version)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/renovar",
+    response_model=OrdenPagoCambiada,
+    summary="Renovar una orden aprobada hace más de 7 días: versión nueva, de nuevo a revisión",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def renovar_orden(
+    orden_id: UUID,
+    renovacion: Renovacion,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
+        version = _ejecutar(
+            conn, permiso,
+            "select nucleo.renovar_orden_vencida(:o, :esperada, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": renovacion.version_esperada},
+        ).scalar_one()  # fmt: skip
+        return 200, OrdenPagoCambiada(id=orden_id, version=version)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Órdenes de pago: emitir -------------------------------------------------------------------
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/emitir",
+    response_model=OrdenPagoCambiada,
+    summary="Emitir una orden aprobada (queda en ejecución); no mueve dinero",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def emitir_orden(
+    orden_id: UUID,
+    emision: Emision,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Quien emite lee la orden como quien prepara (el paquete del administrador tiene las dos
+    facultades) y la separación se evalúa con quienes aprobaron la versión vigente (A5). La base
+    vuelve a exigir todo: la franja, las aprobaciones, los 7 días, el proveedor, la cuenta y la
+    separación por identidad humana."""
+    detalle = _orden_con_versiones(lectura, motor, orden_id)
+    vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
+    # El respaldo es que la orden pasó la aprobación, también si ya se emitió: así el reintento
+    # con la misma clave devuelve la respuesta guardada, y otra emisión la niega la base (409).
+    permiso.verificar(Entidad(
+        aprobado_por=tuple(vigente.aprobada_por),
+        respaldo_presente=detalle.orden.estado in RESPALDADAS,
+    ))  # fmt: skip
+
+    def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.emitir_orden_pago(:o, :version, :actor, 'api', :sesion)",
+            {"o": orden_id, "version": emision.version},
+        )  # fmt: skip
+        return 200, OrdenPagoCambiada(id=orden_id, version=emision.version)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Contratos y abonos ------------------------------------------------------------------------
+
+
+def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None) -> list[Contrato]:
+    sql = "select * from nucleo.contratos_proveedor_lectura(:k, :f, :actor, 'api', :sesion)"
+    filas = _ejecutar(c, permiso, sql, {"k": contrato, "f": LEE_COMO[permiso.accion]})
+    return [Contrato(**f) for f in filas.mappings()]
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/contratos",
+    response_model=ListaContratos,
+    summary="Contratos y abonos que respaldan lo rutinario (preparación)",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_contratos(
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+) -> ListaContratos:
+    with _lectura(permiso, motor) as c:
+        return ListaContratos(elementos=_contratos(c, permiso, None))
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/contratos/revision",
+    response_model=ListaContratos,
+    summary="Contratos y abonos, para confirmarlos (quien aprueba)",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_contratos_revision(
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
+) -> ListaContratos:
+    with _lectura(permiso, motor) as c:
+        return ListaContratos(elementos=_contratos(c, permiso, None))
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/contratos",
+    status_code=201,
+    response_model=ContratoCambiado,
+    summary="Registrar un contrato o abono: no rige hasta que lo confirme un consejero",
+    responses=RESPUESTAS_ESCRITURA
+    | {422: {"description": "Proveedor, documento, decisión o vigencia inválidos."}},
+)
+def registrar_contrato(
+    nuevo: ContratoNuevo,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, ContratoCambiado]:
+        contrato_id = _ejecutar(
+            conn, permiso,
+            "select nucleo.registrar_contrato_proveedor(:p, :tipo, :alcance, :tope, :moneda,"
+            " :desde, :hasta, :doc, :decision, :actor, 'api', :sesion)",
+            {"p": nuevo.proveedor_id, "tipo": nuevo.tipo.value, "alcance": nuevo.alcance,
+             "tope": nuevo.importe_maximo_centavos, "moneda": nuevo.moneda,
+             "desde": nuevo.vigente_desde, "hasta": nuevo.vigente_hasta,
+             "doc": nuevo.documento_id, "decision": nuevo.decision_id},
+        ).scalar_one()  # fmt: skip
+        return 201, ContratoCambiado(id=contrato_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/contratos/{contrato_id}/confirmacion",
+    status_code=201,
+    response_model=ContratoCambiado,
+    summary="Confirmar un contrato, con la huella que se vio: desde ahí respalda lo rutinario",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def confirmar_contrato(
+    contrato_id: UUID,
+    confirmacion: Confirmacion,
+    revision: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(APROBAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    with _lectura(revision, motor) as c:
+        contratos = _contratos(c, revision, contrato_id)
+    if not contratos:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    # Quien registró el contrato ocupa el lugar de quien preparó (`no_es_quien_preparo`).
+    permiso.verificar(Entidad(preparado_por=contratos[0].registrado_por))
+
+    def efecto(conn: Connection) -> tuple[int, ContratoCambiado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.confirmar_contrato_proveedor(:k, :huella, :actor, 'api', :sesion)",
+            {"k": contrato_id, "huella": bytes.fromhex(confirmacion.huella)},
+        )  # fmt: skip
+        return 201, ContratoCambiado(id=contrato_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/contratos/{contrato_id}/baja",
+    response_model=ContratoCambiado,
+    summary="Dar de baja un contrato: deja de respaldar las órdenes nuevas",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def baja_contrato(
+    contrato_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, ContratoCambiado]:
+        _ejecutar(
+            conn, permiso, "select nucleo.baja_contrato_proveedor(:k, :actor, 'api', :sesion)",
+            {"k": contrato_id},
+        )  # fmt: skip
+        return 200, ContratoCambiado(id=contrato_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)

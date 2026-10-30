@@ -584,7 +584,18 @@
           "proveedor_inexistente",
           "proveedor_inactivo",
           "cuit_repetido",
-          "documento_invalido"
+          "documento_invalido",
+          "aprobacion_vencida",
+          "aprobacion_vigente",
+          "aprobaciones_insuficientes",
+          "contrato_no_vigente",
+          "contrato_ya_confirmado",
+          "contrato_dado_de_baja",
+          "proveedor_cambiado",
+          "proveedor_sin_cuenta",
+          "no_es_quien_aprobo",
+          "no_es_quien_registro",
+          "fecha_invalida"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -741,6 +752,22 @@
         ],
         "title": "CondicionBeneficiario",
         "type": "string"
+      },
+      "Confirmacion": {
+        "additionalProperties": false,
+        "description": "`POST …/contratos/{id}/confirmacion`: la huella del contrato que se vio.",
+        "properties": {
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          }
+        },
+        "required": [
+          "huella"
+        ],
+        "title": "Confirmacion",
+        "type": "object"
       },
       "ConfirmacionCaso": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/confirmar`.",
@@ -1192,6 +1219,233 @@
         "title": "ContrasenaGuardada",
         "type": "object"
       },
+      "Contrato": {
+        "properties": {
+          "alcance": {
+            "title": "Alcance",
+            "type": "string"
+          },
+          "baja_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baja En"
+          },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado En"
+          },
+          "confirmado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado Por"
+          },
+          "creado_en": {
+            "format": "date-time",
+            "title": "Creado En",
+            "type": "string"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoContrato"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_maximo_centavos": {
+            "title": "Importe Maximo Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "description": "La de la versión vigente del proveedor.",
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "registrado_por": {
+            "format": "uuid",
+            "title": "Registrado Por",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoContrato"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "format": "date",
+            "title": "Vigente Hasta",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proveedor_id",
+          "razon_social",
+          "tipo",
+          "alcance",
+          "importe_maximo_centavos",
+          "moneda",
+          "vigente_desde",
+          "vigente_hasta",
+          "documento_id",
+          "decision_id",
+          "huella",
+          "registrado_por",
+          "creado_en",
+          "confirmado_por",
+          "confirmado_en",
+          "baja_en",
+          "estado"
+        ],
+        "title": "Contrato",
+        "type": "object"
+      },
+      "ContratoCambiado": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ContratoCambiado",
+        "type": "object"
+      },
+      "ContratoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/contratos`: el registro que respalda lo rutinario. El documento es uno vigente de\nla categoría `contratos_proveedores`.",
+        "properties": {
+          "alcance": {
+            "description": "Qué cubre: el servicio, el rubro, la frecuencia.",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Alcance",
+            "type": "string"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La decisión del consorcio que lo autoriza, si corresponde.",
+            "title": "Decision Id"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "importe_maximo_centavos": {
+            "description": "El tope de cada orden que respalda.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Importe Maximo Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoContrato"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "format": "date",
+            "title": "Vigente Hasta",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "tipo",
+          "alcance",
+          "importe_maximo_centavos",
+          "moneda",
+          "vigente_desde",
+          "vigente_hasta",
+          "documento_id"
+        ],
+        "title": "ContratoNuevo",
+        "type": "object"
+      },
       "CopiaDatosPropios": {
         "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
         "properties": {
@@ -1586,6 +1840,23 @@
         "title": "DocumentoNuevo",
         "type": "object"
       },
+      "Emision": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/emitir`: la versión aprobada que se emite (Aprobada →\nEnEjecucion). No mueve dinero.",
+        "properties": {
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "Emision",
+        "type": "object"
+      },
       "EnlacePedido": {
         "description": "Respuesta 202 del pedido de enlace: la misma exista o no la cuenta (§10.3).",
         "properties": {
@@ -1822,6 +2093,17 @@
         ],
         "title": "EstadoContrasena",
         "type": "object"
+      },
+      "EstadoContrato": {
+        "enum": [
+          "pendiente_confirmacion",
+          "no_iniciado",
+          "vigente",
+          "vencido",
+          "dado_de_baja"
+        ],
+        "title": "EstadoContrato",
+        "type": "string"
       },
       "EstadoDependencia": {
         "enum": [
@@ -2246,6 +2528,20 @@
         ],
         "title": "FinVinculo",
         "type": "object"
+      },
+      "Franja": {
+        "description": "La franja de una versión de la orden (decisión 1A, `0050`). Gana la primera que\ncorresponde, de la más estricta a la más permisiva.",
+        "enum": [
+          "fondo_reserva",
+          "beneficiario_nuevo",
+          "cuenta_cambiada",
+          "rutinaria",
+          "sin_umbral",
+          "sobre_umbral",
+          "bajo_umbral"
+        ],
+        "title": "Franja",
+        "type": "string"
       },
       "FuncionContacto": {
         "description": "D5: administración, encargado, emergencias, aseguradora y proveedores críticos, más dos.",
@@ -3041,6 +3337,22 @@
         "title": "ListaContactosGestion",
         "type": "object"
       },
+      "ListaContratos": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Contrato"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaContratos",
+        "type": "object"
+      },
       "ListaDecisiones": {
         "properties": {
           "elementos": {
@@ -3786,15 +4098,46 @@
             "title": "Actualizada En",
             "type": "string"
           },
+          "alerta_fraccionamiento": {
+            "description": "Sumada a las demás del mismo proveedor en el mes, supera el umbral.",
+            "title": "Alerta Fraccionamiento",
+            "type": "boolean"
+          },
+          "aprobacion_vence_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hasta cuándo se emite; después se renueva. Solo en una orden aprobada.",
+            "title": "Aprobacion Vence En"
+          },
           "aprobaciones": {
             "description": "Las que ya tiene la versión vigente.",
             "title": "Aprobaciones",
             "type": "integer"
           },
           "aprobaciones_requeridas": {
-            "description": "Las que pide la versión vigente.",
+            "description": "Las que pide la versión vigente si su franja pide aprobación.",
             "title": "Aprobaciones Requeridas",
             "type": "integer"
+          },
+          "aprobada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuándo llegó a Aprobada.",
+            "title": "Aprobada En"
           },
           "concepto": {
             "title": "Concepto",
@@ -3810,6 +4153,10 @@
           },
           "estado": {
             "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "franja": {
+            "$ref": "#/components/schemas/Franja",
+            "description": "La de la versión vigente."
           },
           "id": {
             "format": "uuid",
@@ -3876,7 +4223,11 @@
           "condicion_beneficiario",
           "usa_fondo_reserva",
           "aprobaciones_requeridas",
-          "aprobaciones"
+          "aprobaciones",
+          "franja",
+          "alerta_fraccionamiento",
+          "aprobada_en",
+          "aprobacion_vence_en"
         ],
         "title": "OrdenPago",
         "type": "object"
@@ -4560,6 +4911,23 @@
         "title": "ReglaReparto",
         "type": "object"
       },
+      "Renovacion": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/renovar`: una orden aprobada hace más de 7 días vuelve a\nrevisión con una versión nueva, evaluada con las reglas de hoy.",
+        "properties": {
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_esperada"
+        ],
+        "title": "Renovacion",
+        "type": "object"
+      },
       "RevisionMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1\ndel propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de\nrevisión. No toca el mandato ni cubre el período en que estuvo sin efecto.",
         "properties": {
@@ -4844,6 +5212,14 @@
         "title": "TipoArchivo",
         "type": "string"
       },
+      "TipoContrato": {
+        "enum": [
+          "contrato",
+          "abono"
+        ],
+        "title": "TipoContrato",
+        "type": "string"
+      },
       "TipoDecision": {
         "enum": [
           "asamblea",
@@ -5082,6 +5458,10 @@
       "VersionOrdenPago": {
         "description": "Cada versión con el proveedor exacto que fija: razón social, CUIT y cuenta de esa versión\ndel proveedor, no de la vigente.",
         "properties": {
+          "alerta_fraccionamiento": {
+            "title": "Alerta Fraccionamiento",
+            "type": "boolean"
+          },
           "aprobaciones_requeridas": {
             "title": "Aprobaciones Requeridas",
             "type": "integer"
@@ -5112,6 +5492,19 @@
           "condicion_beneficiario": {
             "$ref": "#/components/schemas/CondicionBeneficiario"
           },
+          "contrato_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El contrato que la hace rutinaria.",
+            "title": "Contrato Id"
+          },
           "creada_en": {
             "format": "date-time",
             "title": "Creada En",
@@ -5138,6 +5531,9 @@
               }
             ],
             "title": "Cuit"
+          },
+          "franja": {
+            "$ref": "#/components/schemas/Franja"
           },
           "huella": {
             "title": "Huella",
@@ -5177,6 +5573,29 @@
             "title": "Razon Social",
             "type": "string"
           },
+          "umbral_importe_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El umbral vigente al preparar la versión, aunque no haya decidido.",
+            "title": "Umbral Importe Centavos"
+          },
+          "umbral_moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Umbral Moneda"
+          },
           "usa_fondo_reserva": {
             "title": "Usa Fondo Reserva",
             "type": "boolean"
@@ -5199,7 +5618,12 @@
           "razon_social",
           "cuit",
           "cuenta_destino",
-          "aprobada_por"
+          "aprobada_por",
+          "franja",
+          "alerta_fraccionamiento",
+          "umbral_importe_centavos",
+          "umbral_moneda",
+          "contrato_id"
         ],
         "title": "VersionOrdenPago",
         "type": "object"
@@ -6918,6 +7342,321 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/contratos": {
+      "get": {
+        "operationId": "listar_contratos_api_v1_consorcios__consorcio_id__contratos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaContratos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contratos y abonos que respaldan lo rutinario (preparación)",
+        "tags": [
+          "egresos"
+        ]
+      },
+      "post": {
+        "operationId": "registrar_contrato_api_v1_consorcios__consorcio_id__contratos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContratoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContratoCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "Proveedor, documento, decisión o vigencia inválidos."
+          }
+        },
+        "summary": "Registrar un contrato o abono: no rige hasta que lo confirme un consejero",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contratos/revision": {
+      "get": {
+        "operationId": "listar_contratos_revision_api_v1_consorcios__consorcio_id__contratos_revision_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaContratos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Contratos y abonos, para confirmarlos (quien aprueba)",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contratos/{contrato_id}/baja": {
+      "post": {
+        "operationId": "baja_contrato_api_v1_consorcios__consorcio_id__contratos__contrato_id__baja_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contrato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contrato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContratoCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dar de baja un contrato: deja de respaldar las órdenes nuevas",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/contratos/{contrato_id}/confirmacion": {
+      "post": {
+        "operationId": "confirmar_contrato_api_v1_consorcios__consorcio_id__contratos__contrato_id__confirmacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "contrato_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Contrato Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Confirmacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContratoCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar un contrato, con la huella que se vio: desde ahí respalda lo rutinario",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/decisiones": {
       "get": {
         "operationId": "listar_decisiones_api_v1_consorcios__consorcio_id__decisiones_get",
@@ -8625,6 +9364,91 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/emitir": {
+      "post": {
+        "description": "Quien emite lee la orden como quien prepara (el paquete del administrador tiene las dos\nfacultades) y la separación se evalúa con quienes aprobaron la versión vigente (A5). La base\nvuelve a exigir todo: la franja, las aprobaciones, los 7 días, el proveedor, la cuenta y la\nseparación por identidad humana.",
+        "operationId": "emitir_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__emitir_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Emision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Emitir una orden aprobada (queda en ejecución); no mueve dinero",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/enviar-a-revision": {
       "post": {
         "operationId": "enviar_a_revision_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__enviar_a_revision_post",
@@ -8788,6 +9612,90 @@
           }
         },
         "summary": "Rechazar la versión vigente, con el motivo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/renovar": {
+      "post": {
+        "operationId": "renovar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__renovar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Renovacion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Renovar una orden aprobada hace más de 7 días: versión nueva, de nuevo a revisión",
         "tags": [
           "egresos"
         ]

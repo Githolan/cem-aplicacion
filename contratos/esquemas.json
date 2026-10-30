@@ -937,7 +937,18 @@
           "proveedor_inexistente",
           "proveedor_inactivo",
           "cuit_repetido",
-          "documento_invalido"
+          "documento_invalido",
+          "aprobacion_vencida",
+          "aprobacion_vigente",
+          "aprobaciones_insuficientes",
+          "contrato_no_vigente",
+          "contrato_ya_confirmado",
+          "contrato_dado_de_baja",
+          "proveedor_cambiado",
+          "proveedor_sin_cuenta",
+          "no_es_quien_aprobo",
+          "no_es_quien_registro",
+          "fecha_invalida"
         ],
         "title": "CodigoError",
         "type": "string"
