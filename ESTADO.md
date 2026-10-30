@@ -111,9 +111,27 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `f2a7cfa` (29-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md` y `2026-10-29-f2a7cfa.md` con la de 0046).
+Medido en el despliegue de `286e6d3` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047 y `2026-10-30-286e6d3.md` con la de 0048).
 
-**Staging y producción en `f2a7cfa`** (29-10-2026; staging de 16:12 a 16:15 UTC y producción de 16:17 a 16:20 UTC), base `0046`, contrato 0.27.0.
+**Staging y producción en `286e6d3`** (30-10-2026; contenedores nuevos de staging de 04:19 a 04:21 UTC y de producción de 04:24 a 04:26 UTC), base `0048`, contrato 0.27.0.
+
+- **Qué suma:** el proveedor versionado, la cuenta destino y el beneficiario de la orden (PR #165, `0048`; punto 40). Antes, el mismo día: `0047` (PR #164, punto 39) y Privacidad (PR #161, punto 38).
+- **Controles:**
+  - `ci.ps1` verde sobre `2c7bbf5` (la cabeza del PR) y sobre `286e6d3`, en la segunda corrida en los dos casos. La primera falló por la e2e intermitente `versiones.e2e.ts:80` (E33) y, en la fusión, por una prueba de tiempos del login con un proceso ajeno ocupando un núcleo.
+  - Resultado: backend 2239 (2 omitidas), contratos 58, frontend 395 y e2e 193.
+- **Validación en los dos entornos, en solo lectura:**
+  - base en `0048`, con las 2 tablas del proveedor y 0 proveedores y 0 órdenes;
+  - sin la columna `beneficiario` y sin las firmas viejas;
+  - emitir y aprobar con los controles nuevos;
+  - `cem_app` y `public` sin permisos;
+  - `cbu_valido`: `t` con un CBU sintético y `f` con un dígito cambiado;
+  - producción con 0 consorcios.
+- **Staging, además:** smoke `819fb46b` (salida 0, 16 controles).
+- **Registros y Kuma:** 0 `ERROR` y 0 `Traceback`; ningún monitor activo de CEM caído (el 9, excluido).
+
+**Antes, el 29-10: `fa1548c`** (`0047`, punto 39) y **`b258311`** (Privacidad, punto 38), con su validación en los registros de despliegue del repositorio CEM.
+
+**Antes: staging y producción en `f2a7cfa`** (29-10-2026; staging de 16:12 a 16:15 UTC y producción de 16:17 a 16:20 UTC), base `0046`, contrato 0.27.0.
 
 - **Qué suma:** la decisión 2 de H3 del 29-10 (PR #162, `0046`): el Consejo aprueba las órdenes de pago y la cantidad (1 o 2) se configura por consorcio; la carga soporte, sin configuración rige 1. Detalle en «Próximo paso», punto 37.
 - **Controles.** `ci.ps1` verde sobre `d64cb08` (la cabeza del PR) y sobre `f2a7cfa`: backend 2200 (2 omitidas), contratos 58, frontend 394 y e2e 193. Copia previa verificada antes de `0046` en cada entorno.
@@ -894,7 +912,35 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Un rojo de la CI, corregido:** la prueba nueva corre antes que las idas y vueltas de migraciones y dejaba órdenes que citan identidades. `conftest.vaciar_mandatos` ahora vacía órdenes y cargas. Control: sin eso, `test_contrasena` falla en el mismo orden.
    - **Revisión:** independiente sobre `2d53e7c` y sobre el delta hasta `d64cb08`, 0 P1/P2. Quedan los P3 80 a 88 en el repositorio CEM; el 80 y el 81 los decide el propietario. Codex limpio sobre `d64cb08`. `ci.ps1` verde sobre `d64cb08` y `f2a7cfa`.
    - **Sigue abierto:** decisión 1 (qué órdenes necesitan aprobación; hoy toda orden pasa por revisión) y decisión 6 (administrador que además es consejero). No hay rutas: nadie prepara ni aprueba por la API.
-38. **Privacidad: el foco y el estado al consultar de nuevo** (P3 77 del repositorio CEM; este PR):
+38. **Privacidad: el foco y el estado al consultar de nuevo** (P3 77 del repositorio CEM; PR #161, fusionado en `b258311`, desplegado en los dos entornos el 29-10):
    - Al tocar «Consultar de nuevo» el botón desaparece y el foco iba al cuerpo de la página. Ahora va al título de la sección.
    - Desde ese momento la sección queda a la vista con su estado: «Consultando tus pedidos…», los pedidos o «No tenés pedidos pendientes sobre tus datos». En la primera consulta sigue sin mostrarse si no hay nada.
    - Pruebas: el foco en el título y el estado intermedio con la respuesta demorada, más axe. Mutaciones: sin el foco fallan dos; sin el estado de reconsulta, dos.
+39. **P3 80 y 81: la cantidad de aprobaciones solo con un acta, y aprobar órdenes solo en el Consejo** (PR #164, `0047`, fusionado en `fa1548c`, head `8ddbd85`; desplegado en los dos entornos el 29-10):
+   - **Decisión del propietario (29-10):** la cantidad (1 o 2) solo la respalda un acta de asamblea o del Consejo (`decision_no_es_acta`), y `egresos.aprobar_orden` queda solo en `miembro_consejo`.
+   - **`nucleo.aprobar_orden_solo_consejo`** (`facultad_solo_consejo`):
+     - no deja poner la facultad en otro paquete;
+     - no la otorga a un mandato de otro tipo;
+     - no deja cambiar el tipo de un mandato que la tiene, tampoco por UPDATE.
+   - **Lo que no decide:** la 6. Quien preparó la orden no la aprueba, ni con otra cuenta.
+   - **Guardas:** el upgrade se niega si hay cargas sin acta o si la facultad ya está fuera del Consejo, con un bloqueo de las tablas antes de mirar.
+   - **Pruebas:**
+     - `test_aprobaciones_orden_pago_0047.py`;
+     - las de PA14 usan ahora la otra cuenta del mismo humano en el Consejo;
+     - mutaciones detectadas: aceptar todos los tipos, guarda apagada y trigger solo para `update of facultad`.
+   - **Revisión independiente** en tres vueltas, sin P1 ni P2; Codex limpio sobre `8ddbd85`.
+40. **Proveedor versionado, cuenta destino y beneficiario de la orden** (PR #165, `0048`, fusionado en `286e6d3`, head `2c7bbf5`; desplegado en los dos entornos el 30-10). Diseño en `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, neutral respecto de las decisiones 1 y 6:
+   - **Modelo:**
+     - `nucleo.proveedor`, con CUIT opcional y único en el consorcio;
+     - `nucleo.proveedor_version`, con razón social, rubro, contacto, estado, documento y CBU/CVU con sus dos verificadores (`nucleo.cbu_valido`); solo se agregan filas y cada versión lleva su huella.
+   - **La orden** apunta a una versión del proveedor, y la huella del proveedor ocupa en la huella de la orden el lugar del beneficiario: otra cuenta es otra huella. `condicion_beneficiario` (`nuevo`, `cuenta_cambiada` o `conocido`) se guarda al preparar, sin política, porque es la decisión 1.
+   - **Invariantes:**
+     - emitir se niega si el proveedor cambió (`proveedor_cambiado`);
+     - un proveedor que no está activo no recibe órdenes (`proveedor_inactivo`);
+     - quien firmó una versión con la cuenta que la orden paga no la aprueba (`no_es_quien_cargo_la_cuenta`, con `exigir_separacion_humana`); rechazar sí puede.
+   - **Permisos:** el alta y las versiones del proveedor piden `egresos.preparar_orden` y las barreras de la orden. No hay rutas: `cem_app` no tiene permisos.
+   - **Pruebas:**
+     - `test_proveedor_0048.py`, 26 pruebas;
+     - las de la orden, adaptadas con proveedores sintéticos (CBU del banco 999, que no existe);
+     - 6 mutaciones detectadas.
+   - **Revisión:** independiente en cinco vueltas, sin P1, con dos P2 corregidos. Codex dejó dos P2, corregidos con sus hilos resueltos. Quedan P3 91 a 101 en el repositorio CEM.
