@@ -306,7 +306,7 @@ def test_una_referencia_larga_del_riel_no_impide_registrar_el_pago(
 ):
     o = emitida(motor_migrate, e)
     [x] = ejecuciones(motor_migrate, o)
-    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.PAGADA, referencia="  " + "R" * 500)
+    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.PAGADA, referencia="  \x00" + "R" * 500)
     correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
     assert orden(motor_migrate, o)["estado"] == "pagada"
     with motor_migrate.connect() as c:

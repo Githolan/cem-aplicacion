@@ -61,11 +61,18 @@ class RespuestaRiel:
 
 
 class RielDePago(Protocol):
-    """Lo que tiene que cumplir un riel para conectarse.
+    """Lo que tiene que cumplir un riel para conectarse. Son requisitos, no sugerencias: sin
+    ellos, ningún adaptador se conecta.
 
     - `ordenar` es idempotente por `pedido.clave`: el mismo pedido dos veces paga una sola vez y
-      contesta lo mismo. Tarda a lo sumo 60 segundos; si no sabe, contesta `INCIERTA`.
-    - `consultar` no mueve dinero: dice qué pasó con la clave (`DESCONOCIDA` si nunca la recibió).
+      contesta lo mismo. Si no sabe, contesta `INCIERTA`.
+    - `ordenar` tiene un plazo total de 60 segundos que hace cumplir el propio adaptador (cliente
+      con plazo, sin reintentos después): pasado el plazo no queda ningún envío en curso. El
+      bloqueo de la ejecución dura lo que la conexión a la base; un envío que siguiera después de
+      cortarse esa conexión podría pagar algo que verificar ya dio por fallido.
+    - `consultar` no mueve dinero. `DESCONOCIDA` es definitiva y consistente: el riel nunca recibió
+      esa clave y, desde esa respuesta, la rechaza para siempre. Un riel que acepta un pedido y
+      todavía no lo informa no puede contestar `DESCONOCIDA`, sino `INCIERTA`.
     """
 
     def ordenar(self, pedido: PedidoPago) -> RespuestaRiel: ...
@@ -117,9 +124,10 @@ def _texto(valor: str | None) -> str | None:
     """El texto del riel como lo guarda la base: sin espacios de más, vacío como nulo y cortado al
     largo de la columna. Un pago hecho nunca deja de registrarse por cómo vino escrita su
     referencia."""
-    if valor is None or not valor.strip():
+    if valor is None:
         return None
-    return valor.strip()[:LARGO_TEXTO_RIEL]
+    limpio = valor.replace("\x00", "").strip()
+    return limpio[:LARGO_TEXTO_RIEL] or None
 
 
 def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str) -> str:
