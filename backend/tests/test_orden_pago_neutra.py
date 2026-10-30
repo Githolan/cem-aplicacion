@@ -37,14 +37,15 @@ ESENCIALES = {
     "concepto": "SINTETICO / PRUEBA / NO REAL: reparación de la bomba",
     "comprobante": "Factura TEST-0001",
     "reserva": False,
+    "contrato": None,  # el contrato declarado (0050): sin él, nunca es rutinaria
 }
 PREPARAR = (
     "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :proveedor,"
-    " :comprobante, :reserva, :actor, :origen, :sesion)"
+    " :comprobante, :reserva, :contrato, :actor, :origen, :sesion)"
 )
 MODIFICAR = (
     "select nucleo.modificar_orden_pago(:orden, :version, :importe, :moneda, :concepto,"
-    " :proveedor, :comprobante, :reserva, :actor, :origen, :sesion)"
+    " :proveedor, :comprobante, :reserva, :contrato, :actor, :origen, :sesion)"
 )
 ENVIAR = "select nucleo.enviar_orden_a_revision(:orden, :version, :actor, :origen, :sesion)"
 APROBAR = (
@@ -265,9 +266,10 @@ def test_preparar_crea_el_borrador_con_su_version_y_su_huella(motor_migrate, e):
     with motor_migrate.connect() as c:
         recalculada = c.execute(
             text(
-                "select nucleo.huella_orden_pago(:o, 1, :importe, :moneda, :concepto,"
-                " (select encode(huella, 'hex') from nucleo.proveedor_version"
-                "   where proveedor_id = :p and numero = 1), :comprobante, :reserva)"
+                "select nucleo.huella_orden_pago_evaluada(nucleo.huella_orden_pago(:o, 1,"
+                " :importe, :moneda, :concepto, (select encode(huella, 'hex')"
+                " from nucleo.proveedor_version where proveedor_id = :p and numero = 1),"
+                " :comprobante, :reserva), 'beneficiario_nuevo', null, null)"
             ),
             {"o": o, "p": e.proveedor, **ESENCIALES},
         ).scalar_one()
@@ -751,7 +753,8 @@ def test_la_base_niega_las_transiciones_fuera_del_diagrama(motor_migrate, e, des
         c.execute(
             text("update nucleo.orden_pago set estado = cast(:d as nucleo.estado_orden_pago),"
                  " motivo_rechazo = case when cast(:d as text) = 'rechazada' then 'SINTETICO'"
-                 " end where id = :o"),
+                 " end, aprobada_en = case when cast(:d as text) in ('borrador', 'en_revision',"
+                 " 'rechazada') then null else now() end where id = :o"),
             {"d": desde, "o": o},
         )  # fmt: skip
         c.execute(text("alter table nucleo.orden_pago enable trigger transicion_orden_pago"))
@@ -876,19 +879,25 @@ def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate
 # Permisos e ida y vuelta ---------------------------------------------------------------------
 
 
-RUTAS_0049 = {
+RUTAS = {
     "alta_proveedor", "enviar_orden_a_revision", "modificar_orden_pago",
     "nueva_version_proveedor", "orden_pago_versiones_lectura", "ordenes_pago_lectura",
     "preparar_orden_pago", "proveedor_versiones_lectura", "proveedores_lectura",
     "rechazar_orden_pago", "registrar_aprobacion_orden_pago",
+    # 0050: emitir, renovar, los contratos y las lecturas de la franja y de los contratos.
+    "emitir_orden_pago", "renovar_orden_vencida", "orden_pago_evaluaciones_lectura",
+    "registrar_contrato_proveedor", "confirmar_contrato_proveedor", "baja_contrato_proveedor",
+    "contratos_proveedor_lectura",
 }  # fmt: skip
-"""Lo único que `cem_app` ejecuta desde `0049`: las funciones de las rutas. Emitir no."""
+"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049` y `0050`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
     tablas = ("nucleo.orden_pago", "nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion",
               "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago",
-              "nucleo.proveedor", "nucleo.proveedor_version")  # fmt: skip
+              "nucleo.proveedor", "nucleo.proveedor_version", "nucleo.umbral_orden_pago",
+              "nucleo.contrato_proveedor", "nucleo.contrato_proveedor_confirmacion",
+              "nucleo.contrato_proveedor_baja")  # fmt: skip
     with motor_migrate.connect() as c:
         tabla = [
             c.execute(
@@ -905,20 +914,26 @@ def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
                 " or p.proname like '%ordenes_pago%' or p.proname like '%proveedor%'"
                 " or p.proname like '%egresos%'"
                 " or p.proname in ('exigir_acto_economico', 'enviar_orden_a_revision',"
-                " 'exigir_decision_sobre_orden'))"
-                " and p.proname <> 'fijar_aprobaciones_orden_pago'"
+                " 'exigir_decision_sobre_orden', 'renovar_orden_vencida', 'aprobar_por_franja',"
+                " 'exigir_orden_emitible'))"
+                " and p.proname not in ('fijar_aprobaciones_orden_pago',"
+                " 'fijar_umbral_orden_pago')"
             )
         ).all()
-        # La carga de soporte corre como `cem_app` (como los coeficientes): solo esa función.
+        # Las cargas de soporte corren como `cem_app` (como los coeficientes): solo esas.
         fijar = c.execute(
             text("select has_function_privilege('cem_app', 'nucleo.fijar_aprobaciones_orden_pago("
-                 "smallint, date, uuid, uuid, text)', 'EXECUTE')")
+                 "smallint, date, uuid, uuid, text)', 'EXECUTE') and has_function_privilege("
+                 "'cem_app', 'nucleo.fijar_umbral_orden_pago(bigint, text, date, uuid, uuid,"
+                 " text)', 'EXECUTE')")
         ).scalar_one()  # fmt: skip
     assert not any(tabla)
-    assert {nombre for nombre, puede in filas if puede} == RUTAS_0049
+    assert {nombre for nombre, puede in filas if puede} == RUTAS
     nombres = {nombre for nombre, _ in filas}
-    # Controles: las demás existen y no se ejecutan, entre ellas emitir y la barrera de lectura.
-    assert {"emitir_orden_pago", "exigir_lectura_egresos", "exigir_acto_economico"} <= nombres
+    # Controles: las demás existen y no se ejecutan, entre ellas las barreras y las internas de
+    # la franja.
+    assert {"exigir_lectura_egresos", "exigir_acto_economico", "evaluar_orden_pago",
+            "aprobar_por_franja", "exigir_orden_emitible"} <= nombres  # fmt: skip
     assert len(filas) >= 26
     assert fijar
 
@@ -979,10 +994,12 @@ def test_0045_no_baja_si_hay_ordenes(base_aparte):  # noqa: F811
 
 
 def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
-    """Desde la decisión 2 (`0046`), solo `registrar_aprobacion_orden_pago` pone «aprobada», al
-    llegar a la cantidad. Alarma por inventario: las otras que nombran el estado lo leen (modificar
-    devuelve a revisión, emitir parte de ahí). Una función nueva que lo nombre hace fallar esta
-    prueba y obliga a revisarla. Mira todos los esquemas propios, no solo `nucleo` (P3 70)."""
+    """Solo dos funciones ponen «aprobada»: `registrar_aprobacion_orden_pago`, al llegar a la
+    cantidad (decisión 2, `0046`), y `aprobar_por_franja`, cuando la franja no pide aprobación
+    (decisión 1A, `0050`). Alarma por inventario: las otras que nombran el estado lo leen (modificar
+    devuelve a revisión, emitir parte de ahí, renovar exige una aprobada). Una función nueva que lo
+    nombre hace fallar esta prueba y obliga a revisarla. Mira todos los esquemas propios, no solo
+    `nucleo` (P3 70)."""
     with motor_migrate.connect() as c:
         nombran = set(
             c.execute(
@@ -999,6 +1016,7 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
         "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
+        "nucleo.aprobar_por_franja", "nucleo.renovar_orden_vencida",
     }  # fmt: skip
 
 

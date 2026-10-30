@@ -8,6 +8,9 @@ import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
+import { OrdenesPago, RUTA_ORDENES } from "./egresos/OrdenesPago";
+import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
+import { RevisionOrdenes, RUTA_REVISION } from "./egresos/RevisionOrdenes";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
 import { InvitacionMandato } from "./InvitacionMandato";
@@ -43,6 +46,12 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_DOCUMENTOS}>Documentos del edificio</Link>
+      </p>
+      <p>
+        <Link to={RUTA_ORDENES}>Órdenes de pago</Link>
+      </p>
+      <p>
+        <Link to={RUTA_REVISION}>Revisar órdenes de pago (Consejo)</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -103,6 +112,9 @@ export function App() {
           <Route path={RUTA_CONTACTOS_GESTION} element={<ContactosGestion />} />
           <Route path={RUTA_DOCUMENTOS} element={<Documentos />} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
+          <Route path={RUTA_PROVEEDORES} element={<Proveedores />} />
+          <Route path={RUTA_ORDENES} element={<OrdenesPago />} />
+          <Route path={RUTA_REVISION} element={<RevisionOrdenes />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>
