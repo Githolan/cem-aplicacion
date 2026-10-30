@@ -33,6 +33,7 @@ const C2 = "abababab-abab-4bab-8bab-abababababab";
 type Proveedor = components["schemas"]["Proveedor"];
 type Orden = components["schemas"]["OrdenPago"];
 type Version = components["schemas"]["VersionOrdenPago"];
+type VersionRevision = components["schemas"]["VersionOrdenPagoRevision"];
 type Contrato = components["schemas"]["Contrato"];
 
 function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
@@ -42,7 +43,7 @@ function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
     razon_social: "Limpieza Ficticia SRL",
     rubro: "limpieza",
     contacto: null,
-    cuenta_destino: CUENTA,
+    cuenta_ultimos_digitos: CUENTA.slice(-4),
     documento_id: null,
     estado: "activo",
     version: 1,
@@ -87,7 +88,7 @@ function version(extra: Partial<Version> = {}): Version {
     proveedor_version: 1,
     razon_social: "Limpieza Ficticia SRL",
     cuit: "20000000001",
-    cuenta_destino: CUENTA,
+    cuenta_ultimos_digitos: CUENTA.slice(-4),
     importe_centavos: 1_500_000,
     moneda: "ARS",
     concepto: "Limpieza de octubre",
@@ -208,7 +209,7 @@ afterEach(() => {
 
 describe("lo común de egresos", () => {
   it("en las listas la cuenta va enmascarada: solo los últimos 4 dígitos", () => {
-    expect(cuentaEnmascarada(CUENTA)).toBe("…1234");
+    expect(cuentaEnmascarada("1234")).toBe("…1234");
     expect(cuentaEnmascarada(null)).toBe("Sin cuenta");
   });
 
@@ -276,7 +277,7 @@ describe("página /egresos/proveedores", () => {
               razon_social: "Limpieza Ficticia SRL",
               rubro: "limpieza",
               contacto: null,
-              cuenta_destino: CUENTA,
+              cuenta_ultimos_digitos: CUENTA.slice(-4),
               documento_id: null,
               estado: "activo",
               huella: H1,
@@ -432,7 +433,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sí, cambiar la cuenta" }));
     expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
-    expect(await enviado.json()).toMatchObject({ cuenta_destino: CUENTA_NUEVA, version_esperada: 1 });
+    expect(await enviado.json()).toMatchObject({ cuenta_destino: CUENTA_NUEVA, version_esperada: 1, conservar_cuenta: false });
   });
 
   it("con el campo de cuenta vacío se conserva la cuenta y no hay aviso", async () => {
@@ -448,7 +449,8 @@ describe("página /egresos/proveedores", () => {
     expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
     expect(screen.queryByText(AVISO_CUENTA)).toBeNull();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
-    expect(await enviado.json()).toMatchObject({ cuenta_destino: CUENTA, rubro: "limpieza y jardín" });
+    // La pantalla no tiene la cuenta completa: pide conservarla, sin mandar ninguna.
+    expect(await enviado.json()).toMatchObject({ cuenta_destino: null, conservar_cuenta: true, rubro: "limpieza y jardín" });
   });
 });
 
@@ -660,7 +662,8 @@ describe("página /egresos/ordenes", () => {
 
 describe("página /egresos/revision", () => {
   const enRevision = orden({ estado: "en_revision", franja: "cuenta_cambiada", aprobaciones_requeridas: 1 });
-  const ficha = (v: Version) => () => Response.json({ orden: { ...enRevision, version_vigente: v.numero }, versiones: [v] });
+  const ficha = (v: VersionRevision) => () => Response.json({ orden: { ...enRevision, version_vigente: v.numero }, versiones: [v] });
+  const revisada = (extra: Partial<VersionRevision> = {}): VersionRevision => ({ ...version(), cuenta_destino: CUENTA, ...extra });
 
   it("la ficha muestra la cuenta completa, el CUIT, la condición y las aprobaciones", async () => {
     vi.stubGlobal(
@@ -668,7 +671,7 @@ describe("página /egresos/revision", () => {
       backend({
         "GET /api/v1/me/consorcios": CONSORCIOS,
         [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
-        [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(version()),
+        [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(revisada()),
       }),
     );
     const { container } = abrir("/egresos/revision");
@@ -689,7 +692,7 @@ describe("página /egresos/revision", () => {
     const simulado = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
-      [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(version()),
+      [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(revisada()),
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () =>
         ++intentos === 1
           ? error("segundo_factor_requerido", 403)
@@ -716,8 +719,8 @@ describe("página /egresos/revision", () => {
       [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
       [`GET ${BASE}/ordenes-pago/${O1}/revision`]: () =>
         ++fichas === 1
-          ? ficha(version())()
-          : ficha(version({ numero: 2, huella: H2, importe_centavos: 9_900_000, cuenta_destino: CUENTA_NUEVA }))(),
+          ? ficha(revisada())()
+          : ficha(revisada({ numero: 2, huella: H2, importe_centavos: 9_900_000, cuenta_destino: CUENTA_NUEVA, cuenta_ultimos_digitos: CUENTA_NUEVA.slice(-4) }))(),
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => error("huella_distinta", 409),
     });
     vi.stubGlobal("fetch", simulado);
@@ -742,7 +745,7 @@ describe("página /egresos/revision", () => {
       [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
       [`GET ${BASE}/ordenes-pago/${O1}/revision`]: () =>
         ++fichas === 1
-          ? ficha(version())()
+          ? ficha(revisada())()
           : Response.json({ orden: { ...enRevision, estado: "rechazada" }, versiones: [version()] }),
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => error("orden_no_admite", 409),
     });
@@ -759,7 +762,7 @@ describe("página /egresos/revision", () => {
     const simulado = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
-      [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(version()),
+      [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(revisada()),
       [`POST ${BASE}/ordenes-pago/${O1}/rechazar`]: () => Response.json({ id: O1, version: 1 }),
     });
     vi.stubGlobal("fetch", simulado);

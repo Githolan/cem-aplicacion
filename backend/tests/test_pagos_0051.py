@@ -36,9 +36,12 @@ class RielSimulado:
     pagos: dict[UUID, RespuestaRiel] = field(default_factory=dict)
     ordenes: int = 0
     consultas: int = 0
+    pedidos: list[PedidoPago] = field(default_factory=list)
+    falla_consulta: Exception | None = None
 
     def ordenar(self, pedido: PedidoPago) -> RespuestaRiel:
         self.ordenes += 1
+        self.pedidos.append(pedido)
         if self.falla is not None:
             raise self.falla
         if pedido.clave not in self.pagos:
@@ -49,6 +52,8 @@ class RielSimulado:
 
     def consultar(self, clave: UUID) -> RespuestaRiel:
         self.consultas += 1
+        if self.falla_consulta is not None:
+            raise self.falla_consulta
         if self.al_consultar is not None:
             return RespuestaRiel(self.al_consultar)
         return self.pagos.get(clave, RespuestaRiel(EstadoRiel.DESCONOCIDA))
@@ -315,6 +320,104 @@ def test_una_referencia_larga_del_riel_no_impide_registrar_el_pago(
                  " where ejecucion_id = :x"), {"x": x["id"]},
         ).scalar_one()  # fmt: skip
     assert referencia == "R" * pagos.LARGO_TEXTO_RIEL
+
+
+def test_una_referencia_cortada_no_termina_en_espacio(motor_migrate, motor_app, e, riel):
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    largo = pagos.LARGO_TEXTO_RIEL
+    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.PAGADA, referencia="R" * (largo - 1) + " X")
+    correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+    with motor_migrate.connect() as c:
+        referencia = c.execute(
+            text("select referencia from nucleo.resultado_ejecucion_orden_pago"
+                 " where ejecucion_id = :x"), {"x": x["id"]},
+        ).scalar_one()  # fmt: skip
+    assert referencia == "R" * (largo - 1)
+
+
+def test_un_trabajo_no_espera_el_bloqueo_y_despues_se_recupera(motor_migrate, motor_app, e, riel):
+    """Mientras otro tiene la ejecución (ordenar llamando al riel), verificar y ordenar fallan a
+    los `ESPERA_BLOQUEO` sin llamar al riel ni registrar nada; liberado el bloqueo, verificar
+    hace su trabajo. Un bloqueo vencido no es un pago incierto."""
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    [ordenar] = trabajos(motor_migrate, pagos.TRABAJO_ORDENAR, e.cons)
+    [verificar] = trabajos(motor_migrate, pagos.TRABAJO_VERIFICAR, e.cons)
+    leer = text("select estado_orden from nucleo.pedido_de_pago(:x)")
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as otro:
+        otro.execute(leer, {"x": x["id"]})
+        for manejador, t in ((pagos.verificar_pago, verificar), (pagos.ordenar_pago, ordenar)):
+            with (
+                pytest.raises(pagos.PagoBloqueado),
+                transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c,
+            ):
+                manejador(c, t)
+    assert (riel.ordenes, riel.consultas) == (0, 0)
+    assert resultados(motor_migrate, o) == []
+    assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
+    # Recuperación: sin el otro, el reintento de verificar consulta y resuelve.
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c:
+        assert pagos.verificar_pago(c, verificar) == {"estado": "fallida"}
+    assert riel.consultas == 1
+
+
+def test_el_riel_que_contesta_mal_deja_el_pago_incierto(motor_migrate, motor_app, e, riel):
+    """`PAGADA` sin referencia no se puede conciliar, y lo que no es una `RespuestaRiel` no se
+    entiende: los dos quedan inciertos y se consultan, nunca pagados ni reenviados."""
+    for respuesta in (RespuestaRiel(EstadoRiel.PAGADA), "pagada"):
+        o = emitida(motor_migrate, e)
+        [x] = ejecuciones(motor_migrate, o)
+        riel.pagos[x["clave"]] = respuesta
+        correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+        assert orden(motor_migrate, o)["estado"] == "en_verificacion", respuesta
+        assert resultados(motor_migrate, o) == [("incierta", "ordenar")]
+
+
+def test_un_resultado_contradictorio_no_cambia_lo_registrado(motor_migrate, motor_app, e, riel):
+    """El riel dijo `DESCONOCIDA` (definitiva) y después dice `PAGADA`: la base niega el segundo
+    resultado y la orden sigue Fallida. Es un caso para una persona, no un pago nuevo."""
+    o = emitida(motor_migrate, e)
+    correr(motor_migrate, motor_app, pagos.TRABAJO_VERIFICAR, e.cons)
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+    [x] = ejecuciones(motor_migrate, o)
+    with (
+        pytest.raises(DBAPIError) as error,
+        transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c,
+    ):
+        c.execute(text("select nucleo.registrar_resultado_pago(:x, 'pagada', 'consultar',"
+                       " 'SIM-9', null)"), {"x": x["id"]})  # fmt: skip
+    assert error.value.orig.diag.message_hint == "resultado_repetido"
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+    assert riel.ordenes == 0
+
+
+def test_el_pedido_lleva_su_plazo_y_no_muestra_la_cuenta(motor_migrate, motor_app, e, riel):
+    from datetime import UTC, datetime
+
+    emitida(motor_migrate, e)
+    antes = datetime.now(UTC)
+    correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+    [pedido] = riel.pedidos
+    assert antes + pagos.PLAZO_RIEL <= pedido.vence_en <= datetime.now(UTC) + pagos.PLAZO_RIEL
+    assert len(pedido.cuenta_destino) == 22
+    assert pedido.cuenta_destino not in repr(pedido)  # ni en registros ni en trazas
+
+
+def test_una_consulta_que_falla_no_lleva_el_texto_del_riel(motor_migrate, motor_app, e, riel):
+    """El texto de la excepción del riel podría traer datos de la cuenta: a la cola y al registro
+    va solo su tipo. La cola reintenta; el pago sigue como estaba."""
+    o = emitida(motor_migrate, e)
+    [verificar] = trabajos(motor_migrate, pagos.TRABAJO_VERIFICAR, e.cons)
+    riel.falla_consulta = ConnectionError("cuenta 2850590940090418135201 rechazada")
+    with (
+        pytest.raises(pagos.ConsultaFallida) as error,
+        transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c,
+    ):
+        pagos.verificar_pago(c, verificar)
+    assert str(error.value) == "ConnectionError"
+    assert error.value.__suppress_context__
+    assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
 
 
 def _tablas(motor) -> int:

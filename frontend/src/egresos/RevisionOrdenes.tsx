@@ -31,7 +31,7 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // nunca pasa sola a otra versión.
 
 type Orden = components["schemas"]["OrdenPago"];
-type Detalle = components["schemas"]["OrdenPagoConVersiones"];
+type Detalle = components["schemas"]["OrdenPagoConVersionesRevision"];
 
 export const RUTA_REVISION = "/egresos/revision";
 
@@ -303,7 +303,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       .map((v) => (
                         <li key={v.numero}>
                           Versión {v.numero}: {importe(v.importe_centavos, v.moneda)}, {v.razon_social}, cuenta{" "}
-                          {cuentaEnmascarada(v.cuenta_destino)}
+                          {cuentaEnmascarada(v.cuenta_ultimos_digitos)}
                         </li>
                       ))}
                   </ol>

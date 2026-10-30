@@ -45,6 +45,7 @@ from cem_contracts.egresos import (
     OrdenPago,
     OrdenPagoCambiada,
     OrdenPagoConVersiones,
+    OrdenPagoConVersionesRevision,
     OrdenPagoNueva,
     OrdenPagoVersionNueva,
     Proveedor,
@@ -55,7 +56,9 @@ from cem_contracts.egresos import (
     Rechazo,
     Renovacion,
     VersionOrdenPago,
+    VersionOrdenPagoRevision,
     VersionProveedor,
+    ultimos_digitos,
 )
 from cem_contracts.errores import CodigoError
 from fastapi import APIRouter, Depends, Response
@@ -242,7 +245,16 @@ def _ordenes(c: Connection, permiso: Permiso, orden: UUID | None) -> list[OrdenP
     return ordenes
 
 
-def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID) -> OrdenPagoConVersiones:
+def _recortada(fila) -> dict:
+    """La fila sin la cuenta completa: quien prepara recibe solo los últimos dígitos."""
+    datos = dict(fila)
+    datos["cuenta_ultimos_digitos"] = ultimos_digitos(datos.pop("cuenta_destino"))
+    return datos
+
+
+def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool):
+    """Con `revision`, cada versión trae la cuenta completa para que el Consejo la verifique;
+    si no, solo sus últimos dígitos."""
     with _lectura(permiso, motor) as c:
         ordenes = _ordenes(c, permiso, orden_id)
         if not ordenes:
@@ -255,11 +267,17 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID) -> OrdenPagoCo
         versiones = []
         for f in filas:
             ev = evaluaciones[(orden_id, f["numero"])]
-            versiones.append(VersionOrdenPago(
-                **f, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
+            datos = _recortada(f)
+            modelo = VersionOrdenPago
+            if revision:
+                modelo, datos["cuenta_destino"] = VersionOrdenPagoRevision, f["cuenta_destino"]
+            versiones.append(modelo(
+                **datos, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
                 umbral_importe_centavos=ev["umbral_importe_centavos"],
                 umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
             ))  # fmt: skip
+    if revision:
+        return OrdenPagoConVersionesRevision(orden=ordenes[0], versiones=versiones)
     return OrdenPagoConVersiones(orden=ordenes[0], versiones=versiones)
 
 
@@ -268,7 +286,8 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID) -> OrdenPagoCo
 
 def _proveedores(c: Connection, permiso: Permiso, proveedor: UUID | None) -> list[Proveedor]:
     sql = "select * from nucleo.proveedores_lectura(:p, :actor, 'api', :sesion)"
-    return [Proveedor(**f) for f in _ejecutar(c, permiso, sql, {"p": proveedor}).mappings()]
+    filas = _ejecutar(c, permiso, sql, {"p": proveedor}).mappings()
+    return [Proveedor(**_recortada(f)) for f in filas]
 
 
 @router.get(
@@ -301,7 +320,7 @@ def ver_proveedor(
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         sql = "select * from nucleo.proveedor_versiones_lectura(:p, :actor, 'api', :sesion)"
         filas = _ejecutar(c, permiso, sql, {"p": proveedor_id}).mappings()
-        versiones = [VersionProveedor(**f) for f in filas]
+        versiones = [VersionProveedor(**_recortada(f)) for f in filas]
     return ProveedorConVersiones(proveedor=proveedores[0], versiones=versiones)
 
 
@@ -354,12 +373,23 @@ def versionar_proveedor(
     motor: MotorDep,
 ) -> Response:
     def efecto(conn: Connection) -> tuple[int, ProveedorCreado]:
+        datos_nuevos = _datos_proveedor(datos)
+        if datos.conservar_cuenta:
+            # La cuenta de la versión esperada, leída en la misma transacción: si la vigente ya
+            # es otra, la función niega la versión desactualizada y esta cuenta no se usa.
+            vigente = _ejecutar(
+                conn, permiso,
+                "select version, cuenta_destino from nucleo.proveedores_lectura(:p, :actor, 'api',"
+                " :sesion)", {"p": proveedor_id},
+            ).mappings().one_or_none()  # fmt: skip
+            if vigente is not None and vigente["version"] == datos.version_esperada:
+                datos_nuevos["cuenta"] = vigente["cuenta_destino"]
         version = _ejecutar(
             conn, permiso,
             "select nucleo.nueva_version_proveedor(:p, :esperada, :razon, :rubro, :contacto,"
             " cast(:estado as nucleo.estado_proveedor), :doc, :cuenta, :actor, 'api', :sesion)",
             {"p": proveedor_id, "esperada": datos.version_esperada, "estado": datos.estado.value,
-             **_datos_proveedor(datos)},
+             **datos_nuevos},
             # El proveedor viene en la ruta: si no existe es 404, como al verlo.
             {"proveedor_inexistente": ERRORES["no_encontrado"]},
         ).scalar_one()  # fmt: skip
@@ -408,21 +438,21 @@ def ver_orden(
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
     motor: MotorDep,
 ) -> OrdenPagoConVersiones:
-    return _orden_con_versiones(permiso, motor, orden_id)
+    return _orden_con_versiones(permiso, motor, orden_id, revision=False)
 
 
 @router.get(
     "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/revision",
-    response_model=OrdenPagoConVersiones,
-    summary="Una orden enviada a revisión, con la huella de cada versión para aprobarla",
+    response_model=OrdenPagoConVersionesRevision,
+    summary="Una orden enviada a revisión, con la huella y la cuenta completa de cada versión",
     responses=RESPUESTAS_LECTURA | {404: {"description": "No existe o es un borrador."}},
 )
 def ver_orden_revision(
     orden_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
     motor: MotorDep,
-) -> OrdenPagoConVersiones:
-    return _orden_con_versiones(permiso, motor, orden_id)
+) -> OrdenPagoConVersionesRevision:
+    return _orden_con_versiones(permiso, motor, orden_id, revision=True)
 
 
 def _datos_orden(d: DatosOrdenPago) -> dict:

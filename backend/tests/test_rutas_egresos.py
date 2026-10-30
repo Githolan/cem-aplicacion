@@ -126,15 +126,71 @@ def test_alta_de_proveedor_y_su_historia(e):
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 1})
     assert (r.status_code, r.json()["version"]) == (200, 2)
     detalle = get(e, e.adm, f"proveedores/{p}").json()
-    assert detalle["proveedor"]["cuenta_destino"] == cbu_sintetico(11)
-    assert [(v["version"], v["cuenta_destino"]) for v in detalle["versiones"]] == [
-        (1, cbu_sintetico(10)), (2, cbu_sintetico(11))]  # fmt: skip
+    assert detalle["proveedor"]["cuenta_ultimos_digitos"] == cbu_sintetico(11)[-4:]
+    assert [(v["version"], v["cuenta_ultimos_digitos"]) for v in detalle["versiones"]] == [
+        (1, cbu_sintetico(10)[-4:]), (2, cbu_sintetico(11)[-4:])]  # fmt: skip
 
     # La versión vieja ya no sirve, y la misma versión sin cambios tampoco.
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 1})
     assert codigo(r) == (409, "version_desactualizada")
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 2})
     assert codigo(r) == (409, "sin_cambios")
+
+
+def test_quien_prepara_nunca_recibe_la_cuenta_completa(e):
+    """Decisión del 31-10-2026: la cuenta sale recortada desde el backend, no se oculta en la
+    pantalla. Ninguna respuesta de preparación lleva sus 22 dígitos; la revisión, sí."""
+    cuenta = cbu_sintetico(1)  # la del proveedor de la escena
+    o = enviada(e)
+    preparacion = [
+        get(e, e.adm, "proveedores"),
+        get(e, e.adm, f"proveedores/{e.proveedor}"),
+        get(e, e.adm, "ordenes-pago"),
+        get(e, e.adm, f"ordenes-pago/{o}"),
+    ]
+    for r in preparacion:
+        assert r.status_code == 200, r.json()
+        assert cuenta not in r.text
+        assert "cuenta_destino" not in r.text
+    detalle = preparacion[3].json()
+    assert detalle["versiones"][0]["cuenta_ultimos_digitos"] == cuenta[-4:]
+    # Quien prepara no lee la revisión (es otra acción), y quien revisa sí ve la cuenta entera.
+    assert codigo(get(e, e.adm, f"ordenes-pago/{o}/revision")) == (403, "sin_permiso")
+    revision = get(e, e.mc1, f"ordenes-pago/{o}/revision")
+    assert revision.json()["versiones"][0]["cuenta_destino"] == cuenta  # control
+
+
+def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
+    p = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": cbu_sintetico(14)}).json()[
+        "id"
+    ]
+    cambio = PROVEEDOR | {"rubro": "Gas", "estado": "activo", "version_esperada": 1}
+    r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"conservar_cuenta": True})
+    assert (r.status_code, r.json()["version"]) == (200, 2)
+    with motor_migrate.connect() as c:
+        cuentas = c.execute(
+            text("select numero, cuenta_destino from nucleo.proveedor_version"
+                 " where proveedor_id = :p order by numero"), {"p": p},
+        ).all()  # fmt: skip
+    assert [tuple(x) for x in cuentas] == [(1, cbu_sintetico(14)), (2, cbu_sintetico(14))]
+    # Conservar y mandar una cuenta a la vez no tiene sentido; con la versión vieja, 409.
+    r = post(e, e.adm, f"proveedores/{p}/versiones",
+             cambio | {"version_esperada": 2, "conservar_cuenta": True,
+                       "cuenta_destino": cbu_sintetico(15)})  # fmt: skip
+    assert codigo(r) == (422, "peticion_invalida")
+    r = post(
+        e, e.adm, f"proveedores/{p}/versiones", cambio | {"rubro": "Agua", "conservar_cuenta": True}
+    )
+    assert codigo(r) == (409, "version_desactualizada")
+    # Control: sin conservar y sin cuenta, la versión nueva queda sin cuenta (como antes).
+    r = post(
+        e,
+        e.adm,
+        f"proveedores/{p}/versiones",
+        PROVEEDOR | {"rubro": "Agua", "estado": "activo", "version_esperada": 2},
+    )
+    assert r.status_code == 200, r.json()
+    assert get(e, e.adm, f"proveedores/{p}").json()["proveedor"]["cuenta_ultimos_digitos"] is None
 
 
 def test_cuenta_y_cuit_invalidos(e):
