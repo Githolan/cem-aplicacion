@@ -79,9 +79,10 @@ APROBAR = "egresos.aprobar_orden"
 EJECUTAR = "egresos.ejecutar_pago"
 RESPALDADAS = {
     EstadoOrdenPago.APROBADA, EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION,
-    EstadoOrdenPago.PAGADA, EstadoOrdenPago.CONCILIADA,
+    EstadoOrdenPago.PAGADA, EstadoOrdenPago.FALLIDA, EstadoOrdenPago.CONCILIADA,
 }  # fmt: skip
-"""Las órdenes que ya pasaron una aprobación completa (`APROBADAS` de `0048`)."""
+"""Las órdenes que ya pasaron una aprobación completa y, después, su emisión (también la que
+falló): el reintento de la emisión con la misma clave devuelve la respuesta guardada."""
 LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR}
 """La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`)."""
 
@@ -142,6 +143,11 @@ ERRORES = {
     "contrato_no_vigente": (
         409, CodigoError.CONTRATO_NO_VIGENTE,
         "El contrato que respaldaba la orden ya no rige: renovala para evaluarla de nuevo.",
+    ),
+    "contrato_no_aplica": (
+        422, CodigoError.CONTRATO_NO_APLICA,
+        "El contrato elegido no respalda esta orden: revisá el proveedor, la moneda, el importe"
+        " máximo y que esté confirmado y vigente.",
     ),
     "contrato_ya_confirmado": (
         409, CodigoError.CONTRATO_YA_CONFIRMADO, "El contrato ya está confirmado.",
@@ -427,6 +433,7 @@ def _datos_orden(d: DatosOrdenPago) -> dict:
         "proveedor": d.proveedor_id,
         "comprobante": d.comprobante,
         "reserva": d.usa_fondo_reserva,
+        "contrato": d.contrato_id,
     }
 
 
@@ -447,7 +454,7 @@ def preparar_orden(
         orden_id = _ejecutar(
             conn, permiso,
             "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :proveedor,"
-            " :comprobante, :reserva, :actor, 'api', :sesion)",
+            " :comprobante, :reserva, :contrato, :actor, 'api', :sesion)",
             _datos_orden(nueva),
         ).scalar_one()  # fmt: skip
         return 201, OrdenPagoCambiada(id=orden_id, version=1)
@@ -472,7 +479,7 @@ def modificar_orden(
         version = _ejecutar(
             conn, permiso,
             "select nucleo.modificar_orden_pago(:o, :esperada, :importe, :moneda, :concepto,"
-            " :proveedor, :comprobante, :reserva, :actor, 'api', :sesion)",
+            " :proveedor, :comprobante, :reserva, :contrato, :actor, 'api', :sesion)",
             {"o": orden_id, "esperada": datos.version_esperada, **_datos_orden(datos)},
         ).scalar_one()  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=version)
@@ -624,6 +631,12 @@ def emitir_orden(
     separación por identidad humana."""
     detalle = _orden_con_versiones(lectura, motor, orden_id)
     vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
+    # Lo que se emite es la versión y la huella vistas. La versión de la orden no cambia nunca
+    # (solo se agregan versiones), así que la base, que exige la versión vigente, exige también
+    # esta huella.
+    vista = next((v for v in detalle.versiones if v.numero == emision.version), None)
+    if vista is not None and vista.huella != emision.huella:
+        raise ErrorApi(*ERRORES["huella_distinta"])
     # El respaldo es que la orden pasó la aprobación, también si ya se emitió: así el reintento
     # con la misma clave devuelve la respuesta guardada, y otra emisión la niega la base (409).
     permiso.verificar(Entidad(

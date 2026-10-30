@@ -203,6 +203,9 @@ class CodigoError(StrEnum):
     """La versión no tiene las aprobaciones que pide su franja."""
     CONTRATO_NO_VIGENTE = "contrato_no_vigente"
     """El contrato que hacía rutinaria la orden ya no rige: se renueva y se evalúa de nuevo."""
+    CONTRATO_NO_APLICA = "contrato_no_aplica"
+    """El contrato declarado no respalda la orden: otro proveedor, otra moneda, un importe mayor al
+    máximo, o no está confirmado y vigente."""
     CONTRATO_YA_CONFIRMADO = "contrato_ya_confirmado"
     """El contrato ya tiene su confirmación."""
     CONTRATO_DADO_DE_BAJA = "contrato_dado_de_baja"

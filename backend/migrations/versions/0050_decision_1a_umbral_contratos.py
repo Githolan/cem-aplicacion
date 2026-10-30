@@ -5,12 +5,13 @@ aprobación y la emisión (Aprobada → EnEjecucion).
 Diseño: `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, «Decisión 1A», con
 el mensaje del propietario del 30-10-2026 (puntos 1 a 36).
 
-**El umbral** (`nucleo.umbral_orden_pago`): una fila por umbral, con el importe en centavos, la
-moneda, desde cuándo rige y el acta (de asamblea o del Consejo) que lo respalda. Solo se agrega:
-un umbral nuevo es otra fila con una fecha posterior y nunca cambia lo ya preparado. No hay umbral
-de la plataforma: sin umbral registrado, todo lo no rutinario pide aprobación. Lo carga soporte con
-`nucleo.fijar_umbral_orden_pago` (`scripts/umbral_orden_pago.py`), con el importe y el acta que
-decidió el consorcio, desde hoy en adelante; como el resto de la clase B, sin evento de soporte.
+**El umbral** (`nucleo.umbral_orden_pago`): una fila por umbral y moneda, con el importe en
+centavos, la moneda, desde cuándo rige y el acta (de asamblea o del Consejo) que lo respalda. Solo
+se agrega: un umbral nuevo es otra fila con una fecha posterior y nunca cambia lo ya preparado. No
+hay umbral de la plataforma: sin umbral registrado, todo lo no rutinario pide aprobación. Lo carga
+soporte con `nucleo.fijar_umbral_orden_pago` (`scripts/umbral_orden_pago.py`), con el importe y el
+acta que decidió el consorcio, desde hoy en adelante; como el resto de la clase B, sin evento de
+soporte.
 
 **Contratos y abonos** (`nucleo.contrato_proveedor`): el registro estructurado que respalda lo
 rutinario. Proveedor, tipo (`contrato` o `abono`), alcance, importe máximo por orden y moneda,
@@ -22,14 +23,19 @@ sobre la huella que vio (`contrato_proveedor_confirmacion`): si el administrador
 habilitar lo rutinario, escribir «rutinario» le alcanzaría. Se da de baja con
 `contrato_proveedor_baja`. Todo solo se agrega.
 
+**El contrato se declara.** Lo rutinario no se deduce: quien prepara declara en la orden el
+contrato que la respalda (`contrato_id`; `preparar_orden_pago` y `modificar_orden_pago` suman el
+parámetro). Si no la cubre (otro proveedor, otra moneda, un importe mayor al máximo, sin confirmar,
+de baja o fuera de su vigencia) se niega (`contrato_no_aplica`). Sin declararlo, una orden nunca es
+rutinaria aunque el proveedor tenga un contrato (revisión de app #169).
+
 **La franja**, calculada en cada versión de la orden al prepararla y guardada con el umbral
-vigente ese día (`umbral_id`) y el contrato que la respalda (`contrato_id`). Gana la primera que
-corresponde, de la más estricta a la más permisiva (punto 35):
+vigente ese día en la moneda de la orden (`umbral_id`) y el contrato declarado. Gana la primera
+que corresponde, de la más estricta a la más permisiva (punto 35):
 1. `fondo_reserva`: usa el fondo de reserva. Aprueba el Consejo.
 2. `beneficiario_nuevo`: el proveedor no tiene una orden aprobada antes en el consorcio.
 3. `cuenta_cambiada`: la tuvo, pero a otra cuenta.
-4. `rutinaria`: un contrato o abono confirmado, vigente hoy, del mismo proveedor, en la misma
-   moneda y con el importe dentro del máximo. Sin aprobación previa.
+4. `rutinaria`: la orden declara un contrato o abono que la cubre. Sin aprobación previa.
 5. `sin_umbral`: no hay umbral vigente en la moneda de la orden. Aprobación.
 6. `sobre_umbral`: el importe supera el umbral. Aprobación.
 7. `bajo_umbral`: el importe no lo supera. Sin aprobación previa.
@@ -38,7 +44,9 @@ que se evaluó. Una franja sin aprobación pasa la orden de EnRevision a Aprobad
 
 **Fraccionamiento** (punto 9): una orden `bajo_umbral` lleva `alerta_fraccionamiento` si, sumada a
 las demás órdenes no rechazadas del mismo proveedor y moneda preparadas en el mismo mes del
-consorcio, supera el umbral. Es una alerta que se ve en la revisión, no un bloqueo.
+consorcio, supera el umbral; una `rutinaria`, si sumada a las demás del mismo contrato en el mes
+supera su importe máximo (revisión de app #169). Es una alerta que se ve en la revisión, no un
+bloqueo.
 
 **Vigencia de una aprobación** (punto 10): `orden_pago.aprobada_en` es cuándo la orden llegó a
 Aprobada. A los 7 días corridos (`VIGENCIA_APROBACION_DIAS`) ya no se emite
@@ -87,29 +95,35 @@ _franjas = _lista(f"'{f}'" for f in FRANJAS)
 _sin_aprobacion = _lista(f"'{f}'" for f in SIN_APROBACION)
 _actas = _lista(f"'{t}'" for t in TIPOS_ACTA)
 
+# Las que cambian de firma (suman el contrato declarado) llevan `{}`: sin nada antes de 0050,
+# `, uuid` después. Se crean de nuevo y se borra la anterior, como en 0048.
 NUEVA_VERSION = (
-    "nucleo.nueva_version_orden_pago(uuid, uuid, integer, bigint, text, text, uuid, text, boolean,"
-    " uuid, uuid)"
+    "nucleo.nueva_version_orden_pago(uuid, uuid, integer, bigint, text, text, uuid, text,"
+    " boolean{}, uuid, uuid)"
 )
+PREPARAR = "nucleo.preparar_orden_pago(bigint, text, text, uuid, text, boolean{}, uuid, text, uuid)"
 MODIFICAR = (
-    "nucleo.modificar_orden_pago(uuid, integer, bigint, text, text, uuid, text, boolean, uuid,"
+    "nucleo.modificar_orden_pago(uuid, integer, bigint, text, text, uuid, text, boolean{}, uuid,"
     " text, uuid)"
 )
+ANTES, DESPUES = "", ", uuid"
 ENVIAR = "nucleo.enviar_orden_a_revision(uuid, integer, uuid, text, uuid)"
 APROBAR = "nucleo.registrar_aprobacion_orden_pago(uuid, integer, bytea, uuid, text, uuid)"
 EMITIR = "nucleo.emitir_orden_pago(uuid, integer, uuid, text, uuid)"
+FIRMA = ("usa_reserva boolean, actor uuid", "usa_reserva boolean, contrato_nuevo uuid, actor uuid")
 
 # Sobre el texto exacto de cada función (0045 con lo que sumaron 0046 y 0048): (antes, después).
 CAMBIOS = {
     NUEVA_VERSION: [
+        FIRMA,
         ("    h bytea;\n  begin", "    h bytea;\n    ev record;\n  begin"),
         (
             """    h := nucleo.huella_orden_pago(orden, numero, importe_nuevo, moneda_nueva,
            btrim(concepto_nuevo), encode(pv.huella, 'hex'), btrim(comprobante_nuevo),
            usa_reserva);""",
-            """    -- 0050: la franja, con el umbral y el contrato del día, entra en la huella.
+            """    -- 0050: la franja, con el umbral y el contrato declarado, entra en la huella.
     select * into ev from nucleo.evaluar_orden_pago(c, orden, pv, importe_nuevo, moneda_nueva,
-                                                    usa_reserva);
+                                                    usa_reserva, contrato_nuevo);
     h := nucleo.huella_orden_pago_evaluada(
            nucleo.huella_orden_pago(orden, numero, importe_nuevo, moneda_nueva,
              btrim(concepto_nuevo), encode(pv.huella, 'hex'), btrim(comprobante_nuevo),
@@ -131,7 +145,28 @@ CAMBIOS = {
             "            ev.contrato_id, ev.alerta);",
         ),
     ],
+    PREPARAR: [
+        FIRMA,
+        (
+            "comprobante_nuevo, usa_reserva, actor, identidad);",
+            "comprobante_nuevo, usa_reserva, contrato_nuevo,\n           actor, identidad);",
+        ),
+    ],
     MODIFICAR: [
+        FIRMA,
+        (
+            "comprobante_nuevo, usa_reserva,\n           actor, identidad);",
+            "comprobante_nuevo, usa_reserva,\n           contrato_nuevo, actor, identidad);",
+        ),
+        # Declarar otro contrato (o ninguno) también es un cambio.
+        (
+            "        v.comprobante, v.usa_fondo_reserva)",
+            "        v.comprobante, v.usa_fondo_reserva, v.contrato_id)",
+        ),
+        (
+            "btrim(comprobante_nuevo), usa_reserva)\n    then",
+            "btrim(comprobante_nuevo), usa_reserva, contrato_nuevo)\n    then",
+        ),
         (
             "       set version_vigente = o.version_vigente + 1, estado = estado_nuevo,"
             " actualizada_en = now()",
@@ -195,7 +230,8 @@ create table nucleo.umbral_orden_pago (
   creada_en         timestamptz not null default now(),
   primary key (id),
   unique (consorcio_id, id),
-  unique (consorcio_id, vigente_desde),
+  -- Un umbral por moneda: el de otra moneda no apaga este.
+  unique (consorcio_id, moneda, vigente_desde),
   foreign key (consorcio_id, decision_id) references nucleo.decision_formal (consorcio_id, id)
 );
 
@@ -295,8 +331,10 @@ alter table nucleo.orden_pago_version
   add foreign key (consorcio_id, umbral_id) references nucleo.umbral_orden_pago (consorcio_id, id),
   add foreign key (consorcio_id, contrato_id)
     references nucleo.contrato_proveedor (consorcio_id, id),
-  add check ((franja = 'rutinaria') = (contrato_id is not null)),
-  add check (alerta_fraccionamiento is false or franja = 'bajo_umbral');
+  -- `contrato_id` es el contrato que declaró quien preparó; solo hace rutinaria la orden si
+  -- ninguna franja más estricta corresponde.
+  add check (franja <> 'rutinaria' or contrato_id is not null),
+  add check (alerta_fraccionamiento is false or franja in ('bajo_umbral', 'rutinaria'));
 
 -- Cuándo llegó a Aprobada: la vigencia de la aprobación se cuenta desde ahí.
 alter table nucleo.orden_pago
@@ -354,10 +392,13 @@ create function nucleo.contrato_vigente(c uuid, contrato uuid, dia date)
   $$;
 
 -- La franja de una versión de la orden, con la condición del beneficiario, el umbral vigente hoy
--- (aunque no decida), el contrato que la hace rutinaria y la alerta de fraccionamiento.
+-- en la moneda de la orden (aunque no decida) y la alerta de fraccionamiento. Lo rutinario no se
+-- deduce: quien prepara declara el contrato que respalda la orden, y si ese contrato no la cubre
+-- (otro proveedor, otra moneda, un importe mayor al máximo, sin confirmar, de baja o fuera de su
+-- vigencia) se niega, en vez de evaluarla callada como otra cosa.
 create function nucleo.evaluar_orden_pago(c uuid, orden uuid, pv nucleo.proveedor_version,
                                           importe_orden bigint, moneda_orden text,
-                                          reserva boolean)
+                                          reserva boolean, contrato_declarado uuid)
   returns table (condicion text, franja text, umbral_id uuid, contrato_id uuid, alerta boolean)
   language plpgsql stable
   set search_path = pg_catalog, pg_temp
@@ -366,27 +407,36 @@ create function nucleo.evaluar_orden_pago(c uuid, orden uuid, pv nucleo.proveedo
     hoy date := nucleo.hoy_del_consorcio(c);
     cond text := nucleo.condicion_beneficiario(c, orden, pv);
     u nucleo.umbral_orden_pago;
-    respaldo uuid;
+    tope bigint;
     elegida text;
     previas numeric;
   begin
     select * into u from nucleo.umbral_orden_pago x
-     where x.consorcio_id = c and x.vigente_desde <= hoy
+     where x.consorcio_id = c and x.moneda = moneda_orden and x.vigente_desde <= hoy
      order by x.vigente_desde desc limit 1;
-    select k.id into respaldo from nucleo.contrato_proveedor k
-     where k.consorcio_id = c and k.proveedor_id = pv.proveedor_id and k.moneda = moneda_orden
-       and importe_orden <= k.importe_maximo_centavos and nucleo.contrato_vigente(c, k.id, hoy)
-     order by k.creado_en desc, k.id limit 1;
+    if contrato_declarado is not null then
+      select k.importe_maximo_centavos into tope from nucleo.contrato_proveedor k
+       where k.consorcio_id = c and k.id = contrato_declarado
+         and k.proveedor_id = pv.proveedor_id and k.moneda = moneda_orden
+         and importe_orden <= k.importe_maximo_centavos
+         and nucleo.contrato_vigente(c, k.id, hoy);
+      if not found then
+        raise exception 'el contrato declarado no respalda esta orden' using errcode = 'P0001',
+          hint = 'contrato_no_aplica';
+      end if;
+    end if;
     -- De la más estricta a la más permisiva: ninguna permisiva anula una estricta.
     elegida := case
       when reserva then 'fondo_reserva'
       when cond = 'nuevo' then 'beneficiario_nuevo'
       when cond = 'cuenta_cambiada' then 'cuenta_cambiada'
-      when respaldo is not null then 'rutinaria'
-      when u.id is null or u.moneda <> moneda_orden then 'sin_umbral'
+      when contrato_declarado is not null then 'rutinaria'
+      when u.id is null then 'sin_umbral'
       when importe_orden > u.importe_centavos then 'sobre_umbral'
       else 'bajo_umbral' end;
-    if elegida = 'bajo_umbral' then
+    -- Fraccionamiento: las demás órdenes no rechazadas del mismo proveedor y moneda (o, si es
+    -- rutinaria, del mismo contrato) preparadas este mes del consorcio. Alerta, no bloqueo.
+    if elegida in ('bajo_umbral', 'rutinaria') then
       select coalesce(sum(v2.importe_centavos), 0) into previas
         from nucleo.orden_pago o2
         join nucleo.orden_pago_version v2
@@ -394,12 +444,15 @@ create function nucleo.evaluar_orden_pago(c uuid, orden uuid, pv nucleo.proveedo
         join nucleo.consorcio k on k.id = o2.consorcio_id
        where o2.consorcio_id = c and o2.id <> orden and o2.estado <> 'rechazada'
          and v2.proveedor_id = pv.proveedor_id and v2.moneda = moneda_orden
+         and (elegida = 'bajo_umbral' or v2.contrato_id = contrato_declarado)
          and date_trunc('month', v2.creada_en at time zone k.zona_horaria)
              = date_trunc('month', hoy::timestamp);
     end if;
-    return query select cond, elegida, u.id,
-      case when elegida = 'rutinaria' then respaldo end,
-      coalesce(elegida = 'bajo_umbral' and previas + importe_orden > u.importe_centavos, false);
+    return query select cond, elegida, u.id, contrato_declarado,
+      coalesce(case elegida
+                 when 'bajo_umbral' then previas + importe_orden > u.importe_centavos
+                 when 'rutinaria' then previas + importe_orden > tope
+               end, false);
   end
   $$;
 
@@ -446,6 +499,8 @@ create function nucleo.exigir_orden_emitible(c uuid, o nucleo.orden_pago, numero
       raise exception 'la versión no tiene las aprobaciones que pide' using errcode = 'P0001',
         hint = 'aprobaciones_insuficientes';
     end if;
+    -- La baja del contrato bloquea la misma fila (FOR UPDATE): no se cruza con esta emisión.
+    perform 1 from nucleo.contrato_proveedor k where k.id = v.contrato_id for share;
     if v.franja = 'rutinaria'
        and not nucleo.contrato_vigente(c, v.contrato_id, nucleo.hoy_del_consorcio(c)) then
       raise exception 'el contrato que hacía rutinaria la orden ya no rige'
@@ -490,8 +545,8 @@ create function nucleo.renovar_orden_vencida(orden uuid, version_esperada intege
     select * into v from nucleo.orden_pago_version x
      where x.orden_id = orden and x.numero = o.version_vigente;
     h := nucleo.nueva_version_orden_pago(c, orden, o.version_vigente + 1, v.importe_centavos,
-           v.moneda, v.concepto, v.proveedor_id, v.comprobante, v.usa_fondo_reserva, actor,
-           identidad);
+           v.moneda, v.concepto, v.proveedor_id, v.comprobante, v.usa_fondo_reserva,
+           v.contrato_id, actor, identidad);
     update nucleo.orden_pago
        set version_vigente = o.version_vigente + 1, estado = 'en_revision', aprobada_en = null,
            actualizada_en = now()
@@ -550,9 +605,10 @@ create function nucleo.fijar_umbral_orden_pago(importe bigint, moneda_umbral tex
         using errcode = 'P0001', hint = 'decision_no_es_acta';
     end if;
     if exists (select 1 from nucleo.umbral_orden_pago u
-                where u.consorcio_id = c and u.vigente_desde = desde) then
-      raise exception 'ya hay un umbral que rige desde %', desde using errcode = 'P0001',
-        hint = 'vigencia_repetida';
+                where u.consorcio_id = c and u.moneda = moneda_umbral and u.vigente_desde = desde)
+    then
+      raise exception 'ya hay un umbral en % que rige desde %', moneda_umbral, desde
+        using errcode = 'P0001', hint = 'vigencia_repetida';
     end if;
     insert into nucleo.umbral_orden_pago
       (consorcio_id, importe_centavos, moneda, vigente_desde, decision_id)
@@ -778,7 +834,7 @@ INTERNAS = (
     " uuid)",
     "nucleo.huella_orden_pago_evaluada(bytea, text, uuid, uuid)",
     "nucleo.contrato_vigente(uuid, uuid, date)",
-    "nucleo.evaluar_orden_pago(uuid, uuid, nucleo.proveedor_version, bigint, text, boolean)",
+    "nucleo.evaluar_orden_pago(uuid, uuid, nucleo.proveedor_version, bigint, text, boolean, uuid)",
     "nucleo.aprobar_por_franja(uuid, uuid, integer, uuid)",
     "nucleo.exigir_orden_emitible(uuid, nucleo.orden_pago, integer)",
     "nucleo.auditar_contrato_proveedor(uuid, text, uuid, uuid, jsonb)",
@@ -845,15 +901,25 @@ def _definicion(firma: str) -> str:
 
 
 def _aplicar(inverso: bool) -> None:
-    for firma, pares in CAMBIOS.items():
+    """Reescribe cada función; las que cambian de firma se crean de nuevo y se borra la
+    anterior. Las nuevas quedan sin EXECUTE para public y, preparar y modificar, con el de
+    `cem_app` que tenían desde 0049."""
+    de, a = (DESPUES, ANTES) if inverso else (ANTES, DESPUES)
+    for plantilla, pares in CAMBIOS.items():
+        vieja, nueva = plantilla.format(de), plantilla.format(a)
         if inverso:
             pares = [(despues, antes) for antes, despues in reversed(pares)]
-        definicion = _definicion(firma)
+        definicion = _definicion(vieja)
         for antes, despues in pares:
             if definicion.count(antes) != 1:
-                raise RuntimeError(f"0050: {firma} no tiene exactamente una vez {antes!r}")
+                raise RuntimeError(f"0050: {vieja} no tiene exactamente una vez {antes!r}")
             definicion = definicion.replace(antes, despues)
         op.execute(definicion)
+        if vieja != nueva:
+            op.execute(f"drop function {vieja}")
+            op.execute(f"revoke all on function {nueva} from public")
+            if plantilla in (PREPARAR, MODIFICAR):
+                op.execute(f"grant execute on function {nueva} to cem_app")
 
 
 def upgrade() -> None:

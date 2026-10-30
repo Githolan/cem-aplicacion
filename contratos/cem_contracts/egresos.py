@@ -245,6 +245,10 @@ class DatosOrdenPago(BaseModel):
     proveedor_id: UUID
     comprobante: Comprobante | None = None
     usa_fondo_reserva: bool
+    contrato_id: UUID | None = Field(
+        default=None,
+        description="El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
+    )
 
 
 class OrdenPagoNueva(DatosOrdenPago):
@@ -382,6 +386,7 @@ class Emision(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA, description="La de la versión que se emite.")
 
 
 class Renovacion(BaseModel):

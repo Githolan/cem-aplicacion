@@ -589,6 +589,7 @@
           "aprobacion_vigente",
           "aprobaciones_insuficientes",
           "contrato_no_vigente",
+          "contrato_no_aplica",
           "contrato_ya_confirmado",
           "contrato_dado_de_baja",
           "proveedor_cambiado",
@@ -1844,6 +1845,12 @@
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/emitir`: la versión aprobada que se emite (Aprobada →\nEnEjecucion). No mueve dinero.",
         "properties": {
+          "huella": {
+            "description": "La de la versión que se emite.",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
           "version": {
             "exclusiveMinimum": 0.0,
             "maximum": 2147483647.0,
@@ -1852,7 +1859,8 @@
           }
         },
         "required": [
-          "version"
+          "version",
+          "huella"
         ],
         "title": "Emision",
         "type": "object"
@@ -4299,6 +4307,19 @@
             "title": "Concepto",
             "type": "string"
           },
+          "contrato_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
+            "title": "Contrato Id"
+          },
           "importe_centavos": {
             "description": "En centavos.",
             "exclusiveMinimum": 0.0,
@@ -4358,6 +4379,19 @@
             "pattern": "^[^\\x00-\\x1f\\x7f]*$",
             "title": "Concepto",
             "type": "string"
+          },
+          "contrato_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
+            "title": "Contrato Id"
           },
           "importe_centavos": {
             "description": "En centavos.",

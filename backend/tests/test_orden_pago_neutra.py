@@ -37,14 +37,15 @@ ESENCIALES = {
     "concepto": "SINTETICO / PRUEBA / NO REAL: reparación de la bomba",
     "comprobante": "Factura TEST-0001",
     "reserva": False,
+    "contrato": None,  # el contrato declarado (0050): sin él, nunca es rutinaria
 }
 PREPARAR = (
     "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :proveedor,"
-    " :comprobante, :reserva, :actor, :origen, :sesion)"
+    " :comprobante, :reserva, :contrato, :actor, :origen, :sesion)"
 )
 MODIFICAR = (
     "select nucleo.modificar_orden_pago(:orden, :version, :importe, :moneda, :concepto,"
-    " :proveedor, :comprobante, :reserva, :actor, :origen, :sesion)"
+    " :proveedor, :comprobante, :reserva, :contrato, :actor, :origen, :sesion)"
 )
 ENVIAR = "select nucleo.enviar_orden_a_revision(:orden, :version, :actor, :origen, :sesion)"
 APROBAR = (

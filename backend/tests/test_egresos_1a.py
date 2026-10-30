@@ -176,10 +176,14 @@ def test_sin_umbral_todo_lo_no_rutinario_pide_aprobacion(motor_migrate, e):
     assert versiones(motor_migrate, o)[0]["umbral_id"] is None
 
 
-def test_umbral_en_otra_moneda_es_como_no_tenerlo(motor_migrate, motor_app, e):
+def test_un_umbral_por_moneda(motor_migrate, motor_app, e):
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 10, moneda="USD")
     assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
+    # El de pesos, registrado el mismo día, rige para las órdenes en pesos sin apagar el otro.
+    umbral(motor_app, e.cons, IMPORTE * 10)
+    assert franja(motor_migrate, enviada(motor_migrate, e)) == "bajo_umbral"
+    assert franja(motor_migrate, enviada(motor_migrate, e, moneda="USD")) == "bajo_umbral"
 
 
 def test_proveedor_nuevo_pide_aprobacion_aunque_este_bajo_el_umbral(motor_migrate, motor_app, e):
@@ -211,10 +215,11 @@ def test_cuenta_cambiada_pide_aprobacion_bajo_y_sobre_el_umbral(motor_migrate, m
                                                                 importe):  # fmt: skip
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 10)
-    # Un contrato confirmado del proveedor tampoco la hace rutinaria: la cuenta cambiada gana.
-    confirmado(motor_migrate, e, tope=IMPORTE * 100)
+    # Declarar un contrato confirmado del proveedor tampoco la hace rutinaria: la cuenta cambiada
+    # gana.
+    k = confirmado(motor_migrate, e, tope=IMPORTE * 100)
     nueva_cuenta(motor_migrate, e, 77)
-    o = enviada(motor_migrate, e, importe=importe)
+    o = enviada(motor_migrate, e, importe=importe, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "cuenta_cambiada", "en_revision")  # fmt: skip
 
@@ -222,38 +227,38 @@ def test_cuenta_cambiada_pide_aprobacion_bajo_y_sobre_el_umbral(motor_migrate, m
 def test_el_fondo_de_reserva_siempre_pide_aprobacion(motor_migrate, motor_app, e):
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 10)
-    confirmado(motor_migrate, e, tope=IMPORTE * 10)
-    o = enviada(motor_migrate, e, reserva=True)
+    k = confirmado(motor_migrate, e, tope=IMPORTE * 10)
+    o = enviada(motor_migrate, e, reserva=True, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "fondo_reserva", "en_revision")  # fmt: skip
     # Control: sin el fondo, la misma orden es rutinaria.
-    assert franja(motor_migrate, enviada(motor_migrate, e)) == "rutinaria"
+    assert franja(motor_migrate, enviada(motor_migrate, e, contrato=k)) == "rutinaria"
 
 
 # Contratos y lo rutinario -------------------------------------------------------------------
 
 
-def test_rutinaria_solo_con_un_contrato_confirmado_y_dentro_de_sus_condiciones(motor_migrate, e):
+def test_rutinaria_solo_con_un_contrato_declarado_confirmado_y_que_la_cubre(motor_migrate, e):
     conocido(motor_migrate, e)
     k = contrato(motor_migrate, e, tope=IMPORTE)
     # Registrado y sin confirmar no respalda: escribir «rutinario» no alcanza.
-    assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k)
     llamar(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, contrato=k,
            huella_k=huella_contrato(motor_migrate, k))  # fmt: skip
-    o = enviada(motor_migrate, e)
+    o = enviada(motor_migrate, e, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "rutinaria", "aprobada")  # fmt: skip
     assert versiones(motor_migrate, o)[0]["contrato_id"] == k
-    # Fuera de sus condiciones no: otro importe, otra moneda, otro proveedor.
-    assert franja(motor_migrate, enviada(motor_migrate, e, importe=IMPORTE + 1)) == "sin_umbral"
-    assert franja(motor_migrate, enviada(motor_migrate, e, moneda="USD")) == "sin_umbral"
-    assert franja(motor_migrate, enviada(motor_migrate, e, proveedor=e.otro)) == (
-        "beneficiario_nuevo")  # fmt: skip
+    # Sin declararlo no es rutinaria aunque el proveedor tenga el contrato (revisión de #169).
+    assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
+    # Fuera de sus condiciones se niega: otro importe, otra moneda, otro proveedor.
+    for fuera in ({"importe": IMPORTE + 1}, {"moneda": "USD"}, {"proveedor": e.otro}):
+        niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k, **fuera)
 
 
 def test_un_proveedor_nuevo_con_contrato_igual_pide_aprobacion(motor_migrate, e):
-    confirmado(motor_migrate, e)
-    o = enviada(motor_migrate, e)
+    k = confirmado(motor_migrate, e)
+    o = enviada(motor_migrate, e, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "beneficiario_nuevo", "en_revision")  # fmt: skip
 
@@ -261,10 +266,10 @@ def test_un_proveedor_nuevo_con_contrato_igual_pide_aprobacion(motor_migrate, e)
 def test_un_contrato_vencido_o_dado_de_baja_no_respalda(motor_migrate, e):
     conocido(motor_migrate, e)
     k = confirmado(motor_migrate, e)
-    rutinaria = enviada(motor_migrate, e)
+    rutinaria = enviada(motor_migrate, e, contrato=k)
     assert franja(motor_migrate, rutinaria) == "rutinaria"
     llamar(motor_migrate, e, e.adm, BAJA_CONTRATO, contrato=k)
-    assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k)
     # La orden que ya era rutinaria no se emite con un contrato que ya no rige.
     niega(motor_migrate, e, e.adm, EMITIR, "contrato_no_vigente", orden=rutinaria, version=1)
     niega(motor_migrate, e, e.adm, BAJA_CONTRATO, "contrato_dado_de_baja", contrato=k)
@@ -282,7 +287,7 @@ def test_un_contrato_vencido_o_dado_de_baja_no_respalda(motor_migrate, e):
         )  # fmt: skip
         c.execute(text("alter table nucleo.contrato_proveedor enable trigger"
                        " historia_contrato_proveedor"))  # fmt: skip
-    assert franja(motor_migrate, enviada(motor_migrate, e)) == "sin_umbral"
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=vencido)
 
 
 def test_registrar_un_contrato_exige_su_documento_y_una_vigencia_valida(motor_migrate, e):
@@ -395,6 +400,19 @@ def test_fraccionar_bajo_el_umbral_genera_una_alerta_sin_bloquear(motor_migrate,
     assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is False
 
 
+def test_lo_rutinario_del_mismo_contrato_en_el_mes_alerta_al_pasar_el_maximo(motor_migrate, e):
+    """Revisión de #169: sin la alerta, varias órdenes rutinarias justo bajo el máximo pasarían
+    sin que el Consejo lo note."""
+    conocido(motor_migrate, e)
+    k = confirmado(motor_migrate, e, tope=IMPORTE)
+    alertas = []
+    for _ in range(2):
+        o = enviada(motor_migrate, e, contrato=k)
+        assert orden(motor_migrate, o)["estado"] == "aprobada"  # no se bloquea
+        alertas.append(versiones(motor_migrate, o)[0]["alerta_fraccionamiento"])
+    assert alertas == [False, True]
+
+
 # Vigencia de la aprobación y emisión ---------------------------------------------------------
 
 
@@ -433,8 +451,7 @@ def test_una_aprobacion_dentro_del_plazo_se_emite_y_no_se_renueva(motor_migrate,
 
 def test_una_rutinaria_la_emite_quien_la_preparo_sin_aprobadores(motor_migrate, e):
     conocido(motor_migrate, e)
-    confirmado(motor_migrate, e)
-    o = enviada(motor_migrate, e)
+    o = enviada(motor_migrate, e, contrato=confirmado(motor_migrate, e))
     assert franja(motor_migrate, o) == "rutinaria"
     llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=1)
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
@@ -532,7 +549,7 @@ def test_rutas_de_contratos_franja_y_emision(motor_migrate, e):
 
     r = post(e, e.adm, "ordenes-pago", {"importe_centavos": IMPORTE, "moneda": "ARS",
              "concepto": "SINTETICO: limpieza de octubre", "proveedor_id": str(e.proveedor),
-             "usa_fondo_reserva": False})  # fmt: skip
+             "usa_fondo_reserva": False, "contrato_id": k})  # fmt: skip
     o = r.json()["id"]
     assert post(e, e.adm, f"ordenes-pago/{o}/enviar-a-revision",
                 {"version_esperada": 1}).status_code == 200  # fmt: skip
@@ -541,23 +558,28 @@ def test_rutas_de_contratos_franja_y_emision(motor_migrate, e):
     assert detalle["orden"]["aprobacion_vence_en"] is not None
     assert detalle["versiones"][0]["contrato_id"] == k
 
+    emision = {"version": 1, "huella": detalle["versiones"][0]["huella"]}
+    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", emision | {"huella": "0" * 64})) == (
+        409, "huella_distinta")  # fmt: skip
     clave = clave_idempotencia()
-    primera = post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1}, clave)
-    repetida = post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1}, clave)
+    primera = post(e, e.adm, f"ordenes-pago/{o}/emitir", emision, clave)
+    repetida = post(e, e.adm, f"ordenes-pago/{o}/emitir", emision, clave)
     assert primera.status_code == repetida.status_code == 200, primera.json()
     assert repetida.headers.get("Idempotent-Replayed") == "true"
-    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 2}, clave)) == (
+    otra = emision | {"version": 2}
+    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", otra, clave)) == (
         422, "idempotencia_reutilizada")  # fmt: skip
     assert get(e, e.adm, f"ordenes-pago/{o}").json()["orden"]["estado"] == "en_ejecucion"
     # Con otra clave, la orden ya emitida no se vuelve a emitir.
-    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1})) == (
+    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", emision)) == (
         409, "orden_no_admite")  # fmt: skip
 
 
 def test_ruta_de_renovar_y_emitir_vencida(motor_migrate, e):
     o = aprobada(motor_migrate, e)
     envejecer(motor_migrate, o, timedelta(days=8))
-    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1})) == (
+    emision = {"version": 1, "huella": huella(motor_migrate, o, 1).hex()}
+    assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", emision)) == (
         409, "aprobacion_vencida")  # fmt: skip
     r = post(e, e.adm, f"ordenes-pago/{o}/renovar", {"version_esperada": 1})
     assert (r.status_code, r.json()["version"]) == (200, 2)
@@ -567,9 +589,9 @@ def test_ruta_de_renovar_y_emitir_vencida(motor_migrate, e):
 
 def test_quien_aprueba_no_emite_por_la_ruta(motor_migrate, e):
     o = aprobada(motor_migrate, e)
-    assert codigo(post(e, e.mc1, f"ordenes-pago/{o}/emitir", {"version": 1})) == (
-        403, "sin_permiso")  # fmt: skip
-    assert post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1}).status_code == 200
+    emision = {"version": 1, "huella": huella(motor_migrate, o, 1).hex()}
+    assert codigo(post(e, e.mc1, f"ordenes-pago/{o}/emitir", emision)) == (403, "sin_permiso")
+    assert post(e, e.adm, f"ordenes-pago/{o}/emitir", emision).status_code == 200
 
 
 # Ida y vuelta --------------------------------------------------------------------------------
