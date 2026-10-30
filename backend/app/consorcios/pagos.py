@@ -13,6 +13,9 @@ ejecución y no se mueve dinero. Las pruebas usan un riel simulado, que vive sol
    muere y queda a la vista del monitor de la cola, para una persona. Si el riel dice que nunca
    recibió la clave, la orden queda Fallida: no se reenvía; para pagar hay que prepararla de
    nuevo, revisarla y aprobarla.
+
+Los dos leen la ejecución con `nucleo.pedido_de_pago`, que la bloquea hasta confirmar: nunca
+corren a la vez sobre el mismo pago, ni siquiera con varios trabajadores.
 """
 
 from dataclasses import dataclass
@@ -106,10 +109,29 @@ def _pedido(conn: Connection, ejecucion: UUID) -> _Pedido:
     return _Pedido(**fila)
 
 
+LARGO_TEXTO_RIEL = 200
+"""Lo que guarda la base de la referencia y el motivo del riel (0051)."""
+
+
+def _texto(valor: str | None) -> str | None:
+    """El texto del riel como lo guarda la base: sin espacios de más, vacío como nulo y cortado al
+    largo de la columna. Un pago hecho nunca deja de registrarse por cómo vino escrita su
+    referencia."""
+    if valor is None or not valor.strip():
+        return None
+    return valor.strip()[:LARGO_TEXTO_RIEL]
+
+
 def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str) -> str:
     return conn.execute(
         text("select nucleo.registrar_resultado_pago(:e, :r, :o, :ref, :m)"),
-        {"e": ejecucion, "r": r.estado.value, "o": origen, "ref": r.referencia, "m": r.motivo},
+        {
+            "e": ejecucion,
+            "r": r.estado.value,
+            "o": origen,
+            "ref": _texto(r.referencia),
+            "m": _texto(r.motivo),
+        },
     ).scalar_one()
 
 

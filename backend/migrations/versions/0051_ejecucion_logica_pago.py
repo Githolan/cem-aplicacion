@@ -18,6 +18,11 @@ vuelve a revisión y a aprobarse. Nunca se reenvía la misma.
 A lo sumo un resultado definitivo (`pagada` o `fallida`) por ejecución (índice único parcial):
 un segundo resultado definitivo se rechaza con `resultado_repetido`.
 
+**Nunca a la vez:** `pedido_de_pago` bloquea la ejecución (`for update`) antes de leerla, y el
+trabajo la tiene bloqueada hasta confirmar, también mientras llama al riel. Verificar nunca
+consulta en medio de una orden: si llega primero (ordenar todavía en la cola) y el riel no
+conoce la clave, la orden queda Fallida y ordenar, al tomarla, ya no llama al riel.
+
 **Quién los escribe:** solo un trabajo de `cem-trabajos` (`nucleo.exigir_trabajo`: con consorcio
 y sin persona). Ninguna ruta de la API los llama; el origen auditado es `trabajos`.
 """
@@ -130,6 +135,10 @@ create function nucleo.crear_ejecucion_orden_pago(c uuid, orden uuid, version_vi
         on pv.proveedor_id = v.proveedor_id and pv.numero = v.proveedor_version
      where v.consorcio_id = c and v.orden_id = orden and v.numero = version_vista
     returning id into e;
+    if e is null then
+      raise exception 'la versión emitida no tiene proveedor con cuenta' using errcode = 'P0001',
+        hint = 'proveedor_sin_cuenta';
+    end if;
     insert into plataforma.jobs
       (tipo, consorcio_id, carga, clave_unica, disponible_desde, maximo_intentos)
     values
@@ -146,13 +155,17 @@ create function nucleo.pedido_de_pago(ejecucion uuid)
   returns table (orden_id uuid, version integer, clave uuid, cuenta_destino text,
                  importe_centavos bigint, moneda text, estado_orden text,
                  resultado_definitivo text)
-  language plpgsql stable security definer
+  language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
   declare
     c uuid := plataforma.consorcio_actual();
   begin
     perform nucleo.exigir_trabajo(c);
+    -- El bloqueo primero y la lectura después, en otra sentencia: así ve el resultado que
+    -- confirmó quien tenía el bloqueo.
+    perform 1 from nucleo.ejecucion_orden_pago x
+     where x.consorcio_id = c and x.id = ejecucion for update;
     return query
       select e.orden_id, e.version, e.clave, e.cuenta_destino, e.importe_centavos, e.moneda,
              o.estado::text,

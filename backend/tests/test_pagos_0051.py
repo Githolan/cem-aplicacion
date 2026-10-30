@@ -271,6 +271,52 @@ def test_la_ejecucion_y_sus_resultados_solo_se_agregan(motor_migrate, motor_app,
         assert error.value.orig.diag.message_hint == "historia_inmutable"
 
 
+def test_ordenar_y_verificar_nunca_leen_el_mismo_pago_a_la_vez(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    leer = text("select estado_orden from nucleo.pedido_de_pago(:x)")
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as primero:
+        assert primero.execute(leer, {"x": x["id"]}).scalar_one() == "en_ejecucion"
+        # Mientras el primero la tiene (como ordenar mientras llama al riel), otro no la lee.
+        with (
+            pytest.raises(DBAPIError) as error,
+            transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as segundo,
+        ):
+            segundo.execute(text("set local lock_timeout = '200ms'"))
+            segundo.execute(leer, {"x": x["id"]})
+        assert error.value.orig.diag.sqlstate == "55P03"
+    # Control: confirmado el primero, el segundo lee.
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as segundo:
+        assert segundo.execute(leer, {"x": x["id"]}).scalar_one() == "en_ejecucion"
+
+
+def test_si_verificar_llega_antes_que_ordenar_no_se_paga(motor_migrate, motor_app, e, riel):
+    o = emitida(motor_migrate, e)
+    # La cola atrasada: verificar corre antes que ordenar y el riel no conoce la clave.
+    correr(motor_migrate, motor_app, pagos.TRABAJO_VERIFICAR, e.cons)
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+    assert correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons) == [
+        {"estado": "sin_cambios", "orden": "fallida"}
+    ]
+    assert riel.ordenes == 0
+
+
+def test_una_referencia_larga_del_riel_no_impide_registrar_el_pago(
+    motor_migrate, motor_app, e, riel
+):
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.PAGADA, referencia="  " + "R" * 500)
+    correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+    assert orden(motor_migrate, o)["estado"] == "pagada"
+    with motor_migrate.connect() as c:
+        referencia = c.execute(
+            text("select referencia from nucleo.resultado_ejecucion_orden_pago"
+                 " where ejecucion_id = :x"), {"x": x["id"]},
+        ).scalar_one()  # fmt: skip
+    assert referencia == "R" * pagos.LARGO_TEXTO_RIEL
+
+
 def _tablas(motor) -> int:
     with motor.connect() as c:
         return c.execute(
