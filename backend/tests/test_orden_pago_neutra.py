@@ -897,7 +897,8 @@ def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
               "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago",
               "nucleo.proveedor", "nucleo.proveedor_version", "nucleo.umbral_orden_pago",
               "nucleo.contrato_proveedor", "nucleo.contrato_proveedor_confirmacion",
-              "nucleo.contrato_proveedor_baja")  # fmt: skip
+              "nucleo.contrato_proveedor_baja", "nucleo.ejecucion_orden_pago",
+              "nucleo.resultado_ejecucion_orden_pago")  # fmt: skip
     with motor_migrate.connect() as c:
         tabla = [
             c.execute(

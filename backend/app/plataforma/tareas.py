@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy import Connection, text
 
-from app.consorcios import documentos_analisis  # noqa: F401 (registra sus tipos)
+from app.consorcios import documentos_analisis, pagos  # noqa: F401 (registran sus tipos)
 from app.identidad import sesiones
 from app.plataforma import almacen, cola, copias, correo, indices, outbox, replica_documentos
 from app.plataforma.planificador import periodica
