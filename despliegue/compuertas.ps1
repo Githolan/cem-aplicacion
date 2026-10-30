@@ -42,6 +42,29 @@ $CemCarpetaEstadoPorDefecto = Join-Path $env:LOCALAPPDATA 'cem-despliegue'
 $CemVentanaProhibidaDesde = [timespan]'02:45:00'
 $CemVentanaProhibidaHasta = [timespan]'03:10:59'
 
+# Identificador de una corrida de ci.ps1: nombra su proyecto de compose, su imagen del frontend
+# y sus contenedores de e2e, así dos corridas a la vez no se pisan y cada una borra solo lo
+# suyo. Lleva el PID del proceso para reconocer después una corrida cortada (proceso muerto).
+$CemPrefijoProyectoCi = 'cem-ci-'
+$CemFormatoProyectoCi = '^cem-ci-(?<sha>[0-9a-f]{7})-(?<pid>\d+)-(?<azar>[0-9a-f]{6})$'
+
+function New-CemIdCorrida {
+    param([Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{7}$')][string]$Sha7,
+          [int]$Proceso = $PID)
+    "$Sha7-$Proceso-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
+}
+
+# De los proyectos de compose dados, los de corridas de ci.ps1 cuyo proceso ya no existe. Nunca
+# el de un proceso vivo (podría ser otra corrida en curso) ni un nombre con otro formato.
+# Si el PID lo reusó otro proceso, la corrida no se toma por abandonada: queda, no se borra.
+function Get-CemProyectosCiAbandonados {
+    param([string[]]$Proyectos, [scriptblock]$ProcesoVivo = { param($p) [bool](Get-Process -Id $p -ErrorAction SilentlyContinue) })
+    foreach ($p in ($Proyectos | Sort-Object -Unique)) {
+        $m = [regex]::Match($p, $CemFormatoProyectoCi)
+        if ($m.Success -and -not (& $ProcesoVivo ([int]$m.Groups['pid'].Value))) { $p }
+    }
+}
+
 function Get-CemCarpetaEstado {
     param([ValidateSet('', 'ci', 'verificado-staging', 'deploys')][string]$Sub = '')
     $raiz = if ($env:CEM_DESPLIEGUE_ESTADO) { $env:CEM_DESPLIEGUE_ESTADO } else { $CemCarpetaEstadoPorDefecto }

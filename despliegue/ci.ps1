@@ -7,7 +7,9 @@
 #   0. copia: ningún .sh con CR (con CRLF la imagen no arranca: trampa de Windows
 #      con core.autocrlf=true)
 #   1. backend: pytest en Linux contra PostgreSQL 18 y Redis 7 reales
-#      (backend/pruebas/compose.yml, proyecto de compose propio 'cem-ci')
+#      (backend/pruebas/compose.yml, proyecto de compose propio de la corrida,
+#      cem-ci-<sha7>-<pid>-<azar>: dos corridas a la vez no se pisan y cada una baja solo
+#      lo suyo; al empezar se bajan los de corridas cortadas cuyo proceso ya no existe)
 #   2. ruff check + ruff format --check, en el mismo contenedor
 #   3. contratos: pytest en /src/contratos, en el mismo contenedor
 #   3b. cobertura de PA: `python -m scripts.cobertura_pa --json` en el mismo
@@ -58,10 +60,8 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 . (Join-Path $PSScriptRoot 'compuertas.ps1')
 
-$ProyectoCompose   = 'cem-ci'
 $ServicioPruebas   = 'cem-backend-pruebas'
 $ServicioPostgres  = 'cem-postgres-pruebas'
-$ImagenFrontend    = 'cem-frontend-ci'
 $ComposeRelativo   = 'backend/pruebas/compose.yml'
 $PruebaImagen      = 'frontend/scripts/probar-imagen.sh'
 $PrefijoCopia      = 'cem-ci-'
@@ -83,6 +83,9 @@ $shaCompleta = $shaCompleta.Trim()
 Assert-CemShaCompleta $shaCompleta
 $sha7 = $shaCompleta.Substring(0, 7)
 
+$idCorrida = New-CemIdCorrida -Sha7 $sha7
+$ProyectoCompose = "$CemPrefijoProyectoCi$idCorrida"
+$ImagenFrontend = "cem-frontend-ci:$idCorrida"
 $log = Join-Path (Get-CemCarpetaEstado ci) "$shaCompleta.log"
 "ci.ps1 sobre $shaCompleta, $((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))" | Out-File -Encoding utf8 $log
 
@@ -225,9 +228,18 @@ $composeArgs = @('compose', '-p', $ProyectoCompose, '-f', (Join-Path $copia $Com
 $ok = $false
 $composeUsado = $false
 $e2eUsado = $false
-$sufijoE2e = "ci-$sha7-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
+$sufijoE2e = "ci-$idCorrida"
+$imagenFrontendUsada = $false
 try {
-    Escribir "CEM - integración local sobre $shaCompleta" 'White'
+    Escribir "CEM - integración local sobre $shaCompleta (corrida $idCorrida)" 'White'
+
+    # Corridas cortadas antes de su limpieza (TaskStop, Ctrl+C): su proceso ya no existe y
+    # sus contenedores quedaron. Se bajan por su nombre de proyecto; las de procesos vivos no.
+    $proyectos = @(docker ps -a --filter "label=com.docker.compose.project" --format '{{.Label "com.docker.compose.project"}}')
+    foreach ($abandonado in @(Get-CemProyectosCiAbandonados -Proyectos $proyectos)) {
+        Escribir "  corrida cortada: se baja $abandonado" 'Yellow'
+        docker compose -p $abandonado down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
+    }
 
     # --- 0. copia LF del commit -------------------------------------------------
     Etapa 'Copia LF del commit'
@@ -277,6 +289,7 @@ try {
 
     # --- 5. imagen del frontend -----------------------------------------------
     Etapa 'Imagen del frontend'
+    $imagenFrontendUsada = $true
     if (Correr 'frontend-imagen-build' { docker build -f (Join-Path $copia 'frontend/Dockerfile') -t $ImagenFrontend $copia }) {
         $bash = Get-BashDeGit
         $env:MSYS_NO_PATHCONV = '1'
@@ -341,8 +354,13 @@ finally {
             (@("=== Registro de $ServicioPostgres`: $titulo ===") + $lineas) |
                 Tee-Object -FilePath $log -Append | Out-Host
         }
-        docker @composeArgs down --remove-orphans 2>&1 | Out-File -Append -Encoding utf8 $log
+        # --rmi local: también la imagen que compose construyó para este proyecto (lleva su nombre).
+        docker @composeArgs down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
+        $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$ProyectoCompose")
+        if ($quedan) { $etapas['limpieza-compose'] = "falla (quedan $($quedan.Count) contenedores de $ProyectoCompose)" }
+        else { $etapas['limpieza-compose'] = 'ok'; Escribir "  limpieza-compose: sin contenedores de $ProyectoCompose" 'Green' }
     }
+    if ($imagenFrontendUsada) { docker rmi $ImagenFrontend 2>&1 | Out-File -Append -Encoding utf8 $log }
     # El script de e2e borra lo suyo con un trap; si lo cortaron antes, se borra acá
     # por el sufijo de esta corrida (nunca lo de otra) y se exige que no quede nada.
     if ($e2eUsado) {
