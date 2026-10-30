@@ -22,7 +22,7 @@ import {
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
 import { RUTA_PROVEEDORES } from "./Proveedores";
-import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /egresos/ordenes (pantalla 2, aprobada el 30-10-2026; app 0045 a 0050): la lista de
 // quien prepara, con estado, importe, proveedor, fecha y franja; preparar y modificar con el
@@ -97,6 +97,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const montado = useMontado();
   /** Órdenes cuyo contrato dejó de regir (lo dijo la API al emitir): se ofrece renovarlas. */
   const [sinContrato, setSinContrato] = useState<ReadonlySet<string>>(new Set());
 
@@ -260,6 +261,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
 
   /** `reintento`: el mismo acto después de verificar el segundo factor, con la misma clave. */
   function hacer(acto: Acto, reintento = false) {
+    if (!montado.current) return;
     // Cada botón de la lista es un intento nuevo; el formulario conserva su clave mientras no
     // cambien los datos.
     if (!reintento && acto.tipo !== "guardar") clave.current = null;

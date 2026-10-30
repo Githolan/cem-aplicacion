@@ -816,6 +816,10 @@ create function nucleo.contratos_proveedor_lectura(contrato uuid, facultad text,
              k.documento_id, k.decision_id, encode(k.huella, 'hex'), k.registrado_por,
              k.creado_en, f.persona_id, f.creada_en, b.creada_en,
              case when b.contrato_id is not null then 'dado_de_baja'
+                  when not exists (select 1 from nucleo.documento d
+                                    where d.consorcio_id = k.consorcio_id
+                                      and d.id = k.documento_id and d.estado = 'vigente')
+                    then 'documento_no_vigente'
                   when f.contrato_id is null then 'pendiente_confirmacion'
                   when k.vigente_hasta < hoy then 'vencido'
                   when k.vigente_desde > hoy then 'no_iniciado'

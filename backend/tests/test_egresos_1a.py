@@ -591,6 +591,20 @@ def test_rutas_de_contratos_franja_y_emision(motor_migrate, e):
     assert codigo(post(e, e.adm, f"ordenes-pago/{o}/emitir", emision)) == (
         409, "orden_no_admite")  # fmt: skip
 
+    # Si soporte borra el documento de respaldo, la lectura informa lo mismo que la verificación
+    # al escribir (`contrato_vigente`): el contrato ya no respalda nada.
+    with motor_migrate.begin() as c:
+        mandato = c.execute(text("select id from nucleo.mandato where consorcio_id = :c"
+                                 " and persona_id = :p limit 1"), {"c": e.cons, "p": e.adm},
+                            ).scalar_one()  # fmt: skip
+        c.execute(text("update nucleo.documento set estado = 'borrado', borrado_en = now(),"
+                       " borrado_motivo = 'SINTETICO', borrado_referencia = 'prueba',"
+                       " borrado_solicitado_por = :p, borrado_mandato = :m,"
+                       " borrado_fecha_pedido = current_date where id = :d"),
+                  {"p": e.adm, "m": mandato, "d": cuerpo["documento_id"]})  # fmt: skip
+    (k_,) = get(e, e.adm, "contratos").json()["elementos"]
+    assert (k_["id"], k_["estado"]) == (k, "documento_no_vigente")
+
 
 def test_ruta_de_renovar_y_emitir_vencida(motor_migrate, e):
     o = aprobada(motor_migrate, e)

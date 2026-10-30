@@ -17,6 +17,18 @@ export type PantallaConsorcio =
 
 export class SinSesion extends Error {}
 
+/** Si la pantalla sigue montada: una escritura nunca sale de una pantalla descartada. */
+export function useMontado() {
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
+  return montado;
+}
+
 export function exigirSesion(response: Response) {
   if (response.status === ESTADO.sinSesion) throw new SinSesion();
 }

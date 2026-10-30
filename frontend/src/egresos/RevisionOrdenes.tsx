@@ -21,7 +21,7 @@ import {
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /egresos/revision (pantalla 3, aprobada el 30-10-2026; app 0049 y 0050): las órdenes ya
 // enviadas, para el Consejo. La ficha muestra la versión vigente con el proveedor exacto que fija,
@@ -63,6 +63,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const montado = useMontado();
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -119,6 +120,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
   }
 
   function hacer(acto: Acto, reintento = false) {
+    if (!montado.current) return;
     if (!reintento) clave.current = null;
     clave.current ??= crypto.randomUUID();
     const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };

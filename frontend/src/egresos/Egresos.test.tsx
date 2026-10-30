@@ -615,6 +615,35 @@ describe("página /egresos/ordenes", () => {
     expect(await enviado.json()).toMatchObject({ contrato_id: null });
   });
 
+  it("una emisión cuya lectura previa llega después de cambiar de edificio no sale", async () => {
+    const aprobada = orden({ estado: "aprobada", aprobacion_vence_en: "2999-01-01T00:00:00Z" });
+    let soltar: (r: Response) => void = () => undefined;
+    const ficha = new Promise<Response>((r) => (soltar = r));
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([
+          { id: C1, nombre: "Edificio Ficticio", vinculos: [] },
+          { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [] },
+        ]),
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [aprobada] }),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => ficha,
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => Response.json({ id: O1, version: 1 }),
+      [`GET /api/v1/consorcios/${C2}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET /api/v1/consorcios/${C2}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`GET /api/v1/consorcios/${C2}/contratos`]: () => Response.json({ elementos: [] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Emitir" }));
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByText("El edificio no tiene órdenes de pago.")).toBeTruthy();
+    soltar(Response.json({ orden: aprobada, versiones: [version()] }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(pedidos(simulado, "POST", `${BASE}/ordenes-pago/${O1}/emitir`)).toHaveLength(0);
+  });
+
   it("una aprobación vencida no ofrece emitir: ofrece renovar", async () => {
     const vieja = orden({
       estado: "aprobada",

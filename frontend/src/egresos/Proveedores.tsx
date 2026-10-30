@@ -19,7 +19,7 @@ import {
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /egresos/proveedores (pantalla 1, aprobada el 30-10-2026; app 0048 y 0049): la lista con
 // la cuenta enmascarada, la ficha con la historia de versiones, el alta y el cambio. Cambiar la
@@ -75,6 +75,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const montado = useMontado();
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -174,6 +175,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   }
 
   function pedir(f: Formulario) {
+    if (!montado.current) return;
     clave.current ??= crypto.randomUUID();
     const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const comunes = {

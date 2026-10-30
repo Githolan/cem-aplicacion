@@ -2108,7 +2108,8 @@
           "no_iniciado",
           "vigente",
           "vencido",
-          "dado_de_baja"
+          "dado_de_baja",
+          "documento_no_vigente"
         ],
         "title": "EstadoContrato",
         "type": "string"

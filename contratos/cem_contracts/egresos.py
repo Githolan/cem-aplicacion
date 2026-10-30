@@ -413,6 +413,8 @@ class EstadoContrato(StrEnum):
     VIGENTE = "vigente"
     VENCIDO = "vencido"
     DADO_DE_BAJA = "dado_de_baja"
+    DOCUMENTO_NO_VIGENTE = "documento_no_vigente"
+    """El documento de respaldo se borró: el contrato no respalda nada (`contrato_vigente`)."""
 
 
 class ContratoNuevo(BaseModel):
