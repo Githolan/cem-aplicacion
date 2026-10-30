@@ -437,3 +437,33 @@ def test_quien_firmo_una_version_con_la_cuenta_no_aprueba_aunque_no_prepare(
     niega(motor_migrate, e, e.mc2, APROBAR, "no_es_quien_cargo_la_cuenta", orden=o, version=1,
           huella=h)  # fmt: skip
     llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=1, huella=h)  # control
+
+
+def test_si_quien_cargo_la_cuenta_queda_sin_identidad_nadie_aprueba(motor_migrate, e):  # noqa: F811
+    """Codex en #165: si soporte desvincula la identidad de quien cargó la cuenta, la separación
+    se cierra (`identidad_no_verificada`), como `exigir_separacion_humana`. Prepara mc2 (no el
+    administrador que cargó el proveedor), así que responde esta separación y no la de la orden.
+    Control: antes de desvincular, mc1 aprueba otra orden igual."""
+    with motor_migrate.connect() as c:
+        m, acta = c.execute(
+            text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
+                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+        ).one()  # fmt: skip
+    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+
+    def preparada_por_mc2():
+        o = llamar(motor_migrate, e, e.mc2, PREPARAR)
+        llamar(motor_migrate, e, e.mc2, ENVIAR, orden=o, version=1)
+        return o, huella(motor_migrate, o, 1)
+
+    o1, h1 = preparada_por_mc2()
+    llamar(motor_migrate, e, e.mc1, APROBAR, orden=o1, version=1, huella=h1)  # control
+    o2, h2 = preparada_por_mc2()
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.identidad_persona set desvinculada_en = now()"
+                 " where consorcio_id = :c and persona_id = :p and desvinculada_en is null"),
+            {"c": e.cons, "p": e.adm},
+        )  # fmt: skip
+    niega(motor_migrate, e, e.mc1, APROBAR, "identidad_no_verificada", orden=o2, version=1,
+          huella=h2)  # fmt: skip

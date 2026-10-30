@@ -335,30 +335,36 @@ create function nucleo.exigir_proveedor_sin_cambios(c uuid, orden uuid, numero i
   end
   $$;
 
--- Revisión de app #165: quien cargó la cuenta que paga la orden (en cualquier versión del
--- proveedor hasta la que fija la orden) no la aprueba. Compara la cuenta, la identidad guardada
--- y la actual, como la separación de la orden.
+-- Revisión de app #165: quien firmó una versión del proveedor (hasta la que fija la orden) con
+-- la cuenta que la orden paga no la aprueba. Por la identidad guardada al firmar y, para cada
+-- firmante, `exigir_separacion_humana` (0026): misma persona o misma identidad actual, y se cierra
+-- si alguna de las dos identidades no está verificada (Codex en #165).
 create function nucleo.exigir_no_cargo_la_cuenta(c uuid, orden uuid, numero integer, actor uuid,
                                                  identidad uuid)
   returns void
   language plpgsql
   set search_path = pg_catalog, pg_temp
   as $$
+  declare
+    f record;
   begin
-    if exists (
-         select 1
-           from nucleo.orden_pago_version v
-           join nucleo.proveedor_version fija
-             on fija.proveedor_id = v.proveedor_id and fija.numero = v.proveedor_version
-           join nucleo.proveedor_version x
-             on x.proveedor_id = v.proveedor_id and x.numero <= fija.numero
-            and x.cuenta_destino is not distinct from fija.cuenta_destino
-          where v.orden_id = orden and v.numero = exigir_no_cargo_la_cuenta.numero
-            and (x.preparada_por = actor or x.identidad_preparo = identidad
-                 or nucleo.identidad_humana_de(c, x.preparada_por) = identidad)) then
-      raise exception 'quien cargó la cuenta del proveedor no aprueba este pago'
-        using errcode = 'P0001', hint = 'no_es_quien_cargo_la_cuenta';
-    end if;
+    for f in
+      select distinct x.preparada_por, x.identidad_preparo
+        from nucleo.orden_pago_version v
+        join nucleo.proveedor_version fija
+          on fija.proveedor_id = v.proveedor_id and fija.numero = v.proveedor_version
+        join nucleo.proveedor_version x
+          on x.proveedor_id = v.proveedor_id and x.numero <= fija.numero
+         and x.cuenta_destino is not distinct from fija.cuenta_destino
+       where v.orden_id = orden and v.numero = exigir_no_cargo_la_cuenta.numero
+    loop
+      if f.identidad_preparo = identidad then
+        raise exception 'quien cargó la cuenta del proveedor no aprueba este pago'
+          using errcode = 'P0001', hint = 'no_es_quien_cargo_la_cuenta';
+      end if;
+      perform nucleo.exigir_separacion_humana(c, actor, f.preparada_por,
+                                              'no_es_quien_cargo_la_cuenta');
+    end loop;
   end
   $$;
 
