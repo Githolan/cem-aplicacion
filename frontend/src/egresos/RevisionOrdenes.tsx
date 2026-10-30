@@ -45,9 +45,15 @@ function ordenadas(ordenes: Orden[]): Orden[] {
   return [...ordenes.filter((o) => o.estado === "en_revision"), ...ordenes.filter((o) => o.estado !== "en_revision")];
 }
 
+// Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
+// el reintento pendiente después del código) llega a la pantalla de otro.
 export function RevisionOrdenes() {
+  const elegido = useConsorcio();
+  return <RevisionOrdenesDelEdificio key={elegido.consorcio} {...elegido} />;
+}
+
+function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
-  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
@@ -182,13 +188,7 @@ export function RevisionOrdenes() {
     <>
       <h1>Revisión de órdenes de pago</h1>
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
-        elegir={(c) => {
-          setDetalle(null);
-          setRechazando(false);
-          setAviso(null);
-          setLectura({ tipo: "cargando" });
-          setConsorcio(c);
-        }} />
+        elegir={setConsorcio} />
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}

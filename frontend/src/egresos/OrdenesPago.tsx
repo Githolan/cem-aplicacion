@@ -79,9 +79,15 @@ export function vencida(o: Orden, ahora = Date.now()): boolean {
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";
 
+// Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
+// el reintento pendiente después del código) llega a la pantalla de otro.
 export function OrdenesPago() {
+  const elegido = useConsorcio();
+  return <OrdenesPagoDelEdificio key={elegido.consorcio} {...elegido} />;
+}
+
+function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
-  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [formulario, setFormulario] = useState<Formulario | null>(null);
@@ -315,6 +321,8 @@ export function OrdenesPago() {
         if (data !== undefined) {
           cerrar();
           setAviso({ texto, ok: true });
+          if (acto.tipo === "renovar")
+            setSinContrato((s) => new Set([...s].filter((x) => x !== acto.orden.id)));
           volverAPedir();
           return;
         }
@@ -348,13 +356,7 @@ export function OrdenesPago() {
     <>
       <h1>Órdenes de pago</h1>
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
-        elegir={(c) => {
-          cerrar();
-          setAviso(null);
-          setSinContrato(new Set());
-          setLectura({ tipo: "cargando" });
-          setConsorcio(c);
-        }} />
+        elegir={setConsorcio} />
       <p>
         <Link to={RUTA_PROVEEDORES}>Proveedores</Link>
       </p>

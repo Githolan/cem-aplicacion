@@ -56,9 +56,15 @@ function cuentaPedida(f: Formulario, d: Datos): string | null {
 export const AVISO_CUENTA =
   "Cambiar la cuenta crea una versión nueva del proveedor. Las órdenes ya preparadas siguen apuntando a la versión anterior; las nuevas usan la cuenta nueva. Un cambio material obliga a una revisión nueva cuando corresponde.";
 
+// Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
+// el reintento pendiente después del código) llega a la pantalla de otro.
 export function Proveedores() {
+  const elegido = useConsorcio();
+  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} />;
+}
+
+function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
-  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
@@ -224,13 +230,7 @@ export function Proveedores() {
     <>
       <h1>Proveedores</h1>
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
-        elegir={(c) => {
-          cerrar();
-          setFicha(null);
-          setAviso(null);
-          setLectura({ tipo: "cargando" });
-          setConsorcio(c);
-        }} />
+        elegir={setConsorcio} />
       <p>
         <Link to={RUTA_ORDENES_ENLACE}>Órdenes de pago</Link>
       </p>

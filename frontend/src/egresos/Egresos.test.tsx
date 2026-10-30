@@ -322,6 +322,53 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" })).toBeNull();
   });
 
+  it("una respuesta tardía del edificio anterior no aparece en el nuevo", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const tardia = new Promise<Response>((r) => (soltar = r));
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([
+            { id: C1, nombre: "Edificio Ficticio", vinculos: [] },
+            { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [] },
+          ]),
+        [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+        [`GET ${BASE}/proveedores/${P1}`]: () => tardia,
+        [`GET /api/v1/consorcios/${C2}/proveedores`]: () => Response.json({ elementos: [] }),
+      }),
+    );
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByText("El edificio no tiene proveedores cargados.")).toBeTruthy();
+    soltar(Response.json({ proveedor: proveedor(), versiones: [] }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByRole("list", { name: "Versiones del proveedor" })).toBeNull();
+    expect(screen.queryByText("Limpieza Ficticia SRL")).toBeNull();
+  });
+
+  it("cambiar de edificio descarta el pedido de código pendiente del anterior", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([
+            { id: C1, nombre: "Edificio Ficticio", vinculos: [] },
+            { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [] },
+          ]),
+        [`GET ${BASE}/proveedores`]: () => error("segundo_factor_requerido", 403),
+        [`GET /api/v1/consorcios/${C2}/proveedores`]: () =>
+          Response.json({ elementos: [proveedor({ razon_social: "Pintura Ficticia SA" })] }),
+      }),
+    );
+    abrir("/egresos/proveedores");
+    expect(await screen.findByLabelText("Código")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByRole("button", { name: "Ver la ficha de Pintura Ficticia SA" })).toBeTruthy();
+    expect(screen.queryByLabelText("Código")).toBeNull();
+  });
+
   it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {
     const conDocumento = proveedor({ documento_id: DOC });
     const simulado = backend({
@@ -493,6 +540,31 @@ describe("página /egresos/ordenes", () => {
     expect(await screen.findByText(/renovala; la versión nueva va sin contrato/)).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Renovar" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Emitir" })).toBeNull();
+  });
+
+  it("después de renovar, la orden aprobada otra vez vuelve a ofrecer emitir", async () => {
+    const aprobada = orden({ estado: "aprobada", franja: "rutinaria", aprobacion_vence_en: "2999-01-01T00:00:00Z" });
+    let lista = [aprobada];
+    vi.stubGlobal(
+      "fetch",
+      conLista([], {
+        [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: lista }),
+        [`GET ${BASE}/ordenes-pago/${O1}`]: () =>
+          Response.json({ orden: aprobada, versiones: [version({ franja: "rutinaria", contrato_id: K2 })] }),
+        [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => error("contrato_no_vigente", 409),
+        [`POST ${BASE}/ordenes-pago/${O1}/renovar`]: () => {
+          // Renovada y aprobada de nuevo por el Consejo (versión 2, sin contrato).
+          lista = [orden({ estado: "aprobada", version_vigente: 2, aprobacion_vence_en: "2999-01-01T00:00:00Z" })];
+          return Response.json({ id: O1, version: 2 });
+        },
+      }),
+    );
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Emitir" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Renovar" }));
+    expect(await screen.findByText("Listo: la orden tiene una versión nueva y volvió a revisión.")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Emitir" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Renovar" })).toBeNull();
   });
 
   it("modificar una orden con un contrato que ya no rige lo quita del formulario y lo avisa", async () => {
