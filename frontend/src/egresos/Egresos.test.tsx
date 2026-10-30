@@ -369,6 +369,35 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByLabelText("Código")).toBeNull();
   });
 
+  it("un código ya mandado en el edificio anterior no repite el alta después de cambiar", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const verificacion = new Promise<Response>((r) => (soltar = r));
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([
+          { id: C1, nombre: "Edificio Ficticio", vinculos: [] },
+          { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [] },
+        ]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => error("segundo_factor_requerido", 403),
+      [`GET /api/v1/consorcios/${C2}/proveedores`]: () => Response.json({ elementos: [] }),
+      "POST /api/v1/auth/totp/verificar": () => verificacion,
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await verificarCodigo();
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByText("El edificio no tiene proveedores cargados.")).toBeTruthy();
+    soltar(VERIFICADO());
+    await new Promise((r) => setTimeout(r, 50));
+    // El alta pendiente del primer edificio no se repite al llegar la verificación.
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1);
+  });
+
   it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {
     const conDocumento = proveedor({ documento_id: DOC });
     const simulado = backend({

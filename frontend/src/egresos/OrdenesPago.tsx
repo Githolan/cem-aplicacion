@@ -343,6 +343,8 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
         if (codigo === "contrato_no_vigente" && acto.tipo === "emitir")
           setSinContrato((s) => new Set(s).add(acto.orden.id));
+        if (acto.tipo === "renovar" && cambioLoVisto(response.status, codigo))
+          setSinContrato((s) => new Set([...s].filter((x) => x !== acto.orden.id)));
         if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios") {
           cerrar();
           volverAPedir();

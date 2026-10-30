@@ -25,7 +25,16 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const [error, setError] = useState<string | null>(null);
   const campo = useRef<HTMLInputElement>(null);
 
-  useEffect(() => campo.current?.focus(), []);
+  // Si la pantalla se desmonta (otro edificio, otra página) mientras se verifica, el pedido
+  // pendiente no sigue: se descarta con ella.
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    campo.current?.focus();
+    return () => {
+      montado.current = false;
+    };
+  }, []);
 
   function verificar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
@@ -39,6 +48,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     void api
       .POST("/api/v1/auth/totp/verificar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
       .then(({ data, error: falla, response }) => {
+        if (!montado.current) return;
         if (data !== undefined) {
           setCodigo("");
           alVerificar();
