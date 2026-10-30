@@ -454,3 +454,8 @@ H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,aprob
 H3,egresos.ejecutar_pago,Fac(egresos.ejecutar_pago),AA,cuenta:X,vigente,si,respaldo=si,200,concedido_por_facultad,comportamiento actual: con respaldo y sin aprobadores; el evaluador no cuenta aprobadores (exigirlos y el respaldo de lo rutinario son la decisión 1)
 H3,fondo_reserva.autorizar,MC,AA,,vigente,si,solicito=otro,200,concedido_por_facultad,económica que admite todos los modos: también en Administrador Aumentado
 H3,fondo_reserva.autorizar,MC,AG,,vigente,si,solicito=otro,200,concedido_por_facultad,económica que admite todos los modos: también en Autogestión
+H3,egresos.revisar_orden,Fac(egresos.aprobar_orden),AA,,vigente,si,,200,concedido_por_facultad,quien aprueba lee las órdenes enviadas a revisión; la económica pasa con los controles de R10
+H3,egresos.revisar_orden,Fac(egresos.preparar_orden),AA,,vigente,si,,403,sin_concesion,preparar no da la lectura de revisión: es de quien aprueba (decisión 2 del 29-10)
+H3,egresos.revisar_orden,Fac(egresos.aprobar_orden),C,,vigente,si,,403,modo_no_admitido,en Consejo la plataforma no tiene egresos
+H3,egresos.revisar_orden,AD,AA,,vigente,si,,403,sin_concesion,el administrador no lee la revisión: egresos.aprobar_orden es solo del Consejo (P3 81)
+H3,egresos.revisar_orden,MC,AA,,vigente,si,,200,concedido_por_facultad,el miembro del Consejo la recibe con su paquete (0046)
