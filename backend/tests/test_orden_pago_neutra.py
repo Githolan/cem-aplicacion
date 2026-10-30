@@ -35,17 +35,16 @@ ESENCIALES = {
     "importe": 1_234_500,
     "moneda": "ARS",
     "concepto": "SINTETICO / PRUEBA / NO REAL: reparación de la bomba",
-    "beneficiario": "Proveedor SINTETICO (NO REAL)",
     "comprobante": "Factura TEST-0001",
     "reserva": False,
 }
 PREPARAR = (
-    "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :beneficiario,"
+    "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :proveedor,"
     " :comprobante, :reserva, :actor, :origen, :sesion)"
 )
 MODIFICAR = (
     "select nucleo.modificar_orden_pago(:orden, :version, :importe, :moneda, :concepto,"
-    " :beneficiario, :comprobante, :reserva, :actor, :origen, :sesion)"
+    " :proveedor, :comprobante, :reserva, :actor, :origen, :sesion)"
 )
 ENVIAR = "select nucleo.enviar_orden_a_revision(:orden, :version, :actor, :origen, :sesion)"
 APROBAR = (
@@ -64,6 +63,42 @@ class Escena:
     mc1: UUID  # consejero con aprobar (otorgada por la prueba)
     mc2: UUID  # otro consejero con aprobar
     sesion: dict[UUID, UUID]
+    proveedor: UUID  # el beneficiario de las órdenes (0048)
+    otro: UUID  # otro proveedor, para cambiar de beneficiario
+
+
+RAZON_SOCIAL = "Proveedor SINTETICO (NO REAL)"
+
+
+def cbu_sintetico(semilla: int) -> str:
+    """Un CBU con sus dos dígitos verificadores válidos y el banco 999, que no existe."""
+    b1 = f"999{semilla % 10_000:04d}"
+    b2 = f"{semilla % 10**13:013d}"
+    d1 = (10 - sum(int(x) * w for x, w in zip(b1, (7, 1, 3, 9, 7, 1, 3), strict=True)) % 10) % 10
+    pesos = (3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3)
+    d2 = (10 - sum(int(x) * w for x, w in zip(b2, pesos, strict=True)) % 10) % 10
+    return f"{b1}{d1}{b2}{d2}"
+
+
+def nuevo_proveedor(motor_migrate, cons, quien, *, cuenta=None, razon=RAZON_SOCIAL,
+                    estado="activo") -> UUID:  # fmt: skip
+    """Un proveedor con su versión 1, cargado como dueño de la base (las funciones de alta se
+    prueban en `test_proveedor_0048.py`)."""
+    with motor_migrate.begin() as c:
+        p = c.execute(
+            text("insert into nucleo.proveedor (consorcio_id, alta_por, identidad_alta)"
+                 " values (:c, :q, nucleo.identidad_humana_de(:c, :q)) returning id"),
+            {"c": cons, "q": quien},
+        ).scalar_one()  # fmt: skip
+        c.execute(
+            text("insert into nucleo.proveedor_version (consorcio_id, proveedor_id, numero,"
+                 " razon_social, estado, cuenta_destino, huella, preparada_por,"
+                 " identidad_preparo) values (:c, :p, 1, :r, :e, :cta,"
+                 " nucleo.huella_proveedor(:p, 1, null, :r, :cta), :q,"
+                 " nucleo.identidad_humana_de(:c, :q))"),
+            {"c": cons, "p": p, "r": razon, "e": estado, "cta": cuenta, "q": quien},
+        )  # fmt: skip
+    return p
 
 
 def nueva_sesion(motor_migrate, persona, *, horas_atras=0, totp_min_atras: int | None = 0) -> UUID:
@@ -109,8 +144,16 @@ def escena_economica(motor_migrate, motor_app, *, con_modo=True) -> Escena:
     alta(motor_app, cons, prop, acta, persona=adm)
     for p in (mc1, mc2):
         alta(motor_app, cons, prop, acta, tipo="miembro_consejo", persona=p)
+    sesion = {p: nueva_sesion(motor_migrate, p) for p in (adm, mc1, mc2)}
     return Escena(
-        cons, prop, adm, mc1, mc2, {p: nueva_sesion(motor_migrate, p) for p in (adm, mc1, mc2)}
+        cons,
+        prop,
+        adm,
+        mc1,
+        mc2,
+        sesion,
+        nuevo_proveedor(motor_migrate, cons, adm, cuenta=cbu_sintetico(1)),
+        nuevo_proveedor(motor_migrate, cons, adm, cuenta=cbu_sintetico(2), razon="Otro SINTETICO"),
     )
 
 
@@ -133,7 +176,7 @@ def e(motor_migrate, motor_app) -> Escena:
 
 
 def llamar(motor, e: Escena, actor, sentencia, sesion=None, origen="api", **extra):
-    params = {**ESENCIALES, **extra, "actor": actor, "origen": origen,
+    params = {**ESENCIALES, "proveedor": e.proveedor, **extra, "actor": actor, "origen": origen,
               "sesion": sesion if sesion is not None else e.sesion.get(actor)}  # fmt: skip
     with transaccion(motor, persona_id=actor, consorcio_id=e.cons) as c:
         return c.execute(text(sentencia), params).scalar()
@@ -223,16 +266,17 @@ def test_preparar_crea_el_borrador_con_su_version_y_su_huella(motor_migrate, e):
         recalculada = c.execute(
             text(
                 "select nucleo.huella_orden_pago(:o, 1, :importe, :moneda, :concepto,"
-                " :beneficiario, :comprobante, :reserva)"
+                " (select encode(huella, 'hex') from nucleo.proveedor_version"
+                "   where proveedor_id = :p and numero = 1), :comprobante, :reserva)"
             ),
-            {"o": o, **ESENCIALES},
+            {"o": o, "p": e.proveedor, **ESENCIALES},
         ).scalar_one()
     assert v["huella"] == recalculada and len(v["huella"]) == 32
     [ev] = eventos(motor_migrate, o)
     assert (ev["accion"], ev["actor_persona_id"], ev["origen"]) == (
         "consorcio.orden_pago.preparar", e.adm, "api",
     )  # fmt: skip
-    assert ESENCIALES["concepto"] not in ev["todo"] and ESENCIALES["beneficiario"] not in ev["todo"]
+    assert ESENCIALES["concepto"] not in ev["todo"] and RAZON_SOCIAL not in ev["todo"]
     assert ev["despues"]["huella"] == recalculada.hex()
 
 
@@ -309,7 +353,8 @@ def test_sin_facultad_soporte_u_otro_actor_no_preparan(motor_migrate, e):
     niega(motor_migrate, e, e.adm, PREPARAR, "origen_invalido", origen="soporte")
     with pytest.raises(DBAPIError) as error:
         with transaccion(motor_migrate, persona_id=e.mc1, consorcio_id=e.cons) as c:
-            c.execute(text(PREPARAR), {**ESENCIALES, "actor": e.adm, "origen": "api",
+            c.execute(text(PREPARAR), {**ESENCIALES, "proveedor": e.proveedor, "actor": e.adm,
+                                       "origen": "api",
                                        "sesion": e.sesion[e.adm]})  # fmt: skip
     assert error.value.orig.diag.sqlstate == "42501"  # el actor no es la persona de la sesión
 
@@ -336,10 +381,12 @@ def test_modificar_crea_una_version_nueva_y_conserva_la_anterior(motor_migrate, 
 @pytest.mark.parametrize(
     "cambio",
     [{"importe": 1}, {"moneda": "USD"}, {"concepto": "Otro concepto SINTETICO"},
-     {"beneficiario": "Otro beneficiario SINTETICO"}, {"comprobante": None}, {"reserva": True}],
+     {"proveedor": "otro"}, {"comprobante": None}, {"reserva": True}],
 )  # fmt: skip
 def test_cada_dato_esencial_cambia_la_huella(motor_migrate, e, cambio):
     o = preparada(motor_migrate, e)
+    if cambio.get("proveedor") == "otro":
+        cambio = {"proveedor": e.otro}
     llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, **cambio)
     v = versiones(motor_migrate, o)
     assert v[0]["huella"] != v[1]["huella"]
@@ -476,7 +523,7 @@ def test_un_cambio_esencial_invalida_lo_aprobado_y_permite_aprobar_la_version_nu
 
 def test_una_orden_aprobada_que_cambia_vuelve_a_revision(motor_migrate, e):
     o = _aprobada(motor_migrate, e)
-    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, beneficiario="Otro SINTETICO")
+    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, proveedor=e.otro)
     assert (orden(motor_migrate, o)["estado"], orden(motor_migrate, o)["version_vigente"]) == (
         "en_revision", 2,
     )  # fmt: skip
@@ -487,8 +534,7 @@ def test_pa12_cambiar_el_beneficiario_tras_aprobar_invalida_y_vuelve_a_revision(
     autorización y la devuelve a revisión. Parcial: la base; la ruta y la pantalla esperan a H3."""
     o = _aprobada(motor_migrate, e)
     h1 = huella(motor_migrate, o, 1)
-    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1,
-           beneficiario="Otro proveedor SINTETICO")  # fmt: skip
+    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, proveedor=e.otro)
     despues = orden(motor_migrate, o)
     assert (despues["estado"], despues["version_vigente"]) == ("en_revision", 2)
     assert huella(motor_migrate, o, 2) != h1
@@ -742,7 +788,8 @@ def _en_paralelo(motor_migrate, e, primero, segundo) -> dict:
     conn.execute(text("select set_config('app.persona_id', :p, true),"
                       " set_config('app.consorcio_id', :c, true)"),
                  {"p": str(actor1), "c": str(e.cons)})  # fmt: skip
-    conn.execute(text(sentencia1), {**ESENCIALES, **kw1, "actor": actor1, "origen": "api",
+    conn.execute(text(sentencia1), {**ESENCIALES, "proveedor": e.proveedor, **kw1,
+                                    "actor": actor1, "origen": "api",
                                     "sesion": e.sesion[actor1]})  # fmt: skip
     resultado: dict = {}
 
@@ -831,7 +878,8 @@ def test_dos_cuentas_del_mismo_humano_aprobando_a_la_vez_suman_una(motor_migrate
 
 def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
     tablas = ("nucleo.orden_pago", "nucleo.orden_pago_version", "nucleo.orden_pago_aprobacion",
-              "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago")  # fmt: skip
+              "nucleo.transicion_orden_pago", "nucleo.aprobaciones_orden_pago",
+              "nucleo.proveedor", "nucleo.proveedor_version")  # fmt: skip
     with motor_migrate.connect() as c:
         tabla = [
             c.execute(
@@ -845,6 +893,7 @@ def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
                 "select count(*) filter (where has_function_privilege('cem_app', p.oid,"
                 " 'EXECUTE')), count(*) from pg_proc p join pg_namespace n on n.oid ="
                 " p.pronamespace where n.nspname = 'nucleo' and (p.proname like '%orden_pago%'"
+                " or p.proname like '%proveedor%'"
                 " or p.proname in ('exigir_acto_economico', 'enviar_orden_a_revision',"
                 " 'exigir_decision_sobre_orden'))"
                 " and p.proname <> 'fijar_aprobaciones_orden_pago'"
@@ -856,7 +905,7 @@ def test_cem_app_no_tiene_ningun_permiso_economico(motor_migrate):
                  "smallint, date, uuid, uuid, text)', 'EXECUTE')")
         ).scalar_one()  # fmt: skip
     assert not any(tabla)
-    assert funciones[0] == 0 and funciones[1] >= 14  # control: las funciones existen
+    assert funciones[0] == 0 and funciones[1] >= 21  # control: las funciones existen
     assert fijar
 
 
@@ -931,9 +980,11 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
                 )
             ).scalars()
         )
+    # `condicion_beneficiario` (0048) solo la lee: cuenta las órdenes que ya pasaron una
+    # aprobación completa.
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
-        "nucleo.registrar_aprobacion_orden_pago",
+        "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
     }  # fmt: skip
 
 
