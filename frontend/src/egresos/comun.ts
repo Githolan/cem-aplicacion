@@ -74,8 +74,12 @@ export function importe(centavos: number, moneda: string): string {
 /** Pesos escritos por la persona («1.234,50» o «1234.5») a centavos; null si no es un importe. */
 export function aCentavos(texto: string): number | null {
   const limpio = texto.trim().replace(/\s/g, "");
-  if (!/^\d{1,3}(\.\d{3})*(,\d{1,2})?$|^\d+([.,]\d{1,2})?$/.test(limpio)) return null;
-  const normal = /,/.test(limpio) ? limpio.replace(/\./g, "").replace(",", ".") : limpio;
+  let normal: string;
+  // Con separador de miles («1.234», «1.234,5»): los puntos agrupan y la coma es decimal.
+  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(limpio)) normal = limpio.replace(/\./g, "").replace(",", ".");
+  // Sin separador de miles («1234», «1234,5», «1234.5»): un solo separador decimal.
+  else if (/^\d+([.,]\d{1,2})?$/.test(limpio)) normal = limpio.replace(",", ".");
+  else return null;
   const centavos = Math.round(Number(normal) * 100);
   return Number.isSafeInteger(centavos) && centavos > 0 ? centavos : null;
 }

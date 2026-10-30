@@ -17,6 +17,7 @@ import {
   SEGUNDO_FACTOR_REQUERIDO,
   TEXTO_ESTADO_PROVEEDOR,
 } from "./comun";
+import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 
@@ -57,7 +58,7 @@ export const AVISO_CUENTA =
 
 export function Proveedores() {
   const id = useId();
-  const { pantalla, consorcio, aEntrar } = useConsorcio();
+  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
@@ -187,7 +188,12 @@ export function Proveedores() {
         : api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/versiones", {
             headers: encabezadoCsrf(),
             params: { path: { consorcio_id: consorcio, proveedor_id: f.proveedor.id }, header: encabezado },
-            body: { ...comunes, estado: datos.estado, version_esperada: f.proveedor.version },
+            body: {
+              ...comunes,
+              documento_id: f.proveedor.documento_id,
+              estado: datos.estado,
+              version_esperada: f.proveedor.version,
+            },
           });
     void pedido
       .then(({ data, error, response }) => {
@@ -217,6 +223,14 @@ export function Proveedores() {
   return (
     <>
       <h1>Proveedores</h1>
+      <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
+        elegir={(c) => {
+          cerrar();
+          setFicha(null);
+          setAviso(null);
+          setLectura({ tipo: "cargando" });
+          setConsorcio(c);
+        }} />
       <p>
         <Link to={RUTA_ORDENES_ENLACE}>Órdenes de pago</Link>
       </p>

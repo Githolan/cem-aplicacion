@@ -28,6 +28,7 @@ const CUENTA_NUEVA = "0000003100000000009876";
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
+const C2 = "abababab-abab-4bab-8bab-abababababab";
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Orden = components["schemas"]["OrdenPago"];
@@ -214,6 +215,12 @@ describe("lo común de egresos", () => {
   it("el importe escrito pasa a centavos y rechaza lo que no es un importe", () => {
     expect(aCentavos("12.345,50")).toBe(1_234_550);
     expect(aCentavos("1234.5")).toBe(123_450);
+    expect(aCentavos("1.234")).toBe(123_400);
+    expect(aCentavos("1.234.567")).toBe(123_456_700);
+    expect(aCentavos("1.234,5")).toBe(123_450);
+    expect(aCentavos("1.23")).toBe(123);
+    expect(aCentavos("1234,05")).toBe(123_405);
+    expect(aCentavos("1.2345")).toBeNull();
     expect(aCentavos("0")).toBeNull();
     expect(aCentavos("12,345,6")).toBeNull();
   });
@@ -294,6 +301,44 @@ describe("página /egresos/proveedores", () => {
     expect(container.innerHTML).not.toContain(CUENTA);
     expect((screen.getByLabelText(/Cuenta destino nueva/) as HTMLInputElement).value).toBe("");
     await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("con varios edificios se elige cuál y se leen sus proveedores", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([
+          { id: C1, nombre: "Edificio Ficticio", vinculos: [] },
+          { id: C2, nombre: "Otro Edificio Ficticio", vinculos: [] },
+        ]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET /api/v1/consorcios/${C2}/proveedores`]: () =>
+        Response.json({ elementos: [proveedor({ razon_social: "Pintura Ficticia SA" })] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" });
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    expect(await screen.findByRole("button", { name: "Ver la ficha de Pintura Ficticia SA" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" })).toBeNull();
+  });
+
+  it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {
+    const conDocumento = proveedor({ documento_id: DOC });
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [conDocumento] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: conDocumento, versiones: [] }),
+      [`POST ${BASE}/proveedores/${P1}/versiones`]: () => Response.json({ id: P1, version: 2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
+    fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza integral" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
+    const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
+    expect(await enviado.json()).toMatchObject({ documento_id: DOC });
   });
 
   it("cambiar la cuenta muestra el aviso antes de mandar y crea una versión nueva", async () => {

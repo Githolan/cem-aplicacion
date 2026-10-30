@@ -19,6 +19,7 @@ import {
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
 } from "./comun";
+import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
 import { RUTA_PROVEEDORES } from "./Proveedores";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
@@ -80,7 +81,7 @@ export const AVISO_MODIFICAR =
 
 export function OrdenesPago() {
   const id = useId();
-  const { pantalla, consorcio, aEntrar } = useConsorcio();
+  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [formulario, setFormulario] = useState<Formulario | null>(null);
@@ -346,6 +347,14 @@ export function OrdenesPago() {
   return (
     <>
       <h1>Órdenes de pago</h1>
+      <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
+        elegir={(c) => {
+          cerrar();
+          setAviso(null);
+          setSinContrato(new Set());
+          setLectura({ tipo: "cargando" });
+          setConsorcio(c);
+        }} />
       <p>
         <Link to={RUTA_PROVEEDORES}>Proveedores</Link>
       </p>

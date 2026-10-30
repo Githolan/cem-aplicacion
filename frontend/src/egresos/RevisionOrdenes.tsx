@@ -19,6 +19,7 @@ import {
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
 } from "./comun";
+import { ElegirConsorcio } from "./ElegirConsorcio";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "./useConsorcio";
 
@@ -46,7 +47,7 @@ function ordenadas(ordenes: Orden[]): Orden[] {
 
 export function RevisionOrdenes() {
   const id = useId();
-  const { pantalla, consorcio, aEntrar } = useConsorcio();
+  const { pantalla, consorcio, setConsorcio, aEntrar } = useConsorcio();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
@@ -180,6 +181,14 @@ export function RevisionOrdenes() {
   return (
     <>
       <h1>Revisión de órdenes de pago</h1>
+      <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
+        elegir={(c) => {
+          setDetalle(null);
+          setRechazando(false);
+          setAviso(null);
+          setLectura({ tipo: "cargando" });
+          setConsorcio(c);
+        }} />
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
