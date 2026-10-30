@@ -290,6 +290,23 @@ def test_un_contrato_vencido_o_dado_de_baja_no_respalda(motor_migrate, e):
     niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=vencido)
 
 
+def test_una_rutinaria_con_el_contrato_de_baja_se_renueva_sin_contrato(motor_migrate, e):
+    conocido(motor_migrate, e)
+    k = confirmado(motor_migrate, e)
+    o = enviada(motor_migrate, e, contrato=k)
+    assert orden(motor_migrate, o)["estado"] == "aprobada"
+    # Control: con el contrato vigente y dentro de los 7 días, no se renueva.
+    niega(motor_migrate, e, e.adm, RENOVAR, "aprobacion_vigente", orden=o, version=1)
+    llamar(motor_migrate, e, e.adm, BAJA_CONTRATO, contrato=k)
+    niega(motor_migrate, e, e.adm, EMITIR, "contrato_no_vigente", orden=o, version=1)
+    # Con el contrato de baja sí, antes de los 7 días: la versión nueva va sin contrato, deja de
+    # ser rutinaria y vuelve a revisión, sin las aprobaciones de antes.
+    assert llamar(motor_migrate, e, e.adm, RENOVAR, orden=o, version=1) == 2
+    nueva = versiones(motor_migrate, o)[1]
+    assert (nueva["contrato_id"], nueva["franja"]) == (None, "sin_umbral")
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
+
+
 def test_registrar_un_contrato_exige_su_documento_y_una_vigencia_valida(motor_migrate, e):
     hoy = _hoy(motor_migrate, e)
     base = {"proveedor": e.proveedor, "tipo": "contrato", "alcance": "SINTETICO", "tope": 100,

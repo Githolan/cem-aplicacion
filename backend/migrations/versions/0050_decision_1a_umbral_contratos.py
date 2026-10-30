@@ -526,6 +526,7 @@ create function nucleo.renovar_orden_vencida(orden uuid, version_esperada intege
     v nucleo.orden_pago_version;
     h bytea;
     identidad uuid;
+    sin_contrato boolean;
   begin
     identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.preparar_orden',
                                               origen_pedido);
@@ -538,15 +539,20 @@ create function nucleo.renovar_orden_vencida(orden uuid, version_esperada intege
       raise exception 'la orden cambió mientras tanto' using errcode = 'P0001',
         hint = 'version_desactualizada';
     end if;
-    if o.aprobada_en > now() - make_interval(days => {VIGENCIA_APROBACION_DIAS}) then
+    select * into v from nucleo.orden_pago_version x
+     where x.orden_id = orden and x.numero = o.version_vigente;
+    -- También se renueva, antes de los 7 días, la que declara un contrato que dejó de regir:
+    -- la versión nueva va sin ese contrato (ya no es rutinaria) y pide aprobación.
+    sin_contrato := v.contrato_id is not null
+      and not nucleo.contrato_vigente(c, v.contrato_id, nucleo.hoy_del_consorcio(c));
+    if o.aprobada_en > now() - make_interval(days => {VIGENCIA_APROBACION_DIAS})
+       and not sin_contrato then
       raise exception 'la aprobación todavía rige' using errcode = 'P0001',
         hint = 'aprobacion_vigente';
     end if;
-    select * into v from nucleo.orden_pago_version x
-     where x.orden_id = orden and x.numero = o.version_vigente;
     h := nucleo.nueva_version_orden_pago(c, orden, o.version_vigente + 1, v.importe_centavos,
            v.moneda, v.concepto, v.proveedor_id, v.comprobante, v.usa_fondo_reserva,
-           v.contrato_id, actor, identidad);
+           case when sin_contrato then null else v.contrato_id end, actor, identidad);
     update nucleo.orden_pago
        set version_vigente = o.version_vigente + 1, estado = 'en_revision', aprobada_en = null,
            actualizada_en = now()

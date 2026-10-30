@@ -6,6 +6,7 @@ import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
 import {
   cambioLaOrden,
+  cambioLoVisto,
   cuentaEnmascarada,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
@@ -159,8 +160,9 @@ export function RevisionOrdenes() {
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
         const texto = mensajeDeError(response.status, codigo);
-        // La orden cambió: se vuelve a cargar la ficha y hay que revisar la versión nueva.
-        if (cambioLaOrden(codigo)) abrir(orden.id, { texto, ok: false });
+        // La orden cambió (otra versión, otro estado o ya no está): se vuelve a cargar la ficha y
+        // hay que revisar lo vigente.
+        if (cambioLaOrden(codigo) || cambioLoVisto(response.status, codigo)) abrir(orden.id, { texto, ok: false });
         else setAviso({ texto, ok: false });
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))

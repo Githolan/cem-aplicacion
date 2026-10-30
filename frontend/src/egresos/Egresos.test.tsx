@@ -433,6 +433,42 @@ describe("página /egresos/ordenes", () => {
     expect(segunda).toBe(primera);
   });
 
+  it("si emitir dice que el contrato ya no rige, ofrece renovar en vez de emitir", async () => {
+    const aprobada = orden({ estado: "aprobada", franja: "rutinaria", aprobacion_vence_en: "2999-01-01T00:00:00Z" });
+    vi.stubGlobal(
+      "fetch",
+      conLista([aprobada], {
+        [`GET ${BASE}/ordenes-pago/${O1}`]: () =>
+          Response.json({ orden: aprobada, versiones: [version({ franja: "rutinaria", contrato_id: K2 })] }),
+        [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => error("contrato_no_vigente", 409),
+      }),
+    );
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Emitir" }));
+    expect(await screen.findByText(/renovala; la versión nueva va sin contrato/)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Renovar" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Emitir" })).toBeNull();
+  });
+
+  it("modificar una orden con un contrato que ya no rige lo quita del formulario y lo avisa", async () => {
+    const enRevision = orden({ estado: "borrador", franja: "rutinaria" });
+    const simulado = conLista([enRevision], {
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () =>
+        Response.json({ orden: enRevision, versiones: [version({ franja: "rutinaria", contrato_id: K2 })] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Modificar" }));
+    expect(await screen.findByText(/El contrato de esta orden ya no rige/)).toBeTruthy();
+    expect((screen.getByLabelText("Contrato o abono (opcional)") as HTMLSelectElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza de noviembre" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText("Listo: guardamos la versión nueva.")).toBeTruthy();
+    const enviado = unico(pedidos(simulado, "POST", `${BASE}/ordenes-pago/${O1}/versiones`));
+    expect(await enviado.json()).toMatchObject({ contrato_id: null });
+  });
+
   it("una aprobación vencida no ofrece emitir: ofrece renovar", async () => {
     const vieja = orden({
       estado: "aprobada",
@@ -522,6 +558,26 @@ describe("página /egresos/revision", () => {
       version: 1,
       huella: H1,
     });
+  });
+
+  it("si la orden ya no admite aprobar (409), recarga la ficha y no deja el botón viejo", async () => {
+    let fichas = 0;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
+      [`GET ${BASE}/ordenes-pago/${O1}/revision`]: () =>
+        ++fichas === 1
+          ? ficha(version())()
+          : Response.json({ orden: { ...enRevision, estado: "rechazada" }, versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => error("orden_no_admite", 409),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/revision");
+    fireEvent.click(await screen.findByRole("button", { name: "Revisar la orden de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Aprobar esta versión" }));
+    expect(await screen.findByText("Rechazada")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aprobar esta versión" })).toBeNull();
+    expect(fichas).toBe(2);
   });
 
   it("rechazar pide un motivo", async () => {

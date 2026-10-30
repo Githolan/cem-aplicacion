@@ -90,6 +90,8 @@ export function OrdenesPago() {
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  /** Órdenes cuyo contrato dejó de regir (lo dijo la API al emitir): se ofrece renovarlas. */
+  const [sinContrato, setSinContrato] = useState<ReadonlySet<string>>(new Set());
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -172,6 +174,11 @@ export function OrdenesPago() {
         if (data !== undefined && v !== undefined) {
           clave.current = null;
           setConfirmar(false);
+          const aplica =
+            lectura.tipo === "ok" &&
+            contratosAplicables(lectura.contratos, v.proveedor_id, v.moneda).some((k) => k.id === v.contrato_id);
+          if (v.contrato_id !== null && !aplica)
+            setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
           setDatos({
             proveedor: v.proveedor_id,
             importe: aTexto(v.importe_centavos),
@@ -179,7 +186,7 @@ export function OrdenesPago() {
             concepto: v.concepto,
             comprobante: v.comprobante ?? "",
             reserva: v.usa_fondo_reserva,
-            contrato: v.contrato_id ?? "",
+            contrato: aplica && v.contrato_id !== null ? v.contrato_id : "",
           });
           setFormulario({ modo: "modificar", orden: data.orden });
         } else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
@@ -325,6 +332,8 @@ export function OrdenesPago() {
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
         setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        if (codigo === "contrato_no_vigente" && acto.tipo === "emitir")
+          setSinContrato((s) => new Set(s).add(acto.orden.id));
         if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios") {
           cerrar();
           volverAPedir();
@@ -420,12 +429,12 @@ export function OrdenesPago() {
                               Enviar a revisión
                             </button>
                           )}
-                          {o.estado === "aprobada" && !vencida(o) && (
+                          {o.estado === "aprobada" && !vencida(o) && !sinContrato.has(o.id) && (
                             <button type="button" disabled={enviando} onClick={() => emitir(o)}>
                               Emitir
                             </button>
                           )}
-                          {vencida(o) && (
+                          {(vencida(o) || (o.estado === "aprobada" && sinContrato.has(o.id))) && (
                             <button type="button" disabled={enviando} onClick={() => hacer({ tipo: "renovar", orden: o })}>
                               Renovar
                             </button>

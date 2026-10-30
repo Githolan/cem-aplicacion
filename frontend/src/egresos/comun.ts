@@ -128,7 +128,8 @@ const MENSAJES: Record<string, string> = {
   aprobacion_vencida: "La aprobación tiene más de 7 días: renová la orden para que vuelva a revisión.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",
-  contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: renovala para evaluarla de nuevo.",
+  contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: renovala; la versión nueva va sin contrato y pide aprobación.",
+  contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Elegí otro o ninguno.",
   idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
   idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",
 };
