@@ -122,7 +122,8 @@ def test_alta_de_proveedor_y_su_historia(e):
     assert r.json()["version"] == 1
     assert p in {x["id"] for x in get(e, e.adm, "proveedores").json()["elementos"]}
 
-    cambio = PROVEEDOR | {"cuenta_destino": cbu_sintetico(11), "estado": "activo"}
+    cambio = PROVEEDOR | {"cuenta_destino": cbu_sintetico(11), "estado": "activo",
+                          "conservar_cuenta": False}  # fmt: skip
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 1})
     assert (r.status_code, r.json()["version"]) == (200, 2)
     detalle = get(e, e.adm, f"proveedores/{p}").json()
@@ -160,6 +161,49 @@ def test_quien_prepara_nunca_recibe_la_cuenta_completa(e):
     assert revision.json()["versiones"][0]["cuenta_destino"] == cuenta  # control
 
 
+def test_un_consejero_que_preparo_la_orden_no_ve_la_cuenta_completa_al_revisarla(motor_migrate, e):
+    """Revisión independiente de #172: un consejero que también prepara no aprueba lo que
+    preparó, así que tampoco recibe la cuenta completa en la revisión de esa orden."""
+    _mc2_tambien_prepara(motor_migrate, e)
+    cuenta = cbu_sintetico(1)
+    o = enviada(e)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/versiones",
+             ORDEN | {"proveedor_id": str(e.proveedor), "importe_centavos": 777,
+                      "version_esperada": 1})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    revision = get(e, e.mc2, f"ordenes-pago/{o}/revision")
+    assert revision.status_code == 200, revision.json()
+    assert cuenta not in revision.text
+    assert {v["cuenta_destino"] for v in revision.json()["versiones"]} == {None}
+    assert {v["cuenta_ultimos_digitos"] for v in revision.json()["versiones"]} == {cuenta[-4:]}
+    # Control: quien no preparó ninguna versión la ve entera.
+    otro = get(e, e.mc1, f"ordenes-pago/{o}/revision").json()
+    assert {v["cuenta_destino"] for v in otro["versiones"]} == {cuenta}
+
+
+def test_un_error_de_la_base_llega_al_registro_sin_la_cuenta():
+    """Dos capas: `hide_parameters` saca los valores que agrega SQLAlchemy, y `redactar` tapa la
+    cuenta que PostgreSQL mismo escribe en su mensaje (`value "…" is out of range`). El registro
+    pasa la excepción por `redactar` (`registros.py`)."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.db import crear_motor
+    from app.registros import redactar
+
+    cuenta = cbu_sintetico(3)
+    motor = crear_motor(url_rol("app"))
+    try:
+        with pytest.raises(DBAPIError) as error, motor.connect() as c:
+            c.execute(text("select cast(:x as integer)"), {"x": cuenta})
+    finally:
+        motor.dispose()
+    texto = str(error.value)
+    assert "SQL parameters hidden" in texto
+    assert cuenta in texto  # control: el mensaje de PostgreSQL la trae
+    assert cuenta not in redactar(texto)
+    assert "[cuenta]" in redactar(texto)
+
+
 def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
     p = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": cbu_sintetico(14)}).json()[
         "id"
@@ -182,13 +226,11 @@ def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
         e, e.adm, f"proveedores/{p}/versiones", cambio | {"rubro": "Agua", "conservar_cuenta": True}
     )
     assert codigo(r) == (409, "version_desactualizada")
+    # Sin decir si conserva la cuenta, 422: un cliente viejo o descuidado no la borra sin querer.
+    agua = PROVEEDOR | {"rubro": "Agua", "estado": "activo", "version_esperada": 2}
+    assert codigo(post(e, e.adm, f"proveedores/{p}/versiones", agua)) == (422, "peticion_invalida")
     # Control: sin conservar y sin cuenta, la versión nueva queda sin cuenta (como antes).
-    r = post(
-        e,
-        e.adm,
-        f"proveedores/{p}/versiones",
-        PROVEEDOR | {"rubro": "Agua", "estado": "activo", "version_esperada": 2},
-    )
+    r = post(e, e.adm, f"proveedores/{p}/versiones", agua | {"conservar_cuenta": False})
     assert r.status_code == 200, r.json()
     assert get(e, e.adm, f"proveedores/{p}").json()["proveedor"]["cuenta_ultimos_digitos"] is None
 
@@ -450,7 +492,7 @@ def test_quien_cargo_la_cuenta_no_aprueba_el_pago(motor_migrate, e):
     r = post(e, e.mc2, f"proveedores/{e.proveedor}/versiones",
              {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
               "cuenta_destino": cbu_sintetico(1), "estado": "activo",
-              "version_esperada": 1})  # fmt: skip
+              "version_esperada": 1, "conservar_cuenta": False})  # fmt: skip
     assert r.status_code == 200, r.json()
     o = enviada(e)
     h = huella(e, o, 1)
@@ -467,7 +509,7 @@ def test_el_consejo_no_lee_los_proveedores_por_su_cuenta(e):
 
 
 def test_un_proveedor_inexistente_en_la_ruta_es_404(e):
-    cuerpo = PROVEEDOR | {"estado": "activo", "version_esperada": 1}
+    cuerpo = PROVEEDOR | {"estado": "activo", "version_esperada": 1, "conservar_cuenta": True}
     assert codigo(post(e, e.adm, f"proveedores/{uuid4()}/versiones", cuerpo)) == (
         404, "no_encontrado")  # fmt: skip
     r = post(e, e.adm, f"proveedores/{e.proveedor}/versiones", cuerpo)

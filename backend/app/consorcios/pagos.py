@@ -24,6 +24,7 @@ cuenta destino.
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -88,8 +89,9 @@ class RielDePago(Protocol):
       se rechaza sin pagar (`FALLIDA`), nunca paga lo nuevo ni contesta lo viejo como si fuera
       lo pedido. Cada ejecución tiene su clave (`0051`, única).
     - `PAGADA` lleva la referencia del riel, que es con lo que se concilia. Sin referencia, o
-      con una respuesta que no es una `RespuestaRiel` con un `EstadoRiel`, el pago queda
-      incierto y se consulta.
+      con una respuesta que no es una `RespuestaRiel` con un `EstadoRiel` y textos (`str` o
+      `None`), el pago queda incierto y se consulta.
+    - El `motivo` nunca lleva la cuenta destino; si la trae, se guarda tapada (`[cuenta]`).
     - `ordenar` tiene un plazo total (`PLAZO_RIEL`, hasta `pedido.vence_en`) que hace cumplir el
       propio adaptador (cliente con plazo, sin reintentos después): pasado el plazo no envía y
       no queda ningún envío en curso. El
@@ -131,7 +133,9 @@ class PagoBloqueado(Exception):
 
 
 def _pedido(conn: Connection, ejecucion: UUID) -> _Pedido:
-    # Local a la transacción del trabajo: vale también para lo que registra después.
+    # Solo tomar el bloqueo tiene tope: lo que el trabajo registra después vuelve a la espera
+    # de siempre, así un resultado ya obtenido del riel no se pierde por una espera corta.
+    previo = conn.execute(text("select current_setting('lock_timeout')")).scalar_one()
     espera = f"{int(ESPERA_BLOQUEO.total_seconds() * 1000)}ms"
     conn.execute(text("select set_config('lock_timeout', :t, true)"), {"t": espera})
     try:
@@ -153,6 +157,7 @@ def _pedido(conn: Connection, ejecucion: UUID) -> _Pedido:
             "pago bloqueado por otro trabajo", extra={"campos": {"ejecucion": str(ejecucion)}}
         )
         raise PagoBloqueado(f"la ejecución {ejecucion} la tiene otro trabajo") from None
+    conn.execute(text("select set_config('lock_timeout', :t, true)"), {"t": previo})
     if fila is None:
         raise cola.ErrorDefinitivo(f"la ejecución {ejecucion} no existe en el consorcio")
     return _Pedido(**fila)
@@ -172,9 +177,21 @@ def _texto(valor: str | None) -> str | None:
     return limpio[:LARGO_TEXTO_RIEL].rstrip() or None
 
 
+CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
+"""Una cuenta destino escrita en el motivo del riel: se guarda tapada."""
+
+
+def _textos_validos(respuesta: RespuestaRiel) -> bool:
+    return all(isinstance(t, str | None) for t in (respuesta.referencia, respuesta.motivo))
+
+
 def _entendida(respuesta: object) -> RespuestaRiel:
     """La respuesta como la exige `RielDePago`; si no, el pago queda incierto."""
-    if not isinstance(respuesta, RespuestaRiel) or not isinstance(respuesta.estado, EstadoRiel):
+    if (
+        not isinstance(respuesta, RespuestaRiel)
+        or not isinstance(respuesta.estado, EstadoRiel)
+        or not _textos_validos(respuesta)
+    ):
         return RespuestaRiel(EstadoRiel.INCIERTA, motivo="el riel contestó algo que no se entiende")
     if respuesta.estado is EstadoRiel.PAGADA and _texto(respuesta.referencia) is None:
         return RespuestaRiel(EstadoRiel.INCIERTA, motivo="el riel contestó pagada sin referencia")
@@ -195,7 +212,7 @@ def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str)
             "r": r.estado.value,
             "o": origen,
             "ref": _texto(r.referencia),
-            "m": _texto(r.motivo),
+            "m": _texto(CUENTA_EN_TEXTO.sub("[cuenta]", r.motivo) if r.motivo else r.motivo),
         },
     ).scalar_one()
 

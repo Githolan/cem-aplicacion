@@ -254,7 +254,9 @@ def _recortada(fila) -> dict:
 
 def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool):
     """Con `revision`, cada versión trae la cuenta completa para que el Consejo la verifique;
-    si no, solo sus últimos dígitos."""
+    si no, solo sus últimos dígitos. Quien preparó la orden o alguna de sus versiones no la
+    aprueba (`no_es_quien_preparo`), así que tampoco en la revisión recibe la cuenta completa:
+    un consejero que además prepara la ve como quien prepara."""
     with _lectura(permiso, motor) as c:
         ordenes = _ordenes(c, permiso, orden_id)
         if not ordenes:
@@ -264,13 +266,17 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool
             _ejecutar(c, permiso, sql, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
         )
         evaluaciones = _evaluaciones(c, permiso, orden_id)
+        preparo = permiso.ctx.persona_id in (
+            {ordenes[0].preparada_por} | {f["preparada_por"] for f in filas}
+        )
         versiones = []
         for f in filas:
             ev = evaluaciones[(orden_id, f["numero"])]
             datos = _recortada(f)
             modelo = VersionOrdenPago
             if revision:
-                modelo, datos["cuenta_destino"] = VersionOrdenPagoRevision, f["cuenta_destino"]
+                modelo = VersionOrdenPagoRevision
+                datos["cuenta_destino"] = None if preparo else f["cuenta_destino"]
             versiones.append(modelo(
                 **datos, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
                 umbral_importe_centavos=ev["umbral_importe_centavos"],
@@ -659,7 +665,7 @@ def emitir_orden(
     facultades) y la separación se evalúa con quienes aprobaron la versión vigente (A5). La base
     vuelve a exigir todo: la franja, las aprobaciones, los 7 días, el proveedor, la cuenta y la
     separación por identidad humana."""
-    detalle = _orden_con_versiones(lectura, motor, orden_id)
+    detalle = _orden_con_versiones(lectura, motor, orden_id, revision=False)
     vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
     # Lo que se emite es la versión y la huella vistas. La versión de la orden no cambia nunca
     # (solo se agregan versiones), así que la base, que exige la versión vigente, exige también

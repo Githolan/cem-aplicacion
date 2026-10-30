@@ -71,6 +71,8 @@ def salida_json():
         ("saldo ARS -1500.50", "1500.50", "[importe]"),
         ("cuota U$S 20", "U$S 20", "[importe]"),
         ("importe Decimal('98765.43') en la unidad", "98765.43", "[importe] en la unidad"),
+        ("cuenta 2850590940090418135201 rechazada", "2850590940090418135201",
+         "cuenta [cuenta] rechazada"),
     ],
 )  # fmt: skip
 def test_log_redaction(texto, secreto, marca):
@@ -94,6 +96,7 @@ def test_log_redaction(texto, secreto, marca):
         "1000 trabajos en 1234.5 ms, latencia 60 s",
         "unidad 1° A del Edificio Alvear 100",
         "GET /health 200",
+        "marca 1730400000123456789 ns y pedido 12345678901234567890123",
         "tipo de trabajo desconocido: plataforma.purgar_cola",
     ],
 )

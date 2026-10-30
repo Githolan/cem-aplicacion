@@ -26,8 +26,13 @@ class SinBase(RuntimeError):
 
 
 def crear_motor(url: str) -> Engine:
+    # `hide_parameters`: el texto de un error de la base no lleva los valores de la sentencia
+    # (una cuenta destino, un correo), que de otro modo llegarían al registro con la traza.
     return create_engine(
-        url, pool_pre_ping=True, connect_args={"connect_timeout": ESPERA_CONEXION_S}
+        url,
+        pool_pre_ping=True,
+        hide_parameters=True,
+        connect_args={"connect_timeout": ESPERA_CONEXION_S},
     )
 
 

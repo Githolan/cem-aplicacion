@@ -4844,7 +4844,7 @@
         "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.\n\nQuien prepara nunca recibe la cuenta completa, así que no puede reenviarla:\n`conservar_cuenta` deja la de la versión esperada, y entonces `cuenta_destino` no viene.\nSin `conservar_cuenta`, `cuenta_destino` es la cuenta nueva o ninguna.",
         "properties": {
           "conservar_cuenta": {
-            "default": false,
+            "description": "Obligatorio: así un cliente que no manda la cuenta nunca la borra sin querer.",
             "title": "Conservar Cuenta",
             "type": "boolean"
           },
@@ -4922,7 +4922,8 @@
         "required": [
           "razon_social",
           "version_esperada",
-          "estado"
+          "estado",
+          "conservar_cuenta"
         ],
         "title": "ProveedorVersionNueva",
         "type": "object"
@@ -5755,6 +5756,7 @@
                 "type": "null"
               }
             ],
+            "description": "La cuenta completa. Nula si la versión no tiene cuenta o si quien lee preparó la orden o alguna de sus versiones (no la aprueba): entonces vale `cuenta_ultimos_digitos`.",
             "title": "Cuenta Destino"
           },
           "cuenta_ultimos_digitos": {

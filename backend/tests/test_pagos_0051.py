@@ -392,6 +392,41 @@ def test_un_resultado_contradictorio_no_cambia_lo_registrado(motor_migrate, moto
     assert riel.ordenes == 0
 
 
+def test_el_motivo_del_riel_se_guarda_sin_la_cuenta_y_los_textos_se_exigen(
+    motor_migrate, motor_app, e, riel
+):
+    cuenta = "2850590940090418135201"
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.FALLIDA, motivo=f"cuenta {cuenta} cerrada")
+    correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+    with motor_migrate.connect() as c:
+        motivo = c.execute(
+            text(
+                "select motivo from nucleo.resultado_ejecucion_orden_pago where ejecucion_id = :x"
+            ),
+            {"x": x["id"]},
+        ).scalar_one()
+    assert motivo == "cuenta [cuenta] cerrada"
+    # Una referencia que no es texto no se entiende: incierta, nunca un error sin registrar.
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    riel.pagos[x["clave"]] = RespuestaRiel(EstadoRiel.PAGADA, referencia=12345)
+    correr(motor_migrate, motor_app, pagos.TRABAJO_ORDENAR, e.cons)
+    assert resultados(motor_migrate, o) == [("incierta", "ordenar")]
+
+
+def test_el_tope_de_espera_vale_solo_para_tomar_el_bloqueo(motor_migrate, motor_app, e):
+    """Revisión de #172: lo que el trabajo registra después de llamar al riel vuelve a la espera
+    de siempre; un resultado del riel no se pierde por un tope pensado para tomar el bloqueo."""
+    o = emitida(motor_migrate, e)
+    [x] = ejecuciones(motor_migrate, o)
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c:
+        previo = c.execute(text("select current_setting('lock_timeout')")).scalar_one()
+        pagos._pedido(c, x["id"])
+        assert c.execute(text("select current_setting('lock_timeout')")).scalar_one() == previo
+
+
 def test_el_pedido_lleva_su_plazo_y_no_muestra_la_cuenta(motor_migrate, motor_app, e, riel):
     from datetime import UTC, datetime
 

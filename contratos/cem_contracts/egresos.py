@@ -197,7 +197,9 @@ class ProveedorVersionNueva(DatosProveedor):
 
     version_esperada: Version
     estado: EstadoProveedor
-    conservar_cuenta: bool = False
+    conservar_cuenta: bool = Field(
+        description="Obligatorio: así un cliente que no manda la cuenta nunca la borra sin querer."
+    )
 
     @model_validator(mode="after")
     def _conservar_sin_cuenta(self) -> "ProveedorVersionNueva":
@@ -421,7 +423,11 @@ class OrdenPagoConVersiones(BaseModel):
 class VersionOrdenPagoRevision(VersionOrdenPago):
     """Revisión: el Consejo verifica la cuenta completa antes de aprobar."""
 
-    cuenta_destino: str | None
+    cuenta_destino: str | None = Field(
+        description="La cuenta completa. Nula si la versión no tiene cuenta o si quien lee preparó"
+        " la orden o alguna de sus versiones (no la aprueba): entonces vale"
+        " `cuenta_ultimos_digitos`."
+    )
 
 
 class OrdenPagoConVersionesRevision(BaseModel):

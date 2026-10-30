@@ -61,6 +61,8 @@ _PATRONES: tuple[tuple[re.Pattern[str], str], ...] = (
     # `codigo` de un error ("codigo": "enlace_invalido") no se toca.
     (re.compile(r"(?i)(c[óo]digo\W{0,6})\d{3}\s?\d{3}(?!\d)"), rf"\1{REDACTADO}"),
     (re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"), "[correo]"),
+    # Cuenta destino: un CBU o CVU son 22 dígitos seguidos (decisión del 31-10-2026).
+    (re.compile(r"(?<!\d)\d{22}(?!\d)"), "[cuenta]"),
     # Importes: con moneda ($ 1.234,56 · ARS 100 · U$S 20) o como Decimal('1234.56').
     (re.compile(r"(?:\bARS|\bUSD|U\$S|\$)\s?-?\d+(?:[.,]\d+)*"), "[importe]"),
     (re.compile(r"Decimal\('-?[\d.]+'\)"), "[importe]"),

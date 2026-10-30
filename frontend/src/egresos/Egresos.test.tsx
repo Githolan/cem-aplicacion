@@ -687,6 +687,21 @@ describe("página /egresos/revision", () => {
     await sinFaltasDeAccesibilidad(container);
   });
 
+  it("si quien lee preparó la orden, el backend no manda la cuenta y la ficha muestra los 4 últimos", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": CONSORCIOS,
+        [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [enRevision] }),
+        [`GET ${BASE}/ordenes-pago/${O1}/revision`]: ficha(revisada({ cuenta_destino: null })),
+      }),
+    );
+    abrir("/egresos/revision");
+    fireEvent.click(await screen.findByRole("button", { name: "Revisar la orden de Limpieza Ficticia SRL" }));
+    expect(await screen.findByText("…1234")).toBeTruthy();
+    expect(screen.queryByText("Sin cuenta")).toBeNull();
+  });
+
   it("aprobar manda versión y huella; ante R10 reintenta con la misma clave", async () => {
     let intentos = 0;
     const simulado = backend({

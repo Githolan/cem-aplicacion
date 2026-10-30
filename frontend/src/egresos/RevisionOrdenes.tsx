@@ -274,7 +274,8 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                 <dt>CUIT</dt>
                 <dd>{vigente.cuit ?? "Sin CUIT"}</dd>
                 <dt>Cuenta destino</dt>
-                <dd>{vigente.cuenta_destino ?? "Sin cuenta"}</dd>
+                {/* Nula también si quien lee preparó la orden: el backend le manda solo los 4 últimos. */}
+                <dd>{vigente.cuenta_destino ?? cuentaEnmascarada(vigente.cuenta_ultimos_digitos)}</dd>
                 <dt>Beneficiario</dt>
                 <dd>{TEXTO_CONDICION[vigente.condicion_beneficiario]}</dd>
                 <dt>Franja</dt>
