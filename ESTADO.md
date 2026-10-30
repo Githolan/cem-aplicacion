@@ -111,23 +111,23 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `286e6d3` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047 y `2026-10-30-286e6d3.md` con la de 0048).
+Medido en el despliegue de `6153cbe` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048 y `2026-10-30-6153cbe.md` con la de 0049).
 
-**Staging y producción en `286e6d3`** (30-10-2026; contenedores nuevos de staging de 04:19 a 04:21 UTC y de producción de 04:24 a 04:26 UTC), base `0048`, contrato 0.27.0.
+**Staging y producción en `6153cbe`** (30-10-2026; contenedores nuevos de staging de 06:40 a 06:42 UTC y de producción de 06:45 a 06:46 UTC), base `0049`, contrato 0.28.0.
 
-- **Qué suma:** el proveedor versionado, la cuenta destino y el beneficiario de la orden (PR #165, `0048`; punto 40). Antes, el mismo día: `0047` (PR #164, punto 39) y Privacidad (PR #161, punto 38).
-- **Controles:**
-  - `ci.ps1` verde sobre `2c7bbf5` (la cabeza del PR) y sobre `286e6d3`, en la segunda corrida en los dos casos. La primera falló por la e2e intermitente `versiones.e2e.ts:80` (E33) y, en la fusión, por una prueba de tiempos del login con un proceso ajeno ocupando un núcleo.
-  - Resultado: backend 2239 (2 omitidas), contratos 58, frontend 395 y e2e 193.
+- **Qué suma:** las rutas de proveedores y órdenes de pago (PR #167, `0049`; punto 41). Sin ruta para emitir ni pagar.
+- **Controles:** `ci.ps1` verde sobre `83c9a26`, sobre `946e765` (la cabeza final del PR) y sobre `6153cbe`. Resultado: backend 2268 (2 omitidas), contratos 58, frontend 395 y e2e 193.
 - **Validación en los dos entornos, en solo lectura:**
-  - base en `0048`, con las 2 tablas del proveedor y 0 proveedores y 0 órdenes;
-  - sin la columna `beneficiario` y sin las firmas viejas;
-  - emitir y aprobar con los controles nuevos;
-  - `cem_app` y `public` sin permisos;
-  - `cbu_valido`: `t` con un CBU sintético y `f` con un dígito cambiado;
-  - producción con 0 consorcios.
-- **Staging, además:** smoke `819fb46b` (salida 0, 16 controles).
+  - base en `0049`, con las 4 lecturas;
+  - `cem_app` ejecuta exactamente las 11 funciones de las rutas; ni `emitir_orden_pago` ni la barrera de lectura (control: las dos dan `false`);
+  - `public` no ejecuta ninguna y `cem_app` no tiene ninguna tabla de egresos;
+  - la barrera niega un código que no es de egresos (`padron.ver`: 42501);
+  - 0 órdenes y 0 proveedores; producción con 0 consorcios;
+  - las rutas nuevas responden 401 sin sesión, y una ruta inexistente 404 (control).
+- **Staging, además:** smoke `79d4b41f` (salida 0, 16 controles).
 - **Registros y Kuma:** 0 `ERROR` y 0 `Traceback`; ningún monitor activo de CEM caído (el 9, excluido).
+
+**Antes, el 30-10: `286e6d3`** (`0048`, punto 40; staging de 04:19 a 04:21 UTC y producción de 04:24 a 04:26 UTC, contrato 0.27.0), con su validación en `2026-10-30-286e6d3.md` del repositorio CEM.
 
 **Antes, el 29-10: `fa1548c`** (`0047`, punto 39) y **`b258311`** (Privacidad, punto 38), con su validación en los registros de despliegue del repositorio CEM.
 
@@ -944,3 +944,12 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
      - las de la orden, adaptadas con proveedores sintéticos (CBU del banco 999, que no existe);
      - 6 mutaciones detectadas.
    - **Revisión:** independiente en cinco vueltas, sin P1, con dos P2 corregidos. Codex dejó dos P2, corregidos con sus hilos resueltos. Quedan P3 91 a 101 en el repositorio CEM.
+41. **Rutas de proveedores y órdenes de pago** (PR #167, `0049`, fusionado en `6153cbe`, head `946e765`; desplegado en los dos entornos el 30-10). Diseño, inferencias para confirmar y pantallas propuestas en `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, «Rutas»:
+   - **Preparación** (`egresos.preparar_orden`): proveedores (listar, ver con historia, alta, versión nueva) y órdenes (listar con borradores, ver, preparar, modificar, enviar a revisión).
+   - **Revisión** (`egresos.revisar_orden`, política nueva sobre la facultad `egresos.aprobar_orden`, sin separación al leer): las órdenes ya enviadas, cada versión con el proveedor exacto (razón social, CUIT, cuenta) y su huella.
+   - **Aprobar y rechazar** (`egresos.aprobar_orden`): primero la revisión al entrar, después se lee quién preparó y se evalúa la separación con esa persona; la base compara además con quien preparó cada versión y con quien cargó la cuenta.
+   - **Barreras:** la base repite todo en cada lectura y escritura con la sesión de la petición (`exigir_lectura_egresos` y `exigir_acto_economico`). R10 visible solo para quien ya pasaba lo demás: `segundo_factor_requerido` y `sesion_reciente_requerida`. Toda escritura con `Idempotency-Key`.
+   - **Contrato** 0.28.0, igual o más estricto que la base: CBU con sus verificadores (comparado con `nucleo.cbu_valido` en 442 casos), versiones dentro de `integer`, textos sin caracteres de control (un concepto o un motivo de varias líneas da 422: decisión consciente, se afloja si el propietario lo pide).
+   - **Pruebas:** `test_rutas_egresos.py`, 20 funciones de prueba (21 casos) con su control cada negación; la de `cem_app` exige el conjunto exacto de funciones; una mutación detectada.
+   - **Revisión:** independiente en dos vueltas, sin P1, un P2 corregido (la versión sin techo, que también marcó Codex, con su hilo resuelto); Codex limpio sobre la cabeza final.
+   - **No hace:** umbral, franjas ni plazo (decisión 1), nada de la decisión 6, emitir ni pagar, ni pantallas.
