@@ -163,6 +163,9 @@ CAMBIOS = {
 }
 
 GUARDA = """
+-- Nada se escribe en las órdenes entre la guarda y el cambio de la tabla (como en 0047).
+lock table nucleo.orden_pago in share row exclusive mode;
+
 do $$
 begin
   if exists (select 1 from nucleo.orden_pago) then
@@ -517,6 +520,10 @@ INTERNAS = (
 UPGRADE += "".join(f"revoke all on function {f} from public;\n" for f in INTERNAS)
 
 DOWNGRADE_GUARDA = """
+-- Ninguna orden ni proveedor se confirma entre la guarda y el borrado de las tablas (Codex en
+-- #165): sin el bloqueo, un alta concurrente pasaría la guarda y se borraría con el DROP.
+lock table nucleo.orden_pago, nucleo.proveedor in share row exclusive mode;
+
 do $$
 begin
   if exists (select 1 from nucleo.orden_pago) or exists (select 1 from nucleo.proveedor) then
