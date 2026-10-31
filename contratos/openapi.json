@@ -4635,7 +4635,7 @@
                 "type": "null"
               }
             ],
-            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 31-10-2026).",
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
             "title": "Cuenta Ultimos Digitos"
           },
           "cuit": {
@@ -5582,7 +5582,7 @@
                 "type": "null"
               }
             ],
-            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 31-10-2026).",
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
             "title": "Cuenta Ultimos Digitos"
           },
           "cuit": {
@@ -5768,7 +5768,7 @@
                 "type": "null"
               }
             ],
-            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 31-10-2026).",
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
             "title": "Cuenta Ultimos Digitos"
           },
           "cuit": {
@@ -5906,7 +5906,7 @@
                 "type": "null"
               }
             ],
-            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 31-10-2026).",
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
             "title": "Cuenta Ultimos Digitos"
           },
           "documento_id": {

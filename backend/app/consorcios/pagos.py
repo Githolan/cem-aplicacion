@@ -181,6 +181,11 @@ CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
 """Una cuenta destino escrita en el motivo del riel: se guarda tapada."""
 
 
+def _sin_cuenta(texto: str | None) -> str | None:
+    """Después de `_texto`: un nulo entre los dígitos ya no la esconde."""
+    return None if texto is None else CUENTA_EN_TEXTO.sub("[cuenta]", texto)
+
+
 def _textos_validos(respuesta: RespuestaRiel) -> bool:
     return all(isinstance(t, str | None) for t in (respuesta.referencia, respuesta.motivo))
 
@@ -212,7 +217,7 @@ def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str)
             "r": r.estado.value,
             "o": origen,
             "ref": _texto(r.referencia),
-            "m": _texto(CUENTA_EN_TEXTO.sub("[cuenta]", r.motivo) if r.motivo else r.motivo),
+            "m": _sin_cuenta(_texto(r.motivo)),
         },
     ).scalar_one()
 

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { aCentavos, cuentaEnmascarada, renovarClave } from "./comun";
+import { aCentavos, cuentaEnmascarada, renovarClave, TEXTO_ALERTA_FRACCIONAMIENTO } from "./comun";
 import { AVISO_MODIFICAR, contratosAplicables, vencida } from "./OrdenesPago";
 import { AVISO_CUENTA } from "./Proveedores";
 
@@ -472,7 +472,7 @@ describe("página /egresos/ordenes", () => {
     expect(within(lista).getByRole("heading", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
     expect(within(lista).getByText("Borrador")).toBeTruthy();
     expect(within(lista).getByText("No supera el umbral")).toBeTruthy();
-    expect(within(lista).getByText(/revisá si se fraccionó un gasto/)).toBeTruthy();
+    expect(within(lista).getByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
     expect(container.innerHTML).not.toContain(CUENTA);
     await sinFaltasDeAccesibilidad(container);
   });

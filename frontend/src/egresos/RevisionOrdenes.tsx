@@ -15,6 +15,7 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_CONDICION,
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
@@ -240,7 +241,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       {o.alerta_fraccionamiento && (
                         <>
                           <dt>Alerta</dt>
-                          <dd>Posible fraccionamiento: sumada a las demás del mes, supera el umbral o el máximo del contrato.</dd>
+                          <dd>{TEXTO_ALERTA_FRACCIONAMIENTO}</dd>
                         </>
                       )}
                       <dt>Aprobaciones</dt>
@@ -283,7 +284,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                 {vigente.alerta_fraccionamiento && (
                   <>
                     <dt>Alerta</dt>
-                    <dd>Posible fraccionamiento: sumada a las demás del mes, supera el umbral o el máximo del contrato.</dd>
+                    <dd>{TEXTO_ALERTA_FRACCIONAMIENTO}</dd>
                   </>
                 )}
                 <dt>Fondo de reserva</dt>
