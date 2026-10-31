@@ -849,6 +849,50 @@ def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
+def test_0056_confirmable_mira_el_estado_la_version_y_el_resultado(motor_migrate, e):
+    """`confirmable` leído directo de la base, como lo vería otro cliente que no filtra por
+    estado (revisión de #183): cada condición de `0056` por separado, con una orden para cada
+    una. Los cambios se fuerzan con el rol de migración, por las transiciones permitidas."""
+
+    def confirmable(o, d) -> bool:
+        with transaccion(motor_migrate, persona_id=e.mc1, consorcio_id=e.cons) as c:
+            filas = c.execute(
+                text("select id, confirmable from nucleo.declaraciones_pago_no_realizado_lectura("
+                     ":o, 'egresos.aprobar_orden', :actor, 'api', :sesion)"),
+                {"o": o, "actor": e.mc1, "sesion": e.sesion[e.mc1]},
+            ).all()  # fmt: skip
+        return {f.id: f.confirmable for f in filas}[d]
+
+    def forzar(sql: str, o) -> None:
+        with motor_migrate.begin() as c:
+            c.execute(text(sql), {"o": o})
+
+    def declarada() -> tuple[UUID, UUID]:
+        o = emitida(motor_migrate, e)
+        d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+        assert confirmable(o, d) is True  # control
+        return o, d
+
+    resultado = ("insert into nucleo.resultado_ejecucion_orden_pago (consorcio_id, ejecucion_id,"
+                 " resultado, origen) select consorcio_id, id, '{}', 'manual'"
+                 " from nucleo.ejecucion_orden_pago where orden_id = :o")  # fmt: skip
+    o, d = declarada()
+    forzar(resultado.format("incierta"), o)
+    assert confirmable(o, d) is True  # una incierta no cierra la ejecución
+    forzar(resultado.format("fallida"), o)
+    assert confirmable(o, d) is False  # un resultado definitivo sí
+
+    o, d = declarada()
+    forzar("update nucleo.orden_pago set version_vigente = version_vigente + 1 where id = :o", o)
+    assert confirmable(o, d) is False  # la ejecución es de una versión vieja
+
+    o, d = declarada()
+    forzar("update nucleo.orden_pago set estado = 'en_verificacion' where id = :o", o)
+    assert confirmable(o, d) is True
+    forzar("update nucleo.orden_pago set estado = 'pagada' where id = :o", o)
+    assert confirmable(o, d) is False  # la orden ya no espera su pago
+
+
 def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     x = otro_ejecutor(motor_migrate, motor_app, e)

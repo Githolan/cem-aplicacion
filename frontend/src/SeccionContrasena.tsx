@@ -5,6 +5,7 @@ import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { ENTRAR_DE_NUEVO } from "./fallas";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y el formulario para
@@ -35,6 +36,8 @@ const CODIGO_REQUERIDO = "segundo_factor_requerido";
 const CODIGO_ACTUAL_INVALIDA = "contrasena_actual_invalida";
 const CODIGO_DEBIL = "contrasena_debil";
 const CODIGO_CSRF = "csrf_invalido";
+// La primera contraseña pide una entrada reciente (`exigir_entrada_reciente`).
+const CODIGO_ENTRADA_RECIENTE = "reautenticacion_requerida";
 const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 
 /**
@@ -151,6 +154,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         else if (codigo === CODIGO_DEBIL)
           // El backend explica la regla (largo y que no sea el correo): se muestra tal cual.
           setAviso({ tipo: "error", texto: campoDe(error, "mensaje") ?? SIN_CONEXION });
+        else if (codigo === CODIGO_ENTRADA_RECIENTE) setAviso({ tipo: "error", texto: ENTRAR_DE_NUEVO });
         else if (codigo === CODIGO_CSRF)
           setAviso({ tipo: "error", texto: "No pudimos verificar el pedido. Recargá la página y probá de nuevo." });
         else if (response.status === ESTADO_DEMASIADOS)
