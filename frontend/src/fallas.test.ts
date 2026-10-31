@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { ENTRAR_DE_NUEVO, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 
 describe("mensajeDeFalla (E34)", () => {
   it("un 5xx de la aplicación, con su código, es del servicio", () => {
@@ -24,6 +24,11 @@ describe("mensajeDeFalla (E34)", () => {
   it("un 4xx de la aplicación sin mensaje propio pide recargar", () => {
     expect(mensajeDeFalla(404, "no_encontrado")).toBe(RECARGAR);
     expect(mensajeDeFalla(422, "peticion_invalida")).toBe(RECARGAR);
+  });
+
+  it("una acción que pide una entrada reciente dice que hay que volver a entrar", () => {
+    expect(mensajeDeFalla(403, "reautenticacion_requerida")).toBe(ENTRAR_DE_NUEVO);
+    expect(mensajeDeFalla(403, "sin_permiso")).toBe(RECARGAR); // control
   });
 
   it("esDeConexion solo cuando no respondió la aplicación", () => {

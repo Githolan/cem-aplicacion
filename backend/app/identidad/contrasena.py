@@ -462,9 +462,10 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
         ).scalar_one_or_none()
         if _tiene_segundo_factor(conn):
             _exigir_verificacion_reciente(conn, identidad)
-        elif anterior is not None and (
-            pedido.contrasena_actual is None or not verificar(anterior, pedido.contrasena_actual)
-        ):
+        elif anterior is None:
+            # La primera contraseña, sin otra prueba que la sesión: que sea de una entrada reciente.
+            sf.exigir_entrada_reciente(conn, identidad)
+        elif pedido.contrasena_actual is None or not verificar(anterior, pedido.contrasena_actual):
             log.info("cambio de contraseña rechazado: actual_invalida")
             raise ErrorApi(
                 403,

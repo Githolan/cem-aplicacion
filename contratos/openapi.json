@@ -6990,6 +6990,16 @@
             },
             "description": "Successful Response"
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La sesión no es de una entrada reciente."
+          },
           "409": {
             "content": {
               "application/json": {
@@ -7066,6 +7076,16 @@
               }
             },
             "description": "El código no sirve."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La sesión no es de una entrada reciente."
           },
           "409": {
             "content": {

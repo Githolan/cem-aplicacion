@@ -17,6 +17,9 @@ case "${CEM_PROCESO:-api}" in
     if [ -n "${CEM_DATABASE_URL_MIGRATE:-}" ]; then
       alembic upgrade head
     fi
+    # La API no hereda la credencial de cem_migrate (dueño de los esquemas, BYPASSRLS): sin ella,
+    # una falla en la API no da acceso total a la base (revisión de seguridad H3).
+    unset CEM_DATABASE_URL_MIGRATE
     # Registros JSON (documento 13, §16.1): la misma configuración que los otros dos procesos;
     # el registro de acceso de uvicorn se apaga y lo reemplaza el de app/registros.py.
     exec uvicorn "app.main:crear_app" --factory --host 0.0.0.0 --port 8000 --workers 2 \
