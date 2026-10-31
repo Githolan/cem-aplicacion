@@ -52,9 +52,9 @@ export const RUTA_PAGOS = "/egresos/pagos";
 export const AVISO_VERIFICAR_CUENTA =
   "Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.";
 export const AVISO_SIN_CUENTA =
-  "La cuenta ya no se muestra: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Si transferiste antes, registrá el pago con los datos del comprobante; si no, declará que no se pagó.";
+  "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste antes, registrá el pago con los datos del comprobante; si no, declará que no se pagó.";
 /** Las barreras del acto que, con la orden ya emitida, dejan registrar o declarar sin la cuenta. */
-const SIN_CUENTA = new Set(["aprobacion_vencida", "proveedor_cambiado", "contrato_no_vigente"]);
+const SIN_CUENTA = new Set(["aprobacion_vencida", "proveedor_cambiado", "proveedor_inactivo", "contrato_no_vigente"]);
 const CATEGORIA_COMPROBANTE = "facturas_y_comprobantes";
 
 type Lectura =

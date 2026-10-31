@@ -377,7 +377,7 @@ describe("pagos a realizar", () => {
     expect(await registro?.json()).toMatchObject({ version: 1, huella: H1, cuenta_destino: CUENTA });
   });
 
-  it.each(["proveedor_cambiado", "contrato_no_vigente"])("con %s y la orden emitida, registra sin volver a ver la cuenta", async (codigo) => {
+  it.each(["proveedor_cambiado", "proveedor_inactivo", "contrato_no_vigente"])("con %s y la orden emitida, registra sin volver a ver la cuenta", async (codigo) => {
     const api = simulado({
       [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
       [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [conPago("en_ejecucion")] }),
@@ -475,7 +475,7 @@ describe("conciliación de pagos", () => {
     expect((screen.getByRole("button", { name: "Observar el pago" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Qué no coincide"), { target: { value: "La fecha no coincide" } });
     fireEvent.click(screen.getByRole("button", { name: "Observar el pago" }));
-    expect(await screen.findByText(/no lo concilia ni lo confirma/)).toBeTruthy();
+    expect(await screen.findByText(/quien la vio o registró no concilia ni confirma/)).toBeTruthy();
     const [pedido] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`);
     expect(await pedido?.json()).toEqual({ resultado: "observado", motivo: "La fecha no coincide" });
   });

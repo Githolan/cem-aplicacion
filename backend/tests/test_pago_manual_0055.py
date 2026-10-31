@@ -814,6 +814,24 @@ def test_si_alguien_vio_la_cuenta_declara_quien_la_vio(motor_migrate, motor_app,
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
+def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
+    motor_migrate, motor_app, e
+):
+    """La administración declara y vuelve a abrir el acto (pudo transferir después); x abre y
+    declara. Falta la declaración de la administración posterior a su última apertura."""
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, e.adm, o)
+    llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    ver(motor_migrate, e, e.adm, o)
+    ver(motor_migrate, e, x, o)
+    dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
+    llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dx)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
 def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     x = otro_ejecutor(motor_migrate, motor_app, e)
@@ -939,15 +957,15 @@ def test_la_historia_del_pago_manual_solo_se_agrega(motor_migrate, e):
 def test_cem_app_solo_ejecuta_las_rutas_del_pago_manual(motor_migrate):
     tablas = ("nucleo.pago_manual", "nucleo.operacion_pago_manual",
               "nucleo.conciliacion_pago_manual", "nucleo.declaracion_pago_no_realizado",
-              "nucleo.confirmacion_pago_no_realizado",
-              "nucleo.riel_de_pago_habilitado")  # fmt: skip
+              "nucleo.confirmacion_pago_no_realizado", "nucleo.apertura_cuenta_pago_manual",
+              "nucleo.comprobante_pago_manual", "nucleo.riel_de_pago_habilitado")  # fmt: skip
     rutas = {"cuenta_para_pago_manual", "registrar_pago_manual", "conciliar_pago_manual",
              "declarar_pago_no_realizado", "confirmar_pago_no_realizado",
              "ejecuciones_manuales_lectura", "pagos_manuales_lectura",
              "declaraciones_pago_no_realizado_lectura"}  # fmt: skip
     internas = {"ejecucion_manual_abierta", "ultimo_pago_manual", "pago_manual_observado",
                 "exigir_sin_pago_vigente", "exigir_no_aprobo", "exigir_no_preparo",
-                "orden_para_pago_manual"}  # fmt: skip
+                "orden_para_pago_manual", "exigir_no_ejecuto"}  # fmt: skip
     with motor_migrate.connect() as c:
         privilegios = [
             (t, p) for t in tablas
@@ -961,7 +979,12 @@ def test_cem_app_solo_ejecuta_las_rutas_del_pago_manual(motor_migrate):
                  " where n.nspname = 'nucleo' and p.proname = any(:n)"),
             {"n": list(rutas | internas)},
         ).all())  # fmt: skip
+        # La secuencia que ordena los hechos: sin USAGE ni UPDATE (`setval` la haría retroceder).
+        secuencia = [p for p in ("USAGE", "SELECT", "UPDATE") if c.execute(
+            text("select has_sequence_privilege('cem_app', 'nucleo.paso_pago_manual', :p)"),
+            {"p": p}).scalar_one()]  # fmt: skip
     assert privilegios == []
+    assert secuencia == []
     assert set(funciones) == rutas | internas  # control: la consulta las encuentra
     assert {f for f, puede in funciones.items() if puede} == rutas
 
