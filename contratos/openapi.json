@@ -1531,7 +1531,7 @@
                 "type": "null"
               }
             ],
-            "description": "La cuenta completa de esa versión.",
+            "description": "La cuenta completa de esa versión. Nula si quien lee registró el contrato (también con otra cuenta suya: por identidad humana); entonces vale `cuenta_ultimos_digitos`.",
             "title": "Cuenta Destino"
           },
           "cuenta_ultimos_digitos": {

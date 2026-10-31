@@ -555,7 +555,11 @@ class ContratoRevision(Contrato):
     """Revisión del Consejo: quien confirma (o reconfirma, `0053`) ve la cuenta completa de la
     versión vigente del proveedor, que es lo que confirma."""
 
-    cuenta_destino: str | None = Field(description="La cuenta completa de esa versión.")
+    cuenta_destino: str | None = Field(
+        description="La cuenta completa de esa versión. Nula si quien lee registró el contrato"
+        " (también con otra cuenta suya: por identidad humana); entonces vale"
+        " `cuenta_ultimos_digitos`."
+    )
 
 
 class ListaContratosRevision(BaseModel):

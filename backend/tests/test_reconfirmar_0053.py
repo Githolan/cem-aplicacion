@@ -294,3 +294,16 @@ def _como_dueno(motor, sentencia: str, k) -> None:
         c.execute(text(sentencia), {"k": k})
         c.execute(text("alter table nucleo.contrato_proveedor_confirmacion"
                        " enable trigger historia_contrato_proveedor_confirmacion"))  # fmt: skip
+
+
+def test_la_revision_de_contratos_no_da_la_cuenta_a_quien_registro(motor_migrate, motor_app, e):
+    """Codex en #178: quien registró el contrato ocupa el lugar de quien preparó. Tampoco con
+    otra cuenta suya en el Consejo recibe la cuenta completa (por identidad humana)."""
+    contrato(motor_migrate, e)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    (suya,) = get(e, otra, "contratos/revision").json()["elementos"]
+    assert (suya["cuenta_destino"], suya["cuenta_ultimos_digitos"]) == (
+        None, cbu_sintetico(1)[-4:])  # fmt: skip
+    # Control: otro ser humano del Consejo la ve entera.
+    (ajena,) = get(e, e.mc1, "contratos/revision").json()["elementos"]
+    assert ajena["cuenta_destino"] == cbu_sintetico(1)

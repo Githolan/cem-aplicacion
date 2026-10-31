@@ -721,7 +721,7 @@ def emitir_orden(
 
 def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None, revision: bool = False):
     """Quien prepara recibe los últimos dígitos de la cuenta; la revisión del Consejo, también la
-    completa, que es lo que confirma."""
+    completa, que es lo que confirma, salvo para quien registró el contrato."""
     sql = "select * from nucleo.contratos_proveedor_lectura(:k, :f, :actor, 'api', :sesion)"
     filas = _ejecutar(c, permiso, sql, {"k": contrato, "f": LEE_COMO[permiso.accion]})
     contratos = []
@@ -729,6 +729,14 @@ def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None, revision:
         datos = dict(f)
         datos["cuenta_ultimos_digitos"] = ultimos_digitos(datos["cuenta_destino"])
         if revision:
+            # Quien registró el contrato ocupa el lugar de quien preparó: por identidad humana,
+            # tampoco con otra cuenta suya recibe la cuenta completa (como en las órdenes; Codex
+            # en #178).
+            registro = _ejecutar(c, permiso, MISMA_IDENTIDAD,
+                                 {"c": permiso.ctx.consorcio_id,
+                                  "ps": [datos["registrado_por"]]}).scalar_one()  # fmt: skip
+            if registro:
+                datos["cuenta_destino"] = None
             contratos.append(ContratoRevision(**datos))
         else:
             del datos["cuenta_destino"]
