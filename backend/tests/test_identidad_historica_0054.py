@@ -97,8 +97,31 @@ def test_sin_identidad_vigente_falla_cerrada(motor_migrate, motor_app, e):
     desvincular(motor_migrate, e, e.mc1)
     assert llamar(motor_app, e, e.mc1, PREPARO, orden=o) is True
     assert llamar(motor_app, e, e.mc1, REGISTRO, contrato=k) is True
-    r = get(e, e.mc1, f"ordenes-pago/{o}/revision")
-    assert r.status_code != 200 or {v["cuenta_destino"] for v in r.json()["versiones"]} == {None}
+    # La ruta ni siquiera la atiende: sin identidad humana no hay revisión.
+    for ruta in (f"ordenes-pago/{o}/revision", "contratos/revision"):
+        r = get(e, e.mc1, ruta)
+        assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso"), r.json()
+
+
+def test_un_vinculo_corregido_despues_tambien_niega_al_dueno_real(motor_migrate, motor_app, e):
+    """Revisión independiente de #180: el administrador preparó y registró con su identidad; después
+    soporte corrige el vínculo y su cuenta pasa a la identidad de mc2. La identidad guardada no es
+    la de mc2, pero hoy son el mismo ser humano: mc2 tampoco recibe la cuenta (como en la
+    aprobación, que mira las dos)."""
+    o = enviada(motor_migrate, e)
+    k = contrato(motor_migrate, e)
+    desvincular(motor_migrate, e, e.adm)
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.identidad_persona (consorcio_id, persona_id, identidad_id)"
+                 " values (:c, :p, nucleo.identidad_humana_de(:c, :de))"),
+            {"c": e.cons, "p": e.adm, "de": e.mc2},
+        )  # fmt: skip
+    assert cuentas_de_la_orden(e, e.mc2, o) == {None}
+    assert cuenta_del_contrato(e, e.mc2) is None
+    assert llamar(motor_app, e, e.mc2, PREPARO, orden=o) is True
+    assert llamar(motor_app, e, e.mc2, REGISTRO, contrato=k) is True
+    assert cuentas_de_la_orden(e, e.mc1, o) == {cbu_sintetico(1)}  # control
 
 
 def test_de_otro_consorcio_o_inexistente_falla_cerrada(motor_migrate, motor_app, e):

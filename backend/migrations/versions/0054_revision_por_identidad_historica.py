@@ -10,7 +10,10 @@ acto (`identidad_preparo`, `identidad_registro`); la lectura, no.
 
 Cómo: dos funciones de solo lectura, en el ámbito del consorcio actual y para la persona actual,
 que comparan la identidad humana vigente de quien lee con la identidad guardada al preparar cada
-versión de la orden o al registrar el contrato, además de la cuenta misma:
+versión de la orden o al registrar el contrato. Encima conservan la barrera anterior: la misma
+cuenta o la misma identidad de hoy (`nucleo.misma_persona_humana`), igual que la aprobación
+(`0045`) y la confirmación (`0050`). Así, si soporte corrige un vínculo equivocado, el dueño real
+tampoco recibe la cuenta (revisión independiente de #180):
 - `nucleo.lee_quien_preparo_la_orden(orden, actor)`;
 - `nucleo.lee_quien_registro_el_contrato(contrato, actor)`.
 
@@ -60,10 +63,12 @@ create function nucleo.lee_quien_preparo_la_orden(orden uuid, actor uuid)
     return yo is null
         or not exists (select 1 from nucleo.orden_pago o where o.consorcio_id = c and o.id = orden)
         or exists (select 1 from nucleo.orden_pago o
-                    where o.consorcio_id = c and o.id = orden and o.preparada_por = actor)
+                    where o.consorcio_id = c and o.id = orden
+                      and nucleo.misma_persona_humana(c, actor, o.preparada_por))
         or exists (select 1 from nucleo.orden_pago_version v
                     where v.consorcio_id = c and v.orden_id = orden
-                      and (v.preparada_por = actor or v.identidad_preparo = yo));
+                      and (v.identidad_preparo = yo
+                           or nucleo.misma_persona_humana(c, actor, v.preparada_por)));
   end
   $$;
 
@@ -83,8 +88,8 @@ create function nucleo.lee_quien_registro_el_contrato(contrato uuid, actor uuid)
     return yo is null
         or not exists (select 1 from nucleo.contrato_proveedor k
                         where k.consorcio_id = c and k.id = contrato
-                          and k.registrado_por is distinct from actor
-                          and k.identidad_registro is distinct from yo);
+                          and k.identidad_registro is distinct from yo
+                          and not nucleo.misma_persona_humana(c, actor, k.registrado_por));
   end
   $$;
 """
@@ -95,10 +100,14 @@ INSERTAR_VERSION = (
 )
 SOLO_VIGENTE = (
     "          where d.consorcio_id = c and d.id = documento and d.estado = 'vigente') then\n"
+    "      raise exception 'el documento no existe en este consorcio' using errcode = 'P0001',\n"
 )
 RESPALDA = (
     "          where d.consorcio_id = c and d.id = documento\n"
     "            and nucleo.documento_respalda(c, documento)) then\n"
+    "      raise exception 'el documento no existe en este consorcio o no tiene una versión"
+    " disponible'\n"
+    "        using errcode = 'P0001',\n"
 )
 
 FIRMAS = (
