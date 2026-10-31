@@ -111,9 +111,27 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `b790866` (31-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050, `2026-10-30-71cf09f.md` con la de 0051, `2026-10-31-9e4e86d.md` con la de 0052 y el ensayo sintético `bc5a0574`, y `2026-10-31-b790866.md` con la de 0053 y el ensayo `3b29baeb`).
+Medido en el despliegue de `63a682a` (31-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050, `2026-10-30-71cf09f.md` con la de 0051, `2026-10-31-9e4e86d.md` con la de 0052 y el ensayo sintético `bc5a0574`, `2026-10-31-b790866.md` con la de 0053 y el ensayo `3b29baeb`, y `2026-10-31-63a682a.md` con la de 0054 y el ensayo `00471d27`).
 
-**Staging y producción en `b790866`** (31-10-2026; staging de 08:26 a 08:29 UTC y producción de 08:32 a 08:35 UTC). Base `0053`, contrato 0.31.0. Antes, ese mismo día, se había desplegado `9e4e86d` (base `0052`, PR #172 a #177).
+**Staging y producción en `63a682a`** (31-10-2026; staging de 14:19 a 14:23 UTC y producción de 14:24 a 14:27 UTC). Base `0054`, contrato 0.31.0.
+
+- **PR #180 (`63a682a`, `0054`).**
+  - **P3 115.** La revisión del Consejo niega la cuenta completa a quien preparó la orden o registró el contrato. Lo decide por la identidad humana guardada en el acto (`identidad_preparo`, `identidad_registro`) **y** por la misma persona humana de hoy (`misma_persona_humana`), como la aprobación. Funciones: `nucleo.lee_quien_preparo_la_orden` y `nucleo.lee_quien_registro_el_contrato`. Fallan cerradas: sin identidad, de otro consorcio o con un actor ajeno.
+  - **P3 93.** Una versión nueva del proveedor exige un documento que respalde (`documento_respalda`). La historia no se toca.
+  - **P3 114.** Documentado en `RielDePago`.
+  - **Arreglo de las pruebas.** `conftest` quita el documento de las versiones del proveedor antes de borrar los documentos.
+- **Compuertas.**
+  - CI VERDE sobre `e95fbf2` (backend 2352, contratos 58, frontend 425, e2e 199) y con imágenes sobre `63a682a`.
+  - Codex sin hallazgos.
+  - Revisión independiente: un P2 arreglado; cabeza final con 0 P1, 0 P2 y 0 P3.
+  - 5 mutaciones detectadas.
+- **Validación.**
+  - Copias previas: staging 55 tablas y 17 300 filas; producción 55 tablas y 3 570 filas.
+  - `cem_app` ejecuta las funciones nuevas y `public` no.
+  - Ensayo `00471d27`: 12 de 12, con 0 cuentas en 37 eventos.
+  - Producción sin datos sintéticos.
+
+**Antes, el 31-10: `b790866`** (31-10-2026; staging de 08:26 a 08:29 UTC y producción de 08:32 a 08:35 UTC). Base `0053`, contrato 0.31.0. Antes, ese mismo día, se había desplegado `9e4e86d` (base `0052`, PR #172 a #177).
 
 - **PR #178 (`b790866`, `0053`):** decisión P3 112 del propietario (31-10). Si cambia la cuenta del proveedor, el contrato hay que confirmarlo de nuevo.
   - La confirmación queda atada a la versión del proveedor (`proveedor_version`). Deja de valer si alguna versión posterior trae otra cuenta (`nucleo.confirmacion_vale`). Volver a la cuenta vieja (A→B→A) no la revive.
