@@ -122,15 +122,25 @@ def test_el_alta_crea_la_version_1_sin_el_tercero_en_el_evento(motor_migrate, e)
     assert (v["numero"], v["estado"], v["cuenta_destino"], v["razon_social"]) == (
         1, "activo", DATOS["cuenta"], DATOS["razon"],
     )  # fmt: skip
+    # Desde 0052 la huella lleva una sal al azar: con todo lo demás y los últimos dígitos no se
+    # puede probar candidatos de cuenta contra ella (revisión de seguridad de #175).
     with motor_migrate.connect() as c:
-        recalculada = c.execute(
-            text("select nucleo.huella_proveedor(:p, 1, :cuit, :r, :cta)"),
+        sin_sal = c.execute(
+            text("select sha256(convert_to(jsonb_build_object('proveedor', cast(:p as uuid),"
+                 " 'version', 1, 'cuit', cast(:cuit as text), 'razon_social', cast(:r as text),"
+                 " 'cuenta_destino', cast(:cta as text))::text, 'UTF8'))"),
             {"p": p, "cuit": CUIT, "r": DATOS["razon"], "cta": DATOS["cuenta"]},
-        ).scalar_one()
-    assert v["huella"] == recalculada
+        ).scalar_one()  # fmt: skip
+        dos = c.execute(
+            text("select nucleo.huella_proveedor(:p, 1, :cuit, :r, :cta)"
+                 " from generate_series(1, 2)"),
+            {"p": p, "cuit": CUIT, "r": DATOS["razon"], "cta": DATOS["cuenta"]},
+        ).scalars().all()  # fmt: skip
+    assert len(v["huella"]) == 32 and v["huella"] != sin_sal
+    assert dos[0] != dos[1] and sin_sal not in dos
     [ev] = eventos_de(motor_migrate, p)
     assert (ev["accion"], ev["actor_persona_id"]) == ("consorcio.proveedor.alta", e.adm)
-    assert ev["despues"]["con_cuenta"] is True and ev["despues"]["huella"] == recalculada.hex()
+    assert ev["despues"]["con_cuenta"] is True and ev["despues"]["huella"] == v["huella"].hex()
     for dato in (DATOS["cuenta"], DATOS["razon"], DATOS["contacto"]):
         assert dato not in ev["todo"]
 

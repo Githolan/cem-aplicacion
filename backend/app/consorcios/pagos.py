@@ -167,8 +167,9 @@ LARGO_TEXTO_RIEL = 200
 """Lo que guarda la base de la referencia y el motivo del riel (0051)."""
 
 
-CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
-"""Una cuenta destino escrita en la referencia o el motivo del riel: se guarda tapada."""
+CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d(?:[ .\-]?\d){21}(?!\d)")
+"""Una cuenta destino escrita en la referencia o el motivo del riel, también con espacios,
+puntos o guiones entre los dígitos: se guarda tapada."""
 
 
 def _texto(valor: str | None) -> str | None:

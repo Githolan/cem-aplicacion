@@ -252,6 +252,17 @@ def _recortada(fila) -> dict:
     return datos
 
 
+MISMA_IDENTIDAD = (
+    "select cast(:actor as uuid) = any(cast(:ps as uuid[])) or exists ("
+    " select 1 from nucleo.identidad_persona a join nucleo.identidad_persona b"
+    "   on b.consorcio_id = a.consorcio_id and b.identidad_id = a.identidad_id"
+    "  where a.consorcio_id = :c and a.persona_id = :actor and a.desvinculada_en is null"
+    "    and b.persona_id = any(cast(:ps as uuid[])) and b.desvinculada_en is null)"
+)
+"""Si quien lee es alguna de las personas `ps` o el mismo ser humano verificado (`cem_app` lee
+qué cuenta es de qué identidad, `0026`)."""
+
+
 def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool):
     """Con `revision`, cada versión trae la cuenta completa para que el Consejo la verifique;
     si no, solo sus últimos dígitos. Quien preparó la orden o alguna de sus versiones no la
@@ -266,9 +277,12 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool
             _ejecutar(c, permiso, sql, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
         )
         evaluaciones = _evaluaciones(c, permiso, orden_id)
-        preparo = permiso.ctx.persona_id in (
-            {ordenes[0].preparada_por} | {f["preparada_por"] for f in filas}
-        )
+        # Por identidad humana, no por cuenta: quien preparó con una cuenta y revisa con otra
+        # tampoco recibe la cuenta completa (revisión de seguridad de #175).
+        preparadores = list({ordenes[0].preparada_por} | {f["preparada_por"] for f in filas})
+        preparo = revision and _ejecutar(c, permiso, MISMA_IDENTIDAD,
+                                         {"c": permiso.ctx.consorcio_id,
+                                          "ps": preparadores}).scalar_one()  # fmt: skip
         versiones = []
         for f in filas:
             ev = evaluaciones[(orden_id, f["numero"])]

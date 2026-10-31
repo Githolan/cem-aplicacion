@@ -428,6 +428,9 @@ def test_la_cuenta_se_tapa_antes_de_cortar_y_sin_los_nulos():
     assert pagos._texto(f"{relleno} {cuenta}") == f"{relleno} [cue"
     assert pagos._texto(f"cuenta {cuenta[:9]}\x00{cuenta[9:]}") == "cuenta [cuenta]"
     assert pagos._texto(f"SIM-{cuenta}") == "SIM-[cuenta]"
+    # Con separadores entre los dígitos, como la escribiría una persona.
+    partida = f"{cuenta[:3]} {cuenta[3:7]}-{cuenta[7:8]}.{cuenta[8:21]} {cuenta[21:]}"
+    assert pagos._texto(f"cuenta {partida} cerrada") == "cuenta [cuenta] cerrada"
     # Control: lo que no es una cuenta de 22 dígitos queda igual.
     assert pagos._texto(f"ref {cuenta[:21]} ok") == f"ref {cuenta[:21]} ok"
 

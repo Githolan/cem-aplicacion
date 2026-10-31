@@ -159,7 +159,7 @@ def _hoy(motor_migrate, e):
         return c.execute(text("select nucleo.hoy_del_consorcio(:c)"), {"c": e.cons}).scalar_one()
 
 
-def nueva_cuenta(motor_migrate, e, semilla: int) -> None:
+def nueva_cuenta(motor_migrate, e, semilla: int, por: UUID | None = None) -> None:
     """Versión 2 del proveedor de la escena con otra cuenta (como dueño de la base)."""
     with motor_migrate.begin() as c:
         c.execute(
@@ -169,7 +169,7 @@ def nueva_cuenta(motor_migrate, e, semilla: int) -> None:
                  " 'activo', :cta, nucleo.huella_proveedor(:p, 2, null,"
                  " 'Proveedor SINTETICO (NO REAL)', :cta), :q,"
                  " nucleo.identidad_humana_de(:c, :q))"),
-            {"c": e.cons, "p": e.proveedor, "cta": cbu_sintetico(semilla), "q": e.adm},
+            {"c": e.cons, "p": e.proveedor, "cta": cbu_sintetico(semilla), "q": por or e.adm},
         )  # fmt: skip
 
 
@@ -761,6 +761,8 @@ FUNCIONES_0052 = (
     "nucleo.registrar_contrato_proveedor(uuid, text, text, bigint, text, date, date, uuid, uuid,"
     " uuid, text, uuid)",
     "nucleo.contratos_proveedor_lectura(uuid, text, uuid, text, uuid)",
+    "nucleo.huella_proveedor(uuid, integer, text, text, text)",
+    "nucleo.confirmar_contrato_proveedor(uuid, bytea, uuid, text, uuid)",
 )
 
 
@@ -779,23 +781,25 @@ def _funciones_nuevas(motor) -> int:
         return c.execute(
             text("select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                  " where n.nspname = 'nucleo' and p.proname in ('ventana_fraccionamiento',"
-                 " 'documento_respalda')")
+                 " 'documento_respalda', 'exigir_no_cargo_la_cuenta_del_proveedor')")
         ).scalar_one()  # fmt: skip
 
 
 def test_0052_ida_y_vuelta(base_aparte):  # noqa: F811
-    """Sube cambiando las cuatro funciones y baja dejándolas idénticas a las de 0051."""
+    """Sube cambiando las seis funciones y baja dejándolas idénticas a las de 0051."""
     cfg, motor = base_aparte
     command.upgrade(cfg, "0051")
     antes = _definiciones(motor)
     assert _funciones_nuevas(motor) == 0
     command.upgrade(cfg, "0052")
     despues = _definiciones(motor)
-    assert _funciones_nuevas(motor) == 2
+    assert _funciones_nuevas(motor) == 3
     for f in FUNCIONES_0052:
         assert despues[f] != antes[f], f  # control: la subida cambió cada una
     assert "ventana_fraccionamiento()" in despues[FUNCIONES_0052[0]]
-    assert all("documento_respalda(" in despues[f] for f in FUNCIONES_0052[1:])
+    assert all("documento_respalda(" in despues[f] for f in FUNCIONES_0052[1:4])
+    assert "'sal', gen_random_uuid()" in despues[FUNCIONES_0052[4]]
+    assert "exigir_no_cargo_la_cuenta_del_proveedor(" in despues[FUNCIONES_0052[5]]
     command.downgrade(cfg, "0051")
     assert _definiciones(motor) == antes
     assert _funciones_nuevas(motor) == 0
@@ -825,3 +829,31 @@ def test_un_contrato_anterior_a_0052_sin_version_analizada_no_respalda(motor_mig
     niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k)
     niega(motor_migrate, e, e.adm, EMITIR, "contrato_no_vigente", orden=rutinaria, version=1)
     assert get(e, e.adm, "contratos").json()["elementos"][0]["estado"] == "documento_no_vigente"
+
+
+def test_quien_cargo_la_cuenta_del_proveedor_no_confirma_su_contrato(motor_migrate, motor_app, e):
+    """Revisión de seguridad de #175: confirmar un contrato reemplaza la aprobación de cada orden
+    rutinaria, así que quien cargó la cuenta vigente del proveedor no lo confirma, tampoco con
+    otra cuenta suya."""
+    nueva_cuenta(motor_migrate, e, 41, por=e.mc1)
+    k = contrato(motor_migrate, e)
+    h = huella_contrato(motor_migrate, k)
+    niega(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
+          huella_k=h)  # fmt: skip
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    niega(motor_migrate, e, otra, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
+          huella_k=h)  # fmt: skip
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, huella_k=h)  # control
+
+
+def test_la_revision_no_da_la_cuenta_a_otra_cuenta_de_quien_preparo(motor_migrate, motor_app, e):
+    """Revisión de seguridad de #175: la cuenta completa se niega por identidad humana, no por
+    cuenta. Quien preparó y revisa con otra cuenta suya ve solo los últimos dígitos."""
+    o = enviada(motor_migrate, e)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    revision = get(e, otra, f"ordenes-pago/{o}/revision")
+    assert revision.status_code == 200, revision.json()
+    assert {v["cuenta_destino"] for v in revision.json()["versiones"]} == {None}
+    # Control: otro ser humano del Consejo la ve entera.
+    control = get(e, e.mc1, f"ordenes-pago/{o}/revision").json()
+    assert None not in {v["cuenta_destino"] for v in control["versiones"]}

@@ -105,12 +105,82 @@ create function nucleo.ventana_fraccionamiento()
 comment on function nucleo.ventana_fraccionamiento() is
   'Parámetro técnico provisional (30-10-2026): cuánto hacia atrás suma la alerta de'
   ' fraccionamiento. No deniega nada.';
+
+-- La huella de una versión del proveedor lleva una sal al azar. Quien prepara la recibe junto con
+-- todo lo demás que entra en ella salvo la cuenta, y los últimos dígitos: sin sal, probar
+-- candidatos de CBU contra la huella devolvía la cuenta completa (revisión de seguridad de #175;
+-- también P3 92, la huella en los eventos). Se calcula una vez al crear la versión y se guarda;
+-- nada la recalcula.
+create or replace function nucleo.huella_proveedor(proveedor uuid, numero integer, cuit text,
+                                                   razon_social text, cuenta text)
+  returns bytea
+  language sql volatile
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select sha256(convert_to(jsonb_build_object(
+      'proveedor', proveedor, 'version', numero, 'cuit', cuit, 'razon_social', razon_social,
+      'cuenta_destino', cuenta, 'sal', gen_random_uuid())::text, 'UTF8'))
+  $$;
+
+-- Confirmar un contrato reemplaza la aprobación de cada orden rutinaria: quien cargó la cuenta
+-- vigente del proveedor (en esta o en una versión anterior con la misma cuenta) no lo confirma,
+-- como no aprueba un pago a esa cuenta (`exigir_no_cargo_la_cuenta`).
+create function nucleo.exigir_no_cargo_la_cuenta_del_proveedor(c uuid, proveedor uuid,
+                                                               actor uuid, identidad uuid)
+  returns void
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    f record;
+  begin
+    for f in
+      select distinct x.preparada_por, x.identidad_preparo
+        from nucleo.proveedor_version x
+       where x.consorcio_id = c and x.proveedor_id = proveedor
+         and x.cuenta_destino is not distinct from (
+           select v.cuenta_destino from nucleo.proveedor_version v
+            where v.consorcio_id = c and v.proveedor_id = proveedor
+            order by v.numero desc limit 1)
+    loop
+      if f.identidad_preparo = identidad then
+        raise exception 'quien cargó la cuenta del proveedor no confirma su contrato'
+          using errcode = 'P0001', hint = 'no_es_quien_cargo_la_cuenta';
+      end if;
+      perform nucleo.exigir_separacion_humana(c, actor, f.preparada_por,
+                                              'no_es_quien_cargo_la_cuenta');
+    end loop;
+  end
+  $$;
+revoke all on function nucleo.exigir_no_cargo_la_cuenta_del_proveedor(uuid, uuid, uuid, uuid)
+  from public;
 """
 
 DOWNGRADE_FINAL = """
+create or replace function nucleo.huella_proveedor(proveedor uuid, numero integer, cuit text,
+                                        razon_social text, cuenta text)
+  returns bytea
+  language sql immutable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select sha256(convert_to(jsonb_build_object(
+      'proveedor', proveedor, 'version', numero, 'cuit', cuit, 'razon_social', razon_social,
+      'cuenta_destino', cuenta)::text, 'UTF8'))
+  $$;
+drop function nucleo.exigir_no_cargo_la_cuenta_del_proveedor(uuid, uuid, uuid, uuid);
 drop function nucleo.ventana_fraccionamiento();
 drop function nucleo.documento_respalda(uuid, uuid);
 """
+
+CONFIRMAR = "nucleo.confirmar_contrato_proveedor(uuid, bytea, uuid, text, uuid)"
+SEPARACION = (
+    "    perform nucleo.exigir_separacion_humana(c, actor, k.registrado_por,"
+    " 'no_es_quien_registro');\n",
+)
+SEPARACION_Y_CUENTA = (
+    SEPARACION[0] + "    perform nucleo.exigir_no_cargo_la_cuenta_del_proveedor(c, k.proveedor_id,"
+    " actor, identidad);\n",
+)
 
 
 def _reemplazar(funcion: str, antes: tuple[str, ...], despues: tuple[str, ...]) -> None:
@@ -131,9 +201,11 @@ def upgrade() -> None:
     _reemplazar(EVALUAR, MES, VENTANA)
     for funcion, (antes, despues) in RESPALDO.items():
         _reemplazar(funcion, antes, despues)
+    _reemplazar(CONFIRMAR, SEPARACION, SEPARACION_Y_CUENTA)
 
 
 def downgrade() -> None:
+    _reemplazar(CONFIRMAR, SEPARACION_Y_CUENTA, SEPARACION)
     _reemplazar(EVALUAR, VENTANA, MES)
     for funcion, (antes, despues) in RESPALDO.items():
         _reemplazar(funcion, despues, antes)
