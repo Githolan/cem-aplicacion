@@ -14,14 +14,13 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from tests.conftest import verificar_en_el_consorcio
-from tests.test_egresos_1a import (  # noqa: F401  (`e` y `base_aparte` son fixtures)
+from tests.test_egresos_1a import (  # noqa: F401  (`base_aparte` es un fixture)
     CONFIRMAR_CONTRATO,
     _hoy,
     base_aparte,
-    conocido,
     confirmado,
+    conocido,
     contrato,
-    e,
     enviada,
     franja,
     visto,
@@ -29,7 +28,9 @@ from tests.test_egresos_1a import (  # noqa: F401  (`e` y `base_aparte` son fixt
 from tests.test_orden_pago_neutra import (
     PREPARAR,
     RAZON_SOCIAL,
+    Escena,
     cbu_sintetico,
+    escena_economica,
     llamar,
     niega,
     nuevo_proveedor,
@@ -37,6 +38,11 @@ from tests.test_orden_pago_neutra import (
 )
 from tests.test_rutas_egresos import get
 from tests.test_vinculo_0014 import _consorcio_y_unidad, _persona
+
+
+@pytest.fixture
+def e(motor_migrate, motor_app) -> Escena:
+    return escena_economica(motor_migrate, motor_app)
 
 
 def version(motor_migrate, e, numero: int, cuenta: str, por: UUID, razon=RAZON_SOCIAL) -> None:
@@ -60,7 +66,7 @@ def leido(e) -> dict:
 def vigente(motor_migrate, e, k) -> bool:
     with motor_migrate.connect() as c:
         return c.execute(
-            text("select nucleo.contrato_vigente(:c, :k, :hoy) is not null"),
+            text("select nucleo.contrato_vigente(:c, :k, :hoy)"),
             {"c": e.cons, "k": k, "hoy": _hoy(motor_migrate, e)},
         ).scalar_one()
 
@@ -104,7 +110,7 @@ def test_cambiar_la_cuenta_obliga_a_reconfirmar_sobre_la_version_nueva(motor_mig
 
     assert vigente(motor_migrate, e, k)
     assert leido(e)["estado"] == "vigente"
-    # Vuelve a respaldar; la franja es la de la cuenta recién cambiada, que va antes que el contrato.
+    # Vuelve a respaldar; la franja es la de la cuenta recién cambiada, que gana al contrato.
     assert franja(motor_migrate, enviada(motor_migrate, e, contrato=k)) == "cuenta_cambiada"
     # La historia no se toca: la confirmación de la versión 1 sigue, con quien la hizo.
     assert confirmaciones(motor_migrate, k) == [(1, e.mc1), (2, e.mc2)]
@@ -149,9 +155,7 @@ CONFIRMAR_0053 = "nucleo.confirmar_contrato_proveedor(uuid, bytea, integer, uuid
 def _estado(motor) -> dict:
     with motor.connect() as c:
         defs = {
-            f: c.execute(
-                text("select pg_get_functiondef(to_regprocedure(:f))"), {"f": f}
-            ).scalar()
+            f: c.execute(text("select pg_get_functiondef(to_regprocedure(:f))"), {"f": f}).scalar()
             for f in (*FUNCIONES_0053, CONFIRMAR_0052, CONFIRMAR_0053)
         }
         defs["columnas"] = c.execute(
@@ -161,7 +165,8 @@ def _estado(motor) -> dict:
         ).scalar_one()  # fmt: skip
         defs["permisos"] = c.execute(
             text("select string_agg(p.oid::regprocedure::text || '=' ||"
-                 " has_function_privilege('cem_app', p.oid, 'EXECUTE'), ',' order by 1)"
+                 " has_function_privilege('cem_app', p.oid, 'EXECUTE'), ','"
+                 " order by p.oid::regprocedure::text)"
                  " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                  " where n.nspname = 'nucleo' and p.proname in ('confirmar_contrato_proveedor',"
                  " 'contratos_proveedor_lectura', 'confirmacion_vale')")

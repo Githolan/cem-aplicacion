@@ -70,8 +70,8 @@ from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
 from pypdf import PdfWriter
 from sqlalchemy import Engine, text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from app.config import cargar
 from app.consorcios import pagos
@@ -700,8 +700,10 @@ def recorrer_ordenes(corrida: Corrida) -> None:
     [despues] = [x for x in adm.pedir("GET", corrida.c("/contratos")).cuerpo["elementos"]
                  if x["id"] == k]  # fmt: skip
     comprobar(despues["estado"] == "vigente", f"el abono vuelve a regir: {despues}")
-    corrida.ok("cambio de cuenta: abono pendiente, 422 al usarlo, 409 con la versión vieja, "
-               "reconfirmado por el Consejo sobre la nueva")
+    corrida.ok(
+        "cambio de cuenta: abono pendiente, 422 al usarlo, 409 con la versión vieja, "
+        "reconfirmado por el Consejo sobre la nueva"
+    )
 
 
 def comprobar_fin(corrida: Corrida, inicio) -> None:

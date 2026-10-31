@@ -756,16 +756,24 @@
       },
       "Confirmacion": {
         "additionalProperties": false,
-        "description": "`POST …/contratos/{id}/confirmacion`: la huella del contrato que se vio.",
+        "description": "`POST …/contratos/{id}/confirmacion`: la huella del contrato y la versión del proveedor que\nse vieron. Si el proveedor tiene otra versión vigente, 409 `proveedor_cambiado`.",
         "properties": {
           "huella": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Huella",
             "type": "string"
+          },
+          "proveedor_version": {
+            "description": "La versión vigente del proveedor que se vio (`Contrato.proveedor_version`).",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Proveedor Version",
+            "type": "integer"
           }
         },
         "required": [
-          "huella"
+          "huella",
+          "proveedor_version"
         ],
         "title": "Confirmacion",
         "type": "object"
@@ -1267,6 +1275,18 @@
             "title": "Creado En",
             "type": "string"
           },
+          "cuenta_ultimos_digitos": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Los últimos dígitos de la cuenta de esa versión.",
+            "title": "Cuenta Ultimos Digitos"
+          },
           "decision_id": {
             "anyOf": [
               {
@@ -1308,6 +1328,11 @@
             "format": "uuid",
             "title": "Proveedor Id",
             "type": "string"
+          },
+          "proveedor_version": {
+            "description": "La versión vigente del proveedor.",
+            "title": "Proveedor Version",
+            "type": "integer"
           },
           "razon_social": {
             "description": "La de la versión vigente del proveedor.",
@@ -1351,7 +1376,9 @@
           "confirmado_por",
           "confirmado_en",
           "baja_en",
-          "estado"
+          "estado",
+          "proveedor_version",
+          "cuenta_ultimos_digitos"
         ],
         "title": "Contrato",
         "type": "object"
@@ -2109,7 +2136,8 @@
           "vigente",
           "vencido",
           "dado_de_baja",
-          "documento_no_vigente"
+          "documento_no_vigente",
+          "pendiente_reconfirmacion"
         ],
         "title": "EstadoContrato",
         "type": "string"

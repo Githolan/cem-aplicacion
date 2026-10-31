@@ -129,6 +129,8 @@ function contrato(id: string, extra: Partial<Contrato> = {}): Contrato {
     confirmado_en: "2026-10-02T12:00:00Z",
     baja_en: null,
     estado: "vigente",
+    proveedor_version: 1,
+    cuenta_ultimos_digitos: "0012",
     ...extra,
   };
 }

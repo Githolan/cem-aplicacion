@@ -238,9 +238,11 @@ def test_cuenta_cambiada_pide_aprobacion_bajo_y_sobre_el_umbral(motor_migrate, m
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 10)
     # Declarar un contrato confirmado del proveedor tampoco la hace rutinaria: la cuenta cambiada
-    # gana.
+    # gana. Desde 0053 el contrato hay que confirmarlo de nuevo sobre la cuenta nueva (P3 112).
     k = confirmado(motor_migrate, e, tope=IMPORTE * 100)
     nueva_cuenta(motor_migrate, e, 77)
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", importe=importe, contrato=k)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, **visto(motor_migrate, k))
     o = enviada(motor_migrate, e, importe=importe, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "cuenta_cambiada", "en_revision")  # fmt: skip

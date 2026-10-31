@@ -13,8 +13,8 @@ Cómo:
 - cada confirmación guarda la versión del proveedor sobre la que se hizo (`proveedor_version`). Las
   ya existentes toman la versión vigente en el momento en que se confirmaron, que la historia del
   proveedor permite saber sin suponer nada;
-- `nucleo.confirmacion_vale` dice si alguna confirmación del contrato sigue valiendo: la cuenta de
-  su versión es la de todas las versiones posteriores. Un cambio de cuenta, aunque después vuelva a la
+- `nucleo.confirmacion_vale` dice si alguna confirmación del contrato sigue valiendo: la cuenta
+  de su versión es la de todas las versiones posteriores. Un cambio de cuenta, aunque vuelva a la
   anterior, la deja sin efecto;
 - `contrato_vigente` (lo rutinario y la emisión) lo exige; la lectura devuelve
   `pendiente_reconfirmacion`, la versión vigente del proveedor y los últimos dígitos de su cuenta;
