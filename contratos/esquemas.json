@@ -949,7 +949,17 @@
           "proveedor_sin_cuenta",
           "no_es_quien_aprobo",
           "no_es_quien_registro",
-          "fecha_invalida"
+          "fecha_invalida",
+          "modalidad_riel",
+          "pago_ya_registrado",
+          "numero_operacion_invalido",
+          "no_coincide_con_la_orden",
+          "fecha_operacion_invalida",
+          "comprobante_invalido",
+          "comprobante_de_otra_orden",
+          "operacion_de_otra_orden",
+          "conciliacion_repetida",
+          "no_es_quien_ejecuto"
         ],
         "title": "CodigoError",
         "type": "string"

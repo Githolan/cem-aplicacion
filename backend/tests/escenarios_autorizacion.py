@@ -219,7 +219,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
         "emitio", "decision", "respaldo", "actor", "sin_identidad", "misma_identidad",
-        "controles",
+        "controles", "ejecuto",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -259,6 +259,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
         registrado_por=persona("registrado"),
         registrado_por_soporte=valores.get("registrado") == "soporte",
         emitido_por=persona("emitio"),
+        ejecutado_por=persona("ejecuto"),
         decision_registrada_por=persona("decision"),
         decision_del_equipo=valores.get("decision") == "equipo",
         sin_decision=valores.get("decision") == "ninguna",

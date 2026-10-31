@@ -96,6 +96,7 @@ TODO_PASA = Entidad(
     persona_objetivo=OTRO,
     registrado_por=OTRO,
     emitido_por=OTRO,
+    ejecutado_por=OTRO,
     decision_registrada_por=OTRO,
     respaldo_presente=True,
 )
@@ -326,8 +327,9 @@ def test_las_acciones_de_la_tabla():
     # del mandato pendiente (E62), la historia de modos (RF41-C, 2b-6b), las 2 de la auditoría
     # (RF35-B, 2b-6c), las 2 de la lectura de coeficientes (RF05) y las 2 de documentos de 2c-2
     # (`documentos.ver_restringidos` y `documentos.cargar_operativos`) y la lectura de la revisión
-    # de órdenes de pago (`egresos.revisar_orden`, H3)
-    assert len(POLITICAS) == 49
+    # de órdenes de pago (`egresos.revisar_orden`, H3) y la conciliación del pago manual
+    # (`egresos.conciliar_pago`, 0055)
+    assert len(POLITICAS) == 50
 
 
 def _archivo(tmp_path, nombre, politicas):

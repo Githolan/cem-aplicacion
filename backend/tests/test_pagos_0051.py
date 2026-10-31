@@ -93,7 +93,15 @@ def correr(motor_migrate, motor_app, tipo: str, cons: UUID) -> list[dict]:
     return salidas
 
 
+def habilitar_riel(motor_migrate, cons: UUID) -> None:
+    """El consorcio paga por el riel (`0055`): sin esto, la emisión crea una ejecución manual."""
+    with motor_migrate.begin() as c:
+        c.execute(text("insert into nucleo.riel_de_pago_habilitado (consorcio_id) values (:c)"
+                       " on conflict do nothing"), {"c": cons})  # fmt: skip
+
+
 def emitida(motor_migrate, e) -> UUID:
+    habilitar_riel(motor_migrate, e.cons)
     o = aprobada(motor_migrate, e)
     llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=1)
     return o

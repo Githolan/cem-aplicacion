@@ -54,6 +54,9 @@ class CodigoSeparacion(StrEnum):
     NO_ES_QUIEN_PREPARO = "no_es_quien_preparo"
     NO_ES_QUIEN_APROBO = "no_es_quien_aprobo"
     """Quien ejecuta es una persona distinta de todos los aprobadores (A5)."""
+    NO_ES_QUIEN_EJECUTO = "no_es_quien_ejecuto"
+    """Quien concilia un pago manual no es quien lo registró, ni quien confirma que no se hizo es
+    quien lo declaró (`0055`)."""
     NO_ES_QUIEN_SOLICITO = "no_es_quien_solicito"
     NO_ES_QUIEN_PROPUSO = "no_es_quien_propuso"
     FIRMA_REPETIDA = "firma_repetida"

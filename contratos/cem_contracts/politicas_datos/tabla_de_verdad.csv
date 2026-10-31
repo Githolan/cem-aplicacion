@@ -459,3 +459,9 @@ H3,egresos.revisar_orden,Fac(egresos.preparar_orden),AA,,vigente,si,,403,sin_con
 H3,egresos.revisar_orden,Fac(egresos.aprobar_orden),C,,vigente,si,,403,modo_no_admitido,en Consejo la plataforma no tiene egresos
 H3,egresos.revisar_orden,AD,AA,,vigente,si,,403,sin_concesion,el administrador no lee la revisión: egresos.aprobar_orden es solo del Consejo (P3 81)
 H3,egresos.revisar_orden,MC,AA,,vigente,si,,200,concedido_por_facultad,el miembro del Consejo la recibe con su paquete (0046)
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro;ejecuto=otro,200,concedido_por_facultad,otro miembro del Consejo concilia el pago manual que registró quien ejecutó (31-10)
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro;ejecuto=yo,403,no_es_quien_ejecuto,quien registró el pago no lo concilia: sería autovalidarse
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro2;ejecuto=otro;misma_identidad=otro,403,no_es_quien_ejecuto,la misma persona con otra cuenta tampoco concilia lo que registró (A13-C)
+H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=yo;ejecuto=otro,403,no_es_quien_preparo,quien preparó la orden no concilia su pago
+H3,egresos.conciliar_pago,AD,AA,,vigente,si,preparo=otro;ejecuto=otro,403,sin_concesion,el administrador no concilia: egresos.aprobar_orden es solo del Consejo
+H3,egresos.conciliar_pago,MC,C,,vigente,si,preparo=otro;ejecuto=otro,403,modo_no_admitido,en Consejo la plataforma no tiene egresos

@@ -171,6 +171,8 @@ class Entidad:
     un `registrado_por` nulo sin este dato es un dato que falta y niega."""
     emitido_por: UUID | None = None
     """Quien emitió la invitación de mandato que se aprueba (A7, cuatro ojos)."""
+    ejecutado_por: UUID | None = None
+    """Quien registró el pago manual que se concilia, o declaró que no se hizo (`0055`)."""
     decision_registrada_por: UUID | None = None
     """Quien registró la decisión con que se da de alta o se remueve (A15)."""
     decision_del_equipo: bool = False
@@ -321,6 +323,8 @@ def _separacion(
             ):
                 return None
             otras = (entidad.decision_registrada_por,)
+        case CodigoSeparacion.NO_ES_QUIEN_EJECUTO:
+            otras = (entidad.ejecutado_por,)
         case CodigoSeparacion.NO_ES_QUIEN_APROBO:
             # Distinta de todos los aprobadores (A5).
             otras = entidad.aprobado_por
