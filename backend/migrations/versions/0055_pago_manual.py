@@ -843,7 +843,7 @@ create function nucleo.pagos_manuales_lectura(orden uuid, facultad text, actor u
         join nucleo.ejecucion_orden_pago e on e.consorcio_id = c and e.id = p.ejecucion_id
         left join nucleo.conciliacion_pago_manual k on k.pago_id = p.id
        where p.consorcio_id = c and (orden is null or e.orden_id = orden)
-       order by p.registrado_en, p.id;
+       order by p.paso;
   end
   $$;
 
@@ -851,7 +851,8 @@ create function nucleo.declaraciones_pago_no_realizado_lectura(orden uuid, facul
                                                                actor uuid, origen_pedido text,
                                                                sesion uuid)
   returns table (id uuid, ejecucion_id uuid, orden_id uuid, motivo text, declarado_por uuid,
-                 declarado_en timestamptz, confirmado_por uuid, confirmado_en timestamptz)
+                 declarado_en timestamptz, confirmado_por uuid, confirmado_en timestamptz,
+                 confirmable boolean)
   language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -861,12 +862,26 @@ create function nucleo.declaraciones_pago_no_realizado_lectura(orden uuid, facul
     perform nucleo.exigir_lectura_egresos(c, facultad, actor, origen_pedido, sesion);
     return query
       select d.id, d.ejecucion_id, e.orden_id, d.motivo, d.declarado_por, d.declarado_en,
-             f.confirmado_por, f.confirmado_en
+             f.confirmado_por, f.confirmado_en,
+             -- Lo que exige `confirmar_pago_no_realizado` sobre el orden de los hechos (el
+             -- paso, no el reloj): nadie vio la cuenta ni registró después, y cada persona que
+             -- la vio declaró después de su última apertura.
+             f.id is null
+             and not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                              where a.ejecucion_id = d.ejecucion_id and a.paso > d.paso)
+             and not exists (select 1 from nucleo.pago_manual x
+                              where x.ejecucion_id = d.ejecucion_id and x.paso > d.paso)
+             and not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                              where a.ejecucion_id = d.ejecucion_id
+                                and not exists (select 1 from nucleo.declaracion_pago_no_realizado y
+                                                 where y.ejecucion_id = d.ejecucion_id
+                                                   and y.identidad_declaro = a.identidad_abrio
+                                                   and y.paso > a.paso))
         from nucleo.declaracion_pago_no_realizado d
         join nucleo.ejecucion_orden_pago e on e.consorcio_id = c and e.id = d.ejecucion_id
         left join nucleo.confirmacion_pago_no_realizado f on f.declaracion_id = d.id
        where d.consorcio_id = c and (orden is null or e.orden_id = orden)
-       order by d.declarado_en, d.id;
+       order by d.paso;
   end
   $$;
 """

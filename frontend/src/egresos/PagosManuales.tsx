@@ -75,7 +75,8 @@ export function situacion(c: ConPago): string {
   if (orden.estado === "fallida") return "No se pagó (confirmado por el Consejo)";
   const ultimo = ejecucion.pagos.at(-1);
   if (ultimo === undefined) return "Lista para pagar";
-  if (ultimo.conciliacion === "observado") return "Pago observado: registrá de nuevo con el comprobante correcto";
+  if (ultimo.conciliacion === "observado")
+    return `Pago observado por el Consejo: ${ultimo.motivo_conciliacion ?? "sin motivo"}. Registralo de nuevo corregido.`;
   return "Pago registrado: pendiente de conciliación";
 }
 

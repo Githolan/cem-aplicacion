@@ -44,16 +44,13 @@ export function porConciliar(c: ConPago): Pago | undefined {
   return c.orden.estado === "en_verificacion" && ultimo !== undefined && ultimo.conciliacion === null ? ultimo : undefined;
 }
 
-/** La última declaración de «no se pagó» sin confirmar, si no hay un pago vigente y nadie registró
- * un pago después de ella (un registro posterior la deja superada; el backend también lo niega si
- * después alguien vio la cuenta). */
+/** La última declaración de «no se pagó» que el Consejo puede confirmar hoy. `confirmable` lo
+ * calcula el backend con el orden real de los hechos (nadie vio la cuenta ni registró después, y
+ * cada persona que la vio declaró), no con la hora. */
 export function porConfirmar(c: ConPago): Declaracion | undefined {
   if (c.orden.estado !== "en_ejecucion" && c.orden.estado !== "en_verificacion") return undefined;
   if (porConciliar(c) !== undefined) return undefined;
-  const ultima = c.ejecucion.declaraciones.at(-1);
-  if (ultima === undefined || ultima.confirmado_por !== null) return undefined;
-  const registro = c.ejecucion.pagos.at(-1);
-  return registro === undefined || Date.parse(registro.registrado_en) < Date.parse(ultima.declarado_en) ? ultima : undefined;
+  return c.ejecucion.declaraciones.filter((d) => d.confirmable).at(-1);
 }
 
 function descarga(consorcio: string, pago: Pago): string {

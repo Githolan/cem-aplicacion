@@ -725,6 +725,10 @@ class PagoNoRealizado(BaseModel):
     declarado_en: datetime
     confirmado_por: UUID | None
     confirmado_en: datetime | None
+    confirmable: bool = Field(
+        description="Si el Consejo puede confirmarla hoy: nadie vio la cuenta ni registró un pago"
+        " después, y cada persona que vio la cuenta declaró después de su última apertura."
+    )
 
 
 class EjecucionManual(BaseModel):

@@ -5149,6 +5149,11 @@
       },
       "PagoNoRealizado": {
         "properties": {
+          "confirmable": {
+            "description": "Si el Consejo puede confirmarla hoy: nadie vio la cuenta ni registró un pago después, y cada persona que vio la cuenta declaró después de su última apertura.",
+            "title": "Confirmable",
+            "type": "boolean"
+          },
           "confirmado_en": {
             "anyOf": [
               {
@@ -5199,7 +5204,8 @@
           "declarado_por",
           "declarado_en",
           "confirmado_por",
-          "confirmado_en"
+          "confirmado_en",
+          "confirmable"
         ],
         "title": "PagoNoRealizado",
         "type": "object"

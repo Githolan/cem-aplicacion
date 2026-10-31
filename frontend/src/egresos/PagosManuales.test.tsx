@@ -219,8 +219,9 @@ describe("lo común del pago manual", () => {
     expect(porPagar(conPago("en_ejecucion"))).toBe(true);
     expect(situacion(conPago("en_verificacion", [pago()]))).toBe("Pago registrado: pendiente de conciliación");
     expect(porPagar(conPago("en_verificacion", [pago()]))).toBe(false);
-    const observado = conPago("en_verificacion", [pago({ conciliacion: "observado" })]);
+    const observado = conPago("en_verificacion", [pago({ conciliacion: "observado", motivo_conciliacion: "La fecha no coincide" })]);
     expect(porPagar(observado)).toBe(true);
+    expect(situacion(observado)).toContain("La fecha no coincide");
     expect(situacion(conPago("pagada", [pago({ conciliacion: "conforme" })], { referencia: "0001234567" }))).toBe(
       "Pagada (operación 0001234567)",
     );
@@ -243,20 +244,17 @@ describe("lo común del pago manual", () => {
     const declarada = conPago("en_ejecucion", [], {
       declaraciones: [
         { id: DECL, motivo: "Rechazo del banco", declarado_por: PERSONA, declarado_en: "2026-10-31T14:00:00Z",
-          confirmado_por: null, confirmado_en: null },
+          confirmado_por: null, confirmado_en: null, confirmable: true },
       ],
     });
     expect(porConfirmar(declarada)?.id).toBe(DECL);
     expect(porConfirmar({ ...declarada, ejecucion: { ...declarada.ejecucion, pagos: [pago()] }, orden: orden({ estado: "en_verificacion" }) })).toBeUndefined();
-    // Un registro posterior (aunque lo observen) deja superada la declaración: no se ofrece.
-    const superada = conPago("en_verificacion", [pago({ conciliacion: "observado", registrado_en: "2026-10-31T15:00:00Z" })], {
-      declaraciones: declarada.ejecucion.declaraciones,
-    });
+    // Lo decide `confirmable` (el orden real de los hechos, calculado por el backend), no la hora.
+    const [d] = declarada.ejecucion.declaraciones;
+    const observado = [pago({ conciliacion: "observado", registrado_en: "2026-10-31T15:00:00Z" })];
+    const superada = conPago("en_verificacion", observado, { declaraciones: [{ ...d!, confirmable: false }] });
     expect(porConfirmar(superada)).toBeUndefined();
-    // Una declaración hecha después del registro observado, sí.
-    const posterior = conPago("en_verificacion", [pago({ conciliacion: "observado", registrado_en: "2026-10-31T13:00:00Z" })], {
-      declaraciones: declarada.ejecucion.declaraciones,
-    });
+    const posterior = conPago("en_verificacion", observado, { declaraciones: [{ ...d!, confirmable: true }] });
     expect(porConfirmar(posterior)?.id).toBe(DECL);
   });
 });
@@ -484,7 +482,7 @@ describe("conciliación de pagos", () => {
     const declarada = conPago("en_ejecucion", [], {
       declaraciones: [
         { id: DECL, motivo: "Rechazo del banco", declarado_por: PERSONA, declarado_en: "2026-10-31T14:00:00Z",
-          confirmado_por: null, confirmado_en: null },
+          confirmado_por: null, confirmado_en: null, confirmable: true },
       ],
     });
     const api = backend({

@@ -186,6 +186,13 @@ def pagos_de(motor_migrate, o) -> list[dict]:
         ).mappings()]  # fmt: skip
 
 
+def confirmables(e, o) -> dict[str, bool]:
+    """Lo que la revisión del Consejo dice que puede confirmar, por declaración."""
+    elementos = get(e, e.mc1, "pagos-manuales/revision").json()["elementos"]
+    [elemento] = [x for x in elementos if x["orden"]["id"] == str(o)]
+    return {d["id"]: d["confirmable"] for d in elemento["ejecucion"]["declaraciones"]}
+
+
 # El caso del piloto, de punta a punta por HTTP ---------------------------------------------
 
 
@@ -599,20 +606,25 @@ def test_el_registro_vigente_es_el_ultimo_de_la_cadena_no_el_mas_nuevo(motor_mig
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p1, resultado="observado",
            motivo="SINTETICO: el comprobante no se lee")  # fmt: skip
     with motor_migrate.begin() as c:
-        c.execute(
+        p2 = c.execute(
             text("insert into nucleo.pago_manual (consorcio_id, ejecucion_id, corrige_a,"
                  " numero_operacion, fecha_operacion, importe_centavos, moneda, documento_id,"
                  " version_documento_id, registrado_por, identidad_registro, registrado_en)"
                  " select consorcio_id, ejecucion_id, id, numero_operacion, fecha_operacion,"
                  " importe_centavos, moneda, documento_id, version_documento_id,"
                  " registrado_por, identidad_registro, registrado_en - interval '1 minute'"
-                 " from nucleo.pago_manual where id = :p"),
+                 " from nucleo.pago_manual where id = :p returning id"),
             {"p": p1},
-        )  # fmt: skip
+        ).scalar_one()  # fmt: skip
     niega(motor_migrate, e, e.adm, VER, "pago_ya_registrado", orden=o, version=1,
           huella=huella(motor_migrate, o, 1))  # fmt: skip
     niega(motor_migrate, e, e.adm, DECLARAR, "pago_ya_registrado", orden=o, version=1,
           motivo="SINTETICO")  # fmt: skip
+    # La lectura también sigue el orden de los hechos: la corrección va última (la que mira la
+    # pantalla), aunque su marca de hora sea anterior.
+    for ruta, quien in (("pagos-manuales", e.adm), ("pagos-manuales/revision", e.mc1)):
+        [elemento] = get(e, quien, ruta).json()["elementos"]
+        assert [p["id"] for p in elemento["ejecucion"]["pagos"]] == [str(p1), str(p2)], ruta
 
 
 # La conciliación -----------------------------------------------------------------------------
@@ -839,7 +851,9 @@ def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
     ver(motor_migrate, e, x, o)
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
-    llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o) == {str(d): False}  # la pantalla del Consejo no la ofrece
+    dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o) == {str(d): True, str(dx): True}
     llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
