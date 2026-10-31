@@ -51,6 +51,7 @@ cierra (sesiones y mandatos).
 
 import argparse
 import base64
+import io
 import json
 import os
 import ssl
@@ -67,6 +68,7 @@ from uuid import UUID, uuid4
 
 from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
+from pypdf import PdfWriter
 from sqlalchemy import Engine, text
 from sqlalchemy.engine import make_url
 
@@ -89,7 +91,6 @@ IP_DE_PRUEBA = "198.51.100.78"
 UMBRAL_CENTAVOS = 10_000_000
 """El umbral sintético del consorcio LAB: 100.000,00 ARS."""
 ESPERA_ANTIVIRUS_S = 120
-PDF_SINTETICO = b"%PDF-1.7\n% CEM LAB SINTETICO NO REAL\n" + bytes(range(256)) * 4
 PESOS_1 = (7, 1, 3, 9, 7, 1, 3)
 PESOS_2 = (3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3)
 
@@ -109,6 +110,18 @@ def comprobar(condicion: bool, que: str) -> None:
 
 def _digito(cifras: str, pesos: tuple[int, ...]) -> str:
     return str((10 - sum(int(c) * p for c, p in zip(cifras, pesos, strict=True)) % 10) % 10)
+
+
+def pdf_sintetico(corrida_id: str) -> bytes:
+    """Un PDF válido de una página en blanco, sin contenido activo: el analizador de documentos
+    lo lee con pypdf y lo rechaza si no puede (`pdf_mal_formado`). Único por corrida, así el
+    antivirus y el almacenamiento lo ven como un archivo nuevo."""
+    w = PdfWriter()
+    w.add_blank_page(width=595, height=842)
+    w.add_metadata({"/Title": f"CEM LAB {corrida_id} SINTETICO (NO REAL)"})
+    salida = io.BytesIO()
+    w.write(salida)
+    return salida.getvalue()
 
 
 def cbu_sintetico(n: int) -> str:
@@ -392,7 +405,8 @@ def documento_vigente(corrida: Corrida) -> str:
                    "fecha": time.strftime("%Y-%m-%d")}, csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"crear el documento: {r.texto}")
     doc = r.cuerpo["id"]
-    r = adm.pedir("POST", corrida.c(f"/documentos/{doc}/versiones"), crudo=PDF_SINTETICO,
+    r = adm.pedir("POST", corrida.c(f"/documentos/{doc}/versiones"),
+                  crudo=pdf_sintetico(corrida.id),
                   tipo="application/pdf", csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado in (201, 202), f"subir la versión: {r.texto}")
     # Desde 0052 un contrato solo se respalda en una versión que pasó el antivirus. Se la espera
@@ -475,8 +489,13 @@ def vigente(detalle: dict) -> dict:
     )
 
 
+LECTOR_REVISION = "consejo1"
+"""Quien lee la versión y su huella para armar una aprobación. No es siempre quien la intenta:
+la administración no lee la revisión (403), y consejo2 todavía no tiene el segundo factor."""
+
+
 def aprobar(corrida: Corrida, rol: str, o: str, clave: str | None = None) -> Respuesta:
-    v = vigente(ficha(corrida, rol, o, revision=True))
+    v = vigente(ficha(corrida, LECTOR_REVISION, o, revision=True))
     return corrida.n(rol).pedir("POST", corrida.c(f"/ordenes-pago/{o}/aprobaciones"),
                                 {"version": v["numero"], "huella": v["huella"]}, csrf=True,
                                 clave=clave or str(uuid4()))  # fmt: skip
