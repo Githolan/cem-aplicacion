@@ -134,6 +134,9 @@ create function nucleo.exigir_no_cargo_la_cuenta_del_proveedor(c uuid, proveedor
   declare
     f record;
   begin
+    -- FOR SHARE sobre el proveedor: una versión nueva concurrente (FOR UPDATE) espera, y la
+    -- cuenta que se mira es la que queda vigente al confirmar.
+    perform nucleo.proveedor_vigente(c, proveedor);
     for f in
       select distinct x.preparada_por, x.identidad_preparo
         from nucleo.proveedor_version x
