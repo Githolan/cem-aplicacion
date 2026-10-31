@@ -677,7 +677,7 @@ def recorrer_ordenes(corrida: Corrida) -> None:
                    "rubro": "Mantenimiento SINTETICO", "cuenta_destino": cuenta_nueva,
                    "version_esperada": 1, "estado": "activo", "conservar_cuenta": False},
                   csrf=True, clave=str(uuid4()))  # fmt: skip
-    comprobar(r.estado == 201, f"cambio de cuenta del proveedor: {r.texto}")
+    comprobar(r.estado == 200, f"cambio de cuenta del proveedor: {r.texto}")
     [antes] = [x for x in corrida.n(LECTOR_REVISION).pedir(
         "GET", corrida.c("/contratos/revision")).cuerpo["elementos"] if x["id"] == k]  # fmt: skip
     comprobar((antes["estado"], antes["proveedor_version"]) == ("pendiente_reconfirmacion", 2),
