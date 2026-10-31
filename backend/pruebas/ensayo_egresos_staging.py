@@ -441,13 +441,16 @@ def abono_confirmado(corrida: Corrida, p: str, doc: str, tope: int) -> str:
                    "documento_id": doc}, csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"registrar el abono: {r.texto}")
     k = r.cuerpo["id"]
-    r = adm.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"), {"huella": "0" * 64},
-                  csrf=True, clave=str(uuid4()))  # fmt: skip
+    r = adm.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"),
+                  {"huella": "0" * 64, "proveedor_version": 1}, csrf=True,
+                  clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 403, f"quien registró no confirma (sin la facultad): {r.texto}")
     revision = mc1.pedir("GET", corrida.c("/contratos/revision"))
     [visto] = [x for x in revision.cuerpo["elementos"] if x["id"] == k]
     comprobar(visto["estado"] == "pendiente_confirmacion", f"pendiente: {visto}")
-    r = mc1.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"), {"huella": visto["huella"]},
+    # Desde 0053 la confirmación es de la versión del proveedor que se vio (P3 112).
+    r = mc1.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"),
+                  {"huella": visto["huella"], "proveedor_version": visto["proveedor_version"]},
                   csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"el consejero confirma el abono: {r.texto}")
     [vigente] = [x for x in adm.pedir("GET", corrida.c("/contratos")).cuerpo["elementos"]
@@ -648,6 +651,43 @@ def recorrer_ordenes(corrida: Corrida) -> None:
     )
     ejecucion(corrida, o4)  # exactamente una
     corrida.ok(f"cuatro emisiones concurrentes (dos claves iguales): un solo efecto {estados}")
+
+    # 5. Cambio de cuenta del proveedor con el abono confirmado (0053, P3 112): el abono deja de
+    # regir hasta que otro ser humano lo confirme sobre la versión nueva.
+    cuenta_nueva = cbu_sintetico(int(corrida.id, 16) % 10**9 + 7)
+    corrida.cuentas.append(cuenta_nueva)
+    r = adm.pedir("POST", corrida.c(f"/proveedores/{p1}/versiones"),
+                  {"razon_social": f"Proveedor LAB {corrida.id}-1 SINTETICO (NO REAL)",
+                   "rubro": "Mantenimiento SINTETICO", "cuenta_destino": cuenta_nueva,
+                   "version_esperada": 1, "estado": "activo", "conservar_cuenta": False},
+                  csrf=True, clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 201, f"cambio de cuenta del proveedor: {r.texto}")
+    [antes] = [x for x in corrida.n(LECTOR_REVISION).pedir(
+        "GET", corrida.c("/contratos/revision")).cuerpo["elementos"] if x["id"] == k]  # fmt: skip
+    comprobar((antes["estado"], antes["proveedor_version"]) == ("pendiente_reconfirmacion", 2),
+              f"el abono queda pendiente de reconfirmar: {antes}")  # fmt: skip
+    r = adm.pedir("POST", corrida.c("/ordenes-pago"),
+                  {"proveedor_id": p1, "importe_centavos": 1_000_000, "moneda": "ARS",
+                   "concepto": f"SINTETICO {corrida.id}: abono sin reconfirmar (NO REAL)",
+                   "comprobante": f"Factura TEST-{corrida.id}-C", "usa_fondo_reserva": False,
+                   "contrato_id": k}, csrf=True, clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 422 and r.codigo() == "contrato_no_aplica",
+              f"sin reconfirmar no respalda una orden: {r.texto}")  # fmt: skip
+    consejo1 = corrida.n(LECTOR_REVISION)
+    r = consejo1.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"),
+                       {"huella": antes["huella"], "proveedor_version": 1}, csrf=True,
+                       clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 409 and r.codigo() == "proveedor_cambiado",
+              f"la versión vieja del proveedor se niega: {r.texto}")  # fmt: skip
+    r = consejo1.pedir("POST", corrida.c(f"/contratos/{k}/confirmacion"),
+                       {"huella": antes["huella"], "proveedor_version": 2}, csrf=True,
+                       clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 201, f"el Consejo reconfirma sobre la versión nueva: {r.texto}")
+    [despues] = [x for x in adm.pedir("GET", corrida.c("/contratos")).cuerpo["elementos"]
+                 if x["id"] == k]  # fmt: skip
+    comprobar(despues["estado"] == "vigente", f"el abono vuelve a regir: {despues}")
+    corrida.ok("cambio de cuenta: abono pendiente, 422 al usarlo, 409 con la versión vieja, "
+               "reconfirmado por el Consejo sobre la nueva")
 
 
 def comprobar_fin(corrida: Corrida, inicio) -> None:

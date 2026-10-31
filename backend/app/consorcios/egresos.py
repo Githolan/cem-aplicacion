@@ -186,6 +186,15 @@ ERRORES = {
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de
 R10 pueden llegar si la sesión venció entre el evaluador y la base."""
 
+ERRORES_CONFIRMACION = {
+    "proveedor_cambiado": (
+        409, CodigoError.PROVEEDOR_CAMBIADO,
+        "El proveedor cambió desde que viste el contrato: recargá y confirmá la versión nueva.",
+    ),
+}  # fmt: skip
+"""Al confirmar un contrato, `proveedor_cambiado` es que se vio otra versión del proveedor
+(`0053`), no una orden preparada."""
+
 RESPUESTAS_LECTURA = {
     403: {"description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."}
 }
@@ -794,8 +803,11 @@ def confirmar_contrato(
     def efecto(conn: Connection) -> tuple[int, ContratoCambiado]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.confirmar_contrato_proveedor(:k, :huella, :actor, 'api', :sesion)",
-            {"k": contrato_id, "huella": bytes.fromhex(confirmacion.huella)},
+            "select nucleo.confirmar_contrato_proveedor(:k, :huella, :version, :actor, 'api',"
+            " :sesion)",
+            {"k": contrato_id, "huella": bytes.fromhex(confirmacion.huella),
+             "version": confirmacion.proveedor_version},
+            errores=ERRORES_CONFIRMACION,
         )  # fmt: skip
         return 201, ContratoCambiado(id=contrato_id)
 
