@@ -167,23 +167,20 @@ LARGO_TEXTO_RIEL = 200
 """Lo que guarda la base de la referencia y el motivo del riel (0051)."""
 
 
+CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
+"""Una cuenta destino escrita en la referencia o el motivo del riel: se guarda tapada."""
+
+
 def _texto(valor: str | None) -> str | None:
-    """El texto del riel como lo guarda la base: sin espacios de más, vacío como nulo y cortado al
-    largo de la columna. Un pago hecho nunca deja de registrarse por cómo vino escrita su
-    referencia."""
+    """El texto del riel como lo guarda la base: sin nulos, con la cuenta tapada, sin espacios de
+    más, vacío como nulo y cortado al largo de la columna. Se tapa después de sacar los nulos (un
+    nulo entre los dígitos la escondería) y antes de cortar (un corte en medio de la cuenta deja 21
+    dígitos que el patrón ya no reconoce). Un pago hecho nunca deja de registrarse por cómo vino
+    escrita su referencia."""
     if valor is None:
         return None
-    limpio = valor.replace("\x00", "").strip()
+    limpio = CUENTA_EN_TEXTO.sub("[cuenta]", valor.replace("\x00", "")).strip()
     return limpio[:LARGO_TEXTO_RIEL].rstrip() or None
-
-
-CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
-"""Una cuenta destino escrita en el motivo del riel: se guarda tapada."""
-
-
-def _sin_cuenta(texto: str | None) -> str | None:
-    """Después de `_texto`: un nulo entre los dígitos ya no la esconde."""
-    return None if texto is None else CUENTA_EN_TEXTO.sub("[cuenta]", texto)
 
 
 def _textos_validos(respuesta: RespuestaRiel) -> bool:
@@ -217,7 +214,7 @@ def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str)
             "r": r.estado.value,
             "o": origen,
             "ref": _texto(r.referencia),
-            "m": _sin_cuenta(_texto(r.motivo)),
+            "m": _texto(r.motivo),
         },
     ).scalar_one()
 

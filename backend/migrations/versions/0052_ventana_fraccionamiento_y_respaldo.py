@@ -99,7 +99,7 @@ create function nucleo.documento_respalda(c uuid, documento uuid)
 
 create function nucleo.ventana_fraccionamiento()
   returns interval
-  language sql immutable
+  language sql stable
   set search_path = pg_catalog, pg_temp
   as $$ select interval '{VENTANA_DIAS} days' $$;
 comment on function nucleo.ventana_fraccionamiento() is

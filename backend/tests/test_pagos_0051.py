@@ -416,6 +416,22 @@ def test_el_motivo_del_riel_se_guarda_sin_la_cuenta_y_los_textos_se_exigen(
     assert resultados(motor_migrate, o) == [("incierta", "ordenar")]
 
 
+def test_la_cuenta_se_tapa_antes_de_cortar_y_sin_los_nulos():
+    """Revisión de #175: cortada en el límite de la columna quedarían 21 dígitos que el patrón ya
+    no reconoce; con un nulo entre los dígitos, tampoco. La referencia se tapa igual."""
+    cuenta = "2850590940090418135201"
+    # Cortando primero, de esta cuenta quedarían sus primeros 21 dígitos.
+    relleno = "x" * (pagos.LARGO_TEXTO_RIEL - 22)
+    assert pagos._texto(f"{relleno} {cuenta} fin") == f"{relleno} [cuenta] fin"
+    # Si el corte cae dentro de lo tapado, no queda ningún dígito.
+    relleno = "x" * (pagos.LARGO_TEXTO_RIEL - 5)
+    assert pagos._texto(f"{relleno} {cuenta}") == f"{relleno} [cue"
+    assert pagos._texto(f"cuenta {cuenta[:9]}\x00{cuenta[9:]}") == "cuenta [cuenta]"
+    assert pagos._texto(f"SIM-{cuenta}") == "SIM-[cuenta]"
+    # Control: lo que no es una cuenta de 22 dígitos queda igual.
+    assert pagos._texto(f"ref {cuenta[:21]} ok") == f"ref {cuenta[:21]} ok"
+
+
 def test_el_tope_de_espera_vale_solo_para_tomar_el_bloqueo(motor_migrate, motor_app, e):
     """Revisión de #172: lo que el trabajo registra después de llamar al riel vuelve a la espera
     de siempre; un resultado del riel no se pierde por un tope pensado para tomar el bloqueo."""

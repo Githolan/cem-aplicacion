@@ -121,12 +121,15 @@ def cbu_sintetico(n: int) -> str:
 # Guarda --------------------------------------------------------------------------------------
 
 
-def exigir_staging(origen_publico: str, database_url: str, base: str) -> None:
+def exigir_staging(origen_publico: str, database_url: str, base: str, host: str) -> None:
     host_publico = urlsplit(origen_publico).hostname or ""
     if not host_publico.split(".")[0].endswith(SUFIJO_STAGING):
         raise Negado(f"CEM_ORIGEN_PUBLICO no es de staging: {host_publico!r}")
     if make_url(database_url).host != base:
         raise Negado(f"CEM_DATABASE_URL no apunta a --base {base!r}")
+    # El HTTP va al mismo staging que la base: el proxy podría servir también producción.
+    if host != host_publico:
+        raise Negado(f"--host {host!r} no es el de CEM_ORIGEN_PUBLICO ({host_publico!r})")
 
 
 def asegurar_consorcio(motor: Engine, consorcio: UUID) -> bool:
@@ -676,7 +679,7 @@ def main(argumentos: list[str] | None = None) -> int:
     a = p.parse_args(argumentos)
     config = cargar()
     try:
-        exigir_staging(config.origen_publico, config.database_url, a.base)
+        exigir_staging(config.origen_publico, config.database_url, a.base, a.host)
     except Negado as e:
         print(f"negado: {e}", file=sys.stderr)
         return 3

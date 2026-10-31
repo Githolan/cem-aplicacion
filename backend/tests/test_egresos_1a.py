@@ -462,7 +462,7 @@ def test_la_alerta_mira_la_ventana_de_fraccionamiento_no_el_mes(motor_migrate, m
     assert dias == 30
     with motor_migrate.begin() as c:
         c.execute(text("create or replace function nucleo.ventana_fraccionamiento()"
-                       " returns interval language sql immutable"
+                       " returns interval language sql stable"
                        " set search_path = pg_catalog, pg_temp"
                        " as $$ select interval '0' $$"))  # fmt: skip
     try:
@@ -472,10 +472,36 @@ def test_la_alerta_mira_la_ventana_de_fraccionamiento_no_el_mes(motor_migrate, m
     finally:
         with motor_migrate.begin() as c:
             c.execute(text("create or replace function nucleo.ventana_fraccionamiento()"
-                           " returns interval language sql immutable"
+                           " returns interval language sql stable"
                            " set search_path = pg_catalog, pg_temp"
                            " as $$ select interval '30 days' $$"))  # fmt: skip
     # Control: con la ventana de 30 días, las previas suman y la misma orden sí alerta.
+    o = enviada(motor_migrate, e)
+    assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is True
+
+
+def _preparada_hace(motor_migrate, o, delta: timedelta) -> None:
+    """Corre hacia atrás el momento en que se preparó la versión de la orden (como dueño)."""
+    with motor_migrate.begin() as c:
+        c.execute(text("alter table nucleo.orden_pago_version disable trigger"
+                       " historia_orden_pago_version"))  # fmt: skip
+        c.execute(
+            text("update nucleo.orden_pago_version set creada_en = now() - :d where orden_id = :o"),
+            {"d": delta, "o": o},
+        )
+        c.execute(text("alter table nucleo.orden_pago_version enable trigger"
+                       " historia_orden_pago_version"))  # fmt: skip
+
+
+def test_la_ventana_suma_29_dias_atras_y_no_31(motor_migrate, motor_app, e):
+    """Revisión de #175: el borde de la ventana con órdenes reales, también cruzando de mes."""
+    previa = conocido(motor_migrate, e)
+    umbral(motor_app, e.cons, IMPORTE + 1)  # sola, cada orden queda bajo el umbral
+    _preparada_hace(motor_migrate, previa, timedelta(days=31))
+    o = enviada(motor_migrate, e)
+    assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is False
+    _preparada_hace(motor_migrate, o, timedelta(days=31))  # que esta tampoco sume
+    _preparada_hace(motor_migrate, previa, timedelta(days=29))
     o = enviada(motor_migrate, e)
     assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is True
 
