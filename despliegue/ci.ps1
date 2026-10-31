@@ -238,7 +238,13 @@ try {
     $proyectos = @(docker ps -a --filter "label=com.docker.compose.project" --format '{{.Label "com.docker.compose.project"}}')
     foreach ($abandonado in @(Get-CemProyectosCiAbandonados -Proyectos $proyectos)) {
         Escribir "  corrida cortada: se baja $abandonado" 'Yellow'
+        # `down` no saca el contenedor de `compose run` que sigue andando (el de pytest), y ese
+        # retiene la red: primero se sacan todos los contenedores del proyecto, por su etiqueta.
+        $suyos = @(docker ps -aq --filter "label=com.docker.compose.project=$abandonado")
+        if ($suyos) { docker rm -f @suyos 2>&1 | Out-File -Append -Encoding utf8 $log }
         docker compose -p $abandonado down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
+        $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$abandonado")
+        if ($quedan) { throw "la corrida cortada $abandonado dejó $($quedan.Count) contenedores" }
     }
 
     # --- 0. copia LF del commit -------------------------------------------------
@@ -354,6 +360,9 @@ finally {
             (@("=== Registro de $ServicioPostgres`: $titulo ===") + $lineas) |
                 Tee-Object -FilePath $log -Append | Out-Host
         }
+        # Un `compose run` todavía vivo (corrida interrumpida) no lo saca `down`: va primero.
+        $suyos = @(docker ps -aq --filter "label=com.docker.compose.project=$ProyectoCompose")
+        if ($suyos) { docker rm -f @suyos 2>&1 | Out-File -Append -Encoding utf8 $log }
         # --rmi local: también la imagen que compose construyó para este proyecto (lleva su nombre).
         docker @composeArgs down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
         $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$ProyectoCompose")
