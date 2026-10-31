@@ -41,7 +41,7 @@ type ConPago = components["schemas"]["OrdenConPagoManual"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type DocumentoEnLista = components["schemas"]["DocumentoEnLista"];
 type Version = components["schemas"]["VersionOrdenPago"];
-/** La ficha del acto; `cuenta_destino` es null cuando se abre sin la cuenta (aprobación vencida). */
+/** La ficha del acto; sin la cuenta ni el plazo cuando se abre con la aprobación vencida. */
 type Ficha = Omit<Cuenta, "cuenta_destino" | "aprobada_en" | "aprobacion_vence_en"> & {
   cuenta_destino: string | null;
   aprobacion_vence_en: string | null;
@@ -179,7 +179,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   }
 
   /** La versión vigente y su huella, como las ve quien prepara (sin la cuenta completa). */
-  async function vista(ordenId: string): Promise<{ version: number; huella: string; estado: Orden["estado"]; detalle: Version; vence: string | null } | null> {
+  async function vista(ordenId: string): Promise<{ version: number; huella: string; estado: Orden["estado"]; detalle: Version } | null> {
     const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}", {
       params: { path: { consorcio_id: consorcio, orden_id: ordenId } },
     });
@@ -189,7 +189,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
       fallo(response.status, codigoDe(error), "ver la orden", () => void ejecutar(ordenId));
       return null;
     }
-    return { version: v.numero, huella: v.huella, estado: data.orden.estado, detalle: v, vence: data.orden.aprobacion_vence_en };
+    return { version: v.numero, huella: v.huella, estado: data.orden.estado, detalle: v };
   }
 
   /** «Ejecutar pago manual»: emite si todavía está aprobada y abre el acto de ejecución. */
@@ -243,7 +243,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
           moneda: d.moneda,
           concepto: d.concepto,
           comprobante: d.comprobante,
-          aprobacion_vence_en: v.vence,
+          aprobacion_vence_en: null,
         });
         return;
       }
@@ -463,7 +463,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
                 <dd>{ficha.proveedor_version}</dd>
                 {ficha.aprobacion_vence_en !== null && (
                   <>
-                    <dt>{ficha.cuenta_destino === null ? "La aprobación venció el" : "Pagar antes de"}</dt>
+                    <dt>Pagar antes de</dt>
                     <dd>{momento(ficha.aprobacion_vence_en)}</dd>
                   </>
                 )}

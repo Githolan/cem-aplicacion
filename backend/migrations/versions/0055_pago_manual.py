@@ -60,8 +60,10 @@ efecto y en la historia; quien ejecuta registra otro.
 **«No se pagó»** (`declarar_pago_no_realizado` con `egresos.ejecutar_pago`, y
 `confirmar_pago_no_realizado` con `egresos.aprobar_orden` por otro ser humano): solo sin un registro
 vigente. Declara quien no aprobó la versión (A5, también en la base). La confirmación la hace
-alguien que no vio la cuenta ni registró, y se niega si después de declarar alguien recibió la
-cuenta o registró un pago (la declaración quedó superada: `estado_invalido`). Escribe `fallida`
+alguien que no vio la cuenta ni registró, exige que cada persona que vio la cuenta haya declarado
+después de su última apertura (si alguien la vio, declara alguien que la vio), y se niega si
+después de declarar alguien recibió la cuenta o registró un pago (la declaración quedó superada:
+`estado_invalido`). El orden de esos hechos lo da una secuencia, no el reloj. Escribe `fallida`
 con origen `manual`; para volver a pagar hace falta una versión nueva y otra aprobación, como
 siempre. Así nadie solo abre la puerta a pagar dos veces.
 
@@ -205,8 +207,12 @@ create table nucleo.comprobante_pago_manual (
     references nucleo.ejecucion_orden_pago (consorcio_id, id)
 );
 
+-- El orden de los hechos de una ejecución manual (aperturas, registros, declaraciones): se toma
+-- con la orden ya bloqueada, así sigue el orden real aunque el reloj del servidor retroceda.
+create sequence nucleo.paso_pago_manual;
+revoke all on sequence nucleo.paso_pago_manual from public, cem_app;
+
 -- Cada acto en que alguien recibió la cuenta completa: quien la vio pudo haber transferido.
--- clock_timestamp(): se toma con la orden ya bloqueada, así las marcas siguen el orden real.
 create table nucleo.apertura_cuenta_pago_manual (
   consorcio_id     uuid not null,
   id               uuid not null default plataforma.uuid_v7(),
@@ -214,6 +220,7 @@ create table nucleo.apertura_cuenta_pago_manual (
   abierta_por      uuid not null references nucleo.persona (id),
   identidad_abrio  uuid not null,
   abierta_en       timestamptz not null default clock_timestamp(),
+  paso             bigint not null default nextval('nucleo.paso_pago_manual'),
   primary key (id),
   foreign key (consorcio_id, ejecucion_id)
     references nucleo.ejecucion_orden_pago (consorcio_id, id),
@@ -235,6 +242,7 @@ create table nucleo.pago_manual (
   registrado_por        uuid not null references nucleo.persona (id),
   identidad_registro    uuid not null,
   registrado_en         timestamptz not null default clock_timestamp(),
+  paso                  bigint not null default nextval('nucleo.paso_pago_manual'),
   primary key (id),
   unique (consorcio_id, id),
   foreign key (consorcio_id, ejecucion_id)
@@ -277,6 +285,7 @@ create table nucleo.declaracion_pago_no_realizado (
   declarado_por      uuid not null references nucleo.persona (id),
   identidad_declaro  uuid not null,
   declarado_en       timestamptz not null default clock_timestamp(),
+  paso               bigint not null default nextval('nucleo.paso_pago_manual'),
   primary key (id),
   unique (consorcio_id, id),
   foreign key (consorcio_id, ejecucion_id)
@@ -552,6 +561,13 @@ create function nucleo.registrar_pago_manual(orden uuid, version_vista integer,
     select * into o from nucleo.orden_pago x where x.consorcio_id = c and x.id = orden;
     perform nucleo.exigir_no_aprobo(c, orden, e.version, actor, identidad);
     anterior := nucleo.exigir_sin_pago_vigente(e.id);
+    -- Registra quien recibió la cuenta en el acto de esta ejecución: el que transfirió. Antes de
+    -- comparar la cuenta escrita, para que el registro no sirva para probar cuentas sin rastro.
+    if not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                    where a.ejecucion_id = e.id and a.identidad_abrio = identidad) then
+      raise exception 'registra el pago quien vio la cuenta en el acto de ejecución'
+        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
+    end if;
     if n !~ '^[A-Z0-9]{{4,40}}$' or nucleo.cbu_valido(n) then
       raise exception 'el número de operación no es válido' using errcode = 'P0001',
         hint = 'numero_operacion_invalido';
@@ -597,12 +613,6 @@ create function nucleo.registrar_pago_manual(orden uuid, version_vista integer,
     if atada is distinct from e.id then
       raise exception 'ese número de operación ya respalda otra orden' using errcode = 'P0001',
         hint = 'operacion_de_otra_orden';
-    end if;
-    -- Registra quien recibió la cuenta en el acto de esta ejecución: el que transfirió.
-    if not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
-                    where a.ejecucion_id = e.id and a.identidad_abrio = identidad) then
-      raise exception 'registra el pago quien vio la cuenta en el acto de ejecución'
-        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
     end if;
     insert into nucleo.pago_manual
       (consorcio_id, ejecucion_id, corrige_a, numero_operacion, fecha_operacion,
@@ -704,6 +714,13 @@ create function nucleo.declarar_pago_no_realizado(orden uuid, version_vista inte
     e := nucleo.ejecucion_manual_abierta(c, o);
     perform nucleo.exigir_no_aprobo(c, orden, e.version, actor, identidad);
     perform nucleo.exigir_sin_pago_vigente(e.id);
+    -- Si alguien recibió la cuenta, «no se pagó» lo dice alguien que la recibió.
+    if exists (select 1 from nucleo.apertura_cuenta_pago_manual a where a.ejecucion_id = e.id)
+       and not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                        where a.ejecucion_id = e.id and a.identidad_abrio = identidad) then
+      raise exception 'declara que no se pagó quien vio la cuenta en el acto de ejecución'
+        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
+    end if;
     insert into nucleo.declaracion_pago_no_realizado
       (consorcio_id, ejecucion_id, motivo, declarado_por, identidad_declaro)
     values (c, e.id, btrim(motivo), actor, identidad)
@@ -742,11 +759,22 @@ create function nucleo.confirmar_pago_no_realizado(orden uuid, declaracion uuid,
     perform nucleo.exigir_sin_pago_vigente(e.id);
     -- Superada: después de declararla, alguien recibió la cuenta o registró un pago.
     if exists (select 1 from nucleo.apertura_cuenta_pago_manual a
-                where a.ejecucion_id = e.id and a.abierta_en > d.declarado_en)
+                where a.ejecucion_id = e.id and a.paso > d.paso)
        or exists (select 1 from nucleo.pago_manual x
-                   where x.ejecucion_id = e.id and x.registrado_en > d.declarado_en) then
+                   where x.ejecucion_id = e.id and x.paso > d.paso) then
       raise exception 'después de esa declaración alguien vio la cuenta o registró un pago'
         using errcode = 'P0001', hint = 'estado_invalido';
+    end if;
+    -- Cada persona que recibió la cuenta (pudo haber transferido) declaró que no pagó, después de
+    -- su última apertura.
+    if exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                where a.ejecucion_id = e.id
+                  and not exists (select 1 from nucleo.declaracion_pago_no_realizado x
+                                   where x.ejecucion_id = e.id
+                                     and x.identidad_declaro = a.identidad_abrio
+                                     and x.paso > a.paso)) then
+      raise exception 'falta que declare cada persona que vio la cuenta' using errcode = 'P0001',
+        hint = 'estado_invalido';
     end if;
     perform nucleo.exigir_no_ejecuto(c, e.id, actor, identidad);
     if d.identidad_declaro = identidad then
@@ -894,6 +922,7 @@ DOWNGRADE_FINAL = (
     + "".join(f"drop table {t};\n" for t in reversed(TABLAS))
     + f"""
 drop table nucleo.riel_de_pago_habilitado;
+drop sequence nucleo.paso_pago_manual;
 alter table nucleo.resultado_ejecucion_orden_pago
   drop constraint resultado_ejecucion_orden_pago_origen_check,
   add constraint resultado_ejecucion_orden_pago_origen_check check (origen in ({_origenes_antes}));

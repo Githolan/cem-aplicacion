@@ -407,6 +407,7 @@ def test_con_el_pago_registrado_la_cuenta_ya_no_sale(motor_migrate, e):
 )
 def test_lo_pagado_tiene_que_ser_lo_aprobado(motor_migrate, e, cambio, motivo):
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
     niega(motor_migrate, e, e.adm, REGISTRAR, motivo, **evidencia(motor_migrate, e, o, **cambio))
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
     registrada(motor_migrate, e, o)  # control
@@ -414,6 +415,7 @@ def test_lo_pagado_tiene_que_ser_lo_aprobado(motor_migrate, e, cambio, motivo):
 
 def test_la_fecha_entre_la_emision_y_el_vencimiento(motor_migrate, e):
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
     hoy = _hoy(motor_migrate, e)
     for fecha in (hoy + timedelta(days=1), hoy - timedelta(days=1), None):
         niega(motor_migrate, e, e.adm, REGISTRAR, "fecha_operacion_invalida",
@@ -432,6 +434,7 @@ def test_la_fecha_entre_la_emision_y_el_vencimiento(motor_migrate, e):
 )
 def test_el_comprobante_paso_el_antivirus(motor_migrate, e, estado, categoria):
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
     doc = comprobante(motor_migrate, e, estado, categoria)
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
           **evidencia(motor_migrate, e, o, documento=doc))  # fmt: skip
@@ -460,6 +463,7 @@ def test_un_comprobante_respalda_una_sola_orden(motor_migrate, e):
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
     doc = comprobante(motor_migrate, e)
     registrada(motor_migrate, e, o1, documento=doc)
+    ver(motor_migrate, e, e.adm, o2)
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_de_otra_orden",
           **evidencia(motor_migrate, e, o2, documento=doc))  # fmt: skip
 
@@ -470,6 +474,7 @@ def test_un_comprobante_respalda_una_sola_orden(motor_migrate, e):
 def test_un_numero_de_operacion_respalda_una_sola_orden_para_siempre(motor_migrate, e):
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
     p1 = registrada(motor_migrate, e, o1, numero="0001-23")
+    ver(motor_migrate, e, e.adm, o2)
     # Normalizado: «000123» es el mismo número.
     niega(motor_migrate, e, e.adm, REGISTRAR, "operacion_de_otra_orden",
           **evidencia(motor_migrate, e, o2, numero="000123"))  # fmt: skip
@@ -687,6 +692,9 @@ def test_registra_solo_quien_vio_la_cuenta_de_esa_ejecucion(motor_migrate, motor
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, e.adm, o)
     niega(motor_migrate, e, x, REGISTRAR, "no_es_quien_ejecuto", **evidencia(motor_migrate, e, o))
+    # Antes de comparar la cuenta: el registro no sirve para probar cuentas sin haberla visto.
+    niega(motor_migrate, e, x, REGISTRAR, "no_es_quien_ejecuto",
+          **evidencia(motor_migrate, e, o, cuenta=cbu_sintetico(2)))  # fmt: skip
     # Haber visto la cuenta de otra orden no alcanza.
     otra_orden = emitida(motor_migrate, e)
     ver(motor_migrate, e, x, otra_orden)
@@ -752,12 +760,12 @@ def test_la_declaracion_queda_superada_por_un_pago_registrado_despues(motor_migr
 def test_superada_aunque_quien_registra_haya_visto_la_cuenta_antes_de_declarar(
     motor_migrate, motor_app, e
 ):
-    """x recibió la cuenta antes de que la administración declarara «no se pagó», transfirió y
-    registró después: el registro posterior, no la apertura, deja superada la declaración."""
+    """x recibió la cuenta, declaró «no se pagó», y después transfirió y registró: el registro
+    posterior, no una apertura, deja superada la declaración."""
     o = emitida(motor_migrate, e)
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, x, o)
-    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    d = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     p = llamar(motor_migrate, e, x, REGISTRAR, **evidencia(motor_migrate, e, o))
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
            motivo="SINTETICO: el comprobante no se lee")  # fmt: skip
@@ -774,14 +782,46 @@ def test_la_declaracion_queda_superada_si_despues_alguien_vio_la_cuenta(
     ver(motor_migrate, e, x, o)
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
+    # Aunque x declare después, la vieja sigue superada: se confirma la nueva.
+    d2 = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d2)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
-def test_quien_vio_la_cuenta_no_confirma_que_no_se_pago(motor_migrate, e):
+def test_quien_vio_la_cuenta_no_confirma_que_no_se_pago(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
     ver(motor_migrate, e, e.mc2, o)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, x, o)
+    dm = llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=dx)
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dm)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_si_alguien_vio_la_cuenta_declara_quien_la_vio(motor_migrate, motor_app, e):
+    """x recibió la cuenta y pudo haber transferido: «no se pagó» no lo dicen otros dos."""
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, x, o)
+    niega(motor_migrate, e, e.adm, DECLARAR, "no_es_quien_ejecuto", orden=o, version=1,
+          motivo="SINTETICO")  # fmt: skip
+    d = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")  # control
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, e.adm, o)
+    ver(motor_migrate, e, x, o)
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
-    niega(motor_migrate, e, e.mc2, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=d)
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)  # control
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
