@@ -169,7 +169,7 @@ describe("liquidación (borrador)", () => {
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations.map((v) => v.id)).toEqual([]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Quitar" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Quitar Limpieza Ficticia SRL, .*1\.000,00$/ }));
     expect(await screen.findByText("Listo: quitaste el gasto del borrador.")).toBeTruthy();
     expect(await screen.findByText("Todavía no agregaste gastos.")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
@@ -192,6 +192,21 @@ describe("liquidación (borrador)", () => {
       "No se puede repartir: el esquema no coincide con las unidades activas",
     );
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("una liquidación que no es borrador no ofrece quitar ni agregar", async () => {
+    const publicada = { ...LIQUIDACION, estado: "publicada" };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [publicada] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [LIQUIDABLE] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json({ ...CON_GASTO, liquidacion: publicada }),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    expect(await screen.findByText(/Limpieza Ficticia SRL: /)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Quitar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar el gasto" })).toBeNull();
   });
 
   it("la lectura pide el segundo factor y se reintenta después del código", async () => {

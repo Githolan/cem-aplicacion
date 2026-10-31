@@ -90,8 +90,14 @@ def _liquidaciones(c: Connection, permiso: Permiso, liquidacion: UUID | None) ->
     return [Liquidacion(**f) for f in filas]
 
 
-def _simular(c: Connection, gastos: list[GastoLiquidacion]) -> SimulacionLiquidacion:
-    """Cada esquema reparte el total de sus gastos; la unidad suma lo de cada grupo."""
+def _simular(
+    c: Connection, gastos: list[GastoLiquidacion], grupos_vigentes: list[GrupoLiquidable]
+) -> SimulacionLiquidacion:
+    """Cada esquema reparte el total de sus gastos; la unidad suma lo de cada grupo.
+
+    Un gasto reparte con el esquema que guardó al agregarse. Si después se registró otro vigente
+    el último día del período, ese gasto ya no reparte como corresponde: la simulación se
+    bloquea y dice qué grupo hay que quitar y volver a agregar (revisión de 0057)."""
     totales: dict[UUID, int] = defaultdict(int)
     for g in gastos:
         totales[g.esquema_id] += g.importe_centavos
@@ -109,6 +115,14 @@ def _simular(c: Connection, gastos: list[GastoLiquidacion]) -> SimulacionLiquida
         "total_centavos": sum(totales.values()),
         "grupos": grupos,
     }
+    vigentes = {g.grupo: g.esquema_id for g in grupos_vigentes}
+    viejos = sorted({g.grupo for g in gastos if vigentes.get(g.grupo) != g.esquema_id})
+    if viejos:
+        motivo = (
+            f"el esquema de {', '.join(viejos)} cambió después de agregar sus gastos:"
+            " quitalos y volvé a agregarlos"
+        )
+        return SimulacionLiquidacion(**simulacion, unidades=[], bloqueo=motivo)
     try:
         repartos = {
             e: repartir_por_esquema(c, e, Decimal(total).scaleb(-2)) for e, total in totales.items()
@@ -223,7 +237,10 @@ def ver_liquidacion(
             ).mappings()
         ]  # fmt: skip
         return LiquidacionDetalle(
-            liquidacion=liquidacion, gastos=gastos, grupos=grupos, simulacion=_simular(c, gastos)
+            liquidacion=liquidacion,
+            gastos=gastos,
+            grupos=grupos,
+            simulacion=_simular(c, gastos, grupos),
         )
 
 

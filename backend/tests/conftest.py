@@ -106,7 +106,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     0031, que se niega a bajar si hay contactos de emergencia: se borran. Y con 0035, que se
     niega a bajar si hay documentos: se borran con sus versiones. Y con 0038, que se niega a bajar
     si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran. Y con
-    0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran.
+    0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran. Y
+    con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -130,6 +131,18 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "   alter table nucleo.umbral_orden_pago disable trigger user;"
                 # Las ejecuciones (0051) citan las versiones de la orden: van antes.
                 "   if to_regclass('nucleo.ejecucion_orden_pago') is not null then"
+                # Los gastos de la liquidación (0057) citan órdenes y ejecuciones: van primero.
+                "     if to_regclass('nucleo.liquidacion') is not null then"
+                "       alter table nucleo.liquidacion_gasto_quitado disable trigger user;"
+                "       alter table nucleo.liquidacion_gasto disable trigger user;"
+                "       alter table nucleo.liquidacion disable trigger user;"
+                "       delete from nucleo.liquidacion_gasto_quitado;"
+                "       delete from nucleo.liquidacion_gasto;"
+                "       delete from nucleo.liquidacion;"
+                "       alter table nucleo.liquidacion_gasto_quitado enable trigger user;"
+                "       alter table nucleo.liquidacion_gasto enable trigger user;"
+                "       alter table nucleo.liquidacion enable trigger user;"
+                "     end if;"
                 # Los pagos manuales (0055) citan las ejecuciones y los documentos: van antes.
                 "     if to_regclass('nucleo.pago_manual') is not null then"
                 "       alter table nucleo.conciliacion_pago_manual disable trigger user;"

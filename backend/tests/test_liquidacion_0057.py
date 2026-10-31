@@ -279,6 +279,30 @@ def test_la_simulacion_se_bloquea_si_el_esquema_no_coincide_con_las_unidades(
     assert sim["unidades"] == [] and sim["total_centavos"] == IMPORTE
 
 
+def test_un_esquema_nuevo_vigente_en_el_periodo_bloquea_los_gastos_viejos(
+    motor_migrate, motor_app, e, esquema
+):
+    o = pagada(motor_migrate, e)
+    liq = borrador(motor_migrate, e)
+    gasto = llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o,
+                   grupo="expensas_comunes")  # fmt: skip
+    assert get(e, e.adm, f"liquidaciones/{liq}").json()["simulacion"]["bloqueo"] is None  # control
+    us = unidades(motor_migrate, e)
+    pesos = list(reversed(porcentajes(len(us))))
+    coeficientes = {str(u): f"{p:.6f}" for u, p in zip(us, pesos, strict=True)}
+    nuevo = registrar(motor_app, e.cons, coeficientes, desde="2026-10-15",
+                      decision=acta(motor_migrate, e))  # fmt: skip
+    detalle = get(e, e.adm, f"liquidaciones/{liq}").json()
+    assert detalle["grupos"][0]["esquema_id"] == str(nuevo)
+    sim = detalle["simulacion"]
+    assert "expensas_comunes" in sim["bloqueo"] and sim["unidades"] == []
+    llamar(motor_migrate, e, e.adm, QUITAR, liquidacion=liq, gasto=gasto)
+    llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o, grupo="expensas_comunes")
+    detalle = get(e, e.adm, f"liquidaciones/{liq}").json()
+    assert [g["esquema_id"] for g in detalle["gastos"]] == [str(nuevo)]
+    assert detalle["simulacion"]["bloqueo"] is None and detalle["simulacion"]["unidades"]
+
+
 # Barreras ----------------------------------------------------------------------------------
 
 

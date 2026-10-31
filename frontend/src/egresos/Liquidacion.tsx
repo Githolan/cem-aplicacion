@@ -62,6 +62,13 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
+
+  // Otra liquidación tiene otros grupos: la orden y el grupo elegidos no pasan de una a otra.
+  function abrir(id: string) {
+    setAbierta(id);
+    setOrden("");
+    setGrupo("");
+  }
   const clave = useRef<string | null>(null);
   const montado = useMontado();
 
@@ -146,7 +153,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
           setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
             setMes("");
-            setAbierta(data.id);
+            abrir(data.id);
           }
           if (acto.tipo === "agregar") setOrden("");
           setVuelta((v) => v + 1);
@@ -247,7 +254,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                   {liquidaciones.map((l) => (
                     <li key={l.id}>
                       <button type="button" className="secundario" disabled={enviando || abierta === l.id}
-                        aria-pressed={abierta === l.id} onClick={() => setAbierta(l.id)}>
+                        aria-pressed={abierta === l.id} onClick={() => abrir(l.id)}>
                         {periodo(l.periodo)}, versión {l.version} ({l.estado})
                       </button>
                     </li>
@@ -270,10 +277,13 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                         <li key={g.id}>
                           {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} (grupo {g.grupo},
                           esquema versión {g.esquema_version}; pagada el {momento(g.pagada_en)}){" "}
-                          <button type="button" className="secundario" disabled={enviando}
-                            onClick={() => hacer({ tipo: "quitar", liquidacion: detalle.liquidacion.id, gasto: g.id })}>
-                            Quitar
-                          </button>
+                          {detalle.liquidacion.estado === "borrador" && (
+                            <button type="button" className="secundario" disabled={enviando}
+                              aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
+                              onClick={() => hacer({ tipo: "quitar", liquidacion: detalle.liquidacion.id, gasto: g.id })}>
+                              Quitar
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
