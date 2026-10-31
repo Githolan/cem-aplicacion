@@ -55,6 +55,20 @@
       "economica": true,
       "destinatario_unico": false,
       "fuente_normativa": "D2 (egresos.ejecutar_pago, económica); A5; R10"
+    },
+    {
+      "accion": "egresos.conciliar_pago",
+      "concede_por_vinculo": null,
+      "concede_por_ambito": false,
+      "facultad": "egresos.aprobar_orden",
+      "modos": ["administrador_aumentado", "autogestion"],
+      "sin_modo": false,
+      "recurso": {"tipos": ["cuenta", "grupo"], "general": true},
+      "separacion": ["no_es_quien_preparo", "no_es_quien_ejecuto"],
+      "respaldo": null,
+      "economica": true,
+      "destinatario_unico": false,
+      "fuente_normativa": "Pago manual del piloto (propietario, 31-10-2026; diseño CEM #122): otro miembro del Consejo concilia el pago que registró quien ejecutó, y confirma que no se hizo el que declaró otro; nunca quien preparó la orden. R10"
     }
   ]
 }

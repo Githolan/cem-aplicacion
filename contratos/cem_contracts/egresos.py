@@ -566,3 +566,193 @@ class ListaContratosRevision(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[ContratoRevision]
+
+
+# --- Pago manual asistido (piloto sin riel, `0055`) -------------------------------------------
+
+FORMATO_NUMERO_OPERACION = r"^[A-Za-z0-9 ./-]{4,60}$"
+"""Como lo escribe la persona; la base guarda solo letras y dígitos en mayúsculas (de 4 a 40) y
+compara así: «0001-23» y «000123» son el mismo número."""
+
+
+class ModalidadPago(StrEnum):
+    """Cómo se paga una ejecución, fijada al emitir (`0055`): nunca las dos."""
+
+    RIEL = "riel"
+    MANUAL = "manual"
+    """La paga una persona autorizada por el canal que el consorcio ya tiene (home banking)."""
+
+
+class ResultadoConciliacion(StrEnum):
+    CONFORME = "conforme"
+    """El comprobante coincide con la orden: la orden queda Pagada."""
+    OBSERVADO = "observado"
+    """No coincide: el registro queda sin efecto (y en la historia) y se registra otro."""
+
+
+class PedidoCuentaPagoManual(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/cuenta`: el acto de ejecución manual, sobre la versión
+    y la huella que se vieron. Es el único lugar donde sale la cuenta completa para transferir."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA)
+
+
+class CuentaParaPagoManual(BaseModel):
+    """Lo que necesita quien transfiere, de la ejecución de esa versión: la cuenta completa."""
+
+    model_config = ConfigDict(frozen=True)
+
+    ejecucion_id: UUID
+    version: Version
+    huella: str
+    proveedor_id: UUID
+    proveedor_version: Version
+    razon_social: str
+    cuit: str | None
+    cuenta_destino: str = Field(description="CBU o CVU completo, el de la versión aprobada.")
+    importe_centavos: int
+    moneda: str
+    concepto: str
+    comprobante: str | None
+    aprobada_en: datetime
+    aprobacion_vence_en: datetime = Field(
+        description="El pago tiene que hacerse antes: después no se registra con esa fecha."
+    )
+
+
+class RegistroPagoManual(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual`: la evidencia de una transferencia ya hecha. No da la
+    orden por pagada: queda pendiente de conciliación (En verificación)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA)
+    numero_operacion: str = Field(
+        pattern=FORMATO_NUMERO_OPERACION, description="El número de operación del comprobante."
+    )
+    fecha_operacion: date
+    importe_centavos: Importe
+    moneda: Moneda
+    cuenta_destino: Cuenta
+    documento_id: UUID = Field(
+        description="El comprobante: un documento de «Facturas y comprobantes» que pasó el"
+        " antivirus."
+    )
+
+
+class PagoManualRegistrado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    orden_id: UUID
+
+
+class ConciliacionPagoManual(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/{pago}/conciliacion`: otro ser humano del Consejo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    resultado: ResultadoConciliacion
+    motivo: _texto(1, 300) | None = Field(
+        default=None, description="Obligatorio si es `observado`; no va si es `conforme`."
+    )
+
+    @model_validator(mode="after")
+    def _motivo_solo_si_observado(self):
+        if (self.resultado == ResultadoConciliacion.OBSERVADO) != (self.motivo is not None):
+            raise ValueError("El motivo va solo, y siempre, con una conciliación observada.")
+        return self
+
+
+class DeclaracionPagoNoRealizado(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/no-realizado`: no se pagó. Lo confirma otro ser
+    humano del Consejo; recién entonces la orden queda Fallida."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    motivo: _texto(1, 200)
+
+
+class PagoManualCambiado(BaseModel):
+    """Respuesta de la conciliación y de la confirmación: la orden y su estado nuevo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    estado: EstadoOrdenPago
+
+
+class DeclaracionRegistrada(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    orden_id: UUID
+
+
+class PagoManual(BaseModel):
+    """Un registro de pago manual, sin la cuenta. `corrige_a`: el registro observado que
+    reemplaza."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    corrige_a: UUID | None
+    numero_operacion: str
+    fecha_operacion: date
+    importe_centavos: int
+    moneda: str
+    documento_id: UUID
+    version_documento_id: UUID = Field(description="El archivo exacto que quedó como evidencia.")
+    registrado_por: UUID
+    registrado_en: datetime
+    conciliacion: ResultadoConciliacion | None
+    motivo_conciliacion: str | None
+    conciliado_por: UUID | None
+    conciliado_en: datetime | None
+
+
+class PagoNoRealizado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    motivo: str
+    declarado_por: UUID
+    declarado_en: datetime
+    confirmado_por: UUID | None
+    confirmado_en: datetime | None
+    confirmable: bool = Field(
+        description="Si el Consejo puede confirmarla hoy: nadie vio la cuenta ni registró un pago"
+        " después, y cada persona que vio la cuenta declaró después de su última apertura."
+    )
+
+
+class EjecucionManual(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    version: Version
+    creada_en: datetime
+    resultado: str | None = Field(description="`pagada` o `fallida` cuando ya se resolvió.")
+    referencia: str | None = Field(description="El número de operación conciliado.")
+    pagos: list[PagoManual]
+    declaraciones: list[PagoNoRealizado]
+
+
+class OrdenConPagoManual(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    orden: OrdenPago
+    ejecucion: EjecucionManual
+
+
+class ListaPagosManuales(BaseModel):
+    """Las órdenes con una ejecución manual: por pagar, por conciliar y ya resueltas."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[OrdenConPagoManual]

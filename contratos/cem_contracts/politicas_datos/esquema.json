@@ -5,6 +5,7 @@
       "enum": [
         "no_es_quien_preparo",
         "no_es_quien_aprobo",
+        "no_es_quien_ejecuto",
         "no_es_quien_solicito",
         "no_es_quien_propuso",
         "firma_repetida",
