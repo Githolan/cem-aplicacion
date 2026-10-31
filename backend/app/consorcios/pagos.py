@@ -167,18 +167,25 @@ LARGO_TEXTO_RIEL = 200
 """Lo que guarda la base de la referencia y el motivo del riel (0051)."""
 
 
-def _texto(valor: str | None) -> str | None:
-    """El texto del riel como lo guarda la base: sin espacios de más, vacío como nulo y cortado al
-    largo de la columna. Un pago hecho nunca deja de registrarse por cómo vino escrita su
-    referencia."""
+CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d(?:[ .\-]?\d){21}(?!\d)")
+"""Una cuenta destino escrita en el motivo del riel, también con espacios, puntos o guiones entre
+los dígitos: se guarda tapada. La referencia no se tapa: es la clave para conciliar con el riel,
+y un identificador de operación de 22 dígitos se perdería (P3 114)."""
+
+
+def _texto(valor: str | None, tapar: bool = False) -> str | None:
+    """El texto del riel como lo guarda la base: sin nulos, sin espacios de más, vacío como nulo
+    y cortado al largo de la columna; con `tapar`, la cuenta tapada. Se tapa después de sacar los
+    nulos (un nulo entre los dígitos la escondería) y antes de cortar (un corte en medio de la
+    cuenta deja 21 dígitos que el patrón ya no reconoce). Un pago hecho nunca deja de registrarse
+    por cómo vino escrita su referencia."""
     if valor is None:
         return None
-    limpio = valor.replace("\x00", "").strip()
+    limpio = valor.replace("\x00", "")
+    if tapar:
+        limpio = CUENTA_EN_TEXTO.sub("[cuenta]", limpio)
+    limpio = limpio.strip()
     return limpio[:LARGO_TEXTO_RIEL].rstrip() or None
-
-
-CUENTA_EN_TEXTO = re.compile(r"(?<!\d)\d{22}(?!\d)")
-"""Una cuenta destino escrita en el motivo del riel: se guarda tapada."""
 
 
 def _textos_validos(respuesta: RespuestaRiel) -> bool:
@@ -212,7 +219,7 @@ def _registrar(conn: Connection, ejecucion: UUID, r: RespuestaRiel, origen: str)
             "r": r.estado.value,
             "o": origen,
             "ref": _texto(r.referencia),
-            "m": _texto(CUENTA_EN_TEXTO.sub("[cuenta]", r.motivo) if r.motivo else r.motivo),
+            "m": _texto(r.motivo, tapar=True),
         },
     ).scalar_one()
 

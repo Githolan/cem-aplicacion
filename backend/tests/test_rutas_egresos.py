@@ -139,7 +139,7 @@ def test_alta_de_proveedor_y_su_historia(e):
 
 
 def test_quien_prepara_nunca_recibe_la_cuenta_completa(e):
-    """Decisión del 31-10-2026: la cuenta sale recortada desde el backend, no se oculta en la
+    """Decisión del 30-10-2026: la cuenta sale recortada desde el backend, no se oculta en la
     pantalla. Ninguna respuesta de preparación lleva sus 22 dígitos; la revisión, sí."""
     cuenta = cbu_sintetico(1)  # la del proveedor de la escena
     o = enviada(e)
@@ -465,8 +465,10 @@ def test_0049_ida_y_vuelta(base_aparte):  # noqa: F811
 def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
     with motor_migrate.connect() as c:
         m, acta = c.execute(
+            # P3 103: el mandato de Consejo vigente de mc2, no «el único que tenga».
             text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
-                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+                 " and persona_id = :p and tipo = 'miembro_consejo' and finalizado_en is null"),
+            {"c": e.cons, "p": e.mc2},
         ).one()  # fmt: skip
     otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
 

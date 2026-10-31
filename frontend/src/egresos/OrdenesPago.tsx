@@ -16,6 +16,7 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
 } from "./comun";
@@ -421,7 +422,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                         {o.alerta_fraccionamiento && (
                           <>
                             <dt>Alerta</dt>
-                            <dd>Sumada a las demás del mes, supera el umbral o el máximo del contrato: revisá si se fraccionó un gasto.</dd>
+                            <dd>{TEXTO_ALERTA_FRACCIONAMIENTO}</dd>
                           </>
                         )}
                         {o.aprobacion_vence_en !== null && (

@@ -61,8 +61,12 @@ export const TEXTO_ESTADO_PROVEEDOR: Record<EstadoProveedor, string> = {
   baja: "De baja",
 };
 
+/** La alerta de fraccionamiento (punto 9 del 30-10-2026): funcional, sin afirmar intención. */
+export const TEXTO_ALERTA_FRACCIONAMIENTO =
+  "Posible fraccionamiento: existen órdenes recientes relacionadas que en conjunto superan el umbral o el máximo del contrato.";
+
 /** Una cuenta en las listas: los últimos 4 dígitos, que es lo único que manda el backend fuera
- * de la revisión (decisión del 31-10-2026). */
+ * de la revisión (decisión del 30-10-2026). */
 export function cuentaEnmascarada(ultimos: string | null): string {
   return ultimos === null ? "Sin cuenta" : `…${ultimos}`;
 }

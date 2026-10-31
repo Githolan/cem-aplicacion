@@ -11,7 +11,7 @@ acta, contratos y abonos que respaldan lo rutinario, y una aprobación que vence
   enviadas, cada versión con el proveedor exacto que fija, para aprobar o rechazar esa versión.
 - **La cuenta destino completa** solo sale en la revisión. Preparación recibe los últimos
   4 dígitos (`cuenta_ultimos_digitos`): la cuenta llega ya recortada desde el backend, no
-  se oculta en la pantalla (decisión del propietario, 31-10-2026).
+  se oculta en la pantalla (decisión del propietario, 30-10-2026).
 - **La franja** de cada versión (`Franja`) dice si pide aprobación. Lo rutinario y lo que no
   supera el umbral no la piden; el fondo de reserva, el beneficiario nuevo, la cuenta cambiada,
   lo que supera el umbral y todo lo no rutinario sin umbral, sí.
@@ -51,7 +51,9 @@ FORMATO_HUELLA = r"^[0-9a-f]{64}$"
 """SHA-256 en hexadecimal, en minúsculas, como lo devuelve la lectura."""
 VIGENCIA_APROBACION = timedelta(days=7)
 """Decisión 1A (30-10-2026): una orden aprobada se emite dentro de los 7 días corridos desde que
-llegó a Aprobada. Es `VIGENCIA_APROBACION_DIAS` de `0050` (una prueba los compara)."""
+llegó a Aprobada. Son 168 horas exactas desde el instante en que reunió las aprobaciones que pide,
+no hasta el final del séptimo día calendario (confirmado por el propietario el 30-10-2026). Es
+`VIGENCIA_APROBACION_DIAS` de `0050` (una prueba los compara)."""
 DIGITOS_VISIBLES_CUENTA = 4
 """Lo que ve de la cuenta destino quien no revisa: los últimos dígitos."""
 PESOS_BLOQUE_1 = (7, 1, 3, 9, 7, 1, 3)
@@ -230,7 +232,7 @@ class Proveedor(BaseModel):
     documento_id: UUID | None
     cuenta_ultimos_digitos: str | None = Field(
         description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
-        " revisa (decisión del 31-10-2026)."
+        " revisa (decisión del 30-10-2026)."
     )
     huella: str
     alta_por: UUID
@@ -255,7 +257,7 @@ class VersionProveedor(BaseModel):
     documento_id: UUID | None
     cuenta_ultimos_digitos: str | None = Field(
         description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
-        " revisa (decisión del 31-10-2026)."
+        " revisa (decisión del 30-10-2026)."
     )
     huella: str
     preparada_por: UUID
@@ -399,7 +401,7 @@ class VersionOrdenPago(BaseModel):
     cuit: str | None
     cuenta_ultimos_digitos: str | None = Field(
         description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
-        " revisa (decisión del 31-10-2026)."
+        " revisa (decisión del 30-10-2026)."
     )
     aprobada_por: list[UUID]
     franja: Franja
