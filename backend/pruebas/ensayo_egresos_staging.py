@@ -61,7 +61,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http.cookies import SimpleCookie
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -70,6 +70,7 @@ from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
 from pypdf import PdfWriter
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.engine import make_url
 
 from app.config import cargar
@@ -274,6 +275,8 @@ class Corrida:
     cuentas: list[str] = field(default_factory=list)
     controles: list[str] = field(default_factory=list)
     riel: RielSimulado = field(default_factory=RielSimulado)
+    inicio: datetime | None = None
+    ejecuciones: set[str] = field(default_factory=set)
 
     def ok(self, que: str) -> None:
         self.controles.append(que)
@@ -354,22 +357,27 @@ def preparar_escena(corrida: Corrida) -> None:
                 text("select nucleo.cambiar_modo('administrador_aumentado', :d, :h, null,"
                      " 'soporte')"), {"d": decision, "h": hoy},
             )  # fmt: skip
+        mandatos = {}
         for rol, tipo in (("administracion", "administrador"), ("consejo1", "miembro_consejo"),
                           ("consejo2", "miembro_consejo")):  # fmt: skip
-            corrida.mandatos[rol] = conn.execute(
+            mandatos[rol] = conn.execute(
                 text("select nucleo.alta_mandato(:t, :p, null, null, null, :d, :h, null, null,"
                      " null, 'soporte')"),
                 {"t": tipo, "p": corrida.personas[rol], "d": decision, "h": hoy},
             ).scalar_one()  # fmt: skip
-        umbral = conn.execute(
-            text("select exists (select 1 from nucleo.umbral_orden_pago where moneda = 'ARS'"
-                 " and vigente_desde <= :h)"), {"h": hoy},
-        ).scalar_one()  # fmt: skip
-        if not umbral:
-            conn.execute(
-                text("select nucleo.fijar_umbral_orden_pago(:i, 'ARS', :h, :d, null, 'soporte')"),
-                {"i": UMBRAL_CENTAVOS, "h": hoy, "d": decision},
-            )
+        # El umbral de la corrida rige desde hoy. `cem_app` no lee la tabla de umbrales: si otra
+        # corrida de hoy ya lo fijó, la función lo dice (`vigencia_repetida`) y vale ese.
+        try:
+            with conn.begin_nested():
+                conn.execute(
+                    text("select nucleo.fijar_umbral_orden_pago(:i, 'ARS', :h, :d, null,"
+                         " 'soporte')"), {"i": UMBRAL_CENTAVOS, "h": hoy, "d": decision},
+                )  # fmt: skip
+        except DBAPIError as e:
+            if e.orig.diag.message_hint != "vigencia_repetida":
+                raise
+    # Recién confirmados: si la transacción se deshizo, `cerrar` no tiene mandatos que dar de baja.
+    corrida.mandatos.update(mandatos)
     corrida.ok("tres personas sintéticas por invitación, identidad verificada, mandatos y umbral")
     for rol in ("administracion", "consejo1"):
         activar_totp(corrida, rol)
@@ -516,13 +524,19 @@ def estado(corrida: Corrida, o: str) -> str:
 
 
 def ejecucion(corrida: Corrida, o: str) -> UUID:
+    """La ejecución que dejó la última emisión de `o`. `cem_app` no lee las ejecuciones; sí la
+    cola, y cada emisión encola un `egresos.ordenar_pago` con su ejecución. Las órdenes se emiten
+    de a una, así que la emisión de `o` deja exactamente un trabajo nuevo desde la corrida."""
     with corrida.tx() as conn:
-        filas = conn.execute(
-            text("select x.id from nucleo.ejecucion_orden_pago x where x.orden_id = :o"),
-            {"o": o},
-        ).scalars().all()  # fmt: skip
-    comprobar(len(filas) == 1, f"una sola ejecución de {o}: {len(filas)}")
-    return filas[0]
+        filas = set(conn.execute(
+            text("select carga->>'ejecucion' from plataforma.jobs where consorcio_id = :c"
+                 " and tipo = :t and creado_en >= :i"),
+            {"c": corrida.consorcio, "t": pagos.TRABAJO_ORDENAR, "i": corrida.inicio},
+        ).scalars())  # fmt: skip
+    nuevas = filas - corrida.ejecuciones
+    comprobar(len(nuevas) == 1, f"una sola ejecución nueva de {o}: {len(nuevas)}")
+    corrida.ejecuciones |= nuevas
+    return UUID(nuevas.pop())
 
 
 def trabajo(tipo: str, consorcio: UUID, carga: dict) -> cola.Trabajo:
@@ -758,6 +772,7 @@ def main(argumentos: list[str] | None = None) -> int:
         )
         with corrida.tx() as conn:
             inicio = conn.execute(text("select clock_timestamp()")).scalar_one()
+        corrida.inicio = inicio
         error = None
         try:
             preparar_escena(corrida)
