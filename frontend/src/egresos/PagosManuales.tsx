@@ -31,9 +31,10 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // barreras (quien aprobó no ejecuta, aprobación vigente, proveedor sin cambios, segundo factor
 // reciente). Vive solo en el estado de esa ficha y se descarta al cerrarla.
 //
-// Si la aprobación ya venció y la orden tiene un registro observado (la transferencia se hizo a
-// tiempo), la ficha se abre sin la cuenta: queda corregir el registro con los datos del
-// comprobante o declarar que no se pagó, sin volver a ver la cuenta.
+// Si la aprobación ya venció con la orden emitida esperando su pago (quizás se transfirió a
+// tiempo y falta registrar, o hay que corregir un registro observado), la ficha se abre sin la
+// cuenta: queda registrar con los datos del comprobante o declarar que no se pagó. El backend
+// sigue exigiendo que registre quien vio la cuenta en el acto.
 
 type Orden = components["schemas"]["OrdenPago"];
 type ConPago = components["schemas"]["OrdenConPagoManual"];
@@ -50,7 +51,7 @@ export const RUTA_PAGOS = "/egresos/pagos";
 export const AVISO_VERIFICAR_CUENTA =
   "Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.";
 export const AVISO_APROBACION_VENCIDA =
-  "La aprobación venció: la cuenta no se vuelve a mostrar. Corregí el registro con los datos del comprobante de la transferencia que ya hiciste, o declará que no se pagó.";
+  "La aprobación venció: la cuenta no se vuelve a mostrar. Si transferiste a tiempo, registrá el pago con los datos del comprobante; si no, declará que no se pagó.";
 const CATEGORIA_COMPROBANTE = "facturas_y_comprobantes";
 
 type Lectura =
@@ -225,7 +226,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
       });
       exigirSesion(response);
       const previo = lectura.tipo === "ok" ? lectura.manuales.find((c) => c.orden.id === ordenId) : undefined;
-      if (data === undefined && codigoDe(error) === "aprobacion_vencida" && previo !== undefined && previo.ejecucion.pagos.length > 0) {
+      if (data === undefined && codigoDe(error) === "aprobacion_vencida" && previo !== undefined && porPagar(previo)) {
         const d = v.detalle;
         setRegistro({ ...REGISTRO_VACIO, fecha: hoy() });
         setFichaOrden(ordenId);

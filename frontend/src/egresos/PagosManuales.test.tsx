@@ -377,11 +377,31 @@ describe("pagos a realizar", () => {
     expect(await registro?.json()).toMatchObject({ version: 1, huella: H1, cuenta_destino: CUENTA });
   });
 
-  it("sin un registro previo, la aprobación vencida no abre ninguna ficha", async () => {
+  it("con la aprobación vencida y sin registro, declara que no se pagó sin ver la cuenta", async () => {
     const api = simulado({
       [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
       [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [conPago("en_ejecucion")] }),
       [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: orden({ estado: "en_ejecucion" }), versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error("aprobacion_vencida", 409),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    expect(await screen.findByText(AVISO_APROBACION_VENCIDA)).toBeTruthy();
+    expect(container.textContent).not.toContain(CUENTA);
+    fireEvent.click(screen.getByRole("button", { name: "No se pudo pagar" }));
+    fireEvent.change(screen.getByLabelText("Por qué no se pagó"), { target: { value: "Venció antes de transferir" } });
+    fireEvent.click(screen.getByRole("button", { name: "Declarar que no se pagó" }));
+    expect(await screen.findByText(/Listo: declaraste que no se pagó/)).toBeTruthy();
+    const [declaracion] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`);
+    expect(await declaracion?.json()).toEqual({ version: 1, motivo: "Venció antes de transferir" });
+  });
+
+  it("una orden sin ejecución manual esperando su pago no abre la ficha sin cuenta", async () => {
+    const api = simulado({
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [orden()] }),
+      [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [] }),
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error("aprobacion_vencida", 409),
     });
     vi.stubGlobal("fetch", api);
