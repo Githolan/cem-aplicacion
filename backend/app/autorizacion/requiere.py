@@ -138,6 +138,7 @@ def _personas(entidad: Entidad) -> set[UUID]:
     candidatas = (
         entidad.preparado_por, entidad.solicitado_por, entidad.propuesto_por,
         entidad.persona_objetivo, entidad.registrado_por, entidad.emitido_por,
+        entidad.ejecutado_por,
         entidad.decision_registrada_por, *entidad.aprobado_por, *entidad.firmas,
     )  # fmt: skip
     return {p for p in candidatas if p is not None}

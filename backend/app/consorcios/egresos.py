@@ -1,4 +1,4 @@
-"""Órdenes de pago, proveedores y contratos (H3; documento 08 §6; migraciones `0045` a `0050`).
+"""Órdenes de pago, proveedores y contratos (H3; documento 08 §6; migraciones `0045` a `0055`).
 
 Diseño: `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del repositorio CEM, «Rutas» y
 «Decisión 1A», con las decisiones del propietario: aprobar es del Consejo (decisión 2), preparar
@@ -14,6 +14,11 @@ sigue el paquete vigente, y la franja de cada versión dice si pide aprobación 
   separación con esa persona.
 - **Emitir** (`egresos.ejecutar_pago`): lee la orden como quien prepara y evalúa la separación con
   quienes aprobaron la versión vigente (A5).
+- **Pago manual** (`0055`, piloto sin riel): el acto de ejecución da la cuenta completa a quien va a
+  transferir (`egresos.ejecutar_pago`, con la misma separación que emitir) y registra la evidencia;
+  otro miembro del Consejo concilia (`egresos.conciliar_pago`, con `egresos.aprobar_orden`): nunca
+  quien registró el pago ni quien preparó la orden. «No se pagó» lo declara quien ejecuta y lo
+  confirma el Consejo, con la misma separación.
 
 Toda acción es económica (R10): sesión de menos de 12 horas, segundo factor de menos de 10
 minutos e identidad humana verificada. Las funciones de la base vuelven a exigir todo eso con la
@@ -30,32 +35,45 @@ from cem_contracts.egresos import (
     VIGENCIA_APROBACION,
     Aprobacion,
     AprobacionRegistrada,
+    ConciliacionPagoManual,
     Confirmacion,
     Contrato,
     ContratoCambiado,
     ContratoNuevo,
     ContratoRevision,
+    CuentaParaPagoManual,
     DatosOrdenPago,
     DatosProveedor,
+    DeclaracionPagoNoRealizado,
+    DeclaracionRegistrada,
+    EjecucionManual,
     Emision,
     EnvioARevision,
     EstadoOrdenPago,
     ListaContratos,
     ListaContratosRevision,
     ListaOrdenesPago,
+    ListaPagosManuales,
     ListaProveedores,
+    OrdenConPagoManual,
     OrdenPago,
     OrdenPagoCambiada,
     OrdenPagoConVersiones,
     OrdenPagoConVersionesRevision,
     OrdenPagoNueva,
     OrdenPagoVersionNueva,
+    PagoManual,
+    PagoManualCambiado,
+    PagoManualRegistrado,
+    PagoNoRealizado,
+    PedidoCuentaPagoManual,
     Proveedor,
     ProveedorConVersiones,
     ProveedorCreado,
     ProveedorNuevo,
     ProveedorVersionNueva,
     Rechazo,
+    RegistroPagoManual,
     Renovacion,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
@@ -82,6 +100,7 @@ PREPARAR = "egresos.preparar_orden"
 REVISAR = "egresos.revisar_orden"
 APROBAR = "egresos.aprobar_orden"
 EJECUTAR = "egresos.ejecutar_pago"
+CONCILIAR = "egresos.conciliar_pago"
 RESPALDADAS = {
     EstadoOrdenPago.APROBADA, EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION,
     EstadoOrdenPago.PAGADA, EstadoOrdenPago.FALLIDA, EstadoOrdenPago.CONCILIADA,
@@ -180,11 +199,52 @@ ERRORES = {
     "decision_invalida": (
         422, CodigoError.DECISION_INVALIDA, "La decisión no existe en este consorcio.",
     ),
+    "modalidad_riel": (
+        409, CodigoError.MODALIDAD_RIEL, "Esta orden se paga por el riel: no se registra a mano.",
+    ),
+    "resultado_repetido": (409, CodigoError.ORDEN_NO_ADMITE, NO_ADMITE),
+    "pago_ya_registrado": (
+        409, CodigoError.PAGO_YA_REGISTRADO,
+        "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
+    ),
+    "numero_operacion_invalido": (
+        422, CodigoError.NUMERO_OPERACION_INVALIDO,
+        "El número de operación no es válido: copialo tal como figura en el comprobante.",
+    ),
+    "no_coincide_con_la_orden": (
+        422, CodigoError.NO_COINCIDE_CON_LA_ORDEN,
+        "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante.",
+    ),
+    "fecha_operacion_invalida": (
+        422, CodigoError.FECHA_OPERACION_INVALIDA,
+        "La fecha no puede ser anterior a la emisión, futura ni posterior al vencimiento de la"
+        " aprobación.",
+    ),
+    "comprobante_invalido": (
+        422, CodigoError.COMPROBANTE_INVALIDO,
+        "El comprobante tiene que ser un documento de «Facturas y comprobantes» que ya pasó el"
+        " antivirus.",
+    ),
+    "comprobante_de_otra_orden": (
+        409, CodigoError.COMPROBANTE_DE_OTRA_ORDEN, "Ese comprobante ya respalda otro pago.",
+    ),
+    "operacion_de_otra_orden": (
+        409, CodigoError.OPERACION_DE_OTRA_ORDEN,
+        "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
+    ),
+    "conciliacion_repetida": (
+        409, CodigoError.CONCILIACION_REPETIDA, "Ese pago ya está conciliado.",
+    ),
+    "no_es_quien_ejecuto": (
+        403, CodigoError.NO_ES_QUIEN_EJECUTO,
+        "El pago lo registra, o declara que no se hizo, quien vio la cuenta en el acto de"
+        " ejecución; y quien la vio o registró no concilia ni confirma.",
+    ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
     "requiere_sesion_reciente": (403, *RENOVAR["requiere_sesion_reciente"]),
     "sesion_invalida": (403, *RENOVAR["requiere_sesion_reciente"]),
 }  # fmt: skip
-"""Motivos de las funciones de `0045` a `0050`. Los que el contrato ya impide (razón social,
+"""Motivos de las funciones de `0045` a `0055`. Los que el contrato ya impide (razón social,
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de
 R10 pueden llegar si la sesión venció entre el evaluador y la base."""
 
@@ -845,5 +905,257 @@ def baja_contrato(
             {"k": contrato_id},
         )  # fmt: skip
         return 200, ContratoCambiado(id=contrato_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Pago manual (`0055`) ----------------------------------------------------------------------
+
+
+def _pagos_manuales(
+    c: Connection, permiso: Permiso, orden: UUID | None
+) -> list[OrdenConPagoManual]:
+    """Las órdenes con una ejecución manual de su versión vigente, con sus registros y
+    declaraciones, sin la cuenta. Las ejecuciones se leen **después** de las órdenes: una que no
+    sea de la versión leída (la orden cambió en el medio) no se muestra."""
+    datos_lectura = {"o": orden, "f": LEE_COMO[permiso.accion]}
+    ordenes = {o.id: o for o in _ordenes(c, permiso, orden)}
+    ejecuciones = _ejecutar(
+        c, permiso, "select * from nucleo.ejecuciones_manuales_lectura(:o, :f, :actor, 'api',"
+        " :sesion)", datos_lectura,
+    ).mappings().all()  # fmt: skip
+    pagos: dict[UUID, list[PagoManual]] = {}
+    for fila in _ejecutar(
+        c, permiso, "select * from nucleo.pagos_manuales_lectura(:o, :f, :actor, 'api', :sesion)",
+        datos_lectura,
+    ).mappings():  # fmt: skip
+        datos = dict(fila)
+        del datos["orden_id"]
+        pagos.setdefault(datos.pop("ejecucion_id"), []).append(PagoManual(**datos))
+    declaraciones: dict[UUID, list[PagoNoRealizado]] = {}
+    for fila in _ejecutar(
+        c, permiso, "select * from nucleo.declaraciones_pago_no_realizado_lectura(:o, :f, :actor,"
+        " 'api', :sesion)", datos_lectura,
+    ).mappings():  # fmt: skip
+        datos = dict(fila)
+        del datos["orden_id"]
+        declaraciones.setdefault(datos.pop("ejecucion_id"), []).append(PagoNoRealizado(**datos))
+    elementos = []
+    for e in ejecuciones:
+        o = ordenes.get(e["orden_id"])
+        if o is None or o.version_vigente != e["version"]:
+            continue
+        elementos.append(OrdenConPagoManual(orden=o, ejecucion=EjecucionManual(
+            id=e["id"], version=e["version"], creada_en=e["creada_en"], resultado=e["resultado"],
+            referencia=e["referencia"], pagos=pagos.get(e["id"], []),
+            declaraciones=declaraciones.get(e["id"], []),
+        )))  # fmt: skip
+    return elementos
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos-manuales",
+    response_model=ListaPagosManuales,
+    summary="Pagos manuales por pagar, por conciliar y resueltos (quien ejecuta), sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_pagos_manuales(
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+) -> ListaPagosManuales:
+    with _lectura(permiso, motor) as c:
+        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos-manuales/revision",
+    response_model=ListaPagosManuales,
+    summary="Pagos manuales para conciliar (Consejo), sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_pagos_manuales_revision(
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
+) -> ListaPagosManuales:
+    with _lectura(permiso, motor) as c:
+        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))
+
+
+def _ejecutor(lectura: Permiso, permiso: Permiso, motor, orden_id: UUID) -> None:
+    """Como al emitir: quien ejecuta lee la orden como quien prepara y la separación se evalúa con
+    quienes aprobaron la versión vigente (A5). La base vuelve a exigir todo."""
+    detalle = _orden_con_versiones(lectura, motor, orden_id, revision=False)
+    vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
+    permiso.verificar(Entidad(
+        aprobado_por=tuple(vigente.aprobada_por),
+        respaldo_presente=detalle.orden.estado in RESPALDADAS,
+    ))  # fmt: skip
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/cuenta",
+    response_model=CuentaParaPagoManual,
+    summary="El acto de ejecución manual: la cuenta completa para transferir",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def cuenta_para_pago_manual(
+    orden_id: UUID,
+    pedido: PedidoCuentaPagoManual,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    motor: MotorDep,
+) -> CuentaParaPagoManual:
+    """La única ruta que da la cuenta completa a quien va a pagar. Se evalúa de nuevo en cada
+    pedido y cada uno queda en la auditoría, con los últimos 4 dígitos. No cambia nada más: no
+    lleva `Idempotency-Key`."""
+    _ejecutor(lectura, permiso, motor, orden_id)
+    with _lectura(permiso, motor) as c:
+        fila = _ejecutar(
+            c, permiso,
+            "select * from nucleo.cuenta_para_pago_manual(:o, :version, :huella, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "version": pedido.version, "huella": bytes.fromhex(pedido.huella)},
+        ).mappings().one()  # fmt: skip
+    return CuentaParaPagoManual(**fila)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual",
+    status_code=201,
+    response_model=PagoManualRegistrado,
+    summary="Registrar un pago manual con su evidencia: queda pendiente de conciliación",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "Evidencia inválida."}},
+)
+def registrar_pago_manual(
+    orden_id: UUID,
+    registro: RegistroPagoManual,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    _ejecutor(lectura, permiso, motor, orden_id)
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualRegistrado]:
+        pago = _ejecutar(
+            conn, permiso,
+            "select nucleo.registrar_pago_manual(:o, :version, :huella, :numero, :fecha, :importe,"
+            " :moneda, :cuenta, :doc, :actor, 'api', :sesion)",
+            {"o": orden_id, "version": registro.version,
+             "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
+             "fecha": registro.fecha_operacion, "importe": registro.importe_centavos,
+             "moneda": registro.moneda, "cuenta": registro.cuenta_destino,
+             "doc": registro.documento_id},
+        ).scalar_one()  # fmt: skip
+        return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+def _orden_con_pago(revision: Permiso, motor, orden_id: UUID) -> OrdenConPagoManual:
+    with _lectura(revision, motor) as c:
+        elementos = _pagos_manuales(c, revision, orden_id)
+    if not elementos:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return elementos[0]
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/{pago_id}/conciliacion",
+    response_model=PagoManualCambiado,
+    summary="Conciliar un pago manual (otro miembro del Consejo): conforme la deja Pagada",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def conciliar_pago_manual(
+    orden_id: UUID,
+    pago_id: UUID,
+    conciliacion: ConciliacionPagoManual,
+    revision: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(CONCILIAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Lee la orden con la revisión ya verificada y evalúa la separación con quien la preparó y
+    con quien registró el pago. La base compara además con quien preparó cada versión, por la
+    identidad guardada en cada acto."""
+    actual = _orden_con_pago(revision, motor, orden_id)
+    pago = next((p for p in actual.ejecucion.pagos if p.id == pago_id), None)
+    if pago is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    permiso.verificar(Entidad(
+        preparado_por=actual.orden.preparada_por, ejecutado_por=pago.registrado_por
+    ))  # fmt: skip
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
+        estado = _ejecutar(
+            conn, permiso,
+            "select nucleo.conciliar_pago_manual(:o, :p, :resultado, :motivo, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "p": pago_id, "resultado": conciliacion.resultado.value,
+             "motivo": conciliacion.motivo},
+        ).scalar_one()  # fmt: skip
+        return 200, PagoManualCambiado(orden_id=orden_id, estado=estado)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/no-realizado",
+    status_code=201,
+    response_model=DeclaracionRegistrada,
+    summary="Declarar que el pago manual no se hizo: lo confirma otro miembro del Consejo",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def declarar_pago_no_realizado(
+    orden_id: UUID,
+    declaracion: DeclaracionPagoNoRealizado,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    _ejecutor(lectura, permiso, motor, orden_id)
+
+    def efecto(conn: Connection) -> tuple[int, DeclaracionRegistrada]:
+        d = _ejecutar(
+            conn, permiso,
+            "select nucleo.declarar_pago_no_realizado(:o, :version, :motivo, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "version": declaracion.version, "motivo": declaracion.motivo},
+        ).scalar_one()  # fmt: skip
+        return 201, DeclaracionRegistrada(id=d, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/no-realizado/"
+    "{declaracion_id}/confirmacion",
+    response_model=PagoManualCambiado,
+    summary="Confirmar que el pago no se hizo (otro miembro del Consejo): la orden queda Fallida",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def confirmar_pago_no_realizado(
+    orden_id: UUID,
+    declaracion_id: UUID,
+    revision: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(CONCILIAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Quien declaró ocupa el lugar de quien ejecutó (`no_es_quien_ejecuto`)."""
+    actual = _orden_con_pago(revision, motor, orden_id)
+    declarada = next((d for d in actual.ejecucion.declaraciones if d.id == declaracion_id), None)
+    if declarada is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    permiso.verificar(Entidad(
+        preparado_por=actual.orden.preparada_por, ejecutado_por=declarada.declarado_por
+    ))  # fmt: skip
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.confirmar_pago_no_realizado(:o, :d, :actor, 'api', :sesion)",
+            {"o": orden_id, "d": declaracion_id},
+        )  # fmt: skip
+        return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)

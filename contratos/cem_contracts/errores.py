@@ -220,6 +220,28 @@ class CodigoError(StrEnum):
     """Quien registró el contrato no lo confirma."""
     FECHA_INVALIDA = "fecha_invalida"
     """La vigencia no es válida: termina antes de empezar o antes de hoy."""
+    MODALIDAD_RIEL = "modalidad_riel"
+    """La ejecución es del riel de pago: no se registra a mano (`0055`)."""
+    PAGO_YA_REGISTRADO = "pago_ya_registrado"
+    """La orden ya tiene un pago manual registrado, pendiente de conciliar o conforme."""
+    NUMERO_OPERACION_INVALIDO = "numero_operacion_invalido"
+    """El número de operación no es válido, o es una cuenta: nunca es un número de operación."""
+    NO_COINCIDE_CON_LA_ORDEN = "no_coincide_con_la_orden"
+    """El importe, la moneda o la cuenta del pago no son los de la orden aprobada."""
+    FECHA_OPERACION_INVALIDA = "fecha_operacion_invalida"
+    """La fecha del pago es anterior a la emisión, futura o posterior al vencimiento de la
+    aprobación."""
+    COMPROBANTE_INVALIDO = "comprobante_invalido"
+    """El comprobante no es un documento vigente de comprobantes con un archivo que pasó el
+    antivirus."""
+    COMPROBANTE_DE_OTRA_ORDEN = "comprobante_de_otra_orden"
+    """Ese comprobante ya respalda el pago de otra orden."""
+    OPERACION_DE_OTRA_ORDEN = "operacion_de_otra_orden"
+    """Ese número de operación ya respalda otra orden: una transferencia paga una sola orden."""
+    CONCILIACION_REPETIDA = "conciliacion_repetida"
+    """Ese registro ya tiene su conciliación."""
+    NO_ES_QUIEN_EJECUTO = "no_es_quien_ejecuto"
+    """Quien registró el pago (o declaró que no se hizo) no lo concilia ni lo confirma."""
 
 
 class Error(BaseModel):

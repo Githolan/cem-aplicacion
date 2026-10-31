@@ -144,3 +144,91 @@ test.describe("egresos en un teléfono", () => {
     await entraEnElTelefono(page);
   });
 });
+
+// Pago manual del piloto (app 0055): la cuenta completa no está en la página hasta el acto de
+// ejecución (un POST que la API responde con todas las barreras); la conciliación del Consejo
+// nunca la recibe.
+const EJECUCION = "e7777777-7777-4777-8777-777777777777";
+const PAGO = "f8888888-8888-4888-8888-888888888888";
+const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
+const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
+
+const ORDEN_APROBADA = { ...ORDEN_A, estado: "aprobada", aprobaciones: 1, aprobada_en: "2026-10-31T12:00:00Z",
+  aprobacion_vence_en: "2026-11-07T12:00:00Z" };
+
+async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
+  const pedidosHechos: string[] = [];
+  await pagina.route("**/api/v1/**", async (ruta) => {
+    const pedido = ruta.request();
+    const camino = new URL(pedido.url()).pathname;
+    pedidosHechos.push(`${pedido.method()} ${camino}`);
+    const c = `/api/v1/consorcios/${A}`;
+    if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
+    if (pedido.method() === "GET" && camino === `${c}/ordenes-pago`) return ruta.fulfill({ json: { elementos: [ORDEN_APROBADA] } });
+    if (camino === `${c}/pagos-manuales`) return ruta.fulfill({ json: { elementos: [] } });
+    if (camino === `${c}/documentos`)
+      return ruta.fulfill({ json: { documentos: [{ id: COMPROBANTE, categoria: "facturas_y_comprobantes",
+        titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z",
+        versiones: [{ id: ARCHIVO, estado: "disponible" }] }] } });
+    if (camino === `${c}/ordenes-pago/${ORDEN}`) return ruta.fulfill({ json: { orden: ORDEN_APROBADA, versiones: [version(null)] } });
+    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/emitir`)
+      return ruta.fulfill({ json: { id: ORDEN, version: 1 } });
+    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/cuenta`)
+      return ruta.fulfill({ json: { ejecucion_id: EJECUCION, version: 1, huella: "cd".repeat(32), proveedor_id: PROV_A,
+        proveedor_version: 1, razon_social: RAZON_LARGA, cuit: "30712345679", cuenta_destino: CUENTA,
+        importe_centavos: 12_000_000, moneda: "ARS", concepto: ORDEN_A.concepto, comprobante: "Factura A 0001-00000042",
+        aprobada_en: "2026-10-31T12:00:00Z", aprobacion_vence_en: "2026-11-07T12:00:00Z" } });
+    if (camino === `${c}/pagos-manuales/revision`)
+      return ruta.fulfill({ json: { elementos: [{ orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, ejecucion: {
+        id: EJECUCION, version: 1, creada_en: "2026-10-31T12:30:00Z", resultado: null, referencia: null, declaraciones: [],
+        pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
+          importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO,
+          registrado_por: ADM, registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null,
+          conciliado_por: null, conciliado_en: null }] } }] } });
+    return ruta.abort();
+  });
+  await pagina.context().addCookies([
+    { name: "__Host-cem_csrf", value: CSRF, domain: new URL(baseURL).hostname, path: "/", secure: true },
+  ]);
+  return pedidosHechos;
+}
+
+test.describe("pago manual en un teléfono", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
+  });
+
+  test("la cuenta completa aparece solo en el acto de ejecución, con su aviso", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    const hechos = await simularPagos(page, baseURL!);
+    await page.goto("/egresos/pagos");
+    const ejecutar = page.getByRole("button", { name: `Ejecutar pago manual de ${RAZON_LARGA}` });
+    await expect(ejecutar).toBeVisible();
+    expect((await ejecutar.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await page.content()).not.toContain(CUENTA);
+    expect(hechos.filter((h) => h.endsWith("/pago-manual/cuenta"))).toEqual([]);
+    await entraEnElTelefono(page);
+    await sinFaltasDeAccesibilidad(page);
+
+    await ejecutar.click();
+    await expect(page.getByText(CUENTA)).toBeVisible();
+    await expect(page.getByText("Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.")).toBeVisible();
+    await entraEnElTelefono(page);
+    await sinFaltasDeAccesibilidad(page);
+    await page.getByRole("button", { name: "Cerrar sin registrar" }).click();
+    expect(await page.content()).not.toContain(CUENTA);
+    expect(errores).toEqual([]);
+  });
+
+  test("la conciliación del Consejo muestra la evidencia sin la cuenta y entra en 360 px", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!);
+    await page.goto("/egresos/conciliacion");
+    await expect(page.getByText("0001234567")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Ver el comprobante" })).toBeVisible();
+    expect(await page.content()).not.toContain(CUENTA);
+    await entraEnElTelefono(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+});

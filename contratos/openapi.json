@@ -596,7 +596,17 @@
           "proveedor_sin_cuenta",
           "no_es_quien_aprobo",
           "no_es_quien_registro",
-          "fecha_invalida"
+          "fecha_invalida",
+          "modalidad_riel",
+          "pago_ya_registrado",
+          "numero_operacion_invalido",
+          "no_coincide_con_la_orden",
+          "fecha_operacion_invalida",
+          "comprobante_invalido",
+          "comprobante_de_otra_orden",
+          "operacion_de_otra_orden",
+          "conciliacion_repetida",
+          "no_es_quien_ejecuto"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -742,6 +752,35 @@
           "hay_esquema_vigente"
         ],
         "title": "CoeficientesGrupo",
+        "type": "object"
+      },
+      "ConciliacionPagoManual": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/{pago}/conciliacion`: otro ser humano del Consejo.",
+        "properties": {
+          "motivo": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obligatorio si es `observado`; no va si es `conforme`.",
+            "title": "Motivo"
+          },
+          "resultado": {
+            "$ref": "#/components/schemas/ResultadoConciliacion"
+          }
+        },
+        "required": [
+          "resultado"
+        ],
+        "title": "ConciliacionPagoManual",
         "type": "object"
       },
       "CondicionBeneficiario": {
@@ -1683,6 +1722,109 @@
         "title": "CopiaDatosPropios",
         "type": "object"
       },
+      "CuentaParaPagoManual": {
+        "description": "Lo que necesita quien transfiere, de la ejecución de esa versión: la cuenta completa.",
+        "properties": {
+          "aprobacion_vence_en": {
+            "description": "El pago tiene que hacerse antes: después no se registra con esa fecha.",
+            "format": "date-time",
+            "title": "Aprobacion Vence En",
+            "type": "string"
+          },
+          "aprobada_en": {
+            "format": "date-time",
+            "title": "Aprobada En",
+            "type": "string"
+          },
+          "comprobante": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "description": "CBU o CVU completo, el de la versión aprobada.",
+            "title": "Cuenta Destino",
+            "type": "string"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuit"
+          },
+          "ejecucion_id": {
+            "format": "uuid",
+            "title": "Ejecucion Id",
+            "type": "string"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "proveedor_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Proveedor Version",
+            "type": "integer"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ejecucion_id",
+          "version",
+          "huella",
+          "proveedor_id",
+          "proveedor_version",
+          "razon_social",
+          "cuit",
+          "cuenta_destino",
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "comprobante",
+          "aprobada_en",
+          "aprobacion_vence_en"
+        ],
+        "title": "CuentaParaPagoManual",
+        "type": "object"
+      },
       "DatosContacto": {
         "additionalProperties": false,
         "description": "Lo que se carga o se corrige.",
@@ -1906,6 +2048,51 @@
         "title": "DecisionResumen",
         "type": "object"
       },
+      "DeclaracionPagoNoRealizado": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/no-realizado`: no se pagó. Lo confirma otro ser\nhumano del Consejo; recién entonces la orden queda Fallida.",
+        "properties": {
+          "motivo": {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "motivo"
+        ],
+        "title": "DeclaracionPagoNoRealizado",
+        "type": "object"
+      },
+      "DeclaracionRegistrada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id"
+        ],
+        "title": "DeclaracionRegistrada",
+        "type": "object"
+      },
       "DerechoPrivacidad": {
         "enum": [
           "acceso",
@@ -2035,6 +2222,75 @@
           "fecha"
         ],
         "title": "DocumentoNuevo",
+        "type": "object"
+      },
+      "EjecucionManual": {
+        "properties": {
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "declaraciones": {
+            "items": {
+              "$ref": "#/components/schemas/PagoNoRealizado"
+            },
+            "title": "Declaraciones",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "pagos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoManual"
+            },
+            "title": "Pagos",
+            "type": "array"
+          },
+          "referencia": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El número de operación conciliado.",
+            "title": "Referencia"
+          },
+          "resultado": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`pagada` o `fallida` cuando ya se resolvió.",
+            "title": "Resultado"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "creada_en",
+          "resultado",
+          "referencia",
+          "pagos",
+          "declaraciones"
+        ],
+        "title": "EjecucionManual",
         "type": "object"
       },
       "Emision": {
@@ -3784,6 +4040,23 @@
         "title": "ListaOrdenesPago",
         "type": "object"
       },
+      "ListaPagosManuales": {
+        "description": "Las órdenes con una ejecución manual: por pagar, por conciliar y ya resueltas.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/OrdenConPagoManual"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaPagosManuales",
+        "type": "object"
+      },
       "ListaProveedores": {
         "properties": {
           "elementos": {
@@ -4312,6 +4585,22 @@
         "title": "NuevaContrasena",
         "type": "object"
       },
+      "OrdenConPagoManual": {
+        "properties": {
+          "ejecucion": {
+            "$ref": "#/components/schemas/EjecucionManual"
+          },
+          "orden": {
+            "$ref": "#/components/schemas/OrdenPago"
+          }
+        },
+        "required": [
+          "orden",
+          "ejecucion"
+        ],
+        "title": "OrdenConPagoManual",
+        "type": "object"
+      },
       "OrdenPago": {
         "description": "La orden con su versión vigente.",
         "properties": {
@@ -4696,6 +4985,231 @@
         "title": "Padron",
         "type": "object"
       },
+      "PagoManual": {
+        "description": "Un registro de pago manual, sin la cuenta. `corrige_a`: el registro observado que\nreemplaza.",
+        "properties": {
+          "conciliacion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResultadoConciliacion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conciliado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conciliado En"
+          },
+          "conciliado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conciliado Por"
+          },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrige A"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo_conciliacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Conciliacion"
+          },
+          "numero_operacion": {
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "registrado_en": {
+            "format": "date-time",
+            "title": "Registrado En",
+            "type": "string"
+          },
+          "registrado_por": {
+            "format": "uuid",
+            "title": "Registrado Por",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "description": "El archivo exacto que quedó como evidencia.",
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "corrige_a",
+          "numero_operacion",
+          "fecha_operacion",
+          "importe_centavos",
+          "moneda",
+          "documento_id",
+          "version_documento_id",
+          "registrado_por",
+          "registrado_en",
+          "conciliacion",
+          "motivo_conciliacion",
+          "conciliado_por",
+          "conciliado_en"
+        ],
+        "title": "PagoManual",
+        "type": "object"
+      },
+      "PagoManualCambiado": {
+        "description": "Respuesta de la conciliación y de la confirmación: la orden y su estado nuevo.",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "estado"
+        ],
+        "title": "PagoManualCambiado",
+        "type": "object"
+      },
+      "PagoManualRegistrado": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id"
+        ],
+        "title": "PagoManualRegistrado",
+        "type": "object"
+      },
+      "PagoNoRealizado": {
+        "properties": {
+          "confirmable": {
+            "description": "Si el Consejo puede confirmarla hoy: nadie vio la cuenta ni registró un pago después, y cada persona que vio la cuenta declaró después de su última apertura.",
+            "title": "Confirmable",
+            "type": "boolean"
+          },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado En"
+          },
+          "confirmado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado Por"
+          },
+          "declarado_en": {
+            "format": "date-time",
+            "title": "Declarado En",
+            "type": "string"
+          },
+          "declarado_por": {
+            "format": "uuid",
+            "title": "Declarado Por",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "motivo",
+          "declarado_por",
+          "declarado_en",
+          "confirmado_por",
+          "confirmado_en",
+          "confirmable"
+        ],
+        "title": "PagoNoRealizado",
+        "type": "object"
+      },
       "PedidoCopia": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
         "properties": {
@@ -4717,6 +5231,29 @@
           }
         },
         "title": "PedidoCopia",
+        "type": "object"
+      },
+      "PedidoCuentaPagoManual": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/cuenta`: el acto de ejecución manual, sobre la versión\ny la huella que se vieron. Es el único lugar donde sale la cuenta completa para transferir.",
+        "properties": {
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "huella"
+        ],
+        "title": "PedidoCuentaPagoManual",
         "type": "object"
       },
       "PedidoEnlace": {
@@ -5165,6 +5702,73 @@
         "title": "Rechazo",
         "type": "object"
       },
+      "RegistroPagoManual": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual`: la evidencia de una transferencia ya hecha. No da la\norden por pagada: queda pendiente de conciliación (En verificación).",
+        "properties": {
+          "cuenta_destino": {
+            "description": "CBU o CVU de 22 dígitos. El alias no se admite.",
+            "pattern": "^[0-9]{22}$",
+            "title": "Cuenta Destino",
+            "type": "string"
+          },
+          "documento_id": {
+            "description": "El comprobante: un documento de «Facturas y comprobantes» que pasó el antivirus.",
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "description": "En centavos.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "description": "El número de operación del comprobante.",
+            "pattern": "^[A-Za-z0-9 ./-]{4,60}$",
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "huella",
+          "numero_operacion",
+          "fecha_operacion",
+          "importe_centavos",
+          "moneda",
+          "cuenta_destino",
+          "documento_id"
+        ],
+        "title": "RegistroPagoManual",
+        "type": "object"
+      },
       "ReglaReparto": {
         "description": "Una versión de la regla de un esquema. Ninguna versión cambia: se agrega otra.",
         "properties": {
@@ -5203,6 +5807,14 @@
         ],
         "title": "Renovacion",
         "type": "object"
+      },
+      "ResultadoConciliacion": {
+        "enum": [
+          "conforme",
+          "observado"
+        ],
+        "title": "ResultadoConciliacion",
+        "type": "string"
       },
       "RevisionMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1\ndel propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de\nrevisión. No toca el mandato ni cubre el período en que estuvo sin efecto.",
@@ -9998,6 +10610,420 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual": {
+      "post": {
+        "operationId": "registrar_pago_manual_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroPagoManual"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualRegistrado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "Evidencia inválida."
+          }
+        },
+        "summary": "Registrar un pago manual con su evidencia: queda pendiente de conciliación",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/cuenta": {
+      "post": {
+        "description": "La única ruta que da la cuenta completa a quien va a pagar. Se evalúa de nuevo en cada\npedido y cada uno queda en la auditoría, con los últimos 4 dígitos. No cambia nada más: no\nlleva `Idempotency-Key`.",
+        "operationId": "cuenta_para_pago_manual_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_cuenta_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PedidoCuentaPagoManual"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuentaParaPagoManual"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "El acto de ejecución manual: la cuenta completa para transferir",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/no-realizado": {
+      "post": {
+        "operationId": "declarar_pago_no_realizado_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_no_realizado_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclaracionPagoNoRealizado"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeclaracionRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declarar que el pago manual no se hizo: lo confirma otro miembro del Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/no-realizado/{declaracion_id}/confirmacion": {
+      "post": {
+        "description": "Quien declaró ocupa el lugar de quien ejecutó (`no_es_quien_ejecuto`).",
+        "operationId": "confirmar_pago_no_realizado_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_no_realizado__declaracion_id__confirmacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "declaracion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Declaracion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar que el pago no se hizo (otro miembro del Consejo): la orden queda Fallida",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/{pago_id}/conciliacion": {
+      "post": {
+        "description": "Lee la orden con la revisión ya verificada y evalúa la separación con quien la preparó y\ncon quien registró el pago. La base compara además con quien preparó cada versión, por la\nidentidad guardada en cada acto.",
+        "operationId": "conciliar_pago_manual_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual__pago_id__conciliacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConciliacionPagoManual"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Conciliar un pago manual (otro miembro del Consejo): conforme la deja Pagada",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/rechazar": {
       "post": {
         "operationId": "rechazar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__rechazar_post",
@@ -10468,6 +11494,98 @@
         "summary": "Informe previo de una importación de padrón (RF02); no escribe nada",
         "tags": [
           "consorcios"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-manuales": {
+      "get": {
+        "operationId": "listar_pagos_manuales_api_v1_consorcios__consorcio_id__pagos_manuales_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPagosManuales"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pagos manuales por pagar, por conciliar y resueltos (quien ejecuta), sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-manuales/revision": {
+      "get": {
+        "operationId": "listar_pagos_manuales_revision_api_v1_consorcios__consorcio_id__pagos_manuales_revision_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPagosManuales"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pagos manuales para conciliar (Consejo), sin la cuenta",
+        "tags": [
+          "egresos"
         ]
       }
     },
