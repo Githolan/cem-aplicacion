@@ -9,7 +9,7 @@ import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { porConciliar, porConfirmar } from "./ConciliacionPagos";
-import { AVISO_APROBACION_VENCIDA, AVISO_VERIFICAR_CUENTA, comprobantesDisponibles, porPagar, situacion } from "./PagosManuales";
+import { AVISO_SIN_CUENTA, AVISO_VERIFICAR_CUENTA, comprobantesDisponibles, porPagar, situacion } from "./PagosManuales";
 
 // Pago manual del piloto (app 0055). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -362,7 +362,7 @@ describe("pagos a realizar", () => {
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/egresos/pagos");
     fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
-    expect(await screen.findByText(AVISO_APROBACION_VENCIDA)).toBeTruthy();
+    expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
     expect(container.textContent).not.toContain(CUENTA);
     expect(screen.queryByText("CBU/CVU")).toBeNull();
     await sinFaltasDeAccesibilidad(container);
@@ -377,6 +377,21 @@ describe("pagos a realizar", () => {
     expect(await registro?.json()).toMatchObject({ version: 1, huella: H1, cuenta_destino: CUENTA });
   });
 
+  it.each(["proveedor_cambiado", "contrato_no_vigente"])("con %s y la orden emitida, registra sin volver a ver la cuenta", async (codigo) => {
+    const api = simulado({
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [conPago("en_ejecucion")] }),
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: orden({ estado: "en_ejecucion" }), versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error(codigo, 409),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
+    expect(container.textContent).not.toContain(CUENTA);
+    expect(screen.getByLabelText("Número de operación")).toBeTruthy();
+  });
+
   it("con la aprobación vencida y sin registro, declara que no se pagó sin ver la cuenta", async () => {
     const api = simulado({
       [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
@@ -388,7 +403,7 @@ describe("pagos a realizar", () => {
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/egresos/pagos");
     fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
-    expect(await screen.findByText(AVISO_APROBACION_VENCIDA)).toBeTruthy();
+    expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
     expect(container.textContent).not.toContain(CUENTA);
     fireEvent.click(screen.getByRole("button", { name: "No se pudo pagar" }));
     fireEvent.change(screen.getByLabelText("Por qué no se pagó"), { target: { value: "Venció antes de transferir" } });
@@ -408,7 +423,7 @@ describe("pagos a realizar", () => {
     abrir("/egresos/pagos");
     fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
     expect(await screen.findByRole("alert")).toBeTruthy();
-    expect(screen.queryByText(AVISO_APROBACION_VENCIDA)).toBeNull();
+    expect(screen.queryByText(AVISO_SIN_CUENTA)).toBeNull();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 
