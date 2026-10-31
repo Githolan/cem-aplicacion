@@ -762,6 +762,7 @@ def test_la_declaracion_queda_superada_por_un_pago_registrado_despues(motor_migr
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
            motivo="SINTETICO: falta el comprobante correcto")  # fmt: skip
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_verificacion"
     d2 = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1,
                 motivo="SINTETICO: el banco devolvió la transferencia")  # fmt: skip
@@ -793,6 +794,7 @@ def test_la_declaracion_queda_superada_si_despues_alguien_vio_la_cuenta(
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, x, o)
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
     # Aunque x declare después, la vieja sigue superada: se confirma la nueva.
     d2 = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
@@ -839,9 +841,56 @@ def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
     ver(motor_migrate, e, x, o)
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
-    llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o)[str(dx)] is False  # la lectura dice lo mismo que la confirmación
+    da = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o)[str(dx)] is True and confirmables(e, o)[str(da)] is True
     llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dx)  # control
+    assert set(confirmables(e, o).values()) == {False}  # confirmada: ninguna más
     assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_0056_confirmable_mira_el_estado_la_version_y_el_resultado(motor_migrate, e):
+    """`confirmable` leído directo de la base, como lo vería otro cliente que no filtra por
+    estado (revisión de #183): cada condición de `0056` por separado, con una orden para cada
+    una. Los cambios se fuerzan con el rol de migración, por las transiciones permitidas."""
+
+    def confirmable(o, d) -> bool:
+        with transaccion(motor_migrate, persona_id=e.mc1, consorcio_id=e.cons) as c:
+            filas = c.execute(
+                text("select id, confirmable from nucleo.declaraciones_pago_no_realizado_lectura("
+                     ":o, 'egresos.aprobar_orden', :actor, 'api', :sesion)"),
+                {"o": o, "actor": e.mc1, "sesion": e.sesion[e.mc1]},
+            ).all()  # fmt: skip
+        return {f.id: f.confirmable for f in filas}[d]
+
+    def forzar(sql: str, o) -> None:
+        with motor_migrate.begin() as c:
+            c.execute(text(sql), {"o": o})
+
+    def declarada() -> tuple[UUID, UUID]:
+        o = emitida(motor_migrate, e)
+        d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+        assert confirmable(o, d) is True  # control
+        return o, d
+
+    resultado = ("insert into nucleo.resultado_ejecucion_orden_pago (consorcio_id, ejecucion_id,"
+                 " resultado, origen) select consorcio_id, id, '{}', 'manual'"
+                 " from nucleo.ejecucion_orden_pago where orden_id = :o")  # fmt: skip
+    o, d = declarada()
+    forzar(resultado.format("incierta"), o)
+    assert confirmable(o, d) is True  # una incierta no cierra la ejecución
+    forzar(resultado.format("fallida"), o)
+    assert confirmable(o, d) is False  # un resultado definitivo sí
+
+    o, d = declarada()
+    forzar("update nucleo.orden_pago set version_vigente = version_vigente + 1 where id = :o", o)
+    assert confirmable(o, d) is False  # la ejecución es de una versión vieja
+
+    o, d = declarada()
+    forzar("update nucleo.orden_pago set estado = 'en_verificacion' where id = :o", o)
+    assert confirmable(o, d) is True
+    forzar("update nucleo.orden_pago set estado = 'pagada' where id = :o", o)
+    assert confirmable(o, d) is False  # la orden ya no espera su pago
 
 
 def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
@@ -1031,6 +1080,25 @@ def test_0055_ida_y_vuelta(base_aparte):
     assert "riel_de_pago_habilitado" not in crear and columnas == 0
     command.upgrade(cfg, "0055")  # control: vuelve a subir limpio
     assert _tablas_0055(motor) == 6
+
+
+def test_0056_ida_y_vuelta(base_aparte):
+    """0056: `confirmable` mira el estado de la orden; baja y sube limpio."""
+    cfg, motor = base_aparte
+
+    def lectura() -> str:
+        with motor.connect() as c:
+            return c.execute(
+                text("select pg_get_functiondef('nucleo.declaraciones_pago_no_realizado_lectura("
+                     "uuid, text, uuid, text, uuid)'::regprocedure)")
+            ).scalar_one()  # fmt: skip
+
+    command.upgrade(cfg, "0056")
+    assert "resultado <> 'incierta'" in lectura()
+    command.downgrade(cfg, "0055")
+    assert "resultado <> 'incierta'" not in lectura()
+    command.upgrade(cfg, "0056")  # control
+    assert "resultado <> 'incierta'" in lectura()
 
 
 def test_0055_no_baja_con_el_riel_habilitado(base_aparte):

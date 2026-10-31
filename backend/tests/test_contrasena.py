@@ -33,7 +33,12 @@ from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
 from tests.test_identidad_cierre_y_purga import entrar_como
 from tests.test_identidad_tabla import nueva_persona
 from tests.test_registros import salida_json  # noqa: F401  (fixture)
-from tests.test_segundo_factor import avisos, con_factor, reloj  # noqa: F401  (fixture)
+from tests.test_segundo_factor import (  # noqa: F401  (`reloj` es un fixture)
+    avisos,
+    con_factor,
+    envejecer_sesion,
+    reloj,
+)
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
 
@@ -143,6 +148,22 @@ def test_definir_y_entrar_sin_segundo_factor(app, motor_migrate):  # noqa: F811
     assert nuevo.get(SESION).json()["persona_id"] == str(persona)
     # Sin segundo factor, la sesión no queda verificada.
     assert nuevo.get("/api/v1/auth/totp").json()["verificado_en"] is None
+
+
+def test_la_primera_contrasena_pide_una_entrada_reciente(app, motor_migrate):  # noqa: F811
+    """Revisión H3: una sesión vieja que quedó abierta no define la primera contraseña."""
+    _, correo = nueva_persona(motor_migrate)
+    c = entrar_como(app, motor_migrate, correo)
+    envejecer_sesion(motor_migrate, c)
+    r = definir(c)
+    assert (r.status_code, r.json()["codigo"], r.json()["detalle"]) == (
+        403,
+        "reautenticacion_requerida",
+        {"falta": "entrar_de_nuevo"},
+    )
+    assert c.get(BASE).json()["definida"] is False
+    reciente = entrar_como(app, motor_migrate, correo)
+    assert definir(reciente).status_code == 200  # control: recién entró
 
 
 def test_estado_sin_contrasena(app, motor_migrate):  # noqa: F811

@@ -17,9 +17,13 @@ const ESTADO_LIMITE = 429;
 const ESTADO_ERROR_DEL_SERVIDOR = 500;
 const ESTADO_NO_DISPONIBLE = 503;
 
+/** Una acción sensible pide una entrada reciente (alta del segundo factor, primera contraseña). */
+export const ENTRAR_DE_NUEVO = "Por seguridad, salí, volvé a entrar y hacelo apenas entres.";
+
 export function mensajeDeFalla(estado: number, codigo: string | undefined): string {
   if (estado === ESTADO_NO_DISPONIBLE) return SERVICIO_NO_DISPONIBLE;
   if (codigo === undefined) return SIN_CONEXION;
+  if (codigo === "reautenticacion_requerida") return ENTRAR_DE_NUEVO;
   if (estado === ESTADO_LIMITE) return LIMITE_DE_PEDIDOS;
   if (estado >= ESTADO_ERROR_DEL_SERVIDOR) return SERVICIO_NO_DISPONIBLE;
   return RECARGAR;

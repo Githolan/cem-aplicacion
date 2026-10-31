@@ -176,6 +176,24 @@ def _sesion(identidad: Identidad) -> UUID:
     return identidad.sesion_id
 
 
+def exigir_entrada_reciente(conn: Connection, identidad: Identidad) -> None:
+    """Para dar de alta un segundo factor o la primera contraseña, la sesión tiene que haber
+    empezado hace menos de 10 minutos (la regla de `0042`): una sesión vieja que quedó abierta en
+    un dispositivo ajeno no alcanza para quedarse con la cuenta (revisión de seguridad H3)."""
+    reciente = conn.execute(
+        text("select creada_en > now() - :v from nucleo.sesion where id = :s"),
+        {"s": _sesion(identidad), "v": VIGENCIA_VERIFICACION},
+    ).scalar_one()
+    if not reciente:
+        log.info("alta rechazada: sin_entrada_reciente")
+        raise ErrorApi(
+            403,
+            CodigoError.REAUTENTICACION_REQUERIDA,
+            "Por seguridad, salí, volvé a entrar y hacelo apenas entres.",
+            detalle={"falta": "entrar_de_nuevo"},
+        )
+
+
 def _verificado_en(conn: Connection, sesion_id: UUID) -> datetime | None:
     return conn.execute(
         text("select segundo_factor_en from nucleo.sesion where id = :s"), {"s": sesion_id}
@@ -305,7 +323,10 @@ def estado(identidad: IdentidadDep, motor: MotorDep, response: Response) -> Esta
     "/alta",
     response_model=AltaTotp,
     summary="Empezar el alta de una aplicación de autenticación",
-    responses={409: {"model": Error, "description": "Ya hay una aplicación activa."}},
+    responses={
+        403: {"model": Error, "description": "La sesión no es de una entrada reciente."},
+        409: {"model": Error, "description": "Ya hay una aplicación activa."},
+    },
 )
 def alta(
     identidad: IdentidadDep, claves: ClavesDep, motor: MotorDep, response: Response
@@ -315,6 +336,7 @@ def alta(
     response.headers.update(SIN_CACHE)
     secreto = secrets.token_bytes(BYTES_SECRETO)
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        exigir_entrada_reciente(conn, identidad)
         activo = conn.execute(
             text("select confirmado_en is not null from nucleo.factor_totp for update")
         ).scalar_one_or_none()
@@ -348,6 +370,7 @@ def alta(
     summary="Confirmar el alta con el primer código",
     responses={
         400: {"model": Error, "description": "El código no sirve."},
+        403: {"model": Error, "description": "La sesión no es de una entrada reciente."},
         409: {"model": Error, "description": "No hay un alta pendiente."},
     },
 )
@@ -365,6 +388,7 @@ async def confirmar(
     await consumir_intento(request, identidad.persona_id)
     codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
+        exigir_entrada_reciente(conn, identidad)
         if not _comprobar_totp(conn, claves, identidad.persona_id, pedido.codigo, confirmado=False):
             raise codigo_invalido()
         conn.execute(text("update nucleo.factor_totp set confirmado_en = now()"))

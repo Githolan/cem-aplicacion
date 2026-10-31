@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
+import { ENTRAR_DE_NUEVO } from "./fallas";
 import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
 
@@ -369,6 +370,19 @@ describe("contraseña en /cuenta", () => {
     // Guardada, el formulario se pliega y el foco vuelve al botón, que ahora es el de cambiarla.
     expect(seccion().queryByLabelText("Contraseña nueva")).toBeNull();
     expect(document.activeElement).toBe(seccion().getByRole("button", { name: "Cambiar la contraseña" }));
+  });
+
+  it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) pide volver a entrar", async () => {
+    const simulado = conSesion({ "PUT /api/v1/auth/contrasena": () => error("reautenticacion_requerida", 403) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText(/Todavía no tenés contraseña/);
+    desplegar();
+    completar(NUEVA);
+
+    expect(await seccion().findByText(ENTRAR_DE_NUEVO)).toBeTruthy();
+    expect(seccion().queryByText(/Revisá la conexión/)).toBeNull();
+    expect(seccion().queryByText(/Listo:/)).toBeNull();
   });
 
   it("sin segundo factor, cambiarla pide la actual; cierra las otras sesiones y las saca de la lista", async () => {

@@ -269,6 +269,45 @@ def test_el_cupo_de_intentos_es_por_persona(app, motor_migrate, reloj):  # noqa:
 # Verificación reciente (TB-CEM-3) y baja --------------------------------------------------
 
 
+def envejecer_sesion(motor_migrate, c) -> None:
+    """La sesión del navegador empezó hace más de 10 minutos."""
+    with motor_migrate.begin() as conn:
+        n = conn.execute(
+            text("update nucleo.sesion set creada_en = now() - :v where token_hash = :t"),
+            {
+                "v": sf.VIGENCIA_VERIFICACION + timedelta(minutes=1),
+                "t": sesiones.hash_token(c.cookies[sesiones.COOKIE_SESION]),
+            },
+        ).rowcount
+    assert n == 1
+
+
+def test_el_alta_pide_una_entrada_reciente(app, motor_migrate, reloj):  # noqa: F811
+    """Revisión H3: una sesión vieja que quedó abierta no da de alta un segundo factor ajeno."""
+    _, correo = nueva_persona(motor_migrate)
+    c = entrar_como(app, motor_migrate, correo)
+    alta = c.post(f"{BASE}/alta", headers=csrf(c))
+    assert alta.status_code == 200, alta.text  # control: recién entró
+    envejecer_sesion(motor_migrate, c)
+    for r in (
+        c.post(f"{BASE}/alta", headers=csrf(c)),
+        c.post(f"{BASE}/confirmar", json={"codigo": sf.codigo_en(secreto_de(alta.json()),
+                                                                  reloj.paso)}, headers=csrf(c)),
+    ):  # fmt: skip
+        assert (r.status_code, r.json()["codigo"], r.json()["detalle"]) == (
+            403,
+            "reautenticacion_requerida",
+            {"falta": "entrar_de_nuevo"},
+        )
+    assert c.get(BASE).json()["activo"] is False
+    with motor_migrate.connect() as conn:
+        assert conn.execute(
+            text("select count(*) from nucleo.sesion where segundo_factor_en is not null"
+                 " and token_hash = :t"),
+            {"t": sesiones.hash_token(c.cookies[sesiones.COOKIE_SESION])},
+        ).scalar_one() == 0  # fmt: skip
+
+
 def test_la_baja_pide_verificacion_reciente(app, motor_migrate, reloj):  # noqa: F811
     _, secreto, _, correo = con_factor(app, motor_migrate, reloj)
     c = entrar_como(app, motor_migrate, correo)
@@ -303,8 +342,10 @@ def test_la_baja_pide_verificacion_reciente(app, motor_migrate, reloj):  # noqa:
         "verificado_en": None,
     }
     assert avisos(motor_migrate, correo)[-1] == sf.ASUNTO_BAJA
-    # Se puede volver a dar de alta.
-    assert c.post(f"{BASE}/alta", headers=csrf(c)).status_code == 200
+    # Se puede volver a dar de alta, desde una entrada reciente (esta sesión tiene una hora).
+    assert c.post(f"{BASE}/alta", headers=csrf(c)).status_code == 403
+    nueva = entrar_como(app, motor_migrate, correo)
+    assert nueva.post(f"{BASE}/alta", headers=csrf(nueva)).status_code == 200
 
 
 def test_sin_sesion_todo_responde_401(app):  # noqa: F811

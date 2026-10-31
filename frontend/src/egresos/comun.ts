@@ -149,7 +149,7 @@ const MENSAJES: Record<string, string> = {
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
   conciliacion_repetida: "Ese pago ya está conciliado.",
   no_es_quien_ejecuto:
-    "El pago lo registra, o declara que no se hizo, quien vio la cuenta en el acto de ejecución; y quien la vio o registró no concilia ni confirma.",
+    "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución; quien la vio, registró o declaró no concilia ni confirma.",
   idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
   idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",
 };
