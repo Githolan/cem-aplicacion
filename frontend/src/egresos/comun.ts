@@ -61,9 +61,10 @@ export const TEXTO_ESTADO_PROVEEDOR: Record<EstadoProveedor, string> = {
   baja: "De baja",
 };
 
-/** Una cuenta en las listas: solo los últimos 4 dígitos (la completa, en la revisión). */
-export function cuentaEnmascarada(cuenta: string | null): string {
-  return cuenta === null ? "Sin cuenta" : `…${cuenta.slice(-4)}`;
+/** Una cuenta en las listas: los últimos 4 dígitos, que es lo único que manda el backend fuera
+ * de la revisión (decisión del 31-10-2026). */
+export function cuentaEnmascarada(ultimos: string | null): string {
+  return ultimos === null ? "Sin cuenta" : `…${ultimos}`;
 }
 
 /** Un importe en centavos, con la moneda. */

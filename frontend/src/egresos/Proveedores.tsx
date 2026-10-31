@@ -47,9 +47,10 @@ type Aviso = { texto: string; ok: boolean };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
 
-/** La cuenta que se manda: en un cambio, el campo vacío conserva la que tiene el proveedor. */
-function cuentaPedida(f: Formulario, d: Datos): string | null {
-  return f.modo === "cambio" && d.cuenta.trim() === "" ? f.proveedor.cuenta_destino : opcional(d.cuenta);
+/** En un cambio, el campo vacío conserva la cuenta del proveedor. La pantalla nunca la tiene
+ * completa: lo pide con `conservar_cuenta` y el backend la toma de la versión esperada. */
+function conservaCuenta(f: Formulario, d: Datos): boolean {
+  return f.modo === "cambio" && d.cuenta.trim() === "";
 }
 
 /** El aviso de cambio de cuenta (decisión del 30-10, punto 21). */
@@ -142,8 +143,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
             razon: f.proveedor.razon_social,
             rubro: f.proveedor.rubro ?? "",
             contacto: f.proveedor.contacto ?? "",
-            // La cuenta completa solo se muestra en la revisión del Consejo: acá el campo empieza
-            // vacío y vacío quiere decir «conservar la que tiene».
+            // La cuenta completa solo llega a la revisión del Consejo: acá el campo empieza vacío y
+            // vacío quiere decir «conservar la que tiene».
             cuenta: "",
             estado: f.proveedor.estado,
           },
@@ -166,7 +167,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
     if (formulario === null) return;
-    const cambiaCuenta = formulario.modo === "cambio" && cuentaPedida(formulario, datos) !== formulario.proveedor.cuenta_destino;
+    const cambiaCuenta = formulario.modo === "cambio" && !conservaCuenta(formulario, datos);
     if (cambiaCuenta && !confirmarCuenta) {
       setConfirmarCuenta(true);
       return;
@@ -182,7 +183,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
       razon_social: datos.razon.trim(),
       rubro: opcional(datos.rubro),
       contacto: opcional(datos.contacto),
-      cuenta_destino: cuentaPedida(f, datos),
+      cuenta_destino: conservaCuenta(f, datos) ? null : opcional(datos.cuenta),
     };
     setEnviando(true);
     setAviso(null);
@@ -201,6 +202,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
               documento_id: f.proveedor.documento_id,
               estado: datos.estado,
               version_esperada: f.proveedor.version,
+              conservar_cuenta: conservaCuenta(f, datos),
             },
           });
     void pedido
@@ -290,7 +292,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                         <dt>Estado</dt>
                         <dd>{TEXTO_ESTADO_PROVEEDOR[p.estado]}</dd>
                         <dt>Cuenta</dt>
-                        <dd>{cuentaEnmascarada(p.cuenta_destino)}</dd>
+                        <dd>{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</dd>
                       </dl>
                       <button type="button" onClick={() => verFicha(p)}>
                         Ver la ficha de {p.razon_social}
@@ -313,14 +315,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                 <dt>Estado</dt>
                 <dd>{TEXTO_ESTADO_PROVEEDOR[ficha.proveedor.estado]}</dd>
                 <dt>Cuenta</dt>
-                <dd>{cuentaEnmascarada(ficha.proveedor.cuenta_destino)}</dd>
+                <dd>{cuentaEnmascarada(ficha.proveedor.cuenta_ultimos_digitos)}</dd>
               </dl>
               <h3>Historia</h3>
               <ol className="versiones" aria-label="Versiones del proveedor">
                 {ficha.versiones.map((v) => (
                   <li key={v.version}>
                     Versión {v.version}, {momento(v.creada_en)}: {v.razon_social}, {TEXTO_ESTADO_PROVEEDOR[v.estado]},
-                    cuenta {cuentaEnmascarada(v.cuenta_destino)}
+                    cuenta {cuentaEnmascarada(v.cuenta_ultimos_digitos)}
                   </li>
                 ))}
               </ol>
@@ -361,7 +363,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
               <label htmlFor={`${id}-cuenta`}>
                 {formulario.modo === "alta"
                   ? "Cuenta destino: CBU o CVU de 22 números (opcional)"
-                  : `Cuenta destino nueva: CBU o CVU de 22 números (vacío conserva ${cuentaEnmascarada(formulario.proveedor.cuenta_destino)})`}
+                  : `Cuenta destino nueva: CBU o CVU de 22 números (vacío conserva ${cuentaEnmascarada(formulario.proveedor.cuenta_ultimos_digitos)})`}
               </label>
               <input id={`${id}-cuenta`} inputMode="numeric" pattern={CBU} value={datos.cuenta} disabled={enviando}
                 onChange={(e) => cambiar("cuenta", e.target.value)} />
