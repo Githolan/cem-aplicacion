@@ -475,6 +475,10 @@ class EstadoContrato(StrEnum):
     DADO_DE_BAJA = "dado_de_baja"
     DOCUMENTO_NO_VIGENTE = "documento_no_vigente"
     """El documento de respaldo se borró: el contrato no respalda nada (`contrato_vigente`)."""
+    PENDIENTE_RECONFIRMACION = "pendiente_reconfirmacion"
+    """Estaba confirmado, pero la cuenta del proveedor cambió después: no respalda nada hasta que
+    un consejero lo confirme de nuevo sobre la versión con la cuenta nueva (`0053`, decisión del
+    propietario del 31-10-2026)."""
 
 
 class ContratoNuevo(BaseModel):
@@ -497,11 +501,15 @@ class ContratoNuevo(BaseModel):
 
 
 class Confirmacion(BaseModel):
-    """`POST …/contratos/{id}/confirmacion`: la huella del contrato que se vio."""
+    """`POST …/contratos/{id}/confirmacion`: la huella del contrato y la versión del proveedor que
+    se vieron. Si el proveedor tiene otra versión vigente, 409 `proveedor_cambiado`."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     huella: str = Field(pattern=FORMATO_HUELLA)
+    proveedor_version: Version = Field(
+        description="La versión vigente del proveedor que se vio (`Contrato.proveedor_version`)."
+    )
 
 
 class ContratoCambiado(BaseModel):
@@ -531,9 +539,30 @@ class Contrato(BaseModel):
     confirmado_en: datetime | None
     baja_en: datetime | None
     estado: EstadoContrato
+    proveedor_version: int = Field(description="La versión vigente del proveedor.")
+    cuenta_ultimos_digitos: str | None = Field(
+        description="Los últimos dígitos de la cuenta de esa versión."
+    )
 
 
 class ListaContratos(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[Contrato]
+
+
+class ContratoRevision(Contrato):
+    """Revisión del Consejo: quien confirma (o reconfirma, `0053`) ve la cuenta completa de la
+    versión vigente del proveedor, que es lo que confirma."""
+
+    cuenta_destino: str | None = Field(
+        description="La cuenta completa de esa versión. Nula si quien lee registró el contrato"
+        " (también con otra cuenta suya: por identidad humana); entonces vale"
+        " `cuenta_ultimos_digitos`."
+    )
+
+
+class ListaContratosRevision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[ContratoRevision]

@@ -34,12 +34,14 @@ from cem_contracts.egresos import (
     Contrato,
     ContratoCambiado,
     ContratoNuevo,
+    ContratoRevision,
     DatosOrdenPago,
     DatosProveedor,
     Emision,
     EnvioARevision,
     EstadoOrdenPago,
     ListaContratos,
+    ListaContratosRevision,
     ListaOrdenesPago,
     ListaProveedores,
     OrdenPago,
@@ -185,6 +187,15 @@ ERRORES = {
 """Motivos de las funciones de `0045` a `0050`. Los que el contrato ya impide (razón social,
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de
 R10 pueden llegar si la sesión venció entre el evaluador y la base."""
+
+ERRORES_CONFIRMACION = {
+    "proveedor_cambiado": (
+        409, CodigoError.PROVEEDOR_CAMBIADO,
+        "El proveedor cambió desde que viste el contrato: recargá y confirmá la versión nueva.",
+    ),
+}  # fmt: skip
+"""Al confirmar un contrato, `proveedor_cambiado` es que se vio otra versión del proveedor
+(`0053`), no una orden preparada."""
 
 RESPUESTAS_LECTURA = {
     403: {"description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."}
@@ -708,10 +719,29 @@ def emitir_orden(
 # --- Contratos y abonos ------------------------------------------------------------------------
 
 
-def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None) -> list[Contrato]:
+def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None, revision: bool = False):
+    """Quien prepara recibe los últimos dígitos de la cuenta; la revisión del Consejo, también la
+    completa, que es lo que confirma, salvo para quien registró el contrato."""
     sql = "select * from nucleo.contratos_proveedor_lectura(:k, :f, :actor, 'api', :sesion)"
     filas = _ejecutar(c, permiso, sql, {"k": contrato, "f": LEE_COMO[permiso.accion]})
-    return [Contrato(**f) for f in filas.mappings()]
+    contratos = []
+    for f in filas.mappings():
+        datos = dict(f)
+        datos["cuenta_ultimos_digitos"] = ultimos_digitos(datos["cuenta_destino"])
+        if revision:
+            # Quien registró el contrato ocupa el lugar de quien preparó: por identidad humana,
+            # tampoco con otra cuenta suya recibe la cuenta completa (como en las órdenes; Codex
+            # en #178).
+            registro = _ejecutar(c, permiso, MISMA_IDENTIDAD,
+                                 {"c": permiso.ctx.consorcio_id,
+                                  "ps": [datos["registrado_por"]]}).scalar_one()  # fmt: skip
+            if registro:
+                datos["cuenta_destino"] = None
+            contratos.append(ContratoRevision(**datos))
+        else:
+            del datos["cuenta_destino"]
+            contratos.append(Contrato(**datos))
+    return contratos
 
 
 @router.get(
@@ -729,15 +759,15 @@ def listar_contratos(
 
 @router.get(
     "/consorcios/{consorcio_id}/contratos/revision",
-    response_model=ListaContratos,
-    summary="Contratos y abonos, para confirmarlos (quien aprueba)",
+    response_model=ListaContratosRevision,
+    summary="Contratos y abonos, para confirmarlos (quien aprueba), con la cuenta completa",
     responses=RESPUESTAS_LECTURA,
 )
 def listar_contratos_revision(
     permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
-) -> ListaContratos:
+) -> ListaContratosRevision:
     with _lectura(permiso, motor) as c:
-        return ListaContratos(elementos=_contratos(c, permiso, None))
+        return ListaContratosRevision(elementos=_contratos(c, permiso, None, revision=True))
 
 
 @router.post(
@@ -794,8 +824,11 @@ def confirmar_contrato(
     def efecto(conn: Connection) -> tuple[int, ContratoCambiado]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.confirmar_contrato_proveedor(:k, :huella, :actor, 'api', :sesion)",
-            {"k": contrato_id, "huella": bytes.fromhex(confirmacion.huella)},
+            "select nucleo.confirmar_contrato_proveedor(:k, :huella, :version, :actor, 'api',"
+            " :sesion)",
+            {"k": contrato_id, "huella": bytes.fromhex(confirmacion.huella),
+             "version": confirmacion.proveedor_version},
+            errores=ERRORES_CONFIRMACION,
         )  # fmt: skip
         return 201, ContratoCambiado(id=contrato_id)
 

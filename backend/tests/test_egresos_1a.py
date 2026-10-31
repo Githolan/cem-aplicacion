@@ -55,7 +55,8 @@ REGISTRAR_CONTRATO = (
     " :desde, :hasta, :documento, :decision, :actor, :origen, :sesion)"
 )
 CONFIRMAR_CONTRATO = (
-    "select nucleo.confirmar_contrato_proveedor(:contrato, :huella_k, :actor, :origen, :sesion)"
+    "select nucleo.confirmar_contrato_proveedor(:contrato, :huella_k, :version_k, :actor,"
+    " :origen, :sesion)"
 )
 BAJA_CONTRATO = "select nucleo.baja_contrato_proveedor(:contrato, :actor, :origen, :sesion)"
 
@@ -140,17 +141,21 @@ def contrato(motor_migrate, e, *, tope=IMPORTE, moneda="ARS", proveedor=None,
     )  # fmt: skip
 
 
-def huella_contrato(motor_migrate, k) -> bytes:
+def visto(motor_migrate, k) -> dict:
+    """Lo que quien confirma vio del contrato: su huella y la versión vigente del proveedor
+    (desde `0053` la confirmación es de esa versión)."""
     with motor_migrate.connect() as c:
-        return c.execute(
-            text("select huella from nucleo.contrato_proveedor where id = :k"), {"k": k}
-        ).scalar_one()
+        fila = c.execute(
+            text("select huella, (nucleo.proveedor_vigente(consorcio_id, proveedor_id)).numero"
+                 " from nucleo.contrato_proveedor where id = :k"), {"k": k},
+        ).one()  # fmt: skip
+    return {"huella_k": fila[0], "version_k": fila[1]}
 
 
 def confirmado(motor_migrate, e, **kw) -> UUID:
     k = contrato(motor_migrate, e, **kw)
     llamar(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, contrato=k,
-           huella_k=huella_contrato(motor_migrate, k))  # fmt: skip
+           **visto(motor_migrate, k))  # fmt: skip
     return k
 
 
@@ -233,9 +238,11 @@ def test_cuenta_cambiada_pide_aprobacion_bajo_y_sobre_el_umbral(motor_migrate, m
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 10)
     # Declarar un contrato confirmado del proveedor tampoco la hace rutinaria: la cuenta cambiada
-    # gana.
+    # gana. Desde 0053 el contrato hay que confirmarlo de nuevo sobre la cuenta nueva (P3 112).
     k = confirmado(motor_migrate, e, tope=IMPORTE * 100)
     nueva_cuenta(motor_migrate, e, 77)
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", importe=importe, contrato=k)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, **visto(motor_migrate, k))
     o = enviada(motor_migrate, e, importe=importe, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "cuenta_cambiada", "en_revision")  # fmt: skip
@@ -261,7 +268,7 @@ def test_rutinaria_solo_con_un_contrato_declarado_confirmado_y_que_la_cubre(moto
     # Registrado y sin confirmar no respalda: escribir «rutinario» no alcanza.
     niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k)
     llamar(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, contrato=k,
-           huella_k=huella_contrato(motor_migrate, k))  # fmt: skip
+           **visto(motor_migrate, k))  # fmt: skip
     o = enviada(motor_migrate, e, contrato=k)
     assert (franja(motor_migrate, o), orden(motor_migrate, o)["estado"]) == (
         "rutinaria", "aprobada")  # fmt: skip
@@ -347,16 +354,16 @@ def test_registrar_un_contrato_exige_su_documento_y_una_vigencia_valida(motor_mi
 def test_confirmar_un_contrato_exige_otro_ser_humano_y_la_huella_vista(motor_migrate, motor_app,
                                                                        e):  # fmt: skip
     k = contrato(motor_migrate, e)
-    h = huella_contrato(motor_migrate, k)
+    v = visto(motor_migrate, k)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     niega(motor_migrate, e, otra, CONFIRMAR_CONTRATO, "no_es_quien_registro", contrato=k,
-          huella_k=h)  # fmt: skip
-    niega(motor_migrate, e, e.adm, CONFIRMAR_CONTRATO, "42501", contrato=k, huella_k=h)
+          **v)  # fmt: skip
+    niega(motor_migrate, e, e.adm, CONFIRMAR_CONTRATO, "42501", contrato=k, **v)
     niega(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, "huella_distinta", contrato=k,
-          huella_k=bytes(32))  # fmt: skip
-    llamar(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, contrato=k, huella_k=h)  # control
+          **(v | {"huella_k": bytes(32)}))  # fmt: skip
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, contrato=k, **v)  # control
     niega(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, "contrato_ya_confirmado", contrato=k,
-          huella_k=h)  # fmt: skip
+          **v)  # fmt: skip
 
 
 # Umbral --------------------------------------------------------------------------------------
@@ -634,9 +641,14 @@ def test_rutas_de_contratos_franja_y_emision(motor_migrate, e):
     k = r.json()["id"]
     (visto,) = get(e, e.mc1, "contratos/revision").json()["elementos"]
     assert (visto["id"], visto["estado"]) == (k, "pendiente_confirmacion")
-    r = post(e, e.adm, f"contratos/{k}/confirmacion", {"huella": visto["huella"]})
+    vista = {"huella": visto["huella"], "proveedor_version": visto["proveedor_version"]}
+    r = post(e, e.adm, f"contratos/{k}/confirmacion", vista)
     assert codigo(r) == (403, "sin_permiso")
-    r = post(e, e.mc1, f"contratos/{k}/confirmacion", {"huella": visto["huella"]})
+    # Otra versión del proveedor que la vista: 409 con el mensaje de la confirmación (0053).
+    r = post(e, e.mc1, f"contratos/{k}/confirmacion", vista | {"proveedor_version": 9})
+    assert codigo(r) == (409, "proveedor_cambiado")
+    assert "recargá" in r.json()["mensaje"], r.json()
+    r = post(e, e.mc1, f"contratos/{k}/confirmacion", vista)
     assert r.status_code == 201, r.json()
     assert get(e, e.adm, "contratos").json()["elementos"][0]["estado"] == "vigente"
 
@@ -837,13 +849,13 @@ def test_quien_cargo_la_cuenta_del_proveedor_no_confirma_su_contrato(motor_migra
     otra cuenta suya."""
     nueva_cuenta(motor_migrate, e, 41, por=e.mc1)
     k = contrato(motor_migrate, e)
-    h = huella_contrato(motor_migrate, k)
+    v = visto(motor_migrate, k)
     niega(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
-          huella_k=h)  # fmt: skip
+          **v)  # fmt: skip
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
     niega(motor_migrate, e, otra, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
-          huella_k=h)  # fmt: skip
-    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, huella_k=h)  # control
+          **v)  # fmt: skip
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, **v)  # control
 
 
 def test_la_revision_no_da_la_cuenta_a_otra_cuenta_de_quien_preparo(motor_migrate, motor_app, e):
