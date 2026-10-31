@@ -237,8 +237,9 @@ ERRORES = {
     ),
     "no_es_quien_ejecuto": (
         403, CodigoError.NO_ES_QUIEN_EJECUTO,
-        "El pago lo registra, o declara que no se hizo, quien vio la cuenta en el acto de"
-        " ejecución; y quien la vio o registró no concilia ni confirma.",
+        "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la"
+        " cuenta en el acto de ejecución; quien la vio, registró o declaró no concilia ni"
+        " confirma.",
     ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
     "requiere_sesion_reciente": (403, *RENOVAR["requiere_sesion_reciente"]),

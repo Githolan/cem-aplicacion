@@ -761,7 +761,8 @@ def entra_otra_cuenta(corrida: Corrida, rol: str, de: str) -> None:
              "r": REFERENCIA + "; otra cuenta del mismo ser humano sintético"},
         ).scalar_one()  # fmt: skip
         de_quien = conn.execute(
-            text("select nucleo.identidad_humana_de(:c, :p)"),
+            text("select identidad_id from nucleo.identidad_persona where consorcio_id = :c"
+                 " and persona_id = :p and desvinculada_en is null"),
             {"c": corrida.consorcio, "p": corrida.personas[de]},
         ).scalar_one()  # fmt: skip
     comprobar(mismo == de_quien, f"{rol} y {de} son la misma identidad humana")

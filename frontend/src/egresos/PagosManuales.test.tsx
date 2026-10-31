@@ -473,7 +473,7 @@ describe("conciliación de pagos", () => {
     expect((screen.getByRole("button", { name: "Observar el pago" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Qué no coincide"), { target: { value: "La fecha no coincide" } });
     fireEvent.click(screen.getByRole("button", { name: "Observar el pago" }));
-    expect(await screen.findByText(/quien la vio o registró no concilia ni confirma/)).toBeTruthy();
+    expect(await screen.findByText(/quien la vio, registró o declaró no concilia ni confirma/)).toBeTruthy();
     const [pedido] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`);
     expect(await pedido?.json()).toEqual({ resultado: "observado", motivo: "La fecha no coincide" });
   });

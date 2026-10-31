@@ -762,6 +762,7 @@ def test_la_declaracion_queda_superada_por_un_pago_registrado_despues(motor_migr
     llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
            motivo="SINTETICO: falta el comprobante correcto")  # fmt: skip
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_verificacion"
     d2 = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1,
                 motivo="SINTETICO: el banco devolvió la transferencia")  # fmt: skip
@@ -793,6 +794,7 @@ def test_la_declaracion_queda_superada_si_despues_alguien_vio_la_cuenta(
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, x, o)
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert confirmables(e, o) == {str(d): False}
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
     # Aunque x declare después, la vieja sigue superada: se confirma la nueva.
     d2 = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
@@ -839,8 +841,11 @@ def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
     ver(motor_migrate, e, x, o)
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
-    llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o)[str(dx)] is False  # la lectura dice lo mismo que la confirmación
+    da = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    assert confirmables(e, o)[str(dx)] is True and confirmables(e, o)[str(da)] is True
     llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=dx)  # control
+    assert set(confirmables(e, o).values()) == {False}  # confirmada: ninguna más
     assert orden(motor_migrate, o)["estado"] == "fallida"
 
 
@@ -1031,6 +1036,25 @@ def test_0055_ida_y_vuelta(base_aparte):
     assert "riel_de_pago_habilitado" not in crear and columnas == 0
     command.upgrade(cfg, "0055")  # control: vuelve a subir limpio
     assert _tablas_0055(motor) == 6
+
+
+def test_0056_ida_y_vuelta(base_aparte):
+    """0056: `confirmable` mira el estado de la orden; baja y sube limpio."""
+    cfg, motor = base_aparte
+
+    def lectura() -> str:
+        with motor.connect() as c:
+            return c.execute(
+                text("select pg_get_functiondef('nucleo.declaraciones_pago_no_realizado_lectura("
+                     "uuid, text, uuid, text, uuid)'::regprocedure)")
+            ).scalar_one()  # fmt: skip
+
+    command.upgrade(cfg, "0056")
+    assert "resultado <> 'incierta'" in lectura()
+    command.downgrade(cfg, "0055")
+    assert "resultado <> 'incierta'" not in lectura()
+    command.upgrade(cfg, "0056")  # control
+    assert "resultado <> 'incierta'" in lectura()
 
 
 def test_0055_no_baja_con_el_riel_habilitado(base_aparte):
