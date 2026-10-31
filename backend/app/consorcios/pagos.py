@@ -92,6 +92,9 @@ class RielDePago(Protocol):
       con una respuesta que no es una `RespuestaRiel` con un `EstadoRiel` y textos (`str` o
       `None`), el pago queda incierto y se consulta.
     - El `motivo` nunca lleva la cuenta destino; si la trae, se guarda tapada (`[cuenta]`).
+    - La `referencia` es el identificador de la operación en el riel, nunca la cuenta destino:
+      no se tapa porque es la clave para conciliar, así que una cuenta escrita ahí quedaría
+      guardada entera (P3 114).
     - `ordenar` tiene un plazo total (`PLAZO_RIEL`, hasta `pedido.vence_en`) que hace cumplir el
       propio adaptador (cliente con plazo, sin reintentos después): pasado el plazo no envía y
       no queda ningún envío en curso. El
