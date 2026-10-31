@@ -959,7 +959,10 @@
           "comprobante_de_otra_orden",
           "operacion_de_otra_orden",
           "conciliacion_repetida",
-          "no_es_quien_ejecuto"
+          "no_es_quien_ejecuto",
+          "liquidacion_no_admite",
+          "orden_no_liquidable",
+          "sin_esquema"
         ],
         "title": "CodigoError",
         "type": "string"

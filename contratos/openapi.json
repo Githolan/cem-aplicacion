@@ -606,7 +606,10 @@
           "comprobante_de_otra_orden",
           "operacion_de_otra_orden",
           "conciliacion_repetida",
-          "no_es_quien_ejecuto"
+          "no_es_quien_ejecuto",
+          "liquidacion_no_admite",
+          "orden_no_liquidable",
+          "sin_esquema"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -3019,6 +3022,186 @@
         "title": "FuncionContacto",
         "type": "string"
       },
+      "GastoAgregado": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "GastoAgregado",
+        "type": "object"
+      },
+      "GastoLiquidacion": {
+        "description": "Un gasto del borrador, con el importe congelado de la ejecución pagada y el esquema exacto\n(grupo y versión) con que se reparte.",
+        "properties": {
+          "agregado_en": {
+            "format": "date-time",
+            "title": "Agregado En",
+            "type": "string"
+          },
+          "agregado_por": {
+            "format": "uuid",
+            "title": "Agregado Por",
+            "type": "string"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "esquema_id": {
+            "format": "uuid",
+            "title": "Esquema Id",
+            "type": "string"
+          },
+          "esquema_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Esquema Version",
+            "type": "integer"
+          },
+          "grupo": {
+            "title": "Grupo",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "pagada_en": {
+            "format": "date-time",
+            "title": "Pagada En",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id",
+          "concepto",
+          "razon_social",
+          "importe_centavos",
+          "moneda",
+          "pagada_en",
+          "grupo",
+          "esquema_id",
+          "esquema_version",
+          "agregado_por",
+          "agregado_en"
+        ],
+        "title": "GastoLiquidacion",
+        "type": "object"
+      },
+      "GastoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/liquidaciones/{id}/gastos`: una orden pagada y el grupo de gasto que la reparte.",
+        "properties": {
+          "grupo": {
+            "examples": [
+              "expensas_comunes"
+            ],
+            "pattern": "^[a-z][a-z0-9_]{1,39}$",
+            "title": "Grupo",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "grupo"
+        ],
+        "title": "GastoNuevo",
+        "type": "object"
+      },
+      "GrupoLiquidable": {
+        "description": "Un grupo con su esquema vigente el último día del período.",
+        "properties": {
+          "esquema_id": {
+            "format": "uuid",
+            "title": "Esquema Id",
+            "type": "string"
+          },
+          "esquema_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Esquema Version",
+            "type": "integer"
+          },
+          "grupo": {
+            "title": "Grupo",
+            "type": "string"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          }
+        },
+        "required": [
+          "grupo",
+          "esquema_id",
+          "esquema_version",
+          "vigente_desde"
+        ],
+        "title": "GrupoLiquidable",
+        "type": "object"
+      },
+      "GrupoSimulado": {
+        "properties": {
+          "esquema_id": {
+            "format": "uuid",
+            "title": "Esquema Id",
+            "type": "string"
+          },
+          "esquema_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Esquema Version",
+            "type": "integer"
+          },
+          "grupo": {
+            "title": "Grupo",
+            "type": "string"
+          },
+          "total_centavos": {
+            "title": "Total Centavos",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "grupo",
+          "esquema_id",
+          "esquema_version",
+          "total_centavos"
+        ],
+        "title": "GrupoSimulado",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3711,6 +3894,116 @@
         "title": "InvitacionRecibida",
         "type": "object"
       },
+      "Liquidacion": {
+        "properties": {
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado": {
+            "description": "`borrador` o `publicada`; este corte no publica.",
+            "title": "Estado",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "periodo": {
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "preparada_por": {
+            "format": "uuid",
+            "title": "Preparada Por",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "periodo",
+          "version",
+          "estado",
+          "preparada_por",
+          "creada_en"
+        ],
+        "title": "Liquidacion",
+        "type": "object"
+      },
+      "LiquidacionCreada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "LiquidacionCreada",
+        "type": "object"
+      },
+      "LiquidacionDetalle": {
+        "properties": {
+          "gastos": {
+            "items": {
+              "$ref": "#/components/schemas/GastoLiquidacion"
+            },
+            "title": "Gastos",
+            "type": "array"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/GrupoLiquidable"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "liquidacion": {
+            "$ref": "#/components/schemas/Liquidacion"
+          },
+          "simulacion": {
+            "$ref": "#/components/schemas/SimulacionLiquidacion"
+          }
+        },
+        "required": [
+          "liquidacion",
+          "gastos",
+          "grupos",
+          "simulacion"
+        ],
+        "title": "LiquidacionDetalle",
+        "type": "object"
+      },
+      "LiquidacionNueva": {
+        "additionalProperties": false,
+        "description": "`POST …/liquidaciones`. Abre el borrador del período en su versión siguiente.",
+        "properties": {
+          "periodo": {
+            "examples": [
+              "2026-10-01"
+            ],
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "periodo"
+        ],
+        "title": "LiquidacionNueva",
+        "type": "object"
+      },
       "ListaCandidatos": {
         "properties": {
           "elementos": {
@@ -3991,6 +4284,22 @@
         "title": "ListaInvitacionesPropias",
         "type": "object"
       },
+      "ListaLiquidaciones": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/Liquidacion"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaLiquidaciones",
+        "type": "object"
+      },
       "ListaMandatos": {
         "properties": {
           "elementos": {
@@ -4022,6 +4331,22 @@
           "elementos"
         ],
         "title": "ListaModos",
+        "type": "object"
+      },
+      "ListaOrdenesLiquidables": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/OrdenLiquidable"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaOrdenesLiquidables",
         "type": "object"
       },
       "ListaOrdenesPago": {
@@ -4599,6 +4924,47 @@
           "ejecucion"
         ],
         "title": "OrdenConPagoManual",
+        "type": "object"
+      },
+      "OrdenLiquidable": {
+        "description": "Una orden pagada que todavía no está en ninguna liquidación.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "pagada_en": {
+            "format": "date-time",
+            "title": "Pagada En",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "concepto",
+          "razon_social",
+          "importe_centavos",
+          "moneda",
+          "pagada_en"
+        ],
+        "title": "OrdenLiquidable",
         "type": "object"
       },
       "OrdenPago": {
@@ -6082,6 +6448,60 @@
         "title": "SesionesRevocadas",
         "type": "object"
       },
+      "SimulacionLiquidacion": {
+        "description": "El reparto de los gastos del borrador entre las unidades. La suma de cada grupo es\nexactamente su total (RN05). `bloqueo` dice por qué no se pudo repartir (por ejemplo, una\nunidad sin coeficiente en el esquema): entonces no hay unidades.",
+        "properties": {
+          "bloqueo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bloqueo"
+          },
+          "grupos": {
+            "items": {
+              "$ref": "#/components/schemas/GrupoSimulado"
+            },
+            "title": "Grupos",
+            "type": "array"
+          },
+          "moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moneda"
+          },
+          "total_centavos": {
+            "title": "Total Centavos",
+            "type": "integer"
+          },
+          "unidades": {
+            "items": {
+              "$ref": "#/components/schemas/UnidadSimulada"
+            },
+            "title": "Unidades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "moneda",
+          "total_centavos",
+          "grupos",
+          "unidades",
+          "bloqueo"
+        ],
+        "title": "SimulacionLiquidacion",
+        "type": "object"
+      },
       "TipoActor": {
         "enum": [
           "vos",
@@ -6196,6 +6616,39 @@
           "designacion"
         ],
         "title": "Unidad",
+        "type": "object"
+      },
+      "UnidadSimulada": {
+        "properties": {
+          "designacion": {
+            "title": "Designacion",
+            "type": "string"
+          },
+          "por_grupo": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Centavos de la unidad en cada grupo.",
+            "title": "Por Grupo",
+            "type": "object"
+          },
+          "total_centavos": {
+            "title": "Total Centavos",
+            "type": "integer"
+          },
+          "unidad_id": {
+            "format": "uuid",
+            "title": "Unidad Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unidad_id",
+          "designacion",
+          "total_centavos",
+          "por_grupo"
+        ],
+        "title": "UnidadSimulada",
         "type": "object"
       },
       "ValidationError": {
@@ -9513,6 +9966,390 @@
         "summary": "Retirar una invitación pendiente",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones": {
+      "get": {
+        "operationId": "listar_liquidaciones_api_v1_consorcios__consorcio_id__liquidaciones_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaLiquidaciones"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Liquidaciones del consorcio, por período y versión (preparación)",
+        "tags": [
+          "liquidaciones"
+        ]
+      },
+      "post": {
+        "operationId": "preparar_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiquidacionNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiquidacionCreada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Abrir el borrador de un período (versión siguiente; uno solo a la vez)",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/ordenes-liquidables": {
+      "get": {
+        "operationId": "listar_ordenes_liquidables_api_v1_consorcios__consorcio_id__liquidaciones_ordenes_liquidables_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaOrdenesLiquidables"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Órdenes pagadas que todavía no están en ninguna liquidación",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}": {
+      "get": {
+        "operationId": "ver_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones__liquidacion_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "liquidacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Liquidacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiquidacionDetalle"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Un borrador con sus gastos, los grupos que se pueden usar y la simulación",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos": {
+      "post": {
+        "operationId": "agregar_gasto_api_v1_consorcios__consorcio_id__liquidaciones__liquidacion_id__gastos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "liquidacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Liquidacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GastoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GastoAgregado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "El grupo no tiene un esquema vigente en el período."
+          }
+        },
+        "summary": "Agregar una orden pagada al borrador, con el grupo de gasto que la reparte",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar": {
+      "post": {
+        "operationId": "quitar_gasto_api_v1_consorcios__consorcio_id__liquidaciones__liquidacion_id__gastos__gasto_id__quitar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "liquidacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Liquidacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "gasto_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Gasto Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GastoAgregado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quitar un gasto del borrador (queda en la historia)",
+        "tags": [
+          "liquidaciones"
         ]
       }
     },

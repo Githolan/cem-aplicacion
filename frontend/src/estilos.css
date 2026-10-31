@@ -336,3 +336,38 @@ button:focus-visible {
     justify-self: stretch;
   }
 }
+
+/* Liquidación: la simulación por unidad. En un teléfono la tabla se desplaza dentro de su caja,
+   nunca la página entera; los importes van alineados a la derecha para compararlos. */
+.tabla-desplazable {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.tabla-desplazable table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+
+.tabla-desplazable caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.5rem;
+}
+
+.tabla-desplazable th,
+.tabla-desplazable td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--tarjeta);
+  white-space: nowrap;
+}
+
+.tabla-desplazable td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabla-desplazable th[scope="row"],
+.tabla-desplazable th[scope="col"]:first-child {
+  text-align: left;
+}
