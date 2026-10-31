@@ -526,7 +526,9 @@ def estado(corrida: Corrida, o: str) -> str:
 def ejecucion(corrida: Corrida, o: str) -> UUID:
     """La ejecución que dejó la última emisión de `o`. `cem_app` no lee las ejecuciones; sí la
     cola, y cada emisión encola un `egresos.ordenar_pago` con su ejecución. Las órdenes se emiten
-    de a una, así que la emisión de `o` deja exactamente un trabajo nuevo desde la corrida."""
+    de a una, así que la emisión de `o` deja exactamente un trabajo nuevo desde la corrida. Por
+    eso dos corridas no pueden ir a la vez sobre el mismo consorcio: cada una vería los trabajos
+    de la otra (revisión de #178). Cada corrida usa su propio `--consorcio` o espera a la otra."""
     with corrida.tx() as conn:
         filas = set(conn.execute(
             text("select carga->>'ejecucion' from plataforma.jobs where consorcio_id = :c"
@@ -666,7 +668,7 @@ def recorrer_ordenes(corrida: Corrida) -> None:
     ejecucion(corrida, o4)  # exactamente una
     corrida.ok(f"cuatro emisiones concurrentes (dos claves iguales): un solo efecto {estados}")
 
-    # 5. Cambio de cuenta del proveedor con el abono confirmado (0053, P3 112): el abono deja de
+    # 6. Cambio de cuenta del proveedor con el abono confirmado (0053, P3 112): el abono deja de
     # regir hasta que otro ser humano lo confirme sobre la versión nueva.
     cuenta_nueva = cbu_sintetico(int(corrida.id, 16) % 10**9 + 7)
     corrida.cuentas.append(cuenta_nueva)

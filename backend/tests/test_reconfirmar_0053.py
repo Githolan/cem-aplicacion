@@ -93,6 +93,12 @@ def test_cambiar_la_cuenta_obliga_a_reconfirmar_sobre_la_version_nueva(motor_mig
     leida = leido(e)
     assert (leida["estado"], leida["proveedor_version"], leida["cuenta_ultimos_digitos"]) == (
         "pendiente_reconfirmacion", 2, cbu_sintetico(41)[-4:])  # fmt: skip
+    # Quien prepara no recibe la cuenta completa; el Consejo, que reconfirma, sí (revisión de
+    # #178). La confirmación que ya no vale no se muestra como si valiera.
+    assert "cuenta_destino" not in leida
+    (revisada,) = get(e, e.mc2, "contratos/revision").json()["elementos"]
+    assert (revisada["cuenta_destino"], revisada["confirmado_por"], leida["confirmado_por"]) == (
+        cbu_sintetico(41), None, None)  # fmt: skip
 
     # Confirmar lo visto antes del cambio no alcanza: hay que ver la versión nueva.
     niega(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, "proveedor_cambiado", contrato=k, **viejo)
@@ -109,7 +115,7 @@ def test_cambiar_la_cuenta_obliga_a_reconfirmar_sobre_la_version_nueva(motor_mig
           **nuevo)  # fmt: skip
 
     assert vigente(motor_migrate, e, k)
-    assert leido(e)["estado"] == "vigente"
+    assert (leido(e)["estado"], leido(e)["confirmado_por"]) == ("vigente", str(e.mc2))
     # Vuelve a respaldar; la franja es la de la cuenta recién cambiada, que gana al contrato.
     assert franja(motor_migrate, enviada(motor_migrate, e, contrato=k)) == "cuenta_cambiada"
     # La historia no se toca: la confirmación de la versión 1 sigue, con quien la hizo.
@@ -261,11 +267,30 @@ def test_0053_toma_la_version_vigente_al_confirmar_y_baja_solo_sin_reconfirmacio
     with pytest.raises(DBAPIError) as error:
         command.downgrade(cfg, "0052")
     assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    # Una sola confirmación, pero que el cambio de cuenta dejó sin efecto: en 0052 volvería a
+    # valer para la cuenta nueva (revisión de #178), así que tampoco baja.
+    _como_dueno(motor, "delete from nucleo.contrato_proveedor_confirmacion"
+                       " where contrato_id = :k and proveedor_version = 2", k)  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        command.downgrade(cfg, "0052")
+    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    # Control: una sola confirmación que vale (la de la versión 2) baja y queda.
+    _como_dueno(motor, "update nucleo.contrato_proveedor_confirmacion set proveedor_version = 2"
+                       " where contrato_id = :k", k)  # fmt: skip
+    command.downgrade(cfg, "0052")
+    with motor.connect() as c:
+        quedan = c.execute(
+            text("select count(*) from nucleo.contrato_proveedor_confirmacion"
+                 " where contrato_id = :k"), {"k": k},
+        ).scalar_one()  # fmt: skip
+    assert quedan == 1
+
+
+def _como_dueno(motor, sentencia: str, k) -> None:
+    """Cambia la tabla de confirmaciones sin su disparador de historia (solo para armar el caso)."""
     with motor.begin() as c:
         c.execute(text("alter table nucleo.contrato_proveedor_confirmacion"
                        " disable trigger historia_contrato_proveedor_confirmacion"))  # fmt: skip
-        c.execute(text("delete from nucleo.contrato_proveedor_confirmacion"
-                       " where contrato_id = :k and proveedor_version = 2"), {"k": k})  # fmt: skip
+        c.execute(text(sentencia), {"k": k})
         c.execute(text("alter table nucleo.contrato_proveedor_confirmacion"
                        " enable trigger historia_contrato_proveedor_confirmacion"))  # fmt: skip
-    command.downgrade(cfg, "0052")  # control: con una sola confirmación, baja

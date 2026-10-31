@@ -1474,6 +1474,175 @@
         "title": "ContratoNuevo",
         "type": "object"
       },
+      "ContratoRevision": {
+        "description": "Revisión del Consejo: quien confirma (o reconfirma, `0053`) ve la cuenta completa de la\nversión vigente del proveedor, que es lo que confirma.",
+        "properties": {
+          "alcance": {
+            "title": "Alcance",
+            "type": "string"
+          },
+          "baja_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baja En"
+          },
+          "confirmado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado En"
+          },
+          "confirmado_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmado Por"
+          },
+          "creado_en": {
+            "format": "date-time",
+            "title": "Creado En",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La cuenta completa de esa versión.",
+            "title": "Cuenta Destino"
+          },
+          "cuenta_ultimos_digitos": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Los últimos dígitos de la cuenta de esa versión.",
+            "title": "Cuenta Ultimos Digitos"
+          },
+          "decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Id"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoContrato"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_maximo_centavos": {
+            "title": "Importe Maximo Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "proveedor_version": {
+            "description": "La versión vigente del proveedor.",
+            "title": "Proveedor Version",
+            "type": "integer"
+          },
+          "razon_social": {
+            "description": "La de la versión vigente del proveedor.",
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "registrado_por": {
+            "format": "uuid",
+            "title": "Registrado Por",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoContrato"
+          },
+          "vigente_desde": {
+            "format": "date",
+            "title": "Vigente Desde",
+            "type": "string"
+          },
+          "vigente_hasta": {
+            "format": "date",
+            "title": "Vigente Hasta",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proveedor_id",
+          "razon_social",
+          "tipo",
+          "alcance",
+          "importe_maximo_centavos",
+          "moneda",
+          "vigente_desde",
+          "vigente_hasta",
+          "documento_id",
+          "decision_id",
+          "huella",
+          "registrado_por",
+          "creado_en",
+          "confirmado_por",
+          "confirmado_en",
+          "baja_en",
+          "estado",
+          "proveedor_version",
+          "cuenta_ultimos_digitos",
+          "cuenta_destino"
+        ],
+        "title": "ContratoRevision",
+        "type": "object"
+      },
       "CopiaDatosPropios": {
         "description": "La copia de los datos propios (§5). Se puede volver a pedir mientras el caso siga\nconfirmado; queda resuelto cuando el titular avisa que la guardó (`…/recibida`).\n\n`datos` lleva, con alcance `cuenta`, `persona`, `sesiones`, `credenciales` y\n`casos_privacidad`; con un consorcio, `vinculos`, `mandatos`, `invitaciones`,\n`invitaciones_mandato`, `desasociaciones_mandato`, `eventos`, `documentos`,\n`versiones_subidas` e `identidad_humana`. Nunca datos de otras personas.",
         "properties": {
@@ -3388,6 +3557,22 @@
           "elementos"
         ],
         "title": "ListaContratos",
+        "type": "object"
+      },
+      "ListaContratosRevision": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ContratoRevision"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaContratosRevision",
         "type": "object"
       },
       "ListaDecisiones": {
@@ -7753,7 +7938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListaContratos"
+                  "$ref": "#/components/schemas/ListaContratosRevision"
                 }
               }
             },
@@ -7773,7 +7958,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Contratos y abonos, para confirmarlos (quien aprueba)",
+        "summary": "Contratos y abonos, para confirmarlos (quien aprueba), con la cuenta completa",
         "tags": [
           "egresos"
         ]

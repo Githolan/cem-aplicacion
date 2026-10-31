@@ -34,12 +34,14 @@ from cem_contracts.egresos import (
     Contrato,
     ContratoCambiado,
     ContratoNuevo,
+    ContratoRevision,
     DatosOrdenPago,
     DatosProveedor,
     Emision,
     EnvioARevision,
     EstadoOrdenPago,
     ListaContratos,
+    ListaContratosRevision,
     ListaOrdenesPago,
     ListaProveedores,
     OrdenPago,
@@ -717,10 +719,21 @@ def emitir_orden(
 # --- Contratos y abonos ------------------------------------------------------------------------
 
 
-def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None) -> list[Contrato]:
+def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None, revision: bool = False):
+    """Quien prepara recibe los últimos dígitos de la cuenta; la revisión del Consejo, también la
+    completa, que es lo que confirma."""
     sql = "select * from nucleo.contratos_proveedor_lectura(:k, :f, :actor, 'api', :sesion)"
     filas = _ejecutar(c, permiso, sql, {"k": contrato, "f": LEE_COMO[permiso.accion]})
-    return [Contrato(**f) for f in filas.mappings()]
+    contratos = []
+    for f in filas.mappings():
+        datos = dict(f)
+        datos["cuenta_ultimos_digitos"] = ultimos_digitos(datos["cuenta_destino"])
+        if revision:
+            contratos.append(ContratoRevision(**datos))
+        else:
+            del datos["cuenta_destino"]
+            contratos.append(Contrato(**datos))
+    return contratos
 
 
 @router.get(
@@ -738,15 +751,15 @@ def listar_contratos(
 
 @router.get(
     "/consorcios/{consorcio_id}/contratos/revision",
-    response_model=ListaContratos,
-    summary="Contratos y abonos, para confirmarlos (quien aprueba)",
+    response_model=ListaContratosRevision,
+    summary="Contratos y abonos, para confirmarlos (quien aprueba), con la cuenta completa",
     responses=RESPUESTAS_LECTURA,
 )
 def listar_contratos_revision(
     permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
-) -> ListaContratos:
+) -> ListaContratosRevision:
     with _lectura(permiso, motor) as c:
-        return ListaContratos(elementos=_contratos(c, permiso, None))
+        return ListaContratosRevision(elementos=_contratos(c, permiso, None, revision=True))
 
 
 @router.post(

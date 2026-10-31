@@ -11,19 +11,24 @@ una confirmación nueva hecha sobre la versión del proveedor que tiene la cuent
 
 Cómo:
 - cada confirmación guarda la versión del proveedor sobre la que se hizo (`proveedor_version`). Las
-  ya existentes toman la versión vigente en el momento en que se confirmaron, que la historia del
-  proveedor permite saber sin suponer nada;
+  ya existentes toman la última versión creada hasta su `creada_en`. `creada_en` es el comienzo de
+  cada transacción: un cambio de cuenta que empezó antes y terminó después de una confirmación
+  podría quedar como la versión confirmada. Medido el 31-10 antes de subir: producción, 0
+  confirmaciones; staging, 1, de un proveedor con una sola cuenta. Ninguna queda expuesta;
 - `nucleo.confirmacion_vale` dice si alguna confirmación del contrato sigue valiendo: la cuenta
   de su versión es la de todas las versiones posteriores. Un cambio de cuenta, aunque vuelva a la
   anterior, la deja sin efecto;
 - `contrato_vigente` (lo rutinario y la emisión) lo exige; la lectura devuelve
-  `pendiente_reconfirmacion`, la versión vigente del proveedor y los últimos dígitos de su cuenta;
+  `pendiente_reconfirmacion`, la versión vigente del proveedor y su cuenta (la API la recorta para
+  quien prepara y la da completa en la revisión del Consejo, que es quien la confirma). Quién
+  confirmó y cuándo son de la confirmación que vale; sin ninguna que valga, nulos;
 - `confirmar_contrato_proveedor` recibe la versión del proveedor que se vio y se niega si ya no es
   la vigente (`proveedor_cambiado`). Se puede confirmar de nuevo solo si la confirmación anterior ya
   no vale.
 
 Downgrade: se niega si algún contrato tiene más de una confirmación (no entra en la tabla de
-`0052`); si no, vuelve a las definiciones de `0052`.
+`0052`) o una confirmación que ya no vale (en `0052` volvería a valer para la cuenta nueva); si
+no, vuelve a las definiciones de `0052`.
 
 Revisión: 0053
 Anterior: 0052
@@ -105,7 +110,7 @@ create function nucleo.contratos_proveedor_lectura(contrato uuid, facultad text,
                  vigente_hasta date, documento_id uuid, decision_id uuid, huella text,
                  registrado_por uuid, creado_en timestamptz, confirmado_por uuid,
                  confirmado_en timestamptz, baja_en timestamptz, estado text,
-                 proveedor_version integer, cuenta_ultimos_digitos text)
+                 proveedor_version integer, cuenta_destino text)
   language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -126,22 +131,25 @@ create function nucleo.contratos_proveedor_lectura(contrato uuid, facultad text,
                                       and d.id = k.documento_id
                                       and nucleo.documento_respalda(d.consorcio_id, d.id))
                     then 'documento_no_vigente'
+                  when f.contrato_id is null and exists (
+                         select 1 from nucleo.contrato_proveedor_confirmacion x
+                          where x.contrato_id = k.id) then 'pendiente_reconfirmacion'
                   when f.contrato_id is null then 'pendiente_confirmacion'
-                  when not nucleo.confirmacion_vale(k.consorcio_id, k.id)
-                    then 'pendiente_reconfirmacion'
                   when k.vigente_hasta < hoy then 'vencido'
                   when k.vigente_desde > hoy then 'no_iniciado'
                   else 'vigente' end,
-             pv.numero, right(pv.cuenta_destino, 4)
+             pv.numero, pv.cuenta_destino
         from nucleo.contrato_proveedor k
         join nucleo.proveedor_version pv
           on pv.consorcio_id = k.consorcio_id and pv.proveedor_id = k.proveedor_id
          and pv.numero = (select max(x.numero) from nucleo.proveedor_version x
                            where x.consorcio_id = k.consorcio_id
                              and x.proveedor_id = k.proveedor_id)
-        -- La confirmación más nueva: quién y cuándo se muestran de esa.
+        -- La confirmación que vale (la más nueva): quién y cuándo se muestran de esa. Si ninguna
+        -- vale, quedan nulos y el estado dice si falta confirmar o reconfirmar.
         left join lateral (select x.* from nucleo.contrato_proveedor_confirmacion x
                             where x.contrato_id = k.id
+                              and nucleo.confirmacion_vale(k.consorcio_id, k.id)
                             order by x.proveedor_version desc limit 1) f on true
         left join nucleo.contrato_proveedor_baja b on b.contrato_id = k.id
        where k.consorcio_id = c and (contrato is null or k.id = contrato)
@@ -233,6 +241,13 @@ begin
   if exists (select 1 from nucleo.contrato_proveedor_confirmacion
               group by contrato_id having count(*) > 1) then
     raise exception 'hay contratos confirmados más de una vez: no entran en la tabla de 0052'
+      using errcode = 'P0001', hint = 'downgrade_con_datos';
+  end if;
+  -- En 0052 cualquier confirmación vale: una que el cambio de cuenta dejó sin efecto volvería a
+  -- respaldar pagos a la cuenta nueva.
+  if exists (select 1 from nucleo.contrato_proveedor_confirmacion f
+              where not nucleo.confirmacion_vale(f.consorcio_id, f.contrato_id)) then
+    raise exception 'hay confirmaciones que ya no valen: en 0052 volverían a valer'
       using errcode = 'P0001', hint = 'downgrade_con_datos';
   end if;
 end
