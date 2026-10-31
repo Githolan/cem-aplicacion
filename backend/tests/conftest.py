@@ -152,6 +152,14 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "   alter table nucleo.umbral_orden_pago enable trigger user;"
                 " end if;"
                 " if to_regclass('nucleo.documento') is not null then"
+                # Las versiones del proveedor (0048) pueden citar un documento; se borran más
+                # abajo, después de las órdenes: acá solo se les quita el documento.
+                "   if to_regclass('nucleo.proveedor_version') is not null then"
+                "     alter table nucleo.proveedor_version disable trigger user;"
+                "     update nucleo.proveedor_version set documento_id = null"
+                "      where documento_id is not null;"
+                "     alter table nucleo.proveedor_version enable trigger user;"
+                "   end if;"
                 "   delete from nucleo.version_documento;"
                 "   delete from nucleo.documento;"
                 " end if;"
