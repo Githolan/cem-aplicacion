@@ -122,6 +122,7 @@ def test_un_vinculo_corregido_despues_tambien_niega_al_dueno_real(motor_migrate,
     assert llamar(motor_app, e, e.mc2, PREPARO, orden=o) is True
     assert llamar(motor_app, e, e.mc2, REGISTRO, contrato=k) is True
     assert cuentas_de_la_orden(e, e.mc1, o) == {cbu_sintetico(1)}  # control
+    assert cuenta_del_contrato(e, e.mc1) == cbu_sintetico(1)  # control
 
 
 def test_de_otro_consorcio_o_inexistente_falla_cerrada(motor_migrate, motor_app, e):
