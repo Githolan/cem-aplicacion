@@ -9,7 +9,7 @@ import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { porConciliar, porConfirmar } from "./ConciliacionPagos";
-import { AVISO_VERIFICAR_CUENTA, comprobantesDisponibles, porPagar, situacion } from "./PagosManuales";
+import { AVISO_APROBACION_VENCIDA, AVISO_VERIFICAR_CUENTA, comprobantesDisponibles, porPagar, situacion } from "./PagosManuales";
 
 // Pago manual del piloto (app 0055). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -248,6 +248,16 @@ describe("lo común del pago manual", () => {
     });
     expect(porConfirmar(declarada)?.id).toBe(DECL);
     expect(porConfirmar({ ...declarada, ejecucion: { ...declarada.ejecucion, pagos: [pago()] }, orden: orden({ estado: "en_verificacion" }) })).toBeUndefined();
+    // Un registro posterior (aunque lo observen) deja superada la declaración: no se ofrece.
+    const superada = conPago("en_verificacion", [pago({ conciliacion: "observado", registrado_en: "2026-10-31T15:00:00Z" })], {
+      declaraciones: declarada.ejecucion.declaraciones,
+    });
+    expect(porConfirmar(superada)).toBeUndefined();
+    // Una declaración hecha después del registro observado, sí.
+    const posterior = conPago("en_verificacion", [pago({ conciliacion: "observado", registrado_en: "2026-10-31T13:00:00Z" })], {
+      declaraciones: declarada.ejecucion.declaraciones,
+    });
+    expect(porConfirmar(posterior)?.id).toBe(DECL);
   });
 });
 
@@ -339,6 +349,47 @@ describe("pagos a realizar", () => {
     expect(await screen.findByText(CUENTA)).toBeTruthy();
     // Ya emitida: no se vuelve a emitir.
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/emitir`)).toHaveLength(0);
+  });
+
+  it("con la aprobación vencida y un registro observado, corrige sin volver a ver la cuenta", async () => {
+    const observado = conPago("en_verificacion", [pago({ conciliacion: "observado", motivo_conciliacion: "No se lee" })]);
+    const api = simulado({
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [observado] }),
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: orden({ estado: "en_verificacion" }), versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error("aprobacion_vencida", 409),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    expect(await screen.findByText(AVISO_APROBACION_VENCIDA)).toBeTruthy();
+    expect(container.textContent).not.toContain(CUENTA);
+    expect(screen.queryByText("CBU/CVU")).toBeNull();
+    await sinFaltasDeAccesibilidad(container);
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15.000" } });
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.change(screen.getByLabelText("Comprobante de la transferencia"), { target: { value: DOC } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar el pago" }));
+    expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
+    const [registro] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`);
+    expect(await registro?.json()).toMatchObject({ version: 1, huella: H1, cuenta_destino: CUENTA });
+  });
+
+  it("sin un registro previo, la aprobación vencida no abre ninguna ficha", async () => {
+    const api = simulado({
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [conPago("en_ejecucion")] }),
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: orden({ estado: "en_ejecucion" }), versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error("aprobacion_vencida", 409),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByText(AVISO_APROBACION_VENCIDA)).toBeNull();
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 
   it("quien aprobó la orden no recibe la cuenta: el acto responde 403 y no hay ficha", async () => {

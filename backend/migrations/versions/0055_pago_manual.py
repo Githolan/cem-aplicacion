@@ -23,16 +23,18 @@ aprobaciones de la franja, contrato vigente), el proveedor sin cambios y activo
 menos de 10 minutos, identidad humana verificada) y que quien la pide no aprobó esa versión, por la
 identidad guardada al aprobar y por la de hoy (A5). Quien preparó la orden puede ejecutarla si no
 la aprobó y tiene la facultad (preparar ≠ aprobar, aprobar ≠ ejecutar); la preparación sigue sin
-recibir la cuenta (#172, #175, `0054`). Cada pedido deja su evento, con los últimos 4 dígitos.
+recibir la cuenta (#172, #175, `0054`). Cada pedido deja su evento, con los últimos 4 dígitos, y
+su apertura (`nucleo.apertura_cuenta_pago_manual`): quien vio la cuenta pudo haber transferido.
 
 **El registro con evidencia** (`nucleo.pago_manual`, `registrar_pago_manual`): número de operación,
 fecha, importe, moneda, cuenta destino y comprobante. El importe, la moneda y la cuenta tienen que
-ser los de la ejecución (`no_coincide_con_la_orden`); la fecha, entre la emisión y el vencimiento
-de la aprobación, y nunca futura (`fecha_operacion_invalida`); el comprobante, un documento vigente
-de `facturas_y_comprobantes` con un archivo que pasó el antivirus, y se guarda **ese archivo**
+ser los de la ejecución (`no_coincide_con_la_orden`); la fecha, entre la emisión y el vencimiento de
+la aprobación, y nunca futura (`fecha_operacion_invalida`); el comprobante, un documento vigente de
+`facturas_y_comprobantes` con un archivo que pasó el antivirus, y se guarda **ese archivo**
 (`version_documento_id`): un archivo subido después no cambia la evidencia. Un comprobante respalda
-una sola ejecución. El registro no da la orden por pagada: la pasa a En verificación, que en un pago
-manual es «pendiente de conciliación».
+una sola ejecución (`nucleo.comprobante_pago_manual`, por clave). Registra solo quien recibió la
+cuenta en el acto de esa ejecución (`no_es_quien_ejecuto`). El registro no da la orden por pagada:
+la pasa a En verificación, que en un pago manual es «pendiente de conciliación».
 
 **El número de operación** se normaliza (mayúsculas, solo letras y dígitos) y queda atado para
 siempre a una sola ejecución (`nucleo.operacion_pago_manual`, clave `(consorcio, número)`): otra
@@ -44,19 +46,24 @@ no admite un número atado a otra.
 **Un solo registro vigente por ejecución:** el primero no corrige a ninguno y cada corrección cita
 el registro observado que reemplaza (`corrige_a`); dos registros nunca ocupan el mismo lugar (índice
 único parcial y `unique (corrige_a)`), así que dos registros a la vez para la misma ejecución nunca
-valen los dos. Nada se borra: los triggers de historia de la orden niegan UPDATE, DELETE y TRUNCATE.
+valen los dos. El vigente es el último de esa cadena, no el de la marca más nueva. Nada se borra:
+los triggers de historia de la orden niegan UPDATE, DELETE y TRUNCATE.
 
 **La conciliación** (`nucleo.conciliacion_pago_manual`, `conciliar_pago_manual`, con
-`egresos.aprobar_orden`): otro ser humano que quien registró el pago y que quien preparó cualquier
-versión, por la identidad guardada en cada acto y por la de hoy. Una por registro. `conforme`
-escribe el resultado `pagada` con origen `manual` y referencia = número de operación, en la misma
-tabla y con el mismo índice de resultado definitivo que el riel, y la orden pasa a Pagada.
-`observado` (con motivo) deja el registro sin efecto y en la historia; quien ejecuta registra otro.
+`egresos.aprobar_orden`): otro ser humano que quien recibió la cuenta de esa ejecución o registró un
+pago de ella (`exigir_no_ejecuto`) y que quien preparó cualquier versión, por la identidad guardada
+en cada acto y por la de hoy. Una por registro. `conforme` escribe el resultado `pagada` con origen
+`manual` y referencia = número de operación, en la misma tabla y con el mismo índice de resultado
+definitivo que el riel, y la orden pasa a Pagada. `observado` (con motivo) deja el registro sin
+efecto y en la historia; quien ejecuta registra otro.
 
 **«No se pagó»** (`declarar_pago_no_realizado` con `egresos.ejecutar_pago`, y
 `confirmar_pago_no_realizado` con `egresos.aprobar_orden` por otro ser humano): solo sin un registro
-vigente. La confirmación escribe `fallida` con origen `manual`; para volver a pagar hace falta una
-versión nueva y otra aprobación, como siempre. Así nadie solo abre la puerta a pagar dos veces.
+vigente. Declara quien no aprobó la versión (A5, también en la base). La confirmación la hace
+alguien que no vio la cuenta ni registró, y se niega si después de declarar alguien recibió la
+cuenta o registró un pago (la declaración quedó superada: `estado_invalido`). Escribe `fallida`
+con origen `manual`; para volver a pagar hace falta una versión nueva y otra aprobación, como
+siempre. Así nadie solo abre la puerta a pagar dos veces.
 
 **Lectura** (`ejecuciones_manuales_lectura`, `pagos_manuales_lectura`,
 `declaraciones_pago_no_realizado_lectura`): con la barrera de lectura de egresos (`0049`), sin la
@@ -151,6 +158,8 @@ _conciliaciones = _lista(f"'{r}'" for r in RESULTADOS_CONCILIACION)
 
 TABLAS = (
     "nucleo.operacion_pago_manual",
+    "nucleo.comprobante_pago_manual",
+    "nucleo.apertura_cuenta_pago_manual",
     "nucleo.pago_manual",
     "nucleo.conciliacion_pago_manual",
     "nucleo.declaracion_pago_no_realizado",
@@ -183,6 +192,35 @@ create table nucleo.operacion_pago_manual (
     references nucleo.ejecucion_orden_pago (consorcio_id, id)
 );
 
+-- Un comprobante respalda una sola ejecución: la clave lo ata aunque dos registros corran a la vez.
+create table nucleo.comprobante_pago_manual (
+  consorcio_id  uuid not null,
+  documento_id  uuid not null,
+  ejecucion_id  uuid not null,
+  atado_en      timestamptz not null default now(),
+  primary key (consorcio_id, documento_id),
+  unique (consorcio_id, documento_id, ejecucion_id),
+  foreign key (consorcio_id, documento_id) references nucleo.documento (consorcio_id, id),
+  foreign key (consorcio_id, ejecucion_id)
+    references nucleo.ejecucion_orden_pago (consorcio_id, id)
+);
+
+-- Cada acto en que alguien recibió la cuenta completa: quien la vio pudo haber transferido.
+-- clock_timestamp(): se toma con la orden ya bloqueada, así las marcas siguen el orden real.
+create table nucleo.apertura_cuenta_pago_manual (
+  consorcio_id     uuid not null,
+  id               uuid not null default plataforma.uuid_v7(),
+  ejecucion_id     uuid not null,
+  abierta_por      uuid not null references nucleo.persona (id),
+  identidad_abrio  uuid not null,
+  abierta_en       timestamptz not null default clock_timestamp(),
+  primary key (id),
+  foreign key (consorcio_id, ejecucion_id)
+    references nucleo.ejecucion_orden_pago (consorcio_id, id),
+  foreign key (consorcio_id, identidad_abrio)
+    references nucleo.identidad_humana (consorcio_id, id)
+);
+
 create table nucleo.pago_manual (
   consorcio_id          uuid not null,
   id                    uuid not null default plataforma.uuid_v7(),
@@ -196,7 +234,7 @@ create table nucleo.pago_manual (
   version_documento_id  uuid not null references nucleo.version_documento (id),
   registrado_por        uuid not null references nucleo.persona (id),
   identidad_registro    uuid not null,
-  registrado_en         timestamptz not null default now(),
+  registrado_en         timestamptz not null default clock_timestamp(),
   primary key (id),
   unique (consorcio_id, id),
   foreign key (consorcio_id, ejecucion_id)
@@ -205,7 +243,8 @@ create table nucleo.pago_manual (
   -- El número, atado a esta misma ejecución: la base no admite uno de otra.
   foreign key (consorcio_id, numero_operacion, ejecucion_id)
     references nucleo.operacion_pago_manual (consorcio_id, numero_operacion, ejecucion_id),
-  foreign key (consorcio_id, documento_id) references nucleo.documento (consorcio_id, id),
+  foreign key (consorcio_id, documento_id, ejecucion_id)
+    references nucleo.comprobante_pago_manual (consorcio_id, documento_id, ejecucion_id),
   foreign key (consorcio_id, identidad_registro)
     references nucleo.identidad_humana (consorcio_id, id)
 );
@@ -237,7 +276,7 @@ create table nucleo.declaracion_pago_no_realizado (
   motivo             text not null check (length(btrim(motivo)) between 1 and 200),
   declarado_por      uuid not null references nucleo.persona (id),
   identidad_declaro  uuid not null,
-  declarado_en       timestamptz not null default now(),
+  declarado_en       timestamptz not null default clock_timestamp(),
   primary key (id),
   unique (consorcio_id, id),
   foreign key (consorcio_id, ejecucion_id)
@@ -308,14 +347,16 @@ create function nucleo.ejecucion_manual_abierta(c uuid, o nucleo.orden_pago)
   end
   $$;
 
--- El último registro de la ejecución; vigente si no lo observaron (a lo sumo uno lo está).
+-- El último registro de la cadena de correcciones (el que nadie corrige); vigente si no lo
+-- observaron. La cadena es lineal: un solo primero y `corrige_a` único.
 create function nucleo.ultimo_pago_manual(e uuid)
   returns nucleo.pago_manual
   language sql stable
   set search_path = pg_catalog, pg_temp
   as $$
-    select p.* from nucleo.pago_manual p where p.ejecucion_id = e
-     order by p.registrado_en desc, p.id desc limit 1
+    select p.* from nucleo.pago_manual p
+     where p.ejecucion_id = e
+       and not exists (select 1 from nucleo.pago_manual q where q.corrige_a = p.id)
   $$;
 
 create function nucleo.pago_manual_observado(pago uuid)
@@ -389,6 +430,32 @@ create function nucleo.exigir_no_preparo(c uuid, orden uuid, actor uuid, identid
   end
   $$;
 
+-- Quien concilia o confirma no recibió la cuenta de esta ejecución ni registró un pago de ella:
+-- pudo haber transferido. Por la identidad guardada y por la actual.
+create function nucleo.exigir_no_ejecuto(c uuid, e uuid, actor uuid, identidad uuid)
+  returns void
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    p uuid;
+  begin
+    if exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                where a.ejecucion_id = e and a.identidad_abrio = identidad)
+       or exists (select 1 from nucleo.pago_manual x
+                   where x.ejecucion_id = e and x.identidad_registro = identidad) then
+      raise exception 'la misma persona no puede ocupar los dos lugares de esta separación'
+        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
+    end if;
+    for p in select a.abierta_por from nucleo.apertura_cuenta_pago_manual a
+              where a.ejecucion_id = e
+             union
+             select x.registrado_por from nucleo.pago_manual x where x.ejecucion_id = e loop
+      perform nucleo.exigir_separacion_humana(c, actor, p, 'no_es_quien_ejecuto');
+    end loop;
+  end
+  $$;
+
 -- La orden, la versión y la huella vistas, y su ejecución manual abierta.
 create function nucleo.orden_para_pago_manual(c uuid, orden uuid, version_vista integer,
                                               huella_vista bytea)
@@ -438,6 +505,9 @@ create function nucleo.cuenta_para_pago_manual(orden uuid, version_vista integer
     perform nucleo.exigir_orden_emitible(c, o, e.version);
     perform nucleo.exigir_proveedor_sin_cambios(c, orden, e.version);
     perform nucleo.exigir_no_aprobo(c, orden, e.version, actor, identidad);
+    insert into nucleo.apertura_cuenta_pago_manual
+      (consorcio_id, ejecucion_id, abierta_por, identidad_abrio)
+    values (c, e.id, actor, identidad);
     perform nucleo.auditar_orden_pago(c, 'consorcio.orden_pago.ver_cuenta_para_pago', orden,
       actor, null,
       jsonb_build_object('version', e.version, 'ejecucion', e.id,
@@ -510,9 +580,12 @@ create function nucleo.registrar_pago_manual(orden uuid, version_vista integer,
       raise exception 'el comprobante no existe o no pasó el antivirus' using errcode = 'P0001',
         hint = 'comprobante_invalido';
     end if;
-    if exists (select 1 from nucleo.pago_manual p
-                where p.consorcio_id = c and p.documento_id = documento
-                  and p.ejecucion_id <> e.id) then
+    insert into nucleo.comprobante_pago_manual (consorcio_id, documento_id, ejecucion_id)
+    values (c, documento, e.id)
+    on conflict (consorcio_id, documento_id) do nothing;
+    select x.ejecucion_id into atada from nucleo.comprobante_pago_manual x
+     where x.consorcio_id = c and x.documento_id = documento;
+    if atada is distinct from e.id then
       raise exception 'ese comprobante ya respalda otro pago' using errcode = 'P0001',
         hint = 'comprobante_de_otra_orden';
     end if;
@@ -524,6 +597,12 @@ create function nucleo.registrar_pago_manual(orden uuid, version_vista integer,
     if atada is distinct from e.id then
       raise exception 'ese número de operación ya respalda otra orden' using errcode = 'P0001',
         hint = 'operacion_de_otra_orden';
+    end if;
+    -- Registra quien recibió la cuenta en el acto de esta ejecución: el que transfirió.
+    if not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                    where a.ejecucion_id = e.id and a.identidad_abrio = identidad) then
+      raise exception 'registra el pago quien vio la cuenta en el acto de ejecución'
+        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
     end if;
     insert into nucleo.pago_manual
       (consorcio_id, ejecucion_id, corrige_a, numero_operacion, fecha_operacion,
@@ -575,11 +654,7 @@ create function nucleo.conciliar_pago_manual(orden uuid, pago uuid, resultado_nu
       raise exception 'ese pago ya está conciliado' using errcode = 'P0001',
         hint = 'conciliacion_repetida';
     end if;
-    if p.identidad_registro = identidad then
-      raise exception 'la misma persona no puede ocupar los dos lugares de esta separación'
-        using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
-    end if;
-    perform nucleo.exigir_separacion_humana(c, actor, p.registrado_por, 'no_es_quien_ejecuto');
+    perform nucleo.exigir_no_ejecuto(c, e.id, actor, identidad);
     perform nucleo.exigir_no_preparo(c, orden, actor, identidad);
     if resultado_nuevo is null or resultado_nuevo not in ({_conciliaciones})
        or (resultado_nuevo = 'observado') <> (nullif(btrim(motivo), '') is not null) then
@@ -627,6 +702,7 @@ create function nucleo.declarar_pago_no_realizado(orden uuid, version_vista inte
         hint = 'version_desactualizada';
     end if;
     e := nucleo.ejecucion_manual_abierta(c, o);
+    perform nucleo.exigir_no_aprobo(c, orden, e.version, actor, identidad);
     perform nucleo.exigir_sin_pago_vigente(e.id);
     insert into nucleo.declaracion_pago_no_realizado
       (consorcio_id, ejecucion_id, motivo, declarado_por, identidad_declaro)
@@ -664,6 +740,15 @@ create function nucleo.confirmar_pago_no_realizado(orden uuid, declaracion uuid,
         hint = 'no_encontrado';
     end if;
     perform nucleo.exigir_sin_pago_vigente(e.id);
+    -- Superada: después de declararla, alguien recibió la cuenta o registró un pago.
+    if exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                where a.ejecucion_id = e.id and a.abierta_en > d.declarado_en)
+       or exists (select 1 from nucleo.pago_manual x
+                   where x.ejecucion_id = e.id and x.registrado_en > d.declarado_en) then
+      raise exception 'después de esa declaración alguien vio la cuenta o registró un pago'
+        using errcode = 'P0001', hint = 'estado_invalido';
+    end if;
+    perform nucleo.exigir_no_ejecuto(c, e.id, actor, identidad);
     if d.identidad_declaro = identidad then
       raise exception 'la misma persona no puede ocupar los dos lugares de esta separación'
         using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
@@ -776,6 +861,7 @@ INTERNAS = (
     "nucleo.exigir_sin_pago_vigente(uuid)",
     "nucleo.exigir_no_aprobo(uuid, uuid, integer, uuid, uuid)",
     "nucleo.exigir_no_preparo(uuid, uuid, uuid, uuid)",
+    "nucleo.exigir_no_ejecuto(uuid, uuid, uuid, uuid)",
     "nucleo.orden_para_pago_manual(uuid, uuid, integer, bytea)",
 )
 UPGRADE += "".join(f"revoke all on function {f} from public;\n" for f in RUTAS + INTERNAS)
@@ -789,6 +875,8 @@ begin
   if exists (select 1 from nucleo.ejecucion_orden_pago where modalidad = 'manual')
      or exists (select 1 from nucleo.pago_manual)
      or exists (select 1 from nucleo.operacion_pago_manual)
+     or exists (select 1 from nucleo.comprobante_pago_manual)
+     or exists (select 1 from nucleo.apertura_cuenta_pago_manual)
      or exists (select 1 from nucleo.conciliacion_pago_manual)
      or exists (select 1 from nucleo.declaracion_pago_no_realizado)
      or exists (select 1 from nucleo.confirmacion_pago_no_realizado)

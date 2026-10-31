@@ -990,6 +990,9 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
     comprobar(estado(corrida, o2) == "aprobada", "bajo el umbral, conocido: aprobada por franja")
     comprobar(emitir(corrida, "administracion", o2).estado == 200, "emitir la orden 2")
     reverificar(corrida, "administracion")
+    # Registra quien recibió la cuenta en el acto de esa ejecución (0055).
+    r = cuenta_para_pagar(corrida, "administracion", o2)
+    comprobar(r.estado == 200, f"el acto de ejecución de la orden 2: {r.texto}")
     r = registrar_pago(
         corrida,
         "administracion",

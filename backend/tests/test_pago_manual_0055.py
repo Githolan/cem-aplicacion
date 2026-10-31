@@ -108,7 +108,10 @@ def evidencia(motor_migrate, e, o, **cambios) -> dict:
 
 
 def registrada(motor_migrate, e, o, quien=None, **cambios) -> UUID:
-    return llamar(motor_migrate, e, quien or e.adm, REGISTRAR,
+    """Quien transfiere entra antes al acto de ejecución (recibe la cuenta) y después registra."""
+    quien = quien or e.adm
+    ver(motor_migrate, e, quien, o)
+    return llamar(motor_migrate, e, quien, REGISTRAR,
                   **evidencia(motor_migrate, e, o, **cambios))  # fmt: skip
 
 
@@ -541,6 +544,7 @@ def _en_paralelo(motor_migrate, e, primero, segundo) -> dict:
 
 def test_dos_registros_a_la_vez_uno_solo_gana(motor_migrate, e):
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
     r = _en_paralelo(motor_migrate, e, (e.adm, REGISTRAR, evidencia(motor_migrate, e, o)),
                      (e.adm, REGISTRAR, evidencia(motor_migrate, e, o)))  # fmt: skip
     assert r == {"esperaba": True, "motivo": "pago_ya_registrado"}
@@ -565,6 +569,44 @@ def test_pagada_no_admite_otro_registro_ni_otra_ejecucion(motor_migrate, e):
     niega(motor_migrate, e, e.adm, REGISTRAR, "estado_invalido", **evidencia(motor_migrate, e, o))
     niega(motor_migrate, e, e.adm, EMITIR, "estado_invalido", orden=o, version=1)
     niega(motor_migrate, e, e.adm, DECLARAR, "estado_invalido", orden=o, version=1,
+          motivo="SINTETICO")  # fmt: skip
+
+
+def test_un_comprobante_a_la_vez_para_dos_ordenes_uno_solo_gana(motor_migrate, e):
+    """La clave del comprobante, no una consulta previa: dos órdenes distintas (cada una con su
+    bloqueo) no lo usan las dos aunque registren a la vez."""
+    o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
+    doc = comprobante(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o1)
+    ver(motor_migrate, e, e.adm, o2)
+    uno = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o1, documento=doc))
+    otro = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o2, documento=doc))
+    r = _en_paralelo(motor_migrate, e, uno, otro)
+    assert r == {"esperaba": True, "motivo": "comprobante_de_otra_orden"}
+    assert (len(pagos_de(motor_migrate, o1)), len(pagos_de(motor_migrate, o2))) == (1, 0)
+
+
+def test_el_registro_vigente_es_el_ultimo_de_la_cadena_no_el_mas_nuevo(motor_migrate, e):
+    """Una corrección con una marca anterior a la del registro observado (su transacción empezó
+    antes) sigue siendo la vigente: la cadena de `corrige_a` manda, no el reloj."""
+    o = emitida(motor_migrate, e)
+    p1 = registrada(motor_migrate, e, o)
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p1, resultado="observado",
+           motivo="SINTETICO: el comprobante no se lee")  # fmt: skip
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.pago_manual (consorcio_id, ejecucion_id, corrige_a,"
+                 " numero_operacion, fecha_operacion, importe_centavos, moneda, documento_id,"
+                 " version_documento_id, registrado_por, identidad_registro, registrado_en)"
+                 " select consorcio_id, ejecucion_id, id, numero_operacion, fecha_operacion,"
+                 " importe_centavos, moneda, documento_id, version_documento_id,"
+                 " registrado_por, identidad_registro, registrado_en - interval '1 minute'"
+                 " from nucleo.pago_manual where id = :p"),
+            {"p": p1},
+        )  # fmt: skip
+    niega(motor_migrate, e, e.adm, VER, "pago_ya_registrado", orden=o, version=1,
+          huella=huella(motor_migrate, o, 1))  # fmt: skip
+    niega(motor_migrate, e, e.adm, DECLARAR, "pago_ya_registrado", orden=o, version=1,
           motivo="SINTETICO")  # fmt: skip
 
 
@@ -639,6 +681,33 @@ def test_la_conciliacion_mal_formada_no_pasa(motor_migrate, e, resultado, motivo
           resultado=resultado, motivo=motivo)  # fmt: skip
 
 
+def test_registra_solo_quien_vio_la_cuenta_de_esa_ejecucion(motor_migrate, motor_app, e):
+    """El que registra es el que transfirió: recibió la cuenta en el acto de esta ejecución."""
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, e.adm, o)
+    niega(motor_migrate, e, x, REGISTRAR, "no_es_quien_ejecuto", **evidencia(motor_migrate, e, o))
+    # Haber visto la cuenta de otra orden no alcanza.
+    otra_orden = emitida(motor_migrate, e)
+    ver(motor_migrate, e, x, otra_orden)
+    niega(motor_migrate, e, x, REGISTRAR, "no_es_quien_ejecuto", **evidencia(motor_migrate, e, o))
+    assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
+    registrada(motor_migrate, e, o, quien=x)  # control: vio la cuenta y registra
+
+
+def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, e):
+    """mc2 (con `aprobar_orden` y además `ejecutar_pago`, sin haber aprobado) abre el acto y
+    transfiere; la administración también lo abre y registra. mc2 no concilia ese pago."""
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    ver(motor_migrate, e, e.mc2, o)
+    p = registrada(motor_migrate, e, o)
+    datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
+    niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)
+    llamar(motor_migrate, e, e.mc1, CONCILIAR, **datos)  # control: no vio la cuenta
+    assert orden(motor_migrate, o)["estado"] == "pagada"
+
+
 # «No se pagó» --------------------------------------------------------------------------------
 
 
@@ -662,6 +731,68 @@ def test_no_se_declara_ni_confirma_con_un_pago_vigente(motor_migrate, e):
     niega(motor_migrate, e, e.adm, DECLARAR, "pago_ya_registrado", orden=o, version=1,
           motivo="SINTETICO")  # fmt: skip
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "pago_ya_registrado", orden=o, declaracion=d)
+
+
+def test_la_declaracion_queda_superada_por_un_pago_registrado_despues(motor_migrate, e):
+    """Declarada «no se pagó», después se transfirió y registró, y ese registro se observó: la
+    declaración vieja ya no se confirma (abriría un segundo pago). Una nueva sí."""
+    o = emitida(motor_migrate, e)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    p = registrada(motor_migrate, e, o)
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
+           motivo="SINTETICO: falta el comprobante correcto")  # fmt: skip
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert orden(motor_migrate, o)["estado"] == "en_verificacion"
+    d2 = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1,
+                motivo="SINTETICO: el banco devolvió la transferencia")  # fmt: skip
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d2)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_superada_aunque_quien_registra_haya_visto_la_cuenta_antes_de_declarar(
+    motor_migrate, motor_app, e
+):
+    """x recibió la cuenta antes de que la administración declarara «no se pagó», transfirió y
+    registró después: el registro posterior, no la apertura, deja superada la declaración."""
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, x, o)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    p = llamar(motor_migrate, e, x, REGISTRAR, **evidencia(motor_migrate, e, o))
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="observado",
+           motivo="SINTETICO: el comprobante no se lee")  # fmt: skip
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert orden(motor_migrate, o)["estado"] == "en_verificacion"
+
+
+def test_la_declaracion_queda_superada_si_despues_alguien_vio_la_cuenta(
+    motor_migrate, motor_app, e
+):
+    o = emitida(motor_migrate, e)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, x, o)
+    niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
+    assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
+
+
+def test_quien_vio_la_cuenta_no_confirma_que_no_se_pago(motor_migrate, e):
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    ver(motor_migrate, e, e.mc2, o)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    niega(motor_migrate, e, e.mc2, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc1, CONFIRMAR, orden=o, declaracion=d)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_quien_aprobo_no_declara_que_no_se_pago(motor_migrate, e):
+    """A5 también en la base, no solo en la política de la ruta."""
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc1)
+    niega(motor_migrate, e, e.mc1, DECLARAR, "no_es_quien_aprobo", orden=o, version=1,
+          motivo="SINTETICO")  # fmt: skip
+    llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")  # control
 
 
 # Riel y manual, nunca las dos ----------------------------------------------------------------

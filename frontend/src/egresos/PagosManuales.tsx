@@ -30,15 +30,27 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // de ejecución de una orden aprobada («Ejecutar pago manual»), que vuelve a evaluar todas las
 // barreras (quien aprobó no ejecuta, aprobación vigente, proveedor sin cambios, segundo factor
 // reciente). Vive solo en el estado de esa ficha y se descarta al cerrarla.
+//
+// Si la aprobación ya venció y la orden tiene un registro observado (la transferencia se hizo a
+// tiempo), la ficha se abre sin la cuenta: queda corregir el registro con los datos del
+// comprobante o declarar que no se pagó, sin volver a ver la cuenta.
 
 type Orden = components["schemas"]["OrdenPago"];
 type ConPago = components["schemas"]["OrdenConPagoManual"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type DocumentoEnLista = components["schemas"]["DocumentoEnLista"];
+type Version = components["schemas"]["VersionOrdenPago"];
+/** La ficha del acto; `cuenta_destino` es null cuando se abre sin la cuenta (aprobación vencida). */
+type Ficha = Omit<Cuenta, "cuenta_destino" | "aprobada_en" | "aprobacion_vence_en"> & {
+  cuenta_destino: string | null;
+  aprobacion_vence_en: string | null;
+};
 
 export const RUTA_PAGOS = "/egresos/pagos";
 export const AVISO_VERIFICAR_CUENTA =
   "Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.";
+export const AVISO_APROBACION_VENCIDA =
+  "La aprobación venció: la cuenta no se vuelve a mostrar. Corregí el registro con los datos del comprobante de la transferencia que ya hiciste, o declará que no se pagó.";
 const CATEGORIA_COMPROBANTE = "facturas_y_comprobantes";
 
 type Lectura =
@@ -86,7 +98,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
-  const [ficha, setFicha] = useState<Cuenta | null>(null);
+  const [ficha, setFicha] = useState<Ficha | null>(null);
   const [fichaOrden, setFichaOrden] = useState<string | null>(null);
   const [registro, setRegistro] = useState<Registro>(REGISTRO_VACIO);
   const [declarando, setDeclarando] = useState(false);
@@ -166,7 +178,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   }
 
   /** La versión vigente y su huella, como las ve quien prepara (sin la cuenta completa). */
-  async function vista(ordenId: string): Promise<{ version: number; huella: string; estado: Orden["estado"] } | null> {
+  async function vista(ordenId: string): Promise<{ version: number; huella: string; estado: Orden["estado"]; detalle: Version; vence: string | null } | null> {
     const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}", {
       params: { path: { consorcio_id: consorcio, orden_id: ordenId } },
     });
@@ -176,7 +188,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
       fallo(response.status, codigoDe(error), "ver la orden", () => void ejecutar(ordenId));
       return null;
     }
-    return { version: v.numero, huella: v.huella, estado: data.orden.estado };
+    return { version: v.numero, huella: v.huella, estado: data.orden.estado, detalle: v, vence: data.orden.aprobacion_vence_en };
   }
 
   /** «Ejecutar pago manual»: emite si todavía está aprobada y abre el acto de ejecución. */
@@ -212,6 +224,28 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
         body: { version: v.version, huella: v.huella },
       });
       exigirSesion(response);
+      const previo = lectura.tipo === "ok" ? lectura.manuales.find((c) => c.orden.id === ordenId) : undefined;
+      if (data === undefined && codigoDe(error) === "aprobacion_vencida" && previo !== undefined && previo.ejecucion.pagos.length > 0) {
+        const d = v.detalle;
+        setRegistro({ ...REGISTRO_VACIO, fecha: hoy() });
+        setFichaOrden(ordenId);
+        setFicha({
+          ejecucion_id: previo.ejecucion.id,
+          version: v.version,
+          huella: v.huella,
+          proveedor_id: d.proveedor_id,
+          proveedor_version: d.proveedor_version,
+          razon_social: d.razon_social,
+          cuit: d.cuit,
+          cuenta_destino: null,
+          importe_centavos: d.importe_centavos,
+          moneda: d.moneda,
+          concepto: d.concepto,
+          comprobante: d.comprobante,
+          aprobacion_vence_en: v.vence,
+        });
+        return;
+      }
       if (data === undefined) {
         fallo(response.status, codigoDe(error), "ver la cuenta para pagar", () => void ejecutar(ordenId, true));
         setVuelta((n) => n + 1);
@@ -401,17 +435,21 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
             <section className="tarjeta" aria-labelledby={`${id}-ficha`}>
               <h2 id={`${id}-ficha`}>Ejecutar el pago a {ficha.razon_social}</h2>
               <p className="aviso-error" role="note">
-                {AVISO_VERIFICAR_CUENTA}
+                {ficha.cuenta_destino === null ? AVISO_APROBACION_VENCIDA : AVISO_VERIFICAR_CUENTA}
               </p>
               <dl className="detalles">
                 <dt>Proveedor</dt>
                 <dd>{ficha.razon_social}</dd>
                 <dt>CUIT</dt>
                 <dd>{ficha.cuit ?? "Sin CUIT"}</dd>
-                <dt>CBU/CVU</dt>
-                <dd>
-                  <code>{ficha.cuenta_destino}</code>
-                </dd>
+                {ficha.cuenta_destino !== null && (
+                  <>
+                    <dt>CBU/CVU</dt>
+                    <dd>
+                      <code>{ficha.cuenta_destino}</code>
+                    </dd>
+                  </>
+                )}
                 <dt>Importe</dt>
                 <dd>{importe(ficha.importe_centavos, ficha.moneda)}</dd>
                 <dt>Concepto</dt>
@@ -422,8 +460,12 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
                 <dd>{ficha.version}</dd>
                 <dt>Versión del proveedor</dt>
                 <dd>{ficha.proveedor_version}</dd>
-                <dt>Pagar antes de</dt>
-                <dd>{momento(ficha.aprobacion_vence_en)}</dd>
+                {ficha.aprobacion_vence_en !== null && (
+                  <>
+                    <dt>{ficha.cuenta_destino === null ? "La aprobación venció el" : "Pagar antes de"}</dt>
+                    <dd>{momento(ficha.aprobacion_vence_en)}</dd>
+                  </>
+                )}
               </dl>
 
               {!declarando && (
