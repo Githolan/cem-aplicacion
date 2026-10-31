@@ -15,6 +15,8 @@
 # 7. Resumen de la copia (JSON válido e inválidos) y la fila del registro.
 # 8. cd.ps1 acepta -SinCopiaPrevia y con él las demás compuertas siguen valiendo.
 # 10. Cobertura de PA: la constancia guarda cubiertas y faltantes; un informe roto falla.
+# 11. Proyecto de compose por corrida: formato, dos corridas distintas, y solo las corridas
+#     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato).
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -322,6 +324,23 @@ foreach ($caso in @(
     $e = $null; try { Read-CemCoberturaPa -Json $caso[1] | Out-Null } catch { $e = $_ }
     Comprobar "informe roto ($($caso[0])) -> falla" ($null -ne $e) 'aceptado'
 }
+
+Write-Host "`n=== 11. Proyecto de compose por corrida de ci.ps1 ===" -ForegroundColor Cyan
+$a = New-CemIdCorrida -Sha7 'abc1234'
+$b = New-CemIdCorrida -Sha7 'abc1234'
+Comprobar 'el nombre del proyecto sigue el formato' ("$CemPrefijoProyectoCi$a" -match $CemFormatoProyectoCi) $a
+Comprobar 'dos corridas del mismo commit tienen proyectos distintos' ($a -ne $b) "$a = $b"
+Comprobar "lleva el PID de la corrida ($PID)" ($a -match "^abc1234-$PID-") $a
+$e = $null; try { New-CemIdCorrida -Sha7 'ABC' | Out-Null } catch { $e = $_ }
+Comprobar 'un sha7 inválido se niega' ($null -ne $e) 'aceptado'
+$vivos = @(100, 200)
+$esVivo = { param($p) $vivos -contains $p }
+$proyectos = @('cem-ci-abc1234-100-aaaaaa', 'cem-ci-abc1234-300-bbbbbb', 'cem-ci-abc1234-300-bbbbbb',
+               'cem-ci', 'cem-h3d', 'cem-ci-abc1234-x-cccccc', 'cem-ci-def5678-200-dddddd')
+$abandonados = @(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo $esVivo)
+Comprobar 'solo la corrida de un proceso muerto, una vez' (($abandonados -join ',') -eq 'cem-ci-abc1234-300-bbbbbb') ($abandonados -join ',')
+Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo { $true }).Count -eq 0) 'hay'
+Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
 
 Remove-Item Env:\CEM_DESPLIEGUE_ESTADO
 if ((Split-Path -Leaf $raiz) -like "$prefijo*" -and $raiz.StartsWith([IO.Path]::GetTempPath())) { Remove-Item -Recurse -Force $raiz }

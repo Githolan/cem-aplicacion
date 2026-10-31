@@ -4,15 +4,18 @@
 # (desde la raíz: docker build -f frontend/Dockerfile -t cem-frontend .)
 set -eu
 IMAGEN="${1:-cem-frontend}"
-PUERTO=18080
 NOMBRE="cem-frontend-prueba-$$"
 falla() { echo "FALLA: $*" >&2; docker rm -f "$NOMBRE" >/dev/null 2>&1; exit 1; }
 
 # Sin CEM_BACKEND_DESTINO el contenedor no debe arrancar.
 if docker run --rm "$IMAGEN" >/dev/null 2>&1; then falla "arrancó sin CEM_BACKEND_DESTINO"; fi
 
-docker run -d --name "$NOMBRE" -p "$PUERTO:8080" -e CEM_BACKEND_DESTINO=sin-backend:8000 "$IMAGEN" >/dev/null
+# Puertos del anfitrión elegidos por Docker (siempre libres), solo en 127.0.0.1: dos corridas a
+# la vez no chocan por un puerto fijo.
+puerto() { docker port "$1" 8080/tcp | head -1 | sed 's/.*://'; }
+docker run -d --name "$NOMBRE" -p 127.0.0.1::8080 -e CEM_BACKEND_DESTINO=sin-backend:8000 "$IMAGEN" >/dev/null
 trap 'docker rm -f "$NOMBRE" >/dev/null 2>&1' EXIT
+PUERTO=$(puerto "$NOMBRE")
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   curl -fs "http://127.0.0.1:$PUERTO/frontend-salud" >/dev/null && break
   sleep 1
@@ -73,9 +76,9 @@ h.HTTPServer(("0.0.0.0", 8000), E).serve_forever()'
 docker network create "$RED" >/dev/null
 docker run -d --name "$ECO" --network "$RED" --network-alias cem-backend-eco \
   python:3.12-slim python -c "$ECO_PY" >/dev/null
-docker run -d --name "$CON_ECO" --network "$RED" -p "$((PUERTO + 1)):8080" \
+docker run -d --name "$CON_ECO" --network "$RED" -p 127.0.0.1::8080 \
   -e CEM_BACKEND_DESTINO=cem-backend-eco:8000 "$IMAGEN" >/dev/null
-URL_ECO="http://127.0.0.1:$((PUERTO + 1))"
+URL_ECO="http://127.0.0.1:$(puerto "$CON_ECO")"
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL_ECO/health")" = 200 ] && break
   sleep 1
