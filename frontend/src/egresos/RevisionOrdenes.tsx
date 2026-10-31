@@ -15,6 +15,7 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_CONDICION,
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
@@ -31,7 +32,7 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // nunca pasa sola a otra versión.
 
 type Orden = components["schemas"]["OrdenPago"];
-type Detalle = components["schemas"]["OrdenPagoConVersiones"];
+type Detalle = components["schemas"]["OrdenPagoConVersionesRevision"];
 
 export const RUTA_REVISION = "/egresos/revision";
 
@@ -240,7 +241,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       {o.alerta_fraccionamiento && (
                         <>
                           <dt>Alerta</dt>
-                          <dd>Posible fraccionamiento: sumada a las demás del mes, supera el umbral o el máximo del contrato.</dd>
+                          <dd>{TEXTO_ALERTA_FRACCIONAMIENTO}</dd>
                         </>
                       )}
                       <dt>Aprobaciones</dt>
@@ -274,7 +275,8 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                 <dt>CUIT</dt>
                 <dd>{vigente.cuit ?? "Sin CUIT"}</dd>
                 <dt>Cuenta destino</dt>
-                <dd>{vigente.cuenta_destino ?? "Sin cuenta"}</dd>
+                {/* Nula también si quien lee preparó la orden: el backend le manda solo los 4 últimos. */}
+                <dd>{vigente.cuenta_destino ?? cuentaEnmascarada(vigente.cuenta_ultimos_digitos)}</dd>
                 <dt>Beneficiario</dt>
                 <dd>{TEXTO_CONDICION[vigente.condicion_beneficiario]}</dd>
                 <dt>Franja</dt>
@@ -282,7 +284,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                 {vigente.alerta_fraccionamiento && (
                   <>
                     <dt>Alerta</dt>
-                    <dd>Posible fraccionamiento: sumada a las demás del mes, supera el umbral o el máximo del contrato.</dd>
+                    <dd>{TEXTO_ALERTA_FRACCIONAMIENTO}</dd>
                   </>
                 )}
                 <dt>Fondo de reserva</dt>
@@ -303,7 +305,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       .map((v) => (
                         <li key={v.numero}>
                           Versión {v.numero}: {importe(v.importe_centavos, v.moneda)}, {v.razon_social}, cuenta{" "}
-                          {cuentaEnmascarada(v.cuenta_destino)}
+                          {cuentaEnmascarada(v.cuenta_ultimos_digitos)}
                         </li>
                       ))}
                   </ol>

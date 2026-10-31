@@ -101,14 +101,31 @@ def conocido(motor_migrate, e) -> UUID:
     return aprobada(motor_migrate, e)
 
 
-def documento_de_contrato(motor_migrate, e, categoria="contratos_proveedores") -> UUID:
+def documento_de_contrato(motor_migrate, e, categoria="contratos_proveedores",
+                          version="disponible") -> UUID:  # fmt: skip
+    """Un documento con una versión en el estado dado (`None`: sin versiones). Desde 0052 solo
+    respalda un contrato si tiene una versión `disponible` (pasó el antivirus)."""
     with motor_migrate.begin() as c:
-        return c.execute(
+        doc = c.execute(
             text("insert into nucleo.documento (consorcio_id, categoria, titulo, fecha,"
                  " cargado_por) values (:c, :k, 'Contrato SINTETICO (NO REAL)', current_date,"
                  " :p) returning id"),
             {"c": e.cons, "k": categoria, "p": e.adm},
         ).scalar_one()  # fmt: skip
+        if version is not None:
+            analizada = version != "en_cuarentena"
+            c.execute(
+                text("insert into nucleo.version_documento (consorcio_id, documento_id, estado,"
+                     " motivo_rechazo, tipo, tamano, sha256, clave_objeto, antivirus, firmas_en,"
+                     " subida_por, analizada_en) values (:c, :d, :estado, :motivo,"
+                     " 'application/pdf', 1, repeat('a', 64), :clave, :av,"
+                     " case when :estado = 'disponible' then now() end, :p,"
+                     " case when :estado <> 'en_cuarentena' then now() end)"),
+                {"c": e.cons, "d": doc, "estado": version, "p": e.adm,
+                 "motivo": "virus" if version == "rechazado" else None,
+                 "clave": f"sintetico/{doc}", "av": "ClamAV SINTETICO" if analizada else None},
+            )  # fmt: skip
+        return doc
 
 
 def contrato(motor_migrate, e, *, tope=IMPORTE, moneda="ARS", proveedor=None,
@@ -142,7 +159,7 @@ def _hoy(motor_migrate, e):
         return c.execute(text("select nucleo.hoy_del_consorcio(:c)"), {"c": e.cons}).scalar_one()
 
 
-def nueva_cuenta(motor_migrate, e, semilla: int) -> None:
+def nueva_cuenta(motor_migrate, e, semilla: int, por: UUID | None = None) -> None:
     """Versión 2 del proveedor de la escena con otra cuenta (como dueño de la base)."""
     with motor_migrate.begin() as c:
         c.execute(
@@ -152,7 +169,7 @@ def nueva_cuenta(motor_migrate, e, semilla: int) -> None:
                  " 'activo', :cta, nucleo.huella_proveedor(:p, 2, null,"
                  " 'Proveedor SINTETICO (NO REAL)', :cta), :q,"
                  " nucleo.identidad_humana_de(:c, :q))"),
-            {"c": e.cons, "p": e.proveedor, "cta": cbu_sintetico(semilla), "q": e.adm},
+            {"c": e.cons, "p": e.proveedor, "cta": cbu_sintetico(semilla), "q": por or e.adm},
         )  # fmt: skip
 
 
@@ -319,6 +336,11 @@ def test_registrar_un_contrato_exige_su_documento_y_una_vigencia_valida(motor_mi
     niega(motor_migrate, e, e.adm, REGISTRAR_CONTRATO, "fecha_invalida", documento=doc,
           **base | pasado)  # fmt: skip
     niega(motor_migrate, e, e.mc1, REGISTRAR_CONTRATO, "42501", documento=doc, **base)
+    # 0052: un documento sin ninguna versión que pasó el antivirus no respalda nada.
+    for version in (None, "en_cuarentena", "rechazado"):
+        sin_archivo = documento_de_contrato(motor_migrate, e, version=version)
+        niega(motor_migrate, e, e.adm, REGISTRAR_CONTRATO, "documento_invalido",
+              documento=sin_archivo, **base)  # fmt: skip
     assert llamar(motor_migrate, e, e.adm, REGISTRAR_CONTRATO, documento=doc, **base)  # control
 
 
@@ -428,6 +450,60 @@ def test_lo_rutinario_del_mismo_contrato_en_el_mes_alerta_al_pasar_el_maximo(mot
         assert orden(motor_migrate, o)["estado"] == "aprobada"  # no se bloquea
         alertas.append(versiones(motor_migrate, o)[0]["alerta_fraccionamiento"])
     assert alertas == [False, True]
+
+
+def test_la_alerta_mira_la_ventana_de_fraccionamiento_no_el_mes(motor_migrate, motor_app, e):
+    """0052: la ventana es un parámetro técnico (`ventana_fraccionamiento`, 30 días). Con una
+    ventana de cero, las órdenes anteriores no suman y no hay alerta; nunca se bloquea."""
+    conocido(motor_migrate, e)  # una orden previa del mismo proveedor, aprobada
+    umbral(motor_app, e.cons, IMPORTE + 1)  # cada orden queda bajo el umbral; dos lo superan
+    with motor_migrate.connect() as c:
+        dias = c.execute(text("select extract(day from nucleo.ventana_fraccionamiento())")).scalar()
+    assert dias == 30
+    with motor_migrate.begin() as c:
+        c.execute(text("create or replace function nucleo.ventana_fraccionamiento()"
+                       " returns interval language sql stable"
+                       " set search_path = pg_catalog, pg_temp"
+                       " as $$ select interval '0' $$"))  # fmt: skip
+    try:
+        o = enviada(motor_migrate, e)
+        assert orden(motor_migrate, o)["estado"] == "aprobada"
+        assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is False
+    finally:
+        with motor_migrate.begin() as c:
+            c.execute(text("create or replace function nucleo.ventana_fraccionamiento()"
+                           " returns interval language sql stable"
+                           " set search_path = pg_catalog, pg_temp"
+                           " as $$ select interval '30 days' $$"))  # fmt: skip
+    # Control: con la ventana de 30 días, las previas suman y la misma orden sí alerta.
+    o = enviada(motor_migrate, e)
+    assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is True
+
+
+def _preparada_hace(motor_migrate, o, delta: timedelta) -> None:
+    """Corre hacia atrás el momento en que se preparó la versión de la orden (como dueño)."""
+    with motor_migrate.begin() as c:
+        c.execute(text("alter table nucleo.orden_pago_version disable trigger"
+                       " historia_orden_pago_version"))  # fmt: skip
+        c.execute(
+            text("update nucleo.orden_pago_version set creada_en = now() - :d where orden_id = :o"),
+            {"d": delta, "o": o},
+        )
+        c.execute(text("alter table nucleo.orden_pago_version enable trigger"
+                       " historia_orden_pago_version"))  # fmt: skip
+
+
+def test_la_ventana_suma_29_dias_atras_y_no_31(motor_migrate, motor_app, e):
+    """Revisión de #175: el borde de la ventana con órdenes reales, también cruzando de mes."""
+    previa = conocido(motor_migrate, e)
+    umbral(motor_app, e.cons, IMPORTE + 1)  # sola, cada orden queda bajo el umbral
+    _preparada_hace(motor_migrate, previa, timedelta(days=31))
+    o = enviada(motor_migrate, e)
+    assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is False
+    _preparada_hace(motor_migrate, o, timedelta(days=31))  # que esta tampoco sume
+    _preparada_hace(motor_migrate, previa, timedelta(days=29))
+    o = enviada(motor_migrate, e)
+    assert versiones(motor_migrate, o)[0]["alerta_fraccionamiento"] is True
 
 
 # Vigencia de la aprobación y emisión ---------------------------------------------------------
@@ -677,3 +753,107 @@ def test_0050_no_sube_con_ordenes(base_aparte):  # noqa: F811
         c.execute(text("delete from nucleo.orden_pago where id = :o"), {"o": o})
     command.upgrade(cfg, "0050")  # control: sin la orden, sube
     assert _tablas(motor) == 4
+
+
+FUNCIONES_0052 = (
+    "nucleo.evaluar_orden_pago(uuid, uuid, nucleo.proveedor_version, bigint, text, boolean, uuid)",
+    "nucleo.contrato_vigente(uuid, uuid, date)",
+    "nucleo.registrar_contrato_proveedor(uuid, text, text, bigint, text, date, date, uuid, uuid,"
+    " uuid, text, uuid)",
+    "nucleo.contratos_proveedor_lectura(uuid, text, uuid, text, uuid)",
+    "nucleo.huella_proveedor(uuid, integer, text, text, text)",
+    "nucleo.confirmar_contrato_proveedor(uuid, bytea, uuid, text, uuid)",
+)
+
+
+def _definiciones(motor) -> dict[str, str]:
+    with motor.connect() as c:
+        return {
+            f: c.execute(
+                text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": f}
+            ).scalar_one()
+            for f in FUNCIONES_0052
+        }
+
+
+def _funciones_nuevas(motor) -> int:
+    with motor.connect() as c:
+        return c.execute(
+            text("select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+                 " where n.nspname = 'nucleo' and p.proname in ('ventana_fraccionamiento',"
+                 " 'documento_respalda', 'exigir_no_cargo_la_cuenta_del_proveedor')")
+        ).scalar_one()  # fmt: skip
+
+
+def test_0052_ida_y_vuelta(base_aparte):  # noqa: F811
+    """Sube cambiando las seis funciones y baja dejándolas idénticas a las de 0051."""
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0051")
+    antes = _definiciones(motor)
+    assert _funciones_nuevas(motor) == 0
+    command.upgrade(cfg, "0052")
+    despues = _definiciones(motor)
+    assert _funciones_nuevas(motor) == 3
+    for f in FUNCIONES_0052:
+        assert despues[f] != antes[f], f  # control: la subida cambió cada una
+    assert "ventana_fraccionamiento()" in despues[FUNCIONES_0052[0]]
+    assert all("documento_respalda(" in despues[f] for f in FUNCIONES_0052[1:4])
+    assert "'sal', gen_random_uuid()" in despues[FUNCIONES_0052[4]]
+    assert "exigir_no_cargo_la_cuenta_del_proveedor(" in despues[FUNCIONES_0052[5]]
+    command.downgrade(cfg, "0051")
+    assert _definiciones(motor) == antes
+    assert _funciones_nuevas(motor) == 0
+    command.upgrade(cfg, "0052")  # control: vuelve a subir limpio
+    assert _definiciones(motor) == despues
+
+
+def test_un_contrato_anterior_a_0052_sin_version_analizada_no_respalda(motor_migrate, e):
+    """Un contrato cargado antes de 0052 pudo citar un documento sin ninguna versión `disponible`.
+    Desde 0052 no rige ni se lee como vigente. Se lo simula como dueño, cambiando el documento de
+    un contrato confirmado por uno en cuarentena."""
+    conocido(motor_migrate, e)
+    k = confirmado(motor_migrate, e)
+    rutinaria = enviada(motor_migrate, e, contrato=k)
+    assert franja(motor_migrate, rutinaria) == "rutinaria"  # control: con respaldo, rige
+    assert get(e, e.adm, "contratos").json()["elementos"][0]["estado"] == "vigente"
+    en_cuarentena = documento_de_contrato(motor_migrate, e, version="en_cuarentena")
+    with motor_migrate.begin() as c:
+        c.execute(text("alter table nucleo.contrato_proveedor disable trigger"
+                       " historia_contrato_proveedor"))  # fmt: skip
+        c.execute(
+            text("update nucleo.contrato_proveedor set documento_id = :d where id = :k"),
+            {"d": en_cuarentena, "k": k},
+        )
+        c.execute(text("alter table nucleo.contrato_proveedor enable trigger"
+                       " historia_contrato_proveedor"))  # fmt: skip
+    niega(motor_migrate, e, e.adm, PREPARAR, "contrato_no_aplica", contrato=k)
+    niega(motor_migrate, e, e.adm, EMITIR, "contrato_no_vigente", orden=rutinaria, version=1)
+    assert get(e, e.adm, "contratos").json()["elementos"][0]["estado"] == "documento_no_vigente"
+
+
+def test_quien_cargo_la_cuenta_del_proveedor_no_confirma_su_contrato(motor_migrate, motor_app, e):
+    """Revisión de seguridad de #175: confirmar un contrato reemplaza la aprobación de cada orden
+    rutinaria, así que quien cargó la cuenta vigente del proveedor no lo confirma, tampoco con
+    otra cuenta suya."""
+    nueva_cuenta(motor_migrate, e, 41, por=e.mc1)
+    k = contrato(motor_migrate, e)
+    h = huella_contrato(motor_migrate, k)
+    niega(motor_migrate, e, e.mc1, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
+          huella_k=h)  # fmt: skip
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    niega(motor_migrate, e, otra, CONFIRMAR_CONTRATO, "no_es_quien_cargo_la_cuenta", contrato=k,
+          huella_k=h)  # fmt: skip
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR_CONTRATO, contrato=k, huella_k=h)  # control
+
+
+def test_la_revision_no_da_la_cuenta_a_otra_cuenta_de_quien_preparo(motor_migrate, motor_app, e):
+    """Revisión de seguridad de #175: la cuenta completa se niega por identidad humana, no por
+    cuenta. Quien preparó y revisa con otra cuenta suya ve solo los últimos dígitos."""
+    o = enviada(motor_migrate, e)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    revision = get(e, otra, f"ordenes-pago/{o}/revision")
+    assert revision.status_code == 200, revision.json()
+    assert {v["cuenta_destino"] for v in revision.json()["versiones"]} == {None}
+    # Control: otro ser humano del Consejo la ve entera.
+    control = get(e, e.mc1, f"ordenes-pago/{o}/revision").json()
+    assert None not in {v["cuenta_destino"] for v in control["versiones"]}

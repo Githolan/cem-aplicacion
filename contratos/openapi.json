@@ -4264,6 +4264,7 @@
         "type": "object"
       },
       "OrdenPagoConVersiones": {
+        "description": "Preparación: sin la cuenta completa.",
         "properties": {
           "orden": {
             "$ref": "#/components/schemas/OrdenPago"
@@ -4281,6 +4282,26 @@
           "versiones"
         ],
         "title": "OrdenPagoConVersiones",
+        "type": "object"
+      },
+      "OrdenPagoConVersionesRevision": {
+        "properties": {
+          "orden": {
+            "$ref": "#/components/schemas/OrdenPago"
+          },
+          "versiones": {
+            "items": {
+              "$ref": "#/components/schemas/VersionOrdenPagoRevision"
+            },
+            "title": "Versiones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "orden",
+          "versiones"
+        ],
+        "title": "OrdenPagoConVersionesRevision",
         "type": "object"
       },
       "OrdenPagoNueva": {
@@ -4605,7 +4626,7 @@
             "title": "Creado En",
             "type": "string"
           },
-          "cuenta_destino": {
+          "cuenta_ultimos_digitos": {
             "anyOf": [
               {
                 "type": "string"
@@ -4614,7 +4635,8 @@
                 "type": "null"
               }
             ],
-            "title": "Cuenta Destino"
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
+            "title": "Cuenta Ultimos Digitos"
           },
           "cuit": {
             "anyOf": [
@@ -4682,7 +4704,7 @@
           "contacto",
           "estado",
           "documento_id",
-          "cuenta_destino",
+          "cuenta_ultimos_digitos",
           "huella",
           "alta_por",
           "creado_en",
@@ -4819,8 +4841,13 @@
       },
       "ProveedorVersionNueva": {
         "additionalProperties": false,
-        "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.",
+        "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.\n\nQuien prepara nunca recibe la cuenta completa, así que no puede reenviarla:\n`conservar_cuenta` deja la de la versión esperada, y entonces `cuenta_destino` no viene.\nSin `conservar_cuenta`, `cuenta_destino` es la cuenta nueva o ninguna.",
         "properties": {
+          "conservar_cuenta": {
+            "description": "Obligatorio: así un cliente que no manda la cuenta nunca la borra sin querer.",
+            "title": "Conservar Cuenta",
+            "type": "boolean"
+          },
           "contacto": {
             "anyOf": [
               {
@@ -4895,7 +4922,8 @@
         "required": [
           "razon_social",
           "version_esperada",
-          "estado"
+          "estado",
+          "conservar_cuenta"
         ],
         "title": "ProveedorVersionNueva",
         "type": "object"
@@ -5491,7 +5519,7 @@
         "type": "object"
       },
       "VersionOrdenPago": {
-        "description": "Cada versión con el proveedor exacto que fija: razón social, CUIT y cuenta de esa versión\ndel proveedor, no de la vigente.",
+        "description": "Cada versión con el proveedor exacto que fija: razón social, CUIT y cuenta de esa versión\ndel proveedor, no de la vigente. En preparación, la cuenta va recortada.",
         "properties": {
           "alerta_fraccionamiento": {
             "title": "Alerta Fraccionamiento",
@@ -5545,7 +5573,7 @@
             "title": "Creada En",
             "type": "string"
           },
-          "cuenta_destino": {
+          "cuenta_ultimos_digitos": {
             "anyOf": [
               {
                 "type": "string"
@@ -5554,7 +5582,8 @@
                 "type": "null"
               }
             ],
-            "title": "Cuenta Destino"
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
+            "title": "Cuenta Ultimos Digitos"
           },
           "cuit": {
             "anyOf": [
@@ -5652,7 +5681,7 @@
           "condicion_beneficiario",
           "razon_social",
           "cuit",
-          "cuenta_destino",
+          "cuenta_ultimos_digitos",
           "aprobada_por",
           "franja",
           "alerta_fraccionamiento",
@@ -5661,6 +5690,193 @@
           "contrato_id"
         ],
         "title": "VersionOrdenPago",
+        "type": "object"
+      },
+      "VersionOrdenPagoRevision": {
+        "description": "Revisión: el Consejo verifica la cuenta completa antes de aprobar.",
+        "properties": {
+          "alerta_fraccionamiento": {
+            "title": "Alerta Fraccionamiento",
+            "type": "boolean"
+          },
+          "aprobaciones_requeridas": {
+            "title": "Aprobaciones Requeridas",
+            "type": "integer"
+          },
+          "aprobada_por": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Aprobada Por",
+            "type": "array"
+          },
+          "comprobante": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comprobante"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "condicion_beneficiario": {
+            "$ref": "#/components/schemas/CondicionBeneficiario"
+          },
+          "contrato_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El contrato que la hace rutinaria.",
+            "title": "Contrato Id"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "cuenta_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La cuenta completa. Nula si la versión no tiene cuenta o si quien lee preparó la orden o alguna de sus versiones (no la aprueba): entonces vale `cuenta_ultimos_digitos`.",
+            "title": "Cuenta Destino"
+          },
+          "cuenta_ultimos_digitos": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
+            "title": "Cuenta Ultimos Digitos"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuit"
+          },
+          "franja": {
+            "$ref": "#/components/schemas/Franja"
+          },
+          "huella": {
+            "title": "Huella",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Numero",
+            "type": "integer"
+          },
+          "preparada_por": {
+            "format": "uuid",
+            "title": "Preparada Por",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "proveedor_version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Proveedor Version",
+            "type": "integer"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "umbral_importe_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El umbral vigente al preparar la versión, aunque no haya decidido.",
+            "title": "Umbral Importe Centavos"
+          },
+          "umbral_moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Umbral Moneda"
+          },
+          "usa_fondo_reserva": {
+            "title": "Usa Fondo Reserva",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "numero",
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "comprobante",
+          "usa_fondo_reserva",
+          "huella",
+          "preparada_por",
+          "creada_en",
+          "aprobaciones_requeridas",
+          "proveedor_id",
+          "proveedor_version",
+          "condicion_beneficiario",
+          "razon_social",
+          "cuit",
+          "cuenta_ultimos_digitos",
+          "aprobada_por",
+          "franja",
+          "alerta_fraccionamiento",
+          "umbral_importe_centavos",
+          "umbral_moneda",
+          "contrato_id",
+          "cuenta_destino"
+        ],
+        "title": "VersionOrdenPagoRevision",
         "type": "object"
       },
       "VersionProveedor": {
@@ -5681,7 +5897,7 @@
             "title": "Creada En",
             "type": "string"
           },
-          "cuenta_destino": {
+          "cuenta_ultimos_digitos": {
             "anyOf": [
               {
                 "type": "string"
@@ -5690,7 +5906,8 @@
                 "type": "null"
               }
             ],
-            "title": "Cuenta Destino"
+            "description": "Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien revisa (decisión del 30-10-2026).",
+            "title": "Cuenta Ultimos Digitos"
           },
           "documento_id": {
             "anyOf": [
@@ -5745,7 +5962,7 @@
           "contacto",
           "estado",
           "documento_id",
-          "cuenta_destino",
+          "cuenta_ultimos_digitos",
           "huella",
           "preparada_por",
           "creada_en"
@@ -9766,7 +9983,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrdenPagoConVersiones"
+                  "$ref": "#/components/schemas/OrdenPagoConVersionesRevision"
                 }
               }
             },
@@ -9789,7 +10006,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Una orden enviada a revisión, con la huella de cada versión para aprobarla",
+        "summary": "Una orden enviada a revisión, con la huella y la cuenta completa de cada versión",
         "tags": [
           "egresos"
         ]

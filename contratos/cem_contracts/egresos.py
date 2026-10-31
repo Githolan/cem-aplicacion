@@ -9,6 +9,9 @@ acta, contratos y abonos que respaldan lo rutinario, y una aprobación que vence
   incluidos.
 - **Revisión** (`egresos.revisar_orden`, con la facultad `egresos.aprobar_orden`): las órdenes ya
   enviadas, cada versión con el proveedor exacto que fija, para aprobar o rechazar esa versión.
+- **La cuenta destino completa** solo sale en la revisión. Preparación recibe los últimos
+  4 dígitos (`cuenta_ultimos_digitos`): la cuenta llega ya recortada desde el backend, no
+  se oculta en la pantalla (decisión del propietario, 30-10-2026).
 - **La franja** de cada versión (`Franja`) dice si pide aprobación. Lo rutinario y lo que no
   supera el umbral no la piden; el fondo de reserva, el beneficiario nuevo, la cuenta cambiada,
   lo que supera el umbral y todo lo no rutinario sin umbral, sí.
@@ -25,7 +28,14 @@ from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
 """El tope de `bigint` en la base."""
@@ -41,7 +51,11 @@ FORMATO_HUELLA = r"^[0-9a-f]{64}$"
 """SHA-256 en hexadecimal, en minúsculas, como lo devuelve la lectura."""
 VIGENCIA_APROBACION = timedelta(days=7)
 """Decisión 1A (30-10-2026): una orden aprobada se emite dentro de los 7 días corridos desde que
-llegó a Aprobada. Es `VIGENCIA_APROBACION_DIAS` de `0050` (una prueba los compara)."""
+llegó a Aprobada. Son 168 horas exactas desde el instante en que reunió las aprobaciones que pide,
+no hasta el final del séptimo día calendario (confirmado por el propietario el 30-10-2026). Es
+`VIGENCIA_APROBACION_DIAS` de `0050` (una prueba los compara)."""
+DIGITOS_VISIBLES_CUENTA = 4
+"""Lo que ve de la cuenta destino quien no revisa: los últimos dígitos."""
 PESOS_BLOQUE_1 = (7, 1, 3, 9, 7, 1, 3)
 PESOS_BLOQUE_2 = (3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3)
 
@@ -60,6 +74,11 @@ def _cuenta_valida(cuenta: str) -> str:
     if _digito(cuenta[8:21], PESOS_BLOQUE_2) != int(cuenta[21]):
         raise ValueError("La cuenta no es un CBU o CVU válido.")
     return cuenta
+
+
+def ultimos_digitos(cuenta: str | None) -> str | None:
+    """La cuenta como la recibe quien no revisa."""
+    return None if cuenta is None else cuenta[-DIGITOS_VISIBLES_CUENTA:]
 
 
 def _texto(minimo: int, maximo: int):
@@ -172,10 +191,23 @@ class ProveedorNuevo(DatosProveedor):
 
 class ProveedorVersionNueva(DatosProveedor):
     """`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya
-    preparadas siguen apuntando a la anterior. El CUIT no cambia."""
+    preparadas siguen apuntando a la anterior. El CUIT no cambia.
+
+    Quien prepara nunca recibe la cuenta completa, así que no puede reenviarla:
+    `conservar_cuenta` deja la de la versión esperada, y entonces `cuenta_destino` no viene.
+    Sin `conservar_cuenta`, `cuenta_destino` es la cuenta nueva o ninguna."""
 
     version_esperada: Version
     estado: EstadoProveedor
+    conservar_cuenta: bool = Field(
+        description="Obligatorio: así un cliente que no manda la cuenta nunca la borra sin querer."
+    )
+
+    @model_validator(mode="after")
+    def _conservar_sin_cuenta(self) -> "ProveedorVersionNueva":
+        if self.conservar_cuenta and self.cuenta_destino is not None:
+            raise ValueError("Con conservar_cuenta no se manda cuenta_destino.")
+        return self
 
 
 class ProveedorCreado(BaseModel):
@@ -198,7 +230,10 @@ class Proveedor(BaseModel):
     contacto: str | None
     estado: EstadoProveedor
     documento_id: UUID | None
-    cuenta_destino: str | None
+    cuenta_ultimos_digitos: str | None = Field(
+        description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
+        " revisa (decisión del 30-10-2026)."
+    )
     huella: str
     alta_por: UUID
     creado_en: datetime
@@ -220,7 +255,10 @@ class VersionProveedor(BaseModel):
     contacto: str | None
     estado: EstadoProveedor
     documento_id: UUID | None
-    cuenta_destino: str | None
+    cuenta_ultimos_digitos: str | None = Field(
+        description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
+        " revisa (decisión del 30-10-2026)."
+    )
     huella: str
     preparada_por: UUID
     creada_en: datetime
@@ -342,7 +380,7 @@ class ListaOrdenesPago(BaseModel):
 
 class VersionOrdenPago(BaseModel):
     """Cada versión con el proveedor exacto que fija: razón social, CUIT y cuenta de esa versión
-    del proveedor, no de la vigente."""
+    del proveedor, no de la vigente. En preparación, la cuenta va recortada."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -361,7 +399,10 @@ class VersionOrdenPago(BaseModel):
     condicion_beneficiario: CondicionBeneficiario
     razon_social: str
     cuit: str | None
-    cuenta_destino: str | None
+    cuenta_ultimos_digitos: str | None = Field(
+        description="Los últimos 4 dígitos de la cuenta destino: la completa solo la ve quien"
+        " revisa (decisión del 30-10-2026)."
+    )
     aprobada_por: list[UUID]
     franja: Franja
     alerta_fraccionamiento: bool
@@ -373,10 +414,29 @@ class VersionOrdenPago(BaseModel):
 
 
 class OrdenPagoConVersiones(BaseModel):
+    """Preparación: sin la cuenta completa."""
+
     model_config = ConfigDict(frozen=True)
 
     orden: OrdenPago
     versiones: list[VersionOrdenPago]
+
+
+class VersionOrdenPagoRevision(VersionOrdenPago):
+    """Revisión: el Consejo verifica la cuenta completa antes de aprobar."""
+
+    cuenta_destino: str | None = Field(
+        description="La cuenta completa. Nula si la versión no tiene cuenta o si quien lee preparó"
+        " la orden o alguna de sus versiones (no la aprueba): entonces vale"
+        " `cuenta_ultimos_digitos`."
+    )
+
+
+class OrdenPagoConVersionesRevision(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    orden: OrdenPago
+    versiones: list[VersionOrdenPagoRevision]
 
 
 class Emision(BaseModel):

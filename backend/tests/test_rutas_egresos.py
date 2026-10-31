@@ -122,19 +122,117 @@ def test_alta_de_proveedor_y_su_historia(e):
     assert r.json()["version"] == 1
     assert p in {x["id"] for x in get(e, e.adm, "proveedores").json()["elementos"]}
 
-    cambio = PROVEEDOR | {"cuenta_destino": cbu_sintetico(11), "estado": "activo"}
+    cambio = PROVEEDOR | {"cuenta_destino": cbu_sintetico(11), "estado": "activo",
+                          "conservar_cuenta": False}  # fmt: skip
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 1})
     assert (r.status_code, r.json()["version"]) == (200, 2)
     detalle = get(e, e.adm, f"proveedores/{p}").json()
-    assert detalle["proveedor"]["cuenta_destino"] == cbu_sintetico(11)
-    assert [(v["version"], v["cuenta_destino"]) for v in detalle["versiones"]] == [
-        (1, cbu_sintetico(10)), (2, cbu_sintetico(11))]  # fmt: skip
+    assert detalle["proveedor"]["cuenta_ultimos_digitos"] == cbu_sintetico(11)[-4:]
+    assert [(v["version"], v["cuenta_ultimos_digitos"]) for v in detalle["versiones"]] == [
+        (1, cbu_sintetico(10)[-4:]), (2, cbu_sintetico(11)[-4:])]  # fmt: skip
 
     # La versión vieja ya no sirve, y la misma versión sin cambios tampoco.
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 1})
     assert codigo(r) == (409, "version_desactualizada")
     r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"version_esperada": 2})
     assert codigo(r) == (409, "sin_cambios")
+
+
+def test_quien_prepara_nunca_recibe_la_cuenta_completa(e):
+    """Decisión del 30-10-2026: la cuenta sale recortada desde el backend, no se oculta en la
+    pantalla. Ninguna respuesta de preparación lleva sus 22 dígitos; la revisión, sí."""
+    cuenta = cbu_sintetico(1)  # la del proveedor de la escena
+    o = enviada(e)
+    preparacion = [
+        get(e, e.adm, "proveedores"),
+        get(e, e.adm, f"proveedores/{e.proveedor}"),
+        get(e, e.adm, "ordenes-pago"),
+        get(e, e.adm, f"ordenes-pago/{o}"),
+    ]
+    for r in preparacion:
+        assert r.status_code == 200, r.json()
+        assert cuenta not in r.text
+        assert "cuenta_destino" not in r.text
+    detalle = preparacion[3].json()
+    assert detalle["versiones"][0]["cuenta_ultimos_digitos"] == cuenta[-4:]
+    # Quien prepara no lee la revisión (es otra acción), y quien revisa sí ve la cuenta entera.
+    assert codigo(get(e, e.adm, f"ordenes-pago/{o}/revision")) == (403, "sin_permiso")
+    revision = get(e, e.mc1, f"ordenes-pago/{o}/revision")
+    assert revision.json()["versiones"][0]["cuenta_destino"] == cuenta  # control
+
+
+def test_un_consejero_que_preparo_la_orden_no_ve_la_cuenta_completa_al_revisarla(motor_migrate, e):
+    """Revisión independiente de #172: un consejero que también prepara no aprueba lo que
+    preparó, así que tampoco recibe la cuenta completa en la revisión de esa orden."""
+    _mc2_tambien_prepara(motor_migrate, e)
+    cuenta = cbu_sintetico(1)
+    o = enviada(e)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/versiones",
+             ORDEN | {"proveedor_id": str(e.proveedor), "importe_centavos": 777,
+                      "version_esperada": 1})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    revision = get(e, e.mc2, f"ordenes-pago/{o}/revision")
+    assert revision.status_code == 200, revision.json()
+    assert cuenta not in revision.text
+    assert {v["cuenta_destino"] for v in revision.json()["versiones"]} == {None}
+    assert {v["cuenta_ultimos_digitos"] for v in revision.json()["versiones"]} == {cuenta[-4:]}
+    # Control: quien no preparó ninguna versión la ve entera.
+    otro = get(e, e.mc1, f"ordenes-pago/{o}/revision").json()
+    assert {v["cuenta_destino"] for v in otro["versiones"]} == {cuenta}
+
+
+def test_un_error_de_la_base_llega_al_registro_sin_la_cuenta():
+    """Dos capas: `hide_parameters` saca los valores que agrega SQLAlchemy, y `redactar` tapa la
+    cuenta que PostgreSQL mismo escribe en su mensaje (`value "…" is out of range`). El registro
+    pasa la excepción por `redactar` (`registros.py`)."""
+    from sqlalchemy.exc import DBAPIError
+
+    from app.db import crear_motor
+    from app.registros import redactar
+
+    cuenta = cbu_sintetico(3)
+    motor = crear_motor(url_rol("app"))
+    try:
+        with pytest.raises(DBAPIError) as error, motor.connect() as c:
+            c.execute(text("select cast(:x as integer)"), {"x": cuenta})
+    finally:
+        motor.dispose()
+    texto = str(error.value)
+    assert "SQL parameters hidden" in texto
+    assert cuenta in texto  # control: el mensaje de PostgreSQL la trae
+    assert cuenta not in redactar(texto)
+    assert "[cuenta]" in redactar(texto)
+
+
+def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
+    p = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": cbu_sintetico(14)}).json()[
+        "id"
+    ]
+    cambio = PROVEEDOR | {"rubro": "Gas", "estado": "activo", "version_esperada": 1}
+    r = post(e, e.adm, f"proveedores/{p}/versiones", cambio | {"conservar_cuenta": True})
+    assert (r.status_code, r.json()["version"]) == (200, 2)
+    with motor_migrate.connect() as c:
+        cuentas = c.execute(
+            text("select numero, cuenta_destino from nucleo.proveedor_version"
+                 " where proveedor_id = :p order by numero"), {"p": p},
+        ).all()  # fmt: skip
+    assert [tuple(x) for x in cuentas] == [(1, cbu_sintetico(14)), (2, cbu_sintetico(14))]
+    # Conservar y mandar una cuenta a la vez no tiene sentido; con la versión vieja, 409.
+    r = post(e, e.adm, f"proveedores/{p}/versiones",
+             cambio | {"version_esperada": 2, "conservar_cuenta": True,
+                       "cuenta_destino": cbu_sintetico(15)})  # fmt: skip
+    assert codigo(r) == (422, "peticion_invalida")
+    r = post(
+        e, e.adm, f"proveedores/{p}/versiones", cambio | {"rubro": "Agua", "conservar_cuenta": True}
+    )
+    assert codigo(r) == (409, "version_desactualizada")
+    # Sin decir si conserva la cuenta, 422: un cliente viejo o descuidado no la borra sin querer.
+    agua = PROVEEDOR | {"rubro": "Agua", "estado": "activo", "version_esperada": 2}
+    assert codigo(post(e, e.adm, f"proveedores/{p}/versiones", agua)) == (422, "peticion_invalida")
+    # Control: sin conservar y sin cuenta, la versión nueva queda sin cuenta (como antes).
+    r = post(e, e.adm, f"proveedores/{p}/versiones", agua | {"conservar_cuenta": False})
+    assert r.status_code == 200, r.json()
+    assert get(e, e.adm, f"proveedores/{p}").json()["proveedor"]["cuenta_ultimos_digitos"] is None
 
 
 def test_cuenta_y_cuit_invalidos(e):
@@ -367,8 +465,10 @@ def test_0049_ida_y_vuelta(base_aparte):  # noqa: F811
 def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
     with motor_migrate.connect() as c:
         m, acta = c.execute(
+            # P3 103: el mandato de Consejo vigente de mc2, no «el único que tenga».
             text("select id, decision_id from nucleo.mandato where consorcio_id = :c"
-                 " and persona_id = :p"), {"c": e.cons, "p": e.mc2},
+                 " and persona_id = :p and tipo = 'miembro_consejo' and finalizado_en is null"),
+            {"c": e.cons, "p": e.mc2},
         ).one()  # fmt: skip
     otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
 
@@ -394,7 +494,7 @@ def test_quien_cargo_la_cuenta_no_aprueba_el_pago(motor_migrate, e):
     r = post(e, e.mc2, f"proveedores/{e.proveedor}/versiones",
              {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
               "cuenta_destino": cbu_sintetico(1), "estado": "activo",
-              "version_esperada": 1})  # fmt: skip
+              "version_esperada": 1, "conservar_cuenta": False})  # fmt: skip
     assert r.status_code == 200, r.json()
     o = enviada(e)
     h = huella(e, o, 1)
@@ -411,7 +511,7 @@ def test_el_consejo_no_lee_los_proveedores_por_su_cuenta(e):
 
 
 def test_un_proveedor_inexistente_en_la_ruta_es_404(e):
-    cuerpo = PROVEEDOR | {"estado": "activo", "version_esperada": 1}
+    cuerpo = PROVEEDOR | {"estado": "activo", "version_esperada": 1, "conservar_cuenta": True}
     assert codigo(post(e, e.adm, f"proveedores/{uuid4()}/versiones", cuerpo)) == (
         404, "no_encontrado")  # fmt: skip
     r = post(e, e.adm, f"proveedores/{e.proveedor}/versiones", cuerpo)

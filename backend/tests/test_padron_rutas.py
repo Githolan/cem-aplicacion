@@ -301,11 +301,15 @@ def test_un_vinculo_inexistente_o_de_otro_consorcio_responde_404(motor_migrate, 
     leer: la lectura filtra por el consorcio de la ruta (sin el filtro sería un 403)."""
     e = escena
     cons_b, _ = segundo_consorcio_con_mandato(motor_migrate, motor_app, e["admin"])
+    # El vínculo ajeno es el de otra persona: en B también está el del propio administrador, que
+    # ya viene confirmado (lo crea `segundo_consorcio_con_mandato`).
     with motor_migrate.connect() as c:
-        ajeno, unidad_b = c.execute(
-            text("select id, unidad_id from nucleo.vinculo where consorcio_id = :c limit 1"),
-            {"c": cons_b},
-        ).one()
+        ajeno, unidad_b, confirmado = c.execute(
+            text("select id, unidad_id, confirmado_en from nucleo.vinculo"
+                 " where consorcio_id = :c and persona_id <> :yo"),
+            {"c": cons_b, "yo": e["admin"]},
+        ).one()  # fmt: skip
+    assert confirmado is None  # así la última línea prueba que la ruta no lo confirmó
     propio_en_b = invitar_y_aceptar(motor_migrate, cons_b, unidad_b, None, persona=e["admin"])
     with cliente(e["admin"]) as c:
         for vinculo in (uuid4(), ajeno, propio_en_b):
