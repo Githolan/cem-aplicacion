@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 28-10-2026 (noche).
+**Actualizado:** 31-10-2026 (madrugada).
 
 ## Qué existe
 
@@ -112,6 +112,33 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 ## Desplegado
 
 Medido en el despliegue de `71cf09f` (30-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050 y `2026-10-30-71cf09f.md` con la de 0051).
+
+**En `main` y SIN desplegar (31-10-2026, `0dac226`):** base `0052`, contrato 0.30.0. Viene del segundo mensaje del propietario del 30-10. Cada PR se fusionó con su CI verde, Codex limpio y 0 hilos abiertos.
+
+**Bloqueo:** la emulación arm64 del Docker de la PC desapareció el 30-10 sin que se reiniciara la VM, y `ci.ps1` ya no puede publicar las imágenes `linux/arm64`. El clasificador de permisos bloqueó reinstalarla, así que la restaura el propietario (P3 108 del repositorio CEM). Las corridas de estos PR usaron `ci.ps1 -SinSubirImagenes`: sus constancias no tienen imágenes y `cd.ps1` no despliega esas SHA. Para desplegar hace falta una corrida de `ci.ps1` con imágenes sobre `main`, después staging con copia de la base (cambia el esquema) y el ensayo `backend/pruebas/ensayo_egresos_staging.py`.
+
+- **PR #172 (`951cd75`):** quien prepara nunca recibe la cuenta completa.
+  - Proveedores y órdenes devuelven `cuenta_ultimos_digitos`. La cuenta completa solo sale por `/revision`, y en blanco para quien preparó (desde #175, por identidad humana).
+  - `conservar_cuenta` permite versionar un proveedor sin ver su cuenta.
+  - La cuenta no llega a los registros: `hide_parameters`, y `redactar` tapa 22 dígitos.
+  - Pagos:
+    - `lock_timeout` de 5 s al tomar el bloqueo; si vence, `PagoBloqueado` y reintento de la cola, nunca un resultado incierto;
+    - `vence_en` en cada pedido;
+    - una respuesta fuera del contrato se registra como incierta.
+- **PR #173 (`fd61664`):** `test_padron_rutas` elige el vínculo ajeno por la condición.
+- **PR #174 (`8b48531`):** cada corrida de `ci.ps1` usa su propio proyecto de compose (`cem-ci-<sha7>-<pid>-<azar>`) y puertos que elige Docker.
+  - Al empezar, baja las corridas cortadas, incluido el contenedor de `compose run` que sigue vivo.
+  - Probado: dos corridas cortadas dejaron 7 contenedores, y la siguiente las dejó en 0 contenedores y 0 redes.
+- **PR #175 (`1a8b691`, `0052`):**
+  - la alerta de fraccionamiento suma los últimos `nucleo.ventana_fraccionamiento()` días (30) y no bloquea nunca;
+  - un contrato solo se respalda en un documento con una versión `disponible` (`nucleo.documento_respalda`);
+  - pruebas de la barrera entre la API y los trabajos;
+  - de la revisión de seguridad:
+    - la huella del proveedor lleva una sal al azar;
+    - quien cargó la cuenta no confirma el contrato del proveedor;
+    - en el motivo del riel se tapa la cuenta antes de cortarlo; la referencia no se tapa.
+  - Mutaciones detectadas en cada arreglo, y el ensayo sintético de staging (sin correr todavía).
+- **PR #176 (`0dac226`):** e2e de egresos en un teléfono: 360 px, WCAG 2.2 AA, edificio A→B→A y la cuenta completa solo en la revisión.
 
 **Staging y producción en `71cf09f`** (30-10-2026, de 22:11 a 22:20 UTC), base `0051`, contrato 0.29.0.
 
