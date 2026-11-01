@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { periodo } from "./Liquidacion";
+import { mesSiguiente, periodo } from "./Liquidacion";
 
 // Liquidación neutral (app 0057). Datos ficticios: ningún proveedor ni importe real.
 
@@ -167,7 +167,7 @@ describe("liquidación (borrador)", () => {
       expect.stringContaining("1° B"),
     ]);
     expect(within(tabla).getByText(/Total .*1\.000,00, repartido por unidad/)).toBeTruthy();
-    expect(screen.getByText("No hay órdenes pagadas para agregar.")).toBeTruthy();
+    expect(screen.getByText("No hay órdenes pagadas hasta el fin de octubre de 2026 para agregar.")).toBeTruthy();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations.map((v) => v.id)).toEqual([]);
 
@@ -278,6 +278,29 @@ describe("liquidación (borrador)", () => {
     const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true);
     expect(opciones.some((t) => t?.includes("Proveedor en dólares SRL"))).toBe(false);
+  });
+
+  it("solo ofrece lo pagado hasta el último día del período, como el backend (P3 136)", async () => {
+    const elUltimoDia = { ...LIQUIDABLE, orden_id: O1.replace("3333", "8888"), pagada_el: "2026-10-31" };
+    const alOtroDia = { ...LIQUIDABLE, orden_id: O1.replace("3333", "9999"), pagada_el: "2026-11-01",
+                        razon_social: "Pagada en noviembre SRL" };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [elUltimoDia, alOtroDia] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    const select = await screen.findByLabelText("Orden pagada");
+    const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true); // control: el 31 entra
+    expect(opciones.some((t) => t?.includes("Pagada en noviembre SRL"))).toBe(false);
+  });
+
+  it("el mes siguiente cruza el año sin pasar por la zona del navegador", () => {
+    expect([mesSiguiente("2026-10-01"), mesSiguiente("2026-12-01"), mesSiguiente("2027-01-01")])
+      .toEqual(["2026-11-01", "2027-01-01", "2027-02-01"]);
   });
 
   it("un período mal escrito se explica sin ir al backend", async () => {

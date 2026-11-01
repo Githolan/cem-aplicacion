@@ -48,6 +48,13 @@ const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: 
 /** «2026-10-01» como «octubre de 2026». */
 export const periodo = (iso: string) => FORMATO_PERIODO.format(new Date(`${iso}T00:00:00Z`));
 
+/** "2026-10-01" → "2026-11-01": el primer día del mes siguiente, sin la zona del navegador. */
+export function mesSiguiente(iso: string): string {
+  const anio = Number(iso.slice(0, 4));
+  const mes = Number(iso.slice(5, 7));
+  return mes === 12 ? `${anio + 1}-01-01` : `${anio}-${String(mes + 1).padStart(2, "0")}-01`;
+}
+
 export function Liquidacion() {
   const elegido = useConsorcio();
   return <LiquidacionDelEdificio key={elegido.consorcio} {...elegido} />;
@@ -228,7 +235,11 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const moneda = simulacion?.moneda ?? null;
   // Un borrador tiene una sola moneda: con gastos, solo se ofrecen órdenes de esa moneda.
   const monedaBorrador = detalle?.gastos[0]?.moneda ?? null;
-  const ofrecibles = monedaBorrador === null ? liquidables : liquidables.filter((o) => o.moneda === monedaBorrador);
+  // Como la regla del backend (0058): entra solo lo pagado hasta el último día del período (P3 136).
+  const hasta = detalle === null ? null : mesSiguiente(detalle.liquidacion.periodo);
+  const ofrecibles = liquidables.filter(
+    (o) => (monedaBorrador === null || o.moneda === monedaBorrador) && (hasta === null || o.pagada_el < hasta),
+  );
 
   return (
     <>
@@ -323,7 +334,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
 
                   {detalle.liquidacion.estado === "borrador" &&
                     (ofrecibles.length === 0 ? (
-                      <p>No hay órdenes pagadas para agregar.</p>
+                      <p>No hay órdenes pagadas hasta el fin de {periodo(detalle.liquidacion.periodo)} para agregar.</p>
                     ) : detalle.grupos.length === 0 ? (
                       <p>El edificio no tiene esquemas de coeficientes vigentes en el período: soporte los carga.</p>
                     ) : (
