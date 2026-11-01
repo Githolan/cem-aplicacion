@@ -95,7 +95,11 @@ async function nombres(): Promise<string[]> {
     .map((h) => h.textContent ?? "");
 }
 
+// Los datos son del 20 y 21-10-2026 y la guardia de gas vence el 1-11: sin un reloj fijo, desde
+// ese día las pruebas sin conexión fallaban solas (falló el 1-11-2026). Las que prueban el
+// vencimiento ponen su propia hora.
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-21T12:00:00-03:00") });
   localStorage.clear();
 });
 
@@ -183,7 +187,7 @@ describe("página /contactos", () => {
   });
 
   it("sin conexión muestra la copia con su fecha y oculta lo que ya venció", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-01T12:00:00-03:00") });
+    vi.setSystemTime(new Date("2026-11-01T12:00:00-03:00"));
     guardar(C1, "Edificio Azul", LISTA);
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": sinRed }));
     abrir();
@@ -193,7 +197,7 @@ describe("página /contactos", () => {
   });
 
   it("control: el día anterior al fin, sin conexión, el contacto se muestra", async () => {
-    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-31T23:30:00-03:00") });
+    vi.setSystemTime(new Date("2026-10-31T23:30:00-03:00"));
     guardar(C1, "Edificio Azul", LISTA);
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": sinRed }));
     abrir();

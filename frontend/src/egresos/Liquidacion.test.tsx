@@ -238,6 +238,28 @@ describe("liquidación (borrador)", () => {
     expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
   });
 
+  it("el motivo escrito para un borrador no pasa a otro", async () => {
+    const L2 = L1.replace("2222-4222", "2223-4222");
+    const noviembre = { ...LIQUIDACION, id: L2, periodo: "2026-11-01" };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION, noviembre] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
+      [`GET ${BASE}/liquidaciones/${L2}`]: () =>
+        Response.json({ ...SIN_GASTOS, liquidacion: noviembre }),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"),
+      { target: { value: "SINTETICO: el de octubre" } });
+    fireEvent.click(screen.getByRole("button", { name: /noviembre de 2026, versión 1/ }));
+    const campo = await screen.findByLabelText("Motivo para descartar el borrador");
+    expect((campo as HTMLInputElement).value).toBe("");
+    const boton = screen.getByRole("button", { name: "Descartar el borrador" });
+    expect((boton as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("con gastos en una moneda solo ofrece órdenes de esa moneda", async () => {
     const enDolares = { ...LIQUIDABLE, orden_id: O1.replace("3333", "9999"), moneda: "USD",
                         razon_social: "Proveedor en dólares SRL" };

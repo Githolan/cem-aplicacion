@@ -68,11 +68,13 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
 
-  // Otra liquidación tiene otros grupos: la orden y el grupo elegidos no pasan de una a otra.
+  // Otra liquidación tiene otros grupos: la orden, el grupo y el motivo de descarte elegidos no
+  // pasan de una a otra (un motivo escrito para un borrador no descarta otro).
   function abrir(id: string) {
     setAbierta(id);
     setOrden("");
     setGrupo("");
+    setMotivo("");
   }
   const clave = useRef<string | null>(null);
   const montado = useMontado();

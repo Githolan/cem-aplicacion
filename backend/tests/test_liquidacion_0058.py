@@ -5,7 +5,7 @@ la de `test_liquidacion_0057`.
 """
 
 import importlib.util
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -26,6 +26,10 @@ pytestmark = pytest.mark.db
 
 DESCARTAR = "select nucleo.descartar_liquidacion(:liquidacion, :motivo, :actor, :origen, :sesion)"
 MOTIVO = "SINTETICO: período equivocado"
+DESCARTE_EN_REGLA = (
+    "estado = 'descartada', descartada_en = now(), descartada_por = preparada_por,"
+    " identidad_descarto = identidad_preparo, motivo_descarte = 'x'"
+)
 
 
 def mes(d: date, mas: int) -> str:
@@ -111,6 +115,10 @@ def test_solo_se_descarta_un_borrador_con_motivo_y_una_vez(motor_migrate, e):
         "version = version + 1",
         "estado = 'publicada'",
         "motivo_descarte = 'otro'",
+        # Descartada en regla, pero cambiando otra columna: también se niega.
+        f"{DESCARTE_EN_REGLA}, periodo = periodo + interval '1 month'",
+        f"{DESCARTE_EN_REGLA}, version = version + 1",
+        f"{DESCARTE_EN_REGLA}, creada_en = creada_en - interval '1 day'",
     ],
 )
 def test_la_tabla_solo_admite_pasar_de_borrador_a_descartada(motor_migrate, e, cambio):
@@ -126,6 +134,15 @@ def test_la_tabla_solo_admite_pasar_de_borrador_a_descartada(motor_migrate, e, c
         with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
             c.execute(text(sentencia), {"l": liq})
         assert error.value.orig.diag.message_hint == "historia_inmutable"
+    assert liquidacion(motor_migrate, liq)["estado"] == "descartada"
+
+
+def test_el_descarte_en_regla_pasa_el_trigger(motor_migrate, e):
+    """Control de la prueba anterior: sin tocar otra columna, el trigger lo deja pasar."""
+    liq = borrador(motor_migrate, e)
+    with motor_migrate.begin() as c:
+        c.execute(text(f"update nucleo.liquidacion set {DESCARTE_EN_REGLA} where id = :l"),
+                  {"l": liq})  # fmt: skip
     assert liquidacion(motor_migrate, liq)["estado"] == "descartada"
 
 
@@ -158,6 +175,65 @@ def test_una_orden_pagada_despues_del_periodo_no_entra(motor_migrate, e, esquema
            grupo="expensas_comunes")  # pagada antes y olvidada: entra después  # fmt: skip
 
 
+def fechar_pago(motor_migrate, o, **cambios) -> None:
+    """Corre las fechas del pago de `o` para probar los bordes del período sin esperar un mes.
+    Las dos tablas solo agregan filas: sus triggers se apagan dentro de esta transacción."""
+    tablas = ("nucleo.pago_manual", "nucleo.resultado_ejecucion_orden_pago")
+    de_la_orden = "ejecucion_id in (select id from nucleo.ejecucion_orden_pago where orden_id = :o)"
+    sentencias = {
+        "operacion": f"update nucleo.pago_manual set fecha_operacion = :v where {de_la_orden}",
+        "registrado": "update nucleo.resultado_ejecucion_orden_pago"
+        " set registrado_en = cast(:v as timestamptz)"
+        f" where resultado = 'pagada' and {de_la_orden}",
+        "origen": "update nucleo.resultado_ejecucion_orden_pago"
+        f" set origen = :v where resultado = 'pagada' and {de_la_orden}",
+    }
+    with motor_migrate.begin() as c:
+        for t in tablas:
+            c.execute(text(f"alter table {t} disable trigger user"))
+        for clave, valor in cambios.items():
+            assert c.execute(text(sentencias[clave]), {"o": o, "v": valor}).rowcount == 1
+        for t in tablas:
+            c.execute(text(f"alter table {t} enable trigger user"))
+
+
+def agua_desde(motor_migrate, motor_app, e, desde: str) -> None:
+    us = unidades(motor_migrate, e)
+    coeficientes = {str(u): f"{p:.6f}" for u, p in zip(us, porcentajes(len(us)), strict=True)}
+    registrar(motor_app, e.cons, coeficientes, grupo="agua", desde=desde,
+              decision=acta(motor_migrate, e))  # fmt: skip
+
+
+def test_con_pago_manual_vale_la_fecha_de_la_operacion(motor_migrate, motor_app, e):
+    """Revisión independiente de #185 (P2): con pago manual, la fila `pagada` nace al conciliar.
+    Una transferencia del último día conciliada después va en el período de la transferencia."""
+    d = hoy(motor_migrate, e)
+    primero = date.fromisoformat(mes(d, 0))
+    agua_desde(motor_migrate, motor_app, e, mes(d, -1))
+    anterior = borrador(motor_migrate, e, mes(d, -1))
+    o = pagada(motor_migrate, e)  # conciliada hoy
+    fechar_pago(motor_migrate, o, operacion=primero - timedelta(days=1))
+    llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=anterior, orden=o, grupo="agua")
+    otra = pagada(motor_migrate, e)
+    fechar_pago(motor_migrate, otra, operacion=primero)  # control: transferida el día 1
+    niega(motor_migrate, e, e.adm, AGREGAR, "pagada_despues_del_periodo", liquidacion=anterior,
+          orden=otra, grupo="agua")  # fmt: skip
+
+
+def test_con_el_riel_vale_la_hora_del_consorcio(motor_migrate, motor_app, e):
+    """El 1 a las 02:00 UTC todavía es el último día en Buenos Aires; a las 03:30 ya no."""
+    d = hoy(motor_migrate, e)
+    agua_desde(motor_migrate, motor_app, e, mes(d, -1))
+    anterior = borrador(motor_migrate, e, mes(d, -1))
+    o = pagada(motor_migrate, e)
+    fechar_pago(motor_migrate, o, origen="ordenar", registrado=f"{mes(d, 0)} 02:00+00")
+    llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=anterior, orden=o, grupo="agua")
+    otra = pagada(motor_migrate, e)
+    fechar_pago(motor_migrate, otra, origen="ordenar", registrado=f"{mes(d, 0)} 03:30+00")
+    niega(motor_migrate, e, e.adm, AGREGAR, "pagada_despues_del_periodo", liquidacion=anterior,
+          orden=otra, grupo="agua")  # control  # fmt: skip
+
+
 # P3 132: las guardas de los downgrades ---------------------------------------------------------
 
 
@@ -185,10 +261,20 @@ def test_0058_ida_y_vuelta(base_aparte):  # noqa: F811
                                   " where table_schema = 'nucleo' and table_name = 'liquidacion'"
                                   " and column_name like 'descart%'")).scalar_one()  # fmt: skip
 
+    def funciones() -> list[str]:
+        with motor.connect() as c:
+            return c.execute(text("select pg_get_functiondef(p.oid) from pg_proc p"
+                                  " join pg_namespace n on n.oid = p.pronamespace"
+                                  " where n.nspname = 'nucleo' and p.proname in"
+                                  " ('preparar_liquidacion', 'agregar_gasto_liquidacion')"
+                                  " order by p.proname")).scalars().all()  # fmt: skip
+
+    command.upgrade(cfg, "0057")
+    de_0057 = funciones()
     command.upgrade(cfg, "0058")
-    assert columnas() == 2
+    assert columnas() == 2 and funciones() != de_0057
     command.downgrade(cfg, "0057")
-    assert columnas() == 0
+    assert columnas() == 0 and funciones() == de_0057  # vuelven exactas
     command.upgrade(cfg, "0058")  # control
     assert columnas() == 2
 

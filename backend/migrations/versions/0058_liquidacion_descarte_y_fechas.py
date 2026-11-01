@@ -11,9 +11,11 @@ inercia si tocan cálculo, historia o publicación):
   modificación que admite la tabla: el trigger niega cualquier otra, y la fila conserva todo lo
   demás. Además el período no puede ser posterior al mes que viene (en la fecha del consorcio).
 - **P3 130.** Un gasto entraba en cualquier período, aunque la orden se hubiera pagado después
-  del último día. Ahora la fecha del pago (`resultado_ejecucion_orden_pago.registrado_en`, en la
-  zona del consorcio; con pago manual, la conciliación) tiene que ser a lo sumo el último día del
-  período (`pagada_despues_del_periodo`). Una orden pagada antes y olvidada sí entra en un
+  del último día. Ahora la fecha del pago tiene que ser a lo sumo el último día del período
+  (`pagada_despues_del_periodo`). Con pago manual es la fecha de la operación del pago conciliado
+  `conforme` (`pago_manual.fecha_operacion`), no la de la conciliación: un pago del 30 conciliado
+  el 2 del mes siguiente va en el período del 30. Con el riel, `registrado_en` en la zona del
+  consorcio. Sin fecha, no entra. Una orden pagada antes y olvidada sí entra en un
   período posterior. Decisión técnica por defecto, reversible.
 
 Las funciones de `0057` se reescriben sobre su texto (`pg_get_functiondef`), como `0056`.
@@ -52,11 +54,16 @@ AGREGAR_ANTES = (
 AGREGAR_DESPUES = (
     "        hint = 'orden_no_pagada';\n"
     "    end if;\n"
-    "    if (select (r.registrado_en at time zone x.zona_horaria)::date\n"
+    "    if (select case when r.origen = 'manual' then\n"
+    "                 (select p.fecha_operacion from nucleo.pago_manual p\n"
+    "                    join nucleo.conciliacion_pago_manual k\n"
+    "                      on k.pago_id = p.id and k.resultado = 'conforme'\n"
+    "                   where p.consorcio_id = c and p.ejecucion_id = e.id)\n"
+    "               else (r.registrado_en at time zone x.zona_horaria)::date end\n"
     "          from nucleo.resultado_ejecucion_orden_pago r\n"
     "          join nucleo.consorcio x on x.id = c\n"
     "         where r.ejecucion_id = e.id and r.resultado = 'pagada')\n"
-    "       > (l.periodo + interval '1 month' - interval '1 day')::date then\n"
+    "       <= (l.periodo + interval '1 month' - interval '1 day')::date is not true then\n"
     "      raise exception 'la orden se pagó después del último día del período'\n"
     "        using errcode = 'P0001', hint = 'pagada_despues_del_periodo';\n"
     "    end if;\n"
@@ -91,11 +98,12 @@ create function nucleo.liquidacion_solo_se_descarta()
   set search_path = pg_catalog, pg_temp
   as $$
   begin
+    -- Toda columna que no sea del descarte queda igual, también las que se agreguen después.
     if tg_op = 'UPDATE' and old.estado = 'borrador' and new.estado = 'descartada'
-       and (new.consorcio_id, new.id, new.periodo, new.version, new.preparada_por,
-            new.identidad_preparo, new.creada_en)
-           is not distinct from (old.consorcio_id, old.id, old.periodo, old.version,
-                                 old.preparada_por, old.identidad_preparo, old.creada_en) then
+       and to_jsonb(new) - array['estado', 'descartada_en', 'descartada_por',
+                                 'identidad_descarto', 'motivo_descarte']
+           = to_jsonb(old) - array['estado', 'descartada_en', 'descartada_por',
+                                   'identidad_descarto', 'motivo_descarte'] then
       return new;
     end if;
     raise exception 'la historia de una liquidación solo se agrega'

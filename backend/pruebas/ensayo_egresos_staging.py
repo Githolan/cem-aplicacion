@@ -1407,6 +1407,11 @@ def recorrer_liquidacion(corrida: Corrida, otro_consorcio: UUID, orden_ajena: UU
             {"c": corrida.consorcio, "l": liq},
         ).scalar_one()  # fmt: skip
     comprobar(descartes == 1, f"el descarte queda en la auditoría: {descartes}")
+    abiertos = [i for i, x in liquidaciones_por_id(corrida).items() if x["estado"] == "borrador"]
+    for i in abiertos:
+        r = descartar_liquidacion(corrida, "administracion", i, "SINTETICO: fin del ensayo")
+        comprobar(r.estado == 200, f"descartar los borradores del ensayo: {r.texto}")
+    comprobar(len(abiertos) == 3, f"tres borradores abiertos al final: {abiertos}")
     corrida.ok("0058: descartar con motivo y una vez libera período y órdenes (versión 2);"
                " pagada después del período: 409")  # fmt: skip
 
