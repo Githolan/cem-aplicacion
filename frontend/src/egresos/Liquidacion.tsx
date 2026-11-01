@@ -10,7 +10,6 @@ import {
   ESTADO,
   importe,
   mensajeDeError,
-  momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
 } from "./comun";
@@ -309,7 +308,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                       {detalle.gastos.map((g) => (
                         <li key={g.id}>
                           {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} (grupo {g.grupo},
-                          esquema versión {g.esquema_version}; pagada el {momento(g.pagada_en)}){" "}
+                          esquema versión {g.esquema_version}; pagada el {g.pagada_el}){" "}
                           {detalle.liquidacion.estado === "borrador" && (
                             <button type="button" className="secundario" disabled={enviando}
                               aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}

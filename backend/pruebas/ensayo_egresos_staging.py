@@ -1278,6 +1278,11 @@ def recorrer_liquidacion(corrida: Corrida, otro_consorcio: UUID, orden_ajena: UU
     comprobar(liquidables.estado == 200, f"liquidables: {liquidables.texto}")
     ids = {x["orden_id"] for x in liquidables.cuerpo["elementos"]}
     comprobar(ids == {o1, o2}, f"liquidables: solo las dos pagadas, no la 3: {ids}")
+    if contrato_desplegado(corrida) >= (0, 35, 0):
+        # `0059`: la fecha del pago es la de la operación (hoy, en el calendario del consorcio).
+        fechas = {x["pagada_el"] for x in liquidables.cuerpo["elementos"]}
+        comprobar(fechas == {hoy_del_consorcio(corrida).isoformat()},
+                  f"liquidables: pagadas el día de la operación: {fechas}")  # fmt: skip
     corrida.ok("un borrador por período; el Consejo sin liquidacion.preparar: 403;"
                " liquidables = pagadas")  # fmt: skip
 

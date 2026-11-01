@@ -31,7 +31,7 @@ const LIQUIDACION = {
 };
 const LIQUIDABLE = {
   orden_id: O1, concepto: "Limpieza de octubre", razon_social: "Limpieza Ficticia SRL",
-  importe_centavos: 100000, moneda: "ARS", pagada_en: "2026-10-30T12:00:00Z",
+  importe_centavos: 100000, moneda: "ARS", pagada_el: "2026-10-30",
 };
 const GRUPO = { grupo: "expensas_comunes", esquema_id: E1, esquema_version: 1, vigente_desde: "2024-01-01" };
 const SIN_GASTOS: Detalle = {
@@ -156,6 +156,8 @@ describe("liquidación (borrador)", () => {
     expect(await screen.findByText("Listo: agregaste el gasto. La simulación ya lo reparte.")).toBeTruthy();
     const [agregar] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
     expect(await agregar!.json()).toEqual({ orden_id: O1, grupo: "expensas_comunes" });
+    // P3 139: la fecha con la que el gasto entra en el período, sin pasarla por la hora local.
+    expect(within(borrador).getByText(/pagada el 2026-10-30\)/)).toBeTruthy();
 
     const tabla = await screen.findByRole("table");
     const filas = within(tabla).getAllByRole("row");

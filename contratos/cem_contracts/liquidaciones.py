@@ -101,7 +101,7 @@ class GastoLiquidacion(BaseModel):
     razon_social: str
     importe_centavos: int
     moneda: str
-    pagada_en: datetime
+    pagada_el: date  # en el calendario del consorcio; con pago manual, la de la operación
     grupo: str
     esquema_id: UUID
     esquema_version: Version
@@ -119,7 +119,7 @@ class OrdenLiquidable(BaseModel):
     razon_social: str
     importe_centavos: int
     moneda: str
-    pagada_en: datetime
+    pagada_el: date  # en el calendario del consorcio; con pago manual, la de la operación
 
 
 class GrupoLiquidable(BaseModel):
