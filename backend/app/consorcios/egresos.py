@@ -235,11 +235,17 @@ ERRORES = {
     "conciliacion_repetida": (
         409, CodigoError.CONCILIACION_REPETIDA, "Ese pago ya está conciliado.",
     ),
+    "motivo_con_cuenta": (
+        422, CodigoError.MOTIVO_CON_CUENTA,
+        "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla."
+        " Si no es una cuenta, separá los números con una coma.",
+    ),
     "no_es_quien_ejecuto": (
         403, CodigoError.NO_ES_QUIEN_EJECUTO,
         "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la"
-        " cuenta en el acto de ejecución; quien la vio, registró o declaró no concilia ni"
-        " confirma.",
+        " cuenta en el acto de ejecución. Quien vio la cuenta o registró un pago no lo"
+        " concilia ni confirma que no se pagó, y quien declaró no confirma su propia"
+        " declaración.",
     ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
     "requiere_sesion_reciente": (403, *RENOVAR["requiere_sesion_reciente"]),
