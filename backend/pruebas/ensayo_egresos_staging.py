@@ -33,6 +33,14 @@ a la vez, número y comprobante de otra orden, orden emitida modificada, cuenta 
 de baja, «no se pagó» confirmado por otro ser humano) y las rutas de `--otro-consorcio`. El riel de
 este modo no se usa: el consorcio no lo tiene habilitado y la emisión no encola nada.
 
+**Liquidación neutral** (`--liquidacion --otro-consorcio <uuid> --orden-ajena <uuid>`, `0057`,
+propietario del 31-10-2026): en otro consorcio LAB (`NOMBRE_CONSORCIO_LIQUIDACION`), dos órdenes
+pagadas a mano y conciliadas y una sin pagar; un borrador por período; agregar, simular (suma
+exacta, cada unidad a menos de un centavo de su parte, repetible) y quitar (la baja queda en la
+historia); orden sin pagar, de otro consorcio e inexistente; la misma orden y dos borradores a la
+vez (dos hilos de la administración); un esquema nuevo dentro del período que bloquea la
+simulación; y las rutas de `--otro-consorcio`. No publica ni genera cargos.
+
 Al final comprueba que ningún evento de auditoría del consorcio lleva una cuenta, que la cola del
 consorcio no tiene trabajos muertos, la cadena de auditoría, y revoca sesiones y da de baja los
 mandatos de la corrida.
@@ -71,7 +79,8 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from http.cookies import SimpleCookie
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
@@ -94,6 +103,7 @@ from app.plataforma.idempotencia import ENCABEZADO, ENCABEZADO_REPETIDA
 
 NOMBRE_CONSORCIO = "CEM LAB — egresos sintéticos (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_MANUAL = "CEM LAB — pago manual sintético (SINTETICO, PRUEBA, NO REAL)"
+NOMBRE_CONSORCIO_LIQUIDACION = "CEM LAB — liquidación sintética (SINTETICO, PRUEBA, NO REAL)"
 DOMINIO = "cem-prueba.invalid"
 SUFIJO_STAGING = "-staging"
 ZONA = "America/Argentina/Buenos_Aires"
@@ -797,10 +807,18 @@ def cuenta_para_pagar(corrida: Corrida, rol: str, o: str) -> Respuesta:
                                 csrf=True)  # fmt: skip
 
 
+def hoy_del_consorcio(corrida: Corrida) -> date:
+    """La fecha en la zona del consorcio: el contenedor está en UTC, y de noche ya es mañana."""
+    with corrida.tx() as conn:
+        return conn.execute(
+            text("select nucleo.hoy_del_consorcio(:c)"), {"c": corrida.consorcio}
+        ).scalar_one()
+
+
 def registrar_pago(corrida: Corrida, rol: str, o: str, **datos) -> Respuesta:
     v = vigente(ficha(corrida, "administracion", o))
     cuerpo = {"version": v["numero"], "huella": v["huella"], "moneda": "ARS",
-              "fecha_operacion": time.strftime("%Y-%m-%d")} | datos  # fmt: skip
+              "fecha_operacion": hoy_del_consorcio(corrida).isoformat()} | datos  # fmt: skip
     return corrida.n(rol).pedir("POST", corrida.c(f"/ordenes-pago/{o}/pago-manual"), cuerpo,
                                 csrf=True, clave=str(uuid4()))  # fmt: skip
 
@@ -1102,6 +1120,302 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
     corrida.ok("rutas de otro consorcio: 404, sin ninguna cuenta")
 
 
+# Liquidación neutral (0057) ----------------------------------------------------------------
+
+
+GRUPO = "expensas_comunes"
+COEFICIENTES = ("50.000000", "33.333333", "16.666667")
+"""Suman 99,999999 %, como una fuente real: el motor reparte el total exacto igual."""
+
+
+def registrar_esquema(corrida: Corrida, desde, decision: UUID) -> UUID:
+    """El esquema de `GRUPO` con las unidades activas del consorcio, cargado por soporte."""
+    with corrida.tx() as conn:
+        unidades = conn.execute(
+            text("select id from nucleo.unidad where consorcio_id = :c and eliminado_en is null"
+                 " order by designacion"), {"c": corrida.consorcio},
+        ).scalars().all()  # fmt: skip
+        comprobar(len(unidades) == len(COEFICIENTES),
+                  f"el consorcio de la corrida tiene {len(unidades)} unidades")  # fmt: skip
+        coeficientes = dict(zip(map(str, unidades), COEFICIENTES, strict=True))
+        return conn.execute(
+            text("select nucleo.registrar_esquema_coeficientes(:g, :f, :d, :dec,"
+                 " cast(:co as jsonb), 'proporcional_a_coeficientes', 'restos_mayores', null,"
+                 " 'soporte')"),
+            {"g": GRUPO, "f": REFERENCIA + "; coeficientes sintéticos", "d": desde,
+             "dec": decision, "co": json.dumps(coeficientes)},
+        ).scalar_one()  # fmt: skip
+
+
+def aprobada(corrida: Corrida, o: str, n: int) -> None:
+    """La primera orden de un proveedor nuevo la aprueba el Consejo; las siguientes, bajo el
+    umbral, quedan aprobadas por franja al enviarse a revisión."""
+    if estado(corrida, o) != "aprobada":
+        r = aprobar(corrida, "consejo1", o)
+        comprobar(r.estado == 201, f"el Consejo aprueba la orden {n}: {r.texto}")
+    comprobar(estado(corrida, o) == "aprobada", f"la orden {n} está aprobada")
+
+
+def pagada_a_mano(corrida: Corrida, p: str, cuenta: str, importe: int, n: int) -> str:
+    """Preparada y emitida por la administración, aprobada por consejo1, pagada a mano con su
+    comprobante y conciliada por consejo2: `pagada`."""
+    al_dia(corrida, "administracion", "consejo1", "consejo2")
+    o = preparar(corrida, p, importe)
+    aprobada(corrida, o, n)
+    r = emitir(corrida, "administracion", o)
+    comprobar(r.estado == 200, f"se emite la orden {n}: {r.texto}")
+    r = cuenta_para_pagar(corrida, "administracion", o)
+    comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta,
+              f"acto de ejecución de la orden {n}: {r.texto}")  # fmt: skip
+    doc = comprobante_disponible(corrida, n)
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
+                       cuenta_destino=cuenta, numero_operacion=f"LIQ{corrida.id}{n:02d}",
+                       documento_id=doc)  # fmt: skip
+    comprobar(r.estado == 201, f"registrar el pago de la orden {n}: {r.texto}")
+    pago = r.cuerpo["id"]
+    reverificar(corrida, "consejo2")
+    r = conciliar(corrida, "consejo2", o, pago, "conforme")
+    comprobar(r.estado == 200, f"consejo2 concilia la orden {n}: {r.texto}")
+    comprobar(estado(corrida, o) == "pagada", f"la orden {n} queda Pagada al conciliar")
+    return o
+
+
+def detalle_liquidacion(corrida: Corrida, rol: str, liq: str) -> dict:
+    r = corrida.n(rol).pedir("GET", corrida.c(f"/liquidaciones/{liq}"))
+    comprobar(r.estado == 200, f"detalle de la liquidación: {r.texto}")
+    comprobar(not any(c in r.texto for c in corrida.cuentas), "el detalle no trae ninguna cuenta")
+    return r.cuerpo
+
+
+def agregar_gasto(corrida: Corrida, rol: str, liq: str, o: str) -> Respuesta:
+    return corrida.n(rol).pedir("POST", corrida.c(f"/liquidaciones/{liq}/gastos"),
+                                {"orden_id": o, "grupo": GRUPO}, csrf=True,
+                                clave=str(uuid4()))  # fmt: skip
+
+
+def quitar_gasto(corrida: Corrida, rol: str, liq: str, gasto: str) -> Respuesta:
+    return corrida.n(rol).pedir("POST", corrida.c(f"/liquidaciones/{liq}/gastos/{gasto}/quitar"),
+                                {}, csrf=True, clave=str(uuid4()))  # fmt: skip
+
+
+def descartar_liquidacion(corrida: Corrida, rol: str, liq: str, motivo: str) -> Respuesta:
+    return corrida.n(rol).pedir("POST", corrida.c(f"/liquidaciones/{liq}/descartar"),
+                                {"motivo": motivo}, csrf=True, clave=str(uuid4()))  # fmt: skip
+
+
+def liquidaciones_por_id(corrida: Corrida) -> dict[str, dict]:
+    r = corrida.n("administracion").pedir("GET", corrida.c("/liquidaciones"))
+    comprobar(r.estado == 200, f"lista de liquidaciones: {r.texto}")
+    return {x["id"]: x for x in r.cuerpo["elementos"]}
+
+
+def contrato_desplegado(corrida: Corrida) -> tuple[int, ...]:
+    r = corrida.n("administracion").pedir("GET", "/health")
+    comprobar(r.estado == 200 and "version_contrato" in r.cuerpo, f"/health: {r.texto}")
+    return tuple(int(x) for x in r.cuerpo["version_contrato"].split("."))
+
+
+def preparar_liquidacion(corrida: Corrida, rol: str, periodo: str) -> Respuesta:
+    return corrida.n(rol).pedir("POST", corrida.c("/liquidaciones"), {"periodo": periodo},
+                                csrf=True, clave=str(uuid4()))  # fmt: skip
+
+
+def reparto_exacto(simulacion: dict) -> None:
+    """La suma por unidad es el total, y cada unidad queda a menos de un centavo de su parte
+    exacta (restos mayores)."""
+    comprobar(simulacion["bloqueo"] is None, f"la simulación reparte: {simulacion['bloqueo']}")
+    total = simulacion["total_centavos"]
+    unidades = simulacion["unidades"]
+    comprobar(sum(u["total_centavos"] for u in unidades) == total,
+              f"la suma por unidad es el total {total}: {unidades}")  # fmt: skip
+    suma = sum(Decimal(x) for x in COEFICIENTES)
+    partes = sorted(Decimal(total) * Decimal(x) / suma for x in COEFICIENTES)
+    recibidos = sorted(Decimal(u["total_centavos"]) for u in unidades)
+    comprobar(all(abs(r - p) < 1 for r, p in zip(recibidos, partes, strict=True)),
+              f"cada unidad a menos de un centavo: {recibidos} vs {partes}")  # fmt: skip
+
+
+def recorrer_liquidacion(corrida: Corrida, otro_consorcio: UUID, orden_ajena: UUID) -> None:
+    adm = corrida.n("administracion")
+    with corrida.tx() as conn:
+        hoy = conn.execute(
+            text("select nucleo.hoy_del_consorcio(:c)"), {"c": corrida.consorcio}
+        ).scalar_one()
+        decision = conn.execute(
+            text("select nucleo.registrar_decision('asamblea', :h, :d, :r, null, 'soporte')"),
+            {"h": hoy, "d": "SINTETICA: coeficientes del ensayo de liquidación",
+             "r": REFERENCIA},
+        ).scalar_one()  # fmt: skip
+    activar_totp(corrida, "consejo2")
+    periodo = hoy.replace(day=1)
+    # Desde el día anterior al período: así el esquema nuevo del paso 6 cabe aunque hoy sea el 1.
+    esquema_1 = registrar_esquema(corrida, periodo - timedelta(days=1), decision)
+    corrida.ok("esquema sintético vigente desde antes del período; TOTP de consejo2")
+
+    # 1. Órdenes pagadas a mano y conciliadas, y una que no está pagada.
+    p = proveedor(corrida, 1)
+    cuenta = corrida.cuentas[0]
+    o1 = pagada_a_mano(corrida, p, cuenta, 2_500_000, 1)
+    o2 = pagada_a_mano(corrida, p, cuenta, 1_000_001, 2)
+    al_dia(corrida, "administracion", "consejo1")
+    o3 = preparar(corrida, p, 700_000)
+    aprobada(corrida, o3, 3)
+    corrida.ok("dos órdenes pagadas a mano y conciliadas; una tercera aprobada sin pagar")
+
+    # 2. Un borrador por período; quien no tiene la facultad no prepara ni lee.
+    al_dia(corrida, "administracion")
+    r = preparar_liquidacion(corrida, "administracion", periodo.isoformat())
+    comprobar(r.estado == 201, f"abrir el borrador del período: {r.texto}")
+    liq = r.cuerpo["id"]
+    r = preparar_liquidacion(corrida, "administracion", periodo.isoformat())
+    comprobar((r.estado, r.codigo()) == (409, "liquidacion_no_admite"),
+              f"un solo borrador por período: {r.texto}")  # fmt: skip
+    r = corrida.n("consejo1").pedir("GET", corrida.c("/liquidaciones"))
+    comprobar((r.estado, r.codigo()) == (403, "sin_permiso"), f"el Consejo no lee: {r.texto}")
+    r = preparar_liquidacion(corrida, "consejo1", periodo.isoformat())
+    comprobar((r.estado, r.codigo()) == (403, "sin_permiso"), f"el Consejo no prepara: {r.texto}")
+    liquidables = adm.pedir("GET", corrida.c("/liquidaciones/ordenes-liquidables"))
+    comprobar(liquidables.estado == 200, f"liquidables: {liquidables.texto}")
+    ids = {x["orden_id"] for x in liquidables.cuerpo["elementos"]}
+    comprobar(ids == {o1, o2}, f"liquidables: solo las dos pagadas, no la 3: {ids}")
+    corrida.ok("un borrador por período; el Consejo sin liquidacion.preparar: 403;"
+               " liquidables = pagadas")  # fmt: skip
+
+    # 3. Negativos al agregar: orden sin pagar, de otro consorcio, inexistente.
+    r = agregar_gasto(corrida, "administracion", liq, o3)
+    comprobar((r.estado, r.codigo()) == (409, "orden_no_liquidable"), f"sin pagar: {r.texto}")
+    for ajena in (orden_ajena, uuid4()):
+        r = agregar_gasto(corrida, "administracion", liq, str(ajena))
+        comprobar((r.estado, r.codigo()) == (404, "no_encontrado"),
+                  f"orden de otro consorcio o inexistente: {r.texto}")  # fmt: skip
+    corrida.ok("orden sin pagar 409; orden de otro consorcio e inexistente 404")
+
+    # 4. Agregar y simular: suma exacta y repetible.
+    for o in (o1, o2):
+        r = agregar_gasto(corrida, "administracion", liq, o)
+        comprobar(r.estado == 201, f"agregar la orden pagada: {r.texto}")
+    detalle = detalle_liquidacion(corrida, "administracion", liq)
+    comprobar({g["esquema_id"] for g in detalle["gastos"]} == {str(esquema_1)},
+              "los gastos guardan el esquema vigente del período")  # fmt: skip
+    simulacion = detalle["simulacion"]
+    comprobar(simulacion["total_centavos"] == 3_500_001 and simulacion["moneda"] == "ARS",
+              f"total y moneda: {simulacion}")  # fmt: skip
+    reparto_exacto(simulacion)
+    otra = detalle_liquidacion(corrida, "administracion", liq)["simulacion"]
+    comprobar(otra["unidades"] == simulacion["unidades"], "el reparto se repite igual")
+    corrida.ok("simulación de 35.000,01 ARS: suma exacta, a menos de un centavo, repetible")
+
+    # 5. Quitar deja la historia; la misma orden y dos borradores a la vez.
+    gasto_2 = next(g["id"] for g in detalle["gastos"] if g["orden_id"] == o2)
+    comprobar(quitar_gasto(corrida, "administracion", liq, gasto_2).estado == 200, "quitar")
+    r = quitar_gasto(corrida, "administracion", liq, gasto_2)
+    comprobar((r.estado, r.codigo()) == (409, "liquidacion_no_admite"),
+              f"no se quita dos veces: {r.texto}")  # fmt: skip
+    detalle = detalle_liquidacion(corrida, "administracion", liq)
+    comprobar([g["orden_id"] for g in detalle["gastos"]] == [o1], "queda solo la orden 1")
+    with corrida.tx() as conn:
+        acciones = conn.execute(
+            text("select accion from auditoria.eventos where consorcio_id = :c"
+                 " and creado_en >= :i and accion like 'consorcio.liquidacion.%'"),
+            {"c": corrida.consorcio, "i": corrida.inicio},
+        ).scalars().all()  # fmt: skip
+    comprobar(acciones.count("consorcio.liquidacion.quitar_gasto") == 1
+              and acciones.count("consorcio.liquidacion.agregar_gasto") == 2,
+              f"la baja queda en la historia: {acciones}")  # fmt: skip
+    # A la vez: dos hilos con la sesión de la administración, la única que tiene la facultad (un
+    # solo mandato de administración por fechas). `Navegador` solo serializa las cookies.
+    al_dia(corrida, "administracion")
+    resultados = en_paralelo(
+        lambda: agregar_gasto(corrida, "administracion", liq, o2),
+        lambda: agregar_gasto(corrida, "administracion", liq, o2),
+    )
+    comprobar(sorted((r.estado, r.codigo() or "") for r in resultados)
+              == [(201, ""), (409, "orden_no_liquidable")],
+              f"la misma orden a la vez: una sola {[r.texto for r in resultados]}")  # fmt: skip
+    siguiente = (periodo + timedelta(days=32)).replace(day=1).isoformat()
+    resultados = en_paralelo(
+        lambda: preparar_liquidacion(corrida, "administracion", siguiente),
+        lambda: preparar_liquidacion(corrida, "administracion", siguiente),
+    )
+    comprobar(sorted(r.estado for r in resultados) == [201, 409],
+              f"dos borradores a la vez: uno solo {[r.texto for r in resultados]}")  # fmt: skip
+    corrida.ok("quitar deja la baja en la historia; a la vez: una sola orden y un solo borrador")
+
+    # 6. Esquema nuevo dentro del período: la simulación se bloquea hasta quitar y volver a
+    # agregar.
+    esquema_2 = registrar_esquema(corrida, hoy_del_consorcio(corrida), decision)
+    detalle = detalle_liquidacion(corrida, "administracion", liq)
+    bloqueo = detalle["simulacion"]["bloqueo"] or ""
+    comprobar(GRUPO in bloqueo and detalle["simulacion"]["unidades"] == [],
+              f"esquema nuevo: la simulación se bloquea: {detalle['simulacion']}")  # fmt: skip
+    al_dia(corrida, "administracion")
+    for g in detalle["gastos"]:
+        comprobar(quitar_gasto(corrida, "administracion", liq, g["id"]).estado == 200,
+                  "quitar para volver a agregar")  # fmt: skip
+        comprobar(agregar_gasto(corrida, "administracion", liq, g["orden_id"]).estado == 201,
+                  "volver a agregar con el esquema nuevo")  # fmt: skip
+    detalle = detalle_liquidacion(corrida, "administracion", liq)
+    comprobar({g["esquema_id"] for g in detalle["gastos"]} == {str(esquema_2)},
+              "los gastos vueltos a agregar llevan el esquema nuevo")  # fmt: skip
+    reparto_exacto(detalle["simulacion"])
+    corrida.ok("esquema nuevo en el período: simulación bloqueada; quitar y agregar destraba")
+
+    # 7. Otro consorcio: sus liquidaciones no se ven ni se tocan.
+    otra_ruta = f"/api/v1/consorcios/{otro_consorcio}/liquidaciones"
+    pedidos = (("GET", otra_ruta, None), ("GET", f"{otra_ruta}/{liq}", None),
+               ("POST", otra_ruta, {"periodo": periodo.isoformat()}))  # fmt: skip
+    for metodo, ruta, cuerpo in pedidos:
+        r = adm.pedir(metodo, ruta, cuerpo, csrf=metodo == "POST",
+                      clave=str(uuid4()) if cuerpo else None)  # fmt: skip
+        comprobar(r.estado == 404, f"otro consorcio {metodo} {ruta}: {r.estado} {r.texto}")
+    corrida.ok("rutas de liquidación de otro consorcio: 404")
+
+    # 8. `0058` (contrato 0.34.0): descartar libera el período y sus gastos sin borrar la
+    # historia, y una orden pagada después del último día de un período no entra en él.
+    if contrato_desplegado(corrida) < (0, 34, 0):
+        corrida.ok("SIN VERIFICAR con esta imagen: descartar y la fecha de pago llegan con 0058")
+        return
+    al_dia(corrida, "administracion")
+    r = descartar_liquidacion(corrida, "administracion", liq, " ")
+    comprobar(r.estado == 422, f"descartar sin motivo: {r.texto}")
+    r = descartar_liquidacion(corrida, "administracion", liq, "SINTETICO: ensayo de descarte")
+    comprobar(r.estado == 200, f"descartar el borrador: {r.texto}")
+    r = descartar_liquidacion(corrida, "administracion", liq, "SINTETICO: otra vez")
+    comprobar((r.estado, r.codigo()) == (409, "liquidacion_no_admite"),
+              f"se descarta una sola vez: {r.texto}")  # fmt: skip
+    comprobar(liquidaciones_por_id(corrida)[liq]["estado"] == "descartada", "queda descartada")
+    liquidables = adm.pedir("GET", corrida.c("/liquidaciones/ordenes-liquidables"))
+    ids = {x["orden_id"] for x in liquidables.cuerpo["elementos"]}
+    comprobar(ids == {o1, o2}, f"descartar devuelve sus órdenes: {ids}")
+    anterior = (periodo - timedelta(days=1)).replace(day=1).isoformat()
+    r = preparar_liquidacion(corrida, "administracion", anterior)
+    comprobar(r.estado == 201, f"borrador del período anterior: {r.texto}")
+    r = agregar_gasto(corrida, "administracion", r.cuerpo["id"], o1)
+    comprobar((r.estado, r.codigo()) == (409, "orden_no_liquidable")
+              and "período posterior" in r.cuerpo["mensaje"],
+              f"pagada después del período: no entra {r.texto}")  # fmt: skip
+    r = preparar_liquidacion(corrida, "administracion", periodo.isoformat())
+    comprobar(r.estado == 201, f"otro borrador del período descartado: {r.texto}")
+    nuevo = r.cuerpo["id"]
+    comprobar(liquidaciones_por_id(corrida)[nuevo]["version"] == 2, "es la versión 2")
+    comprobar(agregar_gasto(corrida, "administracion", nuevo, o1).estado == 201,
+              "la orden liberada entra en el borrador nuevo")  # fmt: skip
+    with corrida.tx() as conn:
+        descartes = conn.execute(
+            text("select count(*) from auditoria.eventos where consorcio_id = :c"
+                 " and accion = 'consorcio.liquidacion.descartar' and entidad_id = :l"),
+            {"c": corrida.consorcio, "l": liq},
+        ).scalar_one()  # fmt: skip
+    comprobar(descartes == 1, f"el descarte queda en la auditoría: {descartes}")
+    abiertos = [i for i, x in liquidaciones_por_id(corrida).items() if x["estado"] == "borrador"]
+    for i in abiertos:
+        r = descartar_liquidacion(corrida, "administracion", i, "SINTETICO: fin del ensayo")
+        comprobar(r.estado == 200, f"descartar los borradores del ensayo: {r.texto}")
+    comprobar(len(abiertos) == 3, f"tres borradores abiertos al final: {abiertos}")
+    corrida.ok("0058: descartar con motivo y una vez libera período y órdenes (versión 2);"
+               " pagada después del período: 409")  # fmt: skip
+
+
 def comprobar_fin(corrida: Corrida, inicio) -> None:
     with corrida.tx() as conn:
         textos = conn.execute(
@@ -1153,13 +1467,27 @@ def main(argumentos: list[str] | None = None) -> int:
         help="recorre el pago manual (0055) en un consorcio sin el riel habilitado",
     )
     p.add_argument(
+        "--liquidacion",
+        action="store_true",
+        help="recorre la liquidación neutral (0057) sobre órdenes pagadas a mano",
+    )
+    p.add_argument(
         "--otro-consorcio",
         type=UUID,
-        help="con --pago-manual: un consorcio ajeno para probar que no se cruza",
+        help="con --pago-manual o --liquidacion: un consorcio ajeno para probar que no se cruza",
+    )
+    p.add_argument(
+        "--orden-ajena",
+        type=UUID,
+        help="con --liquidacion: una orden pagada de --otro-consorcio, que no se puede agregar",
     )
     a = p.parse_args(argumentos)
-    if a.pago_manual and a.otro_consorcio is None:
-        p.error("--pago-manual pide --otro-consorcio")
+    if a.pago_manual and a.liquidacion:
+        p.error("--pago-manual y --liquidacion van en corridas distintas")
+    if (a.pago_manual or a.liquidacion) and a.otro_consorcio is None:
+        p.error("--pago-manual y --liquidacion piden --otro-consorcio")
+    if a.liquidacion and a.orden_ajena is None:
+        p.error("--liquidacion pide --orden-ajena")
     config = cargar()
     try:
         exigir_staging(config.origen_publico, config.database_url, a.base, a.host)
@@ -1176,7 +1504,11 @@ def main(argumentos: list[str] | None = None) -> int:
                       contexto)  # fmt: skip
     pagos.configurar_riel(corrida.riel)
     try:
-        nombre = NOMBRE_CONSORCIO_MANUAL if a.pago_manual else NOMBRE_CONSORCIO
+        nombre = NOMBRE_CONSORCIO
+        if a.pago_manual:
+            nombre = NOMBRE_CONSORCIO_MANUAL
+        elif a.liquidacion:
+            nombre = NOMBRE_CONSORCIO_LIQUIDACION
         creado = asegurar_consorcio(motor, a.consorcio, nombre)
         print(
             f"corrida {corrida.id}; consorcio {a.consorcio} ({'creado' if creado else 'existente'})"
@@ -1189,6 +1521,8 @@ def main(argumentos: list[str] | None = None) -> int:
             preparar_escena(corrida)
             if a.pago_manual:
                 recorrer_pago_manual(corrida, a.otro_consorcio)
+            elif a.liquidacion:
+                recorrer_liquidacion(corrida, a.otro_consorcio, a.orden_ajena)
             else:
                 recorrer_ordenes(corrida)
             comprobar_fin(corrida, inicio)
