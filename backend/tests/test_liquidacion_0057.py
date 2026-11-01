@@ -5,10 +5,9 @@ Mandato del propietario del 31-10-2026: preparar y simular sin depender de las d
 por su paquete; el Consejo no.
 """
 
-from datetime import date, datetime
+from datetime import date
 from decimal import ROUND_FLOOR, Decimal
 from uuid import UUID, uuid4
-from zoneinfo import ZoneInfo
 
 import pytest
 from alembic import command
@@ -33,20 +32,18 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
 
 pytestmark = pytest.mark.db
 
-ZONA = "America/Argentina/Buenos_Aires"
-"""La zona por defecto de `nucleo.consorcio`: la de la escena."""
 
-
-def mes(mas: int) -> str:
+def periodo(motor_migrate, e, mas: int = 0) -> str:
     """El primer día del mes actual del consorcio más `mas` meses. Las órdenes de la escena se
-    pagan hoy, y desde `0058` un gasto entra solo si se pagó hasta el último día del período."""
-    ahora = datetime.now(ZoneInfo(ZONA))
-    total = ahora.year * 12 + ahora.month - 1 + mas
+    pagan hoy, y desde `0058` un gasto entra solo si se pagó hasta el último día del período.
+    Se lee de la base en cada prueba: calculado al importar, con el reloj de Python, una corrida
+    que cruzaba la medianoche del último día del mes fallaba (P3 135)."""
+    with motor_migrate.connect() as c:
+        d = c.execute(text("select nucleo.hoy_del_consorcio(:c)"), {"c": e.cons}).scalar_one()
+    total = d.year * 12 + d.month - 1 + mas
     return date(total // 12, total % 12 + 1, 1).isoformat()
 
 
-PERIODO = mes(0)
-SIGUIENTE = mes(1)
 PREPARAR = "select nucleo.preparar_liquidacion(:periodo, :actor, :origen, :sesion)"
 AGREGAR = (
     "select nucleo.agregar_gasto_liquidacion(:liquidacion, :orden, :grupo, :actor, :origen,"
@@ -93,22 +90,24 @@ def pagada(motor_migrate, e) -> UUID:
     return o
 
 
-def borrador(motor_migrate, e, periodo=PERIODO) -> UUID:
-    return llamar(motor_migrate, e, e.adm, PREPARAR, periodo=periodo)
+def borrador(motor_migrate, e, mes: str | None = None) -> UUID:
+    """Del mes actual del consorcio si no se dice otro."""
+    return llamar(motor_migrate, e, e.adm, PREPARAR, periodo=mes or periodo(motor_migrate, e))
 
 
 # El caso del piloto, de punta a punta por HTTP ---------------------------------------------
 
 
 def test_prepara_agrega_simula_y_quita_por_http(motor_migrate, e, esquema):
+    mes = periodo(motor_migrate, e)
     o = pagada(motor_migrate, e)
-    r = post(e, e.adm, "liquidaciones", {"periodo": PERIODO})
+    r = post(e, e.adm, "liquidaciones", {"periodo": mes})
     assert r.status_code == 201, r.json()
     liq = r.json()["id"]
     [lista] = get(e, e.adm, "liquidaciones").json()["elementos"]
     assert (lista["id"], lista["periodo"], lista["version"], lista["estado"]) == (
         liq,
-        PERIODO,
+        mes,
         1,
         "borrador",
     )
@@ -172,10 +171,11 @@ def test_prepara_agrega_simula_y_quita_por_http(motor_migrate, e, esquema):
     ]
 
 
-def test_el_reintento_con_la_misma_clave_no_abre_otro_borrador(e, esquema):
+def test_el_reintento_con_la_misma_clave_no_abre_otro_borrador(motor_migrate, e, esquema):
+    mes = periodo(motor_migrate, e)
     clave = {"Idempotency-Key": str(uuid4())}
-    primero = post(e, e.adm, "liquidaciones", {"periodo": PERIODO}, clave)
-    segundo = post(e, e.adm, "liquidaciones", {"periodo": PERIODO}, clave)
+    primero = post(e, e.adm, "liquidaciones", {"periodo": mes}, clave)
+    segundo = post(e, e.adm, "liquidaciones", {"periodo": mes}, clave)
     assert primero.status_code == segundo.status_code == 201
     assert primero.json() == segundo.json()
     assert len(get(e, e.adm, "liquidaciones").json()["elementos"]) == 1
@@ -185,21 +185,23 @@ def test_el_reintento_con_la_misma_clave_no_abre_otro_borrador(e, esquema):
 
 
 def test_un_solo_borrador_por_periodo_y_versiones(motor_migrate, e):
+    mes = periodo(motor_migrate, e)
     primero = borrador(motor_migrate, e)
-    niega(motor_migrate, e, e.adm, PREPARAR, "liquidacion_en_borrador", periodo=PERIODO)
-    assert codigo(post(e, e.adm, "liquidaciones", {"periodo": PERIODO})) == (
+    niega(motor_migrate, e, e.adm, PREPARAR, "liquidacion_en_borrador", periodo=mes)
+    assert codigo(post(e, e.adm, "liquidaciones", {"periodo": mes})) == (
         409,
         "liquidacion_no_admite",
     )
-    otro = borrador(motor_migrate, e, SIGUIENTE)  # control: otro período sí
+    otro = borrador(motor_migrate, e, periodo(motor_migrate, e, 1))  # control: otro período sí
     assert otro != primero
     niega(motor_migrate, e, e.adm, PREPARAR, "periodo_invalido", periodo="2026-10-15")
     assert codigo(post(e, e.adm, "liquidaciones", {"periodo": "2026-10-15"}))[0] == 422
 
 
 def test_dos_borradores_del_mismo_periodo_a_la_vez_uno_solo(motor_migrate, e):
-    r = _en_paralelo(motor_migrate, e, (e.adm, PREPARAR, {"periodo": PERIODO}),
-                     (e.adm, PREPARAR, {"periodo": PERIODO}))  # fmt: skip
+    mes = periodo(motor_migrate, e)
+    r = _en_paralelo(motor_migrate, e, (e.adm, PREPARAR, {"periodo": mes}),
+                     (e.adm, PREPARAR, {"periodo": mes}))  # fmt: skip
     assert r["esperaba"] and r.get("motivo") == "liquidacion_en_borrador", r
 
 
@@ -225,7 +227,7 @@ def test_solo_se_liquida_una_orden_pagada_y_una_sola_vez(motor_migrate, e, esque
     llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o, grupo="expensas_comunes")
     niega(motor_migrate, e, e.adm, AGREGAR, "gasto_ya_liquidado", liquidacion=liq, orden=o,
           grupo="expensas_comunes")  # fmt: skip
-    otra = borrador(motor_migrate, e, SIGUIENTE)
+    otra = borrador(motor_migrate, e, periodo(motor_migrate, e, 1))
     niega(motor_migrate, e, e.adm, AGREGAR, "gasto_ya_liquidado", liquidacion=otra, orden=o,
           grupo="expensas_comunes")  # fmt: skip
     r = post(
@@ -243,7 +245,7 @@ def test_solo_se_liquida_una_orden_pagada_y_una_sola_vez(motor_migrate, e, esque
 
 def test_dos_borradores_no_toman_la_misma_orden_a_la_vez(motor_migrate, e, esquema):
     o = pagada(motor_migrate, e)
-    a, b = borrador(motor_migrate, e), borrador(motor_migrate, e, SIGUIENTE)
+    a, b = borrador(motor_migrate, e), borrador(motor_migrate, e, periodo(motor_migrate, e, 1))
     datos = {"orden": o, "grupo": "expensas_comunes"}
     r = _en_paralelo(motor_migrate, e, (e.adm, AGREGAR, datos | {"liquidacion": a}),
                      (e.adm, AGREGAR, datos | {"liquidacion": b}))  # fmt: skip
@@ -268,7 +270,7 @@ def test_el_grupo_necesita_un_esquema_vigente_en_el_periodo(motor_migrate, motor
 
 def test_quitar_un_gasto_de_otra_liquidacion_no_existe(motor_migrate, e, esquema):
     o = pagada(motor_migrate, e)
-    liq, otra = borrador(motor_migrate, e), borrador(motor_migrate, e, SIGUIENTE)
+    liq, otra = borrador(motor_migrate, e), borrador(motor_migrate, e, periodo(motor_migrate, e, 1))
     gasto = llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o,
                    grupo="expensas_comunes")  # fmt: skip
     niega(motor_migrate, e, e.adm, QUITAR, "no_encontrado", liquidacion=otra, gasto=gasto)
@@ -306,7 +308,7 @@ def test_un_esquema_nuevo_vigente_en_el_periodo_bloquea_los_gastos_viejos(
     us = unidades(motor_migrate, e)
     pesos = list(reversed(porcentajes(len(us))))
     coeficientes = {str(u): f"{p:.6f}" for u, p in zip(us, pesos, strict=True)}
-    nuevo = registrar(motor_app, e.cons, coeficientes, desde=f"{PERIODO[:8]}15",
+    nuevo = registrar(motor_app, e.cons, coeficientes, desde=f"{periodo(motor_migrate, e)[:8]}15",
                       decision=acta(motor_migrate, e))  # fmt: skip
     detalle = get(e, e.adm, f"liquidaciones/{liq}").json()
     assert detalle["grupos"][0]["esquema_id"] == str(nuevo)
@@ -323,8 +325,9 @@ def test_un_esquema_nuevo_vigente_en_el_periodo_bloquea_los_gastos_viejos(
 
 
 def test_sin_liquidacion_preparar_no_se_prepara_ni_se_lee(motor_migrate, e):
-    niega(motor_migrate, e, e.mc1, PREPARAR, "42501", periodo=PERIODO)
-    assert codigo(post(e, e.mc1, "liquidaciones", {"periodo": PERIODO})) == (403, "sin_permiso")
+    mes = periodo(motor_migrate, e)
+    niega(motor_migrate, e, e.mc1, PREPARAR, "42501", periodo=mes)
+    assert codigo(post(e, e.mc1, "liquidaciones", {"periodo": mes})) == (403, "sin_permiso")
     assert codigo(get(e, e.mc1, "liquidaciones")) == (403, "sin_permiso")
     assert get(e, e.adm, "liquidaciones").status_code == 200  # control
 
