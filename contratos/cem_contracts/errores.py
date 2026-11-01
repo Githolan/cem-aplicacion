@@ -242,6 +242,14 @@ class CodigoError(StrEnum):
     """Ese registro ya tiene su conciliación."""
     NO_ES_QUIEN_EJECUTO = "no_es_quien_ejecuto"
     """Quien registró el pago (o declaró que no se hizo) no lo concilia ni lo confirma."""
+    LIQUIDACION_NO_ADMITE = "liquidacion_no_admite"
+    """La liquidación no admite eso: ya hay un borrador del período, no es un borrador o el gasto
+    ya se quitó."""
+    ORDEN_NO_LIQUIDABLE = "orden_no_liquidable"
+    """La orden no se puede liquidar: no está pagada, ya está en una liquidación o es de otra
+    moneda que los gastos del borrador."""
+    SIN_ESQUEMA = "sin_esquema"
+    """El grupo de gasto no tiene un esquema de coeficientes vigente en el período."""
 
 
 class Error(BaseModel):

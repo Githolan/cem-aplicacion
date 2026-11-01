@@ -9,6 +9,7 @@ import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace"
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { ConciliacionPagos, RUTA_CONCILIACION } from "./egresos/ConciliacionPagos";
+import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { OrdenesPago, RUTA_ORDENES } from "./egresos/OrdenesPago";
 import { PagosManuales, RUTA_PAGOS } from "./egresos/PagosManuales";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
@@ -60,6 +61,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_CONCILIACION}>Conciliar pagos (Consejo)</Link>
+      </p>
+      <p>
+        <Link to={RUTA_LIQUIDACION}>Liquidación (borrador)</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -125,6 +129,7 @@ export function App() {
           <Route path={RUTA_REVISION} element={<RevisionOrdenes />} />
           <Route path={RUTA_PAGOS} element={<PagosManuales />} />
           <Route path={RUTA_CONCILIACION} element={<ConciliacionPagos />} />
+          <Route path={RUTA_LIQUIDACION} element={<Liquidacion />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>

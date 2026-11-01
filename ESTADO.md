@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 31-10-2026 (madrugada).
+**Actualizado:** 31-10-2026 (noche).
 
 ## Qué existe
 
@@ -111,9 +111,28 @@ Todo junto, como antes de desplegar (Windows, PowerShell 7): `pwsh despliegue/ci
 
 ## Desplegado
 
-Medido en el despliegue de `63a682a` (31-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050, `2026-10-30-71cf09f.md` con la de 0051, `2026-10-31-9e4e86d.md` con la de 0052 y el ensayo sintético `bc5a0574`, `2026-10-31-b790866.md` con la de 0053 y el ensayo `3b29baeb`, y `2026-10-31-63a682a.md` con la de 0054 y el ensayo `00471d27`).
+Medido en el despliegue de `1621ce7` (31-10-2026) por `cd.ps1` (estado, imagen y digest leídos de cada contenedor, `/health` con la SHA). Cada entorno tiene cinco apps `dockerimage` de ghcr.io: las cuatro de siempre más `cem-copia-continua(-staging)`. Detalle y UUID en `doc/infra/REGISTRO_RECURSOS.md` del repositorio CEM; registros en su `doc/deploys/` (`2026-10-27-4994f7c.md` con la validación de 2c-3, 2c-4 y PA26, `2026-10-27-c3150c7.md`, `2026-10-27-58d1ea9.md`, `2026-10-27-3dfdfdb.md`, `2026-10-28-c9d611d.md`, `2026-10-28-45c9659.md` con la validación de 2d-2, `2026-10-28-f835fe3.md` con la de S2b, `2026-10-28-6b391ed.md` con la de 0044 y 0045, `2026-10-29-b1bbcc7.md`, `2026-10-29-f2a7cfa.md` con la de 0046, `2026-10-29-b258311.md`, `2026-10-29-fa1548c.md` con la de 0047, `2026-10-30-286e6d3.md` con la de 0048, `2026-10-30-6153cbe.md` con la de 0049, `2026-10-30-59bc3d0.md` con la de 0050, `2026-10-30-71cf09f.md` con la de 0051, `2026-10-31-9e4e86d.md` con la de 0052 y el ensayo sintético `bc5a0574`, `2026-10-31-b790866.md` con la de 0053 y el ensayo `3b29baeb`, `2026-10-31-63a682a.md` con la de 0054 y el ensayo `00471d27`, `2026-10-31-30338bb.md` con la de 0055 y los ensayos `392edb16` y `a1eb8e3c`, y `2026-10-31-1621ce7.md` con la de 0056 y los ensayos `61ec6c71` y `8b54b45d`).
 
-**Staging y producción en `63a682a`** (31-10-2026; staging de 14:19 a 14:23 UTC y producción de 14:24 a 14:27 UTC). Base `0054`, contrato 0.31.0.
+**Staging y producción en `1621ce7`** (31-10-2026; staging de 22:49 a 22:53 UTC y producción de 23:00 a 23:03 UTC). Base `0056`, contrato 0.32.0.
+
+- **PR #182 (`30338bb`, `0055`): pago manual asistido y conciliación del piloto.** Regla del CBU del propietario (31-10): quien prepara nunca recibe la cuenta completa durante la preparación; la ve solo dentro del acto de ejecución de esa orden, si después de la aprobación es el ejecutor autorizado. Separación por identidad humana: preparador ≠ aprobador, aprobador ≠ ejecutor y ejecutor ≠ conciliador.
+  - La ejecución nace `manual` o `riel` al emitir y no cambia; el riel se habilita por consorcio (`nucleo.riel_de_pago_habilitado`).
+  - Registrar el pago exige número de operación, fecha, importe, moneda, cuenta y comprobante analizado por el antivirus, iguales a la foto de la ejecución. No hay «pagado» sin evidencia.
+  - Otro ser humano del Consejo concilia; recién entonces la orden queda `pagada`. `conciliada` no se usa.
+  - «No se pagó» lo declara uno y lo confirma otro.
+  - Número y comprobante atados a una sola ejecución; de dos registros a la vez pasa uno.
+  - Desplegado el 31-10 de 20:20 a 20:37 UTC. Ensayos: riel `392edb16` 12/12 y manual `a1eb8e3c` 19/19.
+- **PR #183 (`1621ce7`, `0056`): arreglos de la revisión de seguridad de H3** (documento en `doc/diseno/H3_Revision_Seguridad_Transversal_2026-10-31.md` del repositorio CEM).
+  - El alta del TOTP y la primera contraseña piden entrada reciente (`reautenticacion_requerida`); la pantalla dice «volvé a entrar».
+  - `confirmable` de «no se pagó» exige la orden en ejecución o en verificación, en su versión vigente y sin resultado definitivo (`0056`).
+  - El ensayo lee la identidad en `nucleo.identidad_persona`.
+- **Compuertas.** CI VERDE con imágenes sobre `1621ce7` (82 min). Codex sin hallazgos. Revisión independiente sin P1 ni P2. Queda abierto un hilo de Codex ya corregido (`contrasena.py`) que no puedo resolver: lo resuelve el propietario.
+- **Validación.**
+  - Copias previas: staging 63 tablas y 18 521 filas; producción 63 tablas y 3 794 filas.
+  - Ensayos en staging sobre `1621ce7`: riel `61ec6c71` 12/12 y manual `8b54b45d` 19/19, 49 eventos sin ninguna cuenta. Un primer intento manual (`0735005f`) se cortó por el cupo de autenticación por IP, al correr justo después del riel.
+  - Producción: `0056`, solo lectura, sin datos sintéticos.
+
+**Antes, el 31-10: `63a682a`** (31-10-2026; staging de 14:19 a 14:23 UTC y producción de 14:24 a 14:27 UTC). Base `0054`, contrato 0.31.0.
 
 - **PR #180 (`63a682a`, `0054`).**
   - **P3 115.** La revisión del Consejo niega la cuenta completa a quien preparó la orden o registró el contrato. Lo decide por la identidad humana guardada en el acto (`identidad_preparo`, `identidad_registro`) **y** por la misma persona humana de hoy (`misma_persona_humana`), como la aprobación. Funciones: `nucleo.lee_quien_preparo_la_orden` y `nucleo.lee_quien_registro_el_contrato`. Fallan cerradas: sin identidad, de otro consorcio o con un actor ajeno.
@@ -1047,3 +1066,8 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Pruebas:** `test_rutas_egresos.py`, 20 funciones de prueba (21 casos) con su control cada negación; la de `cem_app` exige el conjunto exacto de funciones; una mutación detectada.
    - **Revisión:** independiente en dos vueltas, sin P1, un P2 corregido (la versión sin techo, que también marcó Codex, con su hilo resuelto); Codex limpio sobre la cabeza final.
    - **No hace:** umbral, franjas ni plazo (decisión 1), nada de la decisión 6, emitir ni pagar, ni pantallas.
+42. **Pago manual, seguridad de H3 y liquidación neutral** (31-10, mandato del propietario).
+   - **Hecho:** PR #182 (`0055`) y #183 (`0056`), en producción en `1621ce7` (ver «Desplegado»).
+   - **Liquidación neutral** (`0057`, rama `h3/liquidacion-neutral`): borrador por período con versión, gastos que son órdenes pagadas con su grupo y el esquema vigente el último día del período, baja que solo agrega, y simulación exacta del reparto con el motor de `app/liquidacion`. Pantalla `/liquidacion`. Contrato 0.33.0. Diseño en `doc/diseno/Liquidacion_Neutral_2026-10-31.md` del repositorio CEM.
+   - **No hace:** revisión, aprobación ni publicación, ni cargos. Depende de las decisiones 4.1, 4.2 y 5.
+   - **Lista para el piloto:** `doc/diseno/Piloto_Lista_Ready_for_Pilot_2026-10-31.md` del repositorio CEM.

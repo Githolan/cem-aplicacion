@@ -1,0 +1,373 @@
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+
+import { api } from "../api/cliente";
+import type { components } from "../api/tipos";
+import { encabezadoCsrf } from "../csrf";
+import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import {
+  cambioLoVisto,
+  ENCABEZADO_IDEMPOTENCIA,
+  ESTADO,
+  importe,
+  mensajeDeError,
+  momento,
+  renovarClave,
+  SEGUNDO_FACTOR_REQUERIDO,
+} from "./comun";
+import { ElegirConsorcio } from "./ElegirConsorcio";
+import { PedirCodigo } from "./PedirCodigo";
+import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
+
+// Página /liquidacion (app 0057): la administración prepara la liquidación de un período. Abre el
+// borrador, le agrega órdenes pagadas con el grupo de gasto de cada una y ve la simulación: cuánto
+// le toca a cada unidad según el esquema de coeficientes vigente del grupo. Todavía no se revisa,
+// aprueba ni publica (decisiones 4.2 y 5 del propietario). La simulación no se guarda.
+
+type Resumen = components["schemas"]["Liquidacion"];
+type Detalle = components["schemas"]["LiquidacionDetalle"];
+type Liquidable = components["schemas"]["OrdenLiquidable"];
+
+export const RUTA_LIQUIDACION = "/liquidacion";
+
+type Lectura =
+  | { tipo: "cargando" }
+  | { tipo: "sin_permiso" }
+  | { tipo: "sin_servicio" }
+  | { tipo: "ok"; liquidaciones: Resumen[]; liquidables: Liquidable[] };
+type Pendiente = { acto: string; reintentar: () => void };
+type Aviso = { texto: string; ok: boolean };
+type Acto =
+  | { tipo: "preparar"; periodo: string }
+  | { tipo: "agregar"; liquidacion: string; orden: string; grupo: string }
+  | { tipo: "quitar"; liquidacion: string; gasto: string };
+
+const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
+/** «2026-10-01» como «octubre de 2026». */
+export const periodo = (iso: string) => FORMATO_PERIODO.format(new Date(`${iso}T00:00:00Z`));
+
+export function Liquidacion() {
+  const elegido = useConsorcio();
+  return <LiquidacionDelEdificio key={elegido.consorcio} {...elegido} />;
+}
+
+function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+  const id = useId();
+  const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
+  const [abierta, setAbierta] = useState<string | null>(null);
+  const [detalle, setDetalle] = useState<Detalle | null>(null);
+  const [vuelta, setVuelta] = useState(0);
+  const [mes, setMes] = useState("");
+  const [orden, setOrden] = useState("");
+  const [grupo, setGrupo] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [pendiente, setPendiente] = useState<Pendiente | null>(null);
+
+  // Otra liquidación tiene otros grupos: la orden y el grupo elegidos no pasan de una a otra.
+  function abrir(id: string) {
+    setAbierta(id);
+    setOrden("");
+    setGrupo("");
+  }
+  const clave = useRef<string | null>(null);
+  const montado = useMontado();
+
+  useEffect(() => {
+    if (consorcio === "") return;
+    let vigente = true;
+    const ruta = { params: { path: { consorcio_id: consorcio } } };
+    void Promise.all([
+      api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones", ruta),
+      api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones/ordenes-liquidables", ruta),
+      abierta === null
+        ? Promise.resolve(null)
+        : api.GET("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}", {
+            params: { path: { consorcio_id: consorcio, liquidacion_id: abierta } },
+          }),
+    ])
+      .then(([lista, liquidables, uno]) => {
+        for (const r of [lista, liquidables, uno]) if (r !== null) exigirSesion(r.response);
+        if (!vigente) return;
+        const falla = [lista, liquidables, uno].find((r) => r !== null && r.data === undefined);
+        if (falla === undefined || falla === null) {
+          setLectura({ tipo: "ok", liquidaciones: lista.data?.elementos ?? [], liquidables: liquidables.data?.elementos ?? [] });
+          setDetalle(uno?.data ?? null);
+          return;
+        }
+        const codigo = codigoDe(falla.error);
+        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
+          setPendiente({ acto: "ver la liquidación", reintentar: () => setVuelta((v) => v + 1) });
+        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else {
+          setLectura({ tipo: "sin_servicio" });
+          setAviso({ texto: mensajeDeError(falla.response.status, codigo), ok: false });
+        }
+      })
+      .catch((e: unknown) => {
+        if (!vigente) return;
+        if (e instanceof SinSesion) aEntrar();
+        else {
+          setLectura({ tipo: "sin_servicio" });
+          setAviso({ texto: SIN_CONEXION, ok: false });
+        }
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [consorcio, abierta, vuelta, aEntrar]);
+
+  function hacer(acto: Acto, reintento = false) {
+    if (!montado.current) return;
+    if (!reintento) clave.current = null;
+    clave.current ??= crypto.randomUUID();
+    const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
+    const headers = encabezadoCsrf();
+    setEnviando(true);
+    setAviso(null);
+    const pedido =
+      acto.tipo === "preparar"
+        ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones", {
+            headers,
+            params: { path: { consorcio_id: consorcio }, header },
+            body: { periodo: acto.periodo },
+          })
+        : acto.tipo === "agregar"
+          ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos", {
+              headers,
+              params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion }, header },
+              body: { orden_id: acto.orden, grupo: acto.grupo },
+            })
+          : api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar", {
+              headers,
+              params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion, gasto_id: acto.gasto }, header },
+            });
+    void pedido
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data !== undefined) {
+          const texto = {
+            preparar: "Listo: abriste el borrador del período.",
+            agregar: "Listo: agregaste el gasto. La simulación ya lo reparte.",
+            quitar: "Listo: quitaste el gasto del borrador.",
+          }[acto.tipo];
+          setAviso({ texto, ok: true });
+          if (acto.tipo === "preparar") {
+            setMes("");
+            abrir(data.id);
+          }
+          if (acto.tipo === "agregar") setOrden("");
+          setVuelta((v) => v + 1);
+          return;
+        }
+        const codigo = codigoDe(error);
+        if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
+          const actual = clave.current;
+          setPendiente({
+            acto: { preparar: "abrir el borrador", agregar: "agregar el gasto", quitar: "quitar el gasto" }[acto.tipo],
+            reintentar: () => {
+              clave.current = actual;
+              hacer(acto, true);
+            },
+          });
+          return;
+        }
+        if (renovarClave(response.status, codigo)) clave.current = null;
+        setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        if (cambioLoVisto(response.status, codigo)) setVuelta((v) => v + 1);
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
+      .finally(() => setEnviando(false));
+  }
+
+  function preparar(evento: FormEvent) {
+    evento.preventDefault();
+    if (mes === "") return;
+    hacer({ tipo: "preparar", periodo: `${mes}-01` });
+  }
+
+  function agregar(evento: FormEvent, liquidacion: string) {
+    evento.preventDefault();
+    if (orden === "" || grupo === "") return;
+    hacer({ tipo: "agregar", liquidacion, orden, grupo });
+  }
+
+  const liquidaciones = lectura.tipo === "ok" ? lectura.liquidaciones : [];
+  const liquidables = lectura.tipo === "ok" ? lectura.liquidables : [];
+  const simulacion = detalle?.simulacion;
+  // Un grupo puede tener dos versiones del esquema en el mismo borrador: una columna por grupo.
+  const grupos = [...new Set(simulacion?.grupos.map((g) => g.grupo) ?? [])];
+  const moneda = simulacion?.moneda ?? null;
+
+  return (
+    <>
+      <h1>Liquidación</h1>
+      <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
+
+      {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_servicio" && (
+        <p className="aviso-error" role="alert">
+          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
+        </p>
+      )}
+      {aviso !== null && (
+        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
+          {aviso.texto}
+        </p>
+      )}
+      {pendiente !== null && (
+        <PedirCodigo
+          acto={pendiente.acto}
+          alVerificar={() => {
+            const { reintentar } = pendiente;
+            setPendiente(null);
+            reintentar();
+          }}
+          alCancelar={() => setPendiente(null)}
+        />
+      )}
+
+      {pantalla.tipo === "lista" && pendiente === null && (
+        <>
+          {lectura.tipo === "cargando" && <p role="status">Cargando la liquidación…</p>}
+          {lectura.tipo === "sin_permiso" && (
+            <p className="tarjeta">La liquidación la prepara la administración: hace falta su mandato en este edificio.</p>
+          )}
+          {lectura.tipo === "ok" && (
+            <>
+              <p>Es un borrador para revisar los números: todavía no se aprueba ni se publica a los propietarios.</p>
+              <form className="formulario" onSubmit={preparar}>
+                <label htmlFor={`${id}-mes`}>Período</label>
+                <input id={`${id}-mes`} type="month" required value={mes} disabled={enviando}
+                  onChange={(e) => setMes(e.target.value)} />
+                <div className="acciones">
+                  <button type="submit" disabled={enviando || mes === ""}>
+                    Abrir el borrador
+                  </button>
+                </div>
+              </form>
+
+              {liquidaciones.length === 0 ? (
+                <p className="tarjeta">Todavía no hay liquidaciones en este edificio.</p>
+              ) : (
+                <ul className="versiones" aria-label="Liquidaciones">
+                  {liquidaciones.map((l) => (
+                    <li key={l.id}>
+                      <button type="button" className="secundario" disabled={enviando || abierta === l.id}
+                        aria-pressed={abierta === l.id} onClick={() => abrir(l.id)}>
+                        {periodo(l.periodo)}, versión {l.version} ({l.estado})
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {detalle !== null && simulacion !== undefined && (
+                <section className="tarjeta" aria-label={`Borrador de ${periodo(detalle.liquidacion.periodo)}`}>
+                  <h2>
+                    {periodo(detalle.liquidacion.periodo)}, versión {detalle.liquidacion.version}
+                  </h2>
+
+                  <h3>Gastos</h3>
+                  {detalle.gastos.length === 0 ? (
+                    <p>Todavía no agregaste gastos.</p>
+                  ) : (
+                    <ul className="versiones" aria-label="Gastos del borrador">
+                      {detalle.gastos.map((g) => (
+                        <li key={g.id}>
+                          {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} (grupo {g.grupo},
+                          esquema versión {g.esquema_version}; pagada el {momento(g.pagada_en)}){" "}
+                          {detalle.liquidacion.estado === "borrador" && (
+                            <button type="button" className="secundario" disabled={enviando}
+                              aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
+                              onClick={() => hacer({ tipo: "quitar", liquidacion: detalle.liquidacion.id, gasto: g.id })}>
+                              Quitar
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {detalle.liquidacion.estado === "borrador" &&
+                    (liquidables.length === 0 ? (
+                      <p>No hay órdenes pagadas para agregar.</p>
+                    ) : detalle.grupos.length === 0 ? (
+                      <p>El edificio no tiene esquemas de coeficientes vigentes en el período: soporte los carga.</p>
+                    ) : (
+                      <form className="formulario" onSubmit={(e) => agregar(e, detalle.liquidacion.id)}>
+                        <label htmlFor={`${id}-orden`}>Orden pagada</label>
+                        <select id={`${id}-orden`} required value={orden} disabled={enviando}
+                          onChange={(e) => setOrden(e.target.value)}>
+                          <option value="">Elegí una orden</option>
+                          {liquidables.map((o) => (
+                            <option key={o.orden_id} value={o.orden_id}>
+                              {o.razon_social}: {importe(o.importe_centavos, o.moneda)}, {o.concepto}
+                            </option>
+                          ))}
+                        </select>
+                        <label htmlFor={`${id}-grupo`}>Grupo de gasto</label>
+                        <select id={`${id}-grupo`} required value={grupo} disabled={enviando}
+                          onChange={(e) => setGrupo(e.target.value)}>
+                          <option value="">Elegí un grupo</option>
+                          {detalle.grupos.map((g) => (
+                            <option key={g.grupo} value={g.grupo}>
+                              {g.grupo} (esquema versión {g.esquema_version})
+                            </option>
+                          ))}
+                        </select>
+                        <div className="acciones">
+                          <button type="submit" disabled={enviando || orden === "" || grupo === ""}>
+                            Agregar el gasto
+                          </button>
+                        </div>
+                      </form>
+                    ))}
+
+                  <h3>Simulación del reparto</h3>
+                  {simulacion.bloqueo !== null ? (
+                    <p className="aviso-error" role="alert">
+                      No se puede repartir: {simulacion.bloqueo}
+                    </p>
+                  ) : simulacion.unidades.length === 0 || moneda === null ? (
+                    <p>Sin gastos no hay nada que repartir.</p>
+                  ) : (
+                    <div className="tabla-desplazable">
+                      <table>
+                        <caption>
+                          Total {importe(simulacion.total_centavos, moneda)}, repartido por unidad
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Unidad</th>
+                            {grupos.map((g) => (
+                              <th key={g} scope="col">
+                                {g}
+                              </th>
+                            ))}
+                            <th scope="col">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {simulacion.unidades.map((u) => (
+                            <tr key={u.unidad_id}>
+                              <th scope="row">{u.designacion}</th>
+                              {grupos.map((g) => (
+                                <td key={g}>{importe(u.por_grupo[g] ?? 0, moneda)}</td>
+                              ))}
+                              <td>{importe(u.total_centavos, moneda)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+}

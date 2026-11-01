@@ -10,6 +10,7 @@ from app.consorcios.contactos import router as contactos
 from app.consorcios.documentos import router as documentos
 from app.consorcios.egresos import router as egresos
 from app.consorcios.importacion import router as importacion
+from app.consorcios.liquidaciones import router as liquidaciones
 from app.consorcios.mandatos import router as mandatos
 from app.consorcios.mandatos_invitaciones import router as mandatos_invitaciones
 from app.consorcios.padron import router as padron
@@ -72,5 +73,6 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(contactos)
     app.include_router(documentos)
     app.include_router(egresos)
+    app.include_router(liquidaciones)
     app.include_router(soporte)
     return app
