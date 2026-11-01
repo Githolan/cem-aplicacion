@@ -29,6 +29,7 @@ from cem_contracts.liquidaciones import (
     GrupoSimulado,
     Liquidacion,
     LiquidacionCreada,
+    LiquidacionDescarte,
     LiquidacionDetalle,
     LiquidacionNueva,
     ListaLiquidaciones,
@@ -64,7 +65,13 @@ ERRORES = {
         "La liquidación no admite eso: ya no es un borrador o el gasto ya se quitó.",
     ),
     "periodo_invalido": (
-        422, CodigoError.PETICION_INVALIDA, "El período es el primer día de un mes."
+        422, CodigoError.PETICION_INVALIDA,
+        "El período es el primer día de un mes, y a lo sumo el mes que viene.",
+    ),
+    "motivo_invalido": (422, CodigoError.PETICION_INVALIDA, "Falta el motivo."),
+    "pagada_despues_del_periodo": (
+        *NO_LIQUIDABLE,
+        "La orden se pagó después del último día del período: va en un período posterior.",
     ),
     "orden_no_pagada": (*NO_LIQUIDABLE, "Solo se liquida una orden pagada."),
     "gasto_ya_liquidado": (*NO_LIQUIDABLE, "La orden ya está en una liquidación."),
@@ -289,5 +296,29 @@ def quitar_gasto(
             {"l": liquidacion_id, "g": gasto_id}, ERRORES,
         )  # fmt: skip
         return 200, GastoAgregado(id=gasto_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/descartar",
+    response_model=LiquidacionCreada,
+    summary="Descartar un borrador: se quitan sus gastos y el período admite otro",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def descartar_liquidacion(
+    liquidacion_id: UUID,
+    descarte: LiquidacionDescarte,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, LiquidacionCreada]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.descartar_liquidacion(:l, :m, :actor, 'api', :sesion)",
+            {"l": liquidacion_id, "m": descarte.motivo}, ERRORES,
+        )  # fmt: skip
+        return 200, LiquidacionCreada(id=liquidacion_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)

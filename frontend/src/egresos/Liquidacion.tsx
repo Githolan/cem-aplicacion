@@ -39,7 +39,11 @@ type Aviso = { texto: string; ok: boolean };
 type Acto =
   | { tipo: "preparar"; periodo: string }
   | { tipo: "agregar"; liquidacion: string; orden: string; grupo: string }
-  | { tipo: "quitar"; liquidacion: string; gasto: string };
+  | { tipo: "quitar"; liquidacion: string; gasto: string }
+  | { tipo: "descartar"; liquidacion: string; motivo: string };
+
+/** Año y mes: lo que da `type="month"`, y lo que se pide escribir donde el navegador no lo tiene. */
+const FORMATO_MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
 /** «2026-10-01» como «octubre de 2026». */
@@ -59,6 +63,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   const [mes, setMes] = useState("");
   const [orden, setOrden] = useState("");
   const [grupo, setGrupo] = useState("");
+  const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -137,10 +142,16 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
               params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion }, header },
               body: { orden_id: acto.orden, grupo: acto.grupo },
             })
-          : api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar", {
-              headers,
-              params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion, gasto_id: acto.gasto }, header },
-            });
+          : acto.tipo === "quitar"
+            ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos/{gasto_id}/quitar", {
+                headers,
+                params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion, gasto_id: acto.gasto }, header },
+              })
+            : api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/descartar", {
+                headers,
+                params: { path: { consorcio_id: consorcio, liquidacion_id: acto.liquidacion }, header },
+                body: { motivo: acto.motivo },
+              });
     void pedido
       .then(({ data, error, response }) => {
         exigirSesion(response);
@@ -149,6 +160,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
             preparar: "Listo: abriste el borrador del período.",
             agregar: "Listo: agregaste el gasto. La simulación ya lo reparte.",
             quitar: "Listo: quitaste el gasto del borrador.",
+            descartar: "Listo: descartaste el borrador. Sus gastos vuelven a estar disponibles y el período admite uno nuevo.",
           }[acto.tipo];
           setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
@@ -156,6 +168,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
             abrir(data.id);
           }
           if (acto.tipo === "agregar") setOrden("");
+          if (acto.tipo === "descartar") setMotivo("");
           setVuelta((v) => v + 1);
           return;
         }
@@ -163,7 +176,12 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
           const actual = clave.current;
           setPendiente({
-            acto: { preparar: "abrir el borrador", agregar: "agregar el gasto", quitar: "quitar el gasto" }[acto.tipo],
+            acto: {
+              preparar: "abrir el borrador",
+              agregar: "agregar el gasto",
+              quitar: "quitar el gasto",
+              descartar: "descartar el borrador",
+            }[acto.tipo],
             reintentar: () => {
               clave.current = actual;
               hacer(acto, true);
@@ -182,6 +200,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   function preparar(evento: FormEvent) {
     evento.preventDefault();
     if (mes === "") return;
+    if (!FORMATO_MES.test(mes)) {
+      setAviso({ texto: "Escribí el período como año y mes, por ejemplo 2026-10.", ok: false });
+      return;
+    }
     hacer({ tipo: "preparar", periodo: `${mes}-01` });
   }
 
@@ -191,12 +213,21 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
     hacer({ tipo: "agregar", liquidacion, orden, grupo });
   }
 
+  function descartar(evento: FormEvent, liquidacion: string) {
+    evento.preventDefault();
+    if (motivo.trim() === "") return;
+    hacer({ tipo: "descartar", liquidacion, motivo: motivo.trim() });
+  }
+
   const liquidaciones = lectura.tipo === "ok" ? lectura.liquidaciones : [];
   const liquidables = lectura.tipo === "ok" ? lectura.liquidables : [];
   const simulacion = detalle?.simulacion;
   // Un grupo puede tener dos versiones del esquema en el mismo borrador: una columna por grupo.
   const grupos = [...new Set(simulacion?.grupos.map((g) => g.grupo) ?? [])];
   const moneda = simulacion?.moneda ?? null;
+  // Un borrador tiene una sola moneda: con gastos, solo se ofrecen órdenes de esa moneda.
+  const monedaBorrador = detalle?.gastos[0]?.moneda ?? null;
+  const ofrecibles = monedaBorrador === null ? liquidables : liquidables.filter((o) => o.moneda === monedaBorrador);
 
   return (
     <>
@@ -239,7 +270,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
               <form className="formulario" onSubmit={preparar}>
                 <label htmlFor={`${id}-mes`}>Período</label>
                 <input id={`${id}-mes`} type="month" required value={mes} disabled={enviando}
-                  onChange={(e) => setMes(e.target.value)} />
+                  placeholder="AAAA-MM" onChange={(e) => setMes(e.target.value)} />
                 <div className="acciones">
                   <button type="submit" disabled={enviando || mes === ""}>
                     Abrir el borrador
@@ -290,7 +321,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                   )}
 
                   {detalle.liquidacion.estado === "borrador" &&
-                    (liquidables.length === 0 ? (
+                    (ofrecibles.length === 0 ? (
                       <p>No hay órdenes pagadas para agregar.</p>
                     ) : detalle.grupos.length === 0 ? (
                       <p>El edificio no tiene esquemas de coeficientes vigentes en el período: soporte los carga.</p>
@@ -300,7 +331,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                         <select id={`${id}-orden`} required value={orden} disabled={enviando}
                           onChange={(e) => setOrden(e.target.value)}>
                           <option value="">Elegí una orden</option>
-                          {liquidables.map((o) => (
+                          {ofrecibles.map((o) => (
                             <option key={o.orden_id} value={o.orden_id}>
                               {o.razon_social}: {importe(o.importe_centavos, o.moneda)}, {o.concepto}
                             </option>
@@ -323,6 +354,19 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                         </div>
                       </form>
                     ))}
+
+                  {detalle.liquidacion.estado === "borrador" && (
+                    <form className="formulario" onSubmit={(e) => descartar(e, detalle.liquidacion.id)}>
+                      <label htmlFor={`${id}-motivo`}>Motivo para descartar el borrador</label>
+                      <input id={`${id}-motivo`} required maxLength={500} value={motivo} disabled={enviando}
+                        onChange={(e) => setMotivo(e.target.value)} />
+                      <div className="acciones">
+                        <button type="submit" className="secundario" disabled={enviando || motivo.trim() === ""}>
+                          Descartar el borrador
+                        </button>
+                      </div>
+                    </form>
+                  )}
 
                   <h3>Simulación del reparto</h3>
                   {simulacion.bloqueo !== null ? (

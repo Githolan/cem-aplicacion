@@ -209,6 +209,70 @@ describe("liquidación (borrador)", () => {
     expect(screen.queryByRole("button", { name: "Agregar el gasto" })).toBeNull();
   });
 
+  it("descarta el borrador con su motivo, y sin motivo no se puede", async () => {
+    let liquidaciones: unknown[] = [LIQUIDACION];
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () =>
+        Response.json({ ...SIN_GASTOS, liquidacion: liquidaciones[0] }),
+      [`POST ${BASE}/liquidaciones/${L1}/descartar`]: () => {
+        liquidaciones = [{ ...LIQUIDACION, estado: "descartada" }];
+        return Response.json({ id: L1 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    const boton = await screen.findByRole("button", { name: "Descartar el borrador" });
+    expect((boton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Motivo para descartar el borrador"),
+      { target: { value: "  SINTETICO: período equivocado " } });
+    fireEvent.click(boton);
+    expect(await screen.findByText(/Listo: descartaste el borrador/)).toBeTruthy();
+    const [descarte] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/descartar`);
+    expect(await descarte!.json()).toEqual({ motivo: "SINTETICO: período equivocado" });
+    expect(descarte!.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /versión 1 \(descartada\)/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
+  });
+
+  it("con gastos en una moneda solo ofrece órdenes de esa moneda", async () => {
+    const enDolares = { ...LIQUIDABLE, orden_id: O1.replace("3333", "9999"), moneda: "USD",
+                        razon_social: "Proveedor en dólares SRL" };
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () =>
+        Response.json({ elementos: [{ ...LIQUIDABLE, orden_id: O1.replace("3333", "8888") }, enDolares] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(CON_GASTO),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    const select = await screen.findByLabelText("Orden pagada");
+    const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
+    expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true);
+    expect(opciones.some((t) => t?.includes("Proveedor en dólares SRL"))).toBe(false);
+  });
+
+  it("un período mal escrito se explica sin ir al backend", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    const campo = await screen.findByLabelText("Período");
+    // Donde el navegador no tiene `type="month"`, el campo es texto libre.
+    campo.setAttribute("type", "text");
+    fireEvent.change(campo, { target: { value: "10/2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    expect(await screen.findByText(/Escribí el período como año y mes/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
+  });
+
   it("la lectura pide el segundo factor y se reintenta después del código", async () => {
     let verificado = false;
     vi.stubGlobal("fetch", backend({

@@ -636,6 +636,11 @@ def test_slot_perdido_se_rehace_y_corta_la_cadena(
         return cc.estado_servidor(url_copia_continua()).wal_status == "lost"
 
     esperar(perdido, paso=0)
+    # Perdido el slot, el tope vuelve a su valor: con 1 MB, el slot nuevo podía perderse otra vez
+    # en el próximo checkpoint, porque el receptor arranca al principio del segmento (falló así
+    # una vez en 311 corridas de la CI, en 2b5140c).
+    admin("alter system reset max_slot_wal_keep_size")
+    admin("select pg_reload_conf()")
     p.vuelta(datetime.now(UTC))
     assert p.corte == "slot perdido: se pasó de max_slot_wal_keep_size"
     estado = cc.estado_servidor(url_copia_continua())

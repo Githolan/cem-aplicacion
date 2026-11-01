@@ -151,7 +151,8 @@ const MENSAJES: Record<string, string> = {
   no_es_quien_ejecuto:
     "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución; quien la vio, registró o declaró no concilia ni confirma.",
   liquidacion_no_admite: "La liquidación no admite eso: ya hay un borrador de ese período, ya no es un borrador o el gasto ya se quitó.",
-  orden_no_liquidable: "Esa orden no se puede liquidar: no está pagada, ya está en una liquidación o es de otra moneda.",
+  orden_no_liquidable:
+    "Esa orden no se puede liquidar: no está pagada, ya está en una liquidación, es de otra moneda o se pagó después del período.",
   sin_esquema: "Ese grupo no tiene un esquema de coeficientes vigente en el período.",
   idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
   idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",

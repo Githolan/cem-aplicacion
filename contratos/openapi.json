@@ -3902,7 +3902,7 @@
             "type": "string"
           },
           "estado": {
-            "description": "`borrador` o `publicada`; este corte no publica.",
+            "description": "`borrador`, `descartada` (`0058`) o `publicada`; este corte no publica.",
             "title": "Estado",
             "type": "string"
           },
@@ -3951,6 +3951,24 @@
           "id"
         ],
         "title": "LiquidacionCreada",
+        "type": "object"
+      },
+      "LiquidacionDescarte": {
+        "additionalProperties": false,
+        "description": "`POST …/liquidaciones/{id}/descartar`. El borrador queda `descartada`, sus gastos activos\nse quitan (quedan en la historia) y el período admite un borrador nuevo (`0058`).",
+        "properties": {
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "LiquidacionDescarte",
         "type": "object"
       },
       "LiquidacionDetalle": {
@@ -10187,6 +10205,90 @@
           }
         },
         "summary": "Un borrador con sus gastos, los grupos que se pueden usar y la simulación",
+        "tags": [
+          "liquidaciones"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/descartar": {
+      "post": {
+        "operationId": "descartar_liquidacion_api_v1_consorcios__consorcio_id__liquidaciones__liquidacion_id__descartar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "liquidacion_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Liquidacion Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiquidacionDescarte"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LiquidacionCreada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Descartar un borrador: se quitan sus gastos y el período admite otro",
         "tags": [
           "liquidaciones"
         ]

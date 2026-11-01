@@ -17,7 +17,7 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from cem_contracts.egresos import Version
+from cem_contracts.egresos import Motivo, Version
 
 FORMATO_GRUPO = r"^[a-z][a-z0-9_]{1,39}$"
 """El de `nucleo.esquema_coeficientes.grupo` (`0021`)."""
@@ -40,6 +40,15 @@ class LiquidacionNueva(BaseModel):
     periodo: Periodo = Field(examples=["2026-10-01"])
 
 
+class LiquidacionDescarte(BaseModel):
+    """`POST …/liquidaciones/{id}/descartar`. El borrador queda `descartada`, sus gastos activos
+    se quitan (quedan en la historia) y el período admite un borrador nuevo (`0058`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Motivo
+
+
 class LiquidacionCreada(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -52,7 +61,9 @@ class Liquidacion(BaseModel):
     id: UUID
     periodo: date
     version: Version
-    estado: str = Field(description="`borrador` o `publicada`; este corte no publica.")
+    estado: str = Field(
+        description="`borrador`, `descartada` (`0058`) o `publicada`; este corte no publica."
+    )
     preparada_por: UUID
     creada_en: datetime
 
