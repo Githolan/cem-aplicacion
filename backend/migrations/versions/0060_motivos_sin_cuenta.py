@@ -6,10 +6,18 @@ ejecución) y el del rechazo de la orden. Un consejero que escribiera «transfer
 daba entera. El número de operación ya se niega si es una cuenta (`0055`); ahora también estos
 motivos, en la base, para cualquier camino que los escriba.
 
-Se niega un texto con 22 dígitos seguidos, contando como seguidos los separados por espacios,
-puntos, guiones o barras: con o sin dígitos verificadores válidos, 22 dígitos de una cuenta ya son
-la cuenta. Los motivos de los resultados del riel no se tocan: los escribe el proveedor, no una
-persona, y hoy no hay riel.
+Se niega un texto con exactamente 22 dígitos, sin otro dígito pegado antes ni después y con a lo
+sumo un separador entre dos de ellos: espacio (también el duro y los finos que deja copiar de un
+home banking o un PDF), punto, guion o barra. Es la definición del riel (`CUENTA_EN_TEXTO` en
+`app/consorcios/pagos.py`) con más separadores; una lista de facturas o de fechas no la cumple. Con
+o sin verificadores válidos: 22 dígitos de una cuenta ya son la cuenta.
+
+Cubre el descuido de copiar la cuenta, no a quien quiera pasarla a propósito: quien aprueba ya la
+recibe completa (decisión del propietario del 30-10) y podría darla por cualquier otro medio.
+
+Los motivos de los resultados del riel no se tocan: los escribe el proveedor, no una persona, y el
+riel ya los guarda tapados. Si un motivo guardado antes ya tiene una cuenta, la migración se niega:
+habría que verlo antes de seguir.
 """
 
 from alembic import op
@@ -26,11 +34,11 @@ TABLAS = (
 )
 
 UPGRADE = r"""
--- 22 dígitos seguidos, aunque estén separados por espacios, puntos, guiones o barras.
+-- Exactamente 22 dígitos, con a lo sumo un separador entre dos de ellos.
 create function nucleo.texto_con_cuenta(t text) returns boolean
   language sql immutable strict parallel safe
   set search_path = pg_catalog, pg_temp
-  as $$ select regexp_replace(t, '([0-9])[ ./-]+(?=[0-9])', '\1', 'g') ~ '[0-9]{22}' $$;
+  as $$ select t ~ '(?<![0-9])[0-9](?:[ ./   -]?[0-9]){21}(?![0-9])' $$;
 revoke all on function nucleo.texto_con_cuenta(text) from public;
 
 -- tg_argv[0]: la columna del motivo.
@@ -47,6 +55,17 @@ create function nucleo.negar_cuenta_en_motivo() returns trigger
   end
   $$;
 revoke all on function nucleo.negar_cuenta_en_motivo() from public;
+
+do $$
+begin
+  if exists (select 1 from nucleo.conciliacion_pago_manual where nucleo.texto_con_cuenta(motivo))
+     or exists (select 1 from nucleo.declaracion_pago_no_realizado
+                 where nucleo.texto_con_cuenta(motivo))
+     or exists (select 1 from nucleo.orden_pago where nucleo.texto_con_cuenta(motivo_rechazo)) then
+    raise exception 'hay motivos guardados con una cuenta: revisarlos antes de migrar';
+  end if;
+end
+$$;
 """
 
 

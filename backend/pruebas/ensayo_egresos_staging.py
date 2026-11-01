@@ -978,6 +978,8 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
                   f"motivo con la cuenta: {r.texto}")  # fmt: skip
         comprobar(estado(corrida, o1) == "en_verificacion", "sigue pendiente")
         corrida.ok("un motivo con la cuenta (en bloques) no se guarda: 422")
+    else:
+        corrida.ok("OMITIDO: motivo con la cuenta (el contrato desplegado es anterior a 0.36.0)")
 
     # 6. Observado → corrección con el mismo número → dos conciliaciones a la vez: una sola.
     r = conciliar(corrida, "consejo2", o1, pago1, "observado",

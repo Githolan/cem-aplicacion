@@ -24,17 +24,29 @@ def partida(cuenta: str, sep: str) -> str:
 CON_CUENTA = [
     f"SINTETICO: transferiste a {CUENTA}",
     f"SINTETICO: fue a {partida(CUENTA, ' ')}, no a la de la orden",
-    f"SINTETICO: cuenta {partida(CUENTA, ' - ')}",
+    f"SINTETICO: cuenta {partida(CUENTA, '-')}.",
     f"SINTETICO: {partida(CUENTA, '.')}",
     f"SINTETICO: {partida(CUENTA, '/')}",
-    # Con los verificadores mal también es la cuenta (o casi toda).
+    # Copiada de un home banking o de un PDF: espacio duro o fino entre los bloques.
+    f"SINTETICO: {partida(CUENTA, chr(0xA0))}",
+    f"SINTETICO: {partida(CUENTA, chr(0x202F))}",
+    # Con los verificadores mal también es la cuenta.
     f"SINTETICO: a {CUENTA[:21]}{(int(CUENTA[21]) + 1) % 10}",
 ]
 SIN_CUENTA = [
     "SINTETICO: el comprobante no se lee",
-    f"SINTETICO: la operación {CUENTA[:21]} no aparece",  # 21 dígitos: no alcanza
+    # 21 dígitos no son una cuenta para la regla: cubre el descuido de copiarla, no a quien quiera
+    # pasarla a propósito (quien aprueba ya la recibe completa).
+    f"SINTETICO: la operación {CUENTA[:21]} no aparece",
     "SINTETICO: 1.234.567,89 del 01-10-2026, factura 0001-00012345",
+    # Listas con más de 22 dígitos que no son una cuenta: ningún tramo de 22 queda suelto.
+    "SINTETICO: faltan las facturas 0003-00001234 0003-00001235",
+    "SINTETICO: CUIT 30-71234567-8 factura 0003-00001234",
+    "SINTETICO: los días 01-10-2026, 02-10-2026, 03-10-2026",
 ]
+FALSO_POSITIVO = "SINTETICO: los días 01-10-2026 02-10-2026 03-10-2026"
+"""Tres fechas separadas solo por espacios tienen un tramo de 22 dígitos («10-2026 02-…»): la base
+y el riel lo toman por una cuenta. El mensaje dice cómo seguir: con una coma pasa (`SIN_CUENTA`)."""
 
 
 @pytest.mark.parametrize("motivo", CON_CUENTA)
@@ -71,19 +83,34 @@ def test_el_rechazo_no_lleva_la_cuenta(motor_migrate, e):
     assert orden(motor_migrate, o)["estado"] == "rechazada"
 
 
-def test_por_http_es_422_y_quien_prepara_no_la_lee(motor_migrate, e):
+def test_por_http_es_422_y_quien_prepara_lee_solo_el_motivo_sin_cuenta(motor_migrate, e):
     o = emitida(motor_migrate, e)
     p = registrada(motor_migrate, e, o)
     ruta = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
-    r = post(e, e.mc2, ruta, {"resultado": "observado", "motivo": CON_CUENTA[0]})
+    r = post(e, e.mc2, ruta, {"resultado": "observado", "motivo": CON_CUENTA[1]})
     assert (r.status_code, r.json()["codigo"]) == (422, "motivo_con_cuenta"), r.text
-    assert CUENTA not in r.text
-    # Lo que lee quien prepara no trae la cuenta en ningún lado.
-    lectura = get(e, e.adm, "pagos-manuales")
-    assert lectura.status_code == 200, lectura.text
-    assert CUENTA not in lectura.text
+    assert CUENTA not in r.text and CUENTA[:8] not in r.text
     r = post(e, e.mc2, ruta, {"resultado": "observado", "motivo": SIN_CUENTA[0]})
     assert r.status_code == 200, r.text  # control: el mismo pedido sin la cuenta pasa
+    # Quien prepara sí lee el motivo (el canal existe), y es el que se guardó.
+    lectura = get(e, e.adm, "pagos-manuales")
+    assert lectura.status_code == 200, lectura.text
+    [elemento] = lectura.json()["elementos"]
+    assert [x["motivo_conciliacion"] for x in elemento["ejecucion"]["pagos"]] == [SIN_CUENTA[0]]
+    assert CUENTA not in lectura.text
+
+
+def test_la_regla_es_la_del_riel_con_mas_separadores(motor_migrate):
+    """La base y el patrón del riel (`CUENTA_EN_TEXTO`) dicen lo mismo de cada caso, salvo los
+    separadores que el riel no conoce (barra, espacio duro y fino)."""
+    from app.consorcios.pagos import CUENTA_EN_TEXTO
+
+    with motor_migrate.connect() as c:
+        for caso in [*CON_CUENTA, *SIN_CUENTA, FALSO_POSITIVO]:
+            base = c.execute(text("select nucleo.texto_con_cuenta(:t)"), {"t": caso}).scalar_one()
+            riel = bool(CUENTA_EN_TEXTO.search(caso.replace("/", " ").replace(chr(0xA0), " ")
+                                               .replace(chr(0x202F), " ")))  # fmt: skip
+            assert base == riel == (caso not in SIN_CUENTA), caso
 
 
 def test_0060_ida_y_vuelta(base_aparte):  # noqa: F811
@@ -105,9 +132,9 @@ def test_0060_ida_y_vuelta(base_aparte):  # noqa: F811
     command.downgrade(cfg, "0059")
     assert disparadores() == []
     with motor.connect() as c:
-        assert (
-            c.execute(text("select to_regprocedure('nucleo.texto_con_cuenta(text)')")).scalar()
-            is None
-        )
+        sql = ("select to_regprocedure('nucleo.texto_con_cuenta(text)'),"
+               " to_regprocedure('nucleo.negar_cuenta_en_motivo()')")  # fmt: skip
+        quedan = c.execute(text(sql)).one()
+        assert quedan == (None, None)
     command.upgrade(cfg, "0060")  # control
     assert len(disparadores()) == 3

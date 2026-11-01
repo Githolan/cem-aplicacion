@@ -149,8 +149,8 @@ const MENSAJES: Record<string, string> = {
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
   conciliacion_repetida: "Ese pago ya está conciliado.",
   no_es_quien_ejecuto:
-    "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución. Quien vio la cuenta o registró el pago no lo concilia, y quien declaró que no se pagó no confirma su propia declaración.",
-  motivo_con_cuenta: "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla.",
+    "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución. Quien vio la cuenta o registró un pago no lo concilia ni confirma que no se pagó, y quien declaró no confirma su propia declaración.",
+  motivo_con_cuenta: "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla. Si no es una cuenta, separá los números con una coma.",
   liquidacion_no_admite: "La liquidación no admite eso: ya hay un borrador de ese período, ya no es un borrador o el gasto ya se quitó.",
   orden_no_liquidable:
     "Esa orden no se puede liquidar: no está pagada, ya está en una liquidación, es de otra moneda o se pagó después del período.",
