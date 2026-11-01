@@ -33,12 +33,16 @@ TABLAS = (
     ("orden_pago", "insert or update of motivo_rechazo", "motivo_rechazo"),
 )
 
-UPGRADE = r"""
+# Espacio, punto, barra, espacio duro (U+00A0), espacio fino (U+202F y U+2009) y guion, último
+# para que sea literal en el corchete.
+SEPARADORES = " ./\u00a0\u202f\u2009-"
+
+UPGRADE = f"""
 -- Exactamente 22 dígitos, con a lo sumo un separador entre dos de ellos.
 create function nucleo.texto_con_cuenta(t text) returns boolean
   language sql immutable strict parallel safe
   set search_path = pg_catalog, pg_temp
-  as $$ select t ~ '(?<![0-9])[0-9](?:[ ./   -]?[0-9]){21}(?![0-9])' $$;
+  as $$ select t ~ '(?<![0-9])[0-9](?:[{SEPARADORES}]?[0-9]){{21}}(?![0-9])' $$;
 revoke all on function nucleo.texto_con_cuenta(text) from public;
 
 -- tg_argv[0]: la columna del motivo.
@@ -55,7 +59,9 @@ create function nucleo.negar_cuenta_en_motivo() returns trigger
   end
   $$;
 revoke all on function nucleo.negar_cuenta_en_motivo() from public;
+"""
 
+COMPROBAR = """
 do $$
 begin
   if exists (select 1 from nucleo.conciliacion_pago_manual where nucleo.texto_con_cuenta(motivo))
@@ -67,6 +73,8 @@ begin
 end
 $$;
 """
+"""Después de los disparadores: `create trigger` espera a las escrituras en curso y frena las
+nuevas, así que lo que se comprueba ya no cambia antes de que la migración confirme."""
 
 
 def upgrade() -> None:
@@ -76,6 +84,7 @@ def upgrade() -> None:
             f"create trigger motivo_sin_cuenta before {cuando} on nucleo.{tabla}"
             f" for each row execute function nucleo.negar_cuenta_en_motivo('{columna}')"
         )
+    op.execute(COMPROBAR)
 
 
 def downgrade() -> None:

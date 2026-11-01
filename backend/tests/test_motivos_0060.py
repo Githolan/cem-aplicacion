@@ -3,9 +3,13 @@
 La escena y los ayudantes son los de `test_pago_manual_0055`.
 """
 
+import importlib.util
+from pathlib import Path
+
 import pytest
 from alembic import command
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from tests.test_orden_pago_neutra import RECHAZAR, cbu_sintetico, llamar, niega, orden, preparada
 from tests.test_pago_manual_0055 import CONCILIAR, CUENTA, DECLARAR, emitida, registrada
@@ -30,6 +34,7 @@ CON_CUENTA = [
     # Copiada de un home banking o de un PDF: espacio duro o fino entre los bloques.
     f"SINTETICO: {partida(CUENTA, chr(0xA0))}",
     f"SINTETICO: {partida(CUENTA, chr(0x202F))}",
+    f"SINTETICO: {partida(CUENTA, chr(0x2009))}",
     # Con los verificadores mal también es la cuenta.
     f"SINTETICO: a {CUENTA[:21]}{(int(CUENTA[21]) + 1) % 10}",
 ]
@@ -108,9 +113,40 @@ def test_la_regla_es_la_del_riel_con_mas_separadores(motor_migrate):
     with motor_migrate.connect() as c:
         for caso in [*CON_CUENTA, *SIN_CUENTA, FALSO_POSITIVO]:
             base = c.execute(text("select nucleo.texto_con_cuenta(:t)"), {"t": caso}).scalar_one()
-            riel = bool(CUENTA_EN_TEXTO.search(caso.replace("/", " ").replace(chr(0xA0), " ")
-                                               .replace(chr(0x202F), " ")))  # fmt: skip
+            normal = caso.replace("/", " ")
+            for raro in (0xA0, 0x202F, 0x2009):
+                normal = normal.replace(chr(raro), " ")
+            riel = bool(CUENTA_EN_TEXTO.search(normal))
             assert base == riel == (caso not in SIN_CUENTA), caso
+
+
+def migracion_0060():
+    ruta = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+    spec = importlib.util.spec_from_file_location("migracion_0060",
+                                                  ruta / "0060_motivos_sin_cuenta.py")  # fmt: skip
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+def test_la_migracion_se_niega_si_ya_hay_un_motivo_con_cuenta(motor_migrate, e):
+    """Un rechazo guardado antes de `0060` con la cuenta (escrito acá sin el disparador, en una
+    transacción que se deshace): la comprobación de la migración se niega."""
+    comprobar = migracion_0060().COMPROBAR
+    o = preparada(motor_migrate, e, en_revision=True)
+    llamar(motor_migrate, e, e.mc1, RECHAZAR, orden=o, version=1, motivo=SIN_CUENTA[0])
+    with motor_migrate.connect() as c:
+        tx = c.begin()
+        c.execute(text(comprobar))  # control: con los motivos de siempre pasa
+        c.execute(text("alter table nucleo.orden_pago disable trigger motivo_sin_cuenta"))
+        c.execute(text("update nucleo.orden_pago set motivo_rechazo = :m where id = :o"),
+                  {"m": CON_CUENTA[1], "o": o})  # fmt: skip
+        with pytest.raises(DBAPIError) as error:
+            with c.begin_nested():
+                c.execute(text(comprobar))
+        assert "hay motivos guardados con una cuenta" in str(error.value)
+        tx.rollback()
+    assert orden(motor_migrate, o)["motivo_rechazo"] == SIN_CUENTA[0]
 
 
 def test_0060_ida_y_vuelta(base_aparte):  # noqa: F811
