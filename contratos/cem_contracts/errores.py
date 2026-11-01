@@ -241,7 +241,10 @@ class CodigoError(StrEnum):
     CONCILIACION_REPETIDA = "conciliacion_repetida"
     """Ese registro ya tiene su conciliación."""
     NO_ES_QUIEN_EJECUTO = "no_es_quien_ejecuto"
-    """Quien registró el pago (o declaró que no se hizo) no lo concilia ni lo confirma."""
+    """Quien vio la cuenta o registró el pago no lo concilia; quien declaró que no se hizo no
+    confirma su propia declaración."""
+    MOTIVO_CON_CUENTA = "motivo_con_cuenta"
+    """El motivo lleva 22 dígitos seguidos: una cuenta nunca va en un motivo (`0060`)."""
     LIQUIDACION_NO_ADMITE = "liquidacion_no_admite"
     """La liquidación no admite eso: ya hay un borrador del período, no es un borrador o el gasto
     ya se quitó."""

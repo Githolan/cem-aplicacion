@@ -607,6 +607,7 @@
           "operacion_de_otra_orden",
           "conciliacion_repetida",
           "no_es_quien_ejecuto",
+          "motivo_con_cuenta",
           "liquidacion_no_admite",
           "orden_no_liquidable",
           "sin_esquema"
