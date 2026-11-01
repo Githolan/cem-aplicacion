@@ -3086,9 +3086,9 @@
             "title": "Orden Id",
             "type": "string"
           },
-          "pagada_en": {
-            "format": "date-time",
-            "title": "Pagada En",
+          "pagada_el": {
+            "format": "date",
+            "title": "Pagada El",
             "type": "string"
           },
           "razon_social": {
@@ -3103,7 +3103,7 @@
           "razon_social",
           "importe_centavos",
           "moneda",
-          "pagada_en",
+          "pagada_el",
           "grupo",
           "esquema_id",
           "esquema_version",
@@ -4964,9 +4964,9 @@
             "title": "Orden Id",
             "type": "string"
           },
-          "pagada_en": {
-            "format": "date-time",
-            "title": "Pagada En",
+          "pagada_el": {
+            "format": "date",
+            "title": "Pagada El",
             "type": "string"
           },
           "razon_social": {
@@ -4980,7 +4980,7 @@
           "razon_social",
           "importe_centavos",
           "moneda",
-          "pagada_en"
+          "pagada_el"
         ],
         "title": "OrdenLiquidable",
         "type": "object"
