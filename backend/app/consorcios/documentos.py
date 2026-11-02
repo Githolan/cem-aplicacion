@@ -408,8 +408,8 @@ def _disposicion(titulo: str, tipo: TipoArchivo) -> str:
         404: {
             "description": "La versión o el documento no existen en este consorcio; su"
             " categoría es restringida y la persona no tiene la facultad `documentos.ver`; o"
-            " respalda un pago manual y la persona no es del Consejo (`egresos.aprobar_orden`)"
-            " ni subió esa versión."
+            " respalda un pago manual, la persona no subió esa versión y no es del Consejo"
+            " (`egresos.aprobar_orden`) o preparó esa orden."
         },
         409: {
             "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"
