@@ -43,7 +43,7 @@ def atado(motor_migrate, e, subio) -> tuple[UUID, UUID]:
     cuenta y la administración registra el pago con él."""
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
-    doc, v = comprobante_subido_por(motor_migrate, e, subio)
+    doc, v = comprobante_subido_por(motor_migrate, e, subio, orden=o)
     registrar_con(motor_migrate, e, o, doc)
     return doc, v
 

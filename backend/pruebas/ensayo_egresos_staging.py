@@ -72,6 +72,7 @@ import base64
 import io
 import json
 import os
+import re
 import ssl
 import sys
 import threading
@@ -279,6 +280,15 @@ class RielSimulado:
 # Corrida -------------------------------------------------------------------------------------
 
 
+def id_de_corrida() -> str:
+    """Ocho hexadecimales sin cinco dígitos seguidos: en un texto libre («LAB <id>-<n>») nunca
+    suman los ocho que el contrato niega como un teléfono (P3 153, corrida `43739007`)."""
+    while True:
+        candidato = uuid4().hex[:8]
+        if re.search(r"[0-9]{5}", candidato) is None:
+            return candidato
+
+
 @dataclass
 class Corrida:
     motor: Engine
@@ -287,7 +297,7 @@ class Corrida:
     url: str
     host: str
     contexto: ssl.SSLContext | None
-    id: str = field(default_factory=lambda: uuid4().hex[:8])
+    id: str = field(default_factory=lambda: id_de_corrida())
     personas: dict[str, UUID] = field(default_factory=dict)
     mandatos: dict[str, UUID] = field(default_factory=dict)
     navegadores: dict[str, Navegador] = field(default_factory=dict)
@@ -440,7 +450,11 @@ def documento_disponible(corrida: Corrida, categoria: str, titulo: str) -> str:
                   {"categoria": categoria, "titulo": titulo,
                    "fecha": time.strftime("%Y-%m-%d")}, csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"crear el documento: {r.texto}")
-    doc = r.cuerpo["id"]
+    return con_archivo_disponible(corrida, r.cuerpo["id"], categoria)
+
+
+def con_archivo_disponible(corrida: Corrida, doc: str, categoria: str) -> str:
+    adm = corrida.n("administracion")
     r = adm.pedir("POST", corrida.c(f"/documentos/{doc}/versiones"),
                   crudo=pdf_sintetico(corrida.id),
                   tipo="application/pdf", csrf=True, clave=str(uuid4()))  # fmt: skip
@@ -795,9 +809,20 @@ def al_dia(corrida: Corrida, *roles: str) -> None:
         reverificar(corrida, rol)
 
 
-def comprobante_disponible(corrida: Corrida, n: int) -> str:
+def comprobante_disponible(corrida: Corrida, n: int, orden: str) -> str:
+    """Cargado desde el pago de `orden` por la administración, que vio la cuenta (`0063`): nace
+    con la orden y restringido, y la lista se la devuelve."""
+    adm = corrida.n("administracion")
     titulo = f"Transferencia LAB {corrida.id}-{n} SINTETICA (NO REAL)"
-    return documento_disponible(corrida, "facturas_y_comprobantes", titulo)
+    r = adm.pedir("POST", corrida.c(f"/ordenes-pago/{orden}/pago-manual/comprobante"),
+                  {"titulo": titulo, "fecha": time.strftime("%Y-%m-%d")}, csrf=True,
+                  clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 201, f"cargar el comprobante desde el pago: {r.texto}")
+    doc = con_archivo_disponible(corrida, r.cuerpo["id"], "facturas_y_comprobantes")
+    lista = adm.pedir("GET", corrida.c("/documentos"))
+    [d] = [x for x in lista.cuerpo["documentos"] if x["id"] == doc]
+    comprobar(d["orden_pago_id"] == orden, f"la lista da la orden del comprobante: {d}")
+    return doc
 
 
 def cuenta_para_pagar(corrida: Corrida, rol: str, o: str) -> Respuesta:
@@ -922,7 +947,7 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
     corrida.ok("quien preparó, sin haber aprobado, recibe la cuenta completa solo en el acto")
 
     # 3. Evidencia inválida: nada se registra.
-    doc1 = comprobante_disponible(corrida, 1)
+    doc1 = comprobante_disponible(corrida, 1, o1)
     for datos, esperado in (
         ({"importe_centavos": 2_500_001, "cuenta_destino": cuenta, "numero_operacion": "LAB0001",
           "documento_id": doc1}, (422, "no_coincide_con_la_orden")),
@@ -1032,9 +1057,10 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
         numero_operacion=numero,
         documento_id=doc1,
     )
-    comprobar((r.estado, r.codigo()) == (409, "comprobante_de_otra_orden"),
+    # Desde 0063 el de otra orden se niega antes de atarlo (el comprobante nace con su orden).
+    comprobar((r.estado, r.codigo()) == (422, "comprobante_invalido"),
               f"el comprobante de la orden 1 no respalda la 2: {r.texto}")  # fmt: skip
-    doc2, doc3 = comprobante_disponible(corrida, 2), comprobante_disponible(corrida, 3)
+    doc2, doc3 = comprobante_disponible(corrida, 2, o2), comprobante_disponible(corrida, 3, o2)
     r = registrar_pago(
         corrida,
         "administracion",
@@ -1178,7 +1204,7 @@ def pagada_a_mano(corrida: Corrida, p: str, cuenta: str, importe: int, n: int) -
     r = cuenta_para_pagar(corrida, "administracion", o)
     comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta,
               f"acto de ejecución de la orden {n}: {r.texto}")  # fmt: skip
-    doc = comprobante_disponible(corrida, n)
+    doc = comprobante_disponible(corrida, n, o)
     r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
                        cuenta_destino=cuenta, numero_operacion=f"LIQ{corrida.id}{n:02d}",
                        documento_id=doc)  # fmt: skip

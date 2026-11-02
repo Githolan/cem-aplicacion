@@ -93,8 +93,15 @@ def emitida(motor_migrate, e, **extra) -> UUID:
     return o
 
 
-def comprobante(motor_migrate, e, estado="disponible", categoria="facturas_y_comprobantes"):
-    return documento_de_contrato(motor_migrate, e, categoria=categoria, version=estado)
+def comprobante(motor_migrate, e, estado="disponible", categoria="facturas_y_comprobantes",
+                orden=None):  # fmt: skip
+    """Con `orden`, cargado desde el pago de esa orden (`0063`): el único que el registro ata."""
+    doc = documento_de_contrato(motor_migrate, e, categoria=categoria, version=estado)
+    if orden is not None:
+        with motor_migrate.begin() as c:
+            c.execute(text("update nucleo.documento set orden_comprobante = :o where id = :d"),
+                      {"o": orden, "d": doc})  # fmt: skip
+    return doc
 
 
 def evidencia(motor_migrate, e, o, **cambios) -> dict:
@@ -102,7 +109,7 @@ def evidencia(motor_migrate, e, o, **cambios) -> dict:
         "orden": o, "version": 1, "huella": huella(motor_migrate, o, 1),
         "numero": f"OP-{uuid4().hex[:10]}", "fecha": _hoy(motor_migrate, e),
         "importe_p": IMPORTE, "moneda_p": "ARS", "cuenta": CUENTA,
-        "documento": comprobante(motor_migrate, e),
+        "documento": comprobante(motor_migrate, e, orden=o),
     }  # fmt: skip
     return datos | cambios
 
@@ -238,7 +245,7 @@ def test_piloto_la_administracion_prepara_y_ejecuta_y_otro_consejero_concilia(mo
     )
     assert datos["razon_social"] == "Proveedor SINTETICO (NO REAL)"
     # Registra la transferencia sintética con su comprobante.
-    doc = comprobante(motor_migrate, e)
+    doc = comprobante(motor_migrate, e, orden=o)
     r = post(e, e.adm, f"ordenes-pago/{o}/pago-manual", {
         "version": 1, "huella": h, "numero_operacion": "0001-234567", "fecha_operacion":
         str(_hoy(motor_migrate, e)), "importe_centavos": IMPORTE, "moneda": "ARS",
@@ -442,7 +449,7 @@ def test_la_fecha_entre_la_emision_y_el_vencimiento(motor_migrate, e):
 def test_el_comprobante_paso_el_antivirus(motor_migrate, e, estado, categoria):
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
-    doc = comprobante(motor_migrate, e, estado, categoria)
+    doc = comprobante(motor_migrate, e, estado, categoria, orden=o)
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
           **evidencia(motor_migrate, e, o, documento=doc))  # fmt: skip
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
@@ -452,7 +459,7 @@ def test_el_comprobante_paso_el_antivirus(motor_migrate, e, estado, categoria):
 def test_la_evidencia_es_el_archivo_analizado_y_no_cambia(motor_migrate, e):
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)  # el comprobante es posterior al acto (0061)
-    doc = comprobante(motor_migrate, e)
+    doc = comprobante(motor_migrate, e, orden=o)
     registrada(motor_migrate, e, o, documento=doc)
     [antes] = pagos_de(motor_migrate, o)
     with motor_migrate.begin() as c:
@@ -468,11 +475,23 @@ def test_la_evidencia_es_el_archivo_analizado_y_no_cambia(motor_migrate, e):
 
 
 def test_un_comprobante_respalda_una_sola_orden(motor_migrate, e):
+    """Desde `0063` el comprobante se carga desde el pago de una orden: el de otra se niega antes
+    de atarlo. La atadura sigue negando el mismo comprobante para otra ejecución."""
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o1)
-    ver(motor_migrate, e, e.adm, o2)  # posterior a los dos actos: lo que niega es la atadura
-    doc = comprobante(motor_migrate, e)
-    registrada(motor_migrate, e, o1, documento=doc)
+    ver(motor_migrate, e, e.adm, o2)  # posterior a los dos actos
+    doc = comprobante(motor_migrate, e, orden=o1)
+    niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
+          **evidencia(motor_migrate, e, o2, documento=doc))  # fmt: skip
+    registrada(motor_migrate, e, o1, documento=doc)  # control: con su orden, sí
+    niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
+          **evidencia(motor_migrate, e, o2, documento=doc))  # fmt: skip
+    # La atadura, sin la marca de por medio: el mismo documento marcado para o2 ya respalda o1.
+    with motor_migrate.begin() as c:
+        c.execute(text("alter table nucleo.documento disable trigger orden_comprobante_fija"))
+        c.execute(text("update nucleo.documento set orden_comprobante = :o where id = :d"),
+                  {"o": o2, "d": doc})  # fmt: skip
+        c.execute(text("alter table nucleo.documento enable trigger orden_comprobante_fija"))
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_de_otra_orden",
           **evidencia(motor_migrate, e, o2, documento=doc))  # fmt: skip
 
@@ -587,16 +606,19 @@ def test_pagada_no_admite_otro_registro_ni_otra_ejecucion(motor_migrate, e):
 
 
 def test_un_comprobante_a_la_vez_para_dos_ordenes_uno_solo_gana(motor_migrate, e):
-    """La clave del comprobante, no una consulta previa: dos órdenes distintas (cada una con su
-    bloqueo) no lo usan las dos aunque registren a la vez."""
+    """Dos órdenes distintas (cada una con su bloqueo) no usan el mismo comprobante aunque
+    registren a la vez. Desde `0063` el de la otra orden se niega antes de atarlo, sin esperar a
+    la primera. La atadura sigue como segunda barrera
+    (`test_un_comprobante_respalda_una_sola_orden`)."""
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o1)
     ver(motor_migrate, e, e.adm, o2)
-    doc = comprobante(motor_migrate, e)  # posterior a los dos actos (0061)
+    doc = comprobante(motor_migrate, e, orden=o1)  # posterior a los dos actos (0061)
     uno = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o1, documento=doc))
     otro = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o2, documento=doc))
     r = _en_paralelo(motor_migrate, e, uno, otro)
-    assert r == {"esperaba": True, "motivo": "comprobante_de_otra_orden"}
+    # Desde 0063 el de otra orden se niega antes de atarlo: siempre con el mismo motivo.
+    assert r == {"esperaba": False, "motivo": "comprobante_invalido"}
     assert (len(pagos_de(motor_migrate, o1)), len(pagos_de(motor_migrate, o2))) == (1, 0)
 
 

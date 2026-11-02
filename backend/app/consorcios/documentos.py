@@ -361,7 +361,7 @@ def listar_documentos(
         filas = _leer(
             conn,
             "select documento_id, categoria, titulo, fecha, cargado_en, version_id, estado,"
-            " motivo_rechazo, tipo, tamano, sha256, subida_en"
+            " motivo_rechazo, tipo, tamano, sha256, subida_en, orden_comprobante"
             " from nucleo.documentos_del_consorcio()",
             {},
             ver,
@@ -376,7 +376,8 @@ def listar_documentos(
         if d is None:
             d = documentos[f["documento_id"]] = DocumentoEnLista(
                 id=f["documento_id"], categoria=categoria, titulo=f["titulo"],
-                fecha=f["fecha"], cargado_en=f["cargado_en"], versiones=[],
+                fecha=f["fecha"], cargado_en=f["cargado_en"],
+                orden_pago_id=f["orden_comprobante"], versiones=[],
             )  # fmt: skip
         if f["version_id"] is not None:
             d.versiones.append(

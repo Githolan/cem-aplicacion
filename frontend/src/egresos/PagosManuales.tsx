@@ -1,10 +1,9 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { RUTA_DOCUMENTOS } from "../Documentos";
+import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
 import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
 import {
   aCentavos,
@@ -55,7 +54,8 @@ export const AVISO_SIN_CUENTA =
   "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste antes, registrá el pago con los datos del comprobante; si no, declará que no se pagó.";
 /** Las barreras del acto que, con la orden ya emitida, dejan registrar o declarar sin la cuenta. */
 const SIN_CUENTA = new Set(["aprobacion_vencida", "proveedor_cambiado", "proveedor_inactivo", "contrato_no_vigente"]);
-const CATEGORIA_COMPROBANTE = "facturas_y_comprobantes";
+/** El tope del título de un documento (`LARGO_MAXIMO_TITULO` de los contratos). */
+const LARGO_TITULO = 200;
 
 type Lectura =
   | { tipo: "cargando" }
@@ -87,9 +87,16 @@ export function porPagar(c: ConPago): boolean {
   return ultimo === undefined || ultimo.conciliacion === "observado";
 }
 
-/** Los comprobantes que pueden respaldar un pago: de la categoría y con un archivo que pasó el antivirus. */
-export function comprobantesDisponibles(documentos: DocumentoEnLista[]): DocumentoEnLista[] {
-  return documentos.filter((d) => d.categoria === CATEGORIA_COMPROBANTE && d.versiones.some((v) => v.estado === "disponible"));
+/** Los comprobantes que pueden respaldar el pago de esa orden: cargados desde su pago (app 0063) y con un archivo que pasó el antivirus. */
+export function comprobantesDisponibles(documentos: DocumentoEnLista[], orden: string): DocumentoEnLista[] {
+  return documentos.filter((d) => d.orden_pago_id === orden && d.versiones.some((v) => v.estado === "disponible"));
+}
+
+/** Cuántos comprobantes de esa orden espera revisar el antivirus. */
+export function comprobantesEnRevision(documentos: DocumentoEnLista[], orden: string): number {
+  return documentos.filter(
+    (d) => d.orden_pago_id === orden && !d.versiones.some((v) => v.estado === "disponible") && d.versiones.some((v) => v.estado === "en_cuarentena"),
+  ).length;
 }
 
 const hoy = () => new Date().toLocaleDateString("en-CA");
@@ -111,7 +118,14 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
+  const [archivo, setArchivo] = useState<File | null>(null);
   const clave = useRef<string | null>(null);
+  const claveCarga = useRef<string | null>(null);
+  const claveArchivo = useRef<string | null>(null);
+  /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
+  const sinArchivo = useRef<string | null>(null);
+  /** Cambia para vaciar el campo del archivo después de subirlo. */
+  const [entrada, setEntrada] = useState(0);
   const montado = useMontado();
 
   useEffect(() => {
@@ -133,7 +147,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
             aprobadas: ordenes.data.elementos.filter((o) => o.estado === "aprobada"),
             manuales: manuales.data.elementos,
             // Sin acceso a los documentos, la lista de comprobantes queda vacía y se dice.
-            comprobantes: comprobantesDisponibles(documentos.data?.documentos ?? []),
+            comprobantes: (documentos.data?.documentos ?? []).filter((d) => d.orden_pago_id != null),
           });
           return;
         }
@@ -165,7 +179,11 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     setRegistro(REGISTRO_VACIO);
     setDeclarando(false);
     setMotivo("");
+    setArchivo(null);
     clave.current = null;
+    claveCarga.current = null;
+    claveArchivo.current = null;
+    sinArchivo.current = null;
   }
 
   function fallo(status: number, codigo: string | undefined, acto: string, reintentar: () => void) {
@@ -259,6 +277,68 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
       setRegistro({ ...REGISTRO_VACIO, fecha: hoy() });
       setFichaOrden(ordenId);
       setFicha(data);
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else setAviso({ texto: SIN_CONEXION, ok: false });
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  /** Carga el comprobante desde el pago (app 0063): el documento nace visible solo para quien lo sube y el Consejo; después va el archivo. */
+  async function subirComprobante() {
+    if (ficha === null || fichaOrden === null || archivo === null || !montado.current) return;
+    const problema = problemaDelArchivo(archivo);
+    if (problema !== null) {
+      setAviso({ texto: problema, ok: false });
+      return;
+    }
+    setEnviando(true);
+    setAviso(null);
+    try {
+      // Si un intento anterior creó el documento y el archivo no entró, se reintenta solo el archivo.
+      if (sinArchivo.current === null) {
+        claveCarga.current ??= crypto.randomUUID();
+        const creado = await api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, orden_id: fichaOrden }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCarga.current } },
+          body: { titulo: `Transferencia a ${ficha.razon_social}`.slice(0, LARGO_TITULO), fecha: registro.fecha || hoy() },
+        });
+        exigirSesion(creado.response);
+        if (creado.data === undefined) {
+          const codigo = codigoDe(creado.error);
+          if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
+          fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante());
+          return;
+        }
+        claveCarga.current = null;
+        sinArchivo.current = creado.data.id;
+      }
+      claveArchivo.current ??= crypto.randomUUID();
+      const subido = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
+        headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
+        params: {
+          path: { consorcio_id: consorcio, documento_id: sinArchivo.current },
+          header: { [ENCABEZADO_IDEMPOTENCIA]: claveArchivo.current },
+        },
+        // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
+        body: archivo as unknown as string,
+        bodySerializer: (cuerpo) => cuerpo,
+      });
+      exigirSesion(subido.response);
+      if (subido.data === undefined) {
+        const codigo = codigoDe(subido.error);
+        if (renovarClave(subido.response.status, codigo)) claveArchivo.current = null;
+        const texto = mensajeDeCarga(subido.response.status, codigo, "subir", [], subido.response.headers.has("Retry-After"));
+        setAviso({ texto: `El archivo no se subió. ${texto}`, ok: false });
+        return;
+      }
+      claveArchivo.current = null;
+      sinArchivo.current = null;
+      setArchivo(null);
+      setEntrada((n) => n + 1);
+      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos; tocá «Actualizar comprobantes» y elegilo.", ok: true });
+      setVuelta((v) => v + 1);
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
       else setAviso({ texto: SIN_CONEXION, ok: false });
@@ -389,7 +469,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
               <p>
                 El pago se hace por el home banking del consorcio. Después registrás acá el número de operación y el
                 comprobante, y otro miembro del Consejo lo concilia. Registrar no es pagar: la orden queda pagada recién
-                con la conciliación. Desde que lo registrás, el comprobante lo ven solo quien subió el archivo y el Consejo, salvo quien preparó la orden.
+                con la conciliación. El comprobante se sube desde acá: desde ese momento lo ven solo quien lo subió y el Consejo, salvo quien preparó la orden.
               </p>
               {lectura.aprobadas.length + lectura.manuales.filter(porPagar).length === 0 ? (
                 <p className="tarjeta">No hay órdenes aprobadas esperando su pago.</p>
@@ -488,20 +568,37 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
                   <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
                   <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
                     onChange={(e) => cambiar("cuenta", e.target.value)} />
+                  <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
+                  <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
+                    onChange={(e) => {
+                      claveArchivo.current = null;
+                      setArchivo(e.target.files?.[0] ?? null);
+                    }} />
+                  <div className="acciones">
+                    <button type="button" disabled={enviando || archivo === null} onClick={() => void subirComprobante()}>
+                      Subir el comprobante
+                    </button>
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => setVuelta((v) => v + 1)}>
+                      Actualizar comprobantes
+                    </button>
+                  </div>
+                  <p>
+                    Desde que lo subís lo ven solo vos y el Consejo, salvo quien preparó la orden. Aparece en la lista cuando el
+                    antivirus lo aprueba.
+                    {fichaOrden !== null && comprobantesEnRevision(lectura.comprobantes, fichaOrden) > 0 &&
+                      ` En revisión: ${comprobantesEnRevision(lectura.comprobantes, fichaOrden)}.`}
+                  </p>
                   <label htmlFor={`${id}-comprobante`}>Comprobante de la transferencia</label>
                   <select id={`${id}-comprobante`} required value={registro.documento} disabled={enviando}
                     onChange={(e) => cambiar("documento", e.target.value)}>
                     <option value="">Elegí el comprobante</option>
-                    {lectura.comprobantes.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.titulo} ({d.fecha})
-                      </option>
-                    ))}
+                    {fichaOrden !== null &&
+                      comprobantesDisponibles(lectura.comprobantes, fichaOrden).map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.titulo} ({d.fecha})
+                        </option>
+                      ))}
                   </select>
-                  <p>
-                    Subilo antes en <Link to={RUTA_DOCUMENTOS}>Documentos</Link>, en «Facturas y comprobantes». Aparece acá
-                    cuando el antivirus lo aprueba.
-                  </p>
                   <div className="acciones">
                     <button type="submit" disabled={enviando || registro.documento === ""}>
                       Registrar el pago
