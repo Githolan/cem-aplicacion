@@ -26,12 +26,15 @@ LISTA = "select documento_id, version_id from nucleo.documentos_del_consorcio()"
 DESCARGA = "select clave_objeto from nucleo.version_para_descargar(:d, :v)"
 
 
-def ve(motor_app, cons, persona, doc, v) -> tuple[bool, bool]:
-    """Si `persona`, en el ámbito de `cons`, tiene la versión en la lista y si la descarga (la
-    base devuelve la clave del objeto solo a quien puede descargarla)."""
+def ve(motor_app, cons, persona, doc, v) -> tuple[bool | str, bool]:
+    """Qué ve `persona`, en el ámbito de `cons`: en la lista, `True` si tiene esa versión,
+    `"titulo"` si tiene el documento con otra versión o sin ninguna (título, fecha y categoría),
+    `False` si no hay rastro del documento; y si la descarga (la base devuelve la clave del objeto
+    solo a quien puede descargarla)."""
     with transaccion(motor_app, persona_id=persona, consorcio_id=cons) as c:
-        en_lista = (doc, v) in {(f.documento_id, f.version_id) for f in c.execute(text(LISTA))}
+        filas = {(f.documento_id, f.version_id) for f in c.execute(text(LISTA))}
         descarga = c.execute(text(DESCARGA), {"d": doc, "v": v}).all()
+    en_lista = True if (doc, v) in filas else "titulo" if doc in {d for d, _ in filas} else False
     return en_lista, descarga != []
 
 
@@ -100,7 +103,7 @@ def test_quien_preparo_ejecuto_y_subio_lo_ve_por_haberlo_subido(motor_migrate, m
                  " 'sintetico/otra/' || :d, 'ClamAV SINTETICO', now(), :p, now()) returning id"),
             {"c": e.cons, "d": doc, "p": e.mc1},
         ).scalar_one()  # fmt: skip
-    assert ve(motor_app, e.cons, e.adm, doc, ajena) == (False, False)
+    assert ve(motor_app, e.cons, e.adm, doc, ajena) == ("titulo", False)
     assert ve(motor_app, e.cons, e.mc2, doc, ajena) == (True, True)
 
 
@@ -124,6 +127,18 @@ def test_desvincular_despues_no_cambia_la_identidad_historica(motor_migrate, mot
     with motor_migrate.connect() as c:
         sql = "select nucleo.misma_persona_humana(:c, :a, :b)"
         assert c.execute(text(sql), {"c": e.cons, "a": otra, "b": e.adm}).scalar_one() is False
+    assert ve(motor_app, e.cons, otra, doc, v) == (False, False)
+    assert ve(motor_app, e.cons, e.mc2, doc, v) == (True, True)  # control
+
+
+def test_el_consejo_sin_identidad_vigente_no_lo_ve(motor_migrate, motor_app, e):
+    """Falla cerrada: una cuenta del Consejo que no preparó, pero sin identidad humana vigente en
+    el consorcio, no lo ve por el Consejo."""
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
+    doc, v = atado(motor_migrate, e, e.mc1)
+    assert ve(motor_app, e.cons, otra, doc, v) == (True, True)  # control: con identidad, sí
+    desvincular(motor_migrate, e, otra)
+    assert es_del_consejo(motor_migrate, e, otra)
     assert ve(motor_app, e.cons, otra, doc, v) == (False, False)
     assert ve(motor_app, e.cons, e.mc2, doc, v) == (True, True)  # control
 
