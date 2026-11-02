@@ -4,6 +4,8 @@ La escena y los ayudantes son los de `test_pago_manual_0055`: la administración
 mc1 aprueba y mc2 concilia; la propietaria lee los documentos por su vínculo.
 """
 
+import importlib.util
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -11,7 +13,7 @@ from alembic import command
 from sqlalchemy import text
 
 from app.db import transaccion
-from tests.test_orden_pago_neutra import llamar, nueva_sesion
+from tests.test_orden_pago_neutra import llamar, niega, nueva_sesion
 from tests.test_pago_manual_0055 import REGISTRAR, emitida, evidencia, registrada, ver
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
 from tests.test_rutas_egresos import get
@@ -63,9 +65,10 @@ def registrar_con(motor_migrate, e, o, doc) -> UUID:
 def test_atado_a_un_pago_lo_ven_solo_el_consejo_y_quien_lo_subio(motor_migrate, motor_app, e):
     """Lo subió mc1 (no quien preparó): la administración, que tiene `documentos.ver`, y la
     propietaria dejan de verlo; mc1 y mc2 (el Consejo) lo siguen viendo."""
+    o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)  # el comprobante es posterior al acto de ejecución
     doc, v = comprobante_subido_por(motor_migrate, e, e.mc1)
     otro, otra_v = comprobante_subido_por(motor_migrate, e, e.mc1)  # no se ata: control
-    o = emitida(motor_migrate, e)
     # Control: antes de atarlo es un documento más de la categoría.
     for persona in (e.prop, e.adm, e.mc2):
         assert (doc, v) in lista(motor_app, e, persona), persona
@@ -109,8 +112,9 @@ def test_quien_lo_subio_ve_solo_su_version(motor_migrate, motor_app, e):
 
 
 def test_por_http_la_propietaria_no_lo_lista_y_su_descarga_es_404(motor_migrate, e):
-    doc, v = comprobante_subido_por(motor_migrate, e, e.adm)
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
+    doc, v = comprobante_subido_por(motor_migrate, e, e.adm)
     sesion = nueva_sesion(motor_migrate, e.prop)
 
     def ids(persona, s=None) -> set[str]:
@@ -127,6 +131,23 @@ def test_por_http_la_propietaria_no_lo_lista_y_su_descarga_es_404(motor_migrate,
     assert r.json()["codigo"] == "no_encontrado"
 
 
+def test_un_documento_anterior_al_acto_de_ejecucion_no_se_ata(motor_migrate, motor_app, e):
+    """Una factura subida antes de ver la cuenta no es el comprobante de esa transferencia: el
+    registro se niega y el documento sigue a la vista de la propietaria."""
+    viejo, v = comprobante_subido_por(motor_migrate, e, e.adm)
+    o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
+    niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
+          **evidencia(motor_migrate, e, o, documento=viejo))  # fmt: skip
+    assert (viejo, v) in lista(motor_app, e, e.prop)
+    with motor_migrate.connect() as c:
+        sql = "select count(*) from nucleo.comprobante_pago_manual where documento_id = :d"
+        assert c.execute(text(sql), {"d": viejo}).scalar_one() == 0  # la atadura se deshizo
+    # Control: con uno subido después del acto, el mismo registro pasa.
+    nuevo, _ = comprobante_subido_por(motor_migrate, e, e.adm)
+    llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o, documento=nuevo))
+
+
 def test_las_funciones_nuevas_no_las_ejecuta_public(motor_migrate):
     with motor_migrate.connect() as c:
         for f in ("nucleo.es_comprobante_de_pago(uuid, uuid)",
@@ -137,16 +158,26 @@ def test_las_funciones_nuevas_no_las_ejecuta_public(motor_migrate):
             assert c.execute(text(sql), {"f": f}).scalar_one() is False, f
 
 
+def migracion_0061():
+    ruta = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+    archivo = ruta / "0061_comprobantes_solo_consejo.py"
+    spec = importlib.util.spec_from_file_location("migracion_0061", archivo)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
 def test_0061_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
 
-    def definiciones() -> tuple[str, str, object]:
+    def definiciones() -> tuple[str, str, object, str]:
         with motor.connect() as c:
             sql = ("select pg_get_functiondef('nucleo.documentos_del_consorcio()'::regprocedure),"
                    " pg_get_functiondef("
                    "'nucleo.version_para_descargar(uuid, uuid)'::regprocedure),"
-                   " to_regprocedure('nucleo.es_comprobante_de_pago(uuid, uuid)')")  # fmt: skip
-            return tuple(c.execute(text(sql)).one())
+                   " to_regprocedure('nucleo.es_comprobante_de_pago(uuid, uuid)'),"
+                   " pg_get_functiondef(cast(:r as regprocedure))")  # fmt: skip
+            return tuple(c.execute(text(sql), {"r": migracion_0061().REGISTRO}).one())
 
     command.upgrade(cfg, "0060")
     antes = definiciones()
@@ -155,6 +186,7 @@ def test_0061_ida_y_vuelta(base_aparte):  # noqa: F811
     despues = definiciones()
     assert despues[2] is not None
     assert "es_comprobante_de_pago" in despues[0] and "es_comprobante_de_pago" in despues[1]
+    assert "anterior al acto" not in antes[3] and "anterior al acto" in despues[3]
     command.downgrade(cfg, "0060")
     assert definiciones() == antes
     command.upgrade(cfg, "0061")  # control

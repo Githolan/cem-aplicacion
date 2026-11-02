@@ -223,7 +223,7 @@ ERRORES = {
     "comprobante_invalido": (
         422, CodigoError.COMPROBANTE_INVALIDO,
         "El comprobante tiene que ser un documento de «Facturas y comprobantes» que ya pasó el"
-        " antivirus.",
+        " antivirus, con el archivo subido después de ver la cuenta para pagar.",
     ),
     "comprobante_de_otra_orden": (
         409, CodigoError.COMPROBANTE_DE_OTRA_ORDEN, "Ese comprobante ya respalda otro pago.",

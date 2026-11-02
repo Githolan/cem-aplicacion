@@ -16,6 +16,11 @@ A los demás la base les devuelve lo mismo que si el documento no existiera (la 
 observe. Antes de registrarlo es un documento más de la categoría: el tramo entre la carga y el
 registro queda como pendiente (P3).
 
+Como atar un documento lo deja solo para el Consejo, el registro exige además que el archivo del
+comprobante se haya subido después del primer acto de ejecución de esa orden
+(`comprobante_invalido`): un comprobante bancario no existe antes de ver la cuenta, y así una
+factura vieja no se ata por error (revisión independiente de #189).
+
 La exportación formal del consorcio (`0038`) no cambia: entrega todos los documentos a quien designa
 el pedido, también los de las categorías restringidas.
 """
@@ -53,11 +58,34 @@ revoke all on function nucleo.ve_comprobantes_de_pago(uuid, uuid) from public;
 """
 
 LISTA = "nucleo.documentos_del_consorcio()"
+REGISTRO = (
+    "nucleo.registrar_pago_manual(uuid, integer, bytea, text, date, bigint, text, text, uuid,"
+    " uuid, text, uuid)"
+)
 DESCARGA = "nucleo.version_para_descargar(uuid, uuid)"
 
 FILTRO_0036 = (
     "         and (restringidos or d.categoria not in ('contratos_proveedores', 'otros'))\n"
 )
+
+COMPROBANTE_DE_OTRA = (
+    "      raise exception 'ese comprobante ya respalda otro pago' using errcode = 'P0001',\n"
+    "        hint = 'comprobante_de_otra_orden';\n"
+    "    end if;\n"
+)
+POSTERIOR_AL_ACTO = """\
+    -- El archivo es posterior al acto de ejecución (0061): atar una factura vieja la dejaría solo
+    -- para el Consejo. Si falla, la atadura de arriba se deshace con la transacción.
+    if not exists (
+         select 1 from nucleo.version_documento v
+          where v.consorcio_id = c and v.id = archivo
+            and v.subida_en >= (select min(a.abierta_en)
+                                  from nucleo.apertura_cuenta_pago_manual a
+                                 where a.consorcio_id = c and a.ejecucion_id = e.id)) then
+      raise exception 'el comprobante es anterior al acto de ejecución'
+        using errcode = 'P0001', hint = 'comprobante_invalido';
+    end if;
+"""
 
 CAMBIOS = {
     LISTA: [
@@ -84,6 +112,7 @@ CAMBIOS = {
             "                            and y.subida_por = quien))\n",
         ),
     ],
+    REGISTRO: [(COMPROBANTE_DE_OTRA, COMPROBANTE_DE_OTRA + POSTERIOR_AL_ACTO)],
     DESCARGA: [
         (
             "    return query\n      select cat, x.estado",
