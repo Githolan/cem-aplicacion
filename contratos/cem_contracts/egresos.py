@@ -37,6 +37,8 @@ from pydantic import (
     model_validator,
 )
 
+from cem_contracts.documentos import Titulo
+
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
 """El tope de `bigint` en la base."""
 FORMATO_MONEDA = r"^[A-Z]{3}$"
@@ -623,6 +625,18 @@ class CuentaParaPagoManual(BaseModel):
     )
 
 
+class ComprobantePagoNuevo(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/comprobante`: el documento del comprobante, cargado
+    desde el pago (`0063`). Lo crea quien vio la cuenta en el acto de ejecución de esa orden. Nace
+    en «Facturas y comprobantes» y restringido: lo ven quien sube cada versión y el Consejo que no
+    preparó la orden. El archivo se sube después a `…/documentos/{id}/versiones`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    titulo: Titulo
+    fecha: date = Field(description="Fecha del comprobante (no la de la carga).")
+
+
 class RegistroPagoManual(BaseModel):
     """`POST …/ordenes-pago/{id}/pago-manual`: la evidencia de una transferencia ya hecha. No da la
     orden por pagada: queda pendiente de conciliación (En verificación)."""
@@ -639,8 +653,8 @@ class RegistroPagoManual(BaseModel):
     moneda: Moneda
     cuenta_destino: Cuenta
     documento_id: UUID = Field(
-        description="El comprobante: un documento de «Facturas y comprobantes» que pasó el"
-        " antivirus."
+        description="El comprobante: cargado desde el pago de esta orden"
+        " (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus."
     )
 
 

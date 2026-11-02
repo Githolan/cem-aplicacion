@@ -31,10 +31,12 @@ from contextlib import contextmanager
 from typing import Annotated
 from uuid import UUID
 
+from cem_contracts.documentos import DocumentoId
 from cem_contracts.egresos import (
     VIGENCIA_APROBACION,
     Aprobacion,
     AprobacionRegistrada,
+    ComprobantePagoNuevo,
     ConciliacionPagoManual,
     Confirmacion,
     Contrato,
@@ -222,8 +224,8 @@ ERRORES = {
     ),
     "comprobante_invalido": (
         422, CodigoError.COMPROBANTE_INVALIDO,
-        "El comprobante tiene que ser un documento de «Facturas y comprobantes» que ya pasó el"
-        " antivirus, con el archivo subido después de ver la cuenta para pagar.",
+        "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta"
+        " para pagar, y su archivo tiene que haber pasado el antivirus.",
     ),
     "comprobante_de_otra_orden": (
         409, CodigoError.COMPROBANTE_DE_OTRA_ORDEN, "Ese comprobante ya respalda otro pago.",
@@ -242,9 +244,9 @@ ERRORES = {
     ),
     "no_es_quien_ejecuto": (
         403, CodigoError.NO_ES_QUIEN_EJECUTO,
-        "Registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la"
-        " cuenta en el acto de ejecución. Quien vio la cuenta o registró un pago no lo"
-        " concilia ni confirma que no se pagó, y quien declaró no confirma su propia"
+        "Carga el comprobante y registra el pago (o declara que no se hizo, si alguien vio la"
+        " cuenta) quien vio la cuenta en el acto de ejecución. Quien vio la cuenta o registró un"
+        " pago no lo concilia ni confirma que no se pagó, y quien declaró no confirma su propia"
         " declaración.",
     ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
@@ -1053,6 +1055,40 @@ def registrar_pago_manual(
              "doc": registro.documento_id},
         ).scalar_one()  # fmt: skip
         return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante",
+    status_code=201,
+    response_model=DocumentoId,
+    summary="Cargar el comprobante de un pago manual: nace visible solo para quien lo sube y el"
+    " Consejo",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def crear_comprobante_de_pago(
+    orden_id: UUID,
+    nuevo: ComprobantePagoNuevo,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """El documento del comprobante, con la orden que respalda (`0063`); el archivo se sube
+    después a `…/documentos/{id}/versiones`. Lo crea quien vio la cuenta en el acto de ejecución
+    (`no_es_quien_ejecuto`); la base lo vuelve a exigir."""
+    cargar.verificar(Entidad())
+    _ejecutor(lectura, permiso, motor, orden_id)
+
+    def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        doc = _ejecutar(
+            conn, permiso,
+            "select nucleo.crear_comprobante_de_pago(:o, :titulo, :fecha, :actor, 'api')",
+            {"o": orden_id, "titulo": nuevo.titulo, "fecha": nuevo.fecha},
+        ).scalar_one()  # fmt: skip
+        return 201, DocumentoId(id=doc)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 

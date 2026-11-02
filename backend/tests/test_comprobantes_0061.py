@@ -25,14 +25,15 @@ LISTA = "select documento_id, version_id from nucleo.documentos_del_consorcio()"
 DESCARGA = "select clave_objeto from nucleo.version_para_descargar(:d, :v)"
 
 
-def comprobante_subido_por(motor_migrate, e, persona) -> tuple[UUID, UUID]:
-    """Un comprobante con una versión `disponible` que subió `persona`."""
+def comprobante_subido_por(motor_migrate, e, persona, orden=None) -> tuple[UUID, UUID]:
+    """Un comprobante con una versión `disponible` que subió `persona`. Con `orden`, cargado desde
+    el pago de esa orden (`0063`): el único que el registro ata."""
     with motor_migrate.begin() as c:
         doc = c.execute(
             text("insert into nucleo.documento (consorcio_id, categoria, titulo, fecha,"
-                 " cargado_por) values (:c, 'facturas_y_comprobantes',"
-                 " 'Comprobante SINTETICO (NO REAL)', current_date, :p) returning id"),
-            {"c": e.cons, "p": persona},
+                 " cargado_por, orden_comprobante) values (:c, 'facturas_y_comprobantes',"
+                 " 'Comprobante SINTETICO (NO REAL)', current_date, :p, :o) returning id"),
+            {"c": e.cons, "p": persona, "o": orden},
         ).scalar_one()  # fmt: skip
         v = c.execute(
             text("insert into nucleo.version_documento (consorcio_id, documento_id, estado, tipo,"
@@ -67,12 +68,14 @@ def test_atado_a_un_pago_lo_ven_solo_el_consejo_y_quien_lo_subio(motor_migrate, 
     propietaria dejan de verlo; mc1 y mc2 (el Consejo) lo siguen viendo."""
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)  # el comprobante es posterior al acto de ejecución
-    doc, v = comprobante_subido_por(motor_migrate, e, e.mc1)
-    otro, otra_v = comprobante_subido_por(motor_migrate, e, e.mc1)  # no se ata: control
-    # Control: antes de atarlo es un documento más de la categoría.
-    for persona in (e.prop, e.adm, e.mc2):
-        assert (doc, v) in lista(motor_app, e, persona), persona
-        assert descarga(motor_app, e, persona, doc, v) == [f"sintetico/{doc}"], persona
+    doc, v = comprobante_subido_por(motor_migrate, e, e.mc1, orden=o)
+    otro, otra_v = comprobante_subido_por(motor_migrate, e, e.mc1)  # sin orden: control
+    # Desde 0063 nace restringido: antes de atarlo ya lo ven solo el Consejo y quien lo subió.
+    for persona in (e.prop, e.adm):
+        assert doc not in {d for d, _ in lista(motor_app, e, persona)}, persona
+        assert descarga(motor_app, e, persona, doc, v) == [], persona
+        assert (otro, otra_v) in lista(motor_app, e, persona), persona  # control
+    assert (doc, v) in lista(motor_app, e, e.mc2)
     registrar_con(motor_migrate, e, o, doc)
     for persona in (e.prop, e.adm):
         assert doc not in {d for d, _ in lista(motor_app, e, persona)}, persona
@@ -114,7 +117,8 @@ def test_quien_lo_subio_ve_solo_su_version(motor_migrate, motor_app, e):
 def test_por_http_la_propietaria_no_lo_lista_y_su_descarga_es_404(motor_migrate, e):
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
-    doc, v = comprobante_subido_por(motor_migrate, e, e.adm)
+    doc, v = comprobante_subido_por(motor_migrate, e, e.adm, orden=o)
+    control, _ = comprobante_subido_por(motor_migrate, e, e.adm)  # sin orden
     sesion = nueva_sesion(motor_migrate, e.prop)
 
     def ids(persona, s=None) -> set[str]:
@@ -122,7 +126,8 @@ def test_por_http_la_propietaria_no_lo_lista_y_su_descarga_es_404(motor_migrate,
         assert r.status_code == 200, r.text
         return {d["id"] for d in r.json()["documentos"]}
 
-    assert str(doc) in ids(e.prop, sesion)  # control: antes de atarlo
+    assert str(control) in ids(e.prop, sesion)  # control: lee documentos
+    assert str(doc) not in ids(e.prop, sesion)  # nace restringido (0063)
     registrar_con(motor_migrate, e, o, doc)
     assert str(doc) not in ids(e.prop, sesion)
     assert str(doc) in ids(e.mc2)  # control: el Consejo
@@ -132,14 +137,14 @@ def test_por_http_la_propietaria_no_lo_lista_y_su_descarga_es_404(motor_migrate,
 
 
 def test_un_documento_anterior_al_acto_de_ejecucion_no_se_ata(motor_migrate, motor_app, e):
-    """Una factura subida antes de ver la cuenta no es el comprobante de esa transferencia: el
-    registro se niega y el documento sigue a la vista de la propietaria."""
-    viejo, v = comprobante_subido_por(motor_migrate, e, e.adm)
+    """Un documento anterior al acto de ejecución no es el comprobante de esa transferencia,
+    aunque tenga la orden (la ruta de `0063` no lo crea antes del acto; acá lo escribe la
+    dueña de la base): el registro se niega y no queda atado."""
     o = emitida(motor_migrate, e)
+    viejo, v = comprobante_subido_por(motor_migrate, e, e.adm, orden=o)
     ver(motor_migrate, e, e.adm, o)
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
           **evidencia(motor_migrate, e, o, documento=viejo))  # fmt: skip
-    assert (viejo, v) in lista(motor_app, e, e.prop)
     with motor_migrate.connect() as c:
         sql = "select count(*) from nucleo.comprobante_pago_manual where documento_id = :d"
         assert c.execute(text(sql), {"d": viejo}).scalar_one() == 0  # la atadura se deshizo
@@ -154,9 +159,11 @@ def test_un_documento_anterior_al_acto_de_ejecucion_no_se_ata(motor_migrate, mot
         )  # fmt: skip
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
           **evidencia(motor_migrate, e, o, documento=viejo))  # fmt: skip
-    assert (viejo, v) in lista(motor_app, e, e.prop)
+    with motor_migrate.connect() as c:
+        sql = "select count(*) from nucleo.comprobante_pago_manual where documento_id = :d"
+        assert c.execute(text(sql), {"d": viejo}).scalar_one() == 0
     # Control: con uno subido después del acto, el mismo registro pasa.
-    nuevo, _ = comprobante_subido_por(motor_migrate, e, e.adm)
+    nuevo, _ = comprobante_subido_por(motor_migrate, e, e.adm, orden=o)
     llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o, documento=nuevo))
 
 

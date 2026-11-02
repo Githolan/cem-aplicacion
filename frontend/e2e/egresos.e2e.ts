@@ -168,7 +168,7 @@ async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
     if (camino === `${c}/pagos-manuales`) return ruta.fulfill({ json: { elementos: [] } });
     if (camino === `${c}/documentos`)
       return ruta.fulfill({ json: { documentos: [{ id: COMPROBANTE, categoria: "facturas_y_comprobantes",
-        titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z",
+        titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: ORDEN,
         versiones: [{ id: ARCHIVO, estado: "disponible" }] }] } });
     if (camino === `${c}/ordenes-pago/${ORDEN}`) return ruta.fulfill({ json: { orden: ORDEN_APROBADA, versiones: [version(null)] } });
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/emitir`)

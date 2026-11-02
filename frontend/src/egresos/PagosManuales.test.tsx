@@ -9,7 +9,14 @@ import type { components } from "../api/tipos";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { porConciliar, porConfirmar } from "./ConciliacionPagos";
-import { AVISO_SIN_CUENTA, AVISO_VERIFICAR_CUENTA, comprobantesDisponibles, porPagar, situacion } from "./PagosManuales";
+import {
+  AVISO_SIN_CUENTA,
+  AVISO_VERIFICAR_CUENTA,
+  comprobantesDisponibles,
+  comprobantesEnRevision,
+  porPagar,
+  situacion,
+} from "./PagosManuales";
 
 // Pago manual del piloto (app 0055). Todos los datos son ficticios: CUIT y CBU inventados, sin
 // ningún proveedor ni cuenta real, y nada se transfiere.
@@ -148,6 +155,17 @@ const DOCUMENTOS = () =>
         titulo: "Transferencia Limpieza Ficticia",
         fecha: "2026-10-31",
         cargado_en: "2026-10-31T13:00:00Z",
+        orden_pago_id: O1,
+        versiones: [{ id: ARCHIVO, estado: "disponible" }],
+      },
+      {
+        // Una factura sin orden (subida en Documentos): el registro no la ata y no se ofrece.
+        id: X1,
+        categoria: "facturas_y_comprobantes",
+        titulo: "Factura de otra cosa",
+        fecha: "2026-10-30",
+        cargado_en: "2026-10-30T13:00:00Z",
+        orden_pago_id: null,
         versiones: [{ id: ARCHIVO, estado: "disponible" }],
       },
     ],
@@ -228,14 +246,17 @@ describe("lo común del pago manual", () => {
     expect(porPagar(conPago("pagada"))).toBe(false);
   });
 
-  it("solo ofrece comprobantes de la categoría que pasaron el antivirus", () => {
-    const base = { fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", titulo: "x" };
+  it("solo ofrece los comprobantes cargados desde el pago de esa orden que pasaron el antivirus", () => {
+    const base = { fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", titulo: "x", categoria: "facturas_y_comprobantes" as const };
     const lista = [
-      { ...base, id: "a", categoria: "facturas_y_comprobantes" as const, versiones: [{ id: "1", estado: "disponible" as const }] },
-      { ...base, id: "b", categoria: "facturas_y_comprobantes" as const, versiones: [{ id: "2", estado: "en_cuarentena" as const }] },
-      { ...base, id: "c", categoria: "contratos_proveedores" as const, versiones: [{ id: "3", estado: "disponible" as const }] },
+      { ...base, id: "a", orden_pago_id: O1, versiones: [{ id: "1", estado: "disponible" as const }] },
+      { ...base, id: "b", orden_pago_id: O1, versiones: [{ id: "2", estado: "en_cuarentena" as const }] },
+      { ...base, id: "c", orden_pago_id: X1, versiones: [{ id: "3", estado: "disponible" as const }] },
+      { ...base, id: "d", orden_pago_id: null, versiones: [{ id: "4", estado: "disponible" as const }] },
     ];
-    expect(comprobantesDisponibles(lista as never).map((d) => d.id)).toEqual(["a"]);
+    expect(comprobantesDisponibles(lista as never, O1).map((d) => d.id)).toEqual(["a"]);
+    expect(comprobantesEnRevision(lista as never, O1)).toBe(1);
+    expect(comprobantesEnRevision(lista as never, X1)).toBe(0);
   });
 
   it("el Consejo concilia el último registro sin conciliar y confirma una declaración sin pago vigente", () => {
@@ -324,6 +345,66 @@ describe("pagos a realizar", () => {
       cuenta_destino: CUENTA,
       documento_id: DOC,
     });
+  });
+
+  it("sube el comprobante desde el pago: primero el documento con la orden, después el archivo", async () => {
+    const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const api = simulado({
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () =>
+        Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    await screen.findByText(CUENTA);
+    // Se ofrece el de esta orden, no la factura sin orden.
+    const opciones = within(screen.getByLabelText("Comprobante de la transferencia")).getAllByRole("option");
+    expect(opciones.map((o) => o.textContent)).toEqual(["Elegí el comprobante", "Transferencia Limpieza Ficticia (2026-10-31)"]);
+    const boton = screen.getByRole("button", { name: "Subir el comprobante" });
+    expect((boton as HTMLButtonElement).disabled).toBe(true);
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.click(boton);
+    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    const [carga] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`);
+    expect(carga?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await carga?.json()).toEqual({ titulo: "Transferencia a Limpieza Ficticia SRL", fecha: "2026-10-31" });
+    const [subida] = pedidos(api, "POST", `${BASE}/documentos/${NUEVO}/versiones`);
+    expect(subida?.headers.get("Content-Type")).toBe("application/pdf");
+    expect(subida?.headers.get("Idempotency-Key")).toBeTruthy();
+    // La lista se vuelve a pedir para que aparezca cuando el antivirus lo apruebe.
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/documentos`).length).toBeGreaterThan(1));
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("si no vio la cuenta, la carga del comprobante se niega y no sube el archivo", async () => {
+    const api = simulado({
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => error("no_es_quien_ejecuto", 403),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    await screen.findByText(CUENTA);
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/quien vio la cuenta en el acto de ejecución/)).toBeTruthy();
+    expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/versiones"))).toBe(false);
+  });
+
+  it("un archivo que no es PDF, JPEG ni PNG no se manda", async () => {
+    const api = simulado();
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    await screen.findByText(CUENTA);
+    const archivo = new File(["texto"], "comprobante.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/Solo se aceptan archivos PDF, JPEG o PNG/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`)).toHaveLength(0);
   });
 
   it("el acto pide el segundo factor y se reintenta después del código", async () => {

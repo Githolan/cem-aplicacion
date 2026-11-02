@@ -137,6 +137,11 @@ class DocumentoEnLista(BaseModel):
     titulo: str
     fecha: date
     cargado_en: datetime
+    orden_pago_id: UUID | None = Field(
+        default=None,
+        description="Si es el comprobante de un pago manual cargado desde el pago (`0063`), la"
+        " orden que respalda.",
+    )
     versiones: list[VersionEnLista] = Field(description="De la más nueva a la más vieja.")
 
 

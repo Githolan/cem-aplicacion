@@ -758,6 +758,29 @@
         "title": "CoeficientesGrupo",
         "type": "object"
       },
+      "ComprobantePagoNuevo": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/comprobante`: el documento del comprobante, cargado\ndesde el pago (`0063`). Lo crea quien vio la cuenta en el acto de ejecución de esa orden. Nace\nen «Facturas y comprobantes» y restringido: lo ven quien sube cada versión y el Consejo que no\npreparó la orden. El archivo se sube después a `…/documentos/{id}/versiones`.",
+        "properties": {
+          "fecha": {
+            "description": "Fecha del comprobante (no la de la carga).",
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "titulo": {
+            "maxLength": 200,
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "titulo",
+          "fecha"
+        ],
+        "title": "ComprobantePagoNuevo",
+        "type": "object"
+      },
       "ConciliacionPagoManual": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/pago-manual/{pago}/conciliacion`: otro ser humano del Consejo.",
@@ -2163,6 +2186,19 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "orden_pago_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si es el comprobante de un pago manual cargado desde el pago (`0063`), la orden que respalda.",
+            "title": "Orden Pago Id"
           },
           "titulo": {
             "title": "Titulo",
@@ -6098,7 +6134,7 @@
             "type": "string"
           },
           "documento_id": {
-            "description": "El comprobante: un documento de «Facturas y comprobantes» que pasó el antivirus.",
+            "description": "El comprobante: cargado desde el pago de esta orden (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus.",
             "format": "uuid",
             "title": "Documento Id",
             "type": "string"
@@ -11642,6 +11678,91 @@
           }
         },
         "summary": "Registrar un pago manual con su evidencia: queda pendiente de conciliación",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante": {
+      "post": {
+        "description": "El documento del comprobante, con la orden que respalda (`0063`); el archivo se sube\ndespués a `…/documentos/{id}/versiones`. Lo crea quien vio la cuenta en el acto de ejecución\n(`no_es_quien_ejecuto`); la base lo vuelve a exigir.",
+        "operationId": "crear_comprobante_de_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_comprobante_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComprobantePagoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cargar el comprobante de un pago manual: nace visible solo para quien lo sube y el Consejo",
         "tags": [
           "egresos"
         ]
