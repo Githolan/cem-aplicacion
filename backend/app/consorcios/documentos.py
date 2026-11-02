@@ -406,8 +406,10 @@ def _disposicion(titulo: str, tipo: TipoArchivo) -> str:
         302: {"description": "`Location` es la URL firmada del almacén; vence a los 5 minutos."},
         403: {"description": "Sin `documentos.ver` en el consorcio."},
         404: {
-            "description": "La versión o el documento no existen en este consorcio, o su"
-            " categoría es restringida y la persona no tiene la facultad `documentos.ver`."
+            "description": "La versión o el documento no existen en este consorcio; su"
+            " categoría es restringida y la persona no tiene la facultad `documentos.ver`; o"
+            " respalda un pago manual y la persona no es del Consejo (`egresos.aprobar_orden`)"
+            " ni subió esa versión."
         },
         409: {
             "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"

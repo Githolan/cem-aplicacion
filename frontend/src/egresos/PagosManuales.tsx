@@ -389,7 +389,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
               <p>
                 El pago se hace por el home banking del consorcio. Después registrás acá el número de operación y el
                 comprobante, y otro miembro del Consejo lo concilia. Registrar no es pagar: la orden queda pagada recién
-                con la conciliación.
+                con la conciliación. Desde que lo registrás, el comprobante lo ven solo el Consejo y quien subió el archivo.
               </p>
               {lectura.aprobadas.length + lectura.manuales.filter(porPagar).length === 0 ? (
                 <p className="tarjeta">No hay órdenes aprobadas esperando su pago.</p>

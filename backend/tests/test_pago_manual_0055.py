@@ -451,6 +451,7 @@ def test_el_comprobante_paso_el_antivirus(motor_migrate, e, estado, categoria):
 
 def test_la_evidencia_es_el_archivo_analizado_y_no_cambia(motor_migrate, e):
     o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)  # el comprobante es posterior al acto (0061)
     doc = comprobante(motor_migrate, e)
     registrada(motor_migrate, e, o, documento=doc)
     [antes] = pagos_de(motor_migrate, o)
@@ -468,9 +469,10 @@ def test_la_evidencia_es_el_archivo_analizado_y_no_cambia(motor_migrate, e):
 
 def test_un_comprobante_respalda_una_sola_orden(motor_migrate, e):
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o1)
+    ver(motor_migrate, e, e.adm, o2)  # posterior a los dos actos: lo que niega es la atadura
     doc = comprobante(motor_migrate, e)
     registrada(motor_migrate, e, o1, documento=doc)
-    ver(motor_migrate, e, e.adm, o2)
     niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_de_otra_orden",
           **evidencia(motor_migrate, e, o2, documento=doc))  # fmt: skip
 
@@ -588,9 +590,9 @@ def test_un_comprobante_a_la_vez_para_dos_ordenes_uno_solo_gana(motor_migrate, e
     """La clave del comprobante, no una consulta previa: dos órdenes distintas (cada una con su
     bloqueo) no lo usan las dos aunque registren a la vez."""
     o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
-    doc = comprobante(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o1)
     ver(motor_migrate, e, e.adm, o2)
+    doc = comprobante(motor_migrate, e)  # posterior a los dos actos (0061)
     uno = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o1, documento=doc))
     otro = (e.adm, REGISTRAR, evidencia(motor_migrate, e, o2, documento=doc))
     r = _en_paralelo(motor_migrate, e, uno, otro)
