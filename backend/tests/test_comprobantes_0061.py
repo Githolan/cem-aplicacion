@@ -143,6 +143,18 @@ def test_un_documento_anterior_al_acto_de_ejecucion_no_se_ata(motor_migrate, mot
     with motor_migrate.connect() as c:
         sql = "select count(*) from nucleo.comprobante_pago_manual where documento_id = :d"
         assert c.execute(text(sql), {"d": viejo}).scalar_one() == 0  # la atadura se deshizo
+    # Tampoco con una versión nueva del documento viejo: las anteriores quedarían escondidas.
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.version_documento (consorcio_id, documento_id, estado, tipo,"
+                 " tamano, sha256, clave_objeto, antivirus, firmas_en, subida_por, analizada_en)"
+                 " values (:c, :d, 'disponible', 'application/pdf', 1, repeat('c', 64),"
+                 " 'sintetico/nueva', 'ClamAV SINTETICO', now(), :p, now())"),
+            {"c": e.cons, "d": viejo, "p": e.adm},
+        )  # fmt: skip
+    niega(motor_migrate, e, e.adm, REGISTRAR, "comprobante_invalido",
+          **evidencia(motor_migrate, e, o, documento=viejo))  # fmt: skip
+    assert (viejo, v) in lista(motor_app, e, e.prop)
     # Control: con uno subido después del acto, el mismo registro pasa.
     nuevo, _ = comprobante_subido_por(motor_migrate, e, e.adm)
     llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o, documento=nuevo))
