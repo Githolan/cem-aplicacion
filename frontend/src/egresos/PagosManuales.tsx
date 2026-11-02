@@ -122,6 +122,10 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   const clave = useRef<string | null>(null);
   const claveCarga = useRef<string | null>(null);
   const claveArchivo = useRef<string | null>(null);
+  /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
+  const sinArchivo = useRef<string | null>(null);
+  /** Cambia para vaciar el campo del archivo después de subirlo. */
+  const [entrada, setEntrada] = useState(0);
   const montado = useMontado();
 
   useEffect(() => {
@@ -179,6 +183,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     clave.current = null;
     claveCarga.current = null;
     claveArchivo.current = null;
+    sinArchivo.current = null;
   }
 
   function fallo(status: number, codigo: string | undefined, acto: string, reintentar: () => void) {
@@ -291,25 +296,29 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     setEnviando(true);
     setAviso(null);
     try {
-      claveCarga.current ??= crypto.randomUUID();
-      const creado = await api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante", {
-        headers: encabezadoCsrf(),
-        params: { path: { consorcio_id: consorcio, orden_id: fichaOrden }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCarga.current } },
-        body: { titulo: `Transferencia a ${ficha.razon_social}`.slice(0, LARGO_TITULO), fecha: registro.fecha || hoy() },
-      });
-      exigirSesion(creado.response);
-      if (creado.data === undefined) {
-        const codigo = codigoDe(creado.error);
-        if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
-        fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante());
-        return;
+      // Si un intento anterior creó el documento y el archivo no entró, se reintenta solo el archivo.
+      if (sinArchivo.current === null) {
+        claveCarga.current ??= crypto.randomUUID();
+        const creado = await api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, orden_id: fichaOrden }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCarga.current } },
+          body: { titulo: `Transferencia a ${ficha.razon_social}`.slice(0, LARGO_TITULO), fecha: registro.fecha || hoy() },
+        });
+        exigirSesion(creado.response);
+        if (creado.data === undefined) {
+          const codigo = codigoDe(creado.error);
+          if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
+          fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante());
+          return;
+        }
+        claveCarga.current = null;
+        sinArchivo.current = creado.data.id;
       }
-      claveCarga.current = null;
       claveArchivo.current ??= crypto.randomUUID();
       const subido = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
         headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
         params: {
-          path: { consorcio_id: consorcio, documento_id: creado.data.id },
+          path: { consorcio_id: consorcio, documento_id: sinArchivo.current },
           header: { [ENCABEZADO_IDEMPOTENCIA]: claveArchivo.current },
         },
         // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
@@ -317,13 +326,17 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
         bodySerializer: (cuerpo) => cuerpo,
       });
       exigirSesion(subido.response);
-      claveArchivo.current = null;
       if (subido.data === undefined) {
-        const texto = mensajeDeCarga(subido.response.status, codigoDe(subido.error), "subir", [], subido.response.headers.has("Retry-After"));
+        const codigo = codigoDe(subido.error);
+        if (renovarClave(subido.response.status, codigo)) claveArchivo.current = null;
+        const texto = mensajeDeCarga(subido.response.status, codigo, "subir", [], subido.response.headers.has("Retry-After"));
         setAviso({ texto: `El archivo no se subió. ${texto}`, ok: false });
         return;
       }
+      claveArchivo.current = null;
+      sinArchivo.current = null;
       setArchivo(null);
+      setEntrada((n) => n + 1);
       setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos; tocá «Actualizar comprobantes» y elegilo.", ok: true });
       setVuelta((v) => v + 1);
     } catch (e: unknown) {
@@ -556,8 +569,11 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
                   <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
                     onChange={(e) => cambiar("cuenta", e.target.value)} />
                   <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
-                  <input id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
-                    onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
+                  <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
+                    onChange={(e) => {
+                      claveArchivo.current = null;
+                      setArchivo(e.target.files?.[0] ?? null);
+                    }} />
                   <div className="acciones">
                     <button type="button" disabled={enviando || archivo === null} onClick={() => void subirComprobante()}>
                       Subir el comprobante

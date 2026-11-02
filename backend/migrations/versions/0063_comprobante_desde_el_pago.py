@@ -10,8 +10,11 @@ política nueva.
 - **Se carga desde el pago** (`nucleo.crear_comprobante_de_pago`): el documento nace en
   `facturas_y_comprobantes` con la orden que respalda (`nucleo.documento.orden_comprobante`).
   Lo crea solo quien vio la cuenta en el acto de una ejecución manual de esa orden, por su
-  identidad humana (`no_es_quien_ejecuto`), y con la facultad de carga de documentos. La versión
-  se sube después por la ruta de siempre, con el antivirus.
+  identidad humana (`no_es_quien_ejecuto`, `nucleo.abrio_la_cuenta_de_la_orden`), y con la
+  facultad de carga de documentos. La versión se sube después por la ruta de siempre, con el
+  antivirus, y `nucleo.nueva_version` también la limita a quien vio la cuenta de esa orden: si
+  no, otro con la facultad de carga (quien preparó, por ejemplo) podría subir un archivo que
+  pasaría a ser la evidencia de una corrección. Para los demás el documento no existe (404).
 - **Restringido desde que existe:** `nucleo.es_comprobante_de_pago` dice que sí también para un
   documento con orden, atado o no, y `nucleo.preparo_la_orden_del_comprobante` mira también esa
   orden. La lista y la descarga de `0061`/`0062` no cambian: ya preguntan a esas dos funciones.
@@ -51,6 +54,8 @@ LISTA_CON_ORDEN = [
      "x.motivo_rechazo, x.tipo, x.tamano, x.sha256, x.subida_en, d.orden_comprobante\n"),
 ]  # fmt: skip
 CREAR = "nucleo.crear_comprobante_de_pago(uuid, text, date, uuid, text)"
+ABRIO = "nucleo.abrio_la_cuenta_de_la_orden"
+VERSION = "nucleo.nueva_version(uuid, text, integer, text, uuid, text)"
 REGISTRO = (
     "nucleo.registrar_pago_manual(uuid, integer, bytea, text, date, bigint, text, text, uuid,"
     " uuid, text, uuid)"
@@ -113,6 +118,21 @@ create function nucleo.orden_comprobante_fija()
 create trigger orden_comprobante_fija before update of orden_comprobante on nucleo.documento
   for each row execute function nucleo.orden_comprobante_fija();
 
+-- Si quien pide recibió la cuenta en el acto de una ejecución manual de la orden, por su
+-- identidad humana. Sin identidad, no.
+create function {ABRIO}(c uuid, orden uuid, quien uuid)
+  returns boolean
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select exists (select 1 from nucleo.ejecucion_orden_pago e
+                     join nucleo.apertura_cuenta_pago_manual a
+                       on a.consorcio_id = e.consorcio_id and a.ejecucion_id = e.id
+                    where e.consorcio_id = c and e.orden_id = orden and e.modalidad = 'manual'
+                      and a.identidad_abrio = nucleo.identidad_humana_de(c, quien))
+  $$;
+revoke all on function {ABRIO}(uuid, uuid, uuid) from public;
+
 -- El comprobante se carga desde el pago: lo crea quien vio la cuenta en el acto de una ejecución
 -- manual de la orden, y nace restringido.
 create function nucleo.crear_comprobante_de_pago(orden uuid, titulo_nuevo text,
@@ -124,17 +144,10 @@ create function nucleo.crear_comprobante_de_pago(orden uuid, titulo_nuevo text,
   as $$
   declare
     c uuid := plataforma.consorcio_actual();
-    identidad uuid;
     d nucleo.documento;
   begin
     perform nucleo.exigir_carga_documentos(c, actor, origen_pedido, '{CATEGORIA}');
-    identidad := nucleo.identidad_humana_de(c, actor);
-    if identidad is null or not exists (
-         select 1 from nucleo.ejecucion_orden_pago e
-           join nucleo.apertura_cuenta_pago_manual a
-             on a.consorcio_id = e.consorcio_id and a.ejecucion_id = e.id
-          where e.consorcio_id = c and e.orden_id = orden and e.modalidad = 'manual'
-            and a.identidad_abrio = identidad) then
+    if not {ABRIO}(c, orden, actor) then
       raise exception 'carga el comprobante quien vio la cuenta en el acto de ejecución'
         using errcode = 'P0001', hint = 'no_es_quien_ejecuto';
     end if;
@@ -208,6 +221,18 @@ DESDE_EL_PAGO = """\
     end if;
 """
 
+CARGA_DE_VERSION = "    perform nucleo.exigir_carga_documentos(c, actor, origen_pedido, cat);\n"
+SOLO_QUIEN_VIO_LA_CUENTA = f"""\
+    -- Una versión de un comprobante de pago la sube solo quien vio la cuenta de esa orden (0063):
+    -- si no, otro con la facultad de carga cambiaría la evidencia de una corrección. Para los
+    -- demás el documento no existe, como en la lista.
+    if exists (select 1 from nucleo.documento d
+                where d.consorcio_id = c and d.id = documento and d.orden_comprobante is not null
+                  and not {ABRIO}(c, d.orden_comprobante, actor)) then
+      raise exception 'el documento no existe' using errcode = 'P0001', hint = 'no_encontrado';
+    end if;
+"""
+
 SIN_REGISTRAR = """
 do $$
 begin
@@ -227,6 +252,7 @@ DOWNGRADE = f"""
 {ES_COMPROBANTE_0061}
 {PREPARO_0062}
 drop function {CREAR};
+drop function {ABRIO}(uuid, uuid, uuid);
 drop trigger orden_comprobante_fija on nucleo.documento;
 drop function nucleo.orden_comprobante_fija();
 alter table nucleo.documento drop column orden_comprobante;
@@ -262,11 +288,13 @@ def _otra_lista(cambios: list[tuple[str, str]]) -> None:
 def upgrade() -> None:
     op.execute(UPGRADE)
     _reemplazar(REGISTRO, SIN_ARCHIVO, SIN_ARCHIVO + DESDE_EL_PAGO)
+    _reemplazar(VERSION, CARGA_DE_VERSION, CARGA_DE_VERSION + SOLO_QUIEN_VIO_LA_CUENTA)
     _otra_lista(LISTA_CON_ORDEN)
 
 
 def downgrade() -> None:
     op.execute(SIN_REGISTRAR)
     _otra_lista([(despues, antes) for antes, despues in reversed(LISTA_CON_ORDEN)])
+    _reemplazar(VERSION, CARGA_DE_VERSION + SOLO_QUIEN_VIO_LA_CUENTA, CARGA_DE_VERSION)
     _reemplazar(REGISTRO, SIN_ARCHIVO + DESDE_EL_PAGO, SIN_ARCHIVO)
     op.execute(DOWNGRADE)

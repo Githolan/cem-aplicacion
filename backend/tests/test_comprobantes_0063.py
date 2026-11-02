@@ -111,6 +111,26 @@ def test_lo_carga_solo_quien_vio_la_cuenta_de_esa_orden(motor_migrate, e):
     assert tuple(fila) == ("facturas_y_comprobantes", o1, e.adm)
 
 
+VERSION = (
+    "select id from nucleo.nueva_version(:documento, 'application/pdf', 1, repeat('c', 64),"
+    " :actor, :origen)"
+)
+
+
+def test_una_version_del_comprobante_la_sube_solo_quien_vio_la_cuenta(motor_migrate, e):
+    """Revisión independiente de 0063: la administración tiene `documentos.cargar` pero no vio la
+    cuenta de o2; una versión del comprobante de o2 cambiaría la evidencia de una corrección. Para
+    ella el documento no existe; después de ver la cuenta, sí sube."""
+    o1, o2 = emitida(motor_migrate, e), emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o1)
+    doc, _ = comprobante_subido_por(motor_migrate, e, e.mc1, orden=o2)
+    sin_orden, _ = comprobante_subido_por(motor_migrate, e, e.mc1)
+    niega(motor_migrate, e, e.adm, VERSION, "no_encontrado", documento=doc)
+    assert llamar(motor_migrate, e, e.adm, VERSION, documento=sin_orden) is not None  # control
+    ver(motor_migrate, e, e.adm, o2)
+    assert llamar(motor_migrate, e, e.adm, VERSION, documento=doc) is not None
+
+
 def test_sin_facultad_de_carga_la_base_lo_niega(motor_migrate, e):
     """mc1 aprobó y no tiene `documentos.cargar`: la base corta antes de mirar el acto."""
     o = emitida(motor_migrate, e)
@@ -165,10 +185,11 @@ def test_otro_consorcio_no_carga_un_comprobante_de_esta_orden(motor_migrate, mot
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
     otro = escena_economica(motor_migrate, motor_app)
-    with pytest.raises(DBAPIError), transaccion(motor_migrate, persona_id=otro.adm,
-                                                consorcio_id=otro.cons) as c:  # fmt: skip
+    with pytest.raises(DBAPIError) as error, transaccion(motor_migrate, persona_id=otro.adm,
+                                                         consorcio_id=otro.cons) as c:  # fmt: skip
         c.execute(text(CREAR), {"orden": o, "titulo": TITULO, "actor": otro.adm,
                                 "origen": "api"})  # fmt: skip
+    assert error.value.orig.diag.message_hint == "no_es_quien_ejecuto"
     with motor_migrate.connect() as c:
         sql = "select count(*) from nucleo.documento where orden_comprobante = :o"
         assert c.execute(text(sql), {"o": o}).scalar_one() == 0
@@ -187,16 +208,21 @@ def test_0063_ida_y_vuelta(base_aparte):  # noqa: F811
                    " to_regprocedure("
                    "'nucleo.crear_comprobante_de_pago(uuid, text, date, uuid, text)'),"
                    " has_function_privilege('cem_app', 'nucleo.documentos_del_consorcio()',"
-                   " 'execute')")  # fmt: skip
-            return tuple(c.execute(text(sql)).one())
+                   " 'execute'),"
+                   " pg_get_functiondef(cast(:registro as regprocedure)),"
+                   " pg_get_functiondef(cast(:version as regprocedure))")  # fmt: skip
+            m = migracion_0063()
+            return tuple(c.execute(text(sql), {"registro": m.REGISTRO, "version": m.VERSION}).one())
 
     command.upgrade(cfg, "0062")
     antes = definiciones()
-    assert antes[3] is None and "orden_comprobante" not in antes[0] + antes[1] + antes[2]
+    assert antes[3] is None
+    assert "orden_comprobante" not in antes[0] + antes[1] + antes[2] + antes[5] + antes[6]
     command.upgrade(cfg, "0063")
     despues = definiciones()
     assert despues[3] is not None and despues[4] is True
     assert "orden_comprobante" in despues[0] and "orden_comprobante" in despues[1]
+    assert "orden_comprobante" in despues[5] and "abrio_la_cuenta" in despues[6]
     command.downgrade(cfg, "0062")
     assert definiciones() == antes
     command.upgrade(cfg, "0063")  # control

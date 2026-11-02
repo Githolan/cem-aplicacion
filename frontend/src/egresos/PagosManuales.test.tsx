@@ -379,6 +379,32 @@ describe("pagos a realizar", () => {
     await sinFaltasDeAccesibilidad(container);
   });
 
+  it("si el archivo no entra, el reintento sube solo el archivo al mismo comprobante", async () => {
+    const NUEVO = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let intentos = 0;
+    const api = simulado({
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () =>
+        ++intentos === 1
+          ? error("archivo_demasiado_grande", 413)
+          : Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    await screen.findByText(CUENTA);
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/El archivo no se subió/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`)).toHaveLength(1);
+    expect(pedidos(api, "POST", `${BASE}/documentos/${NUEVO}/versiones`)).toHaveLength(2);
+    // El campo del archivo queda vacío y el botón, deshabilitado.
+    expect((screen.getByRole("button", { name: "Subir el comprobante" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("si no vio la cuenta, la carga del comprobante se niega y no sube el archivo", async () => {
     const api = simulado({
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => error("no_es_quien_ejecuto", 403),
