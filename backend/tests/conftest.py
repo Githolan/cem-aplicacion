@@ -107,7 +107,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     niega a bajar si hay documentos: se borran con sus versiones. Y con 0038, que se niega a bajar
     si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran. Y con
     0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran. Y
-    con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos.
+    con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos. Y con 0063, cuyos
+    comprobantes citan su orden: se les quita antes de borrar las órdenes.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -174,6 +175,15 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     delete from nucleo.ejecucion_orden_pago;"
                 "     alter table nucleo.resultado_ejecucion_orden_pago enable trigger user;"
                 "     alter table nucleo.ejecucion_orden_pago enable trigger user;"
+                "   end if;"
+                # Los comprobantes cargados desde el pago (0063) citan su orden: se les quita.
+                "   if exists (select 1 from information_schema.columns"
+                "               where table_schema = 'nucleo' and table_name = 'documento'"
+                "                 and column_name = 'orden_comprobante') then"
+                "     alter table nucleo.documento disable trigger orden_comprobante_fija;"
+                "     update nucleo.documento set orden_comprobante = null"
+                "      where orden_comprobante is not null;"
+                "     alter table nucleo.documento enable trigger orden_comprobante_fija;"
                 "   end if;"
                 "   delete from nucleo.orden_pago_aprobacion;"
                 "   delete from nucleo.orden_pago_version;"
