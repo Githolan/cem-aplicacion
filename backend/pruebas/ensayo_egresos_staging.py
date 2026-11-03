@@ -41,6 +41,22 @@ historia); orden sin pagar, de otro consorcio e inexistente; la misma orden y do
 vez (dos hilos de la administración); un esquema nuevo dentro del período que bloquea la
 simulación; y las rutas de `--otro-consorcio`. No publica ni genera cargos.
 
+**Recorrido completo** (`--completo --otro-consorcio <uuid>`, propietario del 03-11-2026): en otro
+consorcio LAB (`NOMBRE_CONSORCIO_COMPLETO`), el pago manual entero y después, en el mismo consorcio:
+quien preparó que intenta aprobar, también desde su otra cuenta del Consejo; dos emisiones a la vez;
+quien aprobó que intenta ejecutar; un archivo inválido; quien ejecutó que intenta conciliar, también
+desde su otra cuenta; el comprobante oculto a la otra cuenta del Consejo de quien preparó y visible
+para quien lo subió y para el Consejo que no preparó (solo la administración tiene
+`egresos.ejecutar_pago`, `0011`: quien prepara es también quien ejecuta y sube el comprobante); la
+liquidación del período con las dos órdenes pagadas y su simulación exacta; una unidad nueva que
+deja la simulación bloqueada sin repartir (falla cerrada); el propietario que no ve comprobantes;
+las rutas de documentos de otro consorcio; las acciones del recorrido, quién registró y quién
+concilió en la auditoría, y su cadena. Deja vigente el mandato de consejo1 y devuelve en el resumen
+(`exportacion`) lo que necesita `ensayo_exportacion_staging.py`, que corre en
+`cem-trabajos-staging`, arma la exportación formal, comprueba los comprobantes y da de baja ese
+mandato. La aprobación vencida no entra: vence a los 7 días y el ensayo no toca el reloj (SIN
+VERIFICAR en staging; la cubren las pruebas).
+
 Al final comprueba que ningún evento de auditoría del consorcio lleva una cuenta, que la cola del
 consorcio no tiene trabajos muertos, la cadena de auditoría, y revoca sesiones y da de baja los
 mandatos de la corrida.
@@ -99,12 +115,13 @@ from app.consorcios.pagos import EstadoRiel, PedidoPago, RespuestaRiel
 from app.db import crear_motor, transaccion
 from app.identidad import invitaciones, sesiones
 from app.identidad import segundo_factor as segundo_factor_app
-from app.plataforma import cola
+from app.plataforma import cola, copia_continua
 from app.plataforma.idempotencia import ENCABEZADO, ENCABEZADO_REPETIDA
 
 NOMBRE_CONSORCIO = "CEM LAB — egresos sintéticos (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_MANUAL = "CEM LAB — pago manual sintético (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_LIQUIDACION = "CEM LAB — liquidación sintética (SINTETICO, PRUEBA, NO REAL)"
+NOMBRE_CONSORCIO_COMPLETO = "CEM LAB — recorrido completo sintético (SINTETICO, PRUEBA, NO REAL)"
 DOMINIO = "cem-prueba.invalid"
 SUFIJO_STAGING = "-staging"
 ZONA = "America/Argentina/Buenos_Aires"
@@ -453,8 +470,9 @@ def documento_disponible(corrida: Corrida, categoria: str, titulo: str) -> str:
     return con_archivo_disponible(corrida, r.cuerpo["id"], categoria)
 
 
-def con_archivo_disponible(corrida: Corrida, doc: str, categoria: str) -> str:
-    adm = corrida.n("administracion")
+def con_archivo_disponible(corrida: Corrida, doc: str, categoria: str,
+                           rol: str = "administracion") -> str:  # fmt: skip
+    adm = corrida.n(rol)
     r = adm.pedir("POST", corrida.c(f"/documentos/{doc}/versiones"),
                   crudo=pdf_sintetico(corrida.id),
                   tipo="application/pdf", csrf=True, clave=str(uuid4()))  # fmt: skip
@@ -809,16 +827,17 @@ def al_dia(corrida: Corrida, *roles: str) -> None:
         reverificar(corrida, rol)
 
 
-def comprobante_disponible(corrida: Corrida, n: int, orden: str) -> str:
-    """Cargado desde el pago de `orden` por la administración, que vio la cuenta (`0063`): nace
-    con la orden y restringido, y la lista se la devuelve."""
-    adm = corrida.n("administracion")
+def comprobante_disponible(corrida: Corrida, n: int, orden: str,
+                           rol: str = "administracion") -> str:  # fmt: skip
+    """Cargado desde el pago de `orden` por `rol`, que vio la cuenta (`0063`): nace con la orden
+    y restringido, y la lista se la devuelve."""
+    adm = corrida.n(rol)
     titulo = f"Transferencia LAB {corrida.id}-{n} SINTETICA (NO REAL)"
     r = adm.pedir("POST", corrida.c(f"/ordenes-pago/{orden}/pago-manual/comprobante"),
                   {"titulo": titulo, "fecha": time.strftime("%Y-%m-%d")}, csrf=True,
                   clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"cargar el comprobante desde el pago: {r.texto}")
-    doc = con_archivo_disponible(corrida, r.cuerpo["id"], "facturas_y_comprobantes")
+    doc = con_archivo_disponible(corrida, r.cuerpo["id"], "facturas_y_comprobantes", rol)
     lista = adm.pedir("GET", corrida.c("/documentos"))
     [d] = [x for x in lista.cuerpo["documentos"] if x["id"] == doc]
     comprobar(d["orden_pago_id"] == orden, f"la lista da la orden del comprobante: {d}")
@@ -890,7 +909,8 @@ def en_paralelo(*pedidos) -> list[Respuesta]:
     return resultados
 
 
-def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
+def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> str:
+    """Devuelve la orden 1, pagada y conciliada (la usa `--completo`)."""
     adm = corrida.n("administracion")
     entra_otra_cuenta(corrida, "administracion_otra", "administracion")
     with corrida.tx() as conn:
@@ -1155,6 +1175,7 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> None:
         comprobar(r.estado == 404 and not any(c in r.texto for c in corrida.cuentas),
                   f"otro consorcio {metodo} {ruta}: {r.estado} {r.texto}")  # fmt: skip
     corrida.ok("rutas de otro consorcio: 404, sin ninguna cuenta")
+    return o1
 
 
 # Liquidación neutral (0057) ----------------------------------------------------------------
@@ -1165,16 +1186,23 @@ COEFICIENTES = ("50.000000", "33.333333", "16.666667")
 """Suman 99,999999 %, como una fuente real: el motor reparte el total exacto igual."""
 
 
-def registrar_esquema(corrida: Corrida, desde, decision: UUID) -> UUID:
+def coeficientes_para(n: int) -> tuple[str, ...]:
+    """Partes iguales con seis decimales; la última lleva el resto, así suman 100."""
+    parte = (Decimal(100) / n).quantize(Decimal("0.000001"), rounding="ROUND_DOWN")
+    return (*(f"{parte}",) * (n - 1), f"{Decimal(100) - parte * (n - 1)}")
+
+
+def registrar_esquema(corrida: Corrida, desde, decision: UUID,
+                      coeficientes: tuple[str, ...] = COEFICIENTES) -> UUID:  # fmt: skip
     """El esquema de `GRUPO` con las unidades activas del consorcio, cargado por soporte."""
     with corrida.tx() as conn:
         unidades = conn.execute(
             text("select id from nucleo.unidad where consorcio_id = :c and eliminado_en is null"
                  " order by designacion"), {"c": corrida.consorcio},
         ).scalars().all()  # fmt: skip
-        comprobar(len(unidades) == len(COEFICIENTES),
+        comprobar(len(unidades) == len(coeficientes),
                   f"el consorcio de la corrida tiene {len(unidades)} unidades")  # fmt: skip
-        coeficientes = dict(zip(map(str, unidades), COEFICIENTES, strict=True))
+        coeficientes = dict(zip(map(str, unidades), coeficientes, strict=True))
         return conn.execute(
             text("select nucleo.registrar_esquema_coeficientes(:g, :f, :d, :dec,"
                  " cast(:co as jsonb), 'proporcional_a_coeficientes', 'restos_mayores', null,"
@@ -1257,7 +1285,7 @@ def preparar_liquidacion(corrida: Corrida, rol: str, periodo: str) -> Respuesta:
                                 csrf=True, clave=str(uuid4()))  # fmt: skip
 
 
-def reparto_exacto(simulacion: dict) -> None:
+def reparto_exacto(simulacion: dict, coeficientes: tuple[str, ...] = COEFICIENTES) -> None:
     """La suma por unidad es el total, y cada unidad queda a menos de un centavo de su parte
     exacta (restos mayores)."""
     comprobar(simulacion["bloqueo"] is None, f"la simulación reparte: {simulacion['bloqueo']}")
@@ -1265,8 +1293,8 @@ def reparto_exacto(simulacion: dict) -> None:
     unidades = simulacion["unidades"]
     comprobar(sum(u["total_centavos"] for u in unidades) == total,
               f"la suma por unidad es el total {total}: {unidades}")  # fmt: skip
-    suma = sum(Decimal(x) for x in COEFICIENTES)
-    partes = sorted(Decimal(total) * Decimal(x) / suma for x in COEFICIENTES)
+    suma = sum(Decimal(x) for x in coeficientes)
+    partes = sorted(Decimal(total) * Decimal(x) / suma for x in coeficientes)
     recibidos = sorted(Decimal(u["total_centavos"]) for u in unidades)
     comprobar(all(abs(r - p) < 1 for r, p in zip(recibidos, partes, strict=True)),
               f"cada unidad a menos de un centavo: {recibidos} vs {partes}")  # fmt: skip
@@ -1458,6 +1486,208 @@ def recorrer_liquidacion(corrida: Corrida, otro_consorcio: UUID, orden_ajena: UU
                " pagada después del período: 409")  # fmt: skip
 
 
+# Recorrido completo (mandato del propietario del 03-11) ---------------------------------------
+
+
+ACCIONES_DEL_RECORRIDO = (
+    "consorcio.proveedor.alta", "consorcio.proveedor.modificar",
+    "consorcio.contrato_proveedor.registrar", "consorcio.contrato_proveedor.confirmar",
+    "consorcio.orden_pago.preparar", "consorcio.orden_pago.aprobar",
+    "consorcio.orden_pago.emitir", "consorcio.orden_pago.ver_cuenta_para_pago",
+    "consorcio.documento.crear", "consorcio.orden_pago.registrar_pago_manual",
+    "consorcio.orden_pago.conciliar_pago_manual", "consorcio.liquidacion.agregar_gasto",
+    "autorizacion.denegada",
+)  # fmt: skip
+
+
+def ultima_negacion(corrida: Corrida, accion: str) -> str | None:
+    with corrida.tx() as conn:
+        return conn.execute(
+            text("select despues->>'motivo' from auditoria.eventos where consorcio_id = :c"
+                 " and accion = 'autorizacion.denegada' and despues->>'accion' = :a"
+                 " and creado_en >= :i order by secuencia desc limit 1"),
+            {"c": corrida.consorcio, "a": accion, "i": corrida.inicio},
+        ).scalar_one_or_none()  # fmt: skip
+
+
+def ids_de_documentos(corrida: Corrida, rol: str) -> dict[str, str | None]:
+    r = corrida.n(rol).pedir("GET", corrida.c("/documentos"))
+    comprobar(r.estado == 200, f"documentos de {rol}: {r.texto}")
+    return {d["id"]: d["orden_pago_id"] for d in r.cuerpo["documentos"]}
+
+
+def recorrer_completo(corrida: Corrida, otro_consorcio: UUID) -> dict:
+    """El recorrido del pago manual y, en el mismo consorcio, lo que le faltaba para ir de punta a
+    punta: los negativos de separación que faltaban, la visibilidad de los comprobantes, la
+    liquidación con su simulación y su falla cerrada, la auditoría y lo que necesita la
+    exportación formal (`ensayo_exportacion_staging.py`, en `cem-trabajos`)."""
+    o1 = recorrer_pago_manual(corrida, otro_consorcio)
+    adm = corrida.n("administracion")
+    al_dia(corrida, "administracion")
+    control = documento_disponible(
+        corrida,
+        "facturas_y_comprobantes",
+        f"Factura LAB {corrida.id} SINTETICA de control (NO REAL)",
+    )
+
+    # 11. Quien prepara no aprueba, tampoco con su otra cuenta del Consejo.
+    al_dia(corrida, "administracion", "consejo1", "administracion_otra")
+    p3 = proveedor(corrida, 3)
+    cuenta_3 = corrida.cuentas[-1]
+    o5 = preparar(corrida, p3, 1_200_000)
+    comprobar(estado(corrida, o5) == "en_revision", "proveedor nuevo: espera al Consejo")
+    r = aprobar(corrida, "administracion", o5)
+    comprobar(r.estado == 403, f"quien preparó no aprueba: {r.texto}")
+    r = aprobar(corrida, "administracion_otra", o5)
+    comprobar(r.estado == 403, f"ni con otra cuenta del Consejo: {r.texto}")
+    # El evaluador niega por la identidad humana y responde un 403 genérico: el motivo queda en
+    # la auditoría.
+    comprobar(ultima_negacion(corrida, "egresos.aprobar_orden") == "no_es_quien_preparo",
+              "la negación es por haber preparado la orden")  # fmt: skip
+    comprobar(estado(corrida, o5) == "en_revision", "sigue en revisión")
+    comprobar(aprobar(corrida, "consejo1", o5).estado == 201, "consejo1 aprueba la orden 5")
+    corrida.ok("quien preparó no aprueba (403), tampoco desde otra cuenta del Consejo")
+
+    # 12. Dos emisiones a la vez: una sola.
+    reverificar(corrida, "administracion")
+    resultados = en_paralelo(
+        lambda: emitir(corrida, "administracion", o5, str(uuid4())),
+        lambda: emitir(corrida, "administracion", o5, str(uuid4())),
+    )
+    comprobar(sorted(r.estado for r in resultados) == [200, 409],
+              f"dos emisiones a la vez: una sola {[r.texto for r in resultados]}")  # fmt: skip
+    corrida.ok("dos emisiones manuales a la vez: una sola")
+
+    # 13. Quien aprobó no entra al acto; ejecuta la administración (el único paquete con
+    # `egresos.ejecutar_pago`, `0011`); quien ejecutó no concilia, tampoco con su otra cuenta.
+    reverificar(corrida, "consejo1")
+    r = cuenta_para_pagar(corrida, "consejo1", o5)
+    comprobar(r.estado == 403 and cuenta_3 not in r.texto, f"quien aprobó no ejecuta: {r.texto}")
+    reverificar(corrida, "administracion")
+    r = cuenta_para_pagar(corrida, "administracion", o5)
+    comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta_3,
+              f"la administración recibe la cuenta en el acto: {r.texto}")  # fmt: skip
+    # Documento inválido: un tipo no admitido, y un PDF declarado que no lo es.
+    for tipo in ("text/plain", "application/pdf"):
+        r = adm.pedir("POST", corrida.c(f"/documentos/{control}/versiones"),
+                      crudo=b"SINTETICO: no es un PDF (NO REAL)", tipo=tipo, csrf=True,
+                      clave=str(uuid4()))  # fmt: skip
+        comprobar((r.estado, r.codigo()) == (415, "tipo_no_admitido"),
+                  f"archivo inválido declarado {tipo}: {r.texto}")  # fmt: skip
+    doc5 = comprobante_disponible(corrida, 5, o5)
+    r = registrar_pago(corrida, "administracion", o5, importe_centavos=1_200_000,
+                       cuenta_destino=cuenta_3, numero_operacion=f"LAB{corrida.id}05",
+                       documento_id=doc5)  # fmt: skip
+    comprobar(r.estado == 201, f"la administración registra: {r.texto}")
+    pago5 = r.cuerpo["id"]
+    al_dia(corrida, "administracion", "administracion_otra")
+    for rol in ("administracion", "administracion_otra"):
+        r = conciliar(corrida, rol, o5, pago5, "conforme")
+        comprobar(r.estado == 403, f"quien ejecutó no concilia ({rol}): {r.texto}")
+    reverificar(corrida, "consejo1")
+    r = conciliar(corrida, "consejo1", o5, pago5, "conforme")
+    comprobar(r.estado == 200 and estado(corrida, o5) == "pagada",
+              f"concilia quien aprobó, que no ejecutó: {r.texto}")  # fmt: skip
+    corrida.ok("quien aprobó no ejecuta; quien ejecutó no concilia, tampoco con otra cuenta;"
+               " un archivo inválido se niega (415)")  # fmt: skip
+
+    # 14. El comprobante: lo ven quien lo subió (la administración, que también preparó: el
+    # piloto no tiene otro ejecutor) y el Consejo que no preparó; no la otra cuenta del Consejo
+    # de quien preparó. El control es una factura sin orden, que todos ven.
+    for rol, lo_ve in (("administracion", True), ("consejo2", True),
+                       ("administracion_otra", False)):  # fmt: skip
+        ids = ids_de_documentos(corrida, rol)
+        comprobar(control in ids, f"control: {rol} lee documentos")
+        comprobar((doc5 in ids) == lo_ve, f"comprobante de la orden 5 para {rol}: {lo_ve}")
+    corrida.ok("comprobante: lo ven quien lo subió y el Consejo que no preparó;"
+               " no la otra cuenta del Consejo de quien preparó")  # fmt: skip
+
+    # 15. Liquidación del período con las dos órdenes pagadas, y su simulación.
+    with corrida.tx() as conn:
+        hoy = conn.execute(
+            text("select nucleo.hoy_del_consorcio(:c)"), {"c": corrida.consorcio}
+        ).scalar_one()
+        decision = conn.execute(
+            text("select nucleo.registrar_decision('asamblea', :h, :d, :r, null, 'soporte')"),
+            {"h": hoy, "d": "SINTETICA: coeficientes del recorrido completo", "r": REFERENCIA},
+        ).scalar_one()  # fmt: skip
+        n_unidades = conn.execute(
+            text("select count(*) from nucleo.unidad where consorcio_id = :c"
+                 " and eliminado_en is null"), {"c": corrida.consorcio},
+        ).scalar_one()  # fmt: skip
+    coeficientes = coeficientes_para(n_unidades)
+    periodo = hoy.replace(day=1)
+    registrar_esquema(corrida, periodo - timedelta(days=1), decision, coeficientes)
+    al_dia(corrida, "administracion")
+    r = preparar_liquidacion(corrida, "administracion", periodo.isoformat())
+    comprobar(r.estado == 201, f"borrador del período: {r.texto}")
+    liq = r.cuerpo["id"]
+    liquidables = adm.pedir("GET", corrida.c("/liquidaciones/ordenes-liquidables"))
+    ids = {x["orden_id"] for x in liquidables.cuerpo["elementos"]}
+    comprobar(ids == {o1, o5}, f"liquidables: las dos pagadas: {ids}")
+    for o in sorted(ids):
+        comprobar(agregar_gasto(corrida, "administracion", liq, o).estado == 201, "agregar")
+    simulacion = detalle_liquidacion(corrida, "administracion", liq)["simulacion"]
+    comprobar(simulacion["total_centavos"] == 3_700_000, f"total: {simulacion}")
+    reparto_exacto(simulacion, coeficientes)
+    corrida.ok(f"liquidación con las dos órdenes pagadas: 37.000,00 ARS en {n_unidades}"
+               " unidades, suma exacta")  # fmt: skip
+
+    # 16. Una unidad nueva (entra un propietario): el esquema ya no describe el consorcio y la
+    # simulación se niega en vez de repartir mal (falla cerrada, como P3 146).
+    entra(corrida, "propietario")
+    simulacion = detalle_liquidacion(corrida, "administracion", liq)["simulacion"]
+    comprobar("no coincide con las unidades activas" in (simulacion["bloqueo"] or "")
+              and simulacion["unidades"] == [],
+              f"esquema que no describe el consorcio: no reparte {simulacion}")  # fmt: skip
+    r = descartar_liquidacion(corrida, "administracion", liq, "SINTETICO: fin del recorrido")
+    comprobar(r.estado == 200, f"descartar el borrador: {r.texto}")
+    ids = ids_de_documentos(corrida, "propietario")
+    comprobar(control in ids, "control: el propietario lee documentos")
+    comprobar(not any(o is not None for o in ids.values()),
+              f"el propietario no ve ningún comprobante: {ids}")  # fmt: skip
+    corrida.ok("unidad nueva: la simulación se bloquea sin repartir; el propietario no ve"
+               " comprobantes")  # fmt: skip
+
+    # 17. Documentos de otro consorcio y auditoría del recorrido.
+    otro = f"/api/v1/consorcios/{otro_consorcio}"
+    for rol in ("consejo2", "administracion"):
+        r = corrida.n(rol).pedir("GET", f"{otro}/documentos")
+        comprobar(r.estado == 404 and doc5 not in r.texto, f"otro consorcio: {r.texto}")
+    with corrida.tx() as conn:
+        acciones = dict(conn.execute(
+            text("select accion, count(*) from auditoria.eventos where consorcio_id = :c"
+                 " and creado_en >= :i group by accion"),
+            {"c": corrida.consorcio, "i": corrida.inicio},
+        ).all())  # fmt: skip
+        actores = dict(conn.execute(
+            text("select accion, actor_persona_id from auditoria.eventos where consorcio_id = :c"
+                 " and entidad_id = :o and accion in"
+                 " ('consorcio.orden_pago.registrar_pago_manual',"
+                 "  'consorcio.orden_pago.conciliar_pago_manual')"),
+            {"c": corrida.consorcio, "o": o5},
+        ).all())  # fmt: skip
+        cadena = conn.execute(copia_continua.CADENA).one()
+    faltan = [a for a in ACCIONES_DEL_RECORRIDO if not acciones.get(a)]
+    comprobar(not faltan, f"acciones del recorrido en la auditoría: faltan {faltan}")
+    esperados = {
+        "consorcio.orden_pago.registrar_pago_manual": corrida.personas["administracion"],
+        "consorcio.orden_pago.conciliar_pago_manual": corrida.personas["consejo1"],
+    }
+    comprobar(actores == esperados, f"quién registró y quién concilió: {actores}")
+    total, rotos, distintos, control_cadena = cadena
+    comprobar(total > 0 and rotos == 0 and distintos == 0 and control_cadena == total,
+              f"cadena de auditoría: {cadena}")  # fmt: skip
+    corrida.ok(f"auditoría: {len(ACCIONES_DEL_RECORRIDO)} acciones, quién registró y concilió;"
+               f" cadena íntegra ({total} eventos); otro consorcio 404")  # fmt: skip
+
+    comprobantes = sorted(d for d, o in ids_de_documentos(corrida, "consejo2").items() if o)
+    return {"consorcio": str(corrida.consorcio), "solicitante": str(corrida.personas["consejo1"]),
+            "mandato": str(corrida.mandatos["consejo1"]), "comprobantes": comprobantes,
+            "control": control, "propietario": str(corrida.personas["propietario"]),
+            "cuentas": corrida.cuentas}  # fmt: skip
+
+
 def comprobar_fin(corrida: Corrida, inicio) -> None:
     with corrida.tx() as conn:
         textos = conn.execute(
@@ -1477,9 +1707,13 @@ def comprobar_fin(corrida: Corrida, inicio) -> None:
     corrida.ok(f"{len(textos)} eventos de la corrida sin ninguna cuenta; 0 trabajos muertos")
 
 
-def cerrar(corrida: Corrida) -> int:
+def cerrar(corrida: Corrida, conservar: str | None = None) -> int:
+    """Revoca todas las sesiones y da de baja los mandatos, salvo el de `conservar`: con
+    `--completo`, el del Consejo que pide la exportación, que la cierra al terminar."""
     with corrida.tx() as conn:
-        for m in corrida.mandatos.values():
+        for rol, m in corrida.mandatos.items():
+            if rol == conservar:
+                continue
             conn.execute(
                 text("select nucleo.baja_mandato(:m, 'renuncia', null, :r, 'Fin del ensayo de"
                      " egresos', null, 'soporte')"), {"m": m, "r": REFERENCIA},
@@ -1514,6 +1748,11 @@ def main(argumentos: list[str] | None = None) -> int:
         help="recorre la liquidación neutral (0057) sobre órdenes pagadas a mano",
     )
     p.add_argument(
+        "--completo",
+        action="store_true",
+        help="recorre todo en un consorcio: pago manual, liquidación, auditoría y exportación",
+    )
+    p.add_argument(
         "--otro-consorcio",
         type=UUID,
         help="con --pago-manual o --liquidacion: un consorcio ajeno para probar que no se cruza",
@@ -1524,10 +1763,10 @@ def main(argumentos: list[str] | None = None) -> int:
         help="con --liquidacion: una orden pagada de --otro-consorcio, que no se puede agregar",
     )
     a = p.parse_args(argumentos)
-    if a.pago_manual and a.liquidacion:
-        p.error("--pago-manual y --liquidacion van en corridas distintas")
-    if (a.pago_manual or a.liquidacion) and a.otro_consorcio is None:
-        p.error("--pago-manual y --liquidacion piden --otro-consorcio")
+    if sum((a.pago_manual, a.liquidacion, a.completo)) > 1:
+        p.error("--pago-manual, --liquidacion y --completo van en corridas distintas")
+    if (a.pago_manual or a.liquidacion or a.completo) and a.otro_consorcio is None:
+        p.error("--pago-manual, --liquidacion y --completo piden --otro-consorcio")
     if a.liquidacion and a.orden_ajena is None:
         p.error("--liquidacion pide --orden-ajena")
     config = cargar()
@@ -1551,6 +1790,8 @@ def main(argumentos: list[str] | None = None) -> int:
             nombre = NOMBRE_CONSORCIO_MANUAL
         elif a.liquidacion:
             nombre = NOMBRE_CONSORCIO_LIQUIDACION
+        elif a.completo:
+            nombre = NOMBRE_CONSORCIO_COMPLETO
         creado = asegurar_consorcio(motor, a.consorcio, nombre)
         print(
             f"corrida {corrida.id}; consorcio {a.consorcio} ({'creado' if creado else 'existente'})"
@@ -1559,9 +1800,12 @@ def main(argumentos: list[str] | None = None) -> int:
             inicio = conn.execute(text("select clock_timestamp()")).scalar_one()
         corrida.inicio = inicio
         error = None
+        exportacion = None
         try:
             preparar_escena(corrida)
-            if a.pago_manual:
+            if a.completo:
+                exportacion = recorrer_completo(corrida, a.otro_consorcio)
+            elif a.pago_manual:
                 recorrer_pago_manual(corrida, a.otro_consorcio)
             elif a.liquidacion:
                 recorrer_liquidacion(corrida, a.otro_consorcio, a.orden_ajena)
@@ -1572,7 +1816,8 @@ def main(argumentos: list[str] | None = None) -> int:
             error = e
             print(f"FALLÓ: {e}", file=sys.stderr, flush=True)
         finally:
-            abiertas = cerrar(corrida)
+            # Con `--completo` en verde, el mandato de consejo1 lo cierra la exportación.
+            abiertas = cerrar(corrida, "consejo1" if exportacion and error is None else None)
             print(
                 json.dumps(
                     {
@@ -1585,6 +1830,7 @@ def main(argumentos: list[str] | None = None) -> int:
                         },
                         "sesiones_abiertas_al_cerrar": abiertas,
                         "controles": corrida.controles,
+                        "exportacion": exportacion if error is None else None,
                     },
                     ensure_ascii=False,
                     indent=2,

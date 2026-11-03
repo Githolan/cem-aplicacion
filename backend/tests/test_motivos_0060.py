@@ -12,7 +12,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from tests.test_orden_pago_neutra import RECHAZAR, cbu_sintetico, llamar, niega, orden, preparada
-from tests.test_pago_manual_0055 import CONCILIAR, CUENTA, DECLARAR, emitida, registrada
+from tests.test_pago_manual_0055 import (
+    CONCILIAR,
+    CUENTA,
+    DECLARAR,
+    emitida,
+    otro_ejecutor,
+    registrada,
+)
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
 from tests.test_rutas_egresos import get, post
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
@@ -105,6 +112,25 @@ def test_por_http_es_422_y_quien_prepara_lee_solo_el_motivo_sin_cuenta(motor_mig
     assert CUENTA not in lectura.text
 
 
+def test_por_http_quien_preparo_y_nunca_vio_la_cuenta_lee_el_motivo_sin_ella(
+    motor_migrate, motor_app, e
+):
+    """P3 151: lee la administración, que preparó y no ejecutó: x vio la cuenta y registró."""
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    p = registrada(motor_migrate, e, o, quien=x)
+    ruta = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
+    r = post(e, e.mc2, ruta, {"resultado": "observado", "motivo": CON_CUENTA[2]})
+    assert (r.status_code, r.json()["codigo"]) == (422, "motivo_con_cuenta"), r.text
+    r = post(e, e.mc2, ruta, {"resultado": "observado", "motivo": SIN_CUENTA[0]})
+    assert r.status_code == 200, r.text  # control
+    lectura = get(e, e.adm, "pagos-manuales")
+    assert lectura.status_code == 200, lectura.text
+    [elemento] = [x for x in lectura.json()["elementos"] if x["orden"]["id"] == str(o)]
+    assert [x["motivo_conciliacion"] for x in elemento["ejecucion"]["pagos"]] == [SIN_CUENTA[0]]
+    assert CUENTA not in lectura.text and partida(CUENTA, "-") not in lectura.text
+
+
 def test_la_regla_es_la_del_riel_con_mas_separadores(motor_migrate):
     """La base y el patrón del riel (`CUENTA_EN_TEXTO`) dicen lo mismo de cada caso, salvo los
     separadores que el riel no conoce (barra, espacio duro y fino)."""
@@ -147,6 +173,16 @@ def test_la_migracion_se_niega_si_ya_hay_un_motivo_con_cuenta(motor_migrate, e):
         assert "hay motivos guardados con una cuenta" in str(error.value)
         tx.rollback()
     assert orden(motor_migrate, o)["motivo_rechazo"] == SIN_CUENTA[0]
+    # P3 151: el rollback deja el disparador activo otra vez, y sigue negando.
+    with motor_migrate.connect() as c:
+        sql = ("select tgenabled from pg_trigger where tgname = 'motivo_sin_cuenta'"
+               " and tgrelid = 'nucleo.orden_pago'::regclass")  # fmt: skip
+        activo = c.execute(text(sql)).scalar_one()
+        assert activo == "O"
+        with pytest.raises(DBAPIError):
+            c.execute(text("update nucleo.orden_pago set motivo_rechazo = :m where id = :o"),
+                      {"m": CON_CUENTA[1], "o": o})  # fmt: skip
+        c.rollback()
 
 
 def test_0060_ida_y_vuelta(base_aparte):  # noqa: F811
