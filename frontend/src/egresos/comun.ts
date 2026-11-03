@@ -20,6 +20,8 @@ export const ESTADO = {
   errorDelServidor: 500,
 } as const;
 export const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
+/** El tope del título de un documento (`LARGO_MAXIMO_TITULO` de los contratos). */
+export const LARGO_TITULO = 200;
 
 /** R10: falta verificar el segundo factor en esta sesión (se pide el código y se reintenta). */
 export const SEGUNDO_FACTOR_REQUERIDO = "segundo_factor_requerido";

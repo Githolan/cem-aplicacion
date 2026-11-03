@@ -4438,7 +4438,7 @@
         "type": "object"
       },
       "ListaPagosPorAclarar": {
-        "description": "`GET /pagos-por-aclarar`: en cualquier consorcio. Se declara con\n`POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`);\nlo confirma otro miembro del Consejo.",
+        "description": "`GET /pagos-por-aclarar`: en cualquier consorcio. Si no transferiste, se declara con\n`POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`).\nSi transferiste, se carga el comprobante (`…/{orden}/comprobante` y su archivo en\n`…/{orden}/comprobante/{documento}/versiones`) y se registra en `…/{orden}/pago`\n(`RegistroPagoManual`, `0068`). Lo concilia o confirma otro miembro del Consejo.",
         "properties": {
           "elementos": {
             "items": {
@@ -5657,6 +5657,31 @@
       "PagoPorAclarar": {
         "description": "Una orden que espera que digas si transferiste: viste la cuenta en el acto de ejecución y\nya no tenés `egresos.ejecutar_pago` en ese consorcio (`0067`, P3 179). Sin la cuenta.",
         "properties": {
+          "comprobante_estado": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El estado de su último archivo: `en_cuarentena`, `disponible` o `rechazado`.",
+            "title": "Comprobante Estado"
+          },
+          "comprobante_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El último comprobante de esta orden que cargaste, si hay (`0068`, P3 184).",
+            "title": "Comprobante Id"
+          },
           "concepto": {
             "title": "Concepto",
             "type": "string"
@@ -5674,6 +5699,12 @@
             "description": "La última vez que viste la cuenta.",
             "format": "date-time",
             "title": "Cuenta Vista En",
+            "type": "string"
+          },
+          "huella": {
+            "description": "La de la versión: el registro la pide (`0068`).",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
             "type": "string"
           },
           "importe_centavos": {
@@ -5704,7 +5735,10 @@
           "concepto",
           "importe_centavos",
           "moneda",
-          "cuenta_vista_en"
+          "cuenta_vista_en",
+          "huella",
+          "comprobante_id",
+          "comprobante_estado"
         ],
         "title": "PagoPorAclarar",
         "type": "object"
@@ -12748,6 +12782,204 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante": {
+      "post": {
+        "description": "El documento (`0068`, P3 184); el archivo va a\n`…/pagos-por-aclarar/{orden}/comprobante/{documento}/versiones`.",
+        "operationId": "crear_comprobante_sin_facultad_api_v1_consorcios__consorcio_id__pagos_por_aclarar__orden_id__comprobante_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComprobantePagoNuevo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cargar el comprobante de lo que transferiste, sin ejecutar ya pagos en el consorcio",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante/{documento_id}/versiones": {
+      "post": {
+        "operationId": "subir_comprobante_sin_facultad_api_v1_consorcios__consorcio_id__pagos_por_aclarar__orden_id__comprobante__documento_id__versiones_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionCargada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+          }
+        },
+        "summary": "Subir el archivo del comprobante, sin ejecutar ya pagos en el consorcio: entra en cuarentena hasta que se analiza",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado": {
       "post": {
         "operationId": "declarar_pago_no_realizado_sin_facultad_api_v1_consorcios__consorcio_id__pagos_por_aclarar__orden_id__no_realizado_post",
@@ -12827,6 +13059,90 @@
           }
         },
         "summary": "Declarar que no transferiste, sin ejecutar ya pagos en el consorcio: lo confirma otro miembro del Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/pago": {
+      "post": {
+        "operationId": "registrar_pago_sin_facultad_api_v1_consorcios__consorcio_id__pagos_por_aclarar__orden_id__pago_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroPagoManual"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualRegistrado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Registrar lo que transferiste, sin ejecutar ya pagos en el consorcio: lo concilia otro miembro del Consejo",
         "tags": [
           "egresos"
         ]

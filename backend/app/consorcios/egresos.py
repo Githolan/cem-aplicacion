@@ -31,7 +31,8 @@ from contextlib import contextmanager
 from typing import Annotated
 from uuid import UUID
 
-from cem_contracts.documentos import DocumentoId
+import anyio
+from cem_contracts.documentos import DocumentoId, VersionCargada
 from cem_contracts.egresos import (
     VIGENCIA_APROBACION,
     Aprobacion,
@@ -85,18 +86,23 @@ from cem_contracts.egresos import (
     ultimos_digitos,
 )
 from cem_contracts.errores import CodigoError
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
+from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
 from app.contexto import Contexto, IdentidadDep, MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
-from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
+from app.plataforma.idempotencia import (
+    ClaveIdempotenciaDep,
+    IdempotenciaDep,
+    responder_una_vez,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["egresos"], dependencies=[Depends(sin_cache)])
 
@@ -1239,6 +1245,39 @@ def pagos_por_aclarar(identidad: IdentidadDep, motor: MotorDep) -> ListaPagosPor
         return ListaPagosPorAclarar(elementos=[PagoPorAclarar(**f) for f in filas])
 
 
+def _sin_ambito(motor, identidad, consorcio_id: UUID) -> Contexto:
+    """El contexto de quien ya no tiene ámbito en el consorcio: solo la persona, la sesión y el
+    consorcio, sin vínculos ni mandatos (no decide nada con él: lo decide la base). 404 si el
+    consorcio no existe, como `require_scope`."""
+    with transaccion(motor, persona_id=identidad.persona_id, consorcio_id=consorcio_id) as c:
+        hoy = c.execute(
+            text("select nucleo.hoy_del_consorcio(id) from nucleo.consorcio"
+                 " where id = :c and eliminado_en is null"),
+            {"c": consorcio_id},
+        ).scalar_one_or_none()  # fmt: skip
+    if hoy is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return Contexto(persona_id=identidad.persona_id, consorcio_id=consorcio_id, hoy=hoy,
+                    vinculos=(), modo=None, sesion_id=identidad.sesion_id)  # fmt: skip
+
+
+def ejecutar_sin_ambito(conn: Connection, ctx: Contexto, sql: str, parametros: dict):
+    """Como `_ejecutar`, para estas rutas: `42501` es 404 (a quien no vio la cuenta no se le dice
+    si la orden existe)."""
+    try:
+        return conn.execute(
+            text(sql), parametros | {"actor": ctx.persona_id, "sesion": ctx.sesion_id}
+        )
+    except DBAPIError as e:
+        if isinstance(e.orig, InsufficientPrivilege):
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO) from e
+        motivo = e.orig.diag.message_hint
+        errores = ERRORES | ERRORES_SIN_AMBITO
+        if motivo in errores:
+            raise ErrorApi(*errores[motivo]) from e
+        raise
+
+
 @router.post(
     "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado",
     status_code=201,
@@ -1255,35 +1294,110 @@ def declarar_pago_no_realizado_sin_facultad(
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    p = identidad.persona_id
-    with transaccion(motor, persona_id=p, consorcio_id=consorcio_id) as c:
-        hoy = c.execute(
-            text("select nucleo.hoy_del_consorcio(id) from nucleo.consorcio"
-                 " where id = :c and eliminado_en is null"),
-            {"c": consorcio_id},
-        ).scalar_one_or_none()  # fmt: skip
-    if hoy is None:
-        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    # Sin vínculos ni mandatos: la persona no tiene nada más en el consorcio.
-    ctx = Contexto(persona_id=p, consorcio_id=consorcio_id, hoy=hoy, vinculos=(), modo=None,
-                   sesion_id=identidad.sesion_id)  # fmt: skip
+    ctx = _sin_ambito(motor, identidad, consorcio_id)
 
     def efecto(conn: Connection) -> tuple[int, DeclaracionRegistrada]:
-        try:
-            d = conn.execute(
-                text("select nucleo.declarar_pago_no_realizado(:o, :version, :motivo, :actor,"
-                     " 'api', :sesion)"),
-                {"o": orden_id, "version": declaracion.version, "motivo": declaracion.motivo,
-                 "actor": p, "sesion": identidad.sesion_id},
-            ).scalar_one()  # fmt: skip
-        except DBAPIError as e:
-            if isinstance(e.orig, InsufficientPrivilege):
-                raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO) from e
-            motivo = e.orig.diag.message_hint
-            errores = ERRORES | ERRORES_SIN_AMBITO
-            if motivo in errores:
-                raise ErrorApi(*errores[motivo]) from e
-            raise
+        d = ejecutar_sin_ambito(
+            conn, ctx,
+            "select nucleo.declarar_pago_no_realizado(:o, :version, :motivo, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "version": declaracion.version, "motivo": declaracion.motivo},
+        ).scalar_one()  # fmt: skip
         return 201, DeclaracionRegistrada(id=d, orden_id=orden_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante",
+    status_code=201,
+    response_model=DocumentoId,
+    summary="Cargar el comprobante de lo que transferiste, sin ejecutar ya pagos en el consorcio",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def crear_comprobante_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    nuevo: ComprobantePagoNuevo,
+    identidad: IdentidadDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """El documento (`0068`, P3 184); el archivo va a
+    `…/pagos-por-aclarar/{orden}/comprobante/{documento}/versiones`."""
+    ctx = _sin_ambito(motor, identidad, consorcio_id)
+
+    def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        doc = ejecutar_sin_ambito(
+            conn, ctx,
+            "select nucleo.crear_comprobante_de_pago(:o, :titulo, :fecha, :actor, 'api', :sesion)",
+            {"o": orden_id, "titulo": nuevo.titulo, "fecha": nuevo.fecha},
+        ).scalar_one()  # fmt: skip
+        return 201, DocumentoId(id=doc)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante/{documento_id}/versiones",
+    status_code=201,
+    response_model=VersionCargada,
+    summary="Subir el archivo del comprobante, sin ejecutar ya pagos en el consorcio: entra en"
+    " cuarentena hasta que se analiza",
+    openapi_extra=SUBIDA_OPENAPI,
+    responses=RESPUESTAS_SUBIDA,
+)
+async def subir_comprobante_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    documento_id: UUID,
+    request: Request,
+    identidad: IdentidadDep,
+    clave: ClaveIdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = await anyio.to_thread.run_sync(lambda: _sin_ambito(motor, identidad, consorcio_id))
+
+    def nueva(conn: Connection, tipo: str, tamano: int, suma: str):
+        return ejecutar_sin_ambito(
+            conn, ctx,
+            "select id, clave_objeto from nucleo.nueva_version_de_comprobante(:o, :d, :t, :n,"
+            " :s, :actor, 'api', :sesion)",
+            {"o": orden_id, "d": documento_id, "t": tipo, "n": tamano, "s": suma},
+        ).one()  # fmt: skip
+
+    return await subir_archivo(request, ctx, clave, motor, nueva)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/pago",
+    status_code=201,
+    response_model=PagoManualRegistrado,
+    summary="Registrar lo que transferiste, sin ejecutar ya pagos en el consorcio: lo concilia"
+    " otro miembro del Consejo",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def registrar_pago_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    registro: RegistroPagoManual,
+    identidad: IdentidadDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = _sin_ambito(motor, identidad, consorcio_id)
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualRegistrado]:
+        pago = ejecutar_sin_ambito(
+            conn, ctx,
+            "select nucleo.registrar_pago_manual(:o, :version, :huella, :numero, :fecha, :importe,"
+            " :moneda, :cuenta, :doc, :actor, 'api', :sesion)",
+            {"o": orden_id, "version": registro.version,
+             "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
+             "fecha": registro.fecha_operacion, "importe": registro.importe_centavos,
+             "moneda": registro.moneda, "cuenta": registro.cuenta_destino,
+             "doc": registro.documento_id},
+        ).scalar_one()  # fmt: skip
+        return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
 
     return responder_una_vez(motor, ctx, idempotencia, efecto)

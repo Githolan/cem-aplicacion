@@ -62,8 +62,11 @@ otro consorcio LAB (`NOMBRE_CONSORCIO_TRABADA`), la administración emite, ve la
 antes de registrar (la baja revoca sus sesiones). Vuelve a entrar con su contraseña y el segundo
 factor, ve la orden en «pagos para aclarar» sin la cuenta y declara que no transfirió, sin
 `egresos.ejecutar_pago`; quien no vio la cuenta recibe 404; otro consejero confirma y la orden
-queda Fallida. El pago fuera de término (P3 180) no entra: pide una aprobación de más de 7 días y
-el ensayo no toca el reloj (SIN VERIFICAR en staging; lo cubren las pruebas).
+queda Fallida. Con otra orden cuya cuenta también vio (`0068`, P3 184), sube el comprobante y
+registra el pago sin la facultad, desde «pagos para aclarar» (el antivirus real lo analiza);
+quien no vio la cuenta recibe 404 y consejo2 lo concilia: Pagada. El pago fuera de término
+(P3 180) no entra: pide una aprobación de más de 7 días y el ensayo no toca el reloj (SIN
+VERIFICAR en staging; lo cubren las pruebas).
 
 Al final comprueba que ningún evento de auditoría del consorcio lleva una cuenta, que la cola del
 consorcio no tiene trabajos muertos, la cadena de auditoría, y revoca sesiones y da de baja los
@@ -1712,6 +1715,15 @@ def recorrer_orden_trabada(corrida: Corrida) -> None:
     r = cuenta_para_pagar(corrida, "administracion", o)
     comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta,
               f"la administración ve la cuenta en el acto de ejecución: {r.texto}")  # fmt: skip
+    # La segunda orden: transfiere antes de renunciar y registra después (`0068`).
+    p2 = proveedor(corrida, 2)
+    cuenta2 = corrida.cuentas[1]
+    o2 = preparar(corrida, p2, 2_300_000)
+    comprobar(aprobar(corrida, "consejo1", o2).estado == 201, "el Consejo aprueba la segunda")
+    comprobar(emitir(corrida, "administracion", o2).estado == 200, "la administración la emite")
+    r = cuenta_para_pagar(corrida, "administracion", o2)
+    comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta2,
+              f"y ve su cuenta: {r.texto}")  # fmt: skip
     adm = corrida.n("administracion")
     contrasena = secrets.token_urlsafe(24)  # solo en memoria, para volver a entrar
     r = adm.pedir("PUT", "/api/v1/auth/contrasena", {"contrasena_nueva": contrasena}, csrf=True)
@@ -1748,6 +1760,8 @@ def recorrer_orden_trabada(corrida: Corrida) -> None:
 
     r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
     comprobar(r.estado == 200 and cuenta not in r.texto, f"pagos para aclarar: {r.texto}")
+    comprobar({o, o2} <= {x["orden_id"] for x in r.cuerpo["elementos"]} and cuenta2 not in r.texto,
+              f"las dos órdenes, para aclarar: {r.texto}")  # fmt: skip
     [fila] = [x for x in r.cuerpo["elementos"] if x["orden_id"] == o]
     comprobar(fila["consorcio_id"] == str(corrida.consorcio) and fila["version"] == 1,
               f"la orden, en su consorcio, sin la cuenta: {fila}")  # fmt: skip
@@ -1765,8 +1779,8 @@ def recorrer_orden_trabada(corrida: Corrida) -> None:
     r = n.pedir("POST", ruta, declaracion, csrf=True, clave=str(uuid4()))
     comprobar(r.estado == 201, f"quien vio la cuenta declara sin la facultad: {r.texto}")
     r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
-    comprobar(r.estado == 200 and all(x["orden_id"] != o for x in r.cuerpo["elementos"]),
-              f"declarada, ya no está para aclarar: {r.texto}")  # fmt: skip
+    comprobar(r.estado == 200 and [x["orden_id"] for x in r.cuerpo["elementos"]] == [o2],
+              f"declarada, ya no está para aclarar (queda la segunda): {r.texto}")  # fmt: skip
     corrida.ok("la declara quien vio la cuenta y renunció; quien no la vio recibe 404")
 
     elemento = pagos_de(corrida, "consejo1", o, revision=True)
@@ -1779,8 +1793,65 @@ def recorrer_orden_trabada(corrida: Corrida) -> None:
     )  # fmt: skip
     comprobar(r.estado == 200 and r.cuerpo["estado"] == "fallida",
               f"otro consejero confirma: {r.texto}")  # fmt: skip
-    comprobar(estado(corrida, o) == "fallida", "la orden quedó Fallida: ya no está trabada")
+    # La administración ya no lee la orden: el estado, como lo ve el Consejo.
+    comprobar(ficha(corrida, "consejo1", o, revision=True)["orden"]["estado"] == "fallida",
+              "la orden quedó Fallida: ya no está trabada")  # fmt: skip
     corrida.ok("el Consejo confirma que no se pagó: la orden sale de la traba (Fallida)")
+
+    # P3 184 (`0068`): la segunda sí la transfirió; carga el comprobante y registra.
+    base = f"/pagos-por-aclarar/{o2}"
+    nuevo = {"titulo": f"Transferencia LAB {corrida.id}-T SINTETICA (NO REAL)",
+             "fecha": hoy_del_consorcio(corrida).isoformat()}  # fmt: skip
+    reverificar(corrida, "consejo1")
+    r = corrida.n("consejo1").pedir("POST", corrida.c(f"{base}/comprobante"), nuevo, csrf=True,
+                                    clave=str(uuid4()))  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (404, "no_encontrado"),
+              f"quien no vio la cuenta no carga el comprobante (404): {r.texto}")  # fmt: skip
+    r = n.pedir("POST", corrida.c(f"{base}/comprobante"), nuevo, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 201, f"quien vio la cuenta carga el comprobante: {r.texto}")
+    doc = r.cuerpo["id"]
+    r = n.pedir("POST", corrida.c(f"{base}/comprobante/{doc}/versiones"),
+                crudo=pdf_sintetico(corrida.id), tipo="application/pdf", csrf=True,
+                clave=str(uuid4()))  # fmt: skip
+    comprobar(r.estado == 201 and r.cuerpo["estado"] == "en_cuarentena",
+              f"sube el archivo: entra en cuarentena: {r.texto}")  # fmt: skip
+    limite = time.monotonic() + ESPERA_ANTIVIRUS_S
+    fila = {"comprobante_estado": "en_cuarentena"}
+    while fila["comprobante_estado"] == "en_cuarentena" and time.monotonic() < limite:
+        time.sleep(2)
+        r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
+        comprobar(r.estado == 200, f"pagos para aclarar: {r.texto}")
+        [fila] = [x for x in r.cuerpo["elementos"] if x["orden_id"] == o2]
+    comprobar((fila["comprobante_id"], fila["comprobante_estado"]) == (doc, "disponible"),
+              f"el antivirus de staging deja el comprobante disponible: {fila}")  # fmt: skip
+    corrida.ok("sin la facultad, carga el comprobante y el antivirus real lo aprueba;"
+               " quien no vio la cuenta recibe 404")  # fmt: skip
+    registro = {"version": fila["version"], "huella": fila["huella"],
+                "numero_operacion": f"LAB{corrida.id}T1",
+                "fecha_operacion": hoy_del_consorcio(corrida).isoformat(),
+                "importe_centavos": 2_300_000, "moneda": "ARS", "cuenta_destino": cuenta2,
+                "documento_id": doc}  # fmt: skip
+    r = corrida.n("consejo1").pedir("POST", corrida.c(f"{base}/pago"), registro, csrf=True,
+                                    clave=str(uuid4()))  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (404, "no_encontrado"),
+              f"quien no vio la cuenta no registra (404): {r.texto}")  # fmt: skip
+    r = n.pedir("POST", corrida.c(f"{base}/pago"), registro, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 201, f"quien vio la cuenta registra sin la facultad: {r.texto}")
+    pago = r.cuerpo["id"]
+    r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
+    comprobar(r.estado == 200 and r.cuerpo["elementos"] == [],
+              f"registrado, ya no tiene pagos para aclarar: {r.texto}")  # fmt: skip
+    corrida.ok("registra el pago con su comprobante; quien no vio la cuenta recibe 404")
+
+    elemento = pagos_de(corrida, "consejo1", o2, revision=True)
+    [registrado] = elemento["ejecucion"]["pagos"]
+    comprobar(registrado["id"] == pago and registrado["fuera_de_termino"] is False,
+              f"el Consejo ve el pago, en término: {registrado}")  # fmt: skip
+    activar_totp(corrida, "consejo2")
+    r = conciliar(corrida, "consejo2", o2, pago, "conforme")
+    comprobar(r.estado == 200 and r.cuerpo["estado"] == "pagada",
+              f"consejo2 concilia: {r.texto}")  # fmt: skip
+    corrida.ok("consejo2 concilia el pago que registró la administración anterior: Pagada")
 
 
 def comprobar_fin(corrida: Corrida, inicio) -> None:

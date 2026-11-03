@@ -792,12 +792,23 @@ class PagoPorAclarar(BaseModel):
     importe_centavos: int
     moneda: str
     cuenta_vista_en: datetime = Field(description="La última vez que viste la cuenta.")
+    huella: str = Field(
+        pattern=FORMATO_HUELLA, description="La de la versión: el registro la pide (`0068`)."
+    )
+    comprobante_id: UUID | None = Field(
+        description="El último comprobante de esta orden que cargaste, si hay (`0068`, P3 184)."
+    )
+    comprobante_estado: str | None = Field(
+        description="El estado de su último archivo: `en_cuarentena`, `disponible` o `rechazado`."
+    )
 
 
 class ListaPagosPorAclarar(BaseModel):
-    """`GET /pagos-por-aclarar`: en cualquier consorcio. Se declara con
-    `POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`);
-    lo confirma otro miembro del Consejo."""
+    """`GET /pagos-por-aclarar`: en cualquier consorcio. Si no transferiste, se declara con
+    `POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`).
+    Si transferiste, se carga el comprobante (`…/{orden}/comprobante` y su archivo en
+    `…/{orden}/comprobante/{documento}/versiones`) y se registra en `…/{orden}/pago`
+    (`RegistroPagoManual`, `0068`). Lo concilia o confirma otro miembro del Consejo."""
 
     model_config = ConfigDict(frozen=True)
 
