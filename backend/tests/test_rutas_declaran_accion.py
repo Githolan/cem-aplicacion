@@ -16,6 +16,15 @@ from app.config import Config
 from app.contexto import ContextoDep, require_scope
 from app.main import crear_app
 
+SIN_AMBITO = {
+    "['POST'] /api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado": (
+        "0067, P3 179: quien vio la cuenta y perdió la facultad ya no tiene ámbito en el consorcio;"
+        " la ruta parte de la sesión y la base exige todo (responde 404 a cualquier otra persona)"
+    ),
+}
+"""Las únicas rutas con `{consorcio_id}` sin `requiere`, con su motivo. No usan el ámbito: no
+deciden con un `Contexto` de políticas (`test_las_rutas_sin_ambito_no_usan_el_ambito`)."""
+
 
 def llamadas(dependant) -> list:
     out = []
@@ -42,8 +51,13 @@ def sin_accion(app: FastAPI) -> list[str]:
     for r in rutas(app.routes):
         calls = llamadas(r.dependant)
         con_ambito = "{consorcio_id}" in r.path or require_scope in calls
-        if con_ambito and not any(isinstance(c, Requiere) for c in calls):
-            faltan.append(f"{sorted(r.methods)} {r.path}")
+        nombre = f"{sorted(r.methods)} {r.path}"
+        if (
+            con_ambito
+            and nombre not in SIN_AMBITO
+            and not any(isinstance(c, Requiere) for c in calls)
+        ):
+            faltan.append(nombre)
     return faltan
 
 
@@ -58,6 +72,14 @@ def test_cada_ruta_con_ambito_declara_su_accion():
     assert con_ambito == {x for x in app.openapi()["paths"] if "{consorcio_id}" in x}
     assert len(con_ambito) >= 3
     assert sin_accion(app) == []
+
+
+def test_las_rutas_sin_ambito_no_usan_el_ambito():
+    app = app_de_prueba()
+    por_nombre = {f"{sorted(r.methods)} {r.path}": r for r in rutas(app.routes)}
+    for nombre in SIN_AMBITO:
+        calls = llamadas(por_nombre[nombre].dependant)  # existe
+        assert require_scope not in calls and not any(isinstance(c, Requiere) for c in calls)
 
 
 def test_control_una_ruta_con_contexto_sin_requiere_se_detecta():

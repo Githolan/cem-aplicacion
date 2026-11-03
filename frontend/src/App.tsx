@@ -10,6 +10,7 @@ import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { ConciliacionPagos, RUTA_CONCILIACION } from "./egresos/ConciliacionPagos";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
+import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
 import { OrdenesPago, RUTA_ORDENES } from "./egresos/OrdenesPago";
 import { PagosManuales, RUTA_PAGOS } from "./egresos/PagosManuales";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
@@ -64,6 +65,9 @@ function Inicio() {
       </p>
       <p>
         <Link to={RUTA_LIQUIDACION}>Liquidación (borrador)</Link>
+      </p>
+      <p>
+        <Link to={RUTA_POR_ACLARAR}>Pagos para aclarar (si dejaste de administrar)</Link>
       </p>
       <EnlaceInstalar />
       <EstadoServicio />
@@ -130,6 +134,7 @@ export function App() {
           <Route path={RUTA_PAGOS} element={<PagosManuales />} />
           <Route path={RUTA_CONCILIACION} element={<ConciliacionPagos />} />
           <Route path={RUTA_LIQUIDACION} element={<Liquidacion />} />
+          <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>

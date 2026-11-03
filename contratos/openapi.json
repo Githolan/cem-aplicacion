@@ -797,7 +797,7 @@
                 "type": "null"
               }
             ],
-            "description": "Obligatorio si es `observado`; no va si es `conforme`.",
+            "description": "Obligatorio si es `observado`. Con `conforme`, va solo si el pago se hizo fuera de término (`0067`): la base lo exige y lo niega en un pago en término.",
             "title": "Motivo"
           },
           "resultado": {
@@ -4437,6 +4437,23 @@
         "title": "ListaPagosManuales",
         "type": "object"
       },
+      "ListaPagosPorAclarar": {
+        "description": "`GET /pagos-por-aclarar`: en cualquier consorcio. Se declara con\n`POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`);\nlo confirma otro miembro del Consejo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoPorAclarar"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaPagosPorAclarar",
+        "type": "object"
+      },
       "ListaProveedores": {
         "properties": {
           "elementos": {
@@ -5465,6 +5482,11 @@
             "title": "Fecha Operacion",
             "type": "string"
           },
+          "fuera_de_termino": {
+            "description": "Transferido después de que venció la aprobación (`0067`): el Consejo lo concilia con un motivo escrito, también para darlo por conforme.",
+            "title": "Fuera De Termino",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -5524,7 +5546,8 @@
           "conciliacion",
           "motivo_conciliacion",
           "conciliado_por",
-          "conciliado_en"
+          "conciliado_en",
+          "fuera_de_termino"
         ],
         "title": "PagoManual",
         "type": "object"
@@ -5629,6 +5652,61 @@
           "confirmable"
         ],
         "title": "PagoNoRealizado",
+        "type": "object"
+      },
+      "PagoPorAclarar": {
+        "description": "Una orden que espera que digas si transferiste: viste la cuenta en el acto de ejecución y\nya no tenés `egresos.ejecutar_pago` en ese consorcio (`0067`, P3 179). Sin la cuenta.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "consorcio": {
+            "title": "Consorcio",
+            "type": "string"
+          },
+          "consorcio_id": {
+            "format": "uuid",
+            "title": "Consorcio Id",
+            "type": "string"
+          },
+          "cuenta_vista_en": {
+            "description": "La última vez que viste la cuenta.",
+            "format": "date-time",
+            "title": "Cuenta Vista En",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "consorcio_id",
+          "consorcio",
+          "orden_id",
+          "version",
+          "concepto",
+          "importe_centavos",
+          "moneda",
+          "cuenta_vista_en"
+        ],
+        "title": "PagoPorAclarar",
         "type": "object"
       },
       "PedidoCopia": {
@@ -12670,6 +12748,90 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado": {
+      "post": {
+        "operationId": "declarar_pago_no_realizado_sin_facultad_api_v1_consorcios__consorcio_id__pagos_por_aclarar__orden_id__no_realizado_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclaracionPagoNoRealizado"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeclaracionRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Declarar que no transferiste, sin ejecutar ya pagos en el consorcio: lo confirma otro miembro del Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/proveedores": {
       "get": {
         "operationId": "listar_proveedores_api_v1_consorcios__consorcio_id__proveedores_get",
@@ -13379,6 +13541,27 @@
         "summary": "Aceptar con mi sesión una invitación dirigida a mi correo",
         "tags": [
           "identidad"
+        ]
+      }
+    },
+    "/api/v1/pagos-por-aclarar": {
+      "get": {
+        "operationId": "pagos_por_aclarar_api_v1_pagos_por_aclarar_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaPagosPorAclarar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Los pagos manuales que esperan que digas si transferiste: viste la cuenta y ya no ejecutás",
+        "tags": [
+          "egresos"
         ]
       }
     },

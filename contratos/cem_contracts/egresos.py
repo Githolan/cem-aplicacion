@@ -672,13 +672,15 @@ class ConciliacionPagoManual(BaseModel):
 
     resultado: ResultadoConciliacion
     motivo: _texto(1, 300) | None = Field(
-        default=None, description="Obligatorio si es `observado`; no va si es `conforme`."
+        default=None,
+        description="Obligatorio si es `observado`. Con `conforme`, va solo si el pago se hizo"
+        " fuera de término (`0067`): la base lo exige y lo niega en un pago en término.",
     )
 
     @model_validator(mode="after")
-    def _motivo_solo_si_observado(self):
-        if (self.resultado == ResultadoConciliacion.OBSERVADO) != (self.motivo is not None):
-            raise ValueError("El motivo va solo, y siempre, con una conciliación observada.")
+    def _motivo_si_observado(self):
+        if self.resultado == ResultadoConciliacion.OBSERVADO and self.motivo is None:
+            raise ValueError("Una conciliación observada lleva el motivo.")
         return self
 
 
@@ -728,6 +730,10 @@ class PagoManual(BaseModel):
     motivo_conciliacion: str | None
     conciliado_por: UUID | None
     conciliado_en: datetime | None
+    fuera_de_termino: bool = Field(
+        description="Transferido después de que venció la aprobación (`0067`): el Consejo lo"
+        " concilia con un motivo escrito, también para darlo por conforme."
+    )
 
 
 class PagoNoRealizado(BaseModel):
@@ -770,3 +776,29 @@ class ListaPagosManuales(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[OrdenConPagoManual]
+
+
+class PagoPorAclarar(BaseModel):
+    """Una orden que espera que digas si transferiste: viste la cuenta en el acto de ejecución y
+    ya no tenés `egresos.ejecutar_pago` en ese consorcio (`0067`, P3 179). Sin la cuenta."""
+
+    model_config = ConfigDict(frozen=True)
+
+    consorcio_id: UUID
+    consorcio: str
+    orden_id: UUID
+    version: Version
+    concepto: str
+    importe_centavos: int
+    moneda: str
+    cuenta_vista_en: datetime = Field(description="La última vez que viste la cuenta.")
+
+
+class ListaPagosPorAclarar(BaseModel):
+    """`GET /pagos-por-aclarar`: en cualquier consorcio. Se declara con
+    `POST /consorcios/{id}/pagos-por-aclarar/{orden}/no-realizado` (`DeclaracionPagoNoRealizado`);
+    lo confirma otro miembro del Consejo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[PagoPorAclarar]
