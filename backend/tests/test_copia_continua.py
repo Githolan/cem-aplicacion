@@ -1030,37 +1030,49 @@ def test_una_copia_base_que_falla_no_frena_la_de_un_corte_nuevo(cfg, monkeypatch
     assert p.corte == "segundo" and p.error_base is None  # la del segundo sigue siendo urgente
 
 
-def _copia_con_wal_reciclado(monkeypatch, motor_migrate):
-    """Durante `pg_basebackup` (frenado con `--max-rate`), varios segmentos de WAL nuevos, cada
-    uno con su checkpoint: con `wal_keep_size` en 0, el WAL del inicio de la copia se recicla. En
-    paralelo, la consulta de la vuelta al slot, como en producción."""
+def _copia_con_wal_reciclado(monkeypatch, motor_migrate) -> dict:
+    """Durante `pg_basebackup` (frenado con `--max-rate`), segmentos de WAL nuevos, cada uno con
+    su checkpoint, hasta que el segmento del inicio de la copia ya no está en `pg_wal` (con
+    `wal_keep_size` en 0 se recicla en cuanto el slot del receptor lo pasa). En paralelo, la
+    consulta de la vuelta al slot, como en producción. Devuelve si se recicló antes de que la
+    copia terminara: sin eso, el control con `fetch` no prueba nada (P3 178)."""
     correr = copias._correr
+    reciclado = {"antes_del_fin": False}
 
     def con_wal(argumentos, entorno=None, tope=None):
         if argumentos[0] != "pg_basebackup":
             return correr(argumentos, entorno, tope)
+        termino = threading.Event()
 
         def generar():
             time.sleep(0.5)  # que la copia ya haya empezado
-            for _ in range(6):
+            inicio = admin("select pg_walfile_name(pg_current_wal_lsn())")[0][0]
+            for _ in range(VUELTAS_MAXIMAS_RECICLADO):
                 with motor_migrate.begin() as c:
                     c.execute(text("insert into plataforma.prueba_pa26 select repeat('x', 100)"
                                    " from generate_series(1, 2000)"))  # fmt: skip
                 admin("select pg_switch_wal()")
+                esperar_recibido(lsn_actual())  # que el slot del receptor pase el segmento
                 admin("checkpoint")
                 cc.estado_servidor(url_copia_continua())
+                if not admin("select 1 from pg_ls_waldir() where name = :n", n=inicio):
+                    reciclado["antes_del_fin"] = not termino.is_set()
+                    return
 
         hilo = threading.Thread(target=generar)
         hilo.start()
         try:
             correr([*argumentos, f"--max-rate={TASA_COPIA_LENTA}"], entorno, tope)
         finally:
+            termino.set()
             hilo.join()
 
     monkeypatch.setattr(copias, "_correr", con_wal)
+    return reciclado
 
 
 TASA_COPIA_LENTA = "2M"
+VUELTAS_MAXIMAS_RECICLADO = 12
 
 
 @pytest.mark.db
@@ -1071,15 +1083,18 @@ def test_la_copia_base_retiene_su_wal_aunque_se_recicle_durante_la_copia(
     p.iniciar(datetime.now(UTC))  # el receptor con su slot, que sigue avanzando
     esperar_recibido(lsn_actual())
     assert admin("show wal_keep_size") == [("0",)]
-    _copia_con_wal_reciclado(monkeypatch, motor_migrate)
+    reciclado = _copia_con_wal_reciclado(monkeypatch, motor_migrate)
     destino = tmp_path / "base"
     cc.tomar_base(cfg.url_copia_continua, destino, "stream")
+    assert reciclado["antes_del_fin"]  # la condición que la prueba dice poner, puesta de verdad
     assert sorted(a.name for a in destino.iterdir()) == sorted(cc.ARCHIVOS_BASE)
     cc.verificar_base(destino, url_rol("backup"), cc.contar_consorcios(url_rol("backup")))
     # Control: con `fetch`, en las mismas condiciones, el WAL del inicio ya no está.
     monkeypatch.setattr(cc, "METODO_WAL", "fetch")
+    reciclado["antes_del_fin"] = False
     with pytest.raises(copias.ErrorCopia, match="pg_basebackup"):
         cc.tomar_base(cfg.url_copia_continua, tmp_path / "fetch", "fetch")
+    assert reciclado["antes_del_fin"]
 
 
 @pytest.mark.db

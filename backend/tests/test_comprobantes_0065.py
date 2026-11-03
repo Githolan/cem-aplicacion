@@ -160,6 +160,57 @@ def test_el_numero_de_operacion_no_lleva_la_cuenta_adentro(motor_migrate, e, num
     llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o, numero="1" * 24))
 
 
+def test_despues_de_una_observacion_quien_ejecuto_sube_otra_version_y_registra_de_nuevo(
+    motor_migrate, motor_app, e
+):
+    """P3 176: con la orden en verificación (pago observado) la ejecución sigue abierta, así que
+    quien vio su cuenta le sube otra versión al comprobante y vuelve a registrar con ese mismo
+    documento; otro consejero concilia. Quien no vio la cuenta no lo encuentra."""
+    o = emitida(motor_migrate, e)
+    p1 = registrada(motor_migrate, e, o)
+    doc = documento_del_pago(motor_migrate, p1)
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p1, resultado="observado",
+           motivo="SINTETICO: el comprobante no se lee")  # fmt: skip
+    assert orden(motor_migrate, o)["estado"] == "en_verificacion"
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    otorgar(motor_migrate, e.cons, mandato_de(motor_migrate, e, x), acta(motor_migrate, e),
+            "documentos.cargar")  # fmt: skip
+    niega(motor_migrate, e, x, VERSION, "no_encontrado", documento=doc)
+    v = llamar(motor_migrate, e, e.adm, VERSION, documento=doc)  # control: quien vio la cuenta
+    with motor_migrate.begin() as c:  # el antivirus la analiza
+        c.execute(text("update nucleo.version_documento set estado = 'disponible',"
+                       " antivirus = 'ClamAV SINTETICO', firmas_en = now(), analizada_en = now()"
+                       " where id = :v"), {"v": v})  # fmt: skip
+    p2 = llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o, documento=doc))
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p2, resultado="conforme",
+           motivo=None)  # fmt: skip
+    assert orden(motor_migrate, o)["estado"] == "pagada"
+
+
+def test_un_resultado_incierto_deja_abierta_la_ejecucion_y_uno_definitivo_la_cierra(
+    motor_migrate, e
+):
+    """P3 176: `incierta` no es un resultado definitivo, así que quien vio la cuenta sigue
+    pudiendo subir la evidencia (para verificar, no para reintentar a ciegas); con `fallida` la
+    ejecución se cierra y nadie cambia el comprobante. Los resultados se fuerzan con el rol de
+    migración, como en `test_0056_confirmable_mira_el_estado_la_version_y_el_resultado`."""
+    o = emitida(motor_migrate, e)
+    ver_version(motor_migrate, e, e.adm, o, 1)
+    doc = llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO)
+
+    def forzar(resultado: str) -> None:
+        with motor_migrate.begin() as c:
+            c.execute(text("insert into nucleo.resultado_ejecucion_orden_pago (consorcio_id,"
+                           " ejecucion_id, resultado, origen) select consorcio_id, id, :r,"
+                           " 'manual' from nucleo.ejecucion_orden_pago where orden_id = :o"),
+                      {"r": resultado, "o": o})  # fmt: skip
+
+    forzar("incierta")
+    assert llamar(motor_migrate, e, e.adm, VERSION, documento=doc) is not None
+    forzar("fallida")
+    niega(motor_migrate, e, e.adm, VERSION, "no_encontrado", documento=doc)
+
+
 def test_0065_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
     m = migracion_0065()
