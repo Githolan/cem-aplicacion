@@ -42,7 +42,7 @@ def test_con_pago_manual_las_lecturas_dan_la_fecha_de_la_operacion(motor_migrate
     assert [g["pagada_el"] for g in r.json()["gastos"]] == [ultimo.isoformat()]
 
 
-def test_con_el_riel_las_lecturas_dan_la_fecha_del_consorcio(motor_migrate, e):
+def test_con_el_riel_las_lecturas_dan_la_fecha_del_consorcio(motor_migrate, motor_app, e):
     """El 1 a las 02:00 UTC todavía es el último día en Buenos Aires; a las 03:30 ya no."""
     d = hoy(motor_migrate, e)
     primero = date.fromisoformat(mes(d, 0))
@@ -52,14 +52,45 @@ def test_con_el_riel_las_lecturas_dan_la_fecha_del_consorcio(motor_migrate, e):
     fechar_pago(motor_migrate, otra, origen="ordenar", registrado=f"{primero} 03:30+00")
     assert liquidables(e) == {str(o): (primero - timedelta(days=1)).isoformat(),
                               str(otra): primero.isoformat()}  # fmt: skip
+    # P3 144: los gastos dicen lo mismo que las liquidables, cada uno en su período.
+    agua_desde(motor_migrate, motor_app, e, mes(d, -1))
+    anterior = borrador(motor_migrate, e, mes(d, -1))
+    actual = borrador(motor_migrate, e, mes(d, 0))
+    llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=anterior, orden=o, grupo="agua")
+    llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=actual, orden=otra, grupo="agua")
+    for liq, esperada in ((anterior, primero - timedelta(days=1)), (actual, primero)):
+        r = get(e, e.adm, f"liquidaciones/{liq}")
+        assert r.status_code == 200, r.text
+        assert [g["pagada_el"] for g in r.json()["gastos"]] == [esperada.isoformat()]
+
+
+def test_a_igual_fecha_de_pago_desempata_el_id(motor_migrate, motor_app, e):
+    """P3 144: dos pagadas el mismo día; la primera se registró después. Las liquidables van por
+    el id de la orden y los gastos por el del gasto, no por cuándo se registró."""
+    d = hoy(motor_migrate, e)
+    a, b = pagada(motor_migrate, e), pagada(motor_migrate, e)
+    fechar_pago(motor_migrate, a, registrado=f"{d} 23:00-03")
+    fechar_pago(motor_migrate, b, registrado=f"{d} 01:00-03")
+    r = get(e, e.adm, "liquidaciones/ordenes-liquidables")
+    assert r.status_code == 200, r.text
+    ids = [x["orden_id"] for x in r.json()["elementos"]]
+    assert ids == sorted([str(a), str(b)]) == [str(a), str(b)]
+    agua_desde(motor_migrate, motor_app, e, mes(d, 0))
+    liq = borrador(motor_migrate, e, mes(d, 0))
+    for o in (a, b):
+        llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o, grupo="agua")
+    r = get(e, e.adm, f"liquidaciones/{liq}")
+    assert r.status_code == 200, r.text
+    assert [g["orden_id"] for g in r.json()["gastos"]] == [str(a), str(b)]
 
 
 def test_0059_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
 
-    def funciones() -> list[tuple[str, str]]:
+    def funciones() -> list[tuple[str, str, str]]:
         with motor.connect() as c:
-            return c.execute(text("select pg_get_functiondef(p.oid), coalesce(p.proacl::text, '')"
+            return c.execute(text("select pg_get_functiondef(p.oid), coalesce(p.proacl::text, ''),"
+                                  " p.proowner::regrole::text"
                                   " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                                   " where n.nspname = 'nucleo' and p.proname in"
                                   " ('agregar_gasto_liquidacion', 'liquidacion_gastos_lectura',"
@@ -71,7 +102,7 @@ def test_0059_ida_y_vuelta(base_aparte):  # noqa: F811
     command.upgrade(cfg, "0059")
     de_0059 = funciones()
     assert len(de_0059) == len(de_0058) + 1 and de_0059 != de_0058
-    assert all("registrado_en" not in f for f, _ in de_0059 if "lectura" in f)
+    assert all("registrado_en" not in f for f, _, _ in de_0059 if "lectura" in f)
     command.downgrade(cfg, "0058")
     assert funciones() == de_0058  # vuelven exactas, con sus permisos
     command.upgrade(cfg, "0059")  # control
