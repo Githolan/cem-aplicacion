@@ -12,7 +12,11 @@ la vio (a nadie más se le dice nada: `42501`), después R10.
 
 - **`crear_comprobante_de_pago`**: sin la facultad, sin `documentos.cargar` (ya no la tiene).
 - **`nucleo.nueva_version_de_comprobante`** (nueva): la versión del archivo de un comprobante de esa
-  orden, con la sesión. `nueva_version` (`0035`) no recibe sesión y exige la facultad de carga.
+  orden, con la sesión, solo para quien ya no ejecuta. `nueva_version` (`0035`) no recibe sesión y
+  exige la facultad de carga.
+- **`nucleo.fijar_version_objeto`**: el `VersionId` del almacén (OCI lo devuelve siempre) también
+  para esa versión, sin la facultad de carga (revisión independiente de #197: sin esto, la subida
+  fallaba en staging y producción).
 - **`registrar_pago_manual`**: sin la facultad; el pago queda con `sin_facultad`. Lo concilia otro
   consejero, como siempre.
 - **`nucleo.pagos_por_aclarar`** agrega la huella de la versión (el registro la pide) y el último
@@ -44,6 +48,7 @@ VERSION_SIN_FACULTAD = (
     "nucleo.nueva_version_de_comprobante(uuid, uuid, text, integer, text, uuid, text, uuid)"
 )
 POR_ACLARAR = "nucleo.pagos_por_aclarar(uuid, text, uuid)"
+FIJAR = "nucleo.fijar_version_objeto(uuid, text, uuid, text)"
 
 
 def _sin_facultad(identidad: str) -> str:
@@ -132,6 +137,8 @@ create function {VERSION_SIN_FACULTAD.split("(")[0]}(orden uuid, documento uuid,
   begin
     if c is null or actor is null or actor is distinct from plataforma.persona_actual()
        or not {ABRIO}(c, orden, actor)
+       or nucleo.tiene_facultad_vigente(c, actor, 'egresos.ejecutar_pago',
+                                        nucleo.hoy_del_consorcio(c))
        or not exists (select 1 from nucleo.documento d
                        where d.consorcio_id = c and d.id = documento and d.estado = 'vigente'
                          and d.categoria = '{CATEGORIA}' and d.orden_comprobante = orden) then
@@ -150,6 +157,25 @@ create function {VERSION_SIN_FACULTAD.split("(")[0]}(orden uuid, documento uuid,
 revoke all on function {VERSION_SIN_FACULTAD} from public;
 grant execute on function {VERSION_SIN_FACULTAD} to cem_app;
 """
+
+
+FIJAR_CAMBIOS = (
+    (
+        "    perform nucleo.exigir_carga_documentos(c, actor, origen_pedido, null);\n",
+        "    -- La versión de un comprobante que subió en esta transacción quien vio la cuenta\n"
+        "    -- de esa orden (nueva_version_de_comprobante, 0068) no pide la facultad de carga.\n"
+        "    if actor is distinct from plataforma.persona_actual() or not exists (\n"
+        "         select 1 from nucleo.version_documento x\n"
+        "           join nucleo.documento d\n"
+        "             on d.consorcio_id = x.consorcio_id and d.id = x.documento_id\n"
+        "          where x.consorcio_id = c and x.id = version and x.subida_por = actor\n"
+        "            and x.estado = 'en_cuarentena' and x.version_objeto is null\n"
+        f"            and d.orden_comprobante is not null and d.categoria = '{CATEGORIA}'\n"
+        f"            and {ABRIO}(c, d.orden_comprobante, actor)) then\n"
+        "      perform nucleo.exigir_carga_documentos(c, actor, origen_pedido, null);\n"
+        "    end if;\n",
+    ),
+)
 
 
 def _por_aclarar(con_registro: bool) -> str:
@@ -259,12 +285,14 @@ def upgrade() -> None:
     op.execute(COLUMNA)
     _reemplazar(REGISTRO, REGISTRO_CAMBIOS)
     op.execute(VERSION_SQL)
+    _reemplazar(FIJAR, FIJAR_CAMBIOS)
     op.execute(_por_aclarar(con_registro=True))
 
 
 def downgrade() -> None:
     op.execute(GUARDA_DOWNGRADE)
     op.execute(_por_aclarar(con_registro=False))
+    _reemplazar(FIJAR, FIJAR_CAMBIOS, al_reves=True)
     op.execute(f"drop function {VERSION_SIN_FACULTAD}")
     _reemplazar(REGISTRO, REGISTRO_CAMBIOS, al_reves=True)
     op.execute("alter table nucleo.pago_manual drop column sin_facultad")

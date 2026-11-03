@@ -11,7 +11,6 @@ import {
   aCentavos,
   ENCABEZADO_IDEMPOTENCIA,
   importe,
-  LARGO_TITULO,
   mensajeDeError,
   momento,
   renovarClave,
@@ -40,6 +39,8 @@ type Registro = { numero: string; fecha: string; importe: string; cuenta: string
 
 const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", cuenta: "" };
 const hoy = () => new Date().toLocaleDateString("en-CA");
+/** El título del comprobante cargado desde acá. */
+const TITULO_COMPROBANTE = "Comprobante de la transferencia";
 
 /** Qué pasa con el comprobante, según el estado de su último archivo. */
 function textoDelComprobante(p: PorAclarar): string {
@@ -179,7 +180,8 @@ export function PagosPorAclarar() {
         const creado = await api.POST("/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante", {
           headers: encabezadoCsrf(),
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCarga.current } },
-          body: { titulo: `Transferencia: ${p.concepto}`.slice(0, LARGO_TITULO), fecha: registro.fecha || hoy() },
+          // Un título fijo: el concepto de la orden puede no pasar el filtro de contactos del título.
+          body: { titulo: TITULO_COMPROBANTE, fecha: registro.fecha || hoy() },
         });
         exigirSesion(creado.response);
         if (creado.data === undefined) {

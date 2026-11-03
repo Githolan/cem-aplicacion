@@ -714,7 +714,7 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(await screen.findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
     expect(registrar.disabled).toBe(true); // en cuarentena todavía no se registra
     const [carga] = pedidos(api, "POST", CARGA);
-    expect(await carga?.json()).toEqual({ titulo: "Transferencia: Limpieza de octubre", fecha: "2026-10-31" });
+    expect(await carga?.json()).toEqual({ titulo: "Comprobante de la transferencia", fecha: "2026-10-31" });
     const [subida] = pedidos(api, "POST", SUBIDA);
     expect(subida?.headers.get("Content-Type")).toBe("application/pdf");
     expect(subida?.headers.get("Idempotency-Key")).toBeTruthy();

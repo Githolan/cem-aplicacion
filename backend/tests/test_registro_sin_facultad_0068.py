@@ -14,11 +14,13 @@ from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.db import transaccion
 from tests.conftest import clave_idempotencia
 from tests.test_comprobantes_0063 import CREAR, TITULO
 from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la_imagen` son fixtures)
     analizar,
     bucket,
+    bucket_con_versiones,
     firmas_de_la_imagen,
     pdf,
 )
@@ -156,6 +158,15 @@ def test_sin_la_facultad_cargar_y_registrar_exigen_r10(
     )  # control
 
 
+def test_con_la_facultad_el_archivo_va_por_la_ruta_de_siempre(motor_migrate, e):
+    """Quien todavía ejecuta y vio la cuenta no usa la función sin la facultad: sube por
+    `nueva_version`, que le exige la facultad de carga (revisión independiente de #197)."""
+    o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
+    doc = llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO)
+    niega(motor_migrate, e, e.adm, VERSION, "42501", orden=o, documento=doc)
+
+
 def test_el_archivo_solo_para_un_comprobante_de_esa_orden(motor_migrate, motor_app, e):
     """El documento tiene que ser un comprobante cargado desde el pago de esa misma orden."""
     o = emitida(motor_migrate, e)
@@ -225,7 +236,7 @@ def migracion_0068():
 def test_0068_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
     m = migracion_0068()
-    funciones = (m.REGISTRO, m.CREAR, m.POR_ACLARAR)
+    funciones = (m.REGISTRO, m.CREAR, m.POR_ACLARAR, m.FIJAR)
 
     def estado() -> tuple:
         with motor.connect() as c:
@@ -354,3 +365,37 @@ def test_por_http_a_quien_no_vio_la_cuenta_cada_ruta_le_responde_404(
         assert codigo(post(e, quien, f"{base}/pago", cuerpo)) == (404, "no_encontrado")
     assert pagos_sin_facultad(motor_migrate, o) == []
     assert post(e, e.adm, f"{base}/pago", cuerpo).status_code == 201  # control
+
+
+def test_por_http_con_un_almacen_que_devuelve_la_version_tambien_sube(
+    motor_migrate,
+    motor_app,
+    e,
+    bucket_con_versiones,  # noqa: F811
+):
+    """OCI devuelve `VersionId` (staging, 26-10): la subida lo fija con `fijar_version_objeto`,
+    que pedía la facultad de carga a quien ya no la tiene (revisión independiente de #197)."""
+    o = trabada(motor_migrate, motor_app, e)
+    nuevo = {"titulo": TITULO, "fecha": "2026-11-03"}
+    r = post(e, e.adm, f"pagos-por-aclarar/{o}/comprobante", nuevo)
+    assert r.status_code == 201, r.text
+    doc = r.json()["id"]
+    r = subir_comprobante(e, e.adm, o, doc, pdf())
+    assert r.status_code == 201, r.text
+    with motor_migrate.connect() as c:
+        guardada = c.execute(
+            text("select version_objeto from nucleo.version_documento where id = :v"),
+            {"v": r.json()["id"]},
+        ).scalar_one()
+    assert guardada  # el almacén la devolvió y quedó fijada
+    x = otra_persona(motor_migrate, e.cons)
+    e.sesion[x] = nueva_sesion(motor_migrate, x)
+    with (
+        pytest.raises(DBAPIError) as error,
+        transaccion(  # control: un extraño
+            motor_app, persona_id=x, consorcio_id=e.cons
+        ) as t,
+    ):
+        t.execute(text("select nucleo.fijar_version_objeto(:v, 'x', :a, 'api')"),
+                  {"v": r.json()["id"], "a": x})  # fmt: skip
+    assert error.value.orig.diag.sqlstate == "42501"
