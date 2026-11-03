@@ -56,6 +56,7 @@ from cem_contracts.egresos import (
     ListaContratosRevision,
     ListaOrdenesPago,
     ListaPagosManuales,
+    ListaPagosPorAclarar,
     ListaProveedores,
     OrdenConPagoManual,
     OrdenPago,
@@ -68,6 +69,7 @@ from cem_contracts.egresos import (
     PagoManualCambiado,
     PagoManualRegistrado,
     PagoNoRealizado,
+    PagoPorAclarar,
     PedidoCuentaPagoManual,
     Proveedor,
     ProveedorConVersiones,
@@ -91,7 +93,7 @@ from sqlalchemy.exc import DBAPIError
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
 from app.consorcios.padron import Discrepancia
-from app.contexto import MotorDep
+from app.contexto import Contexto, IdentidadDep, MotorDep
 from app.db import transaccion
 from app.errores import ErrorApi, sin_cache
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
@@ -234,6 +236,11 @@ ERRORES = {
     "operacion_de_otra_orden": (
         409, CodigoError.OPERACION_DE_OTRA_ORDEN,
         "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
+    ),
+    "conciliacion_invalida": (
+        422, CodigoError.PETICION_INVALIDA,
+        "Un pago en término se da por conforme sin motivo; uno fuera de término, con el motivo"
+        " por el que se acepta.",
     ),
     "conciliacion_repetida": (
         409, CodigoError.CONCILIACION_REPETIDA, "Ese pago ya está conciliado.",
@@ -1203,3 +1210,80 @@ def confirmar_pago_no_realizado(
         return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Quien vio la cuenta y ya no ejecuta (`0067`, P3 179) ---------------------------------------
+# Sin `egresos.ejecutar_pago` ya no tiene ámbito en el consorcio (`require_scope` da 404): estas
+# rutas parten solo de la sesión y la base exige todo (R10, identidad verificada, que haya visto la
+# cuenta de la ejecución abierta). A cualquier otra persona le responde 404.
+
+ERRORES_SIN_AMBITO = {
+    "modo_no_admitido": (
+        409, CodigoError.ORDEN_NO_ADMITE, "El modo vigente del consorcio no admite egresos.",
+    ),
+}  # fmt: skip
+
+
+@router.get(
+    "/pagos-por-aclarar",
+    response_model=ListaPagosPorAclarar,
+    summary="Los pagos manuales que esperan que digas si transferiste: viste la cuenta y ya no"
+    " ejecutás",
+)
+def pagos_por_aclarar(identidad: IdentidadDep, motor: MotorDep) -> ListaPagosPorAclarar:
+    with transaccion(motor, persona_id=identidad.persona_id) as c:
+        filas = c.execute(
+            text("select * from nucleo.pagos_por_aclarar(:actor, 'api', :sesion)"),
+            {"actor": identidad.persona_id, "sesion": identidad.sesion_id},
+        ).mappings()  # fmt: skip
+        return ListaPagosPorAclarar(elementos=[PagoPorAclarar(**f) for f in filas])
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado",
+    status_code=201,
+    response_model=DeclaracionRegistrada,
+    summary="Declarar que no transferiste, sin ejecutar ya pagos en el consorcio: lo confirma otro"
+    " miembro del Consejo",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def declarar_pago_no_realizado_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    declaracion: DeclaracionPagoNoRealizado,
+    identidad: IdentidadDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    p = identidad.persona_id
+    with transaccion(motor, persona_id=p, consorcio_id=consorcio_id) as c:
+        hoy = c.execute(
+            text("select nucleo.hoy_del_consorcio(id) from nucleo.consorcio"
+                 " where id = :c and eliminado_en is null"),
+            {"c": consorcio_id},
+        ).scalar_one_or_none()  # fmt: skip
+    if hoy is None:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    # Sin vínculos ni mandatos: la persona no tiene nada más en el consorcio.
+    ctx = Contexto(persona_id=p, consorcio_id=consorcio_id, hoy=hoy, vinculos=(), modo=None,
+                   sesion_id=identidad.sesion_id)  # fmt: skip
+
+    def efecto(conn: Connection) -> tuple[int, DeclaracionRegistrada]:
+        try:
+            d = conn.execute(
+                text("select nucleo.declarar_pago_no_realizado(:o, :version, :motivo, :actor,"
+                     " 'api', :sesion)"),
+                {"o": orden_id, "version": declaracion.version, "motivo": declaracion.motivo,
+                 "actor": p, "sesion": identidad.sesion_id},
+            ).scalar_one()  # fmt: skip
+        except DBAPIError as e:
+            if isinstance(e.orig, InsufficientPrivilege):
+                raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO) from e
+            motivo = e.orig.diag.message_hint
+            errores = ERRORES | ERRORES_SIN_AMBITO
+            if motivo in errores:
+                raise ErrorApi(*errores[motivo]) from e
+            raise
+        return 201, DeclaracionRegistrada(id=d, orden_id=orden_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)

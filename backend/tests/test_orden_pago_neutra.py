@@ -286,8 +286,8 @@ def test_las_vigencias_de_r10_son_las_de_la_api(motor_migrate):
     with motor_migrate.connect() as c:
         definicion = c.execute(
             text(
-                "select pg_get_functiondef("
-                "'nucleo.exigir_acto_economico(uuid, uuid, uuid, text, text)'::regprocedure)"
+                "select pg_get_functiondef("  # desde 0067, en la que llama exigir_acto_economico
+                "'nucleo.exigir_sesion_economica(uuid, uuid, uuid, text)'::regprocedure)"
             )
         ).scalar_one()
     assert sesiones.VIGENCIA_SESION_ECONOMICA.total_seconds() == 12 * 3600
