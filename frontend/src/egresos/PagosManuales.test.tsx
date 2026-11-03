@@ -109,6 +109,7 @@ function pago(extra: Partial<Pago> = {}): Pago {
     motivo_conciliacion: null,
     conciliado_por: null,
     conciliado_en: null,
+    fuera_de_termino: false,
     ...extra,
   };
 }
@@ -585,6 +586,31 @@ describe("conciliación de pagos", () => {
     expect(await pedido?.json()).toEqual({ resultado: "observado", motivo: "La fecha no coincide" });
   });
 
+  it("un pago fuera de término se marca y, para darlo por conforme, pide el motivo (app 0067)", async () => {
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/pagos-manuales/revision`]: () =>
+        Response.json({ elementos: [conPago("en_verificacion", [pago({ fuera_de_termino: true })])] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () =>
+        Response.json({ orden_id: O1, estado: "pagada" }),
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/conciliacion");
+    const lista = await screen.findByRole("list", { name: "Pagos para conciliar" });
+    expect(within(lista).getByText("Fuera de término")).toBeTruthy();
+    fireEvent.click(within(lista).getByRole("button", { name: "Conforme" }));
+    // No sale nada todavía: primero el motivo.
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`)).toHaveLength(0);
+    const dar = screen.getByRole("button", { name: "Dar el pago por conforme" }) as HTMLButtonElement;
+    expect(dar.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Por qué lo aceptás fuera de término"), { target: { value: "El banco demoró" } });
+    await sinFaltasDeAccesibilidad(container);
+    fireEvent.click(dar);
+    expect(await screen.findByText(/La orden quedó pagada/)).toBeTruthy();
+    const [conciliacion] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`);
+    expect(await conciliacion?.json()).toEqual({ resultado: "conforme", motivo: "El banco demoró" });
+  });
+
   it("confirma que no se pagó una orden declarada por quien la ejecutaba", async () => {
     const declarada = conPago("en_ejecucion", [], {
       declaraciones: [
@@ -603,5 +629,59 @@ describe("conciliación de pagos", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Confirmar que no se pagó" }));
     expect(await screen.findByText(/La orden quedó fallida/)).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado/${DECL}/confirmacion`)).toHaveLength(1);
+  });
+});
+
+describe("pagos para aclarar (app 0067)", () => {
+  const POR_ACLARAR = {
+    consorcio_id: C1,
+    consorcio: "Edificio Ficticio",
+    orden_id: O1,
+    version: 1,
+    concepto: "Limpieza de octubre",
+    importe_centavos: 1_500_000,
+    moneda: "ARS",
+    cuenta_vista_en: "2026-10-31T13:00:00Z",
+  };
+  const DECLARAR = `${BASE}/pagos-por-aclarar/${O1}/no-realizado`;
+
+  it("quien dejó de administrar declara que no transfirió, con el código si hace falta y la misma clave", async () => {
+    let primera = true;
+    let lista = [POR_ACLARAR];
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: lista }),
+      [`POST ${DECLARAR}`]: () => {
+        if (primera) {
+          primera = false;
+          return error("segundo_factor_requerido", 403);
+        }
+        lista = [];
+        return Response.json({ id: DECL, orden_id: O1 }, { status: 201 });
+      },
+      "POST /api/v1/auth/totp/verificar": VERIFICADO,
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/por-aclarar");
+    const tarjetas = await screen.findByRole("list", { name: "Pagos para aclarar" });
+    expect(within(tarjetas).getByText(/Edificio Ficticio/)).toBeTruthy();
+    expect(container.textContent).not.toContain(CUENTA);
+    await sinFaltasDeAccesibilidad(container);
+    const boton = screen.getByRole("button", { name: "No transferí" }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié antes de pagar" } });
+    fireEvent.click(boton);
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+    expect(await screen.findByText(/Ahora lo confirma otro miembro del Consejo/)).toBeTruthy();
+    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
+    const [uno, dos] = pedidos(api, "POST", DECLARAR);
+    expect(await uno?.json()).toEqual({ version: 1, motivo: "Renuncié antes de pagar" });
+    expect(dos?.headers.get("Idempotency-Key")).toBe(uno?.headers.get("Idempotency-Key"));
+  });
+
+  it("sin pagos para aclarar lo dice", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }) }));
+    abrir("/egresos/por-aclarar");
+    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
   });
 });

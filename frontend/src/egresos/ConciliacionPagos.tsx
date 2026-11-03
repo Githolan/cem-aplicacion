@@ -22,6 +22,8 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // compara el comprobante con la orden (número de operación, fecha, importe y proveedor) y marca
 // «Conforme» u «Observado». Recién con «Conforme» la orden queda Pagada. Quien registró el pago, o
 // preparó la orden, no lo concilia (la API y la base lo niegan, también con otra cuenta suya).
+// Un pago transferido después de que venció la aprobación (app 0067) se da por conforme solo con
+// el motivo por el que se acepta.
 // Acá no viaja la cuenta completa.
 
 type ConPago = components["schemas"]["OrdenConPagoManual"];
@@ -34,7 +36,7 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_ser
 type Pendiente = { acto: string; reintentar: () => void };
 type Aviso = { texto: string; ok: boolean };
 type Acto =
-  | { tipo: "conforme"; orden: string; pago: string }
+  | { tipo: "conforme"; orden: string; pago: string; motivo?: string }
   | { tipo: "observado"; orden: string; pago: string; motivo: string }
   | { tipo: "no_realizado"; orden: string; declaracion: string };
 
@@ -66,7 +68,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
-  const [observando, setObservando] = useState<string | null>(null);
+  const [escribiendo, setEscribiendo] = useState<{ pago: string; resultado: "conforme" | "observado" } | null>(null);
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
@@ -124,13 +126,16 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
         : api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/{pago_id}/conciliacion", {
             headers: encabezadoCsrf(),
             params: { path: { consorcio_id: consorcio, orden_id: acto.orden, pago_id: acto.pago }, header },
-            body: acto.tipo === "conforme" ? { resultado: "conforme" } : { resultado: "observado", motivo: acto.motivo },
+            body:
+              acto.tipo === "observado" || acto.motivo !== undefined
+                ? { resultado: acto.tipo, motivo: acto.motivo }
+                : { resultado: "conforme" },
           });
     void pedido
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
-          setObservando(null);
+          setEscribiendo(null);
           setMotivo("");
           const texto = {
             conforme: "Listo: conciliaste el pago. La orden quedó pagada.",
@@ -161,10 +166,10 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
       .finally(() => setEnviando(false));
   }
 
-  function observar(evento: FormEvent, orden: string, pago: string) {
+  function conMotivo(evento: FormEvent, orden: string, pago: string, resultado: "conforme" | "observado") {
     evento.preventDefault();
     if (motivo.trim() === "") return;
-    hacer({ tipo: "observado", orden, pago, motivo: motivo.trim() });
+    hacer({ tipo: resultado, orden, pago, motivo: motivo.trim() });
   }
 
   const elementos = lectura.tipo === "ok" ? lectura.elementos : [];
@@ -227,6 +232,12 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
                             <dd>{pago.numero_operacion}</dd>
                             <dt>Fecha de la transferencia</dt>
                             <dd>{pago.fecha_operacion}</dd>
+                            {pago.fuera_de_termino && (
+                              <>
+                                <dt>Fuera de término</dt>
+                                <dd>Se transfirió después de que venció la aprobación. Para darlo por conforme, escribí por qué lo aceptás.</dd>
+                              </>
+                            )}
                             <dt>Importe registrado</dt>
                             <dd>{importe(pago.importe_centavos, pago.moneda)}</dd>
                             <dt>Registrado</dt>
@@ -236,30 +247,36 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
                               <a href={descarga(consorcio, pago)}>Ver el comprobante</a>
                             </dd>
                           </dl>
-                          {observando !== pago.id ? (
+                          {escribiendo?.pago !== pago.id ? (
                             <div className="acciones">
                               <button type="button" disabled={enviando}
-                                onClick={() => hacer({ tipo: "conforme", orden: c.orden.id, pago: pago.id })}>
+                                onClick={() => {
+                                  if (!pago.fuera_de_termino) return hacer({ tipo: "conforme", orden: c.orden.id, pago: pago.id });
+                                  setEscribiendo({ pago: pago.id, resultado: "conforme" });
+                                  setMotivo("");
+                                }}>
                                 Conforme
                               </button>
                               <button type="button" className="secundario" disabled={enviando}
                                 onClick={() => {
-                                  setObservando(pago.id);
+                                  setEscribiendo({ pago: pago.id, resultado: "observado" });
                                   setMotivo("");
                                 }}>
                                 Observar
                               </button>
                             </div>
                           ) : (
-                            <form className="formulario" onSubmit={(e) => observar(e, c.orden.id, pago.id)}>
-                              <label htmlFor={`${id}-motivo`}>Qué no coincide</label>
+                            <form className="formulario" onSubmit={(e) => conMotivo(e, c.orden.id, pago.id, escribiendo.resultado)}>
+                              <label htmlFor={`${id}-motivo`}>
+                                {escribiendo.resultado === "observado" ? "Qué no coincide" : "Por qué lo aceptás fuera de término"}
+                              </label>
                               <input id={`${id}-motivo`} required maxLength={300} value={motivo} disabled={enviando}
                                 onChange={(e) => setMotivo(e.target.value)} />
                               <div className="acciones">
                                 <button type="submit" disabled={enviando || motivo.trim() === ""}>
-                                  Observar el pago
+                                  {escribiendo.resultado === "observado" ? "Observar el pago" : "Dar el pago por conforme"}
                                 </button>
-                                <button type="button" className="secundario" disabled={enviando} onClick={() => setObservando(null)}>
+                                <button type="button" className="secundario" disabled={enviando} onClick={() => setEscribiendo(null)}>
                                   Cancelar
                                 </button>
                               </div>

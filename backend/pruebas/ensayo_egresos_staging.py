@@ -57,6 +57,14 @@ concilió en la auditoría, y su cadena. Deja vigente el mandato de consejo1 y d
 mandato. La aprobación vencida no entra: vence a los 7 días y el ensayo no toca el reloj (SIN
 VERIFICAR en staging; la cubren las pruebas).
 
+**Orden trabada** (`--orden-trabada`, `0067`, P3 179; opción A del propietario, 03-11-2026): en
+otro consorcio LAB (`NOMBRE_CONSORCIO_TRABADA`), la administración emite, ve la cuenta y renuncia
+antes de registrar (la baja revoca sus sesiones). Vuelve a entrar con su contraseña y el segundo
+factor, ve la orden en «pagos para aclarar» sin la cuenta y declara que no transfirió, sin
+`egresos.ejecutar_pago`; quien no vio la cuenta recibe 404; otro consejero confirma y la orden
+queda Fallida. El pago fuera de término (P3 180) no entra: pide una aprobación de más de 7 días y
+el ensayo no toca el reloj (SIN VERIFICAR en staging; lo cubren las pruebas).
+
 Al final comprueba que ningún evento de auditoría del consorcio lleva una cuenta, que la cola del
 consorcio no tiene trabajos muertos, la cadena de auditoría, y revoca sesiones y da de baja los
 mandatos de la corrida.
@@ -89,6 +97,7 @@ import io
 import json
 import os
 import re
+import secrets
 import ssl
 import sys
 import threading
@@ -122,6 +131,7 @@ NOMBRE_CONSORCIO = "CEM LAB — egresos sintéticos (SINTETICO, PRUEBA, NO REAL)
 NOMBRE_CONSORCIO_MANUAL = "CEM LAB — pago manual sintético (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_LIQUIDACION = "CEM LAB — liquidación sintética (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_COMPLETO = "CEM LAB — recorrido completo sintético (SINTETICO, PRUEBA, NO REAL)"
+NOMBRE_CONSORCIO_TRABADA = "CEM LAB — orden trabada sintética (SINTETICO, PRUEBA, NO REAL)"
 DOMINIO = "cem-prueba.invalid"
 SUFIJO_STAGING = "-staging"
 ZONA = "America/Argentina/Buenos_Aires"
@@ -1688,6 +1698,91 @@ def recorrer_completo(corrida: Corrida, otro_consorcio: UUID) -> dict:
             "cuentas": corrida.cuentas}  # fmt: skip
 
 
+# Orden trabada (`0067`, P3 179) ---------------------------------------------------------------
+
+
+def recorrer_orden_trabada(corrida: Corrida) -> None:
+    al_dia(corrida, "administracion", "consejo1")
+    p1 = proveedor(corrida, 1)
+    cuenta = corrida.cuentas[0]
+    o = preparar(corrida, p1, 1_800_000)
+    comprobar(aprobar(corrida, "consejo1", o).estado == 201, "el Consejo aprueba la orden")
+    comprobar(emitir(corrida, "administracion", o).estado == 200, "la administración emite")
+    reverificar(corrida, "administracion")
+    r = cuenta_para_pagar(corrida, "administracion", o)
+    comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta,
+              f"la administración ve la cuenta en el acto de ejecución: {r.texto}")  # fmt: skip
+    adm = corrida.n("administracion")
+    contrasena = secrets.token_urlsafe(24)  # solo en memoria, para volver a entrar
+    r = adm.pedir("PUT", "/api/v1/auth/contrasena", {"contrasena_nueva": contrasena}, csrf=True)
+    comprobar(r.estado == 200, f"la administración define su contraseña: {r.texto}")
+    r = adm.pedir("GET", "/api/v1/pagos-por-aclarar")
+    comprobar(r.estado == 200 and r.cuerpo["elementos"] == [],
+              f"con la facultad, nada para aclarar: {r.texto}")  # fmt: skip
+    corrida.ok("la administración vio la cuenta; con la facultad, no tiene pagos para aclarar")
+
+    # La renuncia, antes de registrar: la baja revoca sus sesiones (RN22).
+    mandato = corrida.mandatos.pop("administracion")
+    with corrida.tx() as conn:
+        conn.execute(
+            text("select nucleo.baja_mandato(:m, 'renuncia', null, :r, 'Ensayo de orden trabada',"
+                 " null, 'soporte')"), {"m": mandato, "r": REFERENCIA},
+        )  # fmt: skip
+    r = adm.pedir("GET", "/api/v1/pagos-por-aclarar")
+    comprobar(r.estado == 401, f"la sesión de antes de la renuncia ya no sirve: {r.texto}")
+    n = Navegador(corrida.url, corrida.host, corrida.contexto)
+    r = n.pedir("POST", "/api/v1/auth/contrasena/entrar",
+                {"correo": f"egresos-{corrida.id}-administracion@{DOMINIO}",
+                 "contrasena": contrasena})  # fmt: skip
+    comprobar(r.estado == 200 and r.cuerpo["estado"] == "falta_segundo_factor",
+              f"vuelve a entrar con la contraseña: {r.texto}")  # fmt: skip
+    paso = max(segundo_factor_app.paso_actual(), corrida.pasos_totp["administracion"] + 1)
+    while segundo_factor_app.paso_actual() < paso:
+        time.sleep(1)
+    codigo = segundo_factor_app.codigo_en(corrida.secretos_totp["administracion"], paso)
+    r = n.pedir("POST", "/api/v1/auth/contrasena/segundo-factor", {"codigo": codigo})
+    comprobar(r.estado == 200, f"y con el segundo factor: {r.texto}")
+    corrida.pasos_totp["administracion"] = paso
+    corrida.navegadores["administracion"] = n
+    corrida.ok("renunció: sus sesiones se revocaron y volvió a entrar con contraseña y TOTP")
+
+    r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
+    comprobar(r.estado == 200 and cuenta not in r.texto, f"pagos para aclarar: {r.texto}")
+    [fila] = [x for x in r.cuerpo["elementos"] if x["orden_id"] == o]
+    comprobar(fila["consorcio_id"] == str(corrida.consorcio) and fila["version"] == 1,
+              f"la orden, en su consorcio, sin la cuenta: {fila}")  # fmt: skip
+    leido = n.pedir("GET", corrida.c(f"/ordenes-pago/{o}"))
+    comprobar(leido.estado in (403, 404) and cuenta not in leido.texto,
+              f"sin la facultad, ya no lee la orden: {leido.estado}")  # fmt: skip
+    corrida.ok("sin la facultad, ve la orden en «pagos para aclarar», sin la cuenta, y nada más")
+
+    ruta = corrida.c(f"/pagos-por-aclarar/{o}/no-realizado")
+    declaracion = {"version": 1, "motivo": f"LAB {corrida.id}: renuncié antes de transferir"}
+    reverificar(corrida, "consejo1")
+    r = corrida.n("consejo1").pedir("POST", ruta, declaracion, csrf=True, clave=str(uuid4()))
+    comprobar((r.estado, r.codigo()) == (404, "no_encontrado"),
+              f"quien no vio la cuenta no declara (404): {r.texto}")  # fmt: skip
+    r = n.pedir("POST", ruta, declaracion, csrf=True, clave=str(uuid4()))
+    comprobar(r.estado == 201, f"quien vio la cuenta declara sin la facultad: {r.texto}")
+    r = n.pedir("GET", "/api/v1/pagos-por-aclarar")
+    comprobar(r.estado == 200 and all(x["orden_id"] != o for x in r.cuerpo["elementos"]),
+              f"declarada, ya no está para aclarar: {r.texto}")  # fmt: skip
+    corrida.ok("la declara quien vio la cuenta y renunció; quien no la vio recibe 404")
+
+    elemento = pagos_de(corrida, "consejo1", o, revision=True)
+    [d] = elemento["ejecucion"]["declaraciones"]
+    comprobar(d["confirmable"], f"el Consejo puede confirmarla: {d}")
+    reverificar(corrida, "consejo1")
+    r = corrida.n("consejo1").pedir(
+        "POST", corrida.c(f"/ordenes-pago/{o}/pago-manual/no-realizado/{d['id']}/confirmacion"),
+        {}, csrf=True, clave=str(uuid4()),
+    )  # fmt: skip
+    comprobar(r.estado == 200 and r.cuerpo["estado"] == "fallida",
+              f"otro consejero confirma: {r.texto}")  # fmt: skip
+    comprobar(estado(corrida, o) == "fallida", "la orden quedó Fallida: ya no está trabada")
+    corrida.ok("el Consejo confirma que no se pagó: la orden sale de la traba (Fallida)")
+
+
 def comprobar_fin(corrida: Corrida, inicio) -> None:
     with corrida.tx() as conn:
         textos = conn.execute(
@@ -1753,6 +1848,11 @@ def main(argumentos: list[str] | None = None) -> int:
         help="recorre todo en un consorcio: pago manual, liquidación, auditoría y exportación",
     )
     p.add_argument(
+        "--orden-trabada",
+        action="store_true",
+        help="recorre la orden que quedaba trabada (0067, P3 179): declara quien vio la cuenta",
+    )
+    p.add_argument(
         "--otro-consorcio",
         type=UUID,
         help="con --pago-manual o --liquidacion: un consorcio ajeno para probar que no se cruza",
@@ -1763,8 +1863,10 @@ def main(argumentos: list[str] | None = None) -> int:
         help="con --liquidacion: una orden pagada de --otro-consorcio, que no se puede agregar",
     )
     a = p.parse_args(argumentos)
-    if sum((a.pago_manual, a.liquidacion, a.completo)) > 1:
-        p.error("--pago-manual, --liquidacion y --completo van en corridas distintas")
+    if sum((a.pago_manual, a.liquidacion, a.completo, a.orden_trabada)) > 1:
+        p.error(
+            "--pago-manual, --liquidacion, --completo y --orden-trabada van en corridas distintas"
+        )
     if (a.pago_manual or a.liquidacion or a.completo) and a.otro_consorcio is None:
         p.error("--pago-manual, --liquidacion y --completo piden --otro-consorcio")
     if a.liquidacion and a.orden_ajena is None:
@@ -1792,6 +1894,8 @@ def main(argumentos: list[str] | None = None) -> int:
             nombre = NOMBRE_CONSORCIO_LIQUIDACION
         elif a.completo:
             nombre = NOMBRE_CONSORCIO_COMPLETO
+        elif a.orden_trabada:
+            nombre = NOMBRE_CONSORCIO_TRABADA
         creado = asegurar_consorcio(motor, a.consorcio, nombre)
         print(
             f"corrida {corrida.id}; consorcio {a.consorcio} ({'creado' if creado else 'existente'})"
@@ -1809,6 +1913,8 @@ def main(argumentos: list[str] | None = None) -> int:
                 recorrer_pago_manual(corrida, a.otro_consorcio)
             elif a.liquidacion:
                 recorrer_liquidacion(corrida, a.otro_consorcio, a.orden_ajena)
+            elif a.orden_trabada:
+                recorrer_orden_trabada(corrida)
             else:
                 recorrer_ordenes(corrida)
             comprobar_fin(corrida, inicio)
