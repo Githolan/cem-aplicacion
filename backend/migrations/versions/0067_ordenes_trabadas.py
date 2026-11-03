@@ -330,13 +330,14 @@ DECLARAR_CAMBIOS = (
         "                                                origen_pedido);\n"
         "    else\n"
         "      -- Quien vio la cuenta de la ejecución abierta y dejó de ejecutar declara igual,\n"
-        "      -- con R10 y su identidad verificada (P3 179, 0067). A nadie más se le dice si la\n"
-        "      -- orden existe.\n"
-        "      identidad := nucleo.exigir_sesion_economica(c, actor, sesion, origen_pedido);\n"
-        "      if not nucleo.abrio_la_cuenta_de_la_orden(c, orden, actor) then\n"
+        "      -- con R10 y su identidad verificada (P3 179, 0067). Primero si la vio: a nadie\n"
+        "      -- más se le dice nada del consorcio ni de la orden (ni el modo ni su R10).\n"
+        "      if actor is null or actor is distinct from plataforma.persona_actual()\n"
+        "         or not nucleo.abrio_la_cuenta_de_la_orden(c, orden, actor) then\n"
         "        raise exception 'sin egresos.ejecutar_pago en este consorcio'"
         " using errcode = '42501';\n"
         "      end if;\n"
+        "      identidad := nucleo.exigir_sesion_economica(c, actor, sesion, origen_pedido);\n"
         "      sin_facultad := true;\n"
         "    end if;\n",
     ),
@@ -389,8 +390,11 @@ create function {POR_ACLARAR.split("(")[0]}(actor uuid, origen_pedido text, sesi
            where a.consorcio_id = e.consorcio_id and a.ejecucion_id = e.id
              and a.identidad_abrio = nucleo.identidad_humana_de(e.consorcio_id, actor)
            order by a.paso desc limit 1) u
-       where e.modalidad = 'manual'
+       where e.modalidad = 'manual' and e.version = o.version_vigente
          and nucleo.abrio_la_cuenta_de_la_orden(e.consorcio_id, o.id, actor)
+         -- Sin un pago vigente: si otro ya lo registró, no hay nada que declarar.
+         and (select x.id is null or nucleo.pago_manual_observado(x.id)
+                from nucleo.ultimo_pago_manual(e.id) x)
          and not nucleo.tiene_facultad_vigente(e.consorcio_id, actor, 'egresos.ejecutar_pago',
                                                nucleo.hoy_del_consorcio(e.consorcio_id))
          and not exists (select 1 from nucleo.declaracion_pago_no_realizado d
@@ -404,6 +408,8 @@ grant execute on function {POR_ACLARAR} to cem_app;
 """
 
 GUARDA_DOWNGRADE = """
+-- Hasta el fin del downgrade nadie registra ni declara: la guarda vale para lo que se borra.
+lock table nucleo.pago_manual, nucleo.declaracion_pago_no_realizado in share row exclusive mode;
 do $$
 begin
   if exists (select 1 from nucleo.pago_manual where fuera_de_termino)

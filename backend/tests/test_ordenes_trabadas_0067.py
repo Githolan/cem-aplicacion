@@ -27,6 +27,7 @@ from tests.test_pago_manual_0055 import (
     REGISTRAR,
     emitida,
     evidencia,
+    otro_ejecutor,
     pagos_de,
     registrada,
     ver,
@@ -144,6 +145,8 @@ def test_sin_la_facultad_la_declaracion_exige_r10(
 
 
 def test_sin_la_facultad_la_declaracion_exige_la_identidad_verificada(motor_migrate, motor_app, e):
+    """Sin la identidad, la base no sabe que vio la cuenta: niega sin decir nada más (42501).
+    Soporte vuelve a vincularla (reparación técnica) y recién ahí declara."""
     o = trabada(motor_migrate, motor_app, e)
     with motor_migrate.begin() as c:
         c.execute(
@@ -151,8 +154,7 @@ def test_sin_la_facultad_la_declaracion_exige_la_identidad_verificada(motor_migr
                  " where consorcio_id = :c and persona_id = :p and desvinculada_en is null"),
             {"c": e.cons, "p": e.adm},
         )  # fmt: skip
-    niega(motor_migrate, e, e.adm, DECLARAR, "identidad_no_verificada", orden=o, version=1,
-          motivo=MOTIVO)  # fmt: skip
+    niega(motor_migrate, e, e.adm, DECLARAR, "42501", orden=o, version=1, motivo=MOTIVO)
 
 
 def test_quien_vio_la_cuenta_y_aprobo_tampoco_declara_sin_la_facultad(motor_migrate, motor_app, e):
@@ -376,6 +378,38 @@ def test_por_http_a_quien_no_vio_la_cuenta_le_responde_404(motor_migrate, motor_
     e.cons = otro
     r = post(e, e.adm, ruta, {"version": 1, "motivo": MOTIVO})  # control
     assert r.status_code == 201, r.text
+
+
+def test_por_http_un_extrano_con_el_segundo_factor_viejo_recibe_404_igual(
+    motor_migrate, motor_app, e
+):
+    """Sin identidad en el consorcio y sin el segundo factor reciente: 404, no 403. Antes de saber
+    si vio la cuenta, la base no evalúa su R10 ni el modo (revisión independiente de #196)."""
+    o = trabada(motor_migrate, motor_app, e)
+    x = otra_persona(motor_migrate, e.cons)
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("update nucleo.identidad_persona set desvinculada_en = now()"
+                 " where consorcio_id = :c and persona_id = :p and desvinculada_en is null"),
+            {"c": e.cons, "p": x},
+        )  # fmt: skip
+    e.sesion[x] = nueva_sesion(motor_migrate, x, horas_atras=1, totp_min_atras=None)
+    ruta = f"pagos-por-aclarar/{o}/no-realizado"
+    assert codigo(post(e, x, ruta, {"version": 1, "motivo": MOTIVO})) == (404, "no_encontrado")
+    # Una orden que no existe, para quien sí vio otra: lo mismo.
+    otra = f"pagos-por-aclarar/{uuid4()}/no-realizado"
+    assert codigo(post(e, e.adm, otra, {"version": 1, "motivo": MOTIVO})) == (404, "no_encontrado")
+    assert post(e, e.adm, ruta, {"version": 1, "motivo": MOTIVO}).status_code == 201  # control
+
+
+def test_por_aclarar_no_lista_lo_que_otro_ya_registro(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, e.adm, o)
+    dar_de_baja(motor_migrate, motor_app, e, e.adm)
+    assert [f["orden_id"] for f in por_aclarar(motor_migrate, e, e.adm)] == [o]  # control
+    registrada(motor_migrate, e, o, quien=x)
+    assert por_aclarar(motor_migrate, e, e.adm) == []
 
 
 def test_por_http_sin_segundo_factor_reciente_pide_renovarlo(motor_migrate, motor_app, e):
