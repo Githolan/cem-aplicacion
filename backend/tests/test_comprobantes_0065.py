@@ -104,6 +104,42 @@ def test_quien_vio_la_cuenta_de_una_ejecucion_anterior_no_concilia_la_siguiente(
     assert orden(motor_migrate, o)["estado"] == "pagada"
 
 
+def test_quien_vio_la_cuenta_de_una_ejecucion_anterior_no_confirma_que_no_se_pago_otra(
+    motor_migrate, motor_app, e
+):
+    o, x = segunda_ejecucion(motor_migrate, motor_app, e)
+    ver_version(motor_migrate, e, e.adm, o, 2)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=2,
+               motivo="SINTETICO: otra vez rechazada")  # fmt: skip
+    niega(motor_migrate, e, x, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)  # control
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_la_administracion_que_ejecuto_las_dos_carga_el_comprobante_de_la_segunda(motor_migrate, e):
+    """El caso del piloto: la misma administración ve la cuenta de las dos ejecuciones; en la
+    segunda sigue cargando el comprobante y registrando, y otro consejero concilia."""
+    o = emitida(motor_migrate, e)
+    ver_version(motor_migrate, e, e.adm, o, 1)
+    d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1,
+               motivo="SINTETICO: el banco rechazó la transferencia")  # fmt: skip
+    llamar(motor_migrate, e, e.mc2, CONFIRMAR, orden=o, declaracion=d)
+    llamar(motor_migrate, e, e.adm, MODIFICAR, orden=o, version=1, concepto="Reintento SINTETICO")
+    if orden(motor_migrate, o)["estado"] == "en_revision":
+        llamar(motor_migrate, e, e.mc1, APROBAR, orden=o, version=2,
+               huella=huella(motor_migrate, o, 2))  # fmt: skip
+    llamar(motor_migrate, e, e.adm, EMITIR, orden=o, version=2)
+    ver_version(motor_migrate, e, e.adm, o, 2)
+    doc = llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO)
+    con_version(motor_migrate, e, doc, e.adm)
+    p = llamar(motor_migrate, e, e.adm, REGISTRAR,
+               **evidencia(motor_migrate, e, o, version=2, huella=huella(motor_migrate, o, 2),
+                           documento=doc))  # fmt: skip
+    llamar(motor_migrate, e, e.mc2, CONCILIAR, orden=o, pago=p, resultado="conforme",
+           motivo=None)  # fmt: skip
+    assert orden(motor_migrate, o)["estado"] == "pagada"
+
+
 def test_con_la_orden_pagada_nadie_cambia_la_evidencia(motor_migrate, e):
     o = emitida(motor_migrate, e)
     p = registrada(motor_migrate, e, o)
