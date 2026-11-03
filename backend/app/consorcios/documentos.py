@@ -31,6 +31,7 @@ contrato): la categoría elige la acción.
 
 import hashlib
 import re
+from collections.abc import Callable
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
@@ -61,7 +62,7 @@ from sqlalchemy.exc import DBAPIError
 from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
 from app.consorcios.padron import Discrepancia
-from app.contexto import MotorDep
+from app.contexto import Contexto, MotorDep
 from app.db import transaccion
 from app.errores import SIN_CACHE, ErrorApi, sin_cache
 from app.plataforma import almacen, cola
@@ -228,26 +229,33 @@ async def _leer_con_tope(request: Request) -> bytes:
     return bytes(cuerpo)
 
 
+SUBIDA_OPENAPI = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            t.value: {"schema": {"type": "string", "format": "binary"}} for t in TipoArchivo
+        },
+    }
+}
+RESPUESTAS_SUBIDA = {
+    404: {"description": "El documento no existe en este consorcio."},
+    408: {"description": "El cuerpo no llegó entero a tiempo: no se guardó nada."},
+    413: {"description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."},
+    415: {"description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."},
+    503: {"description": "Demasiadas cargas a la vez: probá de nuevo en un momento."},
+}
+"""El cuerpo y las respuestas de toda subida de un archivo (también la de `0068`)."""
+
+
 @router.post(
     "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones",
     status_code=201,
     response_model=VersionCargada,
     summary="Subir un archivo de un documento: entra en cuarentena hasta que se analiza",
-    openapi_extra={
-        "requestBody": {
-            "required": True,
-            "content": {
-                t.value: {"schema": {"type": "string", "format": "binary"}} for t in TipoArchivo
-            },
-        }
-    },
+    openapi_extra=SUBIDA_OPENAPI,
     responses={
         403: {"description": "Sin una acción de carga para la categoría del documento."},
-        404: {"description": "El documento no existe en este consorcio."},
-        408: {"description": "El cuerpo no llegó entero a tiempo: no se guardó nada."},
-        413: {"description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."},
-        415: {"description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."},
-        503: {"description": "Demasiadas cargas a la vez: probá de nuevo en un momento."},
+        **RESPUESTAS_SUBIDA,
     },
 )
 async def subir_version(
@@ -266,6 +274,27 @@ async def subir_version(
         _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
 
     await anyio.to_thread.run_sync(autorizar)
+
+    def nueva(conn: Connection, tipo: str, tamano: int, suma: str):
+        return _escribir(
+            conn,
+            "select id, clave_objeto from nucleo.nueva_version(:d, :t, :n, :s, :a, 'api')",
+            {"d": documento_id, "t": tipo, "n": tamano, "s": suma, "a": ctx.persona_id},
+        ).one()
+
+    return await subir_archivo(request, ctx, clave, motor, nueva)
+
+
+NuevaVersion = Callable[[Connection, str, int, str], object]
+"""Crea la fila de la versión en la base (con su autorización) y devuelve `id` y `clave_objeto`."""
+
+
+async def subir_archivo(
+    request: Request, ctx: Contexto, clave: str, motor, nueva: NuevaVersion
+) -> Response:
+    """Lee el archivo con su tope, comprueba el tipo real, crea la versión con `nueva`, lo guarda
+    en el almacén y encola el análisis, todo bajo la misma clave de reintento. La autorización de
+    cada ruta va antes y adentro de `nueva`; esta es la parte común (también la de `0068`)."""
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
@@ -290,12 +319,7 @@ async def subir_version(
         destino = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
 
         def efecto(conn: Connection) -> tuple[int, VersionCargada]:
-            fila = _escribir(
-                conn,
-                "select id, clave_objeto from nucleo.nueva_version(:d, :t, :n, :s, :a, 'api')",
-                {"d": documento_id, "t": tipo.value, "n": len(cuerpo), "s": suma,
-                 "a": ctx.persona_id},
-            ).one()  # fmt: skip
+            fila = nueva(conn, tipo.value, len(cuerpo), suma)
             subida = destino.cliente().put_object(
                 Bucket=destino.bucket, Key=fila.clave_objeto, Body=cuerpo,
                 ContentType=tipo.value, Metadata={"sha256": suma},

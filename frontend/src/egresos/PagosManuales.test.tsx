@@ -642,6 +642,9 @@ describe("pagos para aclarar (app 0067)", () => {
     importe_centavos: 1_500_000,
     moneda: "ARS",
     cuenta_vista_en: "2026-10-31T13:00:00Z",
+    huella: H1,
+    comprobante_id: null,
+    comprobante_estado: null,
   };
   const DECLARAR = `${BASE}/pagos-por-aclarar/${O1}/no-realizado`;
 
@@ -677,6 +680,85 @@ describe("pagos para aclarar (app 0067)", () => {
     const [uno, dos] = pedidos(api, "POST", DECLARAR);
     expect(await uno?.json()).toEqual({ version: 1, motivo: "Renuncié antes de pagar" });
     expect(dos?.headers.get("Idempotency-Key")).toBe(uno?.headers.get("Idempotency-Key"));
+  });
+
+  it("quien transfirió y dejó de administrar sube el comprobante y registra el pago (app 0068)", async () => {
+    const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const CARGA = `${BASE}/pagos-por-aclarar/${O1}/comprobante`;
+    const SUBIDA = `${CARGA}/${NUEVO}/versiones`;
+    const REGISTRO = `${BASE}/pagos-por-aclarar/${O1}/pago`;
+    let lista: object[] = [POR_ACLARAR];
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: lista }),
+      [`POST ${CARGA}`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${SUBIDA}`]: () => {
+        lista = [{ ...POR_ACLARAR, comprobante_id: NUEVO, comprobante_estado: "en_cuarentena" }];
+        return Response.json({ id: ARCHIVO, estado: "en_cuarentena" }, { status: 201 });
+      },
+      [`POST ${REGISTRO}`]: () => {
+        lista = [];
+        return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir("/egresos/por-aclarar");
+    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    expect(screen.getByText("Primero subí el comprobante de la transferencia.")).toBeTruthy();
+    const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
+    expect(registrar.disabled).toBe(true);
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(await screen.findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
+    expect(registrar.disabled).toBe(true); // en cuarentena todavía no se registra
+    const [carga] = pedidos(api, "POST", CARGA);
+    expect(await carga?.json()).toEqual({ titulo: "Transferencia: Limpieza de octubre", fecha: "2026-10-31" });
+    const [subida] = pedidos(api, "POST", SUBIDA);
+    expect(subida?.headers.get("Content-Type")).toBe("application/pdf");
+    expect(subida?.headers.get("Idempotency-Key")).toBeTruthy();
+    // El antivirus lo aprueba: «Actualizar» lo trae disponible y se registra.
+    lista = [{ ...POR_ACLARAR, comprobante_id: NUEVO, comprobante_estado: "disponible" }];
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+    expect(await screen.findByText(/ya podés registrar el pago/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` } });
+    await sinFaltasDeAccesibilidad(container);
+    fireEvent.click(registrar);
+    expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
+    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
+    const [registro] = pedidos(api, "POST", REGISTRO);
+    expect(await registro?.json()).toEqual({
+      version: 1,
+      huella: H1,
+      numero_operacion: "0001-234567",
+      fecha_operacion: "2026-10-31",
+      importe_centavos: 1_500_000,
+      moneda: "ARS",
+      cuenta_destino: CUENTA,
+      documento_id: NUEVO,
+    });
+  });
+
+  it("con un comprobante propio rechazado, sube otro archivo al mismo documento", async () => {
+    const SUBIDA = `${BASE}/pagos-por-aclarar/${O1}/comprobante/${DOC}/versiones`;
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () =>
+        Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "rechazado" }] }),
+      [`POST ${SUBIDA}`]: () => Response.json({ id: ARCHIVO, estado: "en_cuarentena" }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/por-aclarar");
+    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    expect(screen.getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
+    expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/comprobante`)).toHaveLength(0);
   });
 
   it("sin pagos para aclarar lo dice", async () => {
