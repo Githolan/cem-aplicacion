@@ -225,7 +225,8 @@ ERRORES = {
     "comprobante_invalido": (
         422, CodigoError.COMPROBANTE_INVALIDO,
         "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta"
-        " para pagar, y su archivo tiene que haber pasado el antivirus.",
+        " para pagar, seguir en «Facturas y comprobantes» y su archivo tiene que haber pasado el"
+        " antivirus.",
     ),
     "comprobante_de_otra_orden": (
         409, CodigoError.COMPROBANTE_DE_OTRA_ORDEN, "Ese comprobante ya respalda otro pago.",

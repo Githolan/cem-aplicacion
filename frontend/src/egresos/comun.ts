@@ -144,7 +144,7 @@ const MENSAJES: Record<string, string> = {
   numero_operacion_invalido: "El número de operación no es válido: copialo tal como figura en el comprobante.",
   no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante.",
   fecha_operacion_invalida: "La fecha no puede ser anterior a la emisión, futura ni posterior al vencimiento de la aprobación.",
-  comprobante_invalido: "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta para pagar, y su archivo tiene que haber pasado el antivirus.",
+  comprobante_invalido: "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta para pagar, seguir en «Facturas y comprobantes» y su archivo tiene que haber pasado el antivirus.",
   comprobante_de_otra_orden: "Ese comprobante ya respalda otro pago.",
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
   conciliacion_repetida: "Ese pago ya está conciliado.",
