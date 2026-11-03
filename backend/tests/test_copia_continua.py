@@ -1037,7 +1037,7 @@ def _copia_con_wal_reciclado(monkeypatch, motor_migrate) -> dict:
     consulta de la vuelta al slot, como en producción. Devuelve si se recicló antes de que la
     copia terminara: sin eso, el control con `fetch` no prueba nada (P3 178)."""
     correr = copias._correr
-    reciclado = {"antes_del_fin": False}
+    reciclado: dict = {"antes_del_fin": False, "error": None}
 
     def con_wal(argumentos, entorno=None, tope=None):
         if argumentos[0] != "pg_basebackup":
@@ -1045,9 +1045,19 @@ def _copia_con_wal_reciclado(monkeypatch, motor_migrate) -> dict:
         termino = threading.Event()
 
         def generar():
-            time.sleep(0.5)  # que la copia ya haya empezado
+            try:
+                reciclar()
+            except BaseException as error:  # se vuelve a lanzar en el hilo de la prueba
+                reciclado["error"] = error
+
+        def reciclar():
+            # El segmento actual cuando la copia ya pasó su checkpoint de inicio: el del inicio de
+            # la copia es ese o uno anterior, y los anteriores se reciclan primero.
+            esperar(lambda: admin(COPIA_PASO_SU_CHECKPOINT))
             inicio = admin("select pg_walfile_name(pg_current_wal_lsn())")[0][0]
             for _ in range(VUELTAS_MAXIMAS_RECICLADO):
+                if termino.is_set():
+                    return
                 with motor_migrate.begin() as c:
                     c.execute(text("insert into plataforma.prueba_pa26 select repeat('x', 100)"
                                    " from generate_series(1, 2000)"))  # fmt: skip
@@ -1066,6 +1076,8 @@ def _copia_con_wal_reciclado(monkeypatch, motor_migrate) -> dict:
         finally:
             termino.set()
             hilo.join()
+        if reciclado["error"] is not None:
+            raise reciclado["error"]
 
     monkeypatch.setattr(copias, "_correr", con_wal)
     return reciclado
@@ -1073,6 +1085,10 @@ def _copia_con_wal_reciclado(monkeypatch, motor_migrate) -> dict:
 
 TASA_COPIA_LENTA = "2M"
 VUELTAS_MAXIMAS_RECICLADO = 12
+COPIA_PASO_SU_CHECKPOINT = (
+    "select 1 from pg_stat_progress_basebackup"
+    " where phase not in ('initializing', 'waiting for checkpoint to finish')"
+)
 
 
 @pytest.mark.db

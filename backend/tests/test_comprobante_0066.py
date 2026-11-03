@@ -46,6 +46,7 @@ def test_con_la_sesion_de_otra_persona_no_se_carga(motor_migrate, e):
     ver_version(motor_migrate, e, e.adm, o, 1)
     niega(motor_migrate, e, e.adm, CREAR, "sesion_invalida", sesion=e.sesion[e.mc2], orden=o,
           titulo=TITULO)  # fmt: skip
+    assert llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO) is not None  # control
 
 
 def test_0066_ida_y_vuelta(base_aparte):  # noqa: F811
@@ -64,13 +65,24 @@ def test_0066_ida_y_vuelta(base_aparte):  # noqa: F811
                 c.execute(
                     text("select pg_get_functiondef(to_regprocedure(:f))"), {"f": m.CREAR_0063}
                 ).scalar_one(),
+                *permisos(c, m.CREAR_0063),
+                *permisos(c, m.CREAR_R10),
             )
+
+    def permisos(c, firma: str) -> tuple:
+        sql = (
+            "select case when to_regprocedure(:f) is null then null else"
+            " (has_function_privilege('public', to_regprocedure(:f), 'execute'),"
+            "  has_function_privilege('cem_app', to_regprocedure(:f), 'execute'))::text end"
+        )
+        return (c.execute(text(sql), {"f": firma}).scalar_one(),)
 
     command.upgrade(cfg, "0065")
     antes = firmas()
-    assert antes[:2] == (True, False)
+    assert antes[:2] == (True, False) and antes[3] == "(f,t)"  # solo cem_app la ejecuta
     command.upgrade(cfg, "0066")
-    assert firmas()[:2] == (False, True)
+    despues = firmas()
+    assert despues[:2] == (False, True) and despues[4] == "(f,t)"
     command.downgrade(cfg, "0065")
     assert firmas() == antes
     command.upgrade(cfg, "0066")  # control
