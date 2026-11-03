@@ -23,7 +23,10 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
 
 pytestmark = pytest.mark.db
 
-CREAR = "select nucleo.crear_comprobante_de_pago(:orden, :titulo, current_date, :actor, :origen)"
+CREAR = (
+    "select nucleo.crear_comprobante_de_pago(:orden, :titulo, current_date, :actor, :origen,"
+    " :sesion)"
+)
 TITULO = "Transferencia SINTETICA (NO REAL)"
 
 
@@ -168,7 +171,7 @@ def test_la_orden_de_un_comprobante_no_cambia(motor_migrate, e):
 
 
 def test_la_funcion_nueva_la_ejecuta_solo_cem_app(motor_migrate):
-    f = "nucleo.crear_comprobante_de_pago(uuid, text, date, uuid, text)"
+    f = "nucleo.crear_comprobante_de_pago(uuid, text, date, uuid, text, uuid)"  # 0066
     with motor_migrate.connect() as c:
         for rol, esperado in (("public", False), ("cem_app", True)):
             sql = f"select has_function_privilege('{rol}', cast(:f as regprocedure), 'execute')"
@@ -188,7 +191,7 @@ def test_otro_consorcio_no_carga_un_comprobante_de_esta_orden(motor_migrate, mot
     with pytest.raises(DBAPIError) as error, transaccion(motor_migrate, persona_id=otro.adm,
                                                          consorcio_id=otro.cons) as c:  # fmt: skip
         c.execute(text(CREAR), {"orden": o, "titulo": TITULO, "actor": otro.adm,
-                                "origen": "api"})  # fmt: skip
+                                "origen": "api", "sesion": otro.sesion[otro.adm]})  # fmt: skip
     assert error.value.orig.diag.message_hint == "no_es_quien_ejecuto"
     with motor_migrate.connect() as c:
         sql = "select count(*) from nucleo.documento where orden_comprobante = :o"

@@ -1086,7 +1086,7 @@ def crear_comprobante_de_pago(
     def efecto(conn: Connection) -> tuple[int, DocumentoId]:
         doc = _ejecutar(
             conn, permiso,
-            "select nucleo.crear_comprobante_de_pago(:o, :titulo, :fecha, :actor, 'api')",
+            "select nucleo.crear_comprobante_de_pago(:o, :titulo, :fecha, :actor, 'api', :sesion)",
             {"o": orden_id, "titulo": nuevo.titulo, "fecha": nuevo.fecha},
         ).scalar_one()  # fmt: skip
         return 201, DocumentoId(id=doc)
