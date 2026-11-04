@@ -12,9 +12,9 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
   sostiene el pedido) y la clave pública `age` del destinatario.
 - **Comprueba la capacidad en la base:** `nucleo.registrar_exportacion` exige que quien la pidió
   tuviera ese día un mandato vigente de administración o de Consejo con las cinco facultades de
-  lectura del contenido, cada una general, y además, general, una facultad económica del paquete
-  estándar de su tipo de mandato (`0069`: lo económico sale solo para quien ya tenía acceso a
-  algo económico). Recién entonces crea la constancia. Si falta cualquiera, alguna está acotada a
+  lectura del contenido, cada una general, y además, general, una facultad económica de egresos
+  del paquete estándar de su tipo de mandato (`0069`: lo económico sale solo para quien ya leía
+  órdenes). Recién entonces crea la constancia. Si falta cualquiera, alguna está acotada a
   un recurso o el mandato es de otro tipo (un administrador externo), se niega sin escribir nada.
   Las funciones de exportación solo responden para esa constancia, todavía sin armar.
 - **Arma el paquete en tramos directo a `age`:** un ZIP con un JSON por entidad (de las funciones
@@ -315,7 +315,7 @@ def _registrar(conn: Connection, a: argparse.Namespace):
         if e.orig.diag.message_hint == "sin_capacidad":
             raise Negado(
                 "quien la pidió no tenía ese día un mandato vigente de administración o de"
-                " Consejo con " + ", ".join(FACULTADES) + " generales y una facultad económica"
+                " Consejo con " + ", ".join(FACULTADES) + " generales y una facultad de egresos"
                 " general de su paquete"
             ) from e
         raise

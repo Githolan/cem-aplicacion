@@ -80,7 +80,7 @@ PARTES_ECONOMICAS = ("proveedores", "ordenes_pago", "pagos", "liquidaciones")
 ENTIDADES_ECONOMICAS = {
     entidad for parte in PARTES_ECONOMICAS for entidad in exportar_consorcio.PARTES[parte]
 }
-PAQUETE_ECONOMICO_DEL_CONSEJO = ["egresos.aprobar_orden", "fondo_reserva.autorizar"]
+EGRESOS_DEL_CONSEJO = ["egresos.aprobar_orden"]
 
 # Las claves de cada fila del paquete, una por una. Una clave que no está acá es un dato que
 # alguien agregó sin decidir que va (H2c §5, «Nunca van»).
@@ -405,7 +405,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         "Estudio Nuevo SRL", "30712345671")  # fmt: skip
     assert fila["solicitud_referencia"] == "Nota 3/2026 del Consejo"
     assert fila["respaldo_referencia"] == "Acta 45, libro 3, folio 12"
-    assert fila["facultades_verificadas"] == FACULTADES + PAQUETE_ECONOMICO_DEL_CONSEJO
+    assert fila["facultades_verificadas"] == FACULTADES + EGRESOS_DEL_CONSEJO
     assert fila["armada_en"] is not None and fila["entregada_en"] is None
     assert fila["cantidades"] == {k: len(v) for k, v in datos.items()} | {"archivos": 2}
     assert f"exportacion: {fila['id']}" in impreso and f"sha256: {suma}" in impreso
@@ -948,7 +948,7 @@ def test_registrar_exportacion_fija_la_capacidad_adentro(sin_documentos, motor_m
     fila = pedido(e)
     assert fila.mandato_id == e["m_mc"]
     [constancia] = constancias(motor_migrate, e["cons"])
-    assert constancia["facultades_verificadas"] == FACULTADES + PAQUETE_ECONOMICO_DEL_CONSEJO
+    assert constancia["facultades_verificadas"] == FACULTADES + EGRESOS_DEL_CONSEJO
     assert constancia["armada_en"] is None and constancia["entregada_en"] is None
 
 
@@ -1529,17 +1529,18 @@ def test_lo_economico_de_otro_consorcio_no_aparece(economico, con_url, claves, t
 
 
 def test_la_lista_de_facultades_economicas_sale_del_catalogo(motor_migrate):
-    """Control de la regla: lo que cuenta es el catálogo cruzado con el paquete del tipo. Si una
-    migración mueve una facultad, esta prueba avisa antes de que cambie quién exporta."""
+    """Control de la regla: lo que cuenta es lo económico de egresos del catálogo cruzado con el
+    paquete del tipo. Si una migración mueve una facultad, esta prueba avisa antes de que cambie
+    quién exporta."""
     with motor_migrate.connect() as c:
         filas = c.execute(
             text("select p.tipo::text, array_agg(p.facultad order by p.facultad)"
                  " from nucleo.paquete_facultad p join nucleo.facultad k on k.codigo = p.facultad"
-                 " where k.economica group by p.tipo"),
+                 " where k.economica and k.area = 'egresos' group by p.tipo"),
         ).all()  # fmt: skip
     assert {f[0]: f[1] for f in filas} == {
         "administrador": ["egresos.ejecutar_pago", "egresos.preparar_orden"],
-        "miembro_consejo": PAQUETE_ECONOMICO_DEL_CONSEJO,
+        "miembro_consejo": EGRESOS_DEL_CONSEJO,
     }
 
 
@@ -1547,6 +1548,7 @@ def test_la_lista_de_facultades_economicas_sale_del_catalogo(motor_migrate):
     "caso,facultad,recurso",
     [
         ("no es económica", "liquidacion.revisar", None),
+        ("económica y de su paquete, pero no lee órdenes", "fondo_reserva.autorizar", None),
         ("económica pero de otro paquete", "egresos.ejecutar_pago", None),
         ("económica y de su paquete, acotada", "egresos.aprobar_orden", "cuenta:principal"),
     ],
@@ -1568,10 +1570,10 @@ def test_sin_una_economica_general_de_su_paquete_se_niega(sin_documentos, motor_
     assert error.value.orig.diag.message_hint == "sin_capacidad", caso
     assert constancias(motor_migrate, e["cons"]) == []
     # Control: la misma persona, con una económica general de su paquete, pasa.
-    otorgar(motor_migrate, e["cons"], e["m_sin_economica"], e["acta"], "fondo_reserva.autorizar")
+    otorgar(motor_migrate, e["cons"], e["m_sin_economica"], e["acta"], "egresos.aprobar_orden")
     assert pedido(e, e["mc_sin_economica"]).mandato_id == e["m_sin_economica"]
     [constancia] = constancias(motor_migrate, e["cons"])
-    assert constancia["facultades_verificadas"] == FACULTADES + ["fondo_reserva.autorizar"]
+    assert constancia["facultades_verificadas"] == FACULTADES + EGRESOS_DEL_CONSEJO
 
 
 def test_0069_ida_y_vuelta(base_aparte):  # noqa: F811

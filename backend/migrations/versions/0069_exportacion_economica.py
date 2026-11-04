@@ -37,12 +37,13 @@ se suprimió, va nulo.
 
 **Capacidad.** Que lo económico salga no puede dar acceso a quien no lo tenía: además de las cinco
 facultades de lectura, `nucleo.capacidad_para_exportar` exige, general, al menos una facultad
-económica del paquete estándar del tipo de su mandato. Se lee del catálogo
-(`nucleo.facultad.economica` y `nucleo.paquete_facultad`): hoy `egresos.preparar_orden` o
-`egresos.ejecutar_pago` para la administración, y `egresos.aprobar_orden` o
-`fondo_reserva.autorizar` para el Consejo. Falla cerrada: sin ella `registrar_exportacion` niega
-con `sin_capacidad` sin escribir nada. Las verificadas se suman a `facultades_verificadas` de la
-constancia.
+económica de egresos del paquete estándar del tipo de su mandato. Se lee del catálogo
+(`nucleo.facultad.economica`, su área y `nucleo.paquete_facultad`): hoy `egresos.preparar_orden` o
+`egresos.ejecutar_pago` para la administración y `egresos.aprobar_orden` para el Consejo.
+`fondo_reserva.autorizar` no alcanza, aunque sea económica y del paquete del Consejo: no lee
+órdenes en la aplicación (decisión del 04-11-2026). Falla cerrada: sin ella
+`registrar_exportacion` niega con `sin_capacidad` sin escribir nada. Las verificadas se suman a
+`facultades_verificadas` de la constancia.
 
 Downgrade: quita las cuatro funciones y las auxiliares y vuelve la capacidad y el registro al texto
 de `0038`. Las constancias quedan: `facultades_verificadas` es texto y `0038` las admite.
@@ -142,7 +143,7 @@ create function nucleo.nombre_para_exportar(c uuid, quien uuid, hoy date)
   $$;
 revoke all on function nucleo.nombre_para_exportar(uuid, uuid, date) from public;
 
--- Las facultades económicas generales del mandato que están en el paquete estándar de su tipo.
+-- Las facultades económicas de egresos, generales, del mandato y del paquete estándar de su tipo.
 create function nucleo.facultades_economicas_para_exportar(c uuid, mandato_pedido uuid)
   returns text[]
   language sql stable
@@ -154,6 +155,7 @@ create function nucleo.facultades_economicas_para_exportar(c uuid, mandato_pedid
       join nucleo.facultad k on k.codigo = f.facultad
       join nucleo.paquete_facultad p on p.tipo = m.tipo and p.facultad = f.facultad
      where m.consorcio_id = c and m.id = mandato_pedido and f.recurso is null and k.economica
+       and k.area = 'egresos'
   $$;
 revoke all on function nucleo.facultades_economicas_para_exportar(uuid, uuid) from public;
 """
@@ -459,7 +461,7 @@ create or replace function nucleo.capacidad_para_exportar(c uuid, persona uuid, 
 
 def _registrar(economica: bool) -> str:
     falta = (
-        "' Consejo con las cinco facultades de lectura generales y una facultad económica"
+        "' Consejo con las cinco facultades de lectura generales y una facultad de egresos"
         " general de'\n                      ' su paquete'"
         if economica
         else "' Consejo con las cinco facultades de lectura generales'"
