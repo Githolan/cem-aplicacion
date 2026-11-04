@@ -16,6 +16,10 @@
 #      contenedor (documento 14, §11); las PA del P0-piloto cubiertas y faltantes
 #      van a la constancia (campo cobertura_pa) y al .log. Que falten PA no es
 #      rojo (sin --estricto); que el script falle o no devuelva el informe, sí
+#   3c. seguridad (documento 13, §18.2): pip-audit sobre lo que instala la imagen de
+#      cem-backend (con sus dependencias indirectas), pnpm audit --prod desde alta, y
+#      gitleaks sobre el árbol y el historial reciente. Cualquier hallazgo es rojo; las
+#      excepciones de gitleaks van, acotadas y comentadas, en .gitleaks.toml
 #   4. frontend: pnpm install --frozen-lockfile, lint, test, build
 #   5. imagen del frontend: docker build + frontend/scripts/probar-imagen.sh
 #   6. extremo a extremo: pnpm e2e (frontend/scripts/probar-extremo-a-extremo.sh:
@@ -71,6 +75,11 @@ $ShConocido        = 'frontend/scripts/probar-imagen.sh'
 $PrefijoE2e        = 'cem-frontend-e2e'
 # Carpeta temporal del DOCKER_CONFIG del login a ghcr.io (se borra siempre).
 $PrefijoDockerConfig = 'cem-ci-docker-config-'
+# Herramientas de la etapa 3c, con versión fija.
+$ImagenPython      = 'python:3.12-slim'
+$VersionPipAudit   = '2.9.0'
+$ImagenGitleaks    = 'zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854'
+$CommitsGitleaks   = 200
 # Imagen -> referencia, digest y plataforma de lo subido en la etapa 7.
 $imagenes = [ordered]@{}
 # Informe de scripts/cobertura_pa.py (etapa 3b); va a la constancia.
@@ -281,6 +290,25 @@ try {
     Correr 'contratos' { docker @composeArgs run --rm $ServicioPruebas sh -c 'cd /src/contratos && pytest' } | Out-Null
     Etapa 'Cobertura de PA (documento 14, §11)'
     Medir-CoberturaPa
+
+    # --- 3c. seguridad ----------------------------------------------------------
+    Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks)'
+    $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos && /entorno/bin/pip uninstall -q -y pip " +
+        "&& pip install -q pip-audit==$VersionPipAudit && pip-audit --path /entorno/lib/python3.12/site-packages"
+    Correr 'seguridad-dependencias-python' {
+        docker run --rm -v "${copia}:/copia:ro" -w /tmp/auditoria $ImagenPython sh -c "cp -r /copia/backend /copia/contratos . && $auditoriaPip"
+    } | Out-Null
+    Push-Location (Join-Path $copia 'frontend')
+    try { Correr 'seguridad-dependencias-frontend' { pnpm audit --prod --audit-level high } | Out-Null }
+    finally { Pop-Location }
+    Correr 'seguridad-secretos-arbol' {
+        docker run --rm -v "${copia}:/copia:ro" $ImagenGitleaks dir /copia -c /copia/.gitleaks.toml --no-banner --redact=100
+    } | Out-Null
+    $gitComun = (Resolve-Path (git -C $repo rev-parse --path-format=absolute --git-common-dir)).Path
+    Correr 'seguridad-secretos-historial' {
+        docker run --rm -v "${copia}:/copia:ro" -v "${gitComun}:/repo.git:ro" $ImagenGitleaks git /repo.git -c /copia/.gitleaks.toml `
+            --no-banner --redact=100 --log-opts="-n $CommitsGitleaks $shaCompleta"
+    } | Out-Null
 
     # --- 4. frontend ------------------------------------------------------------
     Etapa 'Frontend (pnpm)'
