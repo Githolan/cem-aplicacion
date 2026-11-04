@@ -72,6 +72,10 @@ class E(h.BaseHTTPRequestHandler):
         b = (self.headers.get("X-Forwarded-For") or "").encode()
         self.send_response(200); self.send_header("Content-Length", str(len(b)))
         self.end_headers(); self.wfile.write(b)
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        while n: n -= len(self.rfile.read(min(n, 65536)))
+        self.send_response(201); self.send_header("Content-Length", "0"); self.end_headers()
 h.HTTPServer(("0.0.0.0", 8000), E).serve_forever()'
 docker network create "$RED" >/dev/null
 docker run -d --name "$ECO" --network "$RED" --network-alias cem-backend-eco \
@@ -89,6 +93,19 @@ SIN_CF=$(curl -s -H 'X-Forwarded-For: 198.51.100.66' "$URL_ECO/api/v1/x")
 case "$SIN_CF" in
   "" | *198.51.100.66*) falla "sin CF-Connecting-IP el backend recibió '$SIN_CF'" ;;
 esac
+# Las dos subidas de archivos pasan el tope de 1 MB de nginx: los 20 MB los controla el backend.
+# Control: cualquier otra ruta de la API sigue dando 413 con el mismo cuerpo.
+CUERPO="$(mktemp)"
+head -c 2097152 /dev/zero > "$CUERPO"
+subir() { curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Expect:' --data-binary "@$CUERPO" "$URL_ECO$1"; }
+ID=00000000-0000-0000-0000-000000000001
+[ "$(subir "/api/v1/consorcios/$ID/documentos/$ID/versiones")" = 201 ] \
+  || falla "la subida de un documento de 2 MB no llegó al backend"
+[ "$(subir "/api/v1/consorcios/$ID/pagos-por-aclarar/$ID/comprobante/$ID/versiones")" = 201 ] \
+  || falla "la subida de un comprobante de 2 MB no llegó al backend"
+[ "$(subir "/api/v1/consorcios/$ID/ordenes-pago")" = 413 ] \
+  || falla "otra ruta de la API aceptó 2 MB"
+rm -f "$CUERPO"
 # El registro de acceso no lleva la consulta (documento 13, §16.1): un token o un correo en `?…`
 # no puede quedar en `docker logs` (Dozzle). Se prueba con el backend de eco, para que nginx no
 # escriba errores de upstream: su registro de errores siempre trae la línea del pedido completa y
