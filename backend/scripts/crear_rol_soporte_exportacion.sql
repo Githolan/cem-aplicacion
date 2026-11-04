@@ -1,7 +1,8 @@
 -- Crea el rol de base de la exportación por soporte (H2c §1.1 y §5 del repositorio CEM, corte
 -- 2c-3): lo usa `scripts.exportar_consorcio` para armar el paquete cifrado de un consorcio. Sin
 -- BYPASSRLS y sin SELECT directo sobre ninguna tabla del consorcio: lee por las funciones de
--- exportación y escribe solo la constancia (`plataforma.exportacion`), según la migración 0038.
+-- exportación y escribe solo la constancia (`plataforma.exportacion`), según las migraciones
+-- 0038 y 0069 (las partes económicas: el rol no suma ningún permiso sobre tablas).
 -- Lo incluye `crear_roles.sql`; en un servidor que ya existe se corre solo, con un superusuario
 -- y la clave como variable de psql (nunca en el repositorio):
 --

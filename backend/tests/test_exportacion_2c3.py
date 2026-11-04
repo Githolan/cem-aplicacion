@@ -8,9 +8,11 @@ el mismo pedido de quien sí tiene la capacidad pasa; cada búsqueda que da 0 se
 un lugar donde lo que busca sí está.
 """
 
+import hashlib
 import io
 import json
 import os
+import re
 import subprocess
 import zipfile
 from contextlib import contextmanager
@@ -41,6 +43,9 @@ from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la
     pdf,
     subir,
 )
+from tests.test_egresos_1a import BAJA_CONTRATO, confirmado, enviada, nueva_cuenta, umbral
+from tests.test_liquidacion_0057 import AGREGAR, QUITAR, borrador, pagada, unidades
+from tests.test_liquidacion_0057 import porcentajes as pesos_del_esquema
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
 from tests.test_modo_operacion import (
@@ -50,6 +55,17 @@ from tests.test_modo_operacion import (
     decidir_equipo,
     hoy_de,
 )
+from tests.test_orden_pago_neutra import (
+    PREPARAR,
+    RECHAZAR,
+    cbu_sintetico,
+    escena_economica,
+    exigir,
+    llamar,
+    otorgar,
+)
+from tests.test_pago_manual_0055 import CONFIRMAR, DECLARAR, emitida, ver
+from tests.test_pago_manual_0055 import acta as acta_de_la_escena
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
 from tests.test_vinculo_fin_0020 import finalizar
 
@@ -60,6 +76,11 @@ IP = "203.0.113.77"
 CONSENTIMIENTO = "Consentimiento firmado CONSENT-7781"
 HASH_CONTRASENA = "$argon2id$v=19$m=65536,t=3,p=4$c2FsLWV4cG9ydA$HASH-DE-PRUEBA-EXPORTACION"
 FUNCIONES = [f"exportar_{p}" for p in exportar_consorcio.PARTES] + ["exportar_objetos_documentos"]
+PARTES_ECONOMICAS = ("proveedores", "ordenes_pago", "pagos", "liquidaciones")
+ENTIDADES_ECONOMICAS = {
+    entidad for parte in PARTES_ECONOMICAS for entidad in exportar_consorcio.PARTES[parte]
+}
+PAQUETE_ECONOMICO_DEL_CONSEJO = ["egresos.aprobar_orden", "fondo_reserva.autorizar"]
 
 # Las claves de cada fila del paquete, una por una. Una clave que no está acá es un dato que
 # alguien agregó sin decidir que va (H2c §5, «Nunca van»).
@@ -83,6 +104,48 @@ CLAVES_POR_ENTIDAD = {
                  "vigente_desde", "vigente_hasta", "actualizado_en", "verificado_en",
                  "observado"},
     "evento": {"fecha", "accion", "recurso", "origen", "actor", "actor_nombre", "cambios"},
+    "proveedor": {"id", "cuit", "creado_en", "alta_por_nombre"},
+    "proveedor_version": {"proveedor_id", "version", "razon_social", "rubro", "contacto", "estado",
+                          "documento_id", "cuenta_ultimos_digitos", "preparada_por_nombre",
+                          "creada_en"},
+    "contrato": {"id", "proveedor_id", "tipo", "alcance", "importe_maximo_centavos", "moneda",
+                 "vigente_desde", "vigente_hasta", "documento_id", "decision_id",
+                 "registrado_por_nombre", "creado_en"},
+    "contrato_confirmacion": {"contrato_id", "proveedor_id", "proveedor_version",
+                              "confirmada_por_nombre", "creada_en"},
+    "contrato_baja": {"contrato_id", "baja_por_nombre", "creada_en"},
+    "orden": {"id", "estado", "version_vigente", "preparada_por_nombre", "creada_en",
+              "actualizada_en", "aprobada_en", "motivo_rechazo"},
+    "orden_version": {"orden_id", "numero", "importe_centavos", "moneda", "concepto",
+                      "proveedor_id", "proveedor_version", "razon_social",
+                      "cuenta_ultimos_digitos", "condicion_beneficiario", "comprobante",
+                      "usa_fondo_reserva", "aprobaciones_requeridas", "franja", "umbral_id",
+                      "contrato_id", "alerta_fraccionamiento", "preparada_por_nombre",
+                      "creada_en"},
+    "orden_aprobacion": {"id", "orden_id", "version", "aprobada_por_nombre", "creada_en"},
+    "orden_transicion": {"orden_id", "fecha", "accion", "origen", "desde", "hacia", "version",
+                         "actor_nombre"},
+    "umbral": {"id", "importe_centavos", "moneda", "vigente_desde", "decision_id"},
+    "aprobaciones_configuradas": {"id", "cantidad", "vigente_desde", "decision_id"},
+    "ejecucion": {"id", "orden_id", "version", "modalidad", "proveedor_id", "proveedor_version",
+                  "cuenta_ultimos_digitos", "importe_centavos", "moneda", "creada_en"},
+    "ejecucion_resultado": {"id", "ejecucion_id", "resultado", "origen", "referencia", "motivo",
+                            "registrado_en"},
+    "apertura_cuenta": {"id", "ejecucion_id", "abierta_por_nombre", "abierta_en"},
+    "comprobante": {"documento_id", "ejecucion_id", "atado_en"},
+    "pago": {"id", "ejecucion_id", "corrige_a", "numero_operacion", "fecha_operacion",
+             "importe_centavos", "moneda", "documento_id", "version_documento_id",
+             "registrado_por_nombre", "registrado_en", "fuera_de_termino", "sin_facultad"},
+    "conciliacion": {"id", "pago_id", "resultado", "motivo", "conciliado_por_nombre",
+                     "conciliado_en"},
+    "declaracion_no_pagado": {"id", "ejecucion_id", "motivo", "declarado_por_nombre",
+                              "declarado_en", "sin_facultad"},
+    "confirmacion_no_pagado": {"id", "declaracion_id", "confirmado_por_nombre", "confirmado_en"},
+    "liquidacion": {"id", "periodo", "version", "estado", "preparada_por_nombre", "creada_en",
+                    "descartada_en", "descartada_por_nombre", "motivo_descarte"},
+    "gasto": {"id", "liquidacion_id", "orden_id", "ejecucion_id", "importe_centavos", "moneda",
+              "esquema_id", "agregado_por_nombre", "agregado_en"},
+    "gasto_quitado": {"gasto_id", "quitado_por_nombre", "quitado_en"},
 }  # fmt: skip
 
 
@@ -90,8 +153,8 @@ def _edificio(motor_migrate, motor_app, con_documentos: bool = True, externo: bo
     """Consorcio en Modo Consejo con:
     - un administrador (paquete completo) que carga los documentos;
     - un miembro del Consejo con el paquete completo (`mc`), uno limitado a `padron.ver`
-      (`mc_padron`) y uno con las cinco facultades pero `padron.ver` acotado a una unidad
-      (`mc_acotado`);
+      (`mc_padron`), uno con las cinco facultades pero `padron.ver` acotado a una unidad
+      (`mc_acotado`) y uno con las cinco y ninguna económica (`mc_sin_economica`);
     - documentos con una versión PDF y una PNG `disponible`, una rechazada y una en cuarentena;
     - lo que nunca va: un evento con IP, la cadena de hashes, una negación, una contraseña, una
       sesión y la referencia del consentimiento de un contacto."""
@@ -150,6 +213,10 @@ def _edificio(motor_migrate, motor_app, con_documentos: bool = True, externo: bo
                  " recurso, decision_id) values (:c, :m, 'padron.ver', :r, :d)"),
             {"c": cons, "m": m, "r": f"unidad:{uni}", "d": acta},
         )  # fmt: skip
+    e["mc_sin_economica"] = persona("Elena Sin Económica")
+    e["m_sin_economica"] = alta(motor_app, cons, None, acta, persona=e["mc_sin_economica"],
+                                tipo="miembro_consejo", facultades=FACULTADES,
+                                origen="soporte")  # fmt: skip
     if con_documentos:
         e |= _documentos(e, motor_migrate, motor_app)
     e |= _lo_que_nunca_va(e, motor_migrate)
@@ -323,7 +390,9 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
     for entidad, filas in datos.items():
         for fila in filas:
             assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
-    assert {k for k, v in datos.items() if v} == set(CLAVES_POR_ENTIDAD) - {"revision"}
+    assert {k for k, v in datos.items() if v} == (
+        set(CLAVES_POR_ENTIDAD) - {"revision"} - ENTIDADES_ECONOMICAS
+    )
     # El padrón vuelve con los nombres.
     assert "Ana Exportada" in {v["nombre"] for v in datos["vinculo"]}
     # La constancia: el paquete cifrado que quedó en disco, con su suma y su tamaño.
@@ -336,7 +405,7 @@ def test_el_paquete_se_descifra_y_el_manifiesto_coincide(edificio, con_url, clav
         "Estudio Nuevo SRL", "30712345671")  # fmt: skip
     assert fila["solicitud_referencia"] == "Nota 3/2026 del Consejo"
     assert fila["respaldo_referencia"] == "Acta 45, libro 3, folio 12"
-    assert fila["facultades_verificadas"] == FACULTADES
+    assert fila["facultades_verificadas"] == FACULTADES + PAQUETE_ECONOMICO_DEL_CONSEJO
     assert fila["armada_en"] is not None and fila["entregada_en"] is None
     assert fila["cantidades"] == {k: len(v) for k, v in datos.items()} | {"archivos": 2}
     assert f"exportacion: {fila['id']}" in impreso and f"sha256: {suma}" in impreso
@@ -542,6 +611,7 @@ def test_exportar_no_escribe_eventos_de_auditoria(edificio, con_url, claves, tmp
         ("solicitante sin mandato", {"solicitante": "prop"}),
         ("consejo limitado a padron.ver", {"solicitante": "mc_padron"}),
         ("padron.ver acotado a una unidad", {"solicitante": "mc_acotado"}),
+        ("sin ninguna facultad económica", {"solicitante": "mc_sin_economica"}),
         ("antes del mandato", {"fecha_pedido": "2025-12-31"}),
     ],
 )
@@ -870,7 +940,7 @@ def test_registrar_exportacion_fija_la_capacidad_adentro(sin_documentos, motor_m
     """Quien llama no elige las facultades ni los tipos: un solicitante sin la capacidad no deja
     constancia. Control: el Consejo con el paquete completo sí, con las cinco verificadas."""
     e = sin_documentos
-    for quien in ("prop", "mc_padron", "mc_acotado"):
+    for quien in ("prop", "mc_padron", "mc_acotado", "mc_sin_economica"):
         with pytest.raises(DBAPIError) as error:
             pedido(e, e[quien])
         assert error.value.orig.diag.message_hint == "sin_capacidad", quien
@@ -878,7 +948,7 @@ def test_registrar_exportacion_fija_la_capacidad_adentro(sin_documentos, motor_m
     fila = pedido(e)
     assert fila.mandato_id == e["m_mc"]
     [constancia] = constancias(motor_migrate, e["cons"])
-    assert constancia["facultades_verificadas"] == FACULTADES
+    assert constancia["facultades_verificadas"] == FACULTADES + PAQUETE_ECONOMICO_DEL_CONSEJO
     assert constancia["armada_en"] is None and constancia["entregada_en"] is None
 
 
@@ -1017,7 +1087,7 @@ def test_0038_ida_y_vuelta_y_se_niega_con_una_exportacion(base_aparte):  # noqa:
                      " and p.proname like 'exportar\\_%'"),
             ).scalar_one()  # fmt: skip
 
-    assert funciones() == len(FUNCIONES)
+    assert funciones() == len(FUNCIONES) - len(PARTES_ECONOMICAS)
     command.downgrade(cfg, "0037")
     assert funciones() == 0
     command.upgrade(cfg, "0038")  # control: vuelve a subir limpio
@@ -1151,3 +1221,385 @@ def test_un_consejo_sin_su_condicion_sale_pendiente_de_revision(
     mandatos = {m["id"]: m for m in entidades(descifrar(salida, claves["privada"]))["mandato"]}
     assert mandatos[str(e["m"])]["estado"] == "pendiente_revision"
     assert {m["estado"] for i, m in mandatos.items() if i != str(e["m"])} == {"vigente"}
+
+
+# Lo económico (H-B01, RF36, `0069`) ---------------------------------------------------
+
+
+CUENTA_DEL_PROVEEDOR = cbu_sintetico(1)
+CUENTA_DE_LA_VERSION_2 = cbu_sintetico(41)
+CUENTA_DEL_OTRO_PROVEEDOR = cbu_sintetico(2)
+CUENTA_EN_EL_CONCEPTO = cbu_sintetico(42)
+CUENTA_EN_LA_REFERENCIA = cbu_sintetico(43)
+CUENTAS = [CUENTA_DEL_PROVEEDOR, CUENTA_DE_LA_VERSION_2, CUENTA_DEL_OTRO_PROVEEDOR]
+ESCRITAS_A_MANO = [CUENTA_EN_EL_CONCEPTO, CUENTA_EN_LA_REFERENCIA]
+CONCEPTO_CON_CUENTA = (
+    f"SINTETICO: transferir a {CUENTA_EN_EL_CONCEPTO[:8]} {CUENTA_EN_EL_CONCEPTO[8:]}"
+)
+SIN_LA_CUENTA = "SINTETICO: transferir a [cuenta omitida]"
+TABLA_DE_LA_ENTIDAD = {
+    "proveedor": "nucleo.proveedor",
+    "proveedor_version": "nucleo.proveedor_version",
+    "contrato": "nucleo.contrato_proveedor",
+    "contrato_confirmacion": "nucleo.contrato_proveedor_confirmacion",
+    "contrato_baja": "nucleo.contrato_proveedor_baja",
+    "orden": "nucleo.orden_pago",
+    "orden_version": "nucleo.orden_pago_version",
+    "orden_aprobacion": "nucleo.orden_pago_aprobacion",
+    "umbral": "nucleo.umbral_orden_pago",
+    "aprobaciones_configuradas": "nucleo.aprobaciones_orden_pago",
+    "ejecucion": "nucleo.ejecucion_orden_pago",
+    "ejecucion_resultado": "nucleo.resultado_ejecucion_orden_pago",
+    "apertura_cuenta": "nucleo.apertura_cuenta_pago_manual",
+    "comprobante": "nucleo.comprobante_pago_manual",
+    "pago": "nucleo.pago_manual",
+    "conciliacion": "nucleo.conciliacion_pago_manual",
+    "declaracion_no_pagado": "nucleo.declaracion_pago_no_realizado",
+    "confirmacion_no_pagado": "nucleo.confirmacion_pago_no_realizado",
+    "liquidacion": "nucleo.liquidacion",
+    "gasto": "nucleo.liquidacion_gasto",
+    "gasto_quitado": "nucleo.liquidacion_gasto_quitado",
+}
+TRANSICIONES = (
+    "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
+    " and origen <> 'soporte' and despues ? 'estado'"
+)
+
+
+def _con_objetos_en_el_almacen(motor_migrate, cons, bucket) -> None:  # noqa: F811
+    """`documento_de_contrato` siembra versiones `disponible` sin objeto ni suma real: acá lo que
+    el script baja del almacén tiene que coincidir con la base."""
+    contenido = b"%PDF-1.4 SINTETICO"
+    with motor_migrate.begin() as c:
+        claves = c.execute(
+            text("update nucleo.version_documento set tamano = :t, sha256 = :s"
+                 " where consorcio_id = :c and estado = 'disponible' returning clave_objeto"),
+            {"t": len(contenido), "s": hashlib.sha256(contenido).hexdigest(), "c": cons},
+        ).scalars().all()  # fmt: skip
+    for clave in claves:
+        _s3().put_object(Bucket=bucket, Key=clave, Body=contenido)
+
+
+def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
+    """La escena de egresos con una fila, al menos, en cada entidad económica: dos contratos (uno
+    de baja), una orden en borrador, una rechazada, dos pagadas y conciliadas, una con «no se
+    pagó» confirmado, una liquidación con un gasto y otro quitado, y una versión nueva del
+    proveedor con otra cuenta. Cada cuenta es sintética (banco 999)."""
+    s = escena_economica(motor_migrate, motor_app)
+    while len(unidades(motor_migrate, s)) < 3:
+        otra_unidad(motor_migrate, s.cons, f"EXP {uuid4().hex[:6]}")
+    us = unidades(motor_migrate, s)
+    pesos = pesos_del_esquema(len(us))
+    registrar(motor_app, s.cons, {str(u): f"{p:.6f}" for u, p in zip(us, pesos, strict=True)},
+              decision=acta_de_la_escena(motor_migrate, s))  # fmt: skip
+    umbral(motor_app, s.cons, 1)  # todo supera el umbral: toda orden pide aprobación
+    exigir(motor_app, s.cons, 1)
+    confirmado(motor_migrate, s)
+    llamar(motor_migrate, s, s.adm, BAJA_CONTRATO, contrato=confirmado(motor_migrate, s))
+    en_borrador = llamar(motor_migrate, s, s.adm, PREPARAR, concepto=CONCEPTO_CON_CUENTA,
+                         comprobante=CUENTA_EN_LA_REFERENCIA)  # fmt: skip
+    rechazada = enviada(motor_migrate, s)
+    llamar(motor_migrate, s, s.mc1, RECHAZAR, orden=rechazada, version=1,
+           motivo="SINTETICO: falta la factura")  # fmt: skip
+    pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
+    no_pagada = emitida(motor_migrate, s)
+    ver(motor_migrate, s, s.adm, no_pagada)
+    declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
+                         motivo="SINTETICO: el banco la rechazó")  # fmt: skip
+    llamar(motor_migrate, s, s.mc1, CONFIRMAR, orden=no_pagada, declaracion=declaracion)
+    liquidacion = borrador(motor_migrate, s)
+    gastos = [
+        llamar(motor_migrate, s, s.adm, AGREGAR, liquidacion=liquidacion, orden=o,
+               grupo="expensas_comunes")
+        for o in pagadas
+    ]  # fmt: skip
+    llamar(motor_migrate, s, s.adm, QUITAR, liquidacion=liquidacion, gasto=gastos[1])
+    nueva_cuenta(motor_migrate, s, 41)
+    _con_objetos_en_el_almacen(motor_migrate, s.cons, bucket)
+    return {"cons": s.cons, "hoy": hoy_de(motor_app, s.cons), "mc": s.mc1, "s": s,
+            "pagadas": pagadas, "en_borrador": en_borrador}  # fmt: skip
+
+
+@pytest.fixture
+def economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
+    return _economico(motor_migrate, motor_app, bucket)
+
+
+def _paquete(e, claves, tmp_path) -> zipfile.ZipFile:
+    codigo, salida = exportar(e, claves, tmp_path)
+    assert codigo == 0
+    return descifrar(salida, claves["privada"])
+
+
+def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_migrate):
+    """Cada entidad económica tiene todas las filas del consorcio, con las claves decididas."""
+    e = economico
+    paquete = _paquete(e, claves, tmp_path)
+    assert verificar_manifiesto(paquete) == []
+    datos = entidades(paquete)
+    with motor_migrate.connect() as c:
+        en_la_base = {
+            entidad: c.execute(text(f"select count(*) from {tabla} where consorcio_id = :c"),
+                               {"c": e["cons"]}).scalar_one()
+            for entidad, tabla in TABLA_DE_LA_ENTIDAD.items()
+        }  # fmt: skip
+        en_la_base["orden_transicion"] = c.execute(text(TRANSICIONES),
+                                                   {"c": e["cons"]}).scalar_one()  # fmt: skip
+    assert set(en_la_base) == ENTIDADES_ECONOMICAS
+    # Control: la escena tiene filas en todas; si no, «igual a la base» no prueba nada.
+    assert {k for k, v in en_la_base.items() if v == 0} == set()
+    assert {k: len(datos[k]) for k in ENTIDADES_ECONOMICAS} == en_la_base
+    for entidad in ENTIDADES_ECONOMICAS:
+        for fila in datos[entidad]:
+            assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
+    # La historia va entera, no solo lo vigente.
+    assert len(datos["orden"]) == 5
+    assert str(e["en_borrador"]) in {o["id"] for o in datos["orden"]}
+    assert {v["version"] for v in datos["proveedor_version"]
+            if v["proveedor_id"] == str(e["s"].proveedor)} == {1, 2}  # fmt: skip
+    assert len(datos["gasto"]) == 2 and len(datos["gasto_quitado"]) == 1
+    # Una orden pagada, paso a paso, por sus transiciones.
+    primera = str(e["pagadas"][0])
+    assert [t["hacia"] for t in datos["orden_transicion"] if t["orden_id"] == primera] == [
+        "borrador", "en_revision", "aprobada", "en_ejecucion", "en_verificacion", "pagada",
+    ]  # fmt: skip
+    # Quien hizo cada acto, por su nombre.
+    assert None not in {o["preparada_por_nombre"] for o in datos["orden"]}
+    assert None not in {a["aprobada_por_nombre"] for a in datos["orden_aprobacion"]}
+    assert None not in {p["registrado_por_nombre"] for p in datos["pago"]}
+
+
+def test_el_nombre_sale_solo_con_el_criterio_del_paquete(economico, motor_migrate):
+    """Con un vínculo o un mandato en el consorcio, el nombre. De otro consorcio o suprimida, nulo:
+    un acto económico no agrega al paquete una persona que el padrón no mostraría."""
+    e = economico
+    ajena = otra_persona(motor_migrate, consorcio_con_persona(motor_migrate)[0])
+    suprimida = otra_persona(motor_migrate, e["cons"])
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.persona set eliminado_en = now() where id = :p"),
+                  {"p": suprimida})  # fmt: skip
+        nombres = {
+            p: c.execute(text("select nucleo.nombre_para_exportar(:c, :p, :h)"),
+                         {"c": e["cons"], "p": p, "h": e["hoy"]}).scalar_one()
+            for p in (e["s"].adm, ajena, suprimida)
+        }  # fmt: skip
+    assert nombres[ajena] is None and nombres[suprimida] is None
+    assert nombres[e["s"].adm] is not None  # control: la misma consulta encuentra un nombre
+
+
+def test_ninguna_cuenta_completa_va_en_el_paquete_y_si_en_la_base(
+    economico, con_url, claves, tmp_path, motor_migrate
+):
+    """Regla del propietario: la cuenta completa se ve solo en el acto de ejecución manual. Se
+    busca en todos los archivos del paquete, también los binarios y el manifiesto."""
+    e = economico
+    paquete = _paquete(e, claves, tmp_path)
+    textos = _textos_del_paquete(paquete)
+    assert {c for c in CUENTAS + ESCRITAS_A_MANO if c in textos} == set()
+    # Ni con el separador con que quedó escrita a mano.
+    assert CONCEPTO_CON_CUENTA.lower() not in textos
+    # Ninguna tira de 22 dígitos en lo económico, por si la cuenta fuera otra.
+    economicos = [n for n in paquete.namelist() if n.split("/")[0] in PARTES_ECONOMICAS]
+    assert len(economicos) == len(ENTIDADES_ECONOMICAS)
+    tira = re.compile(r"(?<!\d)\d{22}(?!\d)")
+    assert [n for n in economicos if tira.search(paquete.read(n).decode())] == []
+    # Control: la misma búsqueda, en la base de la que salió, las encuentra todas.
+    with motor_migrate.connect() as c:
+        filas = [
+            t
+            for tabla in ("nucleo.proveedor_version", "nucleo.ejecucion_orden_pago",
+                          "nucleo.orden_pago_version")
+            for t in c.execute(text(f"select x::text from {tabla} x where x.consorcio_id = :c"),
+                               {"c": e["cons"]}).scalars()
+        ]  # fmt: skip
+    base = "\n".join(filas)
+    sin_separador = base.replace(f"{CUENTA_EN_EL_CONCEPTO[:8]} ", CUENTA_EN_EL_CONCEPTO[:8])
+    assert {c for c in CUENTAS + ESCRITAS_A_MANO if c in sin_separador} == set(
+        CUENTAS + ESCRITAS_A_MANO
+    )
+    assert tira.search(base) and CONCEPTO_CON_CUENTA in base
+    # Va lo enmascarado: los últimos 4 dígitos, y el texto a mano sin la cuenta.
+    datos = entidades(paquete)
+    assert {v["cuenta_ultimos_digitos"] for v in datos["proveedor_version"]} == {
+        c[-4:] for c in CUENTAS
+    }
+    assert {x["cuenta_ultimos_digitos"] for x in datos["ejecucion"]} == {CUENTA_DEL_PROVEEDOR[-4:]}
+    [en_borrador] = [v for v in datos["orden_version"] if v["orden_id"] == str(e["en_borrador"])]
+    assert (en_borrador["concepto"], en_borrador["comprobante"]) == (
+        SIN_LA_CUENTA, "[cuenta omitida]")  # fmt: skip
+
+
+def test_ni_huellas_ni_claves_de_pago_van_en_el_paquete(economico, con_url, claves, tmp_path,
+                                                        motor_migrate):  # fmt: skip
+    """Las huellas se calculan sobre la cuenta y la clave de la ejecución identifica el pedido ante
+    el riel: ninguna va."""
+    e = economico
+    consultas = {
+        "huella del proveedor": ("encode(huella, 'hex')", "nucleo.proveedor_version"),
+        "huella de la orden": ("encode(huella, 'hex')", "nucleo.orden_pago_version"),
+        "huella del contrato": ("encode(huella, 'hex')", "nucleo.contrato_proveedor"),
+        "clave de la ejecución": ("clave::text", "nucleo.ejecucion_orden_pago"),
+    }
+    with motor_migrate.connect() as c:
+        buscado = {
+            que: c.execute(text(f"select {columna} from {tabla} where consorcio_id = :c"),
+                           {"c": e["cons"]}).scalars().all()
+            for que, (columna, tabla) in consultas.items()
+        }  # fmt: skip
+        en_la_base = "\n".join(
+            t for _, tabla in consultas.values()
+            for t in c.execute(text(f"select to_jsonb(x)::text from {tabla} x"
+                                    " where x.consorcio_id = :c"), {"c": e["cons"]}).scalars()
+        ).lower()  # fmt: skip
+    assert all(buscado.values())  # la búsqueda tiene qué buscar
+    textos = _textos_del_paquete(_paquete(e, claves, tmp_path))
+    assert _encontrados(buscado, textos) == {que: 0 for que in buscado}
+    # Control: la misma búsqueda, en la base, las encuentra todas.
+    assert _encontrados(buscado, en_la_base) == {que: len(v) for que, v in buscado.items()}
+
+
+_COLUMNAS_DE_PERSONA = {
+    "nucleo.proveedor": ("alta_por", "identidad_alta"),
+    "nucleo.proveedor_version": ("preparada_por", "identidad_preparo"),
+    "nucleo.contrato_proveedor": ("registrado_por", "identidad_registro"),
+    "nucleo.contrato_proveedor_confirmacion": ("persona_id", "identidad_id"),
+    "nucleo.contrato_proveedor_baja": ("persona_id",),
+    "nucleo.orden_pago": ("preparada_por",),
+    "nucleo.orden_pago_version": ("preparada_por", "identidad_preparo"),
+    "nucleo.orden_pago_aprobacion": ("persona_id", "identidad_id"),
+    "nucleo.apertura_cuenta_pago_manual": ("abierta_por", "identidad_abrio"),
+    "nucleo.pago_manual": ("registrado_por", "identidad_registro"),
+    "nucleo.conciliacion_pago_manual": ("conciliado_por", "identidad_concilio"),
+    "nucleo.declaracion_pago_no_realizado": ("declarado_por", "identidad_declaro"),
+    "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
+    "nucleo.liquidacion": ("preparada_por", "identidad_preparo"),
+    "nucleo.liquidacion_gasto": ("agregado_por", "identidad_agrego"),
+    "nucleo.liquidacion_gasto_quitado": ("quitado_por", "identidad_quito"),
+}
+
+
+def test_ningun_identificador_de_persona_va_en_lo_economico(economico, con_url, claves, tmp_path,
+                                                            motor_migrate):  # fmt: skip
+    """Como `test_ningun_identificador_de_persona_va_en_el_paquete`, con cada columna de persona y
+    de identidad humana de las tablas económicas."""
+    e = economico
+    s = e["s"]
+    with motor_migrate.connect() as c:
+        filas = [
+            f
+            for tabla, columnas in _COLUMNAS_DE_PERSONA.items()
+            for columna in columnas
+            for f in c.execute(
+                text(f"select r::text as x, r.{columna} as p from {tabla} r"
+                     f" where r.consorcio_id = :c and r.{columna} is not null"),
+                {"c": e["cons"]},
+            )
+        ]  # fmt: skip
+    personas = {str(f.p) for f in filas}
+    assert {str(s.adm), str(s.mc1), str(s.mc2)} <= personas  # la búsqueda tiene qué buscar
+    assert len(personas) >= 6  # con las identidades humanas de los tres
+    paquete = _textos_del_paquete(_paquete(e, claves, tmp_path))
+    assert {p for p in personas if p in paquete} == set()
+    # Control: la misma búsqueda, en las filas de la base que los nombran, los encuentra todos.
+    base = " ".join(f.x for f in filas)
+    assert {p for p in personas if p in base} == personas
+
+
+def test_lo_economico_de_otro_consorcio_no_aparece(economico, con_url, claves, tmp_path,
+                                                   motor_migrate, motor_app, bucket):  # noqa: F811  # fmt: skip
+    e = economico
+    otro = _economico(motor_migrate, motor_app, bucket)
+
+    def ids(paquete) -> set[str]:
+        datos = entidades(paquete)
+        return {f["id"] for entidad in ("proveedor", "contrato", "orden", "orden_aprobacion",
+                                        "ejecucion", "pago", "conciliacion",
+                                        "declaracion_no_pagado", "liquidacion", "gasto")
+                for f in datos[entidad]}  # fmt: skip
+
+    paquete = _paquete(e, claves, tmp_path)
+    propios, ajenos = ids(paquete), ids(_paquete(otro, claves, tmp_path))
+    # Control: cada paquete encuentra lo suyo, así que la búsqueda de lo ajeno tiene qué buscar.
+    assert str(e["s"].proveedor) in propios and str(otro["s"].proveedor) in ajenos
+    assert len(propios) >= 10 and len(ajenos) >= 10
+    assert propios.isdisjoint(ajenos)
+    textos = _textos_del_paquete(paquete)
+    assert {i for i in ajenos if i in textos} == set()
+    assert {i for i in propios if i in textos} == propios  # control
+
+
+def test_la_lista_de_facultades_economicas_sale_del_catalogo(motor_migrate):
+    """Control de la regla: lo que cuenta es el catálogo cruzado con el paquete del tipo. Si una
+    migración mueve una facultad, esta prueba avisa antes de que cambie quién exporta."""
+    with motor_migrate.connect() as c:
+        filas = c.execute(
+            text("select p.tipo::text, array_agg(p.facultad order by p.facultad)"
+                 " from nucleo.paquete_facultad p join nucleo.facultad k on k.codigo = p.facultad"
+                 " where k.economica group by p.tipo"),
+        ).all()  # fmt: skip
+    assert {f[0]: f[1] for f in filas} == {
+        "administrador": ["egresos.ejecutar_pago", "egresos.preparar_orden"],
+        "miembro_consejo": PAQUETE_ECONOMICO_DEL_CONSEJO,
+    }
+
+
+@pytest.mark.parametrize(
+    "caso,facultad,recurso",
+    [
+        ("no es económica", "liquidacion.revisar", None),
+        ("económica pero de otro paquete", "egresos.ejecutar_pago", None),
+        ("económica y de su paquete, acotada", "egresos.aprobar_orden", "cuenta:principal"),
+    ],
+)
+def test_sin_una_economica_general_de_su_paquete_se_niega(sin_documentos, motor_migrate, caso,
+                                                          facultad, recurso):  # fmt: skip
+    """Falla cerrada: se niega con `sin_capacidad` y no queda constancia; lo económico nunca se
+    omite en silencio."""
+    e = sin_documentos
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.facultad_otorgada (consorcio_id, mandato_id, facultad,"
+                 " recurso, decision_id) values (:c, :m, :f, :r, :d)"),
+            {"c": e["cons"], "m": e["m_sin_economica"], "f": facultad, "r": recurso,
+             "d": e["acta"]},
+        )  # fmt: skip
+    with pytest.raises(DBAPIError) as error:
+        pedido(e, e["mc_sin_economica"])
+    assert error.value.orig.diag.message_hint == "sin_capacidad", caso
+    assert constancias(motor_migrate, e["cons"]) == []
+    # Control: la misma persona, con una económica general de su paquete, pasa.
+    otorgar(motor_migrate, e["cons"], e["m_sin_economica"], e["acta"], "fondo_reserva.autorizar")
+    assert pedido(e, e["mc_sin_economica"]).mandato_id == e["m_sin_economica"]
+    [constancia] = constancias(motor_migrate, e["cons"])
+    assert constancia["facultades_verificadas"] == FACULTADES + ["fondo_reserva.autorizar"]
+
+
+def test_0069_ida_y_vuelta(base_aparte):  # noqa: F811
+    cfg, motor = base_aparte
+    command.upgrade(cfg, "0069")
+    marca = "facultades_economicas_para_exportar"
+
+    def estado_de_la_base() -> tuple[int, int, bool, bool]:
+        with motor.connect() as c:
+            exportar_parte = c.execute(
+                text("select count(*) from pg_proc p join pg_namespace n"
+                     " on n.oid = p.pronamespace where n.nspname = 'nucleo'"
+                     " and p.proname like 'exportar\\_%'"),
+            ).scalar_one()  # fmt: skip
+            auxiliares = c.execute(
+                text("select count(*) from pg_proc p join pg_namespace n"
+                     " on n.oid = p.pronamespace where n.nspname = 'nucleo' and p.proname in"
+                     " ('texto_sin_cuenta', 'nombre_para_exportar', :m)"), {"m": marca},
+            ).scalar_one()  # fmt: skip
+            capacidad, registro = (c.execute(
+                text("select prosrc from pg_proc where oid = cast(:f as regprocedure)"), {"f": f},
+            ).scalar_one() for f in ("nucleo.capacidad_para_exportar(uuid,uuid,date)",
+                                     "nucleo.registrar_exportacion(uuid,text,text,text,uuid,date,"
+                                     "text)"))  # fmt: skip
+            return exportar_parte, auxiliares, marca in capacidad, marca in registro
+
+    assert estado_de_la_base() == (len(FUNCIONES), 3, True, True)
+    command.downgrade(cfg, "0068")
+    assert estado_de_la_base() == (len(FUNCIONES) - len(PARTES_ECONOMICAS), 0, False, False)
+    command.upgrade(cfg, "0069")  # control: vuelve a subir limpio
+    assert estado_de_la_base() == (len(FUNCIONES), 3, True, True)
