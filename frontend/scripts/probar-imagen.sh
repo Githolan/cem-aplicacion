@@ -95,9 +95,7 @@ case "$SIN_CF" in
 esac
 # Las dos subidas de archivos pasan el tope de 1 MB de nginx: los 20 MB los controla el backend.
 # Control: cualquier otra ruta de la API sigue dando 413 con el mismo cuerpo.
-CUERPO="$(mktemp)"
-head -c 2097152 /dev/zero > "$CUERPO"
-subir() { curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Expect:' --data-binary "@$CUERPO" "$URL_ECO$1"; }
+subir() { head -c 2097152 /dev/zero | curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Expect:' --data-binary @- "$URL_ECO$1"; }
 ID=00000000-0000-0000-0000-000000000001
 [ "$(subir "/api/v1/consorcios/$ID/documentos/$ID/versiones")" = 201 ] \
   || falla "la subida de un documento de 2 MB no llegó al backend"
@@ -105,7 +103,6 @@ ID=00000000-0000-0000-0000-000000000001
   || falla "la subida de un comprobante de 2 MB no llegó al backend"
 [ "$(subir "/api/v1/consorcios/$ID/ordenes-pago")" = 413 ] \
   || falla "otra ruta de la API aceptó 2 MB"
-rm -f "$CUERPO"
 # El registro de acceso no lleva la consulta (documento 13, §16.1): un token o un correo en `?…`
 # no puede quedar en `docker logs` (Dozzle). Se prueba con el backend de eco, para que nginx no
 # escriba errores de upstream: su registro de errores siempre trae la línea del pedido completa y
