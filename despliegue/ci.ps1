@@ -293,7 +293,7 @@ try {
 
     # --- 3c. seguridad ----------------------------------------------------------
     Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks)'
-    $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos " +
+    $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos && /entorno/bin/pip uninstall -q -y pip " +
         "&& pip install -q pip-audit==$VersionPipAudit && pip-audit --path /entorno/lib/python3.12/site-packages"
     Correr 'seguridad-dependencias-python' {
         docker run --rm -v "${copia}:/copia:ro" -w /tmp/auditoria $ImagenPython sh -c "cp -r /copia/backend /copia/contratos . && $auditoriaPip"

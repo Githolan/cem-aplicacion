@@ -7,7 +7,8 @@ WORKDIR /build
 COPY contratos/ contratos/
 COPY backend/requirements.prod.txt backend/requirements.prod.txt
 RUN python -m venv /venv \
- && /venv/bin/pip install -r backend/requirements.prod.txt ./contratos
+ && /venv/bin/pip install -r backend/requirements.prod.txt ./contratos \
+ && /venv/bin/pip uninstall -y pip
 
 FROM python:3.12-slim
 # Copias (documento 13, §17): pg_dump de la misma versión mayor que cem-postgres (18), el
