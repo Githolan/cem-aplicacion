@@ -1,0 +1,10 @@
+# Escaneo de secretos de despliegue/ci.ps1 (documento 13, §18.2): las reglas por omisión, más una
+# excepción acotada. El nombre de una variable de entorno no es un secreto, aunque la regla
+# genérica lo marque por estar al lado de una clave llamada `..._clave_secreta`.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Nombres de variables de entorno del proyecto"
+regexTarget = "secret"
+regexes = ['''^CEM_[A-Z0-9_]+$''']
