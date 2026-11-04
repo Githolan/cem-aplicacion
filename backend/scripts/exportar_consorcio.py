@@ -12,14 +12,15 @@ contexto (`0038`). Los binarios los lee con la clave de análisis de documentos
   sostiene el pedido) y la clave pública `age` del destinatario.
 - **Comprueba la capacidad en la base:** `nucleo.registrar_exportacion` exige que quien la pidió
   tuviera ese día un mandato vigente de administración o de Consejo con las cinco facultades de
-  lectura del contenido, cada una general, y recién entonces crea la constancia. Si falta
-  cualquiera, alguna está acotada a un recurso o el mandato es de otro tipo (un administrador
-  externo), se niega sin escribir nada. Las funciones de exportación solo responden para esa
-  constancia, todavía sin armar.
+  lectura del contenido, cada una general, y además, general, una facultad económica de egresos
+  del paquete estándar de su tipo de mandato (`0069`: lo económico sale solo para quien ya leía
+  órdenes). Recién entonces crea la constancia. Si falta cualquiera, alguna está acotada a
+  un recurso o el mandato es de otro tipo (un administrador externo), se niega sin escribir nada.
+  Las funciones de exportación solo responden para esa constancia, todavía sin armar.
 - **Arma el paquete en tramos directo a `age`:** un ZIP con un JSON por entidad (de las funciones
-  de exportación de `0038`), los binarios `disponible` y un `manifiesto.json` con el SHA-256 de
-  cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en claro en
-  el disco.
+  de exportación de `0038` y `0069`), los binarios `disponible` y un `manifiesto.json` con el
+  SHA-256 de cada archivo, cifrado para la clave pública del destinatario. Nunca hay una copia en
+  claro en el disco. De la cuenta de un proveedor, los JSON llevan solo los últimos dígitos.
 - **No escribe eventos de auditoría** (decisión del propietario del 26-10-2026): la constancia es
   la fila de `plataforma.exportacion` (con la fecha de armado y, después, la de entrega) y lo que
   imprime el script.
@@ -64,7 +65,14 @@ PARTES: dict[str, tuple[str, ...]] = {
     "coeficientes": ("coeficiente",),
     "contactos": ("contacto",),
     "auditoria": ("evento",),
-}
+    "proveedores": ("proveedor", "proveedor_version", "contrato", "contrato_confirmacion",
+                    "contrato_baja"),
+    "ordenes_pago": ("orden", "orden_version", "orden_aprobacion", "orden_transicion", "umbral",
+                     "aprobaciones_configuradas"),
+    "pagos": ("ejecucion", "ejecucion_resultado", "apertura_cuenta", "comprobante", "pago",
+              "conciliacion", "declaracion_no_pagado", "confirmacion_no_pagado"),
+    "liquidaciones": ("liquidacion", "gasto", "gasto_quitado"),
+}  # fmt: skip
 """Cada parte es una función `nucleo.exportar_<parte>` y cada entidad, un archivo del paquete."""
 EXTENSIONES = {TipoArchivo.PDF: "pdf", TipoArchivo.JPEG: "jpg", TipoArchivo.PNG: "png"}
 TRAMO = 1024 * 1024
@@ -307,7 +315,8 @@ def _registrar(conn: Connection, a: argparse.Namespace):
         if e.orig.diag.message_hint == "sin_capacidad":
             raise Negado(
                 "quien la pidió no tenía ese día un mandato vigente de administración o de"
-                " Consejo con " + ", ".join(FACULTADES) + " generales"
+                " Consejo con " + ", ".join(FACULTADES) + " generales y una facultad de egresos"
+                " general de su paquete"
             ) from e
         raise
 

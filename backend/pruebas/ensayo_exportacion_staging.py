@@ -13,7 +13,9 @@ imprimió
 3. la pide con el Consejo que dejó vigente el ensayo: se arma y queda la constancia;
 4. descifra el paquete con la clave y comprueba: cada comprobante del recorrido está en
    `documentos/documento.json` con sus versiones y su archivo, el control también, el manifiesto
-   coincide con cada archivo, y ningún JSON lleva una cuenta del ensayo;
+   coincide con cada archivo, lo económico del recorrido viaja (`0069`: proveedores, órdenes,
+   pagos y liquidaciones, con los últimos dígitos de cada cuenta) y ningún JSON lleva una cuenta
+   del ensayo;
 5. da de baja el mandato que quedó vigente y revoca sus sesiones.
 
 Solo staging: exige que `CEM_DATABASE_URL` y `CEM_DATABASE_URL_SOPORTE_EXPORTACION` apunten al
@@ -43,6 +45,10 @@ from app.db import crear_motor, transaccion
 from scripts import exportar_consorcio
 
 REFERENCIA = "ACTA SINTETICA DE PRUEBA — SIN VALIDEZ JURIDICA — exportación del ensayo"
+ECONOMICOS = ("proveedores/proveedor", "proveedores/proveedor_version", "ordenes_pago/orden",
+              "ordenes_pago/orden_version", "ordenes_pago/orden_aprobacion",
+              "ordenes_pago/orden_transicion", "pagos/ejecucion", "pagos/comprobante", "pagos/pago",
+              "pagos/conciliacion", "liquidaciones/liquidacion", "liquidaciones/gasto")  # fmt: skip
 ALFABETO = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
 
@@ -155,6 +161,12 @@ def recorrer(datos: dict, controles: list[str]) -> None:
             versiones = json.loads(z.read("documentos/version.json"))
             textos = [z.read(n).decode() for n in z.namelist() if n.endswith(".json")]
             nombres = set(z.namelist())
+            economicos = {e: json.loads(z.read(f"{e}.json")) for e in ECONOMICOS}
+        vacios = [e for e, filas in economicos.items() if not filas]
+        comprobar(not vacios, f"lo económico del recorrido viaja: vacíos {vacios}")
+        digitos = {v["cuenta_ultimos_digitos"] for v in economicos["proveedores/proveedor_version"]}
+        comprobar(bool(digitos & {c[-4:] for c in datos["cuentas"]}),
+                  "las cuentas del ensayo van por sus últimos dígitos")  # fmt: skip
         esperados = [*datos["comprobantes"], datos["control"]]
         faltan = [d for d in esperados if d not in documentos]
         comprobar(not faltan, f"comprobantes y control en el paquete: faltan {faltan}")
@@ -166,7 +178,8 @@ def recorrer(datos: dict, controles: list[str]) -> None:
         comprobar(not con_cuenta, f"{len(con_cuenta)} archivos JSON llevan una cuenta")
         controles.append(f"{len(datos['comprobantes'])} comprobantes y el control, con sus"
                          f" versiones y archivos; manifiesto íntegro ({len(archivos)} archivos);"
-                         " ninguna cuenta en los JSON")  # fmt: skip
+                         f" {len(ECONOMICOS)} entidades económicas con filas;"
+                         " ninguna cuenta en los JSON, sí sus últimos dígitos")  # fmt: skip
 
 
 def cerrar(datos: dict) -> None:
