@@ -55,6 +55,19 @@ def id_valido(tipo: TipoRecurso, id_: str) -> bool:
     return patron.fullmatch(id_) is not None
 
 
+def admisible(recurso: str | None, aceptado: RecursoAceptado | None) -> bool:
+    """Si la facultad podría alcanzar alguna entidad de la acción: los pasos 1 a 4, sin el 5."""
+    if recurso is None:
+        return aceptado is None or aceptado.general
+    parseado = parsear(recurso)
+    return (
+        parseado is not None
+        and aceptado is not None
+        and parseado.tipo in aceptado.tipos
+        and id_valido(parseado.tipo, parseado.id)
+    )
+
+
 def verificar(
     recurso: str | None,
     aceptado: RecursoAceptado | None,
