@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
@@ -13,7 +14,8 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
 // con la actual marcada (cada una se puede cerrar, o todas las otras de una vez), salir, y el
 // estado del segundo factor con el enlace a su página, y la contraseña (SeccionContrasena). Sin sesión manda a /entrar, igual que
-// después de cerrar la sesión actual. Diseño provisorio: el definitivo llega con G3.
+// después de cerrar la sesión actual. Cada parte se lee por su lado: si una falla, esa parte dice qué
+// pasó y deja reintentar, y las demás siguen a la vista. Diseño provisorio: el definitivo llega con G3.
 
 type Yo = components["schemas"]["SesionActual"];
 type Sesion = components["schemas"]["SesionDispositivo"];
@@ -22,7 +24,6 @@ export const RUTA_CUENTA = "/cuenta";
 
 const ESTADO_SIN_SESION = 401;
 const ESTADO_NO_EXISTE = 404;
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 
 const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
   dateStyle: "long",
@@ -33,10 +34,17 @@ const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
 
 const fecha = (iso: string) => FORMATO_FECHA.format(new Date(iso));
 
-type Pantalla =
-  | { tipo: "cargando" }
-  | { tipo: "sin_servicio" }
-  | { tipo: "lista"; yo: Yo; sesiones: Sesion[]; segundoFactor: boolean; contrasena: EstadoContrasena };
+/** Lo que devolvió la lectura de una parte de la página. */
+type Parte<T> = { ok: true; valor: T } | { ok: false; mensaje: string };
+
+interface Partes {
+  yo: Parte<Yo>;
+  sesiones: Parte<Sesion[]>;
+  segundoFactor: Parte<boolean>;
+  contrasena: Parte<EstadoContrasena>;
+}
+
+type Pantalla = { tipo: "cargando" } | { tipo: "sin_servicio" } | ({ tipo: "lista" } & Partes);
 
 type Aviso = { texto: string; ok: boolean };
 
@@ -47,6 +55,48 @@ class SinSesion extends Error {}
 
 function exigirSesion(response: Response) {
   if (response.status === ESTADO_SIN_SESION) throw new SinSesion();
+}
+
+/** Lee una parte. Un 401 sigue siendo de toda la página; cualquier otra falla queda en la parte. */
+async function leer<D, T>(
+  pedido: Promise<{ data?: D; error?: unknown; response: Response }>,
+  tomar: (datos: D) => T,
+): Promise<Parte<T>> {
+  try {
+    const { data, error, response } = await pedido;
+    exigirSesion(response);
+    if (data === undefined) return { ok: false, mensaje: mensajeDeFalla(response.status, codigoDe(error)) };
+    return { ok: true, valor: tomar(data) };
+  } catch (e) {
+    if (e instanceof SinSesion) throw e;
+    return { ok: false, mensaje: SIN_CONEXION };
+  }
+}
+
+const LECTURAS: { [P in keyof Partes]: () => Promise<Partes[P]> } = {
+  yo: () => leer(api.GET("/api/v1/auth/sesion"), (datos) => datos),
+  sesiones: () => leer(api.GET("/api/v1/auth/sesiones"), (datos) => datos.elementos),
+  segundoFactor: () => leer(api.GET("/api/v1/auth/totp"), (datos) => datos.activo || datos.llaves > 0),
+  contrasena: () => leer(api.GET("/api/v1/auth/contrasena"), (datos) => datos),
+};
+
+interface FallaDeParteProps {
+  mensaje: string;
+  deshabilitado: boolean;
+  alReintentar: () => void;
+}
+
+function FallaDeParte({ mensaje, deshabilitado, alReintentar }: FallaDeParteProps) {
+  return (
+    <>
+      <p className="aviso-error" role="alert">
+        {mensaje}
+      </p>
+      <button type="button" onClick={alReintentar} disabled={deshabilitado}>
+        Reintentar
+      </button>
+    </>
+  );
 }
 
 export function Cuenta() {
@@ -74,35 +124,15 @@ export function Cuenta() {
   );
 
   const consultar = useCallback(() => {
-    void Promise.all([
-      api.GET("/api/v1/auth/sesion"),
-      api.GET("/api/v1/auth/sesiones"),
-      api.GET("/api/v1/auth/totp"),
-      api.GET("/api/v1/auth/contrasena"),
-    ])
-      .then(([sesion, sesiones, totp, contrasena]) => {
-        for (const r of [sesion, sesiones, totp, contrasena]) exigirSesion(r.response);
-        if (
-          sesion.data === undefined ||
-          sesiones.data === undefined ||
-          totp.data === undefined ||
-          contrasena.data === undefined
-        )
+    void Promise.all([LECTURAS.yo(), LECTURAS.sesiones(), LECTURAS.segundoFactor(), LECTURAS.contrasena()])
+      .then(([yo, sesiones, segundoFactor, contrasena]) => {
+        // Sin ninguna parte no hay nada que conservar: un solo aviso y no cuatro iguales.
+        if (![yo, sesiones, segundoFactor, contrasena].some((parte) => parte.ok))
           setPantalla({ tipo: "sin_servicio" });
-        else
-          setPantalla({
-            tipo: "lista",
-            yo: sesion.data,
-            sesiones: sesiones.data.elementos,
-            segundoFactor: totp.data.activo || totp.data.llaves > 0,
-            contrasena: contrasena.data,
-          });
+        else setPantalla({ tipo: "lista", yo, sesiones, segundoFactor, contrasena });
       })
-      .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else setPantalla({ tipo: "sin_servicio" });
-      });
-  }, [aEntrar]);
+      .catch(atajar);
+  }, [atajar]);
 
   useEffect(() => {
     // StrictMode monta dos veces: las consultas salen una sola vez.
@@ -111,10 +141,27 @@ export function Cuenta() {
     consultar();
   }, [consultar]);
 
+  /** Vuelve a leer solo la parte que falló; las demás no se tocan. */
+  function reintentar<P extends keyof Partes>(parte: P) {
+    setEnviando(true);
+    setAviso(null);
+    void LECTURAS[parte]()
+      .then((lectura) => setPantalla((actual) => (actual.tipo === "lista" ? { ...actual, [parte]: lectura } : actual)))
+      .catch(atajar)
+      .finally(() => setEnviando(false));
+  }
+
+  function reintentarTodo() {
+    setPantalla({ tipo: "cargando" });
+    consultar();
+  }
+
   /** Saca de la lista las sesiones que ya no están vigentes. */
   function quitar(seQueda: (s: Sesion) => boolean) {
     setPantalla((actual) =>
-      actual.tipo === "lista" ? { ...actual, sesiones: actual.sesiones.filter(seQueda) } : actual,
+      actual.tipo === "lista" && actual.sesiones.ok
+        ? { ...actual, sesiones: { ok: true, valor: actual.sesiones.valor.filter(seQueda) } }
+        : actual,
     );
   }
 
@@ -176,23 +223,33 @@ export function Cuenta() {
       .finally(() => setEnviando(false));
   }
 
-  const hayOtras = pantalla.tipo === "lista" && pantalla.sesiones.some((s) => !s.actual);
-  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  const lista = pantalla.tipo === "lista" ? pantalla : null;
+  const hayOtras = lista?.sesiones.ok === true && lista.sesiones.valor.some((s) => !s.actual);
+  const conMensaje = aviso !== null || lista === null;
+
+  /** El error de una parte con su Reintentar; nada si la lectura salió bien. */
+  const fallaDe = (parte: keyof Partes, lectura: Parte<unknown>) =>
+    !lectura.ok && (
+      <FallaDeParte mensaje={lectura.mensaje} deshabilitado={enviando} alReintentar={() => reintentar(parte)} />
+    );
 
   return (
     <>
       <h1>Mi cuenta</h1>
 
-      {pantalla.tipo === "lista" && (
+      {lista !== null && (
         <>
           <section aria-labelledby={`${id}-yo`} className="tarjeta">
             <h2 id={`${id}-yo`}>Tus datos</h2>
-            <dl className="detalles">
-              <dt>Nombre</dt>
-              <dd>{pantalla.yo.nombre}</dd>
-              <dt>Correo</dt>
-              <dd>{pantalla.yo.correo}</dd>
-            </dl>
+            {fallaDe("yo", lista.yo)}
+            {lista.yo.ok && (
+              <dl className="detalles">
+                <dt>Nombre</dt>
+                <dd>{lista.yo.valor.nombre}</dd>
+                <dt>Correo</dt>
+                <dd>{lista.yo.valor.correo}</dd>
+              </dl>
+            )}
             <button type="button" onClick={salir} disabled={enviando}>
               Salir
             </button>
@@ -200,32 +257,35 @@ export function Cuenta() {
 
           <section aria-labelledby={`${id}-sesiones`} className="tarjeta">
             <h2 id={`${id}-sesiones`}>Dónde tenés la sesión abierta</h2>
-            <ul className="sesiones">
-              {pantalla.sesiones.map((s) => (
-                <li key={s.id} aria-current={s.actual ? "true" : undefined}>
-                  <h3 id={`${id}-${s.id}`}>
-                    {s.dispositivo}
-                    {s.actual && <span className="sesion-actual"> (este dispositivo)</span>}
-                  </h3>
-                  <dl className="detalles">
-                    <dt>Abierta</dt>
-                    <dd>{fecha(s.creada_en)}</dd>
-                    <dt>Último uso</dt>
-                    <dd>{fecha(s.ultimo_uso_en)}</dd>
-                    <dt>Vence</dt>
-                    <dd>{fecha(s.vence_en)}</dd>
-                  </dl>
-                  <button
-                    type="button"
-                    onClick={() => cerrar(s)}
-                    disabled={enviando}
-                    aria-describedby={`${id}-${s.id}`}
-                  >
-                    Cerrar esta sesión
-                  </button>
-                </li>
-              ))}
-            </ul>
+            {fallaDe("sesiones", lista.sesiones)}
+            {lista.sesiones.ok && (
+              <ul className="sesiones">
+                {lista.sesiones.valor.map((s) => (
+                  <li key={s.id} aria-current={s.actual ? "true" : undefined}>
+                    <h3 id={`${id}-${s.id}`}>
+                      {s.dispositivo}
+                      {s.actual && <span className="sesion-actual"> (este dispositivo)</span>}
+                    </h3>
+                    <dl className="detalles">
+                      <dt>Abierta</dt>
+                      <dd>{fecha(s.creada_en)}</dd>
+                      <dt>Último uso</dt>
+                      <dd>{fecha(s.ultimo_uso_en)}</dd>
+                      <dt>Vence</dt>
+                      <dd>{fecha(s.vence_en)}</dd>
+                    </dl>
+                    <button
+                      type="button"
+                      onClick={() => cerrar(s)}
+                      disabled={enviando}
+                      aria-describedby={`${id}-${s.id}`}
+                    >
+                      Cerrar esta sesión
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {hayOtras && (
               <button type="button" onClick={cerrarOtras} disabled={enviando}>
                 Cerrar las otras sesiones
@@ -235,50 +295,76 @@ export function Cuenta() {
 
           <section aria-labelledby={`${id}-factor`} className="tarjeta">
             <h2 id={`${id}-factor`}>Segundo factor</h2>
-            <p>
-              {pantalla.segundoFactor
-                ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
-                : "No está activado."}
-            </p>
-            <p>
-              <Link to={RUTA_SEGUNDO_FACTOR}>
-                {pantalla.segundoFactor ? "Ver el segundo factor" : "Activar el segundo factor"}
-              </Link>
-            </p>
+            {fallaDe("segundoFactor", lista.segundoFactor)}
+            {lista.segundoFactor.ok && (
+              <>
+                <p>
+                  {lista.segundoFactor.valor
+                    ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
+                    : "No está activado."}
+                </p>
+                <p>
+                  <Link to={RUTA_SEGUNDO_FACTOR}>
+                    {lista.segundoFactor.valor ? "Ver el segundo factor" : "Activar el segundo factor"}
+                  </Link>
+                </p>
+              </>
+            )}
           </section>
 
-          <SeccionContrasena
-            estado={pantalla.contrasena}
-            correo={pantalla.yo.correo}
-            segundoFactor={pantalla.segundoFactor}
-            fecha={fecha}
-            alGuardar={(guardada) => {
-              setPantalla((actual) =>
-                actual.tipo === "lista"
-                  ? { ...actual, contrasena: { definida: true, cambiada_en: guardada.cambiada_en } }
-                  : actual,
-              );
-              // Cambiar una existente cierra las sesiones de los otros dispositivos.
-              if (guardada.sesiones_cerradas > 0) quitar((s) => s.actual);
-            }}
-            sinSesion={aEntrar}
-          />
+          {lista.yo.ok && lista.segundoFactor.ok && lista.contrasena.ok ? (
+            <SeccionContrasena
+              estado={lista.contrasena.valor}
+              correo={lista.yo.valor.correo}
+              segundoFactor={lista.segundoFactor.valor}
+              fecha={fecha}
+              alGuardar={(guardada) => {
+                setPantalla((actual) =>
+                  actual.tipo === "lista"
+                    ? {
+                        ...actual,
+                        contrasena: { ok: true, valor: { definida: true, cambiada_en: guardada.cambiada_en } },
+                      }
+                    : actual,
+                );
+                // Cambiar una existente cierra las sesiones de los otros dispositivos.
+                if (guardada.sesiones_cerradas > 0) quitar((s) => s.actual);
+              }}
+              sinSesion={aEntrar}
+            />
+          ) : (
+            // El formulario depende de las tres lecturas: se ofrece reintentar la que falta.
+            <section aria-labelledby={`${id}-contrasena`} className="tarjeta">
+              <h2 id={`${id}-contrasena`}>Contraseña</h2>
+              {fallaDe("contrasena", lista.contrasena) ||
+                fallaDe("segundoFactor", lista.segundoFactor) ||
+                fallaDe("yo", lista.yo)}
+            </section>
+          )}
 
-          <SeccionPrivacidad
-            contrasena={pantalla.contrasena.definida}
-            segundoFactor={pantalla.segundoFactor}
-            fecha={fecha}
-            sinSesion={aEntrar}
-          />
+          {/* Pide o no la contraseña según estas dos lecturas: sin ellas no se puede armar. */}
+          {lista.contrasena.ok && lista.segundoFactor.ok && (
+            <SeccionPrivacidad
+              contrasena={lista.contrasena.valor.definida}
+              segundoFactor={lista.segundoFactor.valor}
+              fecha={fecha}
+              sinSesion={aEntrar}
+            />
+          )}
         </>
       )}
 
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            No pudimos consultar tu cuenta. Revisá la conexión y volvé en un rato.
-          </p>
+          <>
+            <p className="aviso-error">
+              No pudimos consultar tu cuenta. Revisá la conexión y probá de nuevo.
+            </p>
+            <button type="button" onClick={reintentarTodo}>
+              Reintentar
+            </button>
+          </>
         )}
         {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
       </div>

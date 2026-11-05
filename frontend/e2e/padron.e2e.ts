@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /padron servida por el nginx de la imagen, con su CSP real. Como en mandatos.e2e.ts,
 // sin sesión responde el backend de verdad (401) y, con sesión, la API se simula desde el
@@ -59,6 +59,10 @@ async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vec
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
+    // La sesión la responde simularSesion, en el contexto: page.route va primero y la cortaría.
+    if (camino === "/api/v1/auth/sesion") return ruta.fallback();
+    const permisos = quien === "vecina" ? simularPermisos(ruta, camino, ["consorcios.mis"]) : simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (quien === "vecina") return ruta.fulfill(error(403, "sin_permiso"));
@@ -107,6 +111,7 @@ test.describe("padrón", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: 360, height: 740 });
     const envios = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.goto("/");
     await page.getByRole("link", { name: "Padrón del edificio" }).click();
 
@@ -162,14 +167,17 @@ test.describe("padrón", () => {
     expect(envios[1]?.cuerpo).toEqual({ motivo: "Fin del contrato" });
   });
 
-  test("la vecina sin permiso no ve el padrón ni sus acciones", async ({ page, baseURL }) => {
+  test("la vecina sin permiso no llega al padrón: la dirección lleva al inicio", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularApi(page, baseURL!, "vecina");
+    await simularSesion(page, "con_sesion");
     await page.goto("/padron");
-    await expect(page.getByText(/No tenés permiso para ver el padrón/)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Confirmar|Finalizar/ })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Padrón del edificio" })).toHaveCount(0);
+    await expect(page.getByText(/No tenés permiso/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
-    expect(errores.filter((e) => !e.includes("403"))).toEqual([]);
+    expect(errores).toEqual([]);
   });
 
   test("control: sin la cookie CSRF, el simulador rechaza y la página lo dice", async ({ page, baseURL }) => {

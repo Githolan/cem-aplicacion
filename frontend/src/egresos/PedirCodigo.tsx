@@ -1,10 +1,11 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { Link, useLocation } from "react-router";
 
 import { api } from "../api/cliente";
 import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { confirmarConLlave, llaveDisponible } from "../llaveAcceso";
-import { codigoVerificacion } from "../SegundoFactor";
+import { codigoVerificacion, RUTA_SEGUNDO_FACTOR } from "../SegundoFactor";
 import { mensajeDeError } from "./comun";
 
 // Renovar el segundo factor (pantalla 4, aprobada el 30-10-2026): ante `segundo_factor_requerido`
@@ -20,12 +21,27 @@ interface Props {
   alCancelar: () => void;
 }
 
+/** Sin aplicación de verificación activa no hay código que pedir: el camino es darla de alta. */
+function SinAlta() {
+  const { pathname } = useLocation();
+  return (
+    <p role="alert">
+      Todavía no activaste la verificación en dos pasos.{" "}
+      <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
+        Activala ahora
+      </Link>{" "}
+      y volvé a este paso.
+    </p>
+  );
+}
+
 export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const id = useId();
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [conLlave, setConLlave] = useState(false);
+  const [sinAlta, setSinAlta] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
 
   // Si la pantalla se desmonta (otro edificio, otra página) mientras se verifica, el pedido
@@ -67,6 +83,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     }
     setEnviando(true);
     setError(null);
+    setSinAlta(false);
     void api
       .POST("/api/v1/auth/totp/verificar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
       .then(({ data, error: falla, response }) => {
@@ -76,6 +93,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
           alVerificar();
         } else if (codigoDe(falla) === "segundo_factor_invalido" || codigoDe(falla) === "codigo_invalido")
           setError("El código no es válido. Probá con el que muestra ahora la aplicación.");
+        else if (codigoDe(falla) === "segundo_factor_sin_alta") setSinAlta(true);
         else setError(mensajeDeError(response.status, codigoDe(falla)));
       })
       .catch(() => setError(SIN_CONEXION))
@@ -134,6 +152,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
           {error}
         </p>
       )}
+      {sinAlta && <SinAlta />}
       <div className="acciones">
         <button type="submit" disabled={enviando}>
           {enviando ? "Verificando…" : "Verificar y seguir"}

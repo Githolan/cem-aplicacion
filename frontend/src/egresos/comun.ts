@@ -2,8 +2,10 @@ import type { components } from "../api/tipos";
 import { LIMITE_DE_PEDIDOS, mensajeDeFalla } from "../fallas";
 
 // Lo común a las pantallas de egresos (H3; `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del
-// repositorio CEM, «Pantallas», aprobadas el 30-10-2026). La interfaz nunca concede ni deduce
-// permisos: la API decide y la base vuelve a controlar.
+// repositorio CEM, «Pantallas», aprobadas el 30-10-2026). Lo que la persona no puede hacer no se le
+// ofrece (`permisos.tsx`) y una lectura negada lleva al inicio, pero eso es solo interfaz: la API
+// decide cada pedido, la base vuelve a controlar y un 403 al actuar se dice en la pantalla, porque
+// la separación de funciones depende del caso.
 
 export type EstadoOrden = components["schemas"]["EstadoOrdenPago"];
 export type Franja = components["schemas"]["Franja"];
@@ -28,6 +30,19 @@ export const SEGUNDO_FACTOR_REQUERIDO = "segundo_factor_requerido";
 /** R10: la sesión tiene más de 12 horas (hay que volver a entrar). */
 export const SESION_RECIENTE_REQUERIDA = "sesion_reciente_requerida";
 const CAMBIO_LA_ORDEN = new Set(["version_desactualizada", "huella_distinta"]);
+/** Lo que dice la pantalla ante R10 por sesión vieja; `AvisoPantalla` le suma el enlace a /entrar. */
+export const TEXTO_SESION_VENCIDA = "Tu sesión tiene más de 12 horas: volvé a entrar para seguir.";
+
+/** El resultado de lo último que se hizo o se intentó en una pantalla. */
+export type Aviso = { texto: string; ok: boolean };
+
+/** Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo. */
+export function sinPisarLoHecho(falla: string) {
+  return (actual: Aviso | null): Aviso => (actual?.ok === true ? actual : { texto: falla, ok: false });
+}
+
+/** Al volver a pedir se va el error de la lectura anterior; un «Listo» se queda. */
+export const sinLaFalla = (actual: Aviso | null): Aviso | null => (actual?.ok === true ? actual : null);
 
 export const TEXTO_ESTADO_ORDEN: Record<EstadoOrden, string> = {
   borrador: "Borrador",
@@ -119,7 +134,7 @@ export function cambioLaOrden(codigo: string | undefined): boolean {
 
 const MENSAJES: Record<string, string> = {
   csrf_invalido: "No pudimos verificar el pedido. Recargá la página.",
-  sesion_reciente_requerida: "Tu sesión tiene más de 12 horas: volvé a entrar para seguir.",
+  sesion_reciente_requerida: TEXTO_SESION_VENCIDA,
   identidad_no_verificada: "Falta verificar una identidad en el consorcio. Soporte puede ayudarte.",
   version_desactualizada: "La orden cambió mientras la mirabas. Revisá la versión nueva.",
   huella_distinta: "La orden cambió mientras la mirabas. Revisá la versión nueva antes de aprobar.",
@@ -157,6 +172,8 @@ const MENSAJES: Record<string, string> = {
   orden_no_liquidable:
     "Esa orden no se puede liquidar: no está pagada, ya está en una liquidación, es de otra moneda o se pagó después del período.",
   sin_esquema: "Ese grupo no tiene un esquema de coeficientes vigente en el período.",
+  version_no_disponible: "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
+  archivo_vencido: "Este archivo ya no está disponible.",
   idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
   idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",
 };

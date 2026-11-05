@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /invitacion-mandato (A7) servida por el nginx de la imagen, con su CSP real. El
 // backend de la corrida no tiene base de datos, así que consultar y aceptar se simulan desde el
@@ -11,6 +11,14 @@ import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 // página entra en un teléfono, WCAG AA y que no hay violaciones de la CSP.
 const CSRF = "e2e-csrf-mandato";
 const TOKEN = "M".repeat(21) + "_-" + "n".repeat(20);
+
+const ACEPTADA = {
+  consorcio_id: "11111111-1111-4111-8111-111111111111",
+  persona_id: "22222222-2222-4222-8222-222222222222",
+  mandato_id: "33333333-3333-4333-8333-333333333333",
+  cuenta_nueva: true,
+  vigente_desde: "2026-01-01",
+};
 
 type Pedido = { camino: string; url: string; csrf: string | null; cuerpo: unknown };
 
@@ -28,7 +36,11 @@ function vigilarErrores(pagina: Page): string[] {
   return errores;
 }
 
-async function simularApi(pagina: Page, baseURL: string, aceptar: { status: number; json: unknown }): Promise<Pedido[]> {
+async function simularApi(
+  pagina: Page,
+  baseURL: string,
+  aceptar: { status: number; json: unknown } | (() => { status: number; json: unknown }),
+): Promise<Pedido[]> {
   const pedidos: Pedido[] = [];
   await pagina.route("**/api/v1/auth/invitacion-mandato/**", async (ruta) => {
     const pedido = ruta.request();
@@ -36,7 +48,7 @@ async function simularApi(pagina: Page, baseURL: string, aceptar: { status: numb
     pedidos.push({ camino, url: pedido.url(), csrf: (await pedido.headerValue("x-csrf-token")) ?? null, cuerpo: pedido.postDataJSON() });
     if (camino.endsWith("/consultar"))
       return ruta.fulfill({ json: { consorcio: "Edificio Azul", mandatario: "Estudio X", invitada_por: "Ana", vence_en: "2026-10-26T12:00:00Z" } });
-    return ruta.fulfill(aceptar);
+    return ruta.fulfill(typeof aceptar === "function" ? aceptar() : aceptar);
   });
   await pagina.context().addCookies([
     { name: "__Host-cem_csrf", value: CSRF, domain: new URL(baseURL).hostname, path: "/", secure: true },
@@ -50,16 +62,8 @@ test.describe("invitación de mandato", () => {
   test("en un teléfono, consulta y acepta con el token en el cuerpo y el CSRF", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: 360, height: 740 });
-    const pedidos = await simularApi(page, baseURL!, {
-      status: 200,
-      json: {
-        consorcio_id: "11111111-1111-4111-8111-111111111111",
-        persona_id: "22222222-2222-4222-8222-222222222222",
-        mandato_id: "33333333-3333-4333-8333-333333333333",
-        cuenta_nueva: true,
-        vigente_desde: "2026-01-01",
-      },
-    });
+    const pedidos = await simularApi(page, baseURL!, { status: 200, json: ACEPTADA });
+    await simularSesion(page, "con_sesion");
     await page.goto(`/invitacion-mandato#token=${TOKEN}`);
 
     await expect(page.getByText("Estudio X")).toBeVisible();
@@ -69,6 +73,8 @@ test.describe("invitación de mandato", () => {
 
     await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
     await expect(page.getByText(/tu cuenta quedó asociada a la administración de Edificio Azul/)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page).toHaveURL(/\/$/);
     expect(pedidos.map((p) => p.camino)).toEqual([
       "/api/v1/auth/invitacion-mandato/consultar",
       "/api/v1/auth/invitacion-mandato/aceptar",
@@ -89,5 +95,34 @@ test.describe("invitación de mandato", () => {
     await expect(page.getByText(/el Consejo fiscaliza y no administra/)).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
     expect(errores.filter((e) => !e.includes("409"))).toEqual([]);
+  });
+
+  test("un 503 al aceptar deja el formulario con lo escrito y el reintento lleva al inicio con el aviso", async ({
+    page,
+    baseURL,
+  }) => {
+    let caido = true;
+    const pedidos = await simularApi(page, baseURL!, () =>
+      caido
+        ? { status: 503, json: { codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" } }
+        : { status: 200, json: ACEPTADA },
+    );
+    await simularSesion(page, "con_sesion");
+    await page.goto(`/invitacion-mandato#token=${TOKEN}`);
+    const campo = page.getByLabel("Tu nombre (solo si la cuenta es nueva)");
+    await campo.fill("Beto Estudio");
+    await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
+
+    await expect(page.getByText(/El servicio no está disponible/)).toBeVisible();
+    await expect(campo).toHaveValue("Beto Estudio");
+    await expect(page).toHaveURL(/\/invitacion-mandato$/);
+    await sinFaltasDeAccesibilidad(page);
+
+    caido = false;
+    await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page.getByText(/tu cuenta quedó asociada a la administración de Edificio Azul/)).toBeVisible();
+    expect(pedidos.at(-1)).toMatchObject({ csrf: CSRF, cuerpo: { token: TOKEN, nombre: "Beto Estudio" } });
   });
 });

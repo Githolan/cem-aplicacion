@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
+import { alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { mensajeDeError, PATRON_TELEFONO } from "./ContactosGestion";
 import { SIN_CONEXION } from "./fallas";
@@ -73,7 +74,7 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave];
+    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -192,10 +193,52 @@ describe("página /contactos/gestion", () => {
     expect(Object.keys(localStorage)).toEqual([]);
   });
 
-  it("sin `contactos.gestionar` (403) lo dice, sin lista ni botón para agregar", async () => {
-    vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => error("sin_permiso", 403) }));
+  it("la lista que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
+    let caida = true;
+    const simulado = conLista({
+      [`GET ${GESTION}`]: () => (caida ? Promise.reject(new TypeError("Failed to fetch")) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No tenés permiso para gestionar los contactos/)).toBeTruthy();
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2);
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+    // Control: con la lista a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conLista({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
+  });
+
+  it("un 403 al leer la lista de gestión lleva al inicio, sin lista ni botón para agregar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        "GET /api/v1/auth/sesion": () => Response.json({}),
+        "GET /health": () => error("servicio_no_disponible", 503),
+        "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
+        [`GET ${GESTION}`]: () => error("sin_permiso", 403),
+      }),
+    );
+    abrir();
+    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
     expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
   });

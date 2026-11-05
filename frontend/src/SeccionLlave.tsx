@@ -9,18 +9,25 @@ import { llaveDisponible, quitarLlave, registrarLlave, type Resultado } from "./
 // La llave de acceso en /cuenta/segundo-factor: activarla es un solo botón, sin aplicación aparte.
 // Si el navegador no sabe usarlas, la sección no aparece y queda la aplicación de códigos. Cuando
 // falta confirmar, `PedirCodigo` ofrece la llave o un código, también el de recuperación, y el
-// pedido se repite: quien perdió el dispositivo puede quitar su llave o sumar otra.
+// pedido se repite: quien perdió el dispositivo puede quitar su llave o sumar otra. Los códigos de
+// recuperación salen de acá apenas llegan (`alCodigos`): los muestra la página, que no los suelta
+// hasta que la persona dice que los guardó, y hasta entonces no se consulta nada más.
 
 type Llave = components["schemas"]["LlaveResumen"];
 
 interface Props {
+  /** Cambiaron las llaves: la página vuelve a leer su estado. */
   alCambiar: () => void;
+  /** Llegaron códigos de recuperación, que se muestran una sola vez. */
+  alCodigos: (codigos: string[]) => void;
+  /** Terminó la acción: la página sigue a la pantalla siguiente con este aviso. */
+  alTerminar: (aviso: string) => void;
 }
 
-export function SeccionLlave({ alCambiar }: Props) {
+export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   const id = useId();
   const [llaves, setLlaves] = useState<Llave[] | null>(null);
-  const [codigos, setCodigos] = useState<string[] | null>(null);
+  const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [listo, setListo] = useState<string | null>(null);
@@ -28,13 +35,14 @@ export function SeccionLlave({ alCambiar }: Props) {
   const consultado = useRef(false);
 
   const consultar = useCallback(() => {
+    setFallaConsulta(null);
     void api
       .GET("/api/v1/auth/llave")
       .then(({ data, error, response }) => {
         if (data !== undefined) setLlaves(data);
-        else setAviso(mensajeDeFalla(response.status, codigoDe(error)));
+        else setFallaConsulta(mensajeDeFalla(response.status, codigoDe(error)));
       })
-      .catch(() => setAviso(SIN_CONEXION));
+      .catch(() => setFallaConsulta(SIN_CONEXION));
   }, []);
 
   useEffect(() => {
@@ -47,17 +55,14 @@ export function SeccionLlave({ alCambiar }: Props) {
   if (!llaveDisponible()) return null;
 
   /** Corre un pedido; si falta confirmar, lo deja pendiente hasta que la persona confirme. */
-  function intentar<T>(pedido: () => Promise<Resultado<T>>, alTerminar: (valor: T) => void) {
+  function intentar<T>(pedido: () => Promise<Resultado<T>>, alListo: (valor: T) => void) {
     setEnviando(true);
     setAviso(null);
     setListo(null);
     void pedido()
       .then((r) => {
-        if (r.ok) {
-          alTerminar(r.valor);
-          consultar();
-          alCambiar();
-        } else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alTerminar));
+        if (r.ok) alListo(r.valor);
+        else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo));
         else setAviso(r.mensaje);
       })
       .finally(() => setEnviando(false));
@@ -65,22 +70,26 @@ export function SeccionLlave({ alCambiar }: Props) {
 
   function activar() {
     intentar(registrarLlave, (nuevos) => {
-      setCodigos(nuevos);
-      setListo("Listo: tu llave quedó activada.");
+      if (nuevos !== null) alCodigos(nuevos);
+      else alTerminar("Listo: tu llave quedó activada.");
     });
   }
 
   function quitar(llave: Llave) {
     intentar(
       () => quitarLlave(llave.id),
-      () => setListo("Listo: quitaste la llave."),
+      () => {
+        setListo("Listo: quitaste la llave.");
+        consultar();
+        alCambiar();
+      },
     );
   }
 
   function confirmarSolo() {
     setAviso(null);
     setListo(null);
-    setPendiente(() => () => setListo("Listo: confirmaste que sos vos, por 10 minutos."));
+    setPendiente(() => () => alTerminar("Listo: confirmaste que sos vos, por 10 minutos."));
   }
 
   if (pendiente !== null)
@@ -104,19 +113,12 @@ export function SeccionLlave({ alCambiar }: Props) {
       </p>
       {listo !== null && <p className="aviso-ok">{listo}</p>}
       {aviso !== null && <p role="alert">{aviso}</p>}
-      {codigos !== null && (
+      {fallaConsulta !== null && (
         <>
-          <p>
-            Si perdés este dispositivo, cada uno de estos códigos sirve <strong>una sola vez</strong>{" "}
-            para entrar en su lugar. Guardalos en un lugar seguro: no los vamos a volver a mostrar.
-          </p>
-          <ul className="codigos-recuperacion" aria-label="Códigos de recuperación" translate="no">
-            {codigos.map((c) => (
-              <li key={c}>
-                <code>{c}</code>
-              </li>
-            ))}
-          </ul>
+          <p role="alert">{fallaConsulta}</p>
+          <button type="button" onClick={consultar}>
+            Reintentar
+          </button>
         </>
       )}
       {llaves !== null && llaves.length > 0 && (

@@ -3,8 +3,9 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
+  type Aviso,
   cambioLoVisto,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
@@ -12,8 +13,12 @@ import {
   mensajeDeError,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura, Reintentar } from "./EstadoPantalla";
+import { REQUISITOS } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
@@ -30,11 +35,9 @@ export const RUTA_LIQUIDACION = "/liquidacion";
 
 type Lectura =
   | { tipo: "cargando" }
-  | { tipo: "sin_permiso" }
   | { tipo: "sin_servicio" }
   | { tipo: "ok"; liquidaciones: Resumen[]; liquidables: Liquidable[] };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 type Acto =
   | { tipo: "preparar"; periodo: string }
   | { tipo: "agregar"; liquidacion: string; orden: string; grupo: string }
@@ -56,15 +59,17 @@ export function mesSiguiente(iso: string): string {
 }
 
 export function Liquidacion() {
-  const elegido = useConsorcio();
+  const elegido = useConsorcio(REQUISITOS.liquidacion);
   return <LiquidacionDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierta, setAbierta] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
+  /** Por qué no llegó el detalle de la abierta: la lista sigue a la vista. */
+  const [fallaDetalle, setFallaDetalle] = useState<string | null>(null);
   const [vuelta, setVuelta] = useState(0);
   const [mes, setMes] = useState("");
   const [orden, setOrden] = useState("");
@@ -78,9 +83,16 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
   // pasan de una a otra (un motivo escrito para un borrador no descarta otro).
   function abrir(id: string) {
     setAbierta(id);
+    setFallaDetalle(null);
     setOrden("");
     setGrupo("");
     setMotivo("");
+  }
+
+  function volverALaLista() {
+    setAbierta(null);
+    setDetalle(null);
+    setFallaDetalle(null);
   }
   const clave = useRef<string | null>(null);
   const montado = useMontado();
@@ -101,19 +113,24 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
       .then(([lista, liquidables, uno]) => {
         for (const r of [lista, liquidables, uno]) if (r !== null) exigirSesion(r.response);
         if (!vigente) return;
-        const falla = [lista, liquidables, uno].find((r) => r !== null && r.data === undefined);
-        if (falla === undefined || falla === null) {
+        const falla = [lista, liquidables].find((r) => r.data === undefined);
+        if (falla === undefined) {
           setLectura({ tipo: "ok", liquidaciones: lista.data?.elementos ?? [], liquidables: liquidables.data?.elementos ?? [] });
+          if (uno !== null && uno.data === undefined && codigoDe(uno.error) === SEGUNDO_FACTOR_REQUERIDO) {
+            setPendiente({ acto: "ver la liquidación", reintentar: () => setVuelta((v) => v + 1) });
+            return;
+          }
           setDetalle(uno?.data ?? null);
+          setFallaDetalle(uno !== null && uno.data === undefined ? mensajeDeError(uno.response.status, codigoDe(uno.error)) : null);
           return;
         }
         const codigo = codigoDe(falla.error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver la liquidación", reintentar: () => setVuelta((v) => v + 1) });
-        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(falla.response.status, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(falla.response.status, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -121,13 +138,19 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, abierta, vuelta, aEntrar]);
+  }, [consorcio, abierta, vuelta, aEntrar, aInicio]);
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
@@ -176,7 +199,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
             abrir(data.id);
           }
           if (acto.tipo === "agregar") setOrden("");
-          if (acto.tipo === "descartar") setMotivo("");
+          if (acto.tipo === "descartar") {
+            setMotivo("");
+            volverALaLista();
+          }
           setVuelta((v) => v + 1);
           return;
         }
@@ -248,16 +274,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -273,8 +291,17 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando la liquidación…</p>}
-          {lectura.tipo === "sin_permiso" && (
-            <p className="tarjeta">La liquidación la prepara la administración: hace falta su mandato en este edificio.</p>
+          {lectura.tipo === "sin_servicio" && (
+            <FallaDeLectura alReintentar={reintentarLectura}>
+              {abierta !== null && (
+                <button type="button" className="secundario" onClick={() => {
+                  volverALaLista();
+                  reintentarLectura();
+                }}>
+                  Volver a la lista
+                </button>
+              )}
+            </FallaDeLectura>
           )}
           {lectura.tipo === "ok" && (
             <>
@@ -303,6 +330,19 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {fallaDetalle !== null && (
+                <section className="tarjeta" aria-label="Detalle de la liquidación">
+                  <p className="aviso-error" role="alert">
+                    No pudimos abrir esta liquidación. {fallaDetalle}
+                  </p>
+                  <Reintentar alReintentar={() => setVuelta((v) => v + 1)}>
+                    <button type="button" className="secundario" onClick={volverALaLista}>
+                      Volver a la lista
+                    </button>
+                  </Reintentar>
+                </section>
               )}
 
               {detalle !== null && simulacion !== undefined && (

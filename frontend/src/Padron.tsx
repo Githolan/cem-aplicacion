@@ -4,16 +4,17 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
 // mínimo de D6 (unidad, nombre, carácter, vigencia y si está confirmado; nunca correo ni teléfono),
-// confirmar un vínculo con la referencia del título y finalizarlo con el motivo. La interfaz nunca
-// concede ni deduce permisos: la API decide con las políticas `padron.ver`,
-// `padron.confirmar_vinculo` y `padron.gestionar`, y la base vuelve a controlar. Las acciones se
-// ofrecen según el estado del vínculo (sin confirmar, ya empezado), no según quién mira: un 403 de
-// la API es la respuesta a quien no tiene la facultad.
+// confirmar un vínculo con la referencia del título y finalizarlo con el motivo. Cada acción se
+// ofrece según el estado del vínculo (sin confirmar, ya empezado) y lo que la persona alcanza
+// (`padron.confirmar_vinculo`, `padron.gestionar`), y si no puede leer el padrón va al inicio. Es
+// solo interfaz: la API decide cada pedido y la base vuelve a controlar, y un 403 al actuar se dice
+// acá, porque nadie confirma su propio vínculo ni el que registró.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Fila = components["schemas"]["FilaPadron"];
@@ -100,8 +101,10 @@ type Pantalla =
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
-/** El padrón del edificio: la API lo manda, lo niega (403) o no se pudo consultar. */
-type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_servicio" } | { tipo: "ok"; filas: Fila[] };
+const SIN_EDIFICIOS: readonly Consorcio[] = [];
+
+/** El padrón del edificio: llegó o no se pudo consultar (si la API lo niega, se va al inicio). */
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; filas: Fila[] };
 
 type Abierto = { fila: Fila; accion: Accion };
 
@@ -118,7 +121,11 @@ export function Padron() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
-  const [consorcio, setConsorcio] = useState("");
+  const { edificios, consorcio, setConsorcio } = useEdificioElegido(
+    pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
+    REQUISITOS.padron,
+  );
+  const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [texto, setTexto] = useState("");
@@ -155,27 +162,27 @@ export function Padron() {
 
   const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        const primero = data?.[0];
         if (data === undefined)
           setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
-        else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
-        else {
-          setPantalla({ tipo: "lista", consorcios: data });
-          setConsorcio(primero.id);
-        }
+        else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
+        else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
         else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -187,7 +194,7 @@ export function Padron() {
         // E35: un padrón pedido antes de un cambio puede llegar después y mostrar el estado viejo.
         if (!vigente) return;
         if (data !== undefined) setLectura({ tipo: "ok", filas: data.elementos });
-        else if (response.status === ESTADO.sinPermiso) setLectura({ tipo: "sin_permiso" });
+        else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else {
           setLectura({ tipo: "sin_servicio" });
           // Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo.
@@ -206,7 +213,14 @@ export function Padron() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, navegar]);
+
+  /** Vuelve a pedir el padrón que no se pudo consultar; un «Listo» que esté a la vista queda. */
+  function reconsultar() {
+    setAviso((actual) => (actual?.ok ? actual : null));
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function abrir(fila: Fila, accion: Accion) {
     clave.current = null;
@@ -306,11 +320,12 @@ export function Padron() {
         <>
           <p className="tarjeta">
             El padrón muestra quién tiene un vínculo vigente o futuro con cada unidad. No muestra
-            correos ni teléfonos. Confirmar acredita el carácter sobre la unidad según el título; no
-            acredita la identidad.
+            correos ni teléfonos.
+            {puede("padron.confirmar_vinculo") &&
+              " Confirmar acredita el carácter sobre la unidad según el título; no acredita la identidad."}
           </p>
 
-          {pantalla.consorcios.length > 1 && (
+          {edificios.length > 1 && (
             <div className="formulario formulario-movil tarjeta">
               <label htmlFor={`${id}-consorcio`}>Edificio</label>
               <select
@@ -325,7 +340,7 @@ export function Padron() {
                   setConsorcio(e.target.value);
                 }}
               >
-                {pantalla.consorcios.map((c) => (
+                {edificios.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nombre}
                   </option>
@@ -337,8 +352,14 @@ export function Padron() {
           <section aria-labelledby={`${id}-padron`} className="tarjeta">
             <h2 id={`${id}-padron`}>Vínculos por unidad</h2>
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
-            {lectura.tipo === "sin_permiso" && <p>No tenés permiso para ver el padrón de este edificio.</p>}
-            {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar el padrón.</p>}
+            {lectura.tipo === "sin_servicio" && (
+              <>
+                <p>No pudimos mostrar el padrón.</p>
+                <button type="button" onClick={reconsultar} disabled={enviando}>
+                  Consultar de nuevo
+                </button>
+              </>
+            )}
             {lectura.tipo === "ok" && lectura.filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {lectura.tipo === "ok" && lectura.filas.length > 0 && (
               <ul className="sesiones" aria-label="Padrón">
@@ -352,11 +373,22 @@ export function Padron() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (
@@ -374,6 +406,8 @@ export function Padron() {
     // Si ya empezó lo dice la API con la fecha del consorcio, la misma con la que decide el fin.
     const futuro = !f.iniciado;
     const esteAbierto = abierto?.fila.vinculo_id === f.vinculo_id ? abierto.accion : null;
+    const confirmable = !f.confirmado && puede("padron.confirmar_vinculo");
+    const finalizable = !futuro && puede("padron.gestionar");
     return (
       <li key={f.vinculo_id}>
         <h3 id={titulo}>
@@ -393,15 +427,15 @@ export function Padron() {
           <dd>{f.confirmado ? "Confirmado con el título" : "Sin confirmar"}</dd>
         </dl>
         {esteAbierto === null ? (
-          (!f.confirmado || !futuro) && (
+          (confirmable || finalizable) && (
           <p>
-            {!f.confirmado && (
+            {confirmable && (
               <button type="button" onClick={() => abrir(f, "confirmar")} disabled={enviando} aria-describedby={titulo}>
                 Confirmar
               </button>
             )}
-            {!f.confirmado && !futuro && " "}
-            {!futuro && (
+            {confirmable && finalizable && " "}
+            {finalizable && (
               <button type="button" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
                 Finalizar
               </button>

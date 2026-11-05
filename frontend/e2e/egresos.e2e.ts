@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { simularPermisos, sinFaltasDeAccesibilidad } from "./entorno";
 
 // Las páginas de egresos servidas por el nginx de la imagen, con su CSP real y la API simulada
 // desde el navegador, como en padron.e2e.ts. Mensaje del propietario del 30-10-2026, puntos 31 a
@@ -65,6 +65,8 @@ async function simularApi(pagina: Page, baseURL: string, revisa: "consejero" | "
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
     if (pedido.method() !== "GET") return ruta.abort();
+    const permisos = simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     lecturas.push(camino);
     if (camino === "/api/v1/me/consorcios")
       return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }, { id: B, nombre: "Edificio Bordó", vinculos: [] }] });
@@ -161,6 +163,8 @@ async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
+    const permisos = simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     pedidosHechos.push(`${pedido.method()} ${camino}`);
     const c = `/api/v1/consorcios/${A}`;
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });

@@ -2,10 +2,12 @@
 
 from typing import Annotated
 
-from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
+from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, MisAcciones, Unidad
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
+from app.autorizacion.evaluador import alcanza
+from app.autorizacion.politicas import POLITICAS
 from app.autorizacion.requiere import Permiso, requiere
 from app.contexto import IdentidadDep, MotorDep
 from app.db import transaccion
@@ -60,6 +62,21 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
             {"p": p, "ids": ids, "mandatos": sorted(por_mandato)},
         ).mappings()
         return [ConsorcioResumen(**f) for f in filas]
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/mis-acciones",
+    response_model=MisAcciones,
+    summary="Las acciones que la interfaz le muestra a la persona en el consorcio",
+)
+def mis_acciones(
+    permiso: Annotated[Permiso, Depends(requiere("consorcios.mis_acciones", al_entrar=True))],
+) -> MisAcciones:
+    """Lo que la persona alcanza en el consorcio (documento 13, §10.5). Solo sirve para mostrar:
+    no concede nada, cada ruta sigue decidiendo con `evaluar`, y lo que no se alcanza no se
+    audita porque no es un intento de actuar."""
+    contexto = permiso.ctx.autorizacion
+    return MisAcciones(acciones=sorted(a for a in POLITICAS if alcanza(a, contexto)))
 
 
 @router.get("/consorcios/{consorcio_id}/unidades", response_model=ListaUnidades)

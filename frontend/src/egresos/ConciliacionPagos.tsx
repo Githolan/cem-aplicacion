@@ -1,10 +1,11 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
+  type Aviso,
   cambioLoVisto,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
@@ -13,8 +14,12 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
+import { REQUISITOS, usePuede } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
@@ -32,9 +37,8 @@ type Declaracion = components["schemas"]["PagoNoRealizado"];
 
 export const RUTA_CONCILIACION = "/egresos/conciliacion";
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: ConPago[] };
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: ConPago[] };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 type Acto =
   | { tipo: "conforme"; orden: string; pago: string; motivo?: string }
   | { tipo: "observado"; orden: string; pago: string; motivo: string }
@@ -60,12 +64,13 @@ function descarga(consorcio: string, pago: Pago): string {
 }
 
 export function ConciliacionPagos() {
-  const elegido = useConsorcio();
+  const elegido = useConsorcio(REQUISITOS.conciliacion);
   return <ConciliacionDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
+  const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [escribiendo, setEscribiendo] = useState<{ pago: string; resultado: "conforme" | "observado" } | null>(null);
@@ -88,10 +93,10 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
         if (data !== undefined) setLectura({ tipo: "ok", elementos: data.elementos });
         else if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver los pagos", reintentar: () => setVuelta((v) => v + 1) });
-        else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -99,13 +104,19 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, aInicio]);
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
@@ -166,6 +177,34 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
       .finally(() => setEnviando(false));
   }
 
+  /** Antes de dejar la pantalla pregunta si el comprobante se puede bajar: la descarga es un 302 a
+   * una URL firmada de otro origen, que un `fetch` no puede seguir (CSP `connect-src 'self'`). Con
+   * `redirect: "manual"` el 302 no se sigue, y un error llega con su cuerpo para decirlo acá en
+   * lugar de mostrar el JSON. Si está, recién entonces navega; el archivo viene como adjunto. */
+  function verComprobante(evento: MouseEvent<HTMLAnchorElement>, pago: Pago) {
+    evento.preventDefault();
+    setAviso(null);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
+        params: { path: { consorcio_id: consorcio, documento_id: pago.documento_id, version_id: pago.version_documento_id } },
+        redirect: "manual",
+      })
+      .then(({ error, response }) => {
+        exigirSesion(response);
+        if (response.type === "opaqueredirect") {
+          const enlace = document.createElement("a");
+          enlace.href = descarga(consorcio, pago);
+          enlace.click();
+          return;
+        }
+        const codigo = codigoDe(error);
+        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
+          setPendiente({ acto: "ver el comprobante", reintentar: () => verComprobante(evento, pago) });
+        else setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
+  }
+
   function conMotivo(evento: FormEvent, orden: string, pago: string, resultado: "conforme" | "observado") {
     evento.preventDefault();
     if (motivo.trim() === "") return;
@@ -183,16 +222,8 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -208,9 +239,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
-          {lectura.tipo === "sin_permiso" && (
-            <p className="tarjeta">La conciliación de pagos es del Consejo: hace falta un mandato de Consejo en este edificio.</p>
-          )}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
           {lectura.tipo === "ok" &&
             (pendientes.length === 0 ? (
               <p className="tarjeta">No hay pagos esperando conciliación.</p>
@@ -244,10 +273,12 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
                             <dd>{momento(pago.registrado_en)}</dd>
                             <dt>Comprobante</dt>
                             <dd>
-                              <a href={descarga(consorcio, pago)}>Ver el comprobante</a>
+                              <a href={descarga(consorcio, pago)} onClick={(e) => verComprobante(e, pago)}>
+                                Ver el comprobante
+                              </a>
                             </dd>
                           </dl>
-                          {escribiendo?.pago !== pago.id ? (
+                          {!puede("egresos.conciliar_pago") ? null : escribiendo?.pago !== pago.id ? (
                             <div className="acciones">
                               <button type="button" disabled={enviando}
                                 onClick={() => {
@@ -289,10 +320,12 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }:
                           <p>
                             Declarado como no pagado el {momento(declaracion.declarado_en)}: {declaracion.motivo}
                           </p>
-                          <button type="button" disabled={enviando}
-                            onClick={() => hacer({ tipo: "no_realizado", orden: c.orden.id, declaracion: declaracion.id })}>
-                            Confirmar que no se pagó
-                          </button>
+                          {puede("egresos.conciliar_pago") && (
+                            <button type="button" disabled={enviando}
+                              onClick={() => hacer({ tipo: "no_realizado", orden: c.orden.id, declaracion: declaracion.id })}>
+                              Confirmar que no se pagó
+                            </button>
+                          )}
                         </>
                       )}
                     </li>

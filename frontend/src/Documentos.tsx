@@ -1,19 +1,24 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type MouseEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
 // documento y después se sube el archivo crudo, que entra en cuarentena hasta que el antivirus lo
-// aprueba). La interfaz nunca concede ni deduce permisos: la lista ya llega filtrada por lo que la
-// persona puede ver, y un 403 al cargar es la respuesta a quien no puede cargar esa categoría. La
-// descarga es una navegación común: el navegador sigue el 302 a la URL firmada de 5 minutos.
+// aprueba). La lista ya llega filtrada por lo que la persona puede ver, y cada parte aparece solo
+// si la alcanza: la lista con `documentos.ver`, la carga y sus categorías con la acción de cada una
+// (`CATEGORIAS_OPERATIVAS`). Quien no puede ni ver ni cargar va al inicio. Es solo interfaz: la API
+// decide cada pedido, y un 403 al cargar se dice en la pantalla. La descarga termina en una
+// navegación común, porque el 302 lleva a una URL firmada de otro origen
+// que un `fetch` no puede seguir (CSP `connect-src 'self'`); antes se pregunta con `redirect:
+// "manual"` para decir un error acá, en vez de dejar a la persona frente al JSON.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Documento = components["schemas"]["DocumentoEnLista"];
@@ -38,6 +43,8 @@ const ESTADO = {
   noDisponible: 503,
 } as const;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
+/** Cada cuánto se vuelve a pedir la lista mientras un archivo sigue en revisión. */
+export const REFRESCO_CUARENTENA_MS = 10_000;
 /** Los mismos topes que el contrato (`LARGO_MAXIMO_TITULO`, `TOPE_BYTES`). */
 const LARGO_TITULO = 200;
 export const TOPE_BYTES = 20 * 1024 * 1024;
@@ -145,6 +152,16 @@ export function mensajeDeError(
   return mensajeDeFalla(estado, codigo);
 }
 
+/** Las que también se cargan con `documentos.cargar_operativos` (`CATEGORIAS_OPERATIVAS` del contrato). */
+export const CATEGORIAS_OPERATIVAS: readonly Categoria[] = ["actas_y_decisiones", "presupuestos", "mantenimiento_y_certificados"];
+
+/** Las acciones que cargan una categoría (`ACCIONES_DE_CARGA` del contrato). */
+function accionesDeCarga(categoria: Categoria): string[] {
+  return CATEGORIAS_OPERATIVAS.includes(categoria)
+    ? ["documentos.cargar", "documentos.cargar_operativos"]
+    : ["documentos.cargar"];
+}
+
 /** Si el intento terminó y el próximo lleva otra clave (igual que en /contactos/gestion). */
 function renovarClave(estado: number, codigo: string | undefined): boolean {
   if (codigo === "idempotencia_reutilizada") return true;
@@ -161,7 +178,10 @@ type Pantalla =
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_servicio" } | { tipo: "ok"; documentos: Documento[] };
+const SIN_EDIFICIOS: readonly Consorcio[] = [];
+
+/** `solo_carga`: quien carga sin acceso a la lista (el administrador externo, documento 08 §4). */
+type Lectura = { tipo: "cargando" } | { tipo: "solo_carga" } | { tipo: "sin_servicio" } | { tipo: "ok"; documentos: Documento[] };
 
 /** El formulario abierto: el de un documento nuevo, o el de subir el archivo de uno que ya existe. */
 type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: string };
@@ -174,9 +194,22 @@ function exigirSesion(response: Response) {
   if (response.status === ESTADO.sinSesion) throw new SinSesion();
 }
 
+/** Qué decir si el archivo no se puede bajar. */
+function mensajeDeDescarga(estado: number, codigo: string | undefined): string {
+  if (estado === ESTADO.noEncontrado) return "Ese documento ya no está en este edificio.";
+  if (codigo === "version_no_disponible") return "Ese archivo todavía no se puede bajar.";
+  if (codigo === "archivo_vencido") return "Ese archivo ya no está disponible.";
+  return mensajeDeFalla(estado, codigo);
+}
+
 /** La dirección de descarga: una navegación que el servidor responde con el 302 a la URL firmada. */
 function descarga(consorcio: string, documento: string, version: string): string {
   return `/api/v1/consorcios/${consorcio}/documentos/${documento}/versiones/${version}/descargar`;
+}
+
+/** Si algún archivo de la lista sigue en el análisis: es lo único que justifica volver a pedirla sola. */
+function hayEnCuarentena(documentos: Documento[]): boolean {
+  return documentos.some((d) => d.versiones.some((v) => v.estado === "en_cuarentena"));
 }
 
 /** Sin una versión disponible ni en revisión (ninguna, o todas rechazadas), el documento espera su archivo. */
@@ -188,7 +221,16 @@ export function Documentos() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
-  const [consorcio, setConsorcio] = useState("");
+  const { edificios, consorcio, setConsorcio } = useEdificioElegido(
+    pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
+    REQUISITOS.documentos,
+  );
+  const sabeQueAlcanza = useAcciones(consorcio) !== null;
+  const puede = usePuede(consorcio);
+  const veLaLista = puede("documentos.ver");
+  const carga = puede("documentos.cargar", "documentos.cargar_operativos");
+  // Mientras no se sabe se muestra, pero un 403 de la lista no deja a nadie en una pantalla vacía.
+  const quedaLaCarga = sabeQueAlcanza && carga;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [datos, setDatos] = useState<Datos>(VACIO);
@@ -204,6 +246,8 @@ export function Documentos() {
   const primerCampo = useRef<HTMLElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
   const alAviso = useRef(false);
+  // El próximo pedido de la lista es el refresco automático: si falla, la lista a la vista no se pierde.
+  const refrescoAutomatico = useRef(false);
 
   useEffect(() => {
     if (abierto !== null) primerCampo.current?.focus();
@@ -217,26 +261,42 @@ export function Documentos() {
   }, [enviando, aviso]);
 
   // Sin sesión no queda ninguna copia de /contactos, igual que en las demás páginas con sesión.
+  function bajar(evento: MouseEvent<HTMLAnchorElement>, documento: string, version: string) {
+    evento.preventDefault();
+    setAviso(null);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
+        params: { path: { consorcio_id: consorcio, documento_id: documento, version_id: version } },
+        redirect: "manual",
+      })
+      .then(({ error, response }) => {
+        exigirSesion(response);
+        if (response.type === "opaqueredirect") {
+          const enlace = window.document.createElement("a");
+          enlace.href = descarga(consorcio, documento, version);
+          enlace.click();
+        } else setAviso({ texto: mensajeDeDescarga(response.status, codigoDe(error)), ok: false });
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else setAviso({ texto: SIN_CONEXION, ok: false });
+      });
+  }
+
   const aEntrar = useCallback(() => {
     borrarCopias();
     navegar(RUTA_ENTRAR, { replace: true });
   }, [navegar]);
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        const primero = data?.[0];
         if (data === undefined)
           setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
-        else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
-        else {
-          setPantalla({ tipo: "lista", consorcios: data });
-          setConsorcio(primero.id);
-        }
+        else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
+        else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
@@ -245,8 +305,26 @@ export function Documentos() {
   }, [aEntrar]);
 
   useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
+
+  useEffect(() => {
     if (consorcio === "") return;
+    if (!veLaLista) {
+      setLectura({ tipo: "solo_carga" });
+      return;
+    }
     let vigente = true;
+    const automatico = refrescoAutomatico.current;
+    refrescoAutomatico.current = false;
+    // El refresco que falla deja la lista y un formulario abierto como están, dice que puede estar
+    // vieja y no sigue solo (`setLectura` no cambia, así que no se programa otro): queda «Actualizar».
+    const fallaAutomatica = (falla: string) =>
+      setAviso((actual) =>
+        actual !== null && !actual.ok ? actual : { texto: `${falla} La lista puede no estar al día: tocá «Actualizar».`, ok: false },
+      );
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
@@ -254,7 +332,10 @@ export function Documentos() {
         // Una lista pedida antes de un cambio, o de otro edificio, puede llegar después.
         if (!vigente) return;
         if (data !== undefined) setLectura({ tipo: "ok", documentos: data.documentos });
-        else if (response.status === ESTADO.sinPermiso) setLectura({ tipo: "sin_permiso" });
+        else if (response.status === ESTADO.sinPermiso) {
+          if (quedaLaCarga) setLectura({ tipo: "solo_carga" });
+          else navegar(RUTA_INICIO, { replace: true });
+        } else if (automatico) fallaAutomatica(mensajeDeFalla(response.status, codigoDe(error)));
         else {
           setLectura({ tipo: "sin_servicio" });
           const falla = mensajeDeFalla(response.status, codigoDe(error));
@@ -264,6 +345,7 @@ export function Documentos() {
       .catch((e: unknown) => {
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
+        else if (automatico) fallaAutomatica(SIN_CONEXION);
         else {
           setLectura({ tipo: "sin_servicio" });
           setAviso((actual) => (actual === null ? { texto: SIN_CONEXION, ok: false } : actual));
@@ -272,7 +354,18 @@ export function Documentos() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, navegar, veLaLista, quedaLaCarga]);
+
+  // Un solo pedido por vez: el próximo se programa cuando llega la lista, y se cancela al salir de
+  // la pantalla, al cambiar de edificio o cuando ya ningún archivo está en revisión.
+  useEffect(() => {
+    if (lectura.tipo !== "ok" || !hayEnCuarentena(lectura.documentos)) return;
+    const espera = setTimeout(() => {
+      refrescoAutomatico.current = true;
+      setVuelta((v) => v + 1);
+    }, REFRESCO_CUARENTENA_MS);
+    return () => clearTimeout(espera);
+  }, [lectura]);
 
   function volverAPedir() {
     setLectura({ tipo: "cargando" });
@@ -390,11 +483,14 @@ export function Documentos() {
         return;
       }
       cerrar();
-      // Sin acceso a la lista no hay «Actualizar»: quien solo carga no ve el resultado del análisis.
+      // Sin acceso a la lista, quien solo carga no ve el resultado del análisis. Con la lista caída
+      // no hay refresco automático: queda «Actualizar».
       const despues =
-        lectura.tipo === "sin_permiso"
+        lectura.tipo === "solo_carga"
           ? "Queda «En revisión» mientras lo analizamos."
-          : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible.";
+          : lectura.tipo === "sin_servicio"
+            ? "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible."
+            : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; la lista se actualiza sola.";
       setAviso({ texto: `Listo: subimos el archivo de «${titulo}». ${despues}`, ok: true });
       // Lo que se ve lo decide la API: la lista se vuelve a pedir.
       volverAPedir();
@@ -412,7 +508,7 @@ export function Documentos() {
 
       {pantalla.tipo === "lista" && (
         <>
-          {pantalla.consorcios.length > 1 && (
+          {edificios.length > 1 && (
             <div className="formulario formulario-movil tarjeta">
               <label htmlFor={`${id}-consorcio`}>Edificio</label>
               <select
@@ -426,7 +522,7 @@ export function Documentos() {
                   setConsorcio(e.target.value);
                 }}
               >
-                {pantalla.consorcios.map((c) => (
+                {edificios.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nombre}
                   </option>
@@ -435,37 +531,32 @@ export function Documentos() {
             </div>
           )}
 
-          <section aria-labelledby={`${id}-lista`} className="tarjeta">
-            <h2 id={`${id}-lista`}>Documentos</h2>
-            {lectura.tipo === "cargando" && <p>Consultando…</p>}
-            {lectura.tipo === "sin_permiso" && (
-              <p>
-                No tenés acceso a la lista de documentos de este edificio: la ven los propietarios, la administración y el
-                Consejo. Si tu mandato te permite cargar documentos, podés cargarlos igual.
-              </p>
-            )}
-            {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar la lista.</p>}
-            {lectura.tipo === "ok" && (
-              <>
-                {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
-                {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, lectura.documentos))}
-              </>
-            )}
-            {lectura.tipo !== "cargando" && lectura.tipo !== "sin_permiso" && (
-              <p>
-                <button type="button" onClick={volverAPedir} disabled={enviando}>
-                  Actualizar
-                </button>
-              </p>
-            )}
-          </section>
+          {lectura.tipo !== "solo_carga" && (
+            <section aria-labelledby={`${id}-lista`} className="tarjeta">
+              <h2 id={`${id}-lista`}>Documentos</h2>
+              {lectura.tipo === "cargando" && <p>Consultando…</p>}
+              {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar la lista.</p>}
+              {lectura.tipo === "ok" && (
+                <>
+                  {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
+                  {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => categoria(c, lectura.documentos))}
+                </>
+              )}
+              {lectura.tipo !== "cargando" && (
+                <p>
+                  <button type="button" onClick={volverAPedir} disabled={enviando}>
+                    Actualizar
+                  </button>
+                </p>
+              )}
+            </section>
+          )}
 
-          {/* También sin acceso a la lista: el administrador externo solo carga (documento 08 §4). Quién puede
-              cargar cada categoría lo decide el servidor. Con la lista caída, solo si queda un archivo por
-              reintentar: el documento ya existe y no se pierde el segundo paso. */}
-          {(lectura.tipo === "ok" ||
-            lectura.tipo === "sin_permiso" ||
-            (lectura.tipo === "sin_servicio" && abierto?.tipo === "subir")) && (
+          {/* También sin acceso a la lista: el administrador externo solo carga (documento 08 §4). Con la
+              lista caída, solo si queda un archivo por reintentar: el documento ya existe y no se pierde el
+              segundo paso. */}
+          {carga &&
+            (lectura.tipo === "ok" || lectura.tipo === "solo_carga" || (lectura.tipo === "sin_servicio" && abierto?.tipo === "subir")) && (
             <section aria-labelledby={`${id}-carga`} className="tarjeta">
               <h2 id={`${id}-carga`}>Cargar un documento</h2>
               {abierto?.tipo === "nuevo" ? (
@@ -489,11 +580,22 @@ export function Documentos() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (
@@ -545,7 +647,7 @@ export function Documentos() {
                 {v.estado === "disponible" && (
                   <>
                     {" "}
-                    <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} aria-describedby={titulo}>
+                    <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} aria-describedby={titulo} onClick={(e) => bajar(e, d.id, v.id)}>
                       Descargar
                     </a>
                   </>
@@ -556,7 +658,8 @@ export function Documentos() {
         )}
         {subiendo
           ? formularioArchivo(titulo, `Subir el archivo de «${d.titulo}»`)
-          : esperaArchivo(d) && (
+          : esperaArchivo(d) &&
+            puede(...accionesDeCarga(d.categoria)) && (
               <p>
                 <button
                   type="button"
@@ -642,7 +745,7 @@ export function Documentos() {
           disabled={enviando}
           onChange={(e) => cambiar("categoria", e.target.value as Categoria)}
         >
-          {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).map((c) => (
+          {(Object.keys(TEXTO_CATEGORIA) as Categoria[]).filter((c) => puede(...accionesDeCarga(c))).map((c) => (
             <option key={c} value={c}>
               {TEXTO_CATEGORIA[c]}
             </option>

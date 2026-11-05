@@ -112,7 +112,8 @@ class Politica(_Estricto):
     concede_por_vinculo: ConcesionPorVinculo | None = None
     concede_por_ambito: StrictBool = False
     """Concede a cualquiera que pase el ámbito. Hoy `unidades.listar` (D6),
-    `auditoria.mis_eventos` (RF35-B) y `contactos.ver` (2b-7)."""
+    `auditoria.mis_eventos` (RF35-B), `contactos.ver` (2b-7) y `consorcios.mis_acciones`
+    (documento 13, §10.5)."""
     facultad: CodigoAccion | None = None
     """Código exacto de la facultad (catálogo de D2) que concede la acción."""
     modos: tuple[ModoOperacion, ...]

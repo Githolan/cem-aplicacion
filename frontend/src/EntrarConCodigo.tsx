@@ -1,7 +1,7 @@
 import { type FormEvent, useId, useState } from "react";
-import { Link } from "react-router";
 
 import { api } from "./api/cliente";
+import { useIrAlInicio } from "./sesion";
 
 // Entrar con el código de seis dígitos del correo (documento 13, §10.3): para quien pidió la
 // entrada en un dispositivo y lee el correo en otro, donde el enlace no sirve (está ligado al
@@ -13,7 +13,7 @@ export const DIGITOS_CODIGO = 6;
 const ESTADO_RECHAZADO = 401;
 const ESTADO_DEMASIADOS = 429;
 
-type Estado = "listo" | "enviando" | "adentro" | "rechazado" | "demasiados" | "sin_servicio";
+type Estado = "listo" | "enviando" | "rechazado" | "demasiados" | "sin_servicio";
 
 /** El código como lo escribió la persona («042 917», «042-917»), sin separadores. */
 export function normalizarCodigo(valor: string): string {
@@ -24,9 +24,17 @@ export function codigoValido(valor: string): boolean {
   return new RegExp(`^[0-9]{${DIGITOS_CODIGO}}$`).test(valor);
 }
 
-export function EntrarConCodigo() {
+interface Props {
+  /** El correo ya escrito al pedir el enlace, para no volver a pedirlo. */
+  correoInicial?: string;
+  /** Lo que respondió el pedido del enlace. */
+  aviso?: string | null;
+}
+
+export function EntrarConCodigo({ correoInicial = "", aviso = null }: Props) {
   const id = useId();
-  const [correo, setCorreo] = useState("");
+  const irAlInicio = useIrAlInicio();
+  const [correo, setCorreo] = useState(correoInicial);
   const [codigo, setCodigo] = useState("");
   const [estado, setEstado] = useState<Estado>("listo");
   const [formatoMal, setFormatoMal] = useState(false);
@@ -43,7 +51,7 @@ export function EntrarConCodigo() {
     void api
       .POST("/api/v1/auth/codigo", { body: { correo: correo.trim(), codigo: limpio } })
       .then(({ error, response }) => {
-        if (error === undefined) setEstado("adentro");
+        if (error === undefined) irAlInicio("Entraste.");
         else if (response.status === ESTADO_RECHAZADO) setEstado("rechazado");
         else if (response.status === ESTADO_DEMASIADOS) setEstado("demasiados");
         else setEstado("sin_servicio");
@@ -51,23 +59,10 @@ export function EntrarConCodigo() {
       .catch(() => setEstado("sin_servicio"));
   }
 
-  if (estado === "adentro") {
-    return (
-      <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-        <h2 id={`${id}-titulo`}>Entrar con un código</h2>
-        <div role="status" aria-live="polite">
-          <p className="aviso-ok">Entraste.</p>
-          <p>
-            <Link to="/">Ir al inicio</Link>
-          </p>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
       <h2 id={`${id}-titulo`}>Entrar con un código</h2>
+      {aviso !== null && <p className="aviso-ok">{aviso}</p>}
       <p>
         ¿Leés el correo en otro dispositivo, o no podés abrir el enlace? Escribí tu correo y el
         código de {DIGITOS_CODIGO} números que llegó en el mismo correo.

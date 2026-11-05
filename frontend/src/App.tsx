@@ -1,11 +1,16 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { Link, Route, Routes } from "react-router";
+import { Link, Navigate, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
+import { AvisoLlegada } from "./AvisoLlegada";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
+import { api } from "./api/cliente";
+import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
+import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { ConciliacionPagos, RUTA_CONCILIACION } from "./egresos/ConciliacionPagos";
@@ -25,7 +30,43 @@ import { Padron, RUTA_PADRON } from "./Padron";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
+const ENLACES_DE_INICIO: readonly { ruta: string; texto: string; requisito: Requisito }[] = [
+  { ruta: RUTA_INVITACIONES, texto: "Invitar a una persona", requisito: REQUISITOS.invitaciones },
+  { ruta: RUTA_MANDATOS, texto: "Mandatos y decisiones", requisito: REQUISITOS.mandatos },
+  { ruta: RUTA_PADRON, texto: "Padrón del edificio", requisito: REQUISITOS.padron },
+  { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", requisito: REQUISITOS.contactos },
+  { ruta: RUTA_DOCUMENTOS, texto: "Documentos del edificio", requisito: REQUISITOS.documentos },
+  { ruta: RUTA_ORDENES, texto: "Órdenes de pago", requisito: REQUISITOS.ordenes },
+  { ruta: RUTA_REVISION, texto: "Revisar órdenes de pago (Consejo)", requisito: REQUISITOS.revision },
+  { ruta: RUTA_PAGOS, texto: "Pagos a realizar", requisito: REQUISITOS.pagos },
+  { ruta: RUTA_CONCILIACION, texto: "Conciliar pagos (Consejo)", requisito: REQUISITOS.conciliacion },
+  { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", requisito: REQUISITOS.liquidacion },
+];
+
+async function hayPagosPorAclarar(): Promise<boolean> {
+  const { data } = await api.GET("/api/v1/pagos-por-aclarar");
+  if (data === undefined) throw new Error("no se pudo leer si hay pagos para aclarar");
+  return data.elementos.length > 0;
+}
+
 function Inicio() {
+  const sesion = useSesion();
+  const porEdificio = useAccionesPorEdificio();
+  // No depende de una acción: es lo que quedó pendiente de quien dejó de administrar.
+  const porAclarar = useQuery({
+    queryKey: ["hay-pagos-por-aclarar"],
+    queryFn: hayPagosPorAclarar,
+    enabled: sesion === "con_sesion",
+    gcTime: 0,
+    retry: false,
+  });
+  if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
+  if (sesion === "consultando") return <p role="status">Cargando…</p>;
+  // Sin saber qué puede la persona, solo lo que le sirve igual: los contactos guardados.
+  const enlaces =
+    porEdificio === null
+      ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
+      : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   return (
     <>
       <h1>Tu consorcio, en tu mano</h1>
@@ -36,39 +77,16 @@ function Inicio() {
       <p>
         <Link to={RUTA_CUENTA}>Mi cuenta</Link>
       </p>
-      <p>
-        <Link to={RUTA_INVITACIONES}>Invitar a una persona</Link>
-      </p>
-      <p>
-        <Link to={RUTA_MANDATOS}>Mandatos y decisiones</Link>
-      </p>
-      <p>
-        <Link to={RUTA_PADRON}>Padrón del edificio</Link>
-      </p>
-      <p>
-        <Link to={RUTA_CONTACTOS}>Contactos de emergencia</Link>
-      </p>
-      <p>
-        <Link to={RUTA_DOCUMENTOS}>Documentos del edificio</Link>
-      </p>
-      <p>
-        <Link to={RUTA_ORDENES}>Órdenes de pago</Link>
-      </p>
-      <p>
-        <Link to={RUTA_REVISION}>Revisar órdenes de pago (Consejo)</Link>
-      </p>
-      <p>
-        <Link to={RUTA_PAGOS}>Pagos a realizar</Link>
-      </p>
-      <p>
-        <Link to={RUTA_CONCILIACION}>Conciliar pagos (Consejo)</Link>
-      </p>
-      <p>
-        <Link to={RUTA_LIQUIDACION}>Liquidación (borrador)</Link>
-      </p>
-      <p>
-        <Link to={RUTA_POR_ACLARAR}>Pagos para aclarar (si dejaste de administrar)</Link>
-      </p>
+      {enlaces.map((e) => (
+        <p key={e.ruta}>
+          <Link to={e.ruta}>{e.texto}</Link>
+        </p>
+      ))}
+      {porAclarar.data === true && (
+        <p>
+          <Link to={RUTA_POR_ACLARAR}>Pagos para aclarar (si dejaste de administrar)</Link>
+        </p>
+      )}
       <EnlaceInstalar />
       <EstadoServicio />
     </>
@@ -114,6 +132,7 @@ export function App() {
         <ModoLectura />
       </header>
       <main id="contenido">
+        <AvisoLlegada />
         <Routes>
           <Route path="/" element={<Inicio />} />
           <Route path="/instalar" element={<Instalar />} />
@@ -121,19 +140,19 @@ export function App() {
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
           <Route path={RUTA_INVITACION_MANDATO} element={<InvitacionMandato />} />
           <Route path={RUTA_CUENTA} element={<Cuenta />} />
-          <Route path={RUTA_INVITACIONES} element={<Invitar />} />
-          <Route path={RUTA_MANDATOS} element={<Mandatos />} />
-          <Route path={RUTA_PADRON} element={<Padron />} />
-          <Route path={RUTA_CONTACTOS} element={<Contactos />} />
-          <Route path={RUTA_CONTACTOS_GESTION} element={<ContactosGestion />} />
-          <Route path={RUTA_DOCUMENTOS} element={<Documentos />} />
+          <Route path={RUTA_INVITACIONES} element={<Exige requisito={REQUISITOS.invitaciones}><Invitar /></Exige>} />
+          <Route path={RUTA_MANDATOS} element={<Exige requisito={REQUISITOS.mandatos}><Mandatos /></Exige>} />
+          <Route path={RUTA_PADRON} element={<Exige requisito={REQUISITOS.padron}><Padron /></Exige>} />
+          <Route path={RUTA_CONTACTOS} element={<Exige requisito={REQUISITOS.contactos}><Contactos /></Exige>} />
+          <Route path={RUTA_CONTACTOS_GESTION} element={<Exige requisito={REQUISITOS.contactosGestion}><ContactosGestion /></Exige>} />
+          <Route path={RUTA_DOCUMENTOS} element={<Exige requisito={REQUISITOS.documentos}><Documentos /></Exige>} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
-          <Route path={RUTA_PROVEEDORES} element={<Proveedores />} />
-          <Route path={RUTA_ORDENES} element={<OrdenesPago />} />
-          <Route path={RUTA_REVISION} element={<RevisionOrdenes />} />
-          <Route path={RUTA_PAGOS} element={<PagosManuales />} />
-          <Route path={RUTA_CONCILIACION} element={<ConciliacionPagos />} />
-          <Route path={RUTA_LIQUIDACION} element={<Liquidacion />} />
+          <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />
+          <Route path={RUTA_ORDENES} element={<Exige requisito={REQUISITOS.ordenes}><OrdenesPago /></Exige>} />
+          <Route path={RUTA_REVISION} element={<Exige requisito={REQUISITOS.revision}><RevisionOrdenes /></Exige>} />
+          <Route path={RUTA_PAGOS} element={<Exige requisito={REQUISITOS.pagos}><PagosManuales /></Exige>} />
+          <Route path={RUTA_CONCILIACION} element={<Exige requisito={REQUISITOS.conciliacion}><ConciliacionPagos /></Exige>} />
+          <Route path={RUTA_LIQUIDACION} element={<Exige requisito={REQUISITOS.liquidacion}><Liquidacion /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

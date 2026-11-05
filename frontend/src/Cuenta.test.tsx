@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
-import { ENTRAR_DE_NUEVO } from "./fallas";
+import { ENTRAR_DE_NUEVO, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
 
@@ -89,6 +89,28 @@ function conSesion(extra: Respuestas = {}, totp: object = TOTP_INACTIVO, contras
   });
 }
 
+/**
+ * Como el backend: la acción cierra la sesión y `/auth/sesion` pasa a dar 401. Con un 200 fijo,
+ * /entrar devolvería a la persona al inicio.
+ */
+function sesionQueSeCierra(accion: string, respuesta: () => Response): Respuestas {
+  let cerrada = false;
+  return {
+    "GET /api/v1/auth/sesion": () => (cerrada ? error("no_autenticado", 401) : Response.json(YO)),
+    [accion]: () => {
+      cerrada = true;
+      return respuesta();
+    },
+  };
+}
+
+/** Llegó a /entrar y se queda: la consulta de la sesión de /entrar no la manda a otro lado. */
+async function quedoEnEntrar() {
+  expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+  await new Promise((listo) => setTimeout(listo, 0));
+  expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+}
+
 function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
   return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]);
 }
@@ -124,6 +146,21 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -132,9 +169,9 @@ afterEach(() => {
 
 describe("página /cuenta", () => {
   it("el inicio tiene el enlace a Mi cuenta", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Mi cuenta" }).getAttribute("href")).toBe("/cuenta");
+    expect((await screen.findByRole("link", { name: "Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -183,6 +220,14 @@ describe("página /cuenta", () => {
     expect(screen.getByRole("link", { name: "Ver el segundo factor" }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
     );
+  });
+
+  it("quien solo tiene llave también lo ve activado", async () => {
+    vi.stubGlobal("fetch", conSesion({}, { ...TOTP_INACTIVO, llaves: 1 }));
+    abrir();
+
+    expect(await screen.findByText(/Está activado/)).toBeTruthy();
+    expect(screen.queryByText("No está activado.")).toBeNull();
   });
 
   it("cierra otra sesión con CSRF y la saca de la lista", async () => {
@@ -245,7 +290,7 @@ describe("página /cuenta", () => {
   });
 
   it("salir con CSRF lleva a /entrar y borra las copias de los contactos", async () => {
-    const simulado = conSesion({ "POST /api/v1/auth/salir": sinCuerpo(204) });
+    const simulado = conSesion(sesionQueSeCierra("POST /api/v1/auth/salir", sinCuerpo(204)));
     vi.stubGlobal("fetch", simulado);
     localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
     abrir();
@@ -255,27 +300,33 @@ describe("página /cuenta", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Salir" }));
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
     expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
     expect(pedido(simulado, "POST", "/api/v1/auth/salir")?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
   it("salir con la sesión ya vencida (401) también borra las copias", async () => {
-    vi.stubGlobal("fetch", conSesion({ "POST /api/v1/auth/salir": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("POST /api/v1/auth/salir", () => error("no_autenticado", 401))),
+    );
     localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
     expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
   });
 
   it("si la sesión venció entre medio, una acción lleva a /entrar", async () => {
-    vi.stubGlobal("fetch", conSesion({ "POST /api/v1/auth/sesiones/revocar-otras": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("POST /api/v1/auth/sesiones/revocar-otras", () => error("no_autenticado", 401))),
+    );
     abrir();
 
     fireEvent.click(await screen.findByRole("button", { name: "Cerrar las otras sesiones" }));
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
   });
 
   it("sin backend lo dice", async () => {
@@ -283,6 +334,97 @@ describe("página /cuenta", () => {
     abrir();
 
     expect(await screen.findByText(/No pudimos consultar tu cuenta/)).toBeTruthy();
+  });
+
+  it("sin nada de la cuenta, un solo aviso; Reintentar la vuelve a leer entera", async () => {
+    const simulado = conSesion();
+    let caida = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (p: Request) => (caida ? Promise.reject(new TypeError("sin red")) : simulado(p))),
+    );
+    abrir();
+    const boton = await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    caida = false;
+    fireEvent.click(boton);
+
+    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(screen.queryByText(/No pudimos consultar tu cuenta/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+
+  it.each([
+    ["GET /api/v1/auth/sesiones", "Dónde tenés la sesión abierta", "Ana Pérez", "Chrome en Android"],
+    ["GET /api/v1/auth/sesion", "Tus datos", "Chrome en Android", "Ana Pérez"],
+    ["GET /api/v1/auth/totp", "Segundo factor", "Ana Pérez", "No está activado."],
+    ["GET /api/v1/auth/contrasena", "Contraseña", "Ana Pérez", "Definir una contraseña"],
+  ])("si falla %s, «%s» lo dice y deja reintentar sin perder el resto", async (ruta, parte, sigue, recupera) => {
+    let caida = true;
+    const respuestas = conSesion();
+    const simulado = vi.fn(async (p: Request) =>
+      caida && `${p.method} ${new URL(p.url).pathname}` === ruta ? error("error_interno", 500) : respuestas(p),
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+
+    expect(await screen.findByText(sigue)).toBeTruthy();
+    const region = within(screen.getByRole("region", { name: parte }));
+    expect(region.getByRole("alert").textContent).toBe(SERVICIO_NO_DISPONIBLE);
+    expect(screen.queryByText(recupera)).toBeNull();
+    expect(screen.queryByText(/No pudimos consultar tu cuenta/)).toBeNull();
+    // Salir tiene que seguir a mano aunque falte una parte.
+    expect(screen.getByRole("button", { name: "Salir" })).toBeTruthy();
+    const pedidosAntes = simulado.mock.calls.length;
+
+    caida = false;
+    fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByText(recupera)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+    // Reintentar pide esa parte: las que estaban bien no se vuelven a leer.
+    const nuevas = pedidosDe(simulado)
+      .slice(pedidosAntes)
+      .map((p) => `${p.method} ${new URL(p.url).pathname}`);
+    expect(nuevas.filter((r) => r === ruta)).toHaveLength(1);
+    expect(nuevas.filter((r) => r !== ruta && r !== "GET /api/v1/privacidad/casos")).toEqual([]);
+  });
+
+  it("sin red en una parte también queda en esa parte y un reintento fallido deja seguir probando", async () => {
+    let intentos = 0;
+    const respuestas = conSesion();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (p: Request) => {
+        if (new URL(p.url).pathname !== "/api/v1/auth/sesiones") return respuestas(p);
+        intentos += 1;
+        return intentos < 3 ? Promise.reject(new TypeError("sin red")) : respuestas(p);
+      }),
+    );
+    abrir();
+    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    const region = within(screen.getByRole("region", { name: "Dónde tenés la sesión abierta" }));
+    expect(region.getByRole("alert").textContent).toBe(SIN_CONEXION);
+
+    fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(intentos).toBe(2));
+    await waitFor(() =>
+      expect((region.getByRole("button", { name: "Reintentar" }) as HTMLButtonElement).disabled).toBe(false),
+    );
+    expect(screen.getByText("Ana Pérez")).toBeTruthy();
+
+    fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
+    expect(await screen.findByText("Chrome en Android")).toBeTruthy();
+  });
+
+  it("control: un 401 en una sola lectura no es una falla de esa parte, lleva a /entrar", async () => {
+    vi.stubGlobal("fetch", conSesion({ "GET /api/v1/auth/totp": () => error("no_autenticado", 401) }));
+    abrir();
+
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
   it.each([
@@ -372,7 +514,7 @@ describe("contraseña en /cuenta", () => {
     expect(document.activeElement).toBe(seccion().getByRole("button", { name: "Cambiar la contraseña" }));
   });
 
-  it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) pide volver a entrar", async () => {
+  it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) da la salida a volver a entrar", async () => {
     const simulado = conSesion({ "PUT /api/v1/auth/contrasena": () => error("reautenticacion_requerida", 403) });
     vi.stubGlobal("fetch", simulado);
     abrir();
@@ -383,6 +525,24 @@ describe("contraseña en /cuenta", () => {
     expect(await seccion().findByText(ENTRAR_DE_NUEVO)).toBeTruthy();
     expect(seccion().queryByText(/Revisá la conexión/)).toBeNull();
     expect(seccion().queryByText(/Listo:/)).toBeNull();
+
+    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
+    const consultasDeSesion = () =>
+      pedidosDe(simulado).filter((p) => new URL(p.url).pathname === "/api/v1/auth/sesion").length;
+    const antes = consultasDeSesion();
+    fireEvent.click(seccion().getByRole("link", { name: "Volver a entrar" }));
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(consultasDeSesion()).toBe(antes);
+  });
+
+  it("control: otro rechazo no ofrece volver a entrar", async () => {
+    vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": () => error("csrf_invalido", 403) }));
+    abrir();
+    await screen.findByText(/Todavía no tenés contraseña/);
+    completar(NUEVA);
+
+    expect(await seccion().findByText(/No pudimos verificar el pedido/)).toBeTruthy();
+    expect(seccion().queryByRole("link", { name: "Volver a entrar" })).toBeNull();
   });
 
   it("sin segundo factor, cambiarla pide la actual; cierra las otras sesiones y las saca de la lista", async () => {
@@ -437,29 +597,76 @@ describe("contraseña en /cuenta", () => {
     expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
-  it("con segundo factor no pide la actual, avisa de entrada y explica el 403 con el enlace", async () => {
-    vi.stubGlobal(
-      "fetch",
-      conSesion(
-        { "PUT /api/v1/auth/contrasena": () => error("segundo_factor_requerido", 403) },
-        TOTP_ACTIVO,
-        CON_CONTRASENA,
-      ),
-    );
+  const VERIFICADO = {
+    verificado_en: "2026-10-16T18:00:00Z",
+    vale_hasta: "2026-10-16T18:10:00Z",
+    codigos_recuperacion_restantes: 9,
+  };
+
+  it("con segundo factor no pide la actual y avisa de entrada que va a pedir confirmar, sin mandar a otra página", async () => {
+    vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO, CON_CONTRASENA));
     abrir();
     await screen.findByText(/La cambiaste por última vez/);
 
     desplegar();
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
-    expect(seccion().getByRole("link", { name: /verificá un código/ }).getAttribute("href")).toBe(
-      "/cuenta/segundo-factor",
+    expect(seccion().getByText(/te vamos a pedir que confirmes que sos vos/)).toBeTruthy();
+    expect(seccion().queryByRole("link")).toBeNull();
+  });
+
+  it("sin la verificación reciente (403) pide el código acá mismo y guarda lo que estaba escrito", async () => {
+    let verificado = false;
+    const simulado = conSesion(
+      {
+        "POST /api/v1/auth/totp/verificar": () => {
+          verificado = true;
+          return Response.json(VERIFICADO);
+        },
+        "PUT /api/v1/auth/contrasena": () =>
+          verificado ? Response.json(GUARDADA) : error("segundo_factor_requerido", 403),
+      },
+      TOTP_ACTIVO,
+      CON_CONTRASENA,
     );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText(/La cambiaste por última vez/);
     completar(NUEVA);
 
-    const aviso = within(await seccion().findByText(/Para esto tenés que confirmar/));
-    expect(aviso.getByRole("link", { name: /Verificá un código/ }).getAttribute("href")).toBe(
-      "/cuenta/segundo-factor",
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+
+    expect(await screen.findByText("Listo: cambiaste tu contraseña. Te avisamos por correo.")).toBeTruthy();
+    const puts = pedidosDe(simulado).filter((p) => p.method === "PUT");
+    expect(puts).toHaveLength(2);
+    expect(await puts[1]?.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
+    expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
+  });
+
+  it("si cancela el código vuelve al formulario con lo escrito y no guarda; un código malo se queda ahí", async () => {
+    const simulado = conSesion(
+      {
+        "POST /api/v1/auth/totp/verificar": () => error("segundo_factor_invalido", 400),
+        "PUT /api/v1/auth/contrasena": () => error("segundo_factor_requerido", 403),
+      },
+      TOTP_ACTIVO,
+      CON_CONTRASENA,
     );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByText(/La cambiaste por última vez/);
+    completar(NUEVA);
+
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+
+    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe(NUEVA);
+    expect((seccion().getByLabelText("Repetí la contraseña") as HTMLInputElement).value).toBe(NUEVA);
+    expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
   });
 
   it.each([
@@ -519,12 +726,15 @@ describe("contraseña en /cuenta", () => {
   });
 
   it("si la sesión venció al guardar (401), manda a /entrar", async () => {
-    vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("PUT /api/v1/auth/contrasena", () => error("no_autenticado", 401))),
+    );
     abrir();
     await screen.findByText(/Todavía no tenés contraseña/);
     completar(NUEVA);
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
   });
 
   it.each([
@@ -534,11 +744,13 @@ describe("contraseña en /cuenta", () => {
     ["con un campo mal", SIN_CONTRASENA, TOTP_INACTIVO, "corta"],
     ["guardada", SIN_CONTRASENA, TOTP_INACTIVO, "ok"],
     ["sin la verificación reciente", CON_CONTRASENA, TOTP_ACTIVO, "falta_verificacion"],
+    ["con una sesión vieja", SIN_CONTRASENA, TOTP_INACTIVO, "entrar_de_nuevo"],
     ["con un rechazo", CON_CONTRASENA, TOTP_INACTIVO, "error"],
   ] as const)("%s no tiene faltas de accesibilidad detectables por axe", async (_, contrasena, totp, paso) => {
     const respuestas = {
       ok: () => Response.json(GUARDADA),
       falta_verificacion: () => error("segundo_factor_requerido", 403),
+      entrar_de_nuevo: () => error("reautenticacion_requerida", 403),
       error: () => error("contrasena_actual_invalida", 403),
     };
     const extra: Respuestas = paso === null || paso === "corta" ? {} : { "PUT /api/v1/auth/contrasena": respuestas[paso] };
@@ -548,7 +760,8 @@ describe("contraseña en /cuenta", () => {
     if (paso === "corta") completar("corta");
     else if (paso !== null) {
       completar(NUEVA, NUEVA, contrasena.definida && !totp.activo ? ANTERIOR : undefined);
-      await seccion().findByText(paso === "ok" ? /Listo:/ : /Para esto|actual no es correcta/);
+      if (paso === "falta_verificacion") await screen.findByRole("button", { name: "Verificar y seguir" });
+      else await seccion().findByText(paso === "ok" ? /Listo:/ : /Por seguridad|actual no es correcta/);
     }
 
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -589,7 +802,7 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    const estado = screen.getByRole("status");
+    const estado = estadoDePantalla();
     expect(estado.textContent).toBe("Consultando…");
     // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
     await waitFor(() => expect(retenido).toHaveBeenCalledTimes(4));

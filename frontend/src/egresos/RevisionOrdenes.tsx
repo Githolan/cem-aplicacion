@@ -3,8 +3,9 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
+  type Aviso,
   cambioLaOrden,
   cambioLoVisto,
   cuentaEnmascarada,
@@ -15,12 +16,16 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
   TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_CONDICION,
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
+import { REQUISITOS, usePuede } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
@@ -36,10 +41,9 @@ type Detalle = components["schemas"]["OrdenPagoConVersionesRevision"];
 
 export const RUTA_REVISION = "/egresos/revision";
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_servicio" } | { tipo: "ok"; ordenes: Orden[] };
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; ordenes: Orden[] };
 type Acto = { tipo: "aprobar"; detalle: Detalle } | { tipo: "rechazar"; detalle: Detalle; motivo: string };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 
 /** Lo pendiente primero; después, el resto por fecha (la API ya las ordena por fecha). */
 function ordenadas(ordenes: Orden[]): Orden[] {
@@ -49,12 +53,13 @@ function ordenadas(ordenes: Orden[]): Orden[] {
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
 export function RevisionOrdenes() {
-  const elegido = useConsorcio();
+  const elegido = useConsorcio(REQUISITOS.revision);
   return <RevisionOrdenesDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
+  const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
@@ -78,10 +83,10 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
         if (data !== undefined) setLectura({ tipo: "ok", ordenes: ordenadas(data.elementos) });
         else if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver las órdenes", reintentar: () => setVuelta((v) => v + 1) });
-        else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -89,13 +94,19 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, aInicio]);
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function abrir(ordenId: string, avisoAlAbrir: Aviso | null = null) {
     setAviso(avisoAlAbrir);
@@ -195,16 +206,8 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -220,9 +223,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando las órdenes…</p>}
-          {lectura.tipo === "sin_permiso" && (
-            <p className="tarjeta">La revisión de órdenes es del Consejo: hace falta un mandato de Consejo en este edificio.</p>
-          )}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
           {lectura.tipo === "ok" && detalle === null && (
             lectura.ordenes.length === 0 ? (
               <p className="tarjeta">No hay órdenes enviadas a revisión.</p>
@@ -311,7 +312,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                   </ol>
                 </details>
               )}
-              {detalle.orden.estado === "en_revision" && !rechazando && (
+              {detalle.orden.estado === "en_revision" && !rechazando && puede("egresos.aprobar_orden") && (
                 <div className="formulario">
                   <div className="acciones">
                     <button type="button" disabled={enviando} onClick={() => hacer({ tipo: "aprobar", detalle })}>

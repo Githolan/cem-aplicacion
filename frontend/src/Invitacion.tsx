@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "./api/cliente";
@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { codigoDe, mensajeDeFallaConEnlace, SIN_CONEXION_ENLACE } from "./fallas";
 import { RUTA_ENTRAR, RUTA_INVITACION, tokenDelFragmento } from "./enlace";
+import { useIrAlInicio } from "./sesion";
 
 // Página /invitacion: la que abre el enlace de la invitación del correo (RF03). Como en /entrar,
 // el token llega en el fragmento (#token=…), que el navegador nunca manda al servidor; la página
@@ -23,7 +24,6 @@ type Estado =
   | "consultando"
   | "lista"
   | "aceptando"
-  | "aceptada"
   | "invalida"
   | "requiere_sesion"
   | "otra_persona"
@@ -56,14 +56,14 @@ export function Invitacion() {
   const [invitacion, setInvitacion] = useState<Recibida | null>(null);
   const [nombre, setNombre] = useState("");
   const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
+  const [fallaAlAceptar, setFallaAlAceptar] = useState<string | null>(null);
   const consultada = useRef(false);
+  const irAlInicio = useIrAlInicio();
 
-  useEffect(() => {
-    if (!token || consultada.current) return;
-    consultada.current = true;
-    window.history.replaceState(window.history.state, "", RUTA_INVITACION);
+  const consultar = useCallback((elToken: string) => {
+    setEstado("consultando");
     void api
-      .POST("/api/v1/auth/invitacion/consultar", { body: { token } })
+      .POST("/api/v1/auth/invitacion/consultar", { body: { token: elToken } })
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setInvitacion(data);
@@ -73,26 +73,38 @@ export function Invitacion() {
         else fallar(response.status, codigoDe(error));
       })
       .catch(() => fallar(0, undefined));
-  }, [token]);
+  }, []);
+
+  useEffect(() => {
+    if (!token || consultada.current) return;
+    consultada.current = true;
+    window.history.replaceState(window.history.state, "", RUTA_INVITACION);
+    consultar(token);
+  }, [token, consultar]);
 
   function aceptar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     if (!token) return;
     setEstado("aceptando");
+    setFallaAlAceptar(null);
     const elegido = nombre.trim();
+    const volverAlFormulario = (estadoHttp: number, codigo: string | undefined) => {
+      setFallaAlAceptar(mensajeDeFallaConEnlace(estadoHttp, codigo));
+      setEstado("lista");
+    };
     void api
       .POST("/api/v1/auth/invitacion/aceptar", {
         body: { token, nombre: elegido === "" ? null : elegido },
         headers: encabezadoCsrf(),
       })
       .then(({ error, response }) => {
-        if (error === undefined) setEstado("aceptada");
+        if (error === undefined) irAlInicio(`Listo: ya sos parte de ${invitacion?.consorcio}.`);
         else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else if (response.status === ESTADO_CONFLICTO && "codigo" in error)
           setEstado(CONFLICTOS[error.codigo] ?? "otra_persona");
-        else fallar(response.status, codigoDe(error));
+        else volverAlFormulario(response.status, codigoDe(error));
       })
-      .catch(() => fallar(0, undefined));
+      .catch(() => volverAlFormulario(0, undefined));
   }
 
   // E52: un 403, un 429 o un 5xx no son de la conexión (regla E34 de fallas.ts).
@@ -136,14 +148,7 @@ export function Invitacion() {
       <div role="status" aria-live="polite" className={estado === "lista" ? undefined : "tarjeta"}>
         {estado === "consultando" && <p>Buscando la invitación…</p>}
         {estado === "aceptando" && <p>Aceptando…</p>}
-        {estado === "aceptada" && (
-          <>
-            <p className="aviso-ok">Listo: ya sos parte de {invitacion?.consorcio}.</p>
-            <p>
-              <Link to="/">Ir al inicio</Link>
-            </p>
-          </>
-        )}
+        {estado === "lista" && fallaAlAceptar !== null && <p className="aviso-error">{fallaAlAceptar}</p>}
         {estado === "invalida" && (
           <p className="aviso-error">
             Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada.
@@ -168,7 +173,16 @@ export function Invitacion() {
             propia cuenta.
           </p>
         )}
-        {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}
+        {estado === "sin_servicio" && (
+          <>
+            <p className="aviso-error">{falla}</p>
+            {token && (
+              <button type="button" onClick={() => consultar(token)}>
+                Reintentar
+              </button>
+            )}
+          </>
+        )}
         {estado === "sin_enlace" && (
           <p>Para aceptar una invitación, abrí el enlace que te llegó por correo.</p>
         )}

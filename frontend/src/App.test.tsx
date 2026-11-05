@@ -20,7 +20,38 @@ const SALUD: Salud = {
   version_contrato: "0.1.0",
 };
 
+const SESION = {
+  persona_id: "0199e3a2-1234-7abc-8def-0123456789ab",
+  nombre: "Ana",
+  correo: "ana@ejemplo.com",
+  sesion_id: "0199e3a2-1234-7abc-8def-0123456789ac",
+  vence_en: "2026-11-13T00:00:00Z",
+};
+
+const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
+const RUTA_SESION = "/api/v1/auth/sesion";
+
 const SIN_VERSION_NUEVA: Version = { hayVersionNueva: false, actualizar: () => undefined };
+
+type Respuesta = () => Response | Promise<Response>;
+
+const sinSesion: Respuesta = () =>
+  Response.json({ codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" }, { status: 401 });
+
+/** Responde por ruta, con sesión y servicio sanos; lo que no está previsto falla la prueba. */
+function backend({ sesion, salud }: { sesion?: Respuesta; salud?: Respuesta } = {}) {
+  return vi.fn(async (pedido: Request) => {
+    const camino = new URL(pedido.url).pathname;
+    if (camino === RUTA_SESION) return sesion ? sesion() : Response.json(SESION);
+    if (camino === "/health") return salud ? salud() : Response.json(SALUD);
+    throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
+  });
+}
+
+function caminosDe(simulado: ReturnType<typeof vi.fn>): string[] {
+  return simulado.mock.calls.map((c) => new URL((c as unknown as [Request])[0].url).pathname);
+}
 
 function montar(ruta = "/", version: Version = SIN_VERSION_NUEVA) {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -46,19 +77,18 @@ afterEach(() => {
 
 describe("página de inicio", () => {
   it("muestra el estado del backend leído de /health", async () => {
-    const pedido = vi.fn(async () => Response.json(SALUD));
+    const pedido = backend();
     vi.stubGlobal("fetch", pedido);
 
     montar();
 
     expect(await screen.findByText("El servicio funciona.")).toBeTruthy();
     expect(screen.getByText("0849ee9")).toBeTruthy();
-    const url = new URL((pedido.mock.calls[0] as unknown as [Request])[0].url);
-    expect(url.pathname).toBe("/health");
+    expect(caminosDe(pedido)).toContain("/health");
   });
 
   it("avisa cuando el backend no responde", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("no available server", { status: 503 })));
+    vi.stubGlobal("fetch", backend({ salud: () => new Response("no available server", { status: 503 }) }));
 
     montar();
 
@@ -67,7 +97,7 @@ describe("página de inicio", () => {
   });
 
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SALUD)));
+    vi.stubGlobal("fetch", backend());
     const { container } = montar();
     await screen.findByText("El servicio funciona.");
 
@@ -77,9 +107,73 @@ describe("página de inicio", () => {
   });
 });
 
+describe("/ decide por la sesión", () => {
+  it("sin sesión lleva a /entrar y no consulta el estado del servicio", async () => {
+    const pedido = backend({ sesion: sinSesion });
+    vi.stubGlobal("fetch", pedido);
+
+    montar();
+
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
+    expect(caminosDe(pedido)).not.toContain("/health");
+  });
+
+  it("control: con sesión muestra el inicio y se queda ahí", async () => {
+    vi.stubGlobal("fetch", backend());
+
+    montar();
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    await screen.findByText("El servicio funciona.");
+    expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
+  });
+
+  it.each<[string, Respuesta]>([
+    ["sin la red", () => Promise.reject(new TypeError("Failed to fetch"))],
+    ["con el servicio caído (503)", () => new Response("no available server", { status: 503 })],
+  ])("%s no se sabe si hay sesión: muestra el inicio, no /entrar", async (_, sesion) => {
+    const pedido = backend({ sesion });
+    vi.stubGlobal("fetch", pedido);
+
+    montar();
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    await screen.findByText("El servicio funciona.");
+    expect(caminosDe(pedido)).toContain(RUTA_SESION);
+    expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
+  });
+
+  it("mientras consulta dice «Cargando…», sin el inicio ni /entrar", async () => {
+    let soltar: () => void = () => undefined;
+    const listo = new Promise<void>((r) => {
+      soltar = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        sesion: async () => {
+          await listo;
+          return Response.json(SESION);
+        },
+      }),
+    );
+
+    montar();
+
+    expect(screen.getByText("Cargando…").getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
+    expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
+    soltar();
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByText("Cargando…")).toBeNull();
+  });
+});
+
 describe("cabecera", () => {
   it("tiene el botón del modo lectura ampliada (RF53)", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SALUD)));
+    vi.stubGlobal("fetch", backend());
     montar();
     const cabecera = screen.getByRole("banner");
     const boton = within(cabecera).getByRole("button", { name: NOMBRE_MODO_LECTURA });
@@ -102,7 +196,7 @@ describe("rutas", () => {
 
 describe("versión nueva (documento 13, §14.4)", () => {
   it("en una ruta conocida espera el botón: no se aplica sola", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SALUD)));
+    vi.stubGlobal("fetch", backend());
     const actualizar = vi.fn();
 
     const { container } = montar("/", { hayVersionNueva: true, actualizar });

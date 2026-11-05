@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { simularSesion } from "./entorno";
+
 // Cabeceras de nginx/cabeceras.conf (documento 13, §14.3 y §14.5). Se exigen en la página, en
 // las rutas de la SPA, en los activos, en el manifiesto y en lo que se reenvía al backend.
 const CABECERAS: Record<string, string> = {
@@ -19,7 +21,7 @@ const DIRECTIVAS_CSP = [
 
 test.describe("cabeceras de seguridad del nginx de la imagen", () => {
   test("están en cada tipo de respuesta y nginx no publica su versión", async ({ page, request }) => {
-    await page.goto("/");
+    await page.goto("/instalar");
     const activo = await page.locator('script[type="module"][src^="/assets/"]').getAttribute("src");
     expect(activo).toBeTruthy();
 
@@ -48,6 +50,7 @@ test.describe("cabeceras de seguridad del nginx de la imagen", () => {
       );
     });
 
+    await simularSesion(page, "con_sesion");
     await page.goto("/instalar");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await page.goto("/");

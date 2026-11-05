@@ -4,9 +4,10 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
   aCentavos,
+  type Aviso,
   cambioLaOrden,
   cambioLoVisto,
   ENCABEZADO_IDEMPOTENCIA,
@@ -17,10 +18,14 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
+import { REQUISITOS, usePuede } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useEsperaAntivirus, useMontado } from "./useConsorcio";
 
 // Página /egresos/pagos: el pago manual del piloto (app 0055; propietario, 31-10-2026). Sin riel:
 // quien está autorizado transfiere por el home banking del consorcio y registra acá la evidencia;
@@ -55,14 +60,14 @@ export const AVISO_SIN_CUENTA =
   "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste, registrá el pago con los datos del comprobante (si fue después del vencimiento, queda marcado fuera de término y el Consejo lo concilia con un motivo); si no, declará que no se pagó.";
 /** Las barreras del acto que, con la orden ya emitida, dejan registrar o declarar sin la cuenta. */
 const SIN_CUENTA = new Set(["aprobacion_vencida", "proveedor_cambiado", "proveedor_inactivo", "contrato_no_vigente"]);
+/** Conflictos que vienen de lo escrito, no de la orden: la ficha sigue abierta para corregirlo. */
+const SE_CORRIGE_EN_LA_FICHA = new Set(["operacion_de_otra_orden", "comprobante_de_otra_orden"]);
 
 type Lectura =
   | { tipo: "cargando" }
-  | { tipo: "sin_permiso" }
   | { tipo: "sin_servicio" }
   | { tipo: "ok"; aprobadas: Orden[]; manuales: ConPago[]; comprobantes: DocumentoEnLista[] };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 type Registro = { numero: string; fecha: string; importe: string; cuenta: string; documento: string };
 
 const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", cuenta: "", documento: "" };
@@ -101,12 +106,14 @@ export function comprobantesEnRevision(documentos: DocumentoEnLista[], orden: st
 const hoy = () => new Date().toLocaleDateString("en-CA");
 
 export function PagosManuales() {
-  const elegido = useConsorcio();
+  const elegido = useConsorcio(REQUISITOS.pagos);
   return <PagosManualesDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
+  const puede = usePuede(consorcio);
+  const cargaComprobantes = puede("documentos.cargar");
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<Ficha | null>(null);
@@ -123,6 +130,11 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
   const claveArchivo = useRef<string | null>(null);
   /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
   const sinArchivo = useRef<string | null>(null);
+  /** El comprobante recién subido: se elige solo apenas pasa el antivirus. */
+  const recienSubido = useRef<string | null>(null);
+  const [esperandoAntivirus, setEsperandoAntivirus] = useState(false);
+  /** Lo que no se pudo actualizar de los comprobantes: la ficha sigue abierta y lo dice. */
+  const [fallaComprobantes, setFallaComprobantes] = useState<string | null>(null);
   /** Cambia para vaciar el campo del archivo después de subirlo. */
   const [entrada, setEntrada] = useState(0);
   const montado = useMontado();
@@ -153,10 +165,10 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
         const codigo = codigoDe(falla?.error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver los pagos", reintentar: () => setVuelta((v) => v + 1) });
-        else if (falla?.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else if (falla?.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(falla?.response.status ?? 0, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(falla?.response.status ?? 0, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -164,13 +176,19 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, aInicio]);
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function cerrar() {
     setFicha(null);
@@ -183,6 +201,9 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     claveCarga.current = null;
     claveArchivo.current = null;
     sinArchivo.current = null;
+    recienSubido.current = null;
+    setEsperandoAntivirus(false);
+    setFallaComprobantes(null);
   }
 
   function fallo(status: number, codigo: string | undefined, acto: string, reintentar: () => void) {
@@ -193,6 +214,7 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     if (renovarClave(status, codigo)) clave.current = null;
     const texto = mensajeDeError(status, codigo);
     setAviso({ texto, ok: false });
+    if (SE_CORRIGE_EN_LA_FICHA.has(codigo ?? "")) return;
     if (cambioLaOrden(codigo) || cambioLoVisto(status, codigo)) {
       cerrar();
       setVuelta((v) => v + 1);
@@ -284,6 +306,48 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
     }
   }
 
+  /** Vuelve a leer solo los comprobantes: con la ficha abierta, una falla no se lleva lo escrito. */
+  async function leerComprobantes() {
+    try {
+      const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/documentos", {
+        params: { path: { consorcio_id: consorcio } },
+      });
+      exigirSesion(response);
+      if (!montado.current) return;
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
+          setPendiente({ acto: "ver los comprobantes", reintentar: () => void leerComprobantes() });
+        else setFallaComprobantes(`No pudimos actualizar los comprobantes. ${mensajeDeError(response.status, codigo)}`);
+        return;
+      }
+      const comprobantes = data.documentos.filter((d) => d.orden_pago_id != null);
+      setFallaComprobantes(null);
+      setLectura((l) => (l.tipo === "ok" ? { ...l, comprobantes } : l));
+      const nuevo = comprobantes.find((d) => d.id === recienSubido.current);
+      if (nuevo === undefined) return;
+      if (nuevo.versiones.some((v) => v.estado === "disponible")) {
+        recienSubido.current = null;
+        setEsperandoAntivirus(false);
+        clave.current = null;
+        setRegistro((r) => ({ ...r, documento: nuevo.id }));
+        setAviso({ texto: "Listo: el comprobante pasó el antivirus y ya quedó elegido.", ok: true });
+      } else if (!nuevo.versiones.some((v) => v.estado === "en_cuarentena")) {
+        recienSubido.current = null;
+        setEsperandoAntivirus(false);
+        setAviso({ texto: "El antivirus rechazó el archivo: subí otro.", ok: false });
+      }
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else setFallaComprobantes(`No pudimos actualizar los comprobantes. ${SIN_CONEXION}`);
+    }
+  }
+
+  useEsperaAntivirus(esperandoAntivirus && pendiente === null, () => void leerComprobantes(), () => {
+    setEsperandoAntivirus(false);
+    setFallaComprobantes("El antivirus sigue revisando el comprobante. Tocá «Actualizar comprobantes» en un rato.");
+  });
+
   /** Carga el comprobante desde el pago (app 0063): el documento nace visible solo para quien lo sube y el Consejo; después va el archivo. */
   async function subirComprobante() {
     if (ficha === null || fichaOrden === null || archivo === null || !montado.current) return;
@@ -333,11 +397,13 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
         return;
       }
       claveArchivo.current = null;
+      recienSubido.current = sinArchivo.current;
       sinArchivo.current = null;
       setArchivo(null);
       setEntrada((n) => n + 1);
-      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos; tocá «Actualizar comprobantes» y elegilo.", ok: true });
-      setVuelta((v) => v + 1);
+      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y queda elegido solo.", ok: true });
+      setEsperandoAntivirus(true);
+      void leerComprobantes();
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
       else setAviso({ texto: SIN_CONEXION, ok: false });
@@ -434,16 +500,8 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -459,16 +517,16 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
-          {lectura.tipo === "sin_permiso" && (
-            <p className="tarjeta">Los pagos los ve quien prepara y ejecuta las órdenes de este edificio.</p>
-          )}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
 
           {lectura.tipo === "ok" && ficha === null && (
             <>
               <p>
                 El pago se hace por el home banking del consorcio. Después registrás acá el número de operación y el
                 comprobante, y otro miembro del Consejo lo concilia. Registrar no es pagar: la orden queda pagada recién
-                con la conciliación. El comprobante se sube desde acá: desde ese momento lo ven solo quien lo subió y el Consejo, salvo quien preparó la orden.
+                con la conciliación.
+                {cargaComprobantes &&
+                  " El comprobante se sube desde acá: desde ese momento lo ven solo quien lo subió y el Consejo, salvo quien preparó la orden."}
               </p>
               {lectura.aprobadas.length + lectura.manuales.filter(porPagar).length === 0 ? (
                 <p className="tarjeta">No hay órdenes aprobadas esperando su pago.</p>
@@ -567,26 +625,37 @@ function PagosManualesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }
                   <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
                   <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
                     onChange={(e) => cambiar("cuenta", e.target.value)} />
-                  <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
-                  <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
-                    onChange={(e) => {
-                      claveArchivo.current = null;
-                      setArchivo(e.target.files?.[0] ?? null);
-                    }} />
+                  {cargaComprobantes && (
+                    <>
+                      <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
+                      <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
+                        onChange={(e) => {
+                          claveArchivo.current = null;
+                          setArchivo(e.target.files?.[0] ?? null);
+                        }} />
+                    </>
+                  )}
                   <div className="acciones">
-                    <button type="button" disabled={enviando || archivo === null} onClick={() => void subirComprobante()}>
-                      Subir el comprobante
-                    </button>
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => setVuelta((v) => v + 1)}>
+                    {cargaComprobantes && (
+                      <button type="button" disabled={enviando || archivo === null} onClick={() => void subirComprobante()}>
+                        Subir el comprobante
+                      </button>
+                    )}
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => void leerComprobantes()}>
                       Actualizar comprobantes
                     </button>
                   </div>
                   <p>
-                    Desde que lo subís lo ven solo vos y el Consejo, salvo quien preparó la orden. Aparece en la lista cuando el
-                    antivirus lo aprueba.
+                    {cargaComprobantes && "Desde que lo subís lo ven solo vos y el Consejo, salvo quien preparó la orden. "}
+                    Aparece en la lista cuando el antivirus lo aprueba.
                     {fichaOrden !== null && comprobantesEnRevision(lectura.comprobantes, fichaOrden) > 0 &&
                       ` En revisión: ${comprobantesEnRevision(lectura.comprobantes, fichaOrden)}.`}
                   </p>
+                  {fallaComprobantes !== null && (
+                    <p className="aviso-error" role="alert">
+                      {fallaComprobantes}
+                    </p>
+                  )}
                   <label htmlFor={`${id}-comprobante`}>Comprobante de la transferencia</label>
                   <select id={`${id}-comprobante`} required value={registro.documento} disabled={enviando}
                     onChange={(e) => cambiar("documento", e.target.value)}>

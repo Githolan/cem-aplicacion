@@ -1,0 +1,142 @@
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { type ReactNode, useRef, useState } from "react";
+import { Navigate } from "react-router";
+
+import { api } from "./api/cliente";
+import { RUTA_INICIO } from "./enlace";
+
+// Qué le mostramos a cada persona (regla de fricción, decisión del propietario del 05-11-2026): lo
+// que no puede hacer no aparece. `GET /consorcios/{id}/mis-acciones` trae lo que alcanza en cada
+// edificio. Es solo para mostrar: el servidor decide cada pedido igual, así que mientras no se sabe
+// (cargando, sin conexión) se muestra y la pantalla responde lo que el servidor diga. `gcTime: 0`:
+// al salir, la lista de una persona no queda para la siguiente que entre en este navegador.
+// `networkMode: "always"`: sin red la consulta falla enseguida en vez de quedar en pausa, y la
+// pantalla sigue (la copia de los contactos es justo para ese momento). `retryOnMount: false`: una
+// pantalla que se monta no repite lo que acaba de fallar.
+
+const SIN_CACHE = { gcTime: 0, retry: false, retryOnMount: false, networkMode: "always" } as const;
+
+async function misConsorcios() {
+  const { data } = await api.GET("/api/v1/me/consorcios");
+  if (data === undefined) throw new Error("no se pudieron leer los edificios");
+  return data;
+}
+
+async function misAcciones(consorcio: string): Promise<readonly string[]> {
+  const { data } = await api.GET("/api/v1/consorcios/{consorcio_id}/mis-acciones", {
+    params: { path: { consorcio_id: consorcio } },
+  });
+  if (data === undefined) throw new Error("no se pudieron leer las acciones");
+  return data.acciones;
+}
+
+/** Lo que alcanza en un edificio, o null mientras no se sabe. */
+export function useAcciones(consorcio: string): readonly string[] | null {
+  const consulta = useQuery({
+    queryKey: ["mis-acciones", consorcio],
+    queryFn: () => misAcciones(consorcio),
+    enabled: consorcio !== "",
+    ...SIN_CACHE,
+  });
+  return consulta.data ?? null;
+}
+
+/** `puede(accion)` en un edificio. Mientras no se sabe, sí: lo decide el servidor. */
+export function usePuede(consorcio: string): (...acciones: string[]) => boolean {
+  const alcanzadas = useAcciones(consorcio);
+  return (...acciones) => alcanzadas === null || acciones.some((a) => alcanzadas.includes(a));
+}
+
+type AccionesPorEdificio = {
+  porEdificio: ReadonlyMap<string, readonly string[]> | null;
+  /** Falta alguna respuesta: si ya se sabe que no va a llegar (sin red, error), es false. */
+  consultando: boolean;
+};
+
+function useConsultaDeAcciones(): AccionesPorEdificio {
+  const consorcios = useQuery({ queryKey: ["mis-consorcios"], queryFn: misConsorcios, ...SIN_CACHE });
+  const ids = (consorcios.data ?? []).map((c) => c.id);
+  const acciones = useQueries({
+    queries: ids.map((id) => ({
+      queryKey: ["mis-acciones", id],
+      queryFn: () => misAcciones(id),
+      ...SIN_CACHE,
+    })),
+  });
+  if (consorcios.data === undefined || acciones.some((a) => a.data === undefined)) {
+    const fallo = consorcios.isError || acciones.some((a) => a.isError);
+    return { porEdificio: null, consultando: !fallo };
+  }
+  return { porEdificio: new Map(ids.map((id, i) => [id, acciones[i]?.data ?? []])), consultando: false };
+}
+
+/** Por cada edificio de la persona, lo que alcanza; null mientras no se sepa de todos. */
+export function useAccionesPorEdificio(): ReadonlyMap<string, readonly string[]> | null {
+  return useConsultaDeAcciones().porEdificio;
+}
+
+/** Una pantalla se ofrece si alguna de sus condiciones se cumple; cada una, con todas sus acciones. */
+export type Requisito = readonly (readonly string[])[];
+
+export function cumple(alcanzadas: readonly string[], requisito: Requisito): boolean {
+  return requisito.some((juntas) => juntas.every((a) => alcanzadas.includes(a)));
+}
+
+export function cumpleEnAlguno(porEdificio: ReadonlyMap<string, readonly string[]>, requisito: Requisito): boolean {
+  return [...porEdificio.values()].some((alcanzadas) => cumple(alcanzadas, requisito));
+}
+
+/** Los edificios donde la pantalla sirve: el selector no ofrece otros. Mientras no se sabe, todos. */
+export function useEdificiosCon<T extends { id: string }>(consorcios: readonly T[], requisito: Requisito): readonly T[] {
+  const porEdificio = useAccionesPorEdificio();
+  if (porEdificio === null) return consorcios;
+  return consorcios.filter((c) => cumple(porEdificio.get(c.id) ?? [], requisito));
+}
+
+/**
+ * El edificio de una pantalla: el que eligió la persona, si no el `preferido` (el que trae la
+ * navegación) y si no el primero, siempre entre los que la pantalla sirve. Hasta tener la respuesta
+ * no hay edificio ni selector: la pantalla no le pide datos a uno que no va a ofrecer, y un 403
+ * de ese edificio no la manda al inicio. Si la respuesta no llega (sin red), siguen todos.
+ */
+export function useEdificioElegido<T extends { id: string }>(
+  consorcios: readonly T[],
+  requisito: Requisito,
+  preferido: string | null = null,
+) {
+  const { consultando } = useConsultaDeAcciones();
+  const ofrecidos = useEdificiosCon(consorcios, requisito);
+  const [elegido, setConsorcio] = useState("");
+  // Una vez resuelto no se vuelve atrás: otra consulta que falle después (al volver a la ventana) no
+  // le saca el edificio a la pantalla, que lo perdería todo.
+  const resuelto = useRef(false);
+  resuelto.current ||= !consultando;
+  const actual = ofrecidos.find((c) => c.id === elegido) ?? ofrecidos.find((c) => c.id === preferido) ?? ofrecidos[0];
+  return {
+    edificios: resuelto.current ? ofrecidos : [],
+    consorcio: resuelto.current ? (actual?.id ?? "") : "",
+    setConsorcio,
+  };
+}
+
+/** Una dirección abierta a mano sin permiso lleva al inicio, sin pantalla de «sin permiso». */
+export function Exige({ requisito, children }: { requisito: Requisito; children: ReactNode }) {
+  const porEdificio = useAccionesPorEdificio();
+  if (porEdificio !== null && !cumpleEnAlguno(porEdificio, requisito)) return <Navigate to={RUTA_INICIO} replace />;
+  return <>{children}</>;
+}
+
+export const REQUISITOS = {
+  invitaciones: [["invitaciones.crear"]],
+  mandatos: [["mandatos.ver"], ["decisiones.ver"], ["decisiones.registrar"]],
+  padron: [["padron.ver"]],
+  contactos: [["contactos.ver"]],
+  contactosGestion: [["contactos.gestionar"]],
+  documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
+  proveedores: [["egresos.preparar_orden"]],
+  ordenes: [["egresos.preparar_orden"]],
+  revision: [["egresos.revisar_orden"]],
+  pagos: [["egresos.preparar_orden", "egresos.ejecutar_pago"]],
+  conciliacion: [["egresos.revisar_orden"]],
+  liquidacion: [["liquidacion.preparar"]],
+} as const satisfies Record<string, Requisito>;

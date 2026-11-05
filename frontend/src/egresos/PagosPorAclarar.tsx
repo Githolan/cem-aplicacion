@@ -9,15 +9,19 @@ import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documen
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
   aCentavos,
+  type Aviso,
   ENCABEZADO_IDEMPOTENCIA,
   importe,
   mensajeDeError,
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
 } from "./comun";
+import { AvisoPantalla, FallaDeLectura } from "./EstadoPantalla";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useMontado } from "./useConsorcio";
+import { exigirSesion, SinSesion, useEsperaAntivirus, useMontado } from "./useConsorcio";
 
 // Página /egresos/por-aclarar (app 0067, P3 179): quien vio la cuenta en el acto de ejecución y
 // ya no ejecuta pagos en ese edificio (renunció o lo reemplazaron) declara que no transfirió.
@@ -33,7 +37,6 @@ type PorAclarar = components["schemas"]["PagoPorAclarar"];
 export const RUTA_POR_ACLARAR = "/egresos/por-aclarar";
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: PorAclarar[] };
-type Aviso = { texto: string; ok: boolean };
 type Pendiente = { acto: string; reintentar: () => void };
 type Registro = { numero: string; fecha: string; importe: string; cuenta: string };
 
@@ -45,7 +48,7 @@ const TITULO_COMPROBANTE = "Comprobante de la transferencia";
 /** Qué pasa con el comprobante, según el estado de su último archivo. */
 function textoDelComprobante(p: PorAclarar): string {
   if (p.comprobante_estado === "disponible") return "El comprobante pasó el antivirus: ya podés registrar el pago.";
-  if (p.comprobante_estado === "en_cuarentena") return "El antivirus revisa el comprobante: tocá «Actualizar» en unos segundos.";
+  if (p.comprobante_estado === "en_cuarentena") return "El antivirus revisa el comprobante: esto se actualiza solo en unos segundos.";
   if (p.comprobante_estado === "rechazado") return "El antivirus rechazó el archivo: subí otro.";
   return "Primero subí el comprobante de la transferencia.";
 }
@@ -65,6 +68,9 @@ export function PagosPorAclarar() {
   const [archivo, setArchivo] = useState<File | null>(null);
   /** Cambia para vaciar el campo del archivo después de subirlo. */
   const [entrada, setEntrada] = useState(0);
+  /** Lo que no se pudo actualizar con el formulario abierto: sigue a la vista con lo escrito. */
+  const [fallaLista, setFallaLista] = useState<string | null>(null);
+  const conFormulario = useRef(false);
   const claveCarga = useRef<string | null>(null);
   const claveArchivo = useRef<string | null>(null);
   /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
@@ -74,29 +80,46 @@ export function PagosPorAclarar() {
 
   useEffect(() => {
     let vigente = true;
+    function noLlego(texto: string) {
+      if (conFormulario.current) setFallaLista(`No pudimos actualizar la lista. ${texto}`);
+      else {
+        setLectura({ tipo: "sin_servicio" });
+        setAviso(sinPisarLoHecho(texto));
+      }
+    }
     void api
       .GET("/api/v1/pagos-por-aclarar")
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (!vigente) return;
-        if (data !== undefined) setLectura({ tipo: "ok", elementos: data.elementos });
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
-        }
+        if (data !== undefined) {
+          setFallaLista(null);
+          setLectura({ tipo: "ok", elementos: data.elementos });
+        } else noLlego(mensajeDeError(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
-        else {
-          setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
-        }
+        else noLlego(SIN_CONEXION);
       });
     return () => {
       vigente = false;
     };
   }, [vuelta, aEntrar]);
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
+
+  const abierto = lectura.tipo === "ok" ? lectura.elementos.find((p) => p.orden_id === transfirio) : undefined;
+  conFormulario.current = abierto !== undefined;
+  useEsperaAntivirus(
+    abierto?.comprobante_estado === "en_cuarentena" && pendiente === null,
+    () => setVuelta((v) => v + 1),
+    () => setFallaLista("El antivirus sigue revisando el comprobante. Tocá «Actualizar» en un rato."),
+  );
 
   function declarar(p: PorAclarar, reintento = false) {
     const motivo = (motivos[p.orden_id] ?? "").trim();
@@ -223,7 +246,7 @@ export function PagosPorAclarar() {
       sinArchivo.current = null;
       setArchivo(null);
       setEntrada((n) => n + 1);
-      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos; tocá «Actualizar».", ok: true });
+      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y esto se actualiza solo.", ok: true });
       setVuelta((v) => v + 1);
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
@@ -288,11 +311,7 @@ export function PagosPorAclarar() {
   return (
     <>
       <h1>Pagos para aclarar</h1>
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -305,6 +324,7 @@ export function PagosPorAclarar() {
         />
       )}
       {pendiente === null && lectura.tipo === "cargando" && <p role="status">Cargando…</p>}
+      {pendiente === null && lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
       {pendiente === null &&
         lectura.tipo === "ok" &&
         (lectura.elementos.length === 0 ? (
@@ -344,6 +364,11 @@ export function PagosPorAclarar() {
                     <form className="formulario" onSubmit={(e) => registrar(e, p)}>
                       <h3>Registrá la transferencia</h3>
                       <p role="status">{textoDelComprobante(p)}</p>
+                      {fallaLista !== null && (
+                        <p className="aviso-error" role="alert">
+                          {fallaLista}
+                        </p>
+                      )}
                       <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
                       <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png"
                         disabled={enviando}

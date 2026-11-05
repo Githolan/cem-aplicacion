@@ -4,15 +4,17 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
-// y retirar las que no se aceptaron. El frontend nunca concede ni deduce permisos: muestra todas
-// las unidades del consorcio y es la API la que responde 403 fuera del alcance de quien invita
-// (política `invitaciones.crear`). El correo de una invitación solo llega en las pendientes que
-// creó quien mira (P6); si la API lo manda nulo, no se muestra. Diseño provisorio: el definitivo
-// llega con G3.
+// y retirar las que no se aceptaron. Lo que la persona no alcanza no aparece y una lectura negada
+// lleva al inicio, pero es solo interfaz: muestra todas las unidades del consorcio, porque el
+// alcance de quien invita depende de la unidad, y ahí la API responde 403 (política
+// `invitaciones.crear`), que se dice en la pantalla. El correo de una invitación solo llega en las
+// pendientes que creó quien mira (P6); si la API lo manda nulo, no se muestra. Diseño provisorio:
+// el definitivo llega con G3.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Unidad = components["schemas"]["Unidad"];
@@ -22,6 +24,7 @@ type TipoVinculo = components["schemas"]["TipoVinculo"];
 export const RUTA_INVITACIONES = "/invitaciones";
 
 const ESTADO_SIN_SESION = 401;
+const ESTADO_SIN_PERMISO = 403;
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 const LARGO_MAXIMO_NOMBRE = 100;
 
@@ -66,6 +69,8 @@ type Pantalla =
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
+const SIN_EDIFICIOS: readonly Consorcio[] = [];
+
 type Aviso = { texto: string; ok: boolean };
 
 /** Un 401 en cualquier pedido de la página: se va a /entrar. */
@@ -79,7 +84,11 @@ export function Invitar() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
-  const [consorcio, setConsorcio] = useState<string>("");
+  const { edificios, consorcio, setConsorcio } = useEdificioElegido(
+    pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
+    REQUISITOS.invitaciones,
+  );
+  const puede = usePuede(consorcio);
   const [unidades, setUnidades] = useState<Unidad[]>([]);
   const [invitaciones, setInvitaciones] = useState<Invitacion[] | null>(null);
   // E54: si la lista no se pudo consultar, la sección deja de decir «Consultando…».
@@ -124,27 +133,27 @@ export function Invitar() {
     [aEntrar],
   );
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        const primero = data?.[0];
         if (data === undefined)
           setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
-        else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
-        else {
-          setPantalla({ tipo: "lista", consorcios: data });
-          setConsorcio(primero.id);
-        }
+        else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
+        else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
         else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -154,6 +163,10 @@ export function Invitar() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (!vigente) return;
+        if (response.status === ESTADO_SIN_PERMISO) {
+          navegar(RUTA_INICIO, { replace: true });
+          return;
+        }
         if (data === undefined) {
           setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
           return;
@@ -168,7 +181,7 @@ export function Invitar() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, atajar]);
+  }, [consorcio, atajar, navegar]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -178,6 +191,10 @@ export function Invitar() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (!vigente) return;
+        if (response.status === ESTADO_SIN_PERMISO) {
+          navegar(RUTA_INICIO, { replace: true });
+          return;
+        }
         if (data === undefined) {
           // Si falla la recarga que sigue a un retiro, queda a la vista lo que sí se hizo.
           const texto = mensajeDeFalla(response.status, codigoDe(error));
@@ -200,7 +217,14 @@ export function Invitar() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, navegar]);
+
+  /** Vuelve a pedir la lista que no se pudo consultar; un «Listo» que esté a la vista queda. */
+  function reconsultarLista() {
+    setAviso((actual) => (actual?.ok ? actual : null));
+    setListaFallida(false);
+    setVuelta((v) => v + 1);
+  }
 
   /** Cualquier cambio en los datos es otro intento: otra clave. */
   function cambiar<T>(fijar: (v: T) => void) {
@@ -323,7 +347,7 @@ export function Invitar() {
           <section aria-labelledby={`${id}-nueva`} className="tarjeta">
             <h2 id={`${id}-nueva`}>Nueva invitación</h2>
             <form className="formulario formulario-movil" onSubmit={invitar}>
-              {pantalla.consorcios.length > 1 && (
+              {edificios.length > 1 && (
                 <>
                   <label htmlFor={`${id}-consorcio`}>Edificio</label>
                   <select
@@ -339,7 +363,7 @@ export function Invitar() {
                       cambiar(setConsorcio)(e.target.value);
                     }}
                   >
-                    {pantalla.consorcios.map((c) => (
+                    {edificios.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.nombre}
                       </option>
@@ -405,6 +429,13 @@ export function Invitar() {
             <h2 id={`${id}-lista`}>Invitaciones</h2>
             {invitaciones === null && !listaFallida && <p>Consultando…</p>}
             {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
+            {listaFallida && (
+              <p>
+                <button type="button" onClick={reconsultarLista} disabled={enviando}>
+                  Consultar de nuevo
+                </button>
+              </p>
+            )}
             {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
             {invitaciones !== null && invitaciones.length > 0 && (
               <>
@@ -430,11 +461,22 @@ export function Invitar() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (
@@ -487,6 +529,7 @@ export function Invitar() {
                       )}
                     </dl>
                     {(i.estado === "pendiente" || i.estado === "vencida") &&
+                      puede("invitaciones.revocar") &&
                       (aRetirar?.id === i.id ? (
                         <div role="group" aria-labelledby={`${id}-${i.id}-confirmar`}>
                           <p id={`${id}-${i.id}-confirmar`}>

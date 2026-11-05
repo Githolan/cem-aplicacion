@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PedirCodigo } from "./PedirCodigo";
@@ -122,5 +123,51 @@ describe("confirmar con la llave", () => {
     await vi.waitFor(() => expect(consulta).toHaveBeenCalledOnce());
     expect(screen.getByLabelText("Código")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Confirmar con tu PIN o huella" })).toBeNull();
+  });
+
+  function Alta() {
+    return <p>Alta con vuelta a {(useLocation().state as { volver: string }).volver}</p>;
+  }
+
+  function mostrarEnRuta() {
+    const pantalla = <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />;
+    render(
+      <MemoryRouter initialEntries={["/egresos/revision"]}>
+        <Routes>
+          <Route path="/egresos/revision" element={pantalla} />
+          <Route path="/cuenta/segundo-factor" element={<Alta />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  function mandarCodigo() {
+    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "123456" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+  }
+
+  it("sin alta del segundo factor lleva a darla de alta y a volver acá", async () => {
+    backend({
+      "POST /api/v1/auth/totp/verificar": () =>
+        Response.json({ codigo: "segundo_factor_sin_alta", mensaje: "x", id_correlacion: "c" }, { status: 409 }),
+    });
+    mostrarEnRuta();
+    mandarCodigo();
+
+    fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
+
+    expect(await screen.findByText("Alta con vuelta a /egresos/revision")).not.toBeNull();
+  });
+
+  it("un código equivocado no manda a ninguna parte", async () => {
+    backend({
+      "POST /api/v1/auth/totp/verificar": () =>
+        Response.json({ codigo: "segundo_factor_invalido", mensaje: "x", id_correlacion: "c" }, { status: 400 }),
+    });
+    mostrarEnRuta();
+    mandarCodigo();
+
+    expect((await screen.findByRole("alert")).textContent).toContain("El código no es válido");
+    expect(screen.queryByRole("link", { name: "Activala ahora" })).toBeNull();
   });
 });

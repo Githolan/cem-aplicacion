@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
+import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { mensajeDeError } from "./Padron";
 import { ContextoVersion } from "./version";
@@ -64,7 +65,7 @@ type Respuestas = Record<string, () => Response>;
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave];
+    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -112,6 +113,23 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+  "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
+  "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+};
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -120,10 +138,10 @@ afterEach(() => {
 });
 
 describe("página /padron", () => {
-  it("el inicio tiene el enlace al padrón", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace al padrón", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Padrón del edificio" }).getAttribute("href")).toBe("/padron");
+    expect((await screen.findByRole("link", { name: "Padrón del edificio" })).getAttribute("href")).toBe("/padron");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -207,11 +225,12 @@ describe("página /padron", () => {
     expect(within(carla).queryAllByRole("button")).toEqual([]);
   });
 
-  it("sin `padron.ver` (403) lo dice y no muestra la lista", async () => {
-    vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => error("sin_permiso", 403) }));
+  it("un 403 al leer el padrón lleva al inicio, sin una pantalla de «sin permiso»", async () => {
+    vi.stubGlobal("fetch", conPadron({ ...INICIO_CON_SESION, [`GET ${RUTA_PADRON}`]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByText("No tenés permiso para ver el padrón de este edificio.")).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Padrón" })).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Padrón del edificio" })).toBeNull();
+    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
   });
 
   it("confirma con CSRF, una clave de reintento y la referencia; actualiza la fila y vuelve a pedir el padrón", async () => {
@@ -514,7 +533,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     const { retenido, soltar } = retener(conPadron(), "/api/v1/me/consorcios");
     vi.stubGlobal("fetch", retenido);
     abrir();
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     soltar();
     expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
     expect(screen.queryByText("Consultando…")).toBeNull();
@@ -554,6 +573,51 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     expect(within(seccion).getByText("No pudimos mostrar el padrón.")).toBeTruthy();
   });
 
+  it("el padrón que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
+    let caido = true;
+    const simulado = conPadron({
+      [`GET ${RUTA_PADRON}`]: () => (caido ? error("servicio_no_disponible", 503) : Response.json(PADRON)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const seccion = await screen.findByRole("region", { name: "Vínculos por unidad" });
+    expect(await within(seccion).findByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    caido = false;
+    fireEvent.click(within(seccion).getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2);
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    // Control: con el padrón a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("si el reintento del padrón falla otra vez, sigue en la pantalla con el botón", async () => {
+    const simulado = conPadron({ [`GET ${RUTA_PADRON}`]: () => error("servicio_no_disponible", 503) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2));
+    expect(await screen.findByRole("button", { name: "Consultar de nuevo" })).toBeTruthy();
+    expect(screen.getByText("No pudimos mostrar el padrón.")).toBeTruthy();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conPadron({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
+    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+  });
+
   it("sin conexión al consultar el padrón lo dice", async () => {
     const simulado = vi.fn(async (pedido: Request) => {
       if (new URL(pedido.url).pathname === RUTA_PADRON) throw new TypeError("Failed to fetch");
@@ -562,5 +626,52 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", simulado);
     abrir();
     expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+  });
+});
+
+describe("lo que no se puede hacer no aparece en /padron", () => {
+  const conAcciones = (...acciones: string[]) => conPadron({ [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", ...acciones) });
+  const nombres = (nombre: string) => screen.queryAllByRole("button", { name: nombre }).length;
+
+  it("«Confirmar» se ve con `padron.confirmar_vinculo`, y «Finalizar» no", async () => {
+    vi.stubGlobal("fetch", conAcciones("padron.confirmar_vinculo"));
+    abrir();
+    await tarjeta("1° A: Beto Pérez");
+    expect(nombres("Confirmar")).toBeGreaterThan(0);
+    expect(nombres("Finalizar")).toBe(0);
+    expect(screen.getByText(/Confirmar acredita el carácter/)).toBeTruthy();
+  });
+
+  it("«Finalizar» se ve con `padron.gestionar`, y «Confirmar» no", async () => {
+    vi.stubGlobal("fetch", conAcciones("padron.gestionar"));
+    abrir();
+    await tarjeta("1° A: Beto Pérez");
+    expect(nombres("Finalizar")).toBeGreaterThan(0);
+    expect(nombres("Confirmar")).toBe(0);
+    expect(screen.queryByText(/Confirmar acredita el carácter/)).toBeNull();
+  });
+
+  it("control: solo con `padron.ver` se lee el padrón sin ningún botón", async () => {
+    vi.stubGlobal("fetch", conAcciones());
+    abrir();
+    await tarjeta("1° A: Beto Pérez");
+    expect(screen.queryAllByRole("button")).toEqual(screen.queryAllByRole("button", { name: /Letra grande/ }));
+  });
+
+  it("un 403 al confirmar sigue siendo un error en el lugar: la separación depende del caso", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conPadron({
+        [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", "padron.confirmar_vinculo"),
+        [`POST ${confirmarRuta(V_INQ)}`]: () => error("sin_permiso", 403),
+      }),
+    );
+    abrir();
+    const beto = await tarjeta("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
+    escribir("Referencia del título", "Escritura 123");
+    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar el vínculo" }));
+    expect(await screen.findByText(/No tenés permiso para confirmar este vínculo/)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Padrón del edificio" })).toBeTruthy();
   });
 });

@@ -2,9 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import type { ManifestOptions } from "vite-plugin-pwa";
 
+import { dejarDeSimularSesion, simularSesion } from "./entorno";
+
+// Una ruta que no depende de la sesión: `/` sin sesión lleva a /entrar, que nunca sale de la caché.
+const RUTA_EN_CACHE = "/instalar";
+
 test.describe("PWA servida por la imagen", () => {
   test("el manifiesto enlazado es instalable y sus iconos existen", async ({ page, request }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     const href = await page.locator('link[rel="manifest"]').getAttribute("href");
     expect(href).toBeTruthy();
 
@@ -25,7 +30,7 @@ test.describe("PWA servida por la imagen", () => {
   test("el service worker se registra, controla la página y Chromium la da por instalable", async ({
     page,
   }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     const registro = await page.evaluate(async () => {
       const r = await navigator.serviceWorker.ready;
       return { alcance: r.scope, guion: r.active?.scriptURL ?? "" };
@@ -43,7 +48,7 @@ test.describe("PWA servida por la imagen", () => {
   });
 
   test("una navegación a /entrar nunca sale de la caché del service worker", async ({ page }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     await page.evaluate(() => navigator.serviceWorker.ready);
     // Control: con el service worker al mando, las demás rutas sí salen de su caché.
     const inicio = await page.reload();
@@ -62,7 +67,7 @@ test.describe("PWA servida por la imagen", () => {
   });
 
   test("con red, una navegación pasa por la red aunque el service worker esté al mando", async ({ page, context }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
     expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
@@ -86,7 +91,7 @@ test.describe("PWA servida por la imagen", () => {
     page,
     context,
   }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
     expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
@@ -94,7 +99,7 @@ test.describe("PWA servida por la imagen", () => {
     // Como Access con la sesión vencida: la página responde una redirección a su login.
     const login = "https://acceso.ejemplo.invalid/cdn-cgi/access/login";
     await context.route(
-      (url) => url.pathname === "/" && url.origin === new URL(page.url()).origin,
+      (url) => url.pathname === RUTA_EN_CACHE && url.origin === new URL(page.url()).origin,
       (ruta) => ruta.fulfill({ status: 302, headers: { location: login } }),
     );
     await context.route(`${login}**`, (ruta) =>
@@ -106,7 +111,7 @@ test.describe("PWA servida por la imagen", () => {
   });
 
   test("sin conexión, una ruta que nunca se abrió carga la aplicación de la precaché", async ({ page, context }) => {
-    await page.goto("/");
+    await page.goto(RUTA_EN_CACHE);
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
 
@@ -115,15 +120,22 @@ test.describe("PWA servida por la imagen", () => {
     await expect(page.getByRole("heading", { name: "No encontramos esa página" })).toBeVisible();
   });
 
-  test("sin conexión el shell carga desde caché y /health no sale de caché", async ({ page, context }) => {
+  test("sin conexión el shell carga desde caché, /health no sale de caché y no lleva a /entrar", async ({
+    page,
+    context,
+  }) => {
+    await simularSesion(page, "con_sesion");
     await page.goto("/");
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
     await expect(page.getByText("El servicio funciona.")).toBeVisible();
 
+    // Sin la simulación: la consulta de la sesión falla por la red, como le pasa a la persona.
+    await dejarDeSimularSesion(page);
     await context.setOffline(true);
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
     await expect(page.getByText(/No pudimos contactar al servicio/)).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/");
   });
 });
