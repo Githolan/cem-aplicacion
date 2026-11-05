@@ -405,7 +405,8 @@ def _proveedores(c: Connection, permiso: Permiso, proveedor: UUID | None) -> lis
     responses=RESPUESTAS_LECTURA,
 )
 def listar_proveedores(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaProveedores:
     with _lectura(permiso, motor) as c:
         return ListaProveedores(elementos=_proveedores(c, permiso, None))
@@ -419,7 +420,7 @@ def listar_proveedores(
 )
 def ver_proveedor(
     proveedor_id: UUID,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> ProveedorConVersiones:
     with _lectura(permiso, motor) as c:
@@ -516,7 +517,8 @@ def versionar_proveedor(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_ordenes(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaOrdenesPago:
     with _lectura(permiso, motor) as c:
         return ListaOrdenesPago(elementos=_ordenes(c, permiso, None))
@@ -529,7 +531,8 @@ def listar_ordenes(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_ordenes_revision(
-    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaOrdenesPago:
     with _lectura(permiso, motor) as c:
         return ListaOrdenesPago(elementos=_ordenes(c, permiso, None))
@@ -543,7 +546,7 @@ def listar_ordenes_revision(
 )
 def ver_orden(
     orden_id: UUID,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> OrdenPagoConVersiones:
     return _orden_con_versiones(permiso, motor, orden_id, revision=False)
@@ -557,7 +560,7 @@ def ver_orden(
 )
 def ver_orden_revision(
     orden_id: UUID,
-    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> OrdenPagoConVersionesRevision:
     return _orden_con_versiones(permiso, motor, orden_id, revision=True)
@@ -584,7 +587,7 @@ def _datos_orden(d: DatosOrdenPago) -> dict:
 )
 def preparar_orden(
     nueva: OrdenPagoNueva,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -609,7 +612,7 @@ def preparar_orden(
 def modificar_orden(
     orden_id: UUID,
     datos: OrdenPagoVersionNueva,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -634,7 +637,7 @@ def modificar_orden(
 def enviar_a_revision(
     orden_id: UUID,
     envio: EnvioARevision,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -731,7 +734,7 @@ def rechazar_orden(
 def renovar_orden(
     orden_id: UUID,
     renovacion: Renovacion,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -826,7 +829,8 @@ def _contratos(c: Connection, permiso: Permiso, contrato: UUID | None, revision:
     responses=RESPUESTAS_LECTURA,
 )
 def listar_contratos(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaContratos:
     with _lectura(permiso, motor) as c:
         return ListaContratos(elementos=_contratos(c, permiso, None))
@@ -839,7 +843,8 @@ def listar_contratos(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_contratos_revision(
-    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaContratosRevision:
     with _lectura(permiso, motor) as c:
         return ListaContratosRevision(elementos=_contratos(c, permiso, None, revision=True))
@@ -983,7 +988,8 @@ def _pagos_manuales(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_pagos_manuales(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaPagosManuales:
     with _lectura(permiso, motor) as c:
         return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))
@@ -996,7 +1002,8 @@ def listar_pagos_manuales(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_pagos_manuales_revision(
-    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaPagosManuales:
     with _lectura(permiso, motor) as c:
         return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))

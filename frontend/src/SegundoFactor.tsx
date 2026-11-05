@@ -7,6 +7,7 @@ import { CodigoQr } from "./CodigoQr";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { SeccionLlave } from "./SeccionLlave";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -230,8 +231,9 @@ export function SegundoFactor() {
   return (
     <>
       <h1>Segundo factor</h1>
+      {["inactivo", "alta", "codigos", "activo"].includes(pantalla.tipo) && <SeccionLlave alCambiar={consultar} />}
       <p>
-        Con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
+        Otra opción, si la preferís: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
         Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
         números que cambia cada 30 segundos.
       </p>

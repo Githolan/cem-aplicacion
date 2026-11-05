@@ -164,7 +164,8 @@ def _simular(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_liquidaciones(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaLiquidaciones:
     with _lectura(permiso, motor) as c:
         return ListaLiquidaciones(elementos=_liquidaciones(c, permiso, None))
@@ -179,7 +180,7 @@ def listar_liquidaciones(
 )
 def preparar_liquidacion(
     nueva: LiquidacionNueva,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -200,7 +201,8 @@ def preparar_liquidacion(
     responses=RESPUESTAS_LECTURA,
 )
 def listar_ordenes_liquidables(
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))], motor: MotorDep
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    motor: MotorDep,
 ) -> ListaOrdenesLiquidables:
     with _lectura(permiso, motor) as c:
         filas = _ejecutar(
@@ -218,7 +220,7 @@ def listar_ordenes_liquidables(
 )
 def ver_liquidacion(
     liquidacion_id: UUID,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> LiquidacionDetalle:
     with _lectura(permiso, motor) as c:
@@ -261,7 +263,7 @@ def ver_liquidacion(
 def agregar_gasto(
     liquidacion_id: UUID,
     nuevo: GastoNuevo,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -285,7 +287,7 @@ def agregar_gasto(
 def quitar_gasto(
     liquidacion_id: UUID,
     gasto_id: UUID,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
@@ -309,7 +311,7 @@ def quitar_gasto(
 def descartar_liquidacion(
     liquidacion_id: UUID,
     descarte: LiquidacionDescarte,
-    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:

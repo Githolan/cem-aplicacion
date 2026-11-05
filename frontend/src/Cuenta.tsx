@@ -94,7 +94,7 @@ export function Cuenta() {
             tipo: "lista",
             yo: sesion.data,
             sesiones: sesiones.data.elementos,
-            segundoFactor: totp.data.activo,
+            segundoFactor: totp.data.activo || totp.data.llaves > 0,
             contrasena: contrasena.data,
           });
       })
@@ -237,7 +237,7 @@ export function Cuenta() {
             <h2 id={`${id}-factor`}>Segundo factor</h2>
             <p>
               {pantalla.segundoFactor
-                ? "Está activado: las acciones delicadas te piden un código de la aplicación."
+                ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
                 : "No está activado."}
             </p>
             <p>

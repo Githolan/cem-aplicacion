@@ -11,7 +11,7 @@ import { sinFaltasDeAccesibilidad } from "./entorno";
 const SECRETO = "JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP";
 const URI = `otpauth://totp/Consorcio%20en%20Mano:ana%40ejemplo.com?secret=${SECRETO}&issuer=Consorcio%20en%20Mano`;
 const CODIGOS = Array.from({ length: 10 }, (_, i) => `abcd${i + 2}-fgh${i + 2}k`);
-const INACTIVO = { activo: false, activado_en: null, codigos_recuperacion_restantes: 0, verificado_en: null };
+const INACTIVO = { activo: false, activado_en: null, llaves: 0, codigos_recuperacion_restantes: 0, verificado_en: null };
 
 /** Errores de la página y violaciones de la CSP, que el navegador informa como eventos. */
 function vigilarErrores(pagina: Page): string[] {
@@ -30,6 +30,7 @@ function vigilarErrores(pagina: Page): string[] {
 
 /** Responde la API del segundo factor desde el navegador: la página y su CSP siguen siendo reales. */
 async function simularApi(pagina: Page) {
+  await pagina.route("**/api/v1/auth/llave", (ruta) => ruta.fulfill({ json: [] }));
   await pagina.route("**/api/v1/auth/totp**", async (ruta) => {
     const camino = new URL(ruta.request().url()).pathname;
     if (camino === "/api/v1/auth/totp") return ruta.fulfill({ json: INACTIVO });
@@ -73,6 +74,59 @@ test.describe("segundo factor", () => {
     await page.getByRole("button", { name: "Confirmar" }).click();
     await expect(page.getByRole("list", { name: "Códigos de recuperación" }).getByRole("listitem")).toHaveCount(10);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("activar la llave llama al autenticador real del navegador, sin violar la CSP", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("WebAuthn.enable");
+    await cdp.send("WebAuthn.addVirtualAuthenticator", {
+      options: {
+        protocol: "ctap2",
+        transport: "internal",
+        hasResidentKey: true,
+        hasUserVerification: true,
+        isUserVerified: true,
+      },
+    });
+    await simularApi(page);
+    const llaves: { id: string; nombre: string; creada_en: string; ultimo_uso_en: null }[] = [];
+    let recibida: { nombre: string; credencial: { response: { attestationObject: string; clientDataJSON: string } } } | undefined;
+    await page.route("**/api/v1/auth/llave**", async (ruta) => {
+      const camino = new URL(ruta.request().url()).pathname;
+      if (camino === "/api/v1/auth/llave") return ruta.fulfill({ json: llaves });
+      if (camino === "/api/v1/auth/llave/alta/opciones")
+        return ruta.fulfill({
+          json: {
+            opciones: {
+              rp: { id: "localhost", name: "Consorcio en Mano" },
+              user: { id: "AAAA", name: "ana@ejemplo.com", displayName: "ana@ejemplo.com" },
+              challenge: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+              pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+              authenticatorSelection: { userVerification: "required", residentKey: "preferred" },
+              attestation: "none",
+            },
+          },
+        });
+      if (camino === "/api/v1/auth/llave/alta") {
+        recibida = ruta.request().postDataJSON() as typeof recibida;
+        llaves.push({ id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d", nombre: "Mi PC", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null });
+        return ruta.fulfill({ status: 201, json: { id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d", codigos_recuperacion: CODIGOS } });
+      }
+      return ruta.abort();
+    });
+    // WebAuthn no acepta una dirección IP como sitio: el mismo servidor, por su nombre.
+    const direccion = new URL("/cuenta/segundo-factor", baseURL);
+    direccion.hostname = "localhost";
+    await page.goto(direccion.href);
+    await page.getByRole("button", { name: "Activar en este dispositivo" }).click();
+
+    await expect(page.getByText("Listo: tu llave quedó activada.")).toBeVisible();
+    await expect(page.getByRole("list", { name: "Códigos de recuperación" }).getByRole("listitem")).toHaveCount(10);
+    expect(recibida?.credencial.response.attestationObject.length).toBeGreaterThan(100);
+    expect(recibida?.credencial.response.clientDataJSON.length).toBeGreaterThan(50);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
   });

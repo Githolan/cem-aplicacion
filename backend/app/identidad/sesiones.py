@@ -56,6 +56,8 @@ VIGENCIA_SESION_ECONOMICA = timedelta(hours=12)
 empezó hace menos de 12 horas, sin importar cuánto se usó. La sesión sigue sirviendo para lo
 demás; para lo económico hay que volver a entrar."""
 VIGENCIA_SEGUNDO_FACTOR_RECIENTE = timedelta(minutes=10)
+CONFIRMAR_QUE_SOS_VOS = "Para esto tenés que confirmar que sos vos."
+"""Lo que se le dice a quien le falta la verificación reciente, sea cual sea su medio."""
 """TB-CEM-3: el segundo factor verificado en la sesión en los últimos 10 minutos."""
 RETENCION_ACCESO = timedelta(days=90)
 """Cuánto se conservan una sesión y un enlace después de dejar de servir (vencer, revocarse o

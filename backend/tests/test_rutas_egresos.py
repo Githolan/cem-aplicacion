@@ -403,12 +403,14 @@ def test_quien_preparo_no_aprueba_con_otra_cuenta_del_consejo(motor_migrate, mot
 
 def test_r10_segundo_factor_y_sesion_recientes(e, motor_migrate):
     vieja_totp = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=11)
-    r = get(e, e.adm, "ordenes-pago", sesion=vieja_totp)
+    # Mirar no pide el gesto (`0071`); dar de alta un proveedor, sí: define a quién se le paga.
+    assert get(e, e.adm, "ordenes-pago", sesion=vieja_totp).status_code == 200
+    cuerpo = PROVEEDOR | {"cuenta_destino": cbu_sintetico(77)}
+    with cliente(e.adm, vieja_totp) as c:
+        r = c.post(url(e, "proveedores"), json=cuerpo, headers=clave_idempotencia())
     assert codigo(r) == (403, "segundo_factor_requerido")
     larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13)
     assert codigo(get(e, e.adm, "ordenes-pago", sesion=larga)) == (403, "sesion_reciente_requerida")
-    with cliente(e.adm, None) as c:
-        assert codigo(c.get(url(e, "ordenes-pago"))) == (403, "segundo_factor_requerido")
     # Un 403 de R10 no revela nada a quien no tiene la facultad: recibe el genérico.
     sin_totp = nueva_sesion(motor_migrate, e.mc1, totp_min_atras=None)
     assert codigo(get(e, e.mc1, "ordenes-pago", sesion=sin_totp)) == (403, "sin_permiso")
