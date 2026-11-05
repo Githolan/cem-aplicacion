@@ -1,10 +1,13 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { CodigoQr } from "./CodigoQr";
+import { borrarCopias } from "./copiaContactos";
+import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
+import { PedirCodigo } from "./egresos/PedirCodigo";
 import { RUTA_ENTRAR } from "./enlace";
 import { esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { SeccionLlave } from "./SeccionLlave";
@@ -13,7 +16,10 @@ import { SeccionLlave } from "./SeccionLlave";
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
 // códigos de recuperación, que se muestran una sola vez, y puede verificar en esta sesión y
 // desactivarla. Desactivar pide haber verificado en los últimos 10 minutos; el backend lo exige
-// y esta página solo lo explica. Diseño provisorio: el definitivo llega con G3.
+// y, si falta, la página lo pide acá mismo y repite el pedido. Terminada una acción se sigue a
+// /cuenta, o a `state.volver` si se llegó desde otra pantalla. Los códigos de recuperación, los de
+// la aplicación y los de la llave, son la única pantalla que no se va sola: ninguna respuesta la
+// reemplaza hasta que la persona dice que los guardó. Diseño provisorio: el definitivo llega con G3.
 
 type EstadoFactor = components["schemas"]["EstadoSegundoFactor"];
 type Alta = components["schemas"]["AltaTotp"];
@@ -49,6 +55,17 @@ export function codigoVerificacion(valor: string): string | null {
   return /^[a-z2-9]{10}$/.test(limpio) ? `${limpio.slice(0, 5)}-${limpio.slice(5)}` : null;
 }
 
+/** La pantalla desde la que se llegó, si la navegación la trae. */
+function volverDe(estado: unknown): string | null {
+  if (typeof estado !== "object" || estado === null || !("volver" in estado)) return null;
+  return typeof estado.volver === "string" ? estado.volver : null;
+}
+
+const ACTIVADO = {
+  aplicacion: "Listo: el segundo factor quedó activado.",
+  llave: "Listo: tu llave quedó activada.",
+};
+
 const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
   dateStyle: "long",
   timeStyle: "short",
@@ -67,11 +84,14 @@ type Pantalla =
   | { tipo: "sin_servicio"; deConexion: boolean }
   | { tipo: "inactivo" }
   | { tipo: "alta"; alta: Alta }
-  | { tipo: "codigos"; codigos: string[] }
+  | { tipo: "codigos"; codigos: string[]; medio: keyof typeof ACTIVADO }
   | { tipo: "activo"; estado: EstadoFactor }
-  | { tipo: "desactivado" };
+  | { tipo: "terminado"; aviso: string };
 
 type Aviso = { texto: string; ok: boolean };
+
+/** Lo que espera a que la persona confirme que es ella para repetirse. */
+type Pendiente = { acto: string; reintentar: () => void };
 
 const fallo = (texto: string): Aviso => ({ texto, ok: false });
 
@@ -84,24 +104,42 @@ function codigoDe(error: unknown): string | undefined {
 
 export function SegundoFactor() {
   const id = useId();
+  const navegar = useNavigate();
+  const lugar = useLocation();
+  // El estado del historial puede cambiar mientras se está en la página: vale el de la llegada.
+  const [volver] = useState(() => volverDe(lugar.state));
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const [conLlave, setConLlave] = useState(false);
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const consultado = useRef(false);
+
+  /** Cambia de pantalla, salvo que estén a la vista códigos que no se pueden volver a mostrar. */
+  const pasarA = useCallback((siguiente: Pantalla) => {
+    setPantalla((actual) => (actual.tipo === "codigos" ? actual : siguiente));
+  }, []);
+
+  const terminar = useCallback((texto: string) => pasarA({ tipo: "terminado", aviso: texto }), [pasarA]);
+
+  const mostrarCodigosDeLlave = useCallback((codigos: string[]) => {
+    setPantalla({ tipo: "codigos", codigos, medio: "llave" });
+  }, []);
 
   const consultar = useCallback(() => {
     setAviso(null);
     void api
       .GET("/api/v1/auth/totp")
       .then(({ data, error, response }) => {
-        if (data !== undefined)
-          setPantalla(data.activo ? { tipo: "activo", estado: data } : { tipo: "inactivo" });
-        else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
-        else setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
+        if (data !== undefined) {
+          setConLlave(data.llaves > 0);
+          pasarA(data.activo ? { tipo: "activo", estado: data } : { tipo: "inactivo" });
+        } else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
+        else pasarA({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
       })
-      .catch(() => setPantalla({ tipo: "sin_servicio", deConexion: true }));
-  }, []);
+      .catch(() => pasarA({ tipo: "sin_servicio", deConexion: true }));
+  }, [pasarA]);
 
   useEffect(() => {
     // StrictMode monta dos veces: la consulta sale una sola.
@@ -109,6 +147,15 @@ export function SegundoFactor() {
     consultado.current = true;
     consultar();
   }, [consultar]);
+
+  // Las dos salidas de la página pasan por `pasarA`: con códigos a la vista, ninguna ocurre.
+  useEffect(() => {
+    if (pantalla.tipo === "sin_sesion") {
+      // Toda salida a /entrar borra las copias de los contactos (H2b_7 §5).
+      borrarCopias();
+      navegar(RUTA_ENTRAR, { replace: true });
+    } else if (pantalla.tipo === "terminado") navegar(volver ?? RUTA_CUENTA, { state: { aviso: pantalla.aviso } });
+  }, [pantalla, volver, navegar]);
 
   /** El aviso para un código rechazado al confirmar o verificar. */
   function avisoDeRechazo(status: number, cuerpo: unknown): Aviso {
@@ -124,7 +171,7 @@ export function SegundoFactor() {
 
   /** E53: con la sesión vencida, ofrecer entrar de nuevo en cualquier acción, como `empezarAlta`. */
   function rechazar(status: number, cuerpo: unknown) {
-    if (status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+    if (status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
     else setAviso(avisoDeRechazo(status, cuerpo));
   }
 
@@ -136,9 +183,12 @@ export function SegundoFactor() {
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setCodigo("");
-          setPantalla({ tipo: "alta", alta: data });
+          pasarA({ tipo: "alta", alta: data });
         } else if (codigoDe(error) === CODIGO_YA_ACTIVO) consultar();
-        else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+        // Quien ya tiene una llave suma la aplicación confirmando con ella.
+        else if (codigoDe(error) === CODIGO_REQUERIDO)
+          setPendiente({ acto: "agregar la aplicación", reintentar: empezarAlta });
+        else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
         else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
@@ -159,9 +209,9 @@ export function SegundoFactor() {
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setCodigo("");
-          setPantalla({ tipo: "codigos", codigos: data.codigos });
+          setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
         } else if (codigoDe(error) === CODIGO_SIN_ALTA) {
-          setPantalla({ tipo: "inactivo" });
+          pasarA({ tipo: "inactivo" });
           setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
         } else rechazar(response.status, error);
       })
@@ -183,22 +233,7 @@ export function SegundoFactor() {
       .then(({ data, error, response }) => {
         if (data !== undefined) {
           setCodigo("");
-          setPantalla((actual) =>
-            actual.tipo === "activo"
-              ? {
-                  tipo: "activo",
-                  estado: {
-                    ...actual.estado,
-                    verificado_en: data.verificado_en,
-                    codigos_recuperacion_restantes: data.codigos_recuperacion_restantes,
-                  },
-                }
-              : actual,
-          );
-          setAviso({
-            texto: `Listo: verificado hasta las ${FORMATO_HORA.format(new Date(data.vale_hasta))}.`,
-            ok: true,
-          });
+          terminar(`Listo: verificado hasta las ${FORMATO_HORA.format(new Date(data.vale_hasta))}.`);
         } else if (codigoDe(error) === CODIGO_SIN_ALTA) consultar();
         else rechazar(response.status, error);
       })
@@ -212,37 +247,81 @@ export function SegundoFactor() {
     void api
       .POST("/api/v1/auth/totp/baja", { headers: encabezadoCsrf() })
       .then(({ error, response }) => {
-        if (error === undefined && response.ok) setPantalla({ tipo: "desactivado" });
+        if (error === undefined && response.ok) terminar("Listo: el segundo factor quedó desactivado.");
         else if (codigoDe(error) === CODIGO_REQUERIDO)
-          setAviso(
-            fallo(
-              "Para desactivarla, primero escribí arriba un código de la aplicación (vale 10 minutos).",
-            ),
-          );
-        else if (response.status === ESTADO_SIN_SESION) setPantalla({ tipo: "sin_sesion" });
+          setPendiente({ acto: "desactivar el segundo factor", reintentar: desactivar });
+        else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
         else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
   }
 
-  const conMensaje = aviso !== null || !["inactivo", "alta", "codigos", "activo"].includes(pantalla.tipo);
+  function reintentarConsulta() {
+    setPantalla({ tipo: "cargando" });
+    consultar();
+  }
+
+  const conMensaje = aviso !== null || ["cargando", "sin_servicio"].includes(pantalla.tipo);
+
+  if (pantalla.tipo === "codigos")
+    return (
+      <>
+        <h1>Segundo factor</h1>
+        <section aria-labelledby={`${id}-titulo`} className="tarjeta">
+          <h2 id={`${id}-titulo`}>Guardá tus códigos de recuperación</h2>
+          <p className="aviso-ok">{ACTIVADO[pantalla.medio]}</p>
+          <p>
+            {pantalla.medio === "llave" ? "Si perdés este dispositivo" : "Si perdés el teléfono"}, cada uno
+            de estos códigos sirve <strong>una sola vez</strong>{" "}
+            {pantalla.medio === "llave" ? "para entrar en su lugar" : "en lugar del de la aplicación"}.
+            Guardalos en un lugar seguro: no los vamos a volver a mostrar.
+          </p>
+          <ul className="codigos-recuperacion" aria-label="Códigos de recuperación" translate="no">
+            {pantalla.codigos.map((c) => (
+              <li key={c}>
+                <code>{c}</code>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => setPantalla({ tipo: "terminado", aviso: ACTIVADO[pantalla.medio] })}
+          >
+            Ya los guardé
+          </button>
+        </section>
+      </>
+    );
 
   return (
     <>
       <h1>Segundo factor</h1>
-      {["inactivo", "alta", "codigos", "activo"].includes(pantalla.tipo) && <SeccionLlave alCambiar={consultar} />}
+      {["inactivo", "alta", "activo"].includes(pantalla.tipo) && (
+        <SeccionLlave alCambiar={consultar} alCodigos={mostrarCodigosDeLlave} alTerminar={terminar} />
+      )}
       <p>
         Otra opción, si la preferís: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
         Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
         números que cambia cada 30 segundos.
       </p>
 
-      {pantalla.tipo === "inactivo" && (
+      {pendiente !== null && (
+        <PedirCodigo
+          acto={pendiente.acto}
+          alVerificar={() => {
+            setPendiente(null);
+            pendiente.reintentar();
+          }}
+          alCancelar={() => setPendiente(null)}
+        />
+      )}
+
+      {pantalla.tipo === "inactivo" && pendiente === null && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Todavía no lo activaste</h2>
+          <h2 id={`${id}-titulo`}>{conLlave ? "Está activado con tu llave de acceso" : "Todavía no lo activaste"}</h2>
           <button type="button" onClick={empezarAlta} disabled={enviando}>
-            Activar el segundo factor
+            {conLlave ? "Agregar la aplicación" : "Activar el segundo factor"}
           </button>
         </section>
       )}
@@ -286,29 +365,7 @@ export function SegundoFactor() {
         </section>
       )}
 
-      {pantalla.tipo === "codigos" && (
-        <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Guardá tus códigos de recuperación</h2>
-          <p className="aviso-ok">Listo: el segundo factor quedó activado.</p>
-          <p>
-            Si perdés el teléfono, cada uno de estos códigos sirve <strong>una sola vez</strong> en
-            lugar del de la aplicación. Guardalos en un lugar seguro: no los vamos a volver a
-            mostrar.
-          </p>
-          <ul className="codigos-recuperacion" aria-label="Códigos de recuperación" translate="no">
-            {pantalla.codigos.map((c) => (
-              <li key={c}>
-                <code>{c}</code>
-              </li>
-            ))}
-          </ul>
-          <button type="button" onClick={consultar}>
-            Ya los guardé
-          </button>
-        </section>
-      )}
-
-      {pantalla.tipo === "activo" && (
+      {pantalla.tipo === "activo" && pendiente === null && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
           <h2 id={`${id}-titulo`}>Está activado</h2>
           <dl className="detalles">
@@ -355,23 +412,15 @@ export function SegundoFactor() {
 
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
-        {pantalla.tipo === "sin_sesion" && (
-          <p>
-            Para ver el segundo factor, primero <Link to={RUTA_ENTRAR}>entrá a tu cuenta</Link>.
-          </p>
-        )}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar el segundo factor. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar el segundo factor. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
-        )}
-        {pantalla.tipo === "desactivado" && (
           <>
-            <p className="aviso-ok">Listo: el segundo factor quedó desactivado.</p>
-            <button type="button" onClick={consultar}>
-              Volver
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar el segundo factor. Revisá la conexión y probá de nuevo."
+                : `No pudimos consultar el segundo factor. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button type="button" onClick={reintentarConsulta}>
+              Reintentar
             </button>
           </>
         )}

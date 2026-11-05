@@ -767,3 +767,278 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
   });
 });
+
+describe("fricción: el comprobante, la ficha y las lecturas", () => {
+  const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ESPERA = 3000;
+  const documento = (estado: string) => ({
+    id: NUEVO, categoria: "facturas_y_comprobantes", titulo: "Transferencia nueva", fecha: "2026-10-31",
+    cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: O1, versiones: [{ id: ARCHIVO, estado }],
+  });
+  const POR_ACLARAR = {
+    consorcio_id: C1, consorcio: "Edificio Ficticio", orden_id: O1, version: 1, concepto: "Limpieza de octubre",
+    importe_centavos: 1_500_000, moneda: "ARS", cuenta_vista_en: "2026-10-31T13:00:00Z", huella: H1,
+    comprobante_id: null, comprobante_estado: null,
+  };
+
+  function pagos(extra: Respuestas = {}) {
+    return backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [orden()] }),
+      [`GET ${BASE}/pagos-manuales`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: orden(), versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => Response.json({ id: O1, version: 1 }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () =>
+        Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
+      ...extra,
+    });
+  }
+
+  async function abrirFicha() {
+    abrir("/egresos/pagos");
+    fireEvent.click(await screen.findByRole("button", { name: "Ejecutar pago manual de Limpieza Ficticia SRL" }));
+    await screen.findByText(CUENTA);
+  }
+
+  async function subir() {
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.click(screen.getByRole("button", { name: "Subir el comprobante" }));
+    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+  }
+
+  function escribirRegistro() {
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.change(screen.getByLabelText("Comprobante de la transferencia"), { target: { value: DOC } });
+  }
+
+  const elegido = () => (screen.getByLabelText("Comprobante de la transferencia") as HTMLSelectElement).value;
+  // Solo el intervalo: `findBy…` sigue esperando con su temporizador real.
+  const conEsperaManual = () => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("el comprobante subido se elige solo cuando el antivirus lo aprueba, sin tocar nada", async () => {
+    conEsperaManual();
+    let estado = "en_cuarentena";
+    const api = pagos({
+      [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [documento(estado)] }),
+    });
+    vi.stubGlobal("fetch", api);
+    await abrirFicha();
+    await subir();
+    // En cuarentena todavía no se elige ni se ofrece.
+    expect(await screen.findByText(/En revisión: 1/)).toBeTruthy();
+    expect(elegido()).toBe("");
+    estado = "disponible";
+    await vi.advanceTimersByTimeAsync(ESPERA);
+    expect(await screen.findByText("Listo: el comprobante pasó el antivirus y ya quedó elegido.")).toBeTruthy();
+    expect(elegido()).toBe(NUEVO);
+    // Elegido, deja de mirar.
+    const lecturas = pedidos(api, "GET", `${BASE}/documentos`).length;
+    await vi.advanceTimersByTimeAsync(ESPERA * 2);
+    expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(lecturas);
+  });
+
+  it("un comprobante rechazado por el antivirus no se elige y se dice", async () => {
+    conEsperaManual();
+    let estado = "en_cuarentena";
+    vi.stubGlobal("fetch", pagos({
+      [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [documento(estado)] }),
+    }));
+    await abrirFicha();
+    await subir();
+    estado = "rechazado";
+    await vi.advanceTimersByTimeAsync(ESPERA);
+    expect(await screen.findByText("El antivirus rechazó el archivo: subí otro.")).toBeTruthy();
+    expect(elegido()).toBe("");
+  });
+
+  it("si falla actualizar los comprobantes, la ficha queda con lo escrito y lo avisa", async () => {
+    let caido = false;
+    vi.stubGlobal("fetch", pagos({
+      [`GET ${BASE}/documentos`]: () => (caido ? error("error_interno", 500) : DOCUMENTOS()),
+    }));
+    await abrirFicha();
+    escribirRegistro();
+    caido = true;
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comprobantes" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos actualizar los comprobantes");
+    expect(screen.getByText(CUENTA)).toBeTruthy();
+    expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
+    expect(elegido()).toBe(DOC);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar comprobantes" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+
+  async function registrarConRechazo(codigo: string) {
+    vi.stubGlobal("fetch", pagos({ [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error(codigo, 409) }));
+    await abrirFicha();
+    escribirRegistro();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar el pago" }));
+  }
+
+  it.each([
+    ["operacion_de_otra_orden", /Ese número de operación ya respalda otra orden/],
+    ["comprobante_de_otra_orden", /Ese comprobante ya respalda otro pago/],
+  ])("%s es de tipeo: la ficha queda con lo escrito", async (codigo, texto) => {
+    await registrarConRechazo(codigo);
+    expect(await screen.findByText(texto)).toBeTruthy();
+    expect(screen.getByText(CUENTA)).toBeTruthy();
+    expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
+  });
+
+  it("si la orden cambió de verdad, la ficha sí se cierra", async () => {
+    await registrarConRechazo("orden_no_admite");
+    expect(await screen.findByText(/La orden ya no admite eso/)).toBeTruthy();
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
+    expect(screen.queryByText(CUENTA)).toBeNull();
+  });
+
+  it("si falla la recarga después de registrar, el «Listo» queda y se puede reintentar", async () => {
+    let caido = false;
+    vi.stubGlobal("fetch", pagos({
+      [`GET ${BASE}/pagos-manuales`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => {
+        caido = true;
+        return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
+      },
+    }));
+    await abrirFicha();
+    escribirRegistro();
+    fireEvent.click(screen.getByRole("button", { name: "Registrar el pago" }));
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.getByText(/Listo: registraste el pago/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    ["/egresos/pagos", `GET ${BASE}/pagos-manuales`, "No hay órdenes aprobadas esperando su pago."],
+    ["/egresos/conciliacion", `GET ${BASE}/pagos-manuales/revision`, "No hay pagos esperando conciliación."],
+    ["/egresos/por-aclarar", "GET /api/v1/pagos-por-aclarar", "No tenés pagos para aclarar."],
+  ])("%s: si la lectura falla, Reintentar la vuelve a pedir", async (ruta, clave, vacia) => {
+    let caido = true;
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+      [clave]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
+    }));
+    abrir(ruta);
+    const boton = await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
+    caido = false;
+    fireEvent.click(boton);
+    expect(await screen.findByText(vacia)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+
+  describe("pagos para aclarar", () => {
+    const CON_ARCHIVO = { ...POR_ACLARAR, comprobante_id: NUEVO };
+
+    it("el comprobante en revisión se actualiza solo y habilita registrar", async () => {
+      conEsperaManual();
+      let estado = "en_cuarentena";
+      vi.stubGlobal("fetch", backend({
+        "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...CON_ARCHIVO, comprobante_estado: estado }] }),
+      }));
+      abrir("/egresos/por-aclarar");
+      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
+      expect(registrar.disabled).toBe(true);
+      estado = "disponible";
+      await vi.advanceTimersByTimeAsync(ESPERA);
+      expect(await screen.findByText(/ya podés registrar el pago/)).toBeTruthy();
+      expect(registrar.disabled).toBe(false);
+    });
+
+    it("sin el formulario abierto no mira nada por su cuenta", async () => {
+      conEsperaManual();
+      const api = backend({
+        "GET /api/v1/pagos-por-aclarar": () =>
+          Response.json({ elementos: [{ ...CON_ARCHIVO, comprobante_estado: "en_cuarentena" }] }),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/egresos/por-aclarar");
+      await screen.findByRole("button", { name: "Sí transferí" });
+      const lecturas = pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length;
+      await vi.advanceTimersByTimeAsync(ESPERA * 2);
+      expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar")).toHaveLength(lecturas);
+    });
+
+    it("si falla la actualización, el formulario queda con lo escrito y lo avisa", async () => {
+      let caido = false;
+      vi.stubGlobal("fetch", backend({
+        "GET /api/v1/pagos-por-aclarar": () =>
+          caido ? error("error_interno", 500) : Response.json({ elementos: [POR_ACLARAR] }),
+      }));
+      abrir("/egresos/por-aclarar");
+      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+      caido = true;
+      fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+      expect((await screen.findByRole("alert")).textContent).toContain("No pudimos actualizar la lista");
+      expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
+    });
+  });
+
+  describe("ver el comprobante en la conciliación", () => {
+    const DESCARGA = `${BASE}/documentos/${DOC}/versiones/${ARCHIVO}/descargar`;
+    const conLista = (descarga: () => Response) =>
+      backend({
+        "GET /api/v1/me/consorcios": CONSORCIOS,
+        [`GET ${BASE}/pagos-manuales/revision`]: () => Response.json({ elementos: [conPago("en_verificacion", [pago()])] }),
+        [`GET ${DESCARGA}`]: descarga,
+      });
+    /** Lo que da el navegador con `redirect: "manual"` ante el 302 a la URL firmada. */
+    const redireccion = () => {
+      const r = new Response(null, { status: 200 });
+      Object.defineProperty(r, "type", { value: "opaqueredirect" });
+      Object.defineProperty(r, "ok", { value: false });
+      Object.defineProperty(r, "status", { value: 0 });
+      return r;
+    };
+
+    it("un error se dice en la pantalla y no se navega al JSON", async () => {
+      const navega = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+      vi.stubGlobal("fetch", conLista(() => error("archivo_vencido", 410)));
+      abrir("/egresos/conciliacion");
+      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
+      expect(await screen.findByText("Este archivo ya no está disponible.")).toBeTruthy();
+      expect(navega).not.toHaveBeenCalled();
+      expect(screen.getByRole("list", { name: "Pagos para conciliar" })).toBeTruthy();
+    });
+
+    it("si está, sin seguir el 302 en el pedido, navega a la descarga", async () => {
+      const destinos: string[] = [];
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+        destinos.push(new URL(this.href).pathname);
+      });
+      const api = conLista(redireccion);
+      vi.stubGlobal("fetch", api);
+      abrir("/egresos/conciliacion");
+      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
+      await waitFor(() => expect(destinos).toEqual([DESCARGA]));
+      expect(pedidos(api, "GET", DESCARGA)[0]?.redirect).toBe("manual");
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    it("una respuesta 200 que no es la redirección no se toma por un éxito", async () => {
+      const navega = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+      vi.stubGlobal("fetch", conLista(() => Response.json({})));
+      abrir("/egresos/conciliacion");
+      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(navega).not.toHaveBeenCalled();
+    });
+  });
+});

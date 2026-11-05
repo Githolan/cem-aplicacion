@@ -192,6 +192,39 @@ describe("página /contactos/gestion", () => {
     expect(Object.keys(localStorage)).toEqual([]);
   });
 
+  it("la lista que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
+    let caida = true;
+    const simulado = conLista({
+      [`GET ${GESTION}`]: () => (caida ? Promise.reject(new TypeError("Failed to fetch")) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2);
+    expect(screen.queryByText(SIN_CONEXION)).toBeNull();
+    // Control: con la lista a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conLista({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una sola vez, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(1);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+  });
+
   it("sin `contactos.gestionar` (403) lo dice, sin lista ni botón para agregar", async () => {
     vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => error("sin_permiso", 403) }));
     abrir();

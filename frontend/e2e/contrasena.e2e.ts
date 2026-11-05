@@ -311,15 +311,13 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     expect(errores).toEqual([]);
   });
 
-  test("sin la verificación reciente (403) lo explica con el enlace al segundo factor", async ({ page, baseURL }) => {
+  test("sin la verificación reciente (403) pide confirmar ahí mismo, sin perder lo escrito", async ({ page, baseURL }) => {
     await simularCuenta(page, baseURL!, { status: 403, json: fallo("segundo_factor_requerido") });
     await page.goto("/cuenta");
     await cambiar(page);
 
-    const estado = seccionCuenta(page).getByRole("status");
-    await expect(estado).toContainText("Para esto tenés que confirmar");
-    await estado.getByRole("link", { name: /Verificá un código/ }).click();
-    await expect(page).toHaveURL(/\/cuenta\/segundo-factor$/);
+    await expect(seccionCuenta(page).getByRole("heading", { name: "Confirmá que sos vos" })).toBeVisible();
+    await expect(page).toHaveURL(/\/cuenta$/);
   });
 
   test("modo lectura ampliada: la página con la sección y su aviso pasa el contraste AAA", async ({ page, baseURL }) => {
@@ -328,7 +326,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.getByRole("banner").getByRole("button", { name: "Letra grande y alto contraste" }).click();
     await expect(page.locator("html")).toHaveClass("lectura-ampliada");
     await cambiar(page);
-    await expect(seccionCuenta(page).getByRole("status")).toContainText("Para esto tenés que confirmar");
+    await expect(seccionCuenta(page).getByRole("heading", { name: "Confirmá que sos vos" })).toBeVisible();
 
     const resultado = await new AxeBuilder({ page })
       .withRules(["color-contrast", "color-contrast-enhanced"])

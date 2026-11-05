@@ -146,18 +146,68 @@ describe("sección de pedidos sobre los datos", () => {
     expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([{ contrasena: null }]);
   });
 
-  it("con segundo factor sin verificar lleva a su página", async () => {
+  it("con segundo factor sin verificar lo pide acá mismo y repite el paso con lo que ya estaba escrito", async () => {
+    let verificado = false;
+    const simulado = backend({
+      [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+      "POST /api/v1/auth/totp/verificar": () => {
+        verificado = true;
+        return Response.json({
+          verificado_en: "2026-10-28T12:00:00Z",
+          vale_hasta: "2026-10-28T12:10:00Z",
+          codigos_recuperacion_restantes: 9,
+        });
+      },
+      [`POST ${CASOS}/${CASO}/confirmar`]: () =>
+        verificado ? new Response(null, { status: 204 }) : error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    mostrar(true, true);
+    fireEvent.change(await screen.findByLabelText("Código que te llegó por correo"), { target: { value: "ABCDE" } });
+    fireEvent.change(screen.getByLabelText("Tu contraseña"), { target: { value: "una frase" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+
+    expect(await screen.findByText("Listo: confirmaste tu pedido.")).toBeTruthy();
+    expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([
+      { codigo: "ABCDE", contrasena: "una frase" },
+      { codigo: "042917" },
+      { codigo: "ABCDE", contrasena: "una frase" },
+    ]);
+  });
+
+  it("si cancela el código, vuelve al formulario con lo que había escrito y sin repetir el paso", async () => {
+    const simulado = backend({
+      [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+      [`POST ${CASOS}/${CASO}/confirmar`]: () => error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    mostrar(true, true);
+    fireEvent.change(await screen.findByLabelText("Código que te llegó por correo"), { target: { value: "ABCDE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+
+    const campo = (await screen.findByLabelText("Código que te llegó por correo")) as HTMLInputElement;
+    expect(campo.value).toBe("ABCDE");
+    expect(await Promise.all(cuerpos(simulado, "POST"))).toHaveLength(1);
+  });
+
+  it("control: si lo que falta es la contraseña no pide el código", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
         [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("confirmado")] }),
-        [`POST ${CASOS}/${CASO}/copia`]: () => error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
+        [`POST ${CASOS}/${CASO}/copia`]: () => error("reautenticacion_requerida", 403, { falta: "contrasena" }),
       }),
     );
     mostrar(true, true);
-    fireEvent.change(await screen.findByLabelText("Tu contraseña"), { target: { value: "x" } });
-    fireEvent.click(screen.getByRole("button", { name: "Descargar la copia de mis datos" }));
-    expect(await screen.findByRole("link", { name: "verificá un código en la página del segundo factor" })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Descargar la copia de mis datos" }));
+
+    expect(await screen.findByText("Escribí tu contraseña actual.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Verificar y seguir" })).toBeNull();
   });
 
   it("un código que no sirve muestra el mensaje del backend y es accesible", async () => {

@@ -155,9 +155,7 @@ export function Padron() {
 
   const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
@@ -176,6 +174,12 @@ export function Padron() {
         else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -207,6 +211,13 @@ export function Padron() {
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar]);
+
+  /** Vuelve a pedir el padrón que no se pudo consultar; un «Listo» que esté a la vista queda. */
+  function reconsultar() {
+    setAviso((actual) => (actual?.ok ? actual : null));
+    setLectura({ tipo: "cargando" });
+    setVuelta((v) => v + 1);
+  }
 
   function abrir(fila: Fila, accion: Accion) {
     clave.current = null;
@@ -338,7 +349,14 @@ export function Padron() {
             <h2 id={`${id}-padron`}>Vínculos por unidad</h2>
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
             {lectura.tipo === "sin_permiso" && <p>No tenés permiso para ver el padrón de este edificio.</p>}
-            {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar el padrón.</p>}
+            {lectura.tipo === "sin_servicio" && (
+              <>
+                <p>No pudimos mostrar el padrón.</p>
+                <button type="button" onClick={reconsultar} disabled={enviando}>
+                  Consultar de nuevo
+                </button>
+              </>
+            )}
             {lectura.tipo === "ok" && lectura.filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {lectura.tipo === "ok" && lectura.filas.length > 0 && (
               <ul className="sesiones" aria-label="Padrón">
@@ -352,11 +370,22 @@ export function Padron() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (

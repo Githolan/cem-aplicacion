@@ -64,6 +64,11 @@ function backend(respuestas: Respuestas) {
 
 const sinRed = () => Promise.reject(new TypeError("Failed to fetch"));
 
+/** Cuántas veces se pidió un camino. */
+function veces(simulado: ReturnType<typeof vi.fn>, camino: string): number {
+  return simulado.mock.calls.filter((c) => new URL((c as unknown as [Request])[0].url).pathname === camino).length;
+}
+
 function abrir(ruta = "/contactos") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -226,6 +231,123 @@ describe("página /contactos", () => {
     abrir();
     expect(await screen.findByText(/Este dispositivo no tiene contactos guardados/)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
+  });
+
+  it("sin copia, la lista que no respondió se reintenta y el error se va", async () => {
+    let caida = true;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/Este dispositivo no tiene una copia guardada/)).toBeTruthy();
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+    expect(veces(simulado, RUTA(C1))).toBe(2);
+    // Los edificios estaban: solo se volvió a pedir la lista.
+    expect(veces(simulado, "/api/v1/me/consorcios")).toBe(1);
+    expect(screen.queryByText(/Este dispositivo no tiene una copia guardada/)).toBeNull();
+    // Control: con la lista a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("con la copia a la vista, el reintento no la saca mientras consulta y después la reemplaza", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    let soltar: (r: Response) => void = () => undefined;
+    let caida = true;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: () => (caida ? sinRed() : new Promise<Response>((r) => (soltar = r))),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/Esta es la copia guardada el /)).toBeTruthy();
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    const consultando = await screen.findByRole("button", { name: "Consultando…" });
+    expect(consultando.hasAttribute("disabled")).toBe(true);
+    // Son teléfonos de emergencia: siguen a la vista mientras llega la respuesta.
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+    await waitFor(() => expect(veces(simulado, RUTA(C1))).toBe(2));
+    soltar(Response.json({ ...LISTA, elementos: [contacto(K1, "Ascensores del Norte")] }));
+    await waitFor(() => expect(screen.queryByText(/Esta es la copia guardada el /)).toBeNull());
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Norte"]);
+  });
+
+  it("si el reintento vuelve a fallar, la copia sigue y se puede probar otra vez", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: () => sinRed(),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect(veces(simulado, RUTA(C1))).toBe(2));
+    const otraVez = await screen.findByRole("button", { name: "Consultar de nuevo" });
+    expect(otraVez.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText(/Esta es la copia guardada el /)).toBeTruthy();
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+  });
+
+  it("sin edificios a la vista, el reintento los vuelve a pedir y respeta el edificio elegido", async () => {
+    const DOS = [...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }];
+    guardar(C1, "Edificio Azul", LISTA);
+    guardar(C2, "Edificio Verde", { ...LISTA, elementos: [contacto(K2, "Guardia verde")] });
+    let caidos = true;
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => (caidos ? sinRed() : Response.json(DOS)),
+      [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
+      [`GET ${RUTA(C2)}`]: () => Response.json({ ...LISTA, elementos: [contacto(K2, "Guardia verde en línea")] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const edificio = (await screen.findByLabelText("Edificio")) as HTMLSelectElement;
+    fireEvent.change(edificio, { target: { value: C2 } });
+    expect(await nombres()).toEqual(["Emergencias: Guardia verde"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect(veces(simulado, "/api/v1/me/consorcios")).toBe(2));
+    // Falló otra vez: sigue en el edificio elegido, con su copia.
+    expect(await screen.findByRole("button", { name: "Consultar de nuevo" })).toBeTruthy();
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2);
+    caidos = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect(screen.queryByText(/Esta es la copia guardada el /)).toBeNull());
+    expect(await nombres()).toEqual(["Emergencias: Guardia verde en línea"]);
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2);
+    expect(veces(simulado, RUTA(C1))).toBe(0);
+  });
+
+  it("sin edificios ni copias, el reintento trae la lista", async () => {
+    let caidos = true;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => (caidos ? sinRed() : Response.json(CONSORCIOS)),
+        [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
+      }),
+    );
+    abrir();
+    expect(await screen.findByText(/Este dispositivo no tiene contactos guardados/)).toBeTruthy();
+    caidos = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+    expect(screen.queryByText(/Este dispositivo no tiene contactos guardados/)).toBeNull();
+  });
+
+  it("si el reintento dice que ya no participa de ningún edificio, la copia a la vista se va", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    let caidos = true;
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => (caidos ? sinRed() : Response.json([])) }));
+    abrir();
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+    caidos = false;
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
+    expect(copiaGuardada()).toBeNull();
   });
 
   it("mientras llega la lista del edificio dice «Consultando…», sin lista ni copia", async () => {

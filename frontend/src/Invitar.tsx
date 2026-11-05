@@ -124,9 +124,7 @@ export function Invitar() {
     [aEntrar],
   );
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
@@ -145,6 +143,12 @@ export function Invitar() {
         else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -201,6 +205,13 @@ export function Invitar() {
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar]);
+
+  /** Vuelve a pedir la lista que no se pudo consultar; un «Listo» que esté a la vista queda. */
+  function reconsultarLista() {
+    setAviso((actual) => (actual?.ok ? actual : null));
+    setListaFallida(false);
+    setVuelta((v) => v + 1);
+  }
 
   /** Cualquier cambio en los datos es otro intento: otra clave. */
   function cambiar<T>(fijar: (v: T) => void) {
@@ -405,6 +416,13 @@ export function Invitar() {
             <h2 id={`${id}-lista`}>Invitaciones</h2>
             {invitaciones === null && !listaFallida && <p>Consultando…</p>}
             {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
+            {listaFallida && (
+              <p>
+                <button type="button" onClick={reconsultarLista} disabled={enviando}>
+                  Consultar de nuevo
+                </button>
+              </p>
+            )}
             {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
             {invitaciones !== null && invitaciones.length > 0 && (
               <>
@@ -430,11 +448,22 @@ export function Invitar() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (

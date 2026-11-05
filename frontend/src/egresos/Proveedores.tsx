@@ -4,8 +4,9 @@ import { Link } from "react-router";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
+  type Aviso,
   cambioLoVisto,
   cuentaEnmascarada,
   ENCABEZADO_IDEMPOTENCIA,
@@ -15,9 +16,12 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
   TEXTO_ESTADO_PROVEEDOR,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
@@ -43,7 +47,6 @@ const VACIO: Datos = { cuit: "", razon: "", rubro: "", contacto: "", cuenta: "",
 
 type Formulario = { modo: "alta" } | { modo: "cambio"; proveedor: Proveedor };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
 
@@ -64,7 +67,7 @@ export function Proveedores() {
   return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
@@ -93,7 +96,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -101,7 +104,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
@@ -113,6 +116,11 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
     setLectura({ tipo: "cargando" });
     setFicha(null);
     setVuelta((v) => v + 1);
+  }
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    volverAPedir();
   }
 
   function verFicha(p: Proveedor) {
@@ -241,17 +249,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
 
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <AvisoPantalla aviso={aviso} />
 
       {pendiente !== null && (
         <PedirCodigo
@@ -274,6 +274,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
           {lectura.tipo === "sin_permiso" && (
             <p className="tarjeta">No tenés la facultad de preparar órdenes de pago en este edificio.</p>
           )}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
           {lectura.tipo === "ok" && formulario === null && ficha === null && (
             <>
               <button type="button" onClick={() => abrir({ modo: "alta" })}>

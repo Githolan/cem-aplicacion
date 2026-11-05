@@ -803,4 +803,62 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(within(lista).queryByText("Consultando…")).toBeNull();
     expect(within(lista).getByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
   });
+
+  it("la lista que no se pudo consultar se reintenta sin perder lo escrito, y el error se va", async () => {
+    let caida = true;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const lista = await screen.findByRole("region", { name: "Invitaciones" });
+    expect(await within(lista).findByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
+    caida = false;
+    fireEvent.click(within(lista).getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await within(lista).findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2);
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    // Control: con la lista a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("si falla la recarga después de invitar, el «Listo» queda y la lista se reintenta", async () => {
+    let caida = false;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+      [`POST ${RUTA_LISTA}`]: () => {
+        caida = true;
+        return Response.json({ id: NUEVA, nombre: "Dora Ruiz" }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(screen.getByRole("button", { name: "Invitar" }));
+    const reintentar = await screen.findByRole("button", { name: "Consultar de nuevo" });
+    caida = false;
+    fireEvent.click(reintentar);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull());
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(3);
+    expect(screen.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conConsorcio({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una sola vez, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(1);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+  });
 });

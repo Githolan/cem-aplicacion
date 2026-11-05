@@ -1,13 +1,13 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { PedirCodigo } from "./egresos/PedirCodigo";
 import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Sección "Tus pedidos sobre tus datos" de /cuenta (RF37, corte 2d-2). Decisión del propietario
 // del 28-10-2026: la confirmación de un caso y la copia de los datos propios van solo dentro de
@@ -15,7 +15,8 @@ import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 // abierto se confirma con el código que llegó al correo y uno de copia confirmado se descarga.
 // Cada pedido pide reautenticación reciente y el backend decide: la contraseña si la tiene, haber
 // entrado hace menos de 10 minutos si no, y el segundo factor verificado si lo activó
-// (403 `reautenticacion_requerida`, `detalle.falta`). La copia se guarda como archivo en el
+// (403 `reautenticacion_requerida`, `detalle.falta`); el segundo factor se pide acá mismo y el paso
+// se repite con lo que ya estaba escrito. La copia se guarda como archivo en el
 // dispositivo desde la respuesta: no hay ningún enlace que se pueda compartir. Si el navegador no
 // la guardó, se vuelve a pedir; el caso se cierra cuando la persona avisa que la guardó
 // (`…/recibida`). Sin casos pendientes, la sección no se muestra, y en la primera consulta tampoco
@@ -99,6 +100,7 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
   const [clave, setClave] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [pendiente, setPendiente] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     let vigente = true;
@@ -134,8 +136,14 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
 
   const reautenticacion = () => ({ contrasena: contrasena ? clave : null });
 
-  function confirmar(evento: FormEvent<HTMLFormElement>, caso: Caso) {
-    evento.preventDefault();
+  /** Si falta el segundo factor, deja el paso pendiente hasta que la persona confirme. */
+  function rechazar(error: unknown, status: number, reintentar: () => void) {
+    const motivo = avisoDeError(error, status);
+    if (motivo.tipo === "falta" && motivo.falta === "segundo_factor") setPendiente(() => reintentar);
+    else setAviso(motivo);
+  }
+
+  function confirmar(caso: Caso) {
     setEnviando(true);
     setAviso(null);
     void api
@@ -150,14 +158,13 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
           setClave("");
           setAviso({ tipo: "ok", texto: "Listo: confirmaste tu pedido." });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
-        else setAviso(avisoDeError(error, response.status));
+        else rechazar(error, response.status, () => confirmar(caso));
       })
       .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
       .finally(() => setEnviando(false));
   }
 
-  function descargar(evento: FormEvent<HTMLFormElement>, caso: Caso) {
-    evento.preventDefault();
+  function descargar(caso: Caso) {
     setEnviando(true);
     setAviso(null);
     void api
@@ -176,7 +183,7 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
             texto: "Te mandamos la copia. Revisá que el archivo se haya guardado y avisanos.",
           });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
-        else setAviso(avisoDeError(error, response.status));
+        else rechazar(error, response.status, () => descargar(caso));
       })
       .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
       .finally(() => setEnviando(false));
@@ -195,7 +202,7 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
           actualizar(caso.id, { estado: "resuelto" });
           setAviso({ tipo: "ok", texto: "Listo: cerramos tu pedido." });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
-        else setAviso(avisoDeError(error, response.status));
+        else rechazar(error, response.status, () => recibida(caso));
       })
       .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
       .finally(() => setEnviando(false));
@@ -213,6 +220,19 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
           required
         />
       </>
+    );
+
+  // Lo escrito vive en esta sección: el reintento sale con los mismos datos.
+  if (pendiente !== null)
+    return (
+      <PedirCodigo
+        acto="seguir con tu pedido"
+        alVerificar={() => {
+          setPendiente(null);
+          pendiente();
+        }}
+        alCancelar={() => setPendiente(null)}
+      />
     );
 
   return (
@@ -255,7 +275,14 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
           </h3>
           <p>Pedido del {fecha(caso.abierto_en)}.</p>
           {caso.estado === "abierto" ? (
-            <form className="formulario" onSubmit={(e) => confirmar(e, caso)} noValidate>
+            <form
+              className="formulario"
+              onSubmit={(e) => {
+                e.preventDefault();
+                confirmar(caso);
+              }}
+              noValidate
+            >
               <label htmlFor={`${id}-${caso.id}-codigo`}>Código que te llegó por correo</label>
               <input
                 id={`${id}-${caso.id}-codigo`}
@@ -271,7 +298,14 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
             </form>
           ) : (
             <>
-              <form className="formulario" onSubmit={(e) => descargar(e, caso)} noValidate>
+              <form
+                className="formulario"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  descargar(caso);
+                }}
+                noValidate
+              >
                 <p>
                   {caso.copia_entregada_en
                     ? "Si el archivo no se guardó, podés descargarlo de nuevo."
@@ -301,12 +335,6 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
           <p className="aviso-error">
             Por seguridad, <Link to={RUTA_ENTRAR} state={{ renovar: true }}>volvé a entrar con el enlace del correo</Link> y hacelo
             dentro de los 10 minutos.
-          </p>
-        )}
-        {aviso?.tipo === "falta" && aviso.falta === "segundo_factor" && (
-          <p className="aviso-error">
-            Antes, <Link to={RUTA_SEGUNDO_FACTOR}>verificá un código en la página del segundo factor</Link>{" "}
-            (vale 10 minutos).
           </p>
         )}
       </div>

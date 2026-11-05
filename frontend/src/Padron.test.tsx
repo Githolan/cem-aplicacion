@@ -569,6 +569,51 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     expect(within(seccion).getByText("No pudimos mostrar el padrón.")).toBeTruthy();
   });
 
+  it("el padrón que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
+    let caido = true;
+    const simulado = conPadron({
+      [`GET ${RUTA_PADRON}`]: () => (caido ? error("servicio_no_disponible", 503) : Response.json(PADRON)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const seccion = await screen.findByRole("region", { name: "Vínculos por unidad" });
+    expect(await within(seccion).findByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    caido = false;
+    fireEvent.click(within(seccion).getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2);
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    // Control: con el padrón a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("si el reintento del padrón falla otra vez, sigue en la pantalla con el botón", async () => {
+    const simulado = conPadron({ [`GET ${RUTA_PADRON}`]: () => error("servicio_no_disponible", 503) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2));
+    expect(await screen.findByRole("button", { name: "Consultar de nuevo" })).toBeTruthy();
+    expect(screen.getByText("No pudimos mostrar el padrón.")).toBeTruthy();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conPadron({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una sola vez, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(1);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+  });
+
   it("sin conexión al consultar el padrón lo dice", async () => {
     const simulado = vi.fn(async (pedido: Request) => {
       if (new URL(pedido.url).pathname === RUTA_PADRON) throw new TypeError("Failed to fetch");

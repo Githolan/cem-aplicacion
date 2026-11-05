@@ -46,7 +46,8 @@ type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_permiso" }
   | { tipo: "en_linea"; copia: Copia; guardada: boolean }
-  | { tipo: "copia"; copia: Copia; mensaje: string }
+  /** `reconsultando`: se pidió de nuevo y la copia sigue a la vista, porque son teléfonos de emergencia. */
+  | { tipo: "copia"; copia: Copia; mensaje: string; reconsultando?: boolean }
   | { tipo: "sin_servicio"; mensaje: string };
 
 type Pantalla =
@@ -68,6 +69,8 @@ export function Contactos() {
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [consorcio, setConsorcio] = useState("");
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
+  // Cada reintento vuelve a pedir la lista del edificio.
+  const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
 
   // Sin sesión no queda ninguna copia: el próximo que use el dispositivo no ve las listas.
@@ -80,12 +83,11 @@ export function Contactos() {
   const desdeCopias = useCallback((mensaje: string) => {
     const copias = leerCopias();
     setPantalla({ tipo: "copias", consorcios: copias.map((c) => ({ id: c.consorcio_id, nombre: c.nombre })), mensaje });
-    if (copias[0] !== undefined) setConsorcio(copias[0].consorcio_id);
+    // Un reintento que vuelve a fallar no cambia el edificio que la persona eligió.
+    setConsorcio((actual) => (copias.some((c) => c.consorcio_id === actual) ? actual : (copias[0]?.consorcio_id ?? "")));
   }, []);
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
@@ -102,17 +104,25 @@ export function Contactos() {
         if (primero === undefined) {
           // Ya no participa de ningún edificio: ninguna copia sigue valiendo.
           borrarCopias();
+          // En un reintento, la copia a la vista ya no vale.
+          setLectura({ tipo: "cargando" });
           setPantalla({ tipo: "sin_consorcios" });
           return;
         }
         setPantalla({ tipo: "lista", consorcios: data });
-        setConsorcio(primero.id);
+        setConsorcio((actual) => (data.some((c) => c.id === actual) ? actual : primero.id));
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
         else desdeCopias(SIN_CONEXION);
       });
   }, [aEntrar, desdeCopias]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "" || pantalla.tipo === "cargando" || pantalla.tipo === "sin_consorcios") return;
@@ -149,7 +159,18 @@ export function Contactos() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, pantalla, aEntrar]);
+  }, [consorcio, pantalla, vuelta, aEntrar]);
+
+  /** Sin edificios a la vista se pregunta por ellos; con la lista caída, solo por la lista. */
+  function reconsultar() {
+    setLectura((actual) => (actual.tipo === "copia" ? { ...actual, reconsultando: true } : { tipo: "cargando" }));
+    if (pantalla.tipo !== "copias") {
+      setVuelta((v) => v + 1);
+      return;
+    }
+    if (pantalla.consorcios.length === 0) setPantalla({ tipo: "cargando" });
+    consultarEdificios();
+  }
 
   return (
     <>
@@ -184,10 +205,13 @@ export function Contactos() {
         {pantalla.tipo === "cargando" && <p className="tarjeta">Consultando…</p>}
         {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Todavía no participás de ningún edificio.</p>}
         {pantalla.tipo === "copias" && pantalla.consorcios.length === 0 && (
-          <p className="tarjeta aviso-error">
-            {pantalla.mensaje} Este dispositivo no tiene contactos guardados: abrí esta página con conexión
-            para guardarlos.
-          </p>
+          <div className="tarjeta">
+            <p className="aviso-error">
+              {pantalla.mensaje} Este dispositivo no tiene contactos guardados: abrí esta página con conexión
+              para guardarlos.
+            </p>
+            {botonReconsultar()}
+          </div>
         )}
         {pantalla.tipo !== "cargando" && pantalla.tipo !== "sin_consorcios" && pantalla.consorcios.length > 0 && estado()}
       </div>
@@ -207,19 +231,35 @@ export function Contactos() {
       case "sin_permiso":
         return <p className="tarjeta">No tenés acceso a los contactos de este edificio.</p>;
       case "sin_servicio":
-        return <p className="tarjeta aviso-error">{lectura.mensaje} Este dispositivo no tiene una copia guardada de este edificio.</p>;
+        return (
+          <div className="tarjeta">
+            <p className="aviso-error">{lectura.mensaje} Este dispositivo no tiene una copia guardada de este edificio.</p>
+            {botonReconsultar()}
+          </div>
+        );
       case "copia":
         return (
-          <p className="tarjeta aviso-error">
-            {lectura.mensaje} Esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no
-            tener los últimos cambios
-          </p>
+          <div className="tarjeta">
+            <p className="aviso-error">
+              {lectura.mensaje} Esta es la copia guardada el {momento(lectura.copia.guardada_en)}, y puede no
+              tener los últimos cambios
+            </p>
+            {botonReconsultar(lectura.reconsultando)}
+          </div>
         );
       case "en_linea":
         return lectura.guardada ? null : (
           <p className="tarjeta aviso-error">Este navegador no deja guardar la lista: sin conexión no la vas a poder ver.</p>
         );
     }
+  }
+
+  function botonReconsultar(reconsultando = false) {
+    return (
+      <button type="button" onClick={reconsultar} disabled={reconsultando}>
+        {reconsultando ? "Consultando…" : "Consultar de nuevo"}
+      </button>
+    );
   }
 
   function lista(copia: Copia, sinConexion: boolean) {

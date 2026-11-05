@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { File as ArchivoNode } from "node:buffer";
 import { StrictMode } from "react";
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { App } from "./App";
-import { ACEPTA, mensajeDeError, tamano, TOPE_BYTES } from "./Documentos";
+import { ACEPTA, mensajeDeError, REFRESCO_CUARENTENA_MS, tamano, TOPE_BYTES } from "./Documentos";
 import { SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
@@ -164,6 +164,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -173,6 +174,30 @@ describe("página /documentos", () => {
     vi.stubGlobal("fetch", backend({ "GET /health": () => Response.json({ estado: "ok" }) }));
     abrir("/");
     expect((await screen.findByRole("link", { name: "Documentos del edificio" })).getAttribute("href")).toBe("/documentos");
+  });
+
+  it("si el archivo no se puede bajar, lo dice en la pantalla y no navega", async () => {
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click");
+    vi.stubGlobal(
+      "fetch",
+      conLista({ [`GET ${BASE}/${D1}/versiones/${V1}/descargar`]: () => error("archivo_vencido", 410) }),
+    );
+    abrir();
+    fireEvent.click((await screen.findAllByRole("link", { name: "Descargar" }))[0]!);
+    expect(await screen.findByText("Ese archivo ya no está disponible.")).toBeTruthy();
+    expect(clic).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 1, name: /Documentos/ })).toBeTruthy();
+  });
+
+  it("si el archivo está, navega a la descarga sin mostrar error", async () => {
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const redireccion = Response.error();
+    Object.defineProperty(redireccion, "type", { value: "opaqueredirect" });
+    vi.stubGlobal("fetch", conLista({ [`GET ${BASE}/${D1}/versiones/${V1}/descargar`]: () => redireccion }));
+    abrir();
+    fireEvent.click((await screen.findAllByRole("link", { name: "Descargar" }))[0]!);
+    await waitFor(() => expect(clic).toHaveBeenCalledOnce());
+    expect(screen.queryByText(/ya no está disponible/)).toBeNull();
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -244,7 +269,7 @@ describe("página /documentos", () => {
     expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
   });
 
-  it("«Actualizar» vuelve a pedir la lista (sin repetir solo)", async () => {
+  it("«Actualizar» vuelve a pedir la lista", async () => {
     const simulado = conLista();
     vi.stubGlobal("fetch", simulado);
     abrir();
@@ -476,6 +501,139 @@ describe("página /documentos", () => {
     expect(subidas).toHaveLength(2);
     expect(subidas[1]?.headers.get("Idempotency-Key")).toBe(subidas[0]?.headers.get("Idempotency-Key"));
     expect([...new Uint8Array(await (subidas[1] as Request).arrayBuffer())]).toEqual([...BYTES_PDF]);
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conLista({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una sola vez, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(1);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await tarjeta("Acta de asamblea ordinaria")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+  });
+
+  describe("mientras un archivo está en revisión", () => {
+    const ACTA = "Acta de asamblea ordinaria";
+    const EN_REVISION = { documentos: [documento(D1, ACTA, { versiones: [version(V2, { estado: "en_cuarentena" })] })] };
+    const DISPONIBLE = { documentos: [documento(D1, ACTA, { versiones: [version(V2)] })] };
+
+    /** `shouldAdvanceTime`: `findBy` y `waitFor` siguen andando; el intervalo lo adelanta la prueba. */
+    const conReloj = () => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const adelantar = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+    it("vuelve a pedir la lista cada intervalo y para cuando el archivo terminó", async () => {
+      conReloj();
+      const respuestas = [EN_REVISION, EN_REVISION, DISPONIBLE];
+      const simulado = conLista({ [`GET ${BASE}`]: () => Response.json(respuestas.shift() ?? DISPONIBLE) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await tarjeta(ACTA);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(1);
+      // Control: antes del intervalo no se pide nada.
+      await adelantar(REFRESCO_CUARENTENA_MS / 2);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(1);
+      await adelantar(REFRESCO_CUARENTENA_MS);
+      await waitFor(() => expect(pedidos(simulado, "GET", BASE)).toHaveLength(2));
+      await adelantar(REFRESCO_CUARENTENA_MS);
+      await waitFor(() => expect(pedidos(simulado, "GET", BASE)).toHaveLength(3));
+      expect(await screen.findByRole("link", { name: "Descargar" })).toBeTruthy();
+      await adelantar(REFRESCO_CUARENTENA_MS * 3);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(3);
+    });
+
+    it("control: sin archivos en revisión la lista no se pide sola", async () => {
+      conReloj();
+      const simulado = conLista({ [`GET ${BASE}`]: () => Response.json(DISPONIBLE) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await tarjeta(ACTA);
+      await adelantar(REFRESCO_CUARENTENA_MS * 3);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(1);
+    });
+
+    it("para al salir de la pantalla", async () => {
+      conReloj();
+      const simulado = conLista({ [`GET ${BASE}`]: () => Response.json(EN_REVISION) });
+      vi.stubGlobal("fetch", simulado);
+      const { unmount } = abrir();
+      await tarjeta(ACTA);
+      // Control: el próximo refresco estaba programado, y salir lo cancela.
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      unmount();
+      expect(vi.getTimerCount()).toBe(0);
+      await adelantar(REFRESCO_CUARENTENA_MS * 3);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(1);
+    });
+
+    it("tras subir, el aviso dice que la lista se actualiza sola y ya no manda a tocar «Actualizar»", async () => {
+      conReloj();
+      let subido = false;
+      const simulado = conLista({
+        [`GET ${BASE}`]: () => Response.json(subido ? EN_REVISION : { documentos: [] }),
+        [`POST ${BASE}`]: () => Response.json({ id: D1 }, { status: 201 }),
+        [`POST ${versiones(D1)}`]: () => {
+          subido = true;
+          return Response.json(
+            { id: V2, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+            { status: 201 },
+          );
+        },
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await completarNuevo();
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      const listo = await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/);
+      expect(listo.textContent).toMatch(/la lista se actualiza sola/);
+      expect(listo.textContent).not.toMatch(/Actualizar/);
+      await tarjeta(ACTA);
+      const antes = pedidos(simulado, "GET", BASE).length;
+      await adelantar(REFRESCO_CUARENTENA_MS);
+      await waitFor(() => expect(pedidos(simulado, "GET", BASE).length).toBe(antes + 1));
+    });
+
+    it("un refresco que falla no saca la lista ni lo escrito, lo dice y no sigue solo", async () => {
+      conReloj();
+      let caida = false;
+      const simulado = conLista({
+        [`GET ${BASE}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(EN_REVISION)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await tarjeta(ACTA);
+      fireEvent.click(screen.getByRole("button", { name: "Cargar un documento" }));
+      escribir("Título", "Presupuesto de pintura");
+      caida = true;
+      await adelantar(REFRESCO_CUARENTENA_MS);
+      expect(await screen.findByText(/La lista puede no estar al día: tocá «Actualizar»\./)).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 4, name: ACTA })).toBeTruthy();
+      expect(screen.queryByText("No pudimos mostrar la lista.")).toBeNull();
+      expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("Presupuesto de pintura");
+      await adelantar(REFRESCO_CUARENTENA_MS * 3);
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(2);
+    });
+
+    it("control: la misma falla al tocar «Actualizar» sí dice que no se pudo mostrar la lista", async () => {
+      let caida = false;
+      const simulado = conLista({
+        [`GET ${BASE}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(EN_REVISION)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await tarjeta(ACTA);
+      caida = true;
+      fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+      expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+      expect(screen.queryByText(/La lista puede no estar al día/)).toBeNull();
+    });
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, con la lista y con cada formulario abierto", async () => {

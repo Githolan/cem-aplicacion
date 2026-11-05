@@ -795,3 +795,191 @@ describe("página /egresos/revision", () => {
     expect(await enviado.json()).toEqual({ version: 1, motivo: "Falta la factura" });
   });
 });
+
+describe("fricción: el resultado y el error en el lugar justo", () => {
+  const CONSEJO_LISTA = {
+    [`GET ${BASE}/ordenes-pago/revision`]: () => Response.json({ elementos: [orden({ estado: "en_revision" })] }),
+  };
+  const ORDENES_LISTA = {
+    [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [orden()] }),
+    [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+    [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+  };
+  const PROVEEDORES_LISTA = { [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }) };
+
+  it.each([
+    ["/egresos/proveedores", `GET ${BASE}/proveedores`, PROVEEDORES_LISTA, "Dar de alta un proveedor"],
+    ["/egresos/ordenes", `GET ${BASE}/ordenes-pago`, ORDENES_LISTA, "Preparar una orden"],
+  ] as [string, string, Respuestas, string][])("%s: si la lectura falla, ofrece Reintentar y vuelve a pedir", async (ruta, clave, sanas, boton) => {
+    let caido = true;
+    const sana = sanas[clave] as () => Response;
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      ...sanas,
+      [clave]: () => (caido ? error("error_interno", 500) : sana()),
+    }));
+    abrir(ruta);
+    const reintentar = await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
+    caido = false;
+    fireEvent.click(reintentar);
+    expect(await screen.findByRole("button", { name: boton })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("/egresos/revision: si la lectura falla, ofrece Reintentar y vuelve a pedir", async () => {
+    let caido = true;
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/ordenes-pago/revision`]: () =>
+        caido ? error("error_interno", 500) : CONSEJO_LISTA[`GET ${BASE}/ordenes-pago/revision`]!(),
+    }));
+    abrir("/egresos/revision");
+    const reintentar = await screen.findByRole("button", { name: "Reintentar" });
+    caido = false;
+    fireEvent.click(reintentar);
+    expect(await screen.findByRole("list", { name: "Órdenes enviadas" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sin la facultad no se ofrece Reintentar: volver a pedir no lo arregla", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/proveedores`]: () => error("sin_permiso", 403),
+    }));
+    abrir("/egresos/proveedores");
+    expect(await screen.findByText(/No tenés la facultad de preparar órdenes/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+
+  it.each([
+    "/egresos/proveedores", "/egresos/ordenes", "/egresos/revision", "/egresos/pagos", "/egresos/conciliacion", "/liquidacion",
+  ])("%s: si no llegan los edificios, Reintentar vuelve a pedirlos", async (ruta) => {
+    let caido = true;
+    const api = backend({
+      "GET /api/v1/me/consorcios": () => (caido ? error("error_interno", 500) : Response.json([])),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(ruta);
+    const boton = await screen.findByRole("button", { name: "Reintentar" });
+    expect(pedidos(api, "GET", "/api/v1/me/consorcios")).toHaveLength(1);
+    caido = false;
+    fireEvent.click(boton);
+    expect(await screen.findByText("No tenés edificios en Consorcio en Mano.")).toBeTruthy();
+    expect(pedidos(api, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+
+  it("si falla la recarga después de un alta, el «Listo» queda y se puede reintentar", async () => {
+    let caido = false;
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/proveedores`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
+      [`POST ${BASE}/proveedores`]: () => {
+        caido = true;
+        return Response.json(proveedor(), { status: 201 });
+      },
+    }));
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/Razón social/), { target: { value: "Nuevo SRL" } });
+    fireEvent.submit(screen.getByLabelText(/Razón social/).closest("form") as HTMLFormElement);
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.getByText("Listo: dimos de alta el proveedor.")).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+  });
+
+  it("emitir lleva a los pagos del mismo edificio, con el resultado y sin abrir la cuenta", async () => {
+    const aprobada = orden({ estado: "aprobada", aprobacion_vence_en: "2999-01-01T00:00:00Z" });
+    const OTRO = `/api/v1/consorcios/${C2}`;
+    const api = backend({
+      "GET /api/v1/me/consorcios": () =>
+        Response.json([{ id: C1, nombre: "Edificio Uno", vinculos: [] }, { id: C2, nombre: "Edificio Dos", vinculos: [] }]),
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      [`GET ${OTRO}/ordenes-pago`]: () => Response.json({ elementos: [aprobada] }),
+      [`GET ${OTRO}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${OTRO}/contratos`]: () => Response.json({ elementos: [] }),
+      [`GET ${OTRO}/ordenes-pago/${O1}`]: () => Response.json({ orden: aprobada, versiones: [version()] }),
+      [`POST ${OTRO}/ordenes-pago/${O1}/emitir`]: () => Response.json({ id: O1, version: 1 }),
+      [`GET ${OTRO}/pagos-manuales`]: () => Response.json({ elementos: [] }),
+      [`GET ${OTRO}/documentos`]: () => Response.json({ documentos: [] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/ordenes");
+    fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });
+    fireEvent.click(await screen.findByRole("button", { name: "Emitir" }));
+    expect(await screen.findByRole("heading", { name: "Pagos a realizar" })).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó en ejecución. No se movió dinero.")).toBeTruthy();
+    await waitFor(() => expect(pedidos(api, "GET", `${OTRO}/pagos-manuales`).length).toBeGreaterThan(0));
+    expect(((await screen.findByLabelText("Edificio")) as HTMLSelectElement).value).toBe(C2);
+    expect(pedidos(api, "GET", `${BASE}/pagos-manuales`)).toHaveLength(0);
+    expect(pedidos(api, "POST", `${OTRO}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
+  });
+
+  it("si emitir falla, se queda en las órdenes con el error", async () => {
+    const aprobada = orden({ estado: "aprobada", aprobacion_vence_en: "2999-01-01T00:00:00Z" });
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      ...ORDENES_LISTA,
+      [`GET ${BASE}/ordenes-pago`]: () => Response.json({ elementos: [aprobada] }),
+      [`GET ${BASE}/ordenes-pago/${O1}`]: () => Response.json({ orden: aprobada, versiones: [version()] }),
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => error("no_es_quien_aprobo", 403),
+    }));
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Emitir" }));
+    expect(await screen.findByText("Quien aprobó la orden no la emite.")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Órdenes de pago" })).toBeTruthy();
+  });
+
+  async function prepararConRechazo(codigo: string) {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      ...ORDENES_LISTA,
+      [`POST ${BASE}/ordenes-pago`]: () => error(codigo, 409),
+    }));
+    abrir("/egresos/ordenes");
+    fireEvent.click(await screen.findByRole("button", { name: "Preparar una orden" }));
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "1234,50" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Arreglo del portón" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+  }
+
+  it("un proveedor inactivo no se lleva el formulario: lo escrito queda para elegir otro", async () => {
+    await prepararConRechazo("proveedor_inactivo");
+    expect(await screen.findByText(/está suspendido o de baja/)).toBeTruthy();
+    expect((screen.getByLabelText("Importe") as HTMLInputElement).value).toBe("1234,50");
+    expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Arreglo del portón");
+  });
+
+  it("otro conflicto de la orden sí cierra el formulario y vuelve a la lista", async () => {
+    await prepararConRechazo("orden_no_admite");
+    expect(await screen.findByText(/La orden ya no admite eso/)).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Órdenes de pago" })).toBeTruthy();
+    expect(screen.queryByLabelText("Importe")).toBeNull();
+  });
+
+  it("la sesión de más de 12 horas ofrece volver a entrar con la entrada renovada", async () => {
+    let codigo = "sesion_reciente_requerida";
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/proveedores`]: () => error(codigo, 403),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    const enlace = await screen.findByRole("link", { name: "Volver a entrar" });
+    expect(enlace.getAttribute("href")).toBe("/entrar");
+    fireEvent.click(enlace);
+    // Con `renovar`, /entrar no consulta la sesión vigente para mandarla de vuelta adentro.
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Proveedores" })).toBeNull());
+    expect(pedidos(api, "GET", "/api/v1/auth/sesion")).toHaveLength(0);
+    cleanup();
+
+    codigo = "error_interno";
+    abrir("/egresos/proveedores");
+    await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.queryByRole("link", { name: "Volver a entrar" })).toBeNull();
+  });
+});
