@@ -1,6 +1,6 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /invitacion (RF03) servida por el nginx de la imagen, con su CSP real. El backend de
 // la corrida no tiene base de datos, así que consultar y aceptar se simulan desde el navegador.
@@ -13,6 +13,8 @@ const CSRF = "e2e-csrf-invitacion";
 const TOKEN = "I".repeat(21) + "_-" + "v".repeat(20);
 const ANCHO_TELEFONO_PX = 360;
 const ALTO_TELEFONO_PX = 740;
+const AVISO = "Listo: ya sos parte de Edificio Azul.";
+const TITULO_INICIO = "Tu consorcio, en tu mano";
 const RECIBIDA = {
   consorcio: "Edificio Azul",
   unidad: "1° A",
@@ -84,6 +86,7 @@ test.describe("invitación", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: ALTO_TELEFONO_PX });
     const pedidos = await simularApi(page, baseURL!);
+    await simularSesion(page, "con_sesion");
     await page.goto(`/invitacion#token=${TOKEN}`);
 
     await expect(page.getByRole("heading", { level: 2, name: "Edificio Azul" })).toBeVisible();
@@ -93,7 +96,9 @@ test.describe("invitación", () => {
 
     await page.getByLabel("Tu nombre").fill("  Alberto ");
     await page.getByRole("button", { name: "Aceptar la invitación" }).click();
-    await expect(page.getByText("Listo: ya sos parte de Edificio Azul.")).toBeVisible();
+    await expect(page.getByText(AVISO)).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
+    await expect(page).toHaveURL(/\/$/);
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
 
@@ -120,7 +125,8 @@ test.describe("invitación", () => {
     });
     await page.goto(`/invitacion#token=${TOKEN}`);
 
-    await expect(page.getByRole("status")).toHaveText("Buscando la invitación…");
+    // El primer estado es el del aviso de llegada, vacío; el último, el de la pantalla.
+    await expect(page.getByRole("status").last()).toHaveText("Buscando la invitación…");
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
     soltar();
@@ -141,10 +147,69 @@ test.describe("invitación", () => {
 
     await expect(page.getByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
     expect(pedidos.map((p) => p.camino)).toEqual(["/api/v1/auth/invitacion/consultar"]);
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
     // La consola informa el pedido cortado; violaciones de la CSP o errores de la página, ninguno.
     expect(errores.filter((e) => !e.includes("ERR_INTERNET_DISCONNECTED"))).toEqual([]);
+  });
+
+  test("«Reintentar» consulta de nuevo y, si responde, muestra la invitación", async ({ page, baseURL }) => {
+    let caido = true;
+    const pedidos = await simularApi(page, baseURL!, async (_camino, ruta) =>
+      caido ? ruta.abort("internetdisconnected") : ruta.fulfill({ json: RECIBIDA }),
+    );
+    await page.goto(`/invitacion#token=${TOKEN}`);
+    await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
+
+    caido = false;
+    await page.getByRole("button", { name: "Reintentar" }).click();
+
+    await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reintentar" })).toHaveCount(0);
+    expect(pedidos).toHaveLength(2);
+    expect(pedidos[1]).toMatchObject({ cuerpo: { token: TOKEN } });
+    for (const p of pedidos) expect(p.url).not.toContain(TOKEN);
+  });
+
+  test("un 503 al aceptar deja el formulario con lo escrito; el reintento lleva al inicio con el aviso, que no vuelve", async ({
+    page,
+    baseURL,
+  }) => {
+    let caido = true;
+    const pedidos = await simularApi(page, baseURL!, async (camino, ruta) => {
+      if (camino.endsWith("/consultar")) return ruta.fulfill({ json: RECIBIDA });
+      if (caido)
+        return ruta.fulfill({ status: 503, json: { codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" } });
+      return ruta.fulfill({ json: ACEPTADA });
+    });
+    await simularSesion(page, "con_sesion");
+    await page.goto(`/invitacion#token=${TOKEN}`);
+    await page.getByLabel("Tu nombre").fill("Alberto");
+    await page.getByRole("button", { name: "Aceptar la invitación" }).click();
+
+    await expect(page.getByText(/El servicio no está disponible/)).toBeVisible();
+    await expect(page.getByLabel("Tu nombre")).toHaveValue("Alberto");
+    await expect(page).toHaveURL(/\/invitacion$/);
+    await sinFaltasDeAccesibilidad(page);
+
+    caido = false;
+    await page.getByRole("button", { name: "Aceptar la invitación" }).click();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
+    await expect(page.getByText(AVISO)).toBeVisible();
+    expect(pedidos.filter((p) => p.camino.endsWith("/aceptar"))).toHaveLength(2);
+    expect(pedidos.at(-1)).toMatchObject({ csrf: CSRF, cuerpo: { token: TOKEN, nombre: "Alberto" } });
+
+    // Una recarga no lo repite, y tampoco ir a otra pantalla y volver con el navegador.
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
+    await expect(page.getByText(AVISO)).toHaveCount(0);
+    await page.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }).click();
+    await expect(page).toHaveURL(/\/instalar$/);
+    await page.goBack();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
+    await expect(page.getByText(AVISO)).toHaveCount(0);
   });
 });

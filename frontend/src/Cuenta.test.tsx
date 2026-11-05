@@ -89,6 +89,28 @@ function conSesion(extra: Respuestas = {}, totp: object = TOTP_INACTIVO, contras
   });
 }
 
+/**
+ * Como el backend: la acción cierra la sesión y `/auth/sesion` pasa a dar 401. Con un 200 fijo,
+ * /entrar devolvería a la persona al inicio.
+ */
+function sesionQueSeCierra(accion: string, respuesta: () => Response): Respuestas {
+  let cerrada = false;
+  return {
+    "GET /api/v1/auth/sesion": () => (cerrada ? error("no_autenticado", 401) : Response.json(YO)),
+    [accion]: () => {
+      cerrada = true;
+      return respuesta();
+    },
+  };
+}
+
+/** Llegó a /entrar y se queda: la consulta de la sesión de /entrar no la manda a otro lado. */
+async function quedoEnEntrar() {
+  expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+  await new Promise((listo) => setTimeout(listo, 0));
+  expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+}
+
 function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
   return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]);
 }
@@ -124,6 +146,21 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -132,9 +169,9 @@ afterEach(() => {
 
 describe("página /cuenta", () => {
   it("el inicio tiene el enlace a Mi cuenta", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Mi cuenta" }).getAttribute("href")).toBe("/cuenta");
+    expect((await screen.findByRole("link", { name: "Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -245,7 +282,7 @@ describe("página /cuenta", () => {
   });
 
   it("salir con CSRF lleva a /entrar y borra las copias de los contactos", async () => {
-    const simulado = conSesion({ "POST /api/v1/auth/salir": sinCuerpo(204) });
+    const simulado = conSesion(sesionQueSeCierra("POST /api/v1/auth/salir", sinCuerpo(204)));
     vi.stubGlobal("fetch", simulado);
     localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
     abrir();
@@ -255,27 +292,33 @@ describe("página /cuenta", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Salir" }));
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
     expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
     expect(pedido(simulado, "POST", "/api/v1/auth/salir")?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
   it("salir con la sesión ya vencida (401) también borra las copias", async () => {
-    vi.stubGlobal("fetch", conSesion({ "POST /api/v1/auth/salir": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("POST /api/v1/auth/salir", () => error("no_autenticado", 401))),
+    );
     localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA_VALIDA);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
     expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
   });
 
   it("si la sesión venció entre medio, una acción lleva a /entrar", async () => {
-    vi.stubGlobal("fetch", conSesion({ "POST /api/v1/auth/sesiones/revocar-otras": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("POST /api/v1/auth/sesiones/revocar-otras", () => error("no_autenticado", 401))),
+    );
     abrir();
 
     fireEvent.click(await screen.findByRole("button", { name: "Cerrar las otras sesiones" }));
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
   });
 
   it("sin backend lo dice", async () => {
@@ -519,12 +562,15 @@ describe("contraseña en /cuenta", () => {
   });
 
   it("si la sesión venció al guardar (401), manda a /entrar", async () => {
-    vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": () => error("no_autenticado", 401) }));
+    vi.stubGlobal(
+      "fetch",
+      conSesion(sesionQueSeCierra("PUT /api/v1/auth/contrasena", () => error("no_autenticado", 401))),
+    );
     abrir();
     await screen.findByText(/Todavía no tenés contraseña/);
     completar(NUEVA);
 
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    await quedoEnEntrar();
   });
 
   it.each([
@@ -589,7 +635,7 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    const estado = screen.getByRole("status");
+    const estado = estadoDePantalla();
     expect(estado.textContent).toBe("Consultando…");
     // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
     await waitFor(() => expect(retenido).toHaveBeenCalledTimes(4));

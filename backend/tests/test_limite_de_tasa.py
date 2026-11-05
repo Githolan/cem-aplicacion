@@ -13,7 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Config
-from app.limite import LIMITE_API, LimiteDeTasa
+from app.limite import LIMITE_API, LIMITE_AUTENTICACION_IP, LimiteDeTasa
 from app.main import crear_app
 from app.registros import RegistroDePeticiones
 from tests.conftest import REDIS_URL
@@ -33,6 +33,16 @@ def test_el_limite_es_un_middleware_de_toda_la_app():
     app = app_con("memory://")
     assert [m.cls for m in app.user_middleware] == [RegistroDePeticiones, LimiteDeTasa]
     assert str(LIMITE_API) == "300 per 1 minute"
+
+
+def test_preguntar_si_hay_sesion_no_consume_el_cupo_de_autenticacion():
+    cupo = LIMITE_AUTENTICACION_IP.amount
+    with TestClient(app_con("memory://"), client=("203.0.113.30", 40000)) as c:
+        assert {c.get("/api/v1/auth/sesion").status_code for _ in range(cupo + 5)} == {401}
+        # Control: la familia sigue limitando, y el mismo camino con otro método cuenta.
+        respuestas = {c.get("/api/v1/auth/sesiones").status_code for _ in range(cupo + 1)}
+        assert 429 in respuestas
+        assert c.post("/api/v1/auth/sesion").status_code == 429
 
 
 def test_sin_redis_configurado_la_api_no_arranca():

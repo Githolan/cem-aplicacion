@@ -1,11 +1,13 @@
 import { useEffect } from "react";
-import { Link, Route, Routes } from "react-router";
+import { Link, Navigate, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
 import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
+import { AvisoLlegada } from "./AvisoLlegada";
 import { RUTA_ENTRAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
+import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
 import { ConciliacionPagos, RUTA_CONCILIACION } from "./egresos/ConciliacionPagos";
@@ -26,6 +28,9 @@ import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
 function Inicio() {
+  const sesion = useSesion();
+  if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
+  if (sesion === "consultando") return <p role="status">Cargando…</p>;
   return (
     <>
       <h1>Tu consorcio, en tu mano</h1>
@@ -114,6 +119,7 @@ export function App() {
         <ModoLectura />
       </header>
       <main id="contenido">
+        <AvisoLlegada />
         <Routes>
           <Route path="/" element={<Inicio />} />
           <Route path="/instalar" element={<Instalar />} />

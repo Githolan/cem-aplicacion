@@ -103,6 +103,12 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -112,10 +118,10 @@ afterEach(() => {
 });
 
 describe("página /contactos", () => {
-  it("el inicio tiene el enlace a los contactos", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace a los contactos", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Contactos de emergencia" }).getAttribute("href")).toBe("/contactos");
+    expect((await screen.findByRole("link", { name: "Contactos de emergencia" })).getAttribute("href")).toBe("/contactos");
   });
 
   it("muestra la lista con su fecha, guarda la copia y nunca pide la lista de gestión", async () => {

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, type Sesion, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La contraseña en /entrar y en /cuenta, servidas por el nginx de la imagen con su CSP real.
 // El backend de la corrida no tiene base de datos: lo que responde de verdad se mide y se afirma
@@ -39,6 +39,12 @@ const SESIONES = [
 const TOTP = { activo: true, activado_en: "2026-10-15T20:00:00Z", codigos_recuperacion_restantes: 10, verificado_en: null };
 
 const seccionEntrar = (pagina: Page) => pagina.getByRole("region", { name: "Entrar con contraseña" });
+
+/** /entrar muestra una forma por vez: la contraseña se elige en «Otras formas de entrar». */
+async function abrirContrasena(pagina: Page) {
+  await pagina.goto("/entrar");
+  await pagina.getByRole("button", { name: "Entrar con contraseña" }).click();
+}
 const seccionCuenta = (pagina: Page) => pagina.getByRole("region", { name: "Contraseña" });
 
 /** Errores de la página y violaciones de la CSP, que el navegador informa como eventos. */
@@ -74,7 +80,8 @@ test.describe("ver la contraseña mientras se escribe", () => {
   test("el botón Mostrar la deja ver y la vuelve a ocultar, sin desbordar ni faltas de axe", async ({ page }) => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
-    await page.goto("/entrar");
+    await simularSesion(page, "sin_sesion");
+    await abrirContrasena(page);
     const seccion = seccionEntrar(page);
     const campo = seccion.getByLabel("Contraseña", { exact: true });
     await campo.fill(CONTRASENA);
@@ -88,7 +95,8 @@ test.describe("ver la contraseña mientras se escribe", () => {
 
     await seccion.getByRole("button", { name: "Ocultar lo escrito" }).click();
     await expect(campo).toHaveAttribute("type", "password");
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de la consulta de la sesión; errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 });
 
@@ -98,7 +106,8 @@ test.describe("contraseña contra el backend real sin base", () => {
 
   test("entrar: manda correo y contraseña por POST, en el cuerpo; el 503 real se avisa sin colgarse", async ({ page }) => {
     const errores = vigilarErrores(page);
-    await page.goto("/entrar");
+    await simularSesion(page, "sin_sesion");
+    await abrirContrasena(page);
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
@@ -119,8 +128,8 @@ test.describe("contraseña contra el backend real sin base", () => {
     await expect(seccion.getByRole("button", { name: "Entrar con la contraseña" })).toBeEnabled();
     expect(page.url()).not.toContain("frase");
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa el 503 del recurso; violaciones de la CSP o errores de la página, ninguno.
-    expect(errores.filter((e) => !e.includes("503"))).toEqual([]);
+    // La consola informa el 503 del recurso y el 401 de la sesión; errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("503") && !e.includes("401"))).toEqual([]);
   });
 
   test("paso del segundo factor: con la contraseña simulada, el 503 real del código se avisa y deja reintentar", async ({
@@ -129,7 +138,8 @@ test.describe("contraseña contra el backend real sin base", () => {
     await page.route(`**${ENTRAR}`, (ruta) =>
       ruta.fulfill({ json: { estado: "falta_segundo_factor", vence_en: "2026-10-16T21:05:00Z" } }),
     );
-    await page.goto("/entrar");
+    await simularSesion(page, "sin_sesion");
+    await abrirContrasena(page);
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
     await seccion.getByLabel("Contraseña").fill(CONTRASENA);
@@ -151,6 +161,7 @@ test.describe("contraseña contra el backend real sin base", () => {
   });
 
   test("cambiar la contraseña sin sesión: el backend real responde 401", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
     const medido = await page.evaluate(async (camino) => {
       const r = await fetch(camino, {
@@ -169,15 +180,18 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
     const cuerpos: Record<string, unknown> = {};
+    let sesion: Sesion = "sin_sesion";
+    await simularSesion(page, () => sesion);
     await page.route(`**${ENTRAR}`, async (ruta) => {
       cuerpos[ENTRAR] = ruta.request().postDataJSON();
       await ruta.fulfill({ json: { estado: "falta_segundo_factor", vence_en: "2026-10-16T21:05:00Z" } });
     });
     await page.route(`**${PASO}`, async (ruta) => {
       cuerpos[PASO] = ruta.request().postDataJSON();
+      sesion = "con_sesion";
       await ruta.fulfill({ json: YO });
     });
-    await page.goto("/entrar");
+    await abrirContrasena(page);
 
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);
@@ -194,16 +208,21 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await campo.fill("k7m2q-x9p4t");
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(seccion.getByText("Entraste.")).toBeVisible();
+    await expect(page.getByText("Entraste.")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page).toHaveURL(/\/$/);
     expect(cuerpos).toEqual({ [ENTRAR]: { correo: CORREO, contrasena: CONTRASENA }, [PASO]: { codigo: "k7m2q-x9p4t" } });
     expect(page.url()).not.toContain("frase");
+    await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de antes de entrar; errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
   test("credenciales inválidas: mensaje genérico, accesible y sin colgarse", async ({ page }) => {
     await page.route(`**${ENTRAR}`, (ruta) => ruta.fulfill({ status: 401, json: fallo("credenciales_invalidas") }));
-    await page.goto("/entrar");
+    await simularSesion(page, "sin_sesion");
+    await abrirContrasena(page);
 
     const seccion = seccionEntrar(page);
     await seccion.getByLabel("Correo").fill(CORREO);

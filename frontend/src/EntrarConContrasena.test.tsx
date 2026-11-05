@@ -28,24 +28,38 @@ function error(codigo: string, estado: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status: estado });
 }
 
-/** Un backend que responde por ruta, en orden; lo que no está previsto falla la prueba. */
+const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+
+/**
+ * Un backend que responde por ruta, en orden; lo que no está previsto falla la prueba. Como el de
+ * verdad, `/auth/sesion` da 401 hasta que la entrada termina (`sesion_abierta` o el segundo factor).
+ */
 function backend(respuestas: Record<string, (() => Response | Promise<Response>)[]>) {
+  let adentro = false;
   return vi.fn(async (pedido: Request) => {
     const camino = new URL(pedido.url).pathname;
+    if (camino === "/api/v1/auth/sesion") return adentro ? Response.json(SESION) : error("no_autenticado", 401);
+    if (camino === "/health") return error("servicio_no_disponible", 503);
     const siguiente = respuestas[camino]?.shift();
     if (siguiente === undefined) throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
-    return siguiente();
+    const respuesta = await siguiente();
+    if (respuesta.ok) {
+      const cuerpo = (await respuesta.clone().json()) as { estado?: string };
+      adentro = camino === PASO || cuerpo.estado === "sesion_abierta";
+    }
+    return respuesta;
   });
 }
 
-function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
-  return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]);
+function postsDe(simulado: ReturnType<typeof vi.fn>): Request[] {
+  return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((p) => p.method === "POST");
 }
 
+/** /entrar muestra una forma por vez: la contraseña se elige en «Otras formas de entrar». */
 function abrir() {
   window.history.replaceState(null, "", "/entrar");
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const pantalla = render(
     <StrictMode>
       <QueryClientProvider client={consultas}>
         <MemoryRouter initialEntries={["/entrar"]}>
@@ -54,9 +68,10 @@ function abrir() {
       </QueryClientProvider>
     </StrictMode>,
   );
+  fireEvent.click(screen.getByRole("button", { name: "Entrar con contraseña" }));
+  return pantalla;
 }
 
-// /entrar tiene tres campos «Correo»: se busca dentro de la sección.
 const seccion = () => within(screen.getByRole("region", { name: "Entrar con contraseña" }));
 
 function mandar(boton: string) {
@@ -69,6 +84,12 @@ function escribirContrasena(correo = CORREO, contrasena = CONTRASENA) {
   fireEvent.change(seccion().getByLabelText("Correo"), { target: { value: correo } });
   fireEvent.change(seccion().getByLabelText("Contraseña"), { target: { value: contrasena } });
   mandar("Entrar con la contraseña");
+}
+
+async function llegoAlInicio() {
+  expect(await screen.findByText("Entraste.")).toBeTruthy();
+  expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Entrar con contraseña" })).toBeNull();
 }
 
 function escribirCodigo(codigo: string) {
@@ -92,7 +113,7 @@ afterEach(() => {
 
 describe("entrar con contraseña", () => {
   it("los campos piden lo que espera un gestor de contraseñas", () => {
-    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("fetch", backend({}));
     abrir();
 
     expect(seccion().getByLabelText("Correo").getAttribute("autocomplete")).toBe("username");
@@ -107,8 +128,8 @@ describe("entrar con contraseña", () => {
     abrir();
     escribirContrasena(`  ${CORREO} `);
 
-    expect(await seccion().findByText("Entraste.")).toBeTruthy();
-    const [entrada, ...otros] = pedidosDe(simulado);
+    await llegoAlInicio();
+    const [entrada, ...otros] = postsDe(simulado);
     expect(otros).toEqual([]);
     if (entrada === undefined) throw new Error("no hubo pedido");
     const url = new URL(entrada.url);
@@ -133,8 +154,8 @@ describe("entrar con contraseña", () => {
     expect(seccion().queryByLabelText("Contraseña")).toBeNull();
     escribirCodigo("042 917");
 
-    expect(await seccion().findByText("Entraste.")).toBeTruthy();
-    const paso = pedidosDe(simulado).find((p) => new URL(p.url).pathname === PASO);
+    await llegoAlInicio();
+    const paso = postsDe(simulado).find((p) => new URL(p.url).pathname === PASO);
     if (paso === undefined) throw new Error("no hubo paso del segundo factor");
     expect(paso.method).toBe("POST");
     expect(await paso.json()).toEqual({ codigo: "042917" });
@@ -151,8 +172,8 @@ describe("entrar con contraseña", () => {
     await seccion().findByLabelText("Código de la aplicación o de recuperación");
     escribirCodigo("K7M2QX9P4T");
 
-    await seccion().findByText("Entraste.");
-    const paso = pedidosDe(simulado).find((p) => new URL(p.url).pathname === PASO);
+    await llegoAlInicio();
+    const paso = postsDe(simulado).find((p) => new URL(p.url).pathname === PASO);
     expect(await paso?.json()).toEqual({ codigo: "k7m2q-x9p4t" });
   });
 
@@ -167,7 +188,7 @@ describe("entrar con contraseña", () => {
     const campo = seccion().getByLabelText("Código de la aplicación o de recuperación");
     expect(campo.getAttribute("aria-invalid")).toBe("true");
     expect(campo.getAttribute("aria-describedby")).toBe(seccion().getByText(/Escribí los seis números/).id);
-    expect(pedidosDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR]);
+    expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR]);
   });
 
   it.each([
@@ -181,7 +202,8 @@ describe("entrar con contraseña", () => {
     escribirContrasena();
 
     expect(await seccion().findByText(mensaje)).toBeTruthy();
-    expect(seccion().queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(seccion().getByLabelText("Contraseña")).toBeTruthy();
   });
 
@@ -229,6 +251,7 @@ describe("entrar con contraseña", () => {
 
     expect(await seccion().findByText(mensaje)).toBeTruthy();
     expect(seccion().getByLabelText("Código de la aplicación o de recuperación")).toBeTruthy();
+    expect(screen.queryByText("Entraste.")).toBeNull();
   });
 
   it("«Volver a la contraseña» deja el paso del código", async () => {
@@ -277,7 +300,7 @@ describe("entrar con contraseña", () => {
     vi.stubGlobal("fetch", backend({ [ENTRAR]: [() => Response.json(ABIERTA)] }));
     const { container } = abrir();
     escribirContrasena();
-    await seccion().findByText("Entraste.");
+    await llegoAlInicio();
     await sinFaltas(container);
   });
 });
@@ -307,7 +330,7 @@ describe("entrar con contraseña: estado de carga (documento 08, §13.1)", () =>
     expect(boton.disabled).toBe(true);
     soltar();
 
-    expect(await seccion().findByText("Entraste.")).toBeTruthy();
-    expect(seccion().queryByText("Entrando…")).toBeNull();
+    await llegoAlInicio();
+    expect(screen.queryByText("Entrando…")).toBeNull();
   });
 });

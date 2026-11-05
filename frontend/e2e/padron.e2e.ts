@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /padron servida por el nginx de la imagen, con su CSP real. Como en mandatos.e2e.ts,
 // sin sesión responde el backend de verdad (401) y, con sesión, la API se simula desde el
@@ -59,6 +59,8 @@ async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vec
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
+    // La sesión la responde simularSesion, en el contexto: page.route va primero y la cortaría.
+    if (camino === "/api/v1/auth/sesion") return ruta.fallback();
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (quien === "vecina") return ruta.fulfill(error(403, "sin_permiso"));
@@ -107,6 +109,7 @@ test.describe("padrón", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: 360, height: 740 });
     const envios = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.goto("/");
     await page.getByRole("link", { name: "Padrón del edificio" }).click();
 

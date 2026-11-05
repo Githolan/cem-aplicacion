@@ -115,6 +115,21 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -122,10 +137,10 @@ afterEach(() => {
 });
 
 describe("página /invitaciones", () => {
-  it("el inicio tiene el enlace para invitar", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace para invitar", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Invitar a una persona" }).getAttribute("href")).toBe(
+    expect((await screen.findByRole("link", { name: "Invitar a una persona" })).getAttribute("href")).toBe(
       "/invitaciones",
     );
   });
@@ -749,7 +764,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     expect(screen.queryByRole("button", { name: "Invitar" })).toBeNull();
     soltar();
 

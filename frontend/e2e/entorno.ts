@@ -26,6 +26,38 @@ export function otroCliente(n: number): { extraHTTPHeaders: Record<string, strin
   return { extraHTTPHeaders: { "CF-Connecting-IP": `198.51.100.${n}` } };
 }
 
+const RUTA_SESION = "**/api/v1/auth/sesion";
+
+const SESION_SIMULADA = {
+  persona_id: "99999999-9999-4999-8999-999999999999",
+  nombre: "Ana Pérez",
+  correo: "ana@ejemplo.com",
+  sesion_id: "11111111-1111-4111-8111-111111111111",
+  vence_en: "2026-11-15T20:00:00Z",
+};
+
+export type Sesion = "con_sesion" | "sin_sesion";
+
+/**
+ * Responde `GET /api/v1/auth/sesion` desde el navegador. El backend de la corrida no tiene base de
+ * datos: sin esto `/` lleva siempre a /entrar, y cada consulta real gasta el cupo de
+ * /api/v1/auth/ (ver otroCliente). `sesion` puede ser una función, para cuando cambia a mitad de la
+ * prueba. Va en el contexto porque page.route no ve lo que pasa por un service worker. Con
+ * "sin_sesion" la consola informa el 401 del recurso, igual que con el backend de verdad.
+ */
+export async function simularSesion(pagina: Page, sesion: Sesion | (() => Sesion)) {
+  await pagina.context().route(RUTA_SESION, (ruta) => {
+    const vigente = typeof sesion === "function" ? sesion() : sesion;
+    if (vigente === "con_sesion") return ruta.fulfill({ json: SESION_SIMULADA });
+    return ruta.fulfill({ status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } });
+  });
+}
+
+/** Deja de simular: la consulta vuelve a salir a la red (o a fallar, si la prueba la cortó). */
+export async function dejarDeSimularSesion(pagina: Page) {
+  await pagina.context().unroute(RUTA_SESION);
+}
+
 export const AGENTE_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 

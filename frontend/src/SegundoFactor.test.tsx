@@ -75,6 +75,15 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -327,7 +336,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     expect(screen.queryByRole("button", { name: "Activar el segundo factor" })).toBeNull();
     soltar();
 

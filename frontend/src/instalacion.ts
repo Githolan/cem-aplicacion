@@ -10,7 +10,8 @@ interface EventoInstalacion extends Event {
 }
 
 export type FormaDeInstalar =
-  | "instalada" // ya se abrió desde el ícono o se acaba de instalar
+  | "instalada" // ya se abrió desde el ícono
+  | "recien_instalada" // se acaba de instalar desde esta pestaña
   | "boton" // el navegador acepta instalar con un botón
   | "iphone" // iPhone o iPad: hay que usar "Agregar a inicio"
   | "menu"; // otro navegador: se instala desde su menú, si lo permite
@@ -52,20 +53,23 @@ function formaActual(): FormaDeInstalar {
   const standalone =
     window.matchMedia?.("(display-mode: standalone)").matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true;
-  if (standalone || recienInstalada) return "instalada";
+  if (standalone) return "instalada";
+  if (recienInstalada) return "recien_instalada";
   if (eventoGuardado) return "boton";
   if (esIphone(navigator.userAgent, navigator.maxTouchPoints ?? 0)) return "iphone";
   return "menu";
 }
 
-export async function instalar(): Promise<void> {
+/** Abre la instalación del navegador y dice qué eligió la persona; un fallo del navegador sube. */
+export async function instalar(): Promise<"accepted" | "dismissed"> {
   const evento = eventoGuardado;
-  if (!evento) return;
+  if (!evento) throw new Error("no hay instalación ofrecida");
   // El evento sirve una sola vez, acepte o no la persona.
   eventoGuardado = null;
-  await evento.prompt();
-  await evento.userChoice;
   avisar();
+  await evento.prompt();
+  const { outcome } = await evento.userChoice;
+  return outcome;
 }
 
 export function useInstalacion(): FormaDeInstalar {

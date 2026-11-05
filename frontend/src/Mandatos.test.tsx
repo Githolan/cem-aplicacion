@@ -167,6 +167,21 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -174,10 +189,10 @@ afterEach(() => {
 });
 
 describe("página /mandatos", () => {
-  it("el inicio tiene el enlace a mandatos y decisiones", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace a mandatos y decisiones", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Mandatos y decisiones" }).getAttribute("href")).toBe("/mandatos");
+    expect((await screen.findByRole("link", { name: "Mandatos y decisiones" })).getAttribute("href")).toBe("/mandatos");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -856,7 +871,7 @@ describe("página /mandatos", () => {
     fireEvent.change(screen.getByLabelText("Decisión que lo respalda"), { target: { value: D_EQUIPO } });
     expect(screen.queryByText(/No pudimos consultar quién registró esta decisión/)).toBeNull();
     // Y no queda como error de la página.
-    expect(within(screen.getByRole("status")).queryByText(/No pudimos consultar/)).toBeNull();
+    expect(within(estadoDePantalla()).queryByText(/No pudimos consultar/)).toBeNull();
   });
 
   it("el detalle de una baja muestra cuándo se registró, en la hora del edificio", async () => {
@@ -968,12 +983,12 @@ describe("página /mandatos: estados de pantalla mínima (documento 08, §13.1)"
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     expect(screen.queryByRole("region", { name: "Mandatos" })).toBeNull();
     soltar();
 
     await cargado();
-    expect(within(screen.getByRole("status")).queryByText("Consultando…")).toBeNull();
+    expect(within(estadoDePantalla()).queryByText("Consultando…")).toBeNull();
   });
 
   it("carga: las listas del edificio dicen «Consultando…» hasta que llegan las tres", async () => {

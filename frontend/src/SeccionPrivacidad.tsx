@@ -299,7 +299,7 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
         )}
         {aviso?.tipo === "falta" && aviso.falta === "entrar_de_nuevo" && (
           <p className="aviso-error">
-            Por seguridad, <Link to={RUTA_ENTRAR}>volvé a entrar con el enlace del correo</Link> y hacelo
+            Por seguridad, <Link to={RUTA_ENTRAR} state={{ renovar: true }}>volvé a entrar con el enlace del correo</Link> y hacelo
             dentro de los 10 minutos.
           </p>
         )}

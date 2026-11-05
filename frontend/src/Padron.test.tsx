@@ -112,6 +112,21 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+};
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -120,10 +135,10 @@ afterEach(() => {
 });
 
 describe("página /padron", () => {
-  it("el inicio tiene el enlace al padrón", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace al padrón", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Padrón del edificio" }).getAttribute("href")).toBe("/padron");
+    expect((await screen.findByRole("link", { name: "Padrón del edificio" })).getAttribute("href")).toBe("/padron");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -514,7 +529,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     const { retenido, soltar } = retener(conPadron(), "/api/v1/me/consorcios");
     vi.stubGlobal("fetch", retenido);
     abrir();
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     soltar();
     expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
     expect(screen.queryByText("Consultando…")).toBeNull();

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // Pedir el enlace para entrar en /entrar, contra el cem-backend real a través del nginx de la
 // imagen. El backend de la corrida no tiene base de datos ni CEM_ORIGEN_PUBLICO, así que responde
@@ -14,7 +14,11 @@ const CORREO_SIN_DOMINIO = "ana@ejemplo";
 const RUTA = "/api/v1/auth/enlace";
 
 test.describe("pedir el enlace para entrar", () => {
+  // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
+  test.use(otroCliente(12));
+
   test("manda el correo por POST, en el cuerpo, y avisa si el servicio no responde", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
     await sinFaltasDeAccesibilidad(page);
 
@@ -39,6 +43,7 @@ test.describe("pedir el enlace para entrar", () => {
   });
 
   test("un correo que el contrato rechaza (422) se explica junto al campo", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
     const seccion = page.getByRole("region", { name: "Pedir el enlace para entrar" });
     const campo = seccion.getByLabel("Correo");
@@ -50,6 +55,23 @@ test.describe("pedir el enlace para entrar", () => {
     expect(respuesta?.status()).toBe(422);
     await expect(seccion.getByText("Revisá el correo: no parece una dirección válida.")).toBeVisible();
     await expect(campo).toHaveAttribute("aria-invalid", "true");
+    await sinFaltasDeAccesibilidad(page);
+  });
+
+  test("con el pedido hecho (202 simulado) pasa al código, con el correo escrito y el mensaje", async ({ page }) => {
+    const mensaje = "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar.";
+    await simularSesion(page, "sin_sesion");
+    await page.route(`**${RUTA}`, (ruta) => ruta.fulfill({ status: 202, json: { estado: "pedido", mensaje } }));
+    await page.goto("/entrar");
+    const seccion = page.getByRole("region", { name: "Pedir el enlace para entrar" });
+    await seccion.getByLabel("Correo").fill(`  ${CORREO} `);
+    await seccion.getByRole("button", { name: "Pedir el enlace" }).click();
+
+    const codigo = page.getByRole("region", { name: "Entrar con un código" });
+    await expect(codigo.getByText(mensaje)).toBeVisible();
+    await expect(codigo.getByLabel("Correo")).toHaveValue(CORREO);
+    await expect(seccion).toHaveCount(0);
+    expect(page.url()).not.toContain(CORREO);
     await sinFaltasDeAccesibilidad(page);
   });
 });
