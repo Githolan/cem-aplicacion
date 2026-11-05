@@ -36,6 +36,7 @@ ENLACE = "/api/v1/auth/enlace"
 CANJE = "/api/v1/auth/canje"
 ENTRAR = "/entrar"
 SESION = "/api/v1/auth/sesion"
+LLAVES = "/api/v1/auth/llave"
 SALIR = "/api/v1/auth/salir"
 ANA = "ana@ejemplo.com"
 NADIE = "nadie@ejemplo.com"
@@ -539,8 +540,9 @@ def test_veinte_pedidos_por_minuto_por_ip_en_auth(app):
     cupo = LIMITE_AUTENTICACION_IP.amount
     assert cupo == 20
     c = navegador(app, ip="203.0.113.77")
-    assert {c.get(SESION).status_code for _ in range(cupo)} == {401}
-    r = c.get(SESION)
+    # /auth/sesion queda fuera de este cupo (test_limite_de_tasa); /auth/llave cuenta.
+    assert {c.get(LLAVES).status_code for _ in range(cupo)} == {401}
+    r = c.get(LLAVES)
     assert r.status_code == 429
     assert c.post(CANJE, json={"token": secrets.token_urlsafe(32)}).status_code == 429
     # Fuera de /api/v1/auth/ rige solo el cupo general.
