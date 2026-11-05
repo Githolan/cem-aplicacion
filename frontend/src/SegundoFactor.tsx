@@ -231,7 +231,7 @@ export function SegundoFactor() {
   return (
     <>
       <h1>Segundo factor</h1>
-      {pantalla.tipo !== "sin_sesion" && <SeccionLlave alCambiar={consultar} />}
+      {["inactivo", "alta", "codigos", "activo"].includes(pantalla.tipo) && <SeccionLlave alCambiar={consultar} />}
       <p>
         Otra opción, si la preferís: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
         Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis

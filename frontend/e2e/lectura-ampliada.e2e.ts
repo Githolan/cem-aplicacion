@@ -207,7 +207,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     ruta: "/cuenta/segundo-factor",
     url: "/cuenta/segundo-factor",
     cargada: "Está activado",
-    api: { "GET /api/v1/auth/totp": TOTP_ACTIVO },
+    api: { "GET /api/v1/auth/totp": TOTP_ACTIVO, "GET /api/v1/auth/llave": [] },
   },
   {
     ruta: "/invitaciones",

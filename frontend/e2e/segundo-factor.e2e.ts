@@ -30,6 +30,7 @@ function vigilarErrores(pagina: Page): string[] {
 
 /** Responde la API del segundo factor desde el navegador: la página y su CSP siguen siendo reales. */
 async function simularApi(pagina: Page) {
+  await pagina.route("**/api/v1/auth/llave", (ruta) => ruta.fulfill({ json: [] }));
   await pagina.route("**/api/v1/auth/totp**", async (ruta) => {
     const camino = new URL(ruta.request().url()).pathname;
     if (camino === "/api/v1/auth/totp") return ruta.fulfill({ json: INACTIVO });
@@ -77,7 +78,7 @@ test.describe("segundo factor", () => {
     expect(errores).toEqual([]);
   });
 
-  test("activar la llave llama al autenticador real del navegador, sin violar la CSP", async ({ page }) => {
+  test("activar la llave llama al autenticador real del navegador, sin violar la CSP", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("WebAuthn.enable");
@@ -100,7 +101,7 @@ test.describe("segundo factor", () => {
         return ruta.fulfill({
           json: {
             opciones: {
-              rp: { id: new URL(page.url()).hostname, name: "Consorcio en Mano" },
+              rp: { id: "localhost", name: "Consorcio en Mano" },
               user: { id: "AAAA", name: "ana@ejemplo.com", displayName: "ana@ejemplo.com" },
               challenge: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
               pubKeyCredParams: [{ type: "public-key", alg: -7 }],
@@ -116,7 +117,10 @@ test.describe("segundo factor", () => {
       }
       return ruta.abort();
     });
-    await page.goto("/cuenta/segundo-factor");
+    // WebAuthn no acepta una dirección IP como sitio: el mismo servidor, por su nombre.
+    const direccion = new URL("/cuenta/segundo-factor", baseURL);
+    direccion.hostname = "localhost";
+    await page.goto(direccion.href);
     await page.getByRole("button", { name: "Activar en este dispositivo" }).click();
 
     await expect(page.getByText("Listo: tu llave quedó activada.")).toBeVisible();
