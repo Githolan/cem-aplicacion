@@ -3,13 +3,15 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { confirmarConLlave, llaveDisponible } from "../llaveAcceso";
 import { codigoVerificacion } from "../SegundoFactor";
 import { mensajeDeError } from "./comun";
 
 // Renovar el segundo factor (pantalla 4, aprobada el 30-10-2026): ante `segundo_factor_requerido`
 // la pantalla pide el código, lo verifica en esta sesión (`POST /api/v1/auth/totp/verificar`) y
 // recién entonces reintenta el mismo acto. La pantalla que la usa conserva la misma
-// `Idempotency-Key`: el reintento es el mismo pedido, nunca uno nuevo.
+// `Idempotency-Key`: el reintento es el mismo pedido, nunca uno nuevo. Quien tiene una llave de
+// acceso confirma con el PIN, la huella o la cara; el código queda como otra opción.
 
 interface Props {
   /** Qué se va a reintentar, en palabras («aprobar la orden»). */
@@ -23,6 +25,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [conLlave, setConLlave] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
 
   // Si la pantalla se desmonta (otro edificio, otra página) mientras se verifica, el pedido
@@ -31,10 +34,29 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   useEffect(() => {
     montado.current = true;
     campo.current?.focus();
+    if (llaveDisponible())
+      void api
+        .GET("/api/v1/auth/llave")
+        .then(({ data }) => {
+          if (montado.current && data !== undefined && data.length > 0) setConLlave(true);
+        })
+        .catch(() => setError(SIN_CONEXION));
     return () => {
       montado.current = false;
     };
   }, []);
+
+  function confirmar() {
+    setEnviando(true);
+    setError(null);
+    void confirmarConLlave()
+      .then((resultado) => {
+        if (!montado.current) return;
+        if (resultado.ok) alVerificar();
+        else setError(resultado.mensaje);
+      })
+      .finally(() => setEnviando(false));
+  }
 
   function verificar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
@@ -59,6 +81,34 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
       .catch(() => setError(SIN_CONEXION))
       .finally(() => setEnviando(false));
   }
+
+  if (conLlave)
+    return (
+      <section className="formulario tarjeta" aria-labelledby={`${id}-titulo`}>
+        <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
+        <p>Para {acto}, confirmá con tu PIN, huella o cara. Después seguimos con el mismo pedido.</p>
+        {error !== null && <p role="alert">{error}</p>}
+        <div className="acciones">
+          <button type="button" disabled={enviando} onClick={confirmar}>
+            {enviando ? "Confirmando…" : "Confirmar con tu PIN o huella"}
+          </button>
+          <button
+            type="button"
+            className="secundario"
+            disabled={enviando}
+            onClick={() => {
+              setError(null);
+              setConLlave(false);
+            }}
+          >
+            Usar un código
+          </button>
+          <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+            Cancelar
+          </button>
+        </div>
+      </section>
+    );
 
   return (
     <form className="formulario tarjeta" onSubmit={verificar} noValidate aria-labelledby={`${id}-titulo`}>

@@ -43,7 +43,7 @@ SIN_PERMISO = "No tenés permiso para hacer esto."
 RENOVAR = {
     Motivo.REQUIERE_SEGUNDO_FACTOR_RECIENTE: (
         CodigoError.SEGUNDO_FACTOR_REQUERIDO,
-        "Para esto tenés que confirmar con el código de tu aplicación de autenticación.",
+        sesiones.CONFIRMAR_QUE_SOS_VOS,
     ),
     Motivo.REQUIERE_SESION_RECIENTE: (
         CodigoError.SESION_RECIENTE_REQUERIDA,
@@ -147,21 +147,26 @@ def _personas(entidad: Entidad) -> set[UUID]:
 class Requiere:
     """Dependencia de FastAPI: `permiso: Annotated[Permiso, Depends(requiere("x"))]`."""
 
-    def __init__(self, accion: str, *, al_entrar: bool) -> None:
+    def __init__(self, accion: str, *, al_entrar: bool, sin_gesto: bool) -> None:
         if accion not in POLITICAS:
             raise ValueError(f"acción sin política declarada: {accion!r}")
         self.accion = accion
         self.al_entrar = al_entrar
+        self.sin_gesto = sin_gesto
 
     def __call__(
         self, request: Request, motor: MotorDep, ctx: Annotated[Contexto, Depends(require_scope)]
     ) -> Permiso:
+        if self.sin_gesto:
+            ctx = replace(ctx, segundo_factor_reciente=True)
         permiso = Permiso(self.accion, ctx, motor, request)
         if self.al_entrar:
             permiso.verificar()
         return permiso
 
 
-def requiere(accion: str, *, al_entrar: bool = False) -> Requiere:
-    """`al_entrar=True` para las acciones que no dependen de la entidad."""
-    return Requiere(accion, al_entrar=al_entrar)
+def requiere(accion: str, *, al_entrar: bool = False, sin_gesto: bool = False) -> Requiere:
+    """`al_entrar=True` para las acciones que no dependen de la entidad. `sin_gesto=True` para las
+    rutas económicas que solo leen o preparan (`0071`): siguen pidiendo la facultad, el modo, la
+    sesión de 12 horas y la identidad humana, y la base aplica lo mismo."""
+    return Requiere(accion, al_entrar=al_entrar, sin_gesto=sin_gesto)

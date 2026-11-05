@@ -22,6 +22,7 @@ class EstadoSegundoFactor(BaseModel):
 
     activo: bool = Field(description="Tiene una aplicación de autenticación confirmada.")
     activado_en: datetime | None = None
+    llaves: int = Field(ge=0, description="Cuántas llaves de acceso tiene (`llave_acceso`).")
     codigos_recuperacion_restantes: int = Field(ge=0)
     verificado_en: datetime | None = Field(
         description="Última verificación del segundo factor en esta sesión."

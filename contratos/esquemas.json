@@ -1098,6 +1098,12 @@
         "title": "Codigos Recuperacion Restantes",
         "type": "integer"
       },
+      "llaves": {
+        "description": "Cuántas llaves de acceso tiene (`llave_acceso`).",
+        "minimum": 0,
+        "title": "Llaves",
+        "type": "integer"
+      },
       "verificado_en": {
         "anyOf": [
           {
@@ -1114,6 +1120,7 @@
     },
     "required": [
       "activo",
+      "llaves",
       "codigos_recuperacion_restantes",
       "verificado_en"
     ],
@@ -2916,6 +2923,102 @@
     "title": "ListaUnidades",
     "type": "object"
   },
+  "LlaveNueva": {
+    "description": "`POST /api/v1/auth/llave/alta`.",
+    "properties": {
+      "credencial": {
+        "additionalProperties": true,
+        "description": "La respuesta de `navigator.credentials`.",
+        "title": "Credencial",
+        "type": "object"
+      },
+      "nombre": {
+        "examples": [
+          "Mi computadora"
+        ],
+        "maxLength": 60,
+        "minLength": 1,
+        "title": "Nombre",
+        "type": "string"
+      }
+    },
+    "required": [
+      "credencial",
+      "nombre"
+    ],
+    "title": "LlaveNueva",
+    "type": "object"
+  },
+  "LlaveRegistrada": {
+    "description": "Respuesta de `POST /api/v1/auth/llave/alta`.",
+    "properties": {
+      "codigos_recuperacion": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Diez códigos que se muestran una sola vez. Nulo si ya tenía códigos sin usar.",
+        "title": "Codigos Recuperacion"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "codigos_recuperacion"
+    ],
+    "title": "LlaveRegistrada",
+    "type": "object"
+  },
+  "LlaveResumen": {
+    "description": "Una fila de `GET /api/v1/auth/llave`.",
+    "properties": {
+      "creada_en": {
+        "format": "date-time",
+        "title": "Creada En",
+        "type": "string"
+      },
+      "id": {
+        "format": "uuid",
+        "title": "Id",
+        "type": "string"
+      },
+      "nombre": {
+        "title": "Nombre",
+        "type": "string"
+      },
+      "ultimo_uso_en": {
+        "anyOf": [
+          {
+            "format": "date-time",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Ultimo Uso En"
+      }
+    },
+    "required": [
+      "id",
+      "nombre",
+      "creada_en",
+      "ultimo_uso_en"
+    ],
+    "title": "LlaveResumen",
+    "type": "object"
+  },
   "MandatoDadoDeBaja": {
     "$defs": {
       "CausaBaja": {
@@ -3419,6 +3522,22 @@
     "title": "NuevaContrasena",
     "type": "object"
   },
+  "OpcionesLlave": {
+    "description": "Respuesta de `POST …/alta/opciones` y `POST …/verificar/opciones`.",
+    "properties": {
+      "opciones": {
+        "additionalProperties": true,
+        "description": "Opciones WebAuthn, con binarios en base64url.",
+        "title": "Opciones",
+        "type": "object"
+      }
+    },
+    "required": [
+      "opciones"
+    ],
+    "title": "OpcionesLlave",
+    "type": "object"
+  },
   "Padron": {
     "$defs": {
       "FilaPadron": {
@@ -3576,6 +3695,22 @@
       "archivo"
     ],
     "title": "PlanillaPadron",
+    "type": "object"
+  },
+  "RespuestaLlave": {
+    "description": "`POST /api/v1/auth/llave/verificar`.",
+    "properties": {
+      "credencial": {
+        "additionalProperties": true,
+        "description": "La respuesta de `navigator.credentials`.",
+        "title": "Credencial",
+        "type": "object"
+      }
+    },
+    "required": [
+      "credencial"
+    ],
+    "title": "RespuestaLlave",
     "type": "object"
   },
   "Salud": {

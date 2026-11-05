@@ -460,7 +460,7 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
         anterior = conn.execute(
             text("select hash from nucleo.contrasena for update")
         ).scalar_one_or_none()
-        if _tiene_segundo_factor(conn):
+        if sf.tiene_medio(conn):
             _exigir_verificacion_reciente(conn, identidad)
         elif anterior is None:
             # La primera contraseña, sin otra prueba que la sesión: que sea de una entrada reciente.
@@ -506,12 +506,6 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
     return ContrasenaGuardada(cambiada_en=cambiada_en, sesiones_cerradas=cerradas)
 
 
-def _tiene_segundo_factor(conn: Connection) -> bool:
-    return conn.execute(
-        text("select exists (select 1 from nucleo.factor_totp where confirmado_en is not null)")
-    ).scalar_one()
-
-
 def _exigir_verificacion_reciente(conn: Connection, identidad: Identidad) -> None:
     """TB-CEM-3, como `SegundoFactorRecienteDep`, pero solo cuando hay segundo factor."""
     reciente = conn.execute(
@@ -523,7 +517,7 @@ def _exigir_verificacion_reciente(conn: Connection, identidad: Identidad) -> Non
         raise ErrorApi(
             403,
             CodigoError.SEGUNDO_FACTOR_REQUERIDO,
-            "Para esto tenés que confirmar con el código de tu aplicación de autenticación.",
+            sesiones.CONFIRMAR_QUE_SOS_VOS,
         )
 
 

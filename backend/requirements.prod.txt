@@ -10,6 +10,12 @@ limits==5.8.0
 redis==8.1.0
 PyJWT==2.15.1
 cryptography==50.0.2
+# Llave de acceso (WebAuthn, migración 0070) y sus dependencias.
+webauthn==3.0.1
+cbor2==6.2.0.post2
+pyOpenSSL==26.4.0
+pyasn1==0.6.5
+pyasn1_modules==0.4.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
 boto3==1.43.113

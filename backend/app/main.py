@@ -19,6 +19,7 @@ from app.db import crear_motor
 from app.identidad import sesiones
 from app.identidad.contrasena import router as contrasena
 from app.identidad.invitaciones import router as invitaciones
+from app.identidad.llave_acceso import router as llave_acceso
 from app.identidad.privacidad import router as privacidad
 from app.identidad.router import router as identidad
 from app.identidad.router import validar_origen
@@ -61,6 +62,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(identidad)
     app.include_router(invitaciones)
     app.include_router(segundo_factor)
+    app.include_router(llave_acceso)
     app.include_router(contrasena)
     app.include_router(privacidad)
     app.include_router(consorcios)

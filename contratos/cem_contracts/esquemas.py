@@ -46,6 +46,13 @@ from cem_contracts.invitaciones import (
     ListaInvitaciones,
     TokenInvitacion,
 )
+from cem_contracts.llave_acceso import (
+    LlaveNueva,
+    LlaveRegistrada,
+    LlaveResumen,
+    OpcionesLlave,
+    RespuestaLlave,
+)
 from cem_contracts.mandatos import (
     BajaMandato,
     CandidatoMandato,
@@ -129,6 +136,11 @@ MODELOS: tuple[type[BaseModel], ...] = (
     EstadoContrasena,
     EstadoSegundoFactor,
     FaltaSegundoFactor,
+    LlaveNueva,
+    LlaveRegistrada,
+    LlaveResumen,
+    OpcionesLlave,
+    RespuestaLlave,
     FilaPadron,
     FinVinculo,
     ImportacionAplicada,

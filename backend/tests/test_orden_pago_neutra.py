@@ -54,6 +54,9 @@ APROBAR = (
 )
 RECHAZAR = "select nucleo.rechazar_orden_pago(:orden, :version, :motivo, :actor, :origen, :sesion)"
 EMITIR = "select nucleo.emitir_orden_pago(:orden, :version, :actor, :origen, :sesion)"
+ACTO_CON_GESTO = (
+    "select nucleo.exigir_acto_economico(:cons, :actor, :sesion, 'egresos.preparar_orden', :origen)"
+)
 
 
 @dataclass
@@ -286,8 +289,8 @@ def test_las_vigencias_de_r10_son_las_de_la_api(motor_migrate):
     with motor_migrate.connect() as c:
         definicion = c.execute(
             text(
-                "select pg_get_functiondef("  # desde 0067, en la que llama exigir_acto_economico
-                "'nucleo.exigir_sesion_economica(uuid, uuid, uuid, text)'::regprocedure)"
+                "select pg_get_functiondef("  # desde 0071, en la que comparten todos los actos
+                "'nucleo.exigir_sesion_operativa(uuid, uuid, uuid, text, boolean)'::regprocedure)"
             )
         ).scalar_one()
     assert sesiones.VIGENCIA_SESION_ECONOMICA.total_seconds() == 12 * 3600
@@ -318,10 +321,19 @@ def test_en_modo_consejo_no_se_prepara(motor_migrate, motor_app):
 )
 def test_r10_la_sesion_y_el_segundo_factor(motor_migrate, e, horas, totp, motivo):
     s = nueva_sesion(motor_migrate, e.adm, horas_atras=horas, totp_min_atras=totp)
-    niega(motor_migrate, e, e.adm, PREPARAR, motivo, sesion=s)
+    niega(motor_migrate, e, e.adm, ACTO_CON_GESTO, motivo, sesion=s, cons=e.cons)
     # Control en el borde de adentro: 11 horas y TOTP de hace 9 minutos.
     ok = nueva_sesion(motor_migrate, e.adm, horas_atras=11, totp_min_atras=9)
-    assert llamar(motor_migrate, e, e.adm, PREPARAR, sesion=ok) is not None
+    assert llamar(motor_migrate, e, e.adm, ACTO_CON_GESTO, sesion=ok, cons=e.cons) is not None
+
+
+@pytest.mark.parametrize("totp", [None, 11])
+def test_preparar_no_pide_el_gesto_pero_si_la_sesion_reciente(motor_migrate, e, totp):
+    """Decisión del propietario del 04-11-2026 (`0071`): preparar no mueve dinero."""
+    s = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=totp)
+    assert llamar(motor_migrate, e, e.adm, PREPARAR, sesion=s) is not None
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13, totp_min_atras=totp)
+    niega(motor_migrate, e, e.adm, PREPARAR, "requiere_sesion_reciente", sesion=larga)
 
 
 def test_una_sesion_vencida_revocada_o_ajena_no_sirve(motor_migrate, e):

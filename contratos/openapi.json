@@ -2699,6 +2699,12 @@
             "title": "Codigos Recuperacion Restantes",
             "type": "integer"
           },
+          "llaves": {
+            "description": "Cuántas llaves de acceso tiene (`llave_acceso`).",
+            "minimum": 0.0,
+            "title": "Llaves",
+            "type": "integer"
+          },
           "verificado_en": {
             "anyOf": [
               {
@@ -2715,6 +2721,7 @@
         },
         "required": [
           "activo",
+          "llaves",
           "codigos_recuperacion_restantes",
           "verificado_en"
         ],
@@ -4503,6 +4510,102 @@
         "title": "ListaUnidades",
         "type": "object"
       },
+      "LlaveNueva": {
+        "description": "`POST /api/v1/auth/llave/alta`.",
+        "properties": {
+          "credencial": {
+            "additionalProperties": true,
+            "description": "La respuesta de `navigator.credentials`.",
+            "title": "Credencial",
+            "type": "object"
+          },
+          "nombre": {
+            "examples": [
+              "Mi computadora"
+            ],
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "credencial",
+          "nombre"
+        ],
+        "title": "LlaveNueva",
+        "type": "object"
+      },
+      "LlaveRegistrada": {
+        "description": "Respuesta de `POST /api/v1/auth/llave/alta`.",
+        "properties": {
+          "codigos_recuperacion": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Diez códigos que se muestran una sola vez. Nulo si ya tenía códigos sin usar.",
+            "title": "Codigos Recuperacion"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "codigos_recuperacion"
+        ],
+        "title": "LlaveRegistrada",
+        "type": "object"
+      },
+      "LlaveResumen": {
+        "description": "Una fila de `GET /api/v1/auth/llave`.",
+        "properties": {
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "ultimo_uso_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ultimo Uso En"
+          }
+        },
+        "required": [
+          "id",
+          "nombre",
+          "creada_en",
+          "ultimo_uso_en"
+        ],
+        "title": "LlaveResumen",
+        "type": "object"
+      },
       "MandatoDadoDeBaja": {
         "properties": {
           "causa": {
@@ -4980,6 +5083,22 @@
           "contrasena_nueva"
         ],
         "title": "NuevaContrasena",
+        "type": "object"
+      },
+      "OpcionesLlave": {
+        "description": "Respuesta de `POST …/alta/opciones` y `POST …/verificar/opciones`.",
+        "properties": {
+          "opciones": {
+            "additionalProperties": true,
+            "description": "Opciones WebAuthn, con binarios en base64url.",
+            "title": "Opciones",
+            "type": "object"
+          }
+        },
+        "required": [
+          "opciones"
+        ],
+        "title": "OpcionesLlave",
         "type": "object"
       },
       "OrdenConPagoManual": {
@@ -6339,6 +6458,22 @@
           "version_esperada"
         ],
         "title": "Renovacion",
+        "type": "object"
+      },
+      "RespuestaLlave": {
+        "description": "`POST /api/v1/auth/llave/verificar`.",
+        "properties": {
+          "credencial": {
+            "additionalProperties": true,
+            "description": "La respuesta de `navigator.credentials`.",
+            "title": "Credencial",
+            "type": "object"
+          }
+        },
+        "required": [
+          "credencial"
+        ],
+        "title": "RespuestaLlave",
         "type": "object"
       },
       "ResultadoConciliacion": {
@@ -8061,6 +8196,264 @@
           }
         },
         "summary": "Ver una invitación antes de aceptarla",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave": {
+      "get": {
+        "operationId": "listar_api_v1_auth_llave_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/LlaveResumen"
+                  },
+                  "title": "Response Listar Api V1 Auth Llave Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mis llaves de acceso",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave/alta": {
+      "post": {
+        "description": "Deja la sesión verificada y avisa por correo. Devuelve códigos de recuperación si la persona\nno tenía ninguno sin usar.",
+        "operationId": "alta_api_v1_auth_llave_alta_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlaveNueva"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlaveRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La llave no se pudo confirmar."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta confirmar que sos vos."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Registrar la llave",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave/alta/opciones": {
+      "post": {
+        "operationId": "alta_opciones_api_v1_auth_llave_alta_opciones_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpcionesLlave"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta confirmar que sos vos."
+          }
+        },
+        "summary": "Empezar el alta de una llave",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave/verificar": {
+      "post": {
+        "description": "La sesión cuenta como verificada durante 10 minutos, como con el código.",
+        "operationId": "verificar_api_v1_auth_llave_verificar_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespuestaLlave"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SegundoFactorVerificado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "La llave no se pudo confirmar."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirmar con la llave en esta sesión",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave/verificar/opciones": {
+      "post": {
+        "operationId": "verificar_opciones_api_v1_auth_llave_verificar_opciones_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpcionesLlave"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay una llave activa."
+          }
+        },
+        "summary": "Pedir el desafío para confirmar con la llave",
+        "tags": [
+          "identidad"
+        ]
+      }
+    },
+    "/api/v1/auth/llave/{llave_id}": {
+      "delete": {
+        "description": "Pide haber verificado hace poco y deja todas las sesiones sin verificar. Si era el último\nmedio, también borra los códigos de recuperación, que sin medio no sirven.",
+        "operationId": "baja_api_v1_auth_llave__llave_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "llave_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Llave Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Falta una verificación reciente (10 minutos)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "No hay una llave tuya con ese identificador."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quitar una llave",
         "tags": [
           "identidad"
         ]

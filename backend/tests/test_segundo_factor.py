@@ -149,6 +149,7 @@ def test_alta_confirmacion_y_estado(app, motor_migrate, reloj):  # noqa: F811
     assert c.get(BASE).json() == {
         "activo": False,
         "activado_en": None,
+        "llaves": 0,
         "codigos_recuperacion_restantes": 0,
         "verificado_en": None,
     }
@@ -338,6 +339,7 @@ def test_la_baja_pide_verificacion_reciente(app, motor_migrate, reloj):  # noqa:
     assert c.get(BASE).json() == {
         "activo": False,
         "activado_en": None,
+        "llaves": 0,
         "codigos_recuperacion_restantes": 0,
         "verificado_en": None,
     }

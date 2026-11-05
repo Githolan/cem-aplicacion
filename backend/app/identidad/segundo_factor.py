@@ -80,7 +80,7 @@ ASUNTO_ALTA = "Activaste la verificación en dos pasos"
 ASUNTO_BAJA = "Desactivaste la verificación en dos pasos"
 TEXTO_AVISO = """Hola:
 
-{que} la verificación en dos pasos de tu cuenta de Consorcio en Mano.
+{que} tu cuenta de Consorcio en Mano.
 
 Si no fuiste vos, entrá, cerrá las sesiones de los otros dispositivos y avisá a quien administra
 tu consorcio.
@@ -170,7 +170,7 @@ def _claves(request: Request) -> Claves:
 ClavesDep = Annotated[Claves, Depends(_claves)]
 
 
-def _sesion(identidad: Identidad) -> UUID:
+def sesion_de(identidad: Identidad) -> UUID:
     if identidad.sesion_id is None:
         raise RuntimeError("el segundo factor necesita la sesión de la petición")
     return identidad.sesion_id
@@ -182,7 +182,7 @@ def exigir_entrada_reciente(conn: Connection, identidad: Identidad) -> None:
     un dispositivo ajeno no alcanza para quedarse con la cuenta (revisión de seguridad H3)."""
     reciente = conn.execute(
         text("select creada_en > now() - :v from nucleo.sesion where id = :s"),
-        {"s": _sesion(identidad), "v": VIGENCIA_VERIFICACION},
+        {"s": sesion_de(identidad), "v": VIGENCIA_VERIFICACION},
     ).scalar_one()
     if not reciente:
         log.info("alta rechazada: sin_entrada_reciente")
@@ -192,6 +192,53 @@ def exigir_entrada_reciente(conn: Connection, identidad: Identidad) -> None:
             "Por seguridad, salí, volvé a entrar y hacelo apenas entres.",
             detalle={"falta": "entrar_de_nuevo"},
         )
+
+
+def tiene_medio(conn: Connection) -> bool:
+    """La persona del ámbito tiene una aplicación confirmada o una llave de acceso."""
+    return conn.execute(
+        text(
+            "select exists (select 1 from nucleo.factor_totp where confirmado_en is not null)"
+            " or exists (select 1 from nucleo.llave_acceso)"
+        )
+    ).scalar_one()
+
+
+def exigir_permiso_de_alta(conn: Connection, identidad: Identidad) -> None:
+    """Con un medio activo, sumar otro pide verificarse con él: una entrada por el correo no
+    alcanza para agregar un medio a una cuenta que ya tiene uno. Sin ninguno, una entrada
+    reciente."""
+    if not tiene_medio(conn):
+        exigir_entrada_reciente(conn, identidad)
+        return
+    reciente = conn.execute(
+        text("select segundo_factor_en > now() - :v from nucleo.sesion where id = :s"),
+        {"s": sesion_de(identidad), "v": VIGENCIA_VERIFICACION},
+    ).scalar_one()
+    if not reciente:
+        log.info("alta rechazada: sin_verificacion_reciente")
+        raise ErrorApi(403, CodigoError.SEGUNDO_FACTOR_REQUERIDO, sesiones.CONFIRMAR_QUE_SOS_VOS)
+
+
+def marcar_verificada(conn: Connection, identidad: Identidad) -> datetime:
+    return conn.execute(
+        text(
+            "update nucleo.sesion set segundo_factor_en = now() where id = :s"
+            " returning segundo_factor_en"
+        ),
+        {"s": sesion_de(identidad)},
+    ).scalar_one()
+
+
+def emitir_codigos(conn: Connection, claves: Claves, persona_id: UUID) -> list[str]:
+    """Reemplaza los códigos de recuperación de la persona del ámbito y devuelve los nuevos."""
+    codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
+    conn.execute(text("delete from nucleo.codigo_recuperacion"))
+    conn.execute(
+        text("insert into nucleo.codigo_recuperacion (persona_id, codigo_hash) values (:p, :h)"),
+        [{"p": persona_id, "h": claves.hash_recuperacion(persona_id, c)} for c in codigos],
+    )
+    return codigos
 
 
 def _verificado_en(conn: Connection, sesion_id: UUID) -> datetime | None:
@@ -205,13 +252,13 @@ def exigir_segundo_factor_reciente(identidad: IdentidadDep, motor: MotorDep) -> 
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         reciente = conn.execute(
             text("select segundo_factor_en > now() - :v from nucleo.sesion where id = :s"),
-            {"s": _sesion(identidad), "v": VIGENCIA_VERIFICACION},
+            {"s": sesion_de(identidad), "v": VIGENCIA_VERIFICACION},
         ).scalar_one()
     if not reciente:
         raise ErrorApi(
             403,
             CodigoError.SEGUNDO_FACTOR_REQUERIDO,
-            "Para esto tenés que confirmar con el código de tu aplicación de autenticación.",
+            sesiones.CONFIRMAR_QUE_SOS_VOS,
         )
     return identidad
 
@@ -233,7 +280,7 @@ def codigo_invalido() -> ErrorApi:
     )
 
 
-def _avisar(conn: Connection, persona_id: UUID, asunto: str, que: str) -> None:
+def avisar(conn: Connection, persona_id: UUID, asunto: str, que: str) -> None:
     para = conn.execute(
         text("select correo from nucleo.persona where id = :p"), {"p": persona_id}
     ).scalar_one()
@@ -274,10 +321,7 @@ def comprobar_codigo(conn: Connection, claves: Claves, persona_id: UUID, codigo:
         return (
             "totp" if _comprobar_totp(conn, claves, persona_id, codigo, confirmado=True) else None
         )
-    hay_factor = conn.execute(
-        text("select exists (select 1 from nucleo.factor_totp where confirmado_en is not null)")
-    ).scalar_one()
-    if not hay_factor:
+    if not tiene_medio(conn):
         raise ErrorApi(
             409,
             CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
@@ -293,7 +337,7 @@ def comprobar_codigo(conn: Connection, claves: Claves, persona_id: UUID, codigo:
     return "recuperacion" if usado is not None else None
 
 
-def _restantes(conn: Connection) -> int:
+def restantes(conn: Connection) -> int:
     return conn.execute(
         text("select count(*) from nucleo.codigo_recuperacion where usado_en is null")
     ).scalar_one()
@@ -314,8 +358,9 @@ def estado(identidad: IdentidadDep, motor: MotorDep, response: Response) -> Esta
         return EstadoSegundoFactor(
             activo=confirmado is not None,
             activado_en=confirmado,
-            codigos_recuperacion_restantes=_restantes(conn) if confirmado else 0,
-            verificado_en=_verificado_en(conn, _sesion(identidad)),
+            llaves=conn.execute(text("select count(*) from nucleo.llave_acceso")).scalar_one(),
+            codigos_recuperacion_restantes=restantes(conn) if tiene_medio(conn) else 0,
+            verificado_en=_verificado_en(conn, sesion_de(identidad)),
         )
 
 
@@ -336,7 +381,7 @@ def alta(
     response.headers.update(SIN_CACHE)
     secreto = secrets.token_bytes(BYTES_SECRETO)
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
-        exigir_entrada_reciente(conn, identidad)
+        exigir_permiso_de_alta(conn, identidad)
         activo = conn.execute(
             text("select confirmado_en is not null from nucleo.factor_totp for update")
         ).scalar_one_or_none()
@@ -386,27 +431,14 @@ async def confirmar(
     códigos de recuperación que no se vuelven a mostrar. Avisa por correo."""
     response.headers.update(SIN_CACHE)
     await consumir_intento(request, identidad.persona_id)
-    codigos = [nuevo_codigo_recuperacion() for _ in range(CANTIDAD_RECUPERACION)]
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
-        exigir_entrada_reciente(conn, identidad)
+        exigir_permiso_de_alta(conn, identidad)
         if not _comprobar_totp(conn, claves, identidad.persona_id, pedido.codigo, confirmado=False):
             raise codigo_invalido()
         conn.execute(text("update nucleo.factor_totp set confirmado_en = now()"))
-        conn.execute(text("delete from nucleo.codigo_recuperacion"))
-        conn.execute(
-            text(
-                "insert into nucleo.codigo_recuperacion (persona_id, codigo_hash) values (:p, :h)"
-            ),
-            [
-                {"p": identidad.persona_id, "h": claves.hash_recuperacion(identidad.persona_id, c)}
-                for c in codigos
-            ],
-        )
-        conn.execute(
-            text("update nucleo.sesion set segundo_factor_en = now() where id = :s"),
-            {"s": _sesion(identidad)},
-        )
-        _avisar(conn, identidad.persona_id, ASUNTO_ALTA, "Se activó")
+        codigos = emitir_codigos(conn, claves, identidad.persona_id)
+        marcar_verificada(conn, identidad)
+        avisar(conn, identidad.persona_id, ASUNTO_ALTA, "Se activó la verificación en dos pasos de")
     log.info("segundo factor activado", extra={"campos": {"persona_id": str(identidad.persona_id)}})
     return CodigosRecuperacion(codigos=codigos)
 
@@ -441,22 +473,16 @@ async def verificar(
                 extra={"campos": {"persona_id": str(persona)}},
             )
             raise codigo_invalido()
-        verificado_en = conn.execute(
-            text(
-                "update nucleo.sesion set segundo_factor_en = now() where id = :s"
-                " returning segundo_factor_en"
-            ),
-            {"s": _sesion(identidad)},
-        ).scalar_one()
-        restantes = _restantes(conn)
+        verificado_en = marcar_verificada(conn, identidad)
+        quedan = restantes(conn)
     log.info(
         "segundo factor verificado",
-        extra={"campos": {"persona_id": str(persona), "medio": medio, "restantes": restantes}},
+        extra={"campos": {"persona_id": str(persona), "medio": medio, "restantes": quedan}},
     )
     return SegundoFactorVerificado(
         verificado_en=verificado_en,
         vale_hasta=verificado_en + VIGENCIA_VERIFICACION,
-        codigos_recuperacion_restantes=restantes,
+        codigos_recuperacion_restantes=quedan,
     )
 
 
@@ -476,12 +502,15 @@ def baja(identidad: SegundoFactorRecienteDep, motor: MotorDep) -> Response:
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         # TOTP y después recuperación, el orden de `confirmar` y de la supresión (0040).
         conn.execute(text("delete from nucleo.factor_totp"))
-        conn.execute(text("delete from nucleo.codigo_recuperacion"))
+        if not tiene_medio(conn):
+            conn.execute(text("delete from nucleo.codigo_recuperacion"))
         conn.execute(
             text("update nucleo.sesion set segundo_factor_en = null where persona_id = :p"),
             {"p": identidad.persona_id},
         )
-        _avisar(conn, identidad.persona_id, ASUNTO_BAJA, "Se desactivó")
+        avisar(
+            conn, identidad.persona_id, ASUNTO_BAJA, "Se desactivó la verificación en dos pasos de"
+        )
     log.info(
         "segundo factor desactivado", extra={"campos": {"persona_id": str(identidad.persona_id)}}
     )
