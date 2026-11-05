@@ -2,12 +2,14 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
-import { encabezadoCsrf } from "./csrf";
+import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { confirmarConLlave, llaveDisponible, registrarLlave } from "./llaveAcceso";
+import { llaveDisponible, quitarLlave, registrarLlave, type Resultado } from "./llaveAcceso";
 
 // La llave de acceso en /cuenta/segundo-factor: activarla es un solo botón, sin aplicación aparte.
-// Si el navegador no sabe usarlas, la sección no aparece y queda la aplicación de códigos.
+// Si el navegador no sabe usarlas, la sección no aparece y queda la aplicación de códigos. Cuando
+// falta confirmar, `PedirCodigo` ofrece la llave o un código, también el de recuperación, y el
+// pedido se repite: quien perdió el dispositivo puede quitar su llave o sumar otra.
 
 type Llave = components["schemas"]["LlaveResumen"];
 
@@ -22,6 +24,7 @@ export function SeccionLlave({ alCambiar }: Props) {
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<string | null>(null);
   const [listo, setListo] = useState<string | null>(null);
+  const [pendiente, setPendiente] = useState<(() => void) | null>(null);
   const consultado = useRef(false);
 
   const consultar = useCallback(() => {
@@ -43,51 +46,54 @@ export function SeccionLlave({ alCambiar }: Props) {
 
   if (!llaveDisponible()) return null;
 
-  function activar() {
+  /** Corre un pedido; si falta confirmar, lo deja pendiente hasta que la persona confirme. */
+  function intentar<T>(pedido: () => Promise<Resultado<T>>, alTerminar: (valor: T) => void) {
     setEnviando(true);
     setAviso(null);
     setListo(null);
-    void registrarLlave()
+    void pedido()
       .then((r) => {
-        if (!r.ok) {
-          setAviso(r.mensaje);
-          return;
-        }
-        setCodigos(r.valor);
-        setListo("Listo: tu llave quedó activada.");
-        consultar();
-        alCambiar();
+        if (r.ok) {
+          alTerminar(r.valor);
+          consultar();
+          alCambiar();
+        } else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alTerminar));
+        else setAviso(r.mensaje);
       })
       .finally(() => setEnviando(false));
   }
 
-  async function quitar(llave: Llave) {
-    const confirmada = await confirmarConLlave();
-    if (!confirmada.ok) return confirmada.mensaje;
-    const { error, response } = await api.DELETE("/api/v1/auth/llave/{llave_id}", {
-      params: { path: { llave_id: llave.id } },
-      headers: encabezadoCsrf(),
+  function activar() {
+    intentar(registrarLlave, (nuevos) => {
+      setCodigos(nuevos);
+      setListo("Listo: tu llave quedó activada.");
     });
-    return response.ok ? null : mensajeDeFalla(response.status, codigoDe(error));
   }
 
-  function pedirQuitar(llave: Llave) {
-    setEnviando(true);
+  function quitar(llave: Llave) {
+    intentar(
+      () => quitarLlave(llave.id),
+      () => setListo("Listo: quitaste la llave."),
+    );
+  }
+
+  function confirmarSolo() {
     setAviso(null);
     setListo(null);
-    void quitar(llave)
-      .then((mensaje) => {
-        if (mensaje !== null) {
-          setAviso(mensaje);
-          return;
-        }
-        setListo("Listo: quitaste la llave.");
-        consultar();
-        alCambiar();
-      })
-      .catch(() => setAviso(SIN_CONEXION))
-      .finally(() => setEnviando(false));
+    setPendiente(() => () => setListo("Listo: confirmaste que sos vos, por 10 minutos."));
   }
+
+  if (pendiente !== null)
+    return (
+      <PedirCodigo
+        acto="seguir"
+        alVerificar={() => {
+          setPendiente(null);
+          pendiente();
+        }}
+        alCancelar={() => setPendiente(null)}
+      />
+    );
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
@@ -122,7 +128,7 @@ export function SeccionLlave({ alCambiar }: Props) {
                 type="button"
                 className="secundario"
                 disabled={enviando}
-                onClick={() => pedirQuitar(k)}
+                onClick={() => quitar(k)}
               >
                 Quitar
               </button>
@@ -133,6 +139,11 @@ export function SeccionLlave({ alCambiar }: Props) {
       {llaves !== null && (
         <button type="button" onClick={activar} disabled={enviando}>
           {llaves.length === 0 ? "Activar en este dispositivo" : "Agregar este dispositivo"}
+        </button>
+      )}
+      {llaves !== null && llaves.length > 0 && (
+        <button type="button" className="secundario" onClick={confirmarSolo} disabled={enviando}>
+          Confirmar que soy yo
         </button>
       )}
     </section>

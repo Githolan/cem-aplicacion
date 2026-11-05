@@ -114,7 +114,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
     <form className="formulario tarjeta" onSubmit={verificar} noValidate aria-labelledby={`${id}-titulo`}>
       <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
       <p>
-        Para {acto} hace falta el código de tu aplicación de verificación, de los últimos 10 minutos.
+        Para {acto} hace falta el código de tu aplicación de verificación o uno de recuperación.
         Después seguimos con el mismo pedido.
       </p>
       <label htmlFor={`${id}-codigo`}>Código</label>

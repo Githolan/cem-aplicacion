@@ -9,7 +9,10 @@ import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 type Json = Record<string, unknown>;
 type Descriptor = { id: string; type: PublicKeyCredentialType; transports?: AuthenticatorTransport[] };
 
-export type Resultado<T> = { ok: true; valor: T } | { ok: false; mensaje: string };
+export type Resultado<T> =
+  | { ok: true; valor: T }
+  /** Hay otro medio activo y primero hay que verificarse con él. */
+  | { ok: false; mensaje: string; faltaConfirmar: boolean };
 
 const CANCELADO = "No se confirmó. Probá de nuevo cuando quieras.";
 const NO_CONFIRMADO = "No pudimos confirmar tu llave. Probá de nuevo.";
@@ -85,11 +88,12 @@ function credencialDeVerificacion(credencial: PublicKeyCredential): Json {
   };
 }
 
-function mensajeDeRechazo(estado: number, error: unknown): string {
+function rechazo(estado: number, error: unknown): { ok: false; mensaje: string; faltaConfirmar: boolean } {
   const codigo = codigoDe(error);
-  if (codigo === "segundo_factor_requerido") return FALTA_CONFIRMAR;
-  if (codigo === "segundo_factor_invalido") return NO_CONFIRMADO;
-  return mensajeDeFalla(estado, codigo);
+  if (codigo === "segundo_factor_requerido")
+    return { ok: false, mensaje: FALTA_CONFIRMAR, faltaConfirmar: true };
+  const mensaje = codigo === "segundo_factor_invalido" ? NO_CONFIRMADO : mensajeDeFalla(estado, codigo);
+  return { ok: false, mensaje, faltaConfirmar: false };
 }
 
 /** Lo que dice el navegador cuando el gesto no se completó. Todo lo demás es falla de conexión. */
@@ -115,8 +119,7 @@ export function nombreDelDispositivo(agente: string): string {
 export async function registrarLlave(): Promise<Resultado<string[] | null>> {
   try {
     const pedido = await api.POST("/api/v1/auth/llave/alta/opciones", { headers: encabezadoCsrf() });
-    if (pedido.data === undefined)
-      return { ok: false, mensaje: mensajeDeRechazo(pedido.response.status, pedido.error) };
+    if (pedido.data === undefined) return rechazo(pedido.response.status, pedido.error);
     const credencial = (await navigator.credentials.create({
       publicKey: opcionesDeAlta(pedido.data.opciones),
     })) as PublicKeyCredential;
@@ -124,11 +127,23 @@ export async function registrarLlave(): Promise<Resultado<string[] | null>> {
       body: { credencial: credencialDeAlta(credencial), nombre: nombreDelDispositivo(navigator.userAgent) },
       headers: encabezadoCsrf(),
     });
-    if (alta.data === undefined)
-      return { ok: false, mensaje: mensajeDeRechazo(alta.response.status, alta.error) };
+    if (alta.data === undefined) return rechazo(alta.response.status, alta.error);
     return { ok: true, valor: alta.data.codigos_recuperacion ?? null };
   } catch (error) {
-    return { ok: false, mensaje: mensajeDelDispositivo(error) };
+    return { ok: false, mensaje: mensajeDelDispositivo(error), faltaConfirmar: false };
+  }
+}
+
+/** Quita una llave con la verificación que ya tenga la sesión, sea cual sea su medio. */
+export async function quitarLlave(llaveId: string): Promise<Resultado<null>> {
+  try {
+    const { error, response } = await api.DELETE("/api/v1/auth/llave/{llave_id}", {
+      params: { path: { llave_id: llaveId } },
+      headers: encabezadoCsrf(),
+    });
+    return response.ok ? { ok: true, valor: null } : rechazo(response.status, error);
+  } catch {
+    return { ok: false, mensaje: SIN_CONEXION, faltaConfirmar: false };
   }
 }
 
@@ -138,8 +153,7 @@ export async function confirmarConLlave(): Promise<Resultado<null>> {
     const pedido = await api.POST("/api/v1/auth/llave/verificar/opciones", {
       headers: encabezadoCsrf(),
     });
-    if (pedido.data === undefined)
-      return { ok: false, mensaje: mensajeDeRechazo(pedido.response.status, pedido.error) };
+    if (pedido.data === undefined) return rechazo(pedido.response.status, pedido.error);
     const credencial = (await navigator.credentials.get({
       publicKey: opcionesDeVerificacion(pedido.data.opciones),
     })) as PublicKeyCredential;
@@ -147,10 +161,9 @@ export async function confirmarConLlave(): Promise<Resultado<null>> {
       body: { credencial: credencialDeVerificacion(credencial) },
       headers: encabezadoCsrf(),
     });
-    if (verificacion.data === undefined)
-      return { ok: false, mensaje: mensajeDeRechazo(verificacion.response.status, verificacion.error) };
+    if (verificacion.data === undefined) return rechazo(verificacion.response.status, verificacion.error);
     return { ok: true, valor: null };
   } catch (error) {
-    return { ok: false, mensaje: mensajeDelDispositivo(error) };
+    return { ok: false, mensaje: mensajeDelDispositivo(error), faltaConfirmar: false };
   }
 }
