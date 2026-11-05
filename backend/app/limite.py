@@ -167,7 +167,8 @@ class LimiteDeTasa:
             raise RuntimeError("petición sin dirección de cliente: no se puede aplicar el límite")
         ip = scope["client"][0]
         cupos = [(LIMITE_API, "api")] + [
-            (f.limite, f.nombre) for f in self.familias
+            (f.limite, f.nombre)
+            for f in self.familias
             if scope["path"].startswith(f.prefijo)
             and (scope["method"], scope["path"]) not in f.fuera
         ]
