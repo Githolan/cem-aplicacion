@@ -5,15 +5,16 @@ import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { PedirCodigo } from "./egresos/PedirCodigo";
+import { RUTA_ENTRAR } from "./enlace";
 import { ENTRAR_DE_NUEVO } from "./fallas";
-import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 
 // Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y el formulario para
-// definirla o cambiarla (`PUT /api/v1/auth/contrasena`, con X-CSRF-Token). El backend decide y
-// esta sección solo lo explica: con el segundo factor activo pide haberlo verificado en esta
-// sesión en los últimos 10 minutos (403 `segundo_factor_requerido`); sin él, cambiar una
-// existente pide la actual (403 `contrasena_actual_invalida`). Cambiarla cierra las sesiones de
-// los otros dispositivos y siempre avisa por correo.
+// definirla o cambiarla (`PUT /api/v1/auth/contrasena`, con X-CSRF-Token). El backend decide: con
+// el segundo factor activo pide haberlo verificado en esta sesión en los últimos 10 minutos (403
+// `segundo_factor_requerido`), y la sección lo pide acá mismo y repite el pedido sin perder lo
+// escrito; sin él, cambiar una existente pide la actual (403 `contrasena_actual_invalida`).
+// Cambiarla cierra las sesiones de los otros dispositivos y siempre avisa por correo.
 // El formulario empieza plegado detrás de un botón (pedido del propietario, 17-10-2026): quien
 // acaba de definirla no tiene por qué ver tres campos vacíos cada vez que entra a /cuenta, y el
 // navegador no autocompleta la actual en un campo que nadie pidió. Se pliega de nuevo al guardar
@@ -51,7 +52,7 @@ export function largoContrasena(valor: string): number {
 type Aviso =
   | { tipo: "ok"; texto: string }
   | { tipo: "error"; texto: string }
-  | { tipo: "falta_verificacion" };
+  | { tipo: "entrar_de_nuevo" };
 
 /** Respuesta de error con el cuerpo uniforme (`Error`), para leer su código y su mensaje. */
 function campoDe(error: unknown, campo: "codigo" | "mensaje"): string | undefined {
@@ -80,6 +81,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [abierto, setAbierto] = useState(false);
+  const [pidiendoCodigo, setPidiendoCodigo] = useState(false);
   // `null`: todavía no se abrió ni se cerró, y el foco queda donde estaba.
   const [foco, setFoco] = useState<"campo" | "boton" | null>(null);
   const primerCampo = useRef<HTMLInputElement>(null);
@@ -88,7 +90,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   useEffect(() => {
     if (foco === "campo") primerCampo.current?.focus();
     if (foco === "boton") botonAbrir.current?.focus();
-  }, [foco, abierto]);
+  }, [foco, abierto, pidiendoCodigo]);
 
   function vaciar() {
     setActual("");
@@ -120,6 +122,10 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
     setCorta(esCorta);
     setDistintas(!esCorta && sonDistintas);
     if (esCorta || sonDistintas) return;
+    enviar();
+  }
+
+  function enviar() {
     setEnviando(true);
     setAviso(null);
     void api
@@ -148,13 +154,13 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           return;
         }
         const codigo = campoDe(error, "codigo");
-        if (codigo === CODIGO_REQUERIDO) setAviso({ tipo: "falta_verificacion" });
+        if (codigo === CODIGO_REQUERIDO) setPidiendoCodigo(true);
         else if (codigo === CODIGO_ACTUAL_INVALIDA)
           setAviso({ tipo: "error", texto: "La contraseña actual no es correcta." });
         else if (codigo === CODIGO_DEBIL)
           // El backend explica la regla (largo y que no sea el correo): se muestra tal cual.
           setAviso({ tipo: "error", texto: campoDe(error, "mensaje") ?? SIN_CONEXION });
-        else if (codigo === CODIGO_ENTRADA_RECIENTE) setAviso({ tipo: "error", texto: ENTRAR_DE_NUEVO });
+        else if (codigo === CODIGO_ENTRADA_RECIENTE) setAviso({ tipo: "entrar_de_nuevo" });
         else if (codigo === CODIGO_CSRF)
           setAviso({ tipo: "error", texto: "No pudimos verificar el pedido. Recargá la página y probá de nuevo." });
         else if (response.status === ESTADO_DEMASIADOS)
@@ -167,6 +173,19 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
 
   const ayuda = `${id}-ayuda`;
   const describeNueva = [ayuda, corta ? `${id}-corta` : null].filter(Boolean).join(" ");
+
+  // Lo escrito vive en esta sección: al volver del pedido sigue en los campos.
+  if (pidiendoCodigo)
+    return (
+      <PedirCodigo
+        acto="guardar tu contraseña"
+        alVerificar={() => {
+          setPidiendoCodigo(false);
+          enviar();
+        }}
+        alCancelar={() => setPidiendoCodigo(false)}
+      />
+    );
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
@@ -185,9 +204,8 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
       )}
       {abierto && segundoFactor && (
         <p>
-          Como tenés el segundo factor activado, antes de {estado.definida ? "cambiarla" : "definirla"}{" "}
-          <Link to={RUTA_SEGUNDO_FACTOR}>verificá un código en la página del segundo factor</Link> (vale
-          10 minutos).
+          Como tenés el segundo factor activado, al guardar te vamos a pedir que confirmes que sos vos,
+          si no lo hiciste en los últimos 10 minutos.
         </p>
       )}
       {abierto && estado.definida && (
@@ -263,12 +281,15 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         {enviando && <p>Guardando…</p>}
         {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
         {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
-        {aviso?.tipo === "falta_verificacion" && (
-          <p className="aviso-error">
-            Para esto tenés que confirmar con el código de tu aplicación de autenticación.{" "}
-            <Link to={RUTA_SEGUNDO_FACTOR}>Verificá un código en la página del segundo factor</Link> y
-            volvé antes de 10 minutos.
-          </p>
+        {aviso?.tipo === "entrar_de_nuevo" && (
+          <>
+            <p className="aviso-error">{ENTRAR_DE_NUEVO}</p>
+            <p>
+              <Link to={RUTA_ENTRAR} state={{ renovar: true }}>
+                Volver a entrar
+              </Link>
+            </p>
+          </>
         )}
       </div>
     </section>

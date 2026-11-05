@@ -24,6 +24,9 @@ verifica a todos.
 verificado hace poco (`segundo_factor_reciente`), la sesión de menos de 12 horas
 (`sesion_reciente`) y la identidad humana verificada de quien actúa.
 
+**`alcanza` (documento 13, §10.5)** responde otra pregunta, sin entidad: si la interfaz le muestra
+la acción a la persona. Es solo para mostrar: no concede nada y toda ruta decide con `evaluar`.
+
 Los tipos de entrada son propios y puros. El PR 3 armará el `ContextoAutorizacion` desde la
 base (`hoy_del_consorcio`, `nucleo.mandato_vigente`); acá no se toca `app.contexto`. Aunque el
 contexto ya traiga solo lo vigente, el evaluador vuelve a comprobar la vigencia y el consorcio
@@ -38,7 +41,12 @@ from typing import Literal
 from uuid import UUID
 
 from cem_contracts.estados import ModoOperacion, TipoVinculo
-from cem_contracts.politicas import CodigoSeparacion, Politica, TipoRecurso
+from cem_contracts.politicas import (
+    CodigoSeparacion,
+    ConcesionPorVinculo,
+    Politica,
+    TipoRecurso,
+)
 
 from app.autorizacion import recursos
 from app.autorizacion.politicas import POLITICAS
@@ -204,11 +212,7 @@ def evaluar(
     entidad: Entidad,
     politicas: Mapping[str, Politica] = POLITICAS,
 ) -> Decision:
-    mandatos_validos = {
-        m.id
-        for m in contexto.mandatos
-        if m.consorcio_id == contexto.consorcio_id and m.vigente(contexto.hoy)
-    }
+    mandatos_validos = _mandatos_validos(contexto)
     # 1. Ámbito (R2, R11).
     if not contexto.vinculos and not mandatos_validos:
         return Decision(False, 404, Motivo.FUERA_DE_AMBITO)
@@ -227,6 +231,72 @@ def evaluar(
     return concesion
 
 
+def alcanza(
+    accion: str,
+    contexto: ContextoAutorizacion,
+    politicas: Mapping[str, Politica] = POLITICAS,
+) -> bool:
+    """Si la interfaz le muestra la acción a la persona (documento 13, §10.5), sin entidad.
+
+    **Es solo para mostrar: no concede nada.** Toda ruta sigue decidiendo con `evaluar`, y una
+    acción que se alcanza todavía se puede negar. Tampoco audita: preguntar qué se muestra no es
+    un intento de actuar.
+
+    - **Ámbito y acción no declarada:** como `evaluar`.
+    - **Concesión, sobre alguna entidad posible:** un vínculo del tipo declarado (respetando
+      `solo_confirmados`, sin mirar `misma_unidad`: alcanza si es sobre su unidad), el ámbito
+      declarado o una facultad con el código exacto, de un mandato válido de este consorcio,
+      cuyo recurso sea admisible para la acción. Uno mal formado no cuenta.
+    - **Filtros que no dependen de la entidad:** el modo (R6) y, en las económicas, la identidad
+      humana verificada de quien actúa (R10).
+    - **Lo que no se mira:** el segundo factor reciente y la sesión reciente, que se renuevan (la
+      acción se muestra y el gesto se pide al hacerla), y la separación, el respaldo y el
+      destinatario único, que dependen de la entidad.
+
+    Todo lo que `evaluar` concede, se alcanza; al revés, no.
+    """
+    mandatos_validos = _mandatos_validos(contexto)
+    if not contexto.vinculos and not mandatos_validos:
+        return False
+    politica = politicas.get(accion)
+    if politica is None or not _concesion_posible(politica, contexto, mandatos_validos):
+        return False
+    if _filtrar_modo(politica, contexto) is not None:
+        return False
+    return not politica.economica or contexto.persona_id in contexto.identidades
+
+
+def _mandatos_validos(contexto: ContextoAutorizacion) -> set[UUID]:
+    return {
+        m.id
+        for m in contexto.mandatos
+        if m.consorcio_id == contexto.consorcio_id and m.vigente(contexto.hoy)
+    }
+
+
+def _vinculo_cuenta(vinculo: Vinculo, por_vinculo: ConcesionPorVinculo) -> bool:
+    """Tipo y confirmación; `misma_unidad` depende de la entidad y lo mira quien llama."""
+    return vinculo.tipo in por_vinculo.tipos and (
+        not por_vinculo.solo_confirmados or vinculo.confirmado
+    )
+
+
+def _concesion_posible(
+    politica: Politica, contexto: ContextoAutorizacion, mandatos_validos: set[UUID]
+) -> bool:
+    por_vinculo = politica.concede_por_vinculo
+    if por_vinculo is not None and any(_vinculo_cuenta(v, por_vinculo) for v in contexto.vinculos):
+        return True
+    if politica.concede_por_ambito:
+        return True
+    return politica.facultad is not None and any(
+        f.codigo == politica.facultad
+        and f.mandato_id in mandatos_validos
+        and recursos.admisible(f.recurso, politica.recurso)
+        for f in contexto.facultades
+    )
+
+
 def _concesion(
     politica: Politica,
     contexto: ContextoAutorizacion,
@@ -237,10 +307,8 @@ def _concesion(
     if por_vinculo is not None:
         unidad = entidad.recursos.get(TipoRecurso.UNIDAD)
         for v in contexto.vinculos:
-            if (
-                v.tipo in por_vinculo.tipos
-                and (not por_vinculo.misma_unidad or str(v.unidad_id) == unidad)
-                and (not por_vinculo.solo_confirmados or v.confirmado)
+            if _vinculo_cuenta(v, por_vinculo) and (
+                not por_vinculo.misma_unidad or str(v.unidad_id) == unidad
             ):
                 return _permite(Motivo.CONCEDIDO_POR_VINCULO)
     if politica.concede_por_ambito:
@@ -260,13 +328,17 @@ def _concesion(
     return _niega(motivo)
 
 
-def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entidad) -> str | None:
-    # Modo (R6): sin modo registrado solo corren las acciones con `sin_modo`.
+def _filtrar_modo(politica: Politica, contexto: ContextoAutorizacion) -> str | None:
+    """Modo (R6): sin modo registrado solo corren las acciones con `sin_modo`."""
     if contexto.modo is None:
-        if not politica.sin_modo:
-            return Motivo.SIN_MODO_REGISTRADO
-    elif contexto.modo not in politica.modos:
-        return Motivo.MODO_NO_ADMITIDO
+        return None if politica.sin_modo else Motivo.SIN_MODO_REGISTRADO
+    return None if contexto.modo in politica.modos else Motivo.MODO_NO_ADMITIDO
+
+
+def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entidad) -> str | None:
+    motivo_modo = _filtrar_modo(politica, contexto)
+    if motivo_modo is not None:
+        return motivo_modo
     # Separación de funciones (R8, A4, A5, A13-C): por persona y por ser humano; sin
     # identidad, se niega.
     for codigo in politica.separacion:

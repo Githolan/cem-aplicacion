@@ -9,7 +9,7 @@ import json
 
 from pydantic import BaseModel
 
-from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, Unidad
+from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, MisAcciones, Unidad
 from cem_contracts.contrasena import (
     CodigoEntrada,
     ContrasenaGuardada,
@@ -167,6 +167,7 @@ MODELOS: tuple[type[BaseModel], ...] = (
     MandatoNuevo,
     MandatoRegistrado,
     MandatoResumen,
+    MisAcciones,
     NuevaContrasena,
     Padron,
     PlanillaPadron,

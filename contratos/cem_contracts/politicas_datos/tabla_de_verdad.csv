@@ -465,3 +465,9 @@ H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=otro2;ejecuto=otro;misma_ide
 H3,egresos.conciliar_pago,MC,AA,,vigente,si,preparo=yo;ejecuto=otro,403,no_es_quien_preparo,quien preparó la orden no concilia su pago
 H3,egresos.conciliar_pago,AD,AA,,vigente,si,preparo=otro;ejecuto=otro,403,sin_concesion,el administrador no concilia: egresos.aprobar_orden es solo del Consejo
 H3,egresos.conciliar_pago,MC,C,,vigente,si,preparo=otro;ejecuto=otro,403,modo_no_admitido,en Consejo la plataforma no tiene egresos
+§10.5,consorcios.mis_acciones,P,C,,sin_mandato,si,,200,concedido_por_ambito,la propietaria pide lo que alcanza en su consorcio
+§10.5,consorcios.mis_acciones,I,AG,,sin_mandato,si,,200,concedido_por_ambito,el inquilino pide lo que alcanza
+§10.5,consorcios.mis_acciones,MC,C,,vigente,si,,200,concedido_por_ambito,el miembro del Consejo sin vínculo pide lo que alcanza
+§10.5,consorcios.mis_acciones,AE,AA,,vigente,si,,200,concedido_por_ambito,el administrador externo con cuenta pide lo que alcanza
+§10.5,consorcios.mis_acciones,P,—,,sin_mandato,no,,200,concedido_por_ambito,sin modo: la lista se pide igual
+§10.5,consorcios.mis_acciones,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato

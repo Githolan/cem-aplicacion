@@ -5,15 +5,17 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { REQUISITOS, useEdificioElegido } from "./permisos";
 
 // Página /contactos/gestion (H2b 2b-7c; doc/diseno/H2b_7_Diseno.md §3 y §4 del repositorio CEM):
 // la lista de gestión de los contactos de emergencia, con los futuros, la observación y la
 // constancia del consentimiento, y los formularios para agregar, corregir, retirar, verificar y
-// señalar. La interfaz nunca concede ni deduce permisos: la API decide con `contactos.gestionar` y
-// la base vuelve a controlar; un 403 es la respuesta a quien no tiene la facultad. Esta lista
-// nunca se guarda en el dispositivo (§5): la copia sin conexión es solo la de /contactos.
+// señalar. Quien no alcanza `contactos.gestionar` no llega acá: la dirección y una lectura negada
+// llevan al inicio. Es solo interfaz: la API decide cada pedido, la base vuelve a controlar y un
+// 403 al actuar se dice en la pantalla. Esta lista nunca se guarda en el dispositivo (§5): la copia
+// sin conexión es solo la de /contactos.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Contacto = components["schemas"]["ContactoGestion"];
@@ -171,7 +173,9 @@ type Pantalla =
   | { tipo: "sin_consorcios" }
   | { tipo: "lista"; consorcios: Consorcio[] };
 
-type Lectura = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_servicio" } | { tipo: "ok"; contactos: Contacto[] };
+const SIN_EDIFICIOS: readonly Consorcio[] = [];
+
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; contactos: Contacto[] };
 
 type Abierto = { accion: Accion; contacto: Contacto | null };
 
@@ -187,7 +191,10 @@ export function ContactosGestion() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
-  const [consorcio, setConsorcio] = useState("");
+  const { edificios, consorcio, setConsorcio } = useEdificioElegido(
+    pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
+    REQUISITOS.contactosGestion,
+  );
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [datos, setDatos] = useState<Datos>(VACIO);
@@ -224,27 +231,27 @@ export function ContactosGestion() {
     navegar(RUTA_ENTRAR, { replace: true });
   }, [navegar]);
 
-  useEffect(() => {
-    if (consultado.current) return;
-    consultado.current = true;
+  const consultarEdificios = useCallback(() => {
     void api
       .GET("/api/v1/me/consorcios")
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        const primero = data?.[0];
         if (data === undefined)
           setPantalla({ tipo: "sin_servicio", deConexion: esDeConexion(response.status, codigoDe(error)) });
-        else if (primero === undefined) setPantalla({ tipo: "sin_consorcios" });
-        else {
-          setPantalla({ tipo: "lista", consorcios: data });
-          setConsorcio(primero.id);
-        }
+        else if (data.length === 0) setPantalla({ tipo: "sin_consorcios" });
+        else setPantalla({ tipo: "lista", consorcios: data });
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
         else setPantalla({ tipo: "sin_servicio", deConexion: true });
       });
   }, [aEntrar]);
+
+  useEffect(() => {
+    if (consultado.current) return;
+    consultado.current = true;
+    consultarEdificios();
+  }, [consultarEdificios]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -256,7 +263,7 @@ export function ContactosGestion() {
         // Una lista pedida antes de un cambio, o de otro edificio, puede llegar después.
         if (!vigente) return;
         if (data !== undefined) setLectura({ tipo: "ok", contactos: data.elementos });
-        else if (response.status === ESTADO.sinPermiso) setLectura({ tipo: "sin_permiso" });
+        else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else {
           setLectura({ tipo: "sin_servicio" });
           const falla = mensajeDeFalla(response.status, codigoDe(error));
@@ -274,13 +281,19 @@ export function ContactosGestion() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, navegar]);
 
   // Mientras llega la lista nueva, la vieja no queda a mano: un formulario abierto con sus datos
   // mandaría un PUT completo que deshace el cambio recién hecho.
   function volverAPedir() {
     setLectura({ tipo: "cargando" });
     setVuelta((v) => v + 1);
+  }
+
+  /** Vuelve a pedir la lista que no se pudo consultar; un «Listo» que esté a la vista queda. */
+  function reconsultar() {
+    setAviso((actual) => (actual?.ok ? actual : null));
+    volverAPedir();
   }
 
   function abrir(accion: Accion, contacto: Contacto | null) {
@@ -407,7 +420,7 @@ export function ContactosGestion() {
             número profesional y la constancia del consentimiento. Nunca un celular personal.
           </p>
 
-          {pantalla.consorcios.length > 1 && (
+          {edificios.length > 1 && (
             <div className="formulario formulario-movil tarjeta">
               <label htmlFor={`${id}-consorcio`}>Edificio</label>
               <select
@@ -421,7 +434,7 @@ export function ContactosGestion() {
                   setConsorcio(e.target.value);
                 }}
               >
-                {pantalla.consorcios.map((c) => (
+                {edificios.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.nombre}
                   </option>
@@ -433,10 +446,14 @@ export function ContactosGestion() {
           <section aria-labelledby={`${id}-lista`} className="tarjeta">
             <h2 id={`${id}-lista`}>Contactos vigentes y futuros</h2>
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
-            {lectura.tipo === "sin_permiso" && (
-              <p>No tenés permiso para gestionar los contactos de este edificio. La lista para consultar está en «Contactos de emergencia».</p>
+            {lectura.tipo === "sin_servicio" && (
+              <>
+                <p>No pudimos mostrar la lista.</p>
+                <button type="button" onClick={reconsultar} disabled={enviando}>
+                  Consultar de nuevo
+                </button>
+              </>
             )}
-            {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar la lista.</p>}
             {lectura.tipo === "ok" && (
               <>
                 {lectura.contactos.length === 0 && <p>El edificio no tiene contactos de emergencia cargados.</p>}
@@ -463,11 +480,22 @@ export function ContactosGestion() {
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
-          <p className="aviso-error">
-            {pantalla.deConexion
-              ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-              : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-          </p>
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (

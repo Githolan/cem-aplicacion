@@ -2,9 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
-import { AGENTE_IPHONE, simularStandalone, sinFaltasDeAccesibilidad } from "./entorno";
+import { AGENTE_IPHONE, simularSesion, simularStandalone, sinFaltasDeAccesibilidad } from "./entorno";
 
 const TITULO = "Instalá Consorcio en Mano en tu teléfono";
 const BOTON = "Instalar la aplicación";
@@ -12,6 +12,25 @@ const BOTON = "Instalar la aplicación";
 // Chrome solo dispara `beforeinstallprompt` fuera de incógnito y cuando juzga que hubo uso
 // suficiente del sitio; esta opción de línea de comandos saltea esa heurística.
 const SIN_HEURISTICA_DE_USO = "--bypass-app-banner-engagement-checks";
+
+const TITULO_ENTRAR = "Entrar a Consorcio en Mano";
+
+/**
+ * Ofrece la instalación como lo haría Chromium, para decidir qué responde. Que el evento de verdad
+ * llega lo prueba «Chromium ofrece beforeinstallprompt de verdad»; acá importa qué hace la página
+ * con la elección, y la de Chromium no se puede contestar desde una prueba.
+ */
+async function ofrecerInstalacion(pagina: Page, respuesta: "accepted" | "dismissed" | "falla") {
+  await expect(pagina.getByRole("heading", { level: 1 })).toHaveText(TITULO);
+  await pagina.evaluate((eleccion) => {
+    const evento = new Event("beforeinstallprompt", { cancelable: true });
+    Object.assign(evento, {
+      prompt: () => (eleccion === "falla" ? Promise.reject(new Error("el navegador no pudo")) : Promise.resolve()),
+      userChoice: Promise.resolve({ outcome: eleccion }),
+    });
+    window.dispatchEvent(evento);
+  }, respuesta);
+}
 
 test.describe("página /instalar", () => {
   test("Chromium ofrece beforeinstallprompt de verdad y aparece el botón propio", async ({
@@ -60,17 +79,58 @@ test.describe("página /instalar", () => {
     await sinFaltasDeAccesibilidad(page);
   });
 
-  test("en modo standalone avisa que ya está instalada y el inicio no la enlaza", async ({ page }) => {
+  test("en modo standalone no hay nada que instalar: va al inicio, que no la enlaza", async ({ page }) => {
     await simularStandalone(page);
+    await simularSesion(page, "con_sesion");
     await page.goto("/instalar");
-    await expect(page.getByText("Ya está instalada.", { exact: false })).toBeVisible();
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    expect(new URL(page.url()).pathname).toBe("/");
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
     await expect(page.locator("ol.pasos")).toHaveCount(0);
-    await sinFaltasDeAccesibilidad(page);
-
-    await page.getByRole("link", { name: "Volver al inicio" }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
     await expect(page.getByRole("link", { name: "Instalá la aplicación en tu teléfono" })).toHaveCount(0);
+    await sinFaltasDeAccesibilidad(page);
+  });
+
+  test("«Seguir sin instalar» lleva a /entrar", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
+    await page.goto("/instalar");
+    await page.getByRole("link", { name: "Seguir sin instalar" }).click();
+
+    await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_ENTRAR);
+  });
+
+  for (const respuesta of ["dismissed", "falla"] as const) {
+    test(`si la instalación no se hace (${respuesta}), lo dice y sigue en /instalar`, async ({ page }) => {
+      await page.goto("/instalar");
+      await ofrecerInstalacion(page, respuesta);
+      await page.getByRole("button", { name: BOTON }).click();
+
+      await expect(page.getByText(/No se instaló/)).toBeVisible();
+      await expect(page).toHaveURL(/\/instalar$/);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO);
+      await sinFaltasDeAccesibilidad(page);
+    });
+  }
+
+  test("terminada la instalación sigue a /entrar con el aviso", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
+    await page.goto("/instalar");
+    await ofrecerInstalacion(page, "accepted");
+    await page.getByRole("button", { name: BOTON }).click();
+
+    // Control: aceptó pero el navegador todavía no terminó; no se avanza ni hay error.
+    await expect(page.getByText("Instalando…")).toBeVisible();
+    await expect(page.getByText(/No se instaló/)).toHaveCount(0);
+    await expect(page).toHaveURL(/\/instalar$/);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("appinstalled")));
+
+    await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_ENTRAR);
+    await expect(page.getByText(/Ya está instalada. Seguí acá/)).toBeVisible();
+    await sinFaltasDeAccesibilidad(page);
   });
 });
 

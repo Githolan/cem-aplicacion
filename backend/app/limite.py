@@ -83,9 +83,21 @@ class Familia:
     nombre: str
     prefijo: str
     limite: RateLimitItem
+    fuera: frozenset[tuple[str, str]] = frozenset()
+    """(método, ruta) que no consumen el cupo de la familia; sí el general."""
 
 
-FAMILIAS: tuple[Familia, ...] = (Familia("auth-ip", "/api/v1/auth/", LIMITE_AUTENTICACION_IP),)
+FAMILIAS: tuple[Familia, ...] = (
+    Familia(
+        "auth-ip",
+        "/api/v1/auth/",
+        LIMITE_AUTENTICACION_IP,
+        # La aplicación pregunta si hay sesión cada vez que abre el inicio o /entrar (recorrido de
+        # Acceso, 05-11-2026). Solo lee y no prueba nada: si consumiera este cupo, los vecinos
+        # detrás de una misma IP se quedarían sin poder pedir el enlace.
+        frozenset({("GET", "/api/v1/auth/sesion")}),
+    ),
+)
 
 
 def crear_limitador(almacen: str) -> FixedWindowRateLimiter:
@@ -155,7 +167,9 @@ class LimiteDeTasa:
             raise RuntimeError("petición sin dirección de cliente: no se puede aplicar el límite")
         ip = scope["client"][0]
         cupos = [(LIMITE_API, "api")] + [
-            (f.limite, f.nombre) for f in self.familias if scope["path"].startswith(f.prefijo)
+            (f.limite, f.nombre) for f in self.familias
+            if scope["path"].startswith(f.prefijo)
+            and (scope["method"], scope["path"]) not in f.fuera
         ]
         try:
             for limite, nombre in cupos:

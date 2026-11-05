@@ -48,7 +48,8 @@ test.describe("segundo factor", () => {
 
     const respuesta = await consulta;
     expect(respuesta.status()).toBe(401);
-    await expect(page.getByRole("link", { name: "entrá a tu cuenta" })).toHaveAttribute("href", "/entrar");
+    await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Entrar a Consorcio en Mano");
     await sinFaltasDeAccesibilidad(page);
     // La consola informa el 401 del recurso; violaciones de la CSP o errores de la página, ninguno.
     expect(errores.filter((e) => !e.includes("401"))).toEqual([]);

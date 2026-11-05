@@ -52,11 +52,32 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
   return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]);
 }
 
-/** Responde la consulta con la invitación y la aceptación con `aceptacion`. */
-function backend(aceptacion: () => Response) {
-  return vi.fn(async (pedido: Request) =>
-    new URL(pedido.url).pathname.endsWith("/consultar") ? Response.json(RECIBIDA) : aceptacion(),
-  );
+const CONSULTAR = "/api/v1/auth/invitacion/consultar";
+const ACEPTAR = "/api/v1/auth/invitacion/aceptar";
+const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const AVISO = "Listo: ya sos parte de Edificio Alvear 100.";
+
+/**
+ * Responde la consulta con la invitación y la aceptación con `aceptacion`; aceptar abre la sesión,
+ * que es lo que consulta el inicio. Lo que no está previsto falla la prueba.
+ */
+function backend(aceptacion: () => Response, consulta: () => Response | Promise<Response> = () => Response.json(RECIBIDA)) {
+  return vi.fn(async (pedido: Request) => {
+    const camino = new URL(pedido.url).pathname;
+    if (camino === CONSULTAR) return consulta();
+    if (camino === ACEPTAR) return aceptacion();
+    if (camino === "/api/v1/auth/sesion") return Response.json({});
+    if (camino === "/health") return error("servicio_no_disponible", 503);
+    throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
+  });
+}
+
+function aceptacionesDe(simulado: ReturnType<typeof vi.fn>): Request[] {
+  return pedidosDe(simulado).filter((p) => new URL(p.url).pathname === ACEPTAR);
+}
+
+function consultasDe(simulado: ReturnType<typeof vi.fn>): Request[] {
+  return pedidosDe(simulado).filter((p) => new URL(p.url).pathname === CONSULTAR);
 }
 
 afterEach(() => {
@@ -83,7 +104,7 @@ describe("página /invitacion", () => {
     const url = new URL(consulta.url);
     expect([consulta.method, url.pathname, url.search]).toEqual([
       "POST",
-      "/api/v1/auth/invitacion/consultar",
+      CONSULTAR,
       "",
     ]);
     expect(await consulta.json()).toEqual({ token: TOKEN });
@@ -98,10 +119,12 @@ describe("página /invitacion", () => {
     fireEvent.change(nombre, { target: { value: "  Alberto " } });
     fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText("Listo: ya sos parte de Edificio Alvear 100.")).toBeTruthy();
-    const aceptacion = pedidosDe(pedido)[1];
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Ir al inicio" })).toBeNull();
+    const [aceptacion, ...otras] = aceptacionesDe(pedido);
+    expect(otras).toEqual([]);
     if (aceptacion === undefined) throw new Error("no hubo aceptación");
-    expect(new URL(aceptacion.url).pathname).toBe("/api/v1/auth/invitacion/aceptar");
     expect(await aceptacion.json()).toEqual({ token: TOKEN, nombre: "Alberto" });
   });
 
@@ -115,7 +138,7 @@ describe("página /invitacion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
     await screen.findByText(/ya sos parte/);
-    expect(pedidosDe(pedido)[1]?.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(aceptacionesDe(pedido)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
   it("si el correo ya tiene cuenta, manda a entrar", async () => {
@@ -191,7 +214,14 @@ function retener(simulado: (pedido: Request) => Promise<Response>, camino: strin
   return { retenido, soltar: () => soltar() };
 }
 
-const estado = () => screen.getByRole("status");
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
 
 describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1)", () => {
   it("carga: mientras consulta dice «Buscando la invitación…» y lo saca al llegar la respuesta", async () => {
@@ -199,7 +229,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     vi.stubGlobal("fetch", retenido);
     abrir(`/invitacion#token=${TOKEN}`);
 
-    expect(estado().textContent).toBe("Buscando la invitación…");
+    expect(estadoDePantalla().textContent).toBe("Buscando la invitación…");
     expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     soltar();
 
@@ -213,20 +243,58 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(estado().textContent).toBe("Aceptando…");
+    expect(estadoDePantalla().textContent).toBe("Aceptando…");
     expect((screen.getByRole("button", { name: "Aceptar la invitación" }) as HTMLButtonElement).disabled).toBe(true);
     soltar();
 
-    expect(await screen.findByText("Listo: ya sos parte de Edificio Alvear 100.")).toBeTruthy();
+    expect(await screen.findByText(AVISO)).toBeTruthy();
     expect(screen.queryByText("Aceptando…")).toBeNull();
   });
 
-  it("sin red al consultar: lo dice y no ofrece aceptar", async () => {
+  it("sin red al consultar: lo dice, no ofrece aceptar y deja reintentar", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
     abrir(`/invitacion#token=${TOKEN}`);
 
     expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
-    expect(within(screen.getByRole("main")).queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
+    expect(within(screen.getByRole("main")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reintentar"]);
+  });
+
+  it("«Reintentar» consulta de nuevo con el mismo token y, si sale bien, muestra la invitación", async () => {
+    let caido = true;
+    const pedido = backend(
+      () => Response.json(ACEPTADA),
+      () => (caido ? error("servicio_no_disponible", 503) : Response.json(RECIBIDA)),
+    );
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+    await screen.findByText(/El servicio no está disponible/);
+    expect(consultasDe(pedido)).toHaveLength(1);
+
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+    const consultas = consultasDe(pedido);
+    expect(consultas).toHaveLength(2);
+    expect(await consultas[1]?.json()).toEqual({ token: TOKEN });
+    expect(window.location.href).not.toContain(TOKEN);
+  });
+
+  it("«Reintentar» que vuelve a fallar sigue en el error, con el botón", async () => {
+    const pedido = backend(
+      () => Response.json(ACEPTADA),
+      () => error("servicio_no_disponible", 503),
+    );
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", { name: "Reintentar" }));
+
+    await vi.waitFor(() => expect(consultasDe(pedido)).toHaveLength(2));
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
   });
 
   it("sin red al aceptar: lo dice y no da la invitación por aceptada", async () => {
@@ -241,6 +309,51 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
 
     expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
     expect(screen.queryByText(/ya sos parte/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+  });
+
+  it("un 503 al aceptar deja el formulario con el nombre escrito y el error, sin ir al inicio", async () => {
+    vi.stubGlobal("fetch", backend(() => error("servicio_no_disponible", 503)));
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.change(await screen.findByLabelText("Tu nombre"), { target: { value: "Alberto" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    expect((screen.getByLabelText("Tu nombre") as HTMLInputElement).value).toBe("Alberto");
+    expect((screen.getByRole("button", { name: "Aceptar la invitación" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByRole("heading", { name: "Edificio Alvear 100" })).toBeTruthy();
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
+    expect(screen.queryByText(/ya sos parte/)).toBeNull();
+    // Es un error del pedido, no de la consulta: el «Reintentar» de la consulta no aparece.
+    expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
+  });
+
+  it("aceptar de nuevo después del 503 va al inicio con el aviso, y el aviso no vuelve al navegar", async () => {
+    let caido = true;
+    const pedido = backend(() => (caido ? error("servicio_no_disponible", 503) : Response.json(ACEPTADA)));
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.change(await screen.findByLabelText("Tu nombre"), { target: { value: "Alberto" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
+    await screen.findByText(/El servicio no está disponible/);
+
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    const aceptaciones = aceptacionesDe(pedido);
+    expect(aceptaciones).toHaveLength(2);
+    expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Alberto" });
+
+    // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
+    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }));
+    expect(await screen.findByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
+    expect(screen.queryByText(AVISO)).toBeNull();
+    fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByText(AVISO)).toBeNull();
   });
 
   it("permiso insuficiente (403 csrf_invalido) al aceptar no se explica como un problema de conexión", async () => {

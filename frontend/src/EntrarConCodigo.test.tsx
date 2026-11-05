@@ -24,6 +24,29 @@ function error(codigo: string, estado: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status: estado });
 }
 
+const RUTA_CODIGO = "/api/v1/auth/codigo";
+const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+
+type Respuesta = () => Response | Promise<Response>;
+
+/**
+ * El backend visto desde /entrar: lo que no está previsto falla la prueba, y `/auth/sesion` da 401
+ * hasta que una entrada sale bien, como en el de verdad.
+ */
+function backend(entrada: { codigo?: Respuesta; canje?: Respuesta }) {
+  let adentro = false;
+  return vi.fn(async (pedido: Request) => {
+    const camino = new URL(pedido.url).pathname;
+    if (camino === "/api/v1/auth/sesion") return adentro ? Response.json(SESION) : error("no_autenticado", 401);
+    if (camino === "/health") return error("servicio_no_disponible", 503);
+    const responder = camino === RUTA_CODIGO ? entrada.codigo : camino === "/api/v1/auth/canje" ? entrada.canje : undefined;
+    if (responder === undefined) throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
+    const respuesta = await responder();
+    adentro = respuesta.ok;
+    return respuesta;
+  });
+}
+
 function abrir(url = "/entrar") {
   window.history.replaceState(null, "", url);
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -38,7 +61,17 @@ function abrir(url = "/entrar") {
   );
 }
 
-// /entrar tiene dos campos «Correo» (pedir el enlace y entrar con el código): se busca en la sección.
+/** /entrar muestra una forma por vez: el código se elige en «Otras formas de entrar». */
+function abrirCodigo() {
+  const pantalla = abrir();
+  elegirCodigo();
+  return pantalla;
+}
+
+function elegirCodigo() {
+  fireEvent.click(screen.getByRole("button", { name: "Entrar con un código" }));
+}
+
 function seccionCodigo() {
   return within(screen.getByRole("region", { name: "Entrar con un código" }));
 }
@@ -52,8 +85,8 @@ function completar(correo: string, codigo: string) {
   fireEvent.submit(formulario);
 }
 
-function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
-  return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]);
+function postsDe(simulado: ReturnType<typeof vi.fn>): Request[] {
+  return simulado.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((p) => p.method === "POST");
 }
 
 async function sinFaltas(contenedor: HTMLElement) {
@@ -70,35 +103,37 @@ afterEach(() => {
 
 describe("entrar con el código del correo", () => {
   it("manda correo y código por POST, en el cuerpo y sin separadores, y entra", async () => {
-    const pedido = vi.fn(async () => Response.json(SESION));
+    const pedido = backend({ codigo: () => Response.json(SESION) });
     vi.stubGlobal("fetch", pedido);
 
-    abrir();
+    abrirCodigo();
     completar(`  ${CORREO} `, "042 917");
 
     expect(await screen.findByText("Entraste.")).toBeTruthy();
-    const [canje, ...otros] = pedidosDe(pedido);
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Entrar con un código" })).toBeNull();
+    const [canje, ...otros] = postsDe(pedido);
     expect(otros).toEqual([]);
     if (canje === undefined) throw new Error("no hubo pedido");
     const url = new URL(canje.url);
-    expect([canje.method, url.pathname, url.search]).toEqual(["POST", "/api/v1/auth/codigo", ""]);
+    expect([canje.method, url.pathname, url.search]).toEqual(["POST", RUTA_CODIGO, ""]);
     expect(canje.headers.get("content-type")).toBe("application/json");
     expect(await canje.json()).toEqual({ correo: CORREO, codigo: CODIGO });
     expect(window.location.href).not.toContain(CODIGO);
   });
 
   it("un código mal formado no sale y se explica junto al campo", () => {
-    const pedido = vi.fn();
+    const pedido = backend({});
     vi.stubGlobal("fetch", pedido);
 
-    abrir();
+    abrirCodigo();
     completar(CORREO, "04291");
 
     expect(screen.getByText("El código tiene 6 números.")).toBeTruthy();
     const campo = screen.getByLabelText(/^Código de 6 números/);
     expect(campo.getAttribute("aria-invalid")).toBe("true");
     expect(campo.getAttribute("aria-describedby")).toBeTruthy();
-    expect(pedido).not.toHaveBeenCalled();
+    expect(postsDe(pedido)).toEqual([]);
   });
 
   it.each([
@@ -106,40 +141,46 @@ describe("entrar con el código del correo", () => {
     [error("demasiadas_peticiones", 429), /demasiados intentos con este correo/],
     [error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
   ])("ante un rechazo muestra un mensaje genérico (%#)", async (respuesta, mensaje) => {
-    vi.stubGlobal("fetch", vi.fn(async () => respuesta));
+    vi.stubGlobal("fetch", backend({ codigo: () => respuesta }));
 
-    abrir();
+    abrirCodigo();
     completar(CORREO, CODIGO);
 
     expect(await screen.findByText(mensaje)).toBeTruthy();
     expect(screen.queryByText("Entraste.")).toBeNull();
+    // El error queda en la misma pantalla, con lo escrito.
+    expect((seccionCodigo().getByLabelText("Correo") as HTMLInputElement).value).toBe(CORREO);
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
   });
 
   it("sin la red, avisa que no se pudo completar", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("sin red"))));
 
-    abrir();
+    abrirCodigo();
     completar(CORREO, CODIGO);
 
     expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
   });
 
   it("con un enlace válido no muestra el formulario; con uno rechazado, sí", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json(SESION)));
+    vi.stubGlobal("fetch", backend({ canje: () => Response.json(SESION) }));
     abrir(`/entrar#token=${TOKEN}`);
+    expect(screen.queryByRole("heading", { name: "Entrar con un código" })).toBeNull();
     expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Entrar con un código" })).toBeNull();
     cleanup();
 
-    vi.stubGlobal("fetch", vi.fn(async () => error("enlace_invalido", 401)));
+    vi.stubGlobal("fetch", backend({ canje: () => error("enlace_invalido", 401) }));
     abrir(`/entrar#token=${TOKEN}`);
     expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
+    elegirCodigo();
     expect(screen.getByRole("heading", { name: "Entrar con un código" })).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, vacío ni con error", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => error("codigo_invalido", 401)));
-    const { container } = abrir();
+    vi.stubGlobal("fetch", backend({ codigo: () => error("codigo_invalido", 401) }));
+    const { container } = abrirCodigo();
     await sinFaltas(container);
 
     completar(CORREO, "04291");

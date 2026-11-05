@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /mandatos servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad y la página manda a /entrar. Con
@@ -12,6 +12,7 @@ import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 const CSRF = "e2e-csrf-mandatos";
 const C1 = "11111111-1111-4111-8111-111111111111";
 const M_AE = "33333333-3333-4333-8333-333333333333";
+const M_NUEVO = "77777777-7777-4777-8777-777777777777";
 const D_EQUIPO = "44444444-4444-4444-8444-444444444444";
 const D_PROPIA = "55555555-5555-4555-8555-555555555555";
 const D_LARGA = "99999999-9999-4999-8999-999999999999";
@@ -68,6 +69,10 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
+    // La sesión la responde simularSesion, en el contexto: page.route va primero y la cortaría.
+    if (camino === "/api/v1/auth/sesion") return ruta.fallback();
+    const permisos = quien === "propietaria" ? simularPermisos(ruta, camino, ["consorcios.mis"]) : simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (quien === "propietaria") return ruta.fulfill(error(403, "sin_permiso"));
@@ -75,7 +80,8 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       if (camino === `${BASE}/decisiones`) return ruta.fulfill({ json: { elementos: DECISIONES } });
       if (camino === `${BASE}/mandatos/candidatos`)
         return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] } });
-      if (camino === `${BASE}/mandatos/${M_AE}`)
+      // El alta abre el detalle del mandato nuevo.
+      if (camino === `${BASE}/mandatos/${M_AE}` || camino === `${BASE}/mandatos/${M_NUEVO}`)
         return ruta.fulfill({
           json: {
             ...MANDATO_AE,
@@ -102,7 +108,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     envios.push({ camino, csrf, clave, cuerpo });
     if (csrf !== CSRF) return ruta.fulfill(error(403, "csrf_invalido"));
     if (clave === null) return ruta.fulfill(error(422, "peticion_invalida"));
-    if (camino === `${BASE}/mandatos`) return ruta.fulfill({ status: 201, json: { id: "77777777-7777-4777-8777-777777777777" } });
+    if (camino === `${BASE}/mandatos`) return ruta.fulfill({ status: 201, json: { id: M_NUEVO } });
     if (camino === `${BASE}/mandatos/${M_AE}/baja`) {
       if (cuerpo.decision_id === D_PROPIA) return ruta.fulfill(error(403, "sin_permiso"));
       return ruta.fulfill({ json: { id: M_AE, causa: cuerpo.causa, vigente_hasta: "2026-10-19" } });
@@ -135,6 +141,7 @@ test.describe("mandatos", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: 360, height: 740 });
     const envios = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.goto("/");
     await page.getByRole("link", { name: "Mandatos y decisiones" }).click();
 
@@ -185,16 +192,17 @@ test.describe("mandatos", () => {
     expect(errores).toEqual([]);
   });
 
-  test("la propietaria no lee mandatos ni decisiones y no ve el alta", async ({ page, baseURL }) => {
+  test("la propietaria no llega a mandatos: la dirección lleva al inicio, sin enlace ni mensaje", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularApi(page, baseURL!, "propietaria");
+    await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
-    await expect(page.getByText("No tenés permiso para ver los mandatos de este edificio.")).toBeVisible();
-    await expect(page.getByText("No tenés permiso para ver las decisiones de este edificio.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Dar de alta" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Mandatos y decisiones" })).toHaveCount(0);
+    await expect(page.getByText(/No tenés permiso/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
-    // La consola informa los 403; violaciones de la CSP o errores, ninguno.
-    expect(errores.filter((e) => !e.includes("403"))).toEqual([]);
+    expect(errores).toEqual([]);
   });
 
   test("la remoción con una asamblea propia la rechaza la API; con otra, se da de baja", async ({ page, baseURL }) => {

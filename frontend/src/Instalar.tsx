@@ -1,10 +1,34 @@
-import { Link } from "react-router";
+import { useState } from "react";
+import { Link, Navigate } from "react-router";
 
+import { RUTA_ENTRAR } from "./enlace";
 import { instalar, useInstalacion } from "./instalacion";
 
-// Página /instalar: el enlace que se comparte por WhatsApp o en un código QR en la cartelera.
+export const AVISO_INSTALADA =
+  "Ya está instalada. Seguí acá, o abrila desde el ícono de tu pantalla de inicio la próxima vez.";
+
+type Pedido = "quieto" | "instalando" | "fallo";
+
+// Página /instalar: el enlace que se comparte por WhatsApp o en un código QR en la cartelera. Es el
+// primer paso del recorrido de Acceso (decisión del propietario del 05-11-2026, §2): terminada la
+// instalación sigue sola a /entrar; si se cancela o falla, lo dice acá y se puede reintentar. El
+// navegador no siempre puede abrir la aplicación instalada: por eso sigue esta pestaña.
 export function Instalar() {
   const forma = useInstalacion();
+  const [pedido, setPedido] = useState<Pedido>("quieto");
+
+  function pedirInstalacion() {
+    setPedido("instalando");
+    instalar().then(
+      (eleccion) => setPedido(eleccion === "accepted" ? "instalando" : "fallo"),
+      () => setPedido("fallo"),
+    );
+  }
+
+  if (forma === "instalada") return <Navigate to="/" replace />;
+  if (forma === "recien_instalada") {
+    return <Navigate to={RUTA_ENTRAR} replace state={{ aviso: AVISO_INSTALADA }} />;
+  }
 
   return (
     <>
@@ -16,13 +40,16 @@ export function Instalar() {
 
       <section aria-labelledby="titulo-instalar" className="tarjeta">
         <h2 id="titulo-instalar">Cómo instalarla</h2>
-        {forma === "instalada" && (
-          <p className="aviso-ok">Ya está instalada. Abrila desde el ícono de tu pantalla de inicio.</p>
-        )}
+        <div role="status" aria-live="polite">
+          {pedido === "instalando" && <p>Instalando…</p>}
+          {pedido === "fallo" && (
+            <p className="aviso-error">No se instaló. Probá de nuevo, o seguí sin instalar.</p>
+          )}
+        </div>
         {forma === "boton" && (
           <>
             <p>Tocá el botón y confirmá.</p>
-            <button type="button" onClick={() => void instalar()}>
+            <button type="button" onClick={pedirInstalacion}>
               Instalar la aplicación
             </button>
           </>
@@ -58,7 +85,7 @@ export function Instalar() {
       </section>
 
       <p>
-        <Link to="/">Volver al inicio</Link>
+        <Link to={RUTA_ENTRAR}>Seguir sin instalar</Link>
       </p>
     </>
   );
@@ -67,7 +94,7 @@ export function Instalar() {
 // Enlace corto para la página de inicio; desaparece cuando la aplicación ya está instalada.
 export function EnlaceInstalar() {
   const forma = useInstalacion();
-  if (forma === "instalada") return null;
+  if (forma === "instalada" || forma === "recien_instalada") return null;
   return (
     <p>
       <Link to="/instalar">Instalá la aplicación en tu teléfono</Link>

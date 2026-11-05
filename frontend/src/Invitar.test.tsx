@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
+import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { mensajeAlInvitar } from "./Invitar";
 import { ContextoVersion } from "./version";
@@ -58,7 +59,7 @@ type Respuestas = Record<string, () => Response>;
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave];
+    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -115,6 +116,23 @@ beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
 
+/** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
+function estadoDePantalla() {
+  const [aviso, estado, ...otros] = screen.getAllByRole("status");
+  expect(aviso?.textContent).toBe("");
+  expect(otros).toEqual([]);
+  if (estado === undefined) throw new Error("la pantalla no tiene estado");
+  return estado;
+}
+
+/** Lo que consulta el inicio con la sesión abierta; el estado del servicio no importa acá. */
+const INICIO_CON_SESION = {
+  "GET /api/v1/auth/sesion": () => Response.json({}),
+  "GET /health": () => error("servicio_no_disponible", 503),
+  "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
+  "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -122,10 +140,10 @@ afterEach(() => {
 });
 
 describe("página /invitaciones", () => {
-  it("el inicio tiene el enlace para invitar", () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ estado: "ok" })));
+  it("el inicio tiene el enlace para invitar", async () => {
+    vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect(screen.getByRole("link", { name: "Invitar a una persona" }).getAttribute("href")).toBe(
+    expect((await screen.findByRole("link", { name: "Invitar a una persona" })).getAttribute("href")).toBe(
       "/invitaciones",
     );
   });
@@ -749,7 +767,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     vi.stubGlobal("fetch", retenido);
     abrir();
 
-    expect(screen.getByRole("status").textContent).toBe("Consultando…");
+    expect(estadoDePantalla().textContent).toBe("Consultando…");
     expect(screen.queryByRole("button", { name: "Invitar" })).toBeNull();
     soltar();
 
@@ -787,5 +805,92 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     const lista = screen.getByRole("region", { name: "Invitaciones" });
     expect(within(lista).queryByText("Consultando…")).toBeNull();
     expect(within(lista).getByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
+  });
+
+  it("la lista que no se pudo consultar se reintenta sin perder lo escrito, y el error se va", async () => {
+    let caida = true;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const lista = await screen.findByRole("region", { name: "Invitaciones" });
+    expect(await within(lista).findByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
+    caida = false;
+    fireEvent.click(within(lista).getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await within(lista).findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2);
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
+    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    // Control: con la lista a la vista no hay nada que reintentar.
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("si falla la recarga después de invitar, el «Listo» queda y la lista se reintenta", async () => {
+    let caida = false;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_LISTA}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+      [`POST ${RUTA_LISTA}`]: () => {
+        caida = true;
+        return Response.json({ id: NUEVA, nombre: "Dora Ruiz" }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(screen.getByRole("button", { name: "Invitar" }));
+    const reintentar = await screen.findByRole("button", { name: "Consultar de nuevo" });
+    caida = false;
+    fireEvent.click(reintentar);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull());
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(3);
+    expect(screen.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+  });
+
+  it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
+    let caido = true;
+    const simulado = conConsorcio({
+      "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
+    expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
+    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+  });
+});
+
+describe("lo que no se puede hacer no aparece en /invitaciones", () => {
+  it("«Retirar» se ve con `invitaciones.revocar`", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("invitaciones.crear", "invitaciones.revocar") }),
+    );
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    expect(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" })).toBeTruthy();
+  });
+
+  it("control: sin `invitaciones.revocar` la invitación se ve y «Retirar» no", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("invitaciones.crear") }));
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    expect(screen.queryByRole("button", { name: "Retirar" })).toBeNull();
+  });
+
+  it.each([
+    ["las unidades", `GET /api/v1/consorcios/${C1}/unidades`],
+    ["las invitaciones", `GET ${RUTA_LISTA}`],
+  ])("un 403 al leer %s lleva al inicio", async (_, ruta) => {
+    vi.stubGlobal("fetch", conConsorcio({ ...INICIO_CON_SESION, [ruta]: () => error("sin_permiso", 403) }));
+    abrir();
+    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
   });
 });

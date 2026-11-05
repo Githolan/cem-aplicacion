@@ -220,8 +220,10 @@ def test_unidades_listar_por_ambito_y_control_sin_la_declaracion():
 def test_solo_unidades_listar_los_eventos_propios_y_los_contactos_conceden_por_ambito():
     # RF35-B (2b-6c): cada persona lee sus propios eventos en el consorcio. 2b-7: los contactos
     # de emergencia publicados, que no son personales (decisión del propietario del 25-10).
+    # §10.5: lo que la interfaz muestra a cada persona, que no concede nada (05-11-2026).
     assert sorted(a for a, p in POLITICAS.items() if p.concede_por_ambito) == [
-        "auditoria.mis_eventos", "contactos.ver", "unidades.listar"]  # fmt: skip
+        "auditoria.mis_eventos", "consorcios.mis_acciones", "contactos.ver",
+        "unidades.listar"]  # fmt: skip
 
 
 # --- Una acción, una vista; A6 --------------------------------------------------------------
@@ -328,8 +330,8 @@ def test_las_acciones_de_la_tabla():
     # (RF35-B, 2b-6c), las 2 de la lectura de coeficientes (RF05) y las 2 de documentos de 2c-2
     # (`documentos.ver_restringidos` y `documentos.cargar_operativos`) y la lectura de la revisión
     # de órdenes de pago (`egresos.revisar_orden`, H3) y la conciliación del pago manual
-    # (`egresos.conciliar_pago`, 0055)
-    assert len(POLITICAS) == 50
+    # (`egresos.conciliar_pago`, 0055) y lo que muestra la interfaz (`consorcios.mis_acciones`)
+    assert len(POLITICAS) == 51
 
 
 def _archivo(tmp_path, nombre, politicas):

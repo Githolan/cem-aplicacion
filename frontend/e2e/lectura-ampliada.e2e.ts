@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // Modo lectura ampliada (RF53, PA28): se mide en el navegador real, contra el nginx de la imagen.
 const BOTON = "Letra grande y alto contraste";
@@ -48,6 +48,11 @@ async function prender(pagina: Page) {
 }
 
 test.describe("modo lectura ampliada", () => {
+  // Con sesión, para que `/` sea el inicio y no lleve a /entrar.
+  test.beforeEach(async ({ page }) => {
+    await simularSesion(page, "con_sesion");
+  });
+
   for (const esquema of ESQUEMAS) {
     test(`esquema ${esquema}: apagado AA; prendido AAA, 125 % de letra y botones grandes`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: esquema });
@@ -79,8 +84,11 @@ test.describe("modo lectura ampliada", () => {
         await page.emulateMedia({ colorScheme: esquema });
         await page.goto("/");
         await prender(page);
+        // /entrar con sesión lleva al inicio: la pantalla de /entrar se mide sin sesión.
+        if (ruta === "/entrar") await simularSesion(page, "sin_sesion");
         await page.goto(ruta);
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+        expect(new URL(page.url()).pathname).toBe(ruta);
         await expect(page.locator("html"), ruta).toHaveClass(CLASE);
         const { ancho, visible } = await page.evaluate(() => ({
           ancho: document.documentElement.scrollWidth,
@@ -443,7 +451,10 @@ async function simular(pagina: Page, api: Respuestas): Promise<string[]> {
   const imprevistos: string[] = [];
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
-    const clave = `${pedido.method()} ${new URL(pedido.url()).pathname}`;
+    const camino = new URL(pedido.url()).pathname;
+    const permisos = simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
+    const clave = `${pedido.method()} ${camino}`;
     if (clave in api) return ruta.fulfill({ json: api[clave] });
     imprevistos.push(clave);
     return ruta.abort();
@@ -452,6 +463,11 @@ async function simular(pagina: Page, api: Respuestas): Promise<string[]> {
 }
 
 test.describe("modo lectura ampliada en las páginas con datos", () => {
+  // Para prender el modo desde el inicio sin gastar el cupo real de /api/v1/auth/.
+  test.beforeEach(async ({ page }) => {
+    await simularSesion(page, "con_sesion");
+  });
+
   for (const { ruta, url, cargada, api } of PAGINAS_CON_DATOS) {
     for (const esquema of ESQUEMAS) {
       test(`prendido, ${ruta} con datos (${esquema}) no se sale de 360 px y pasa AA y AAA`, async ({ page }) => {

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
 import {
   IMAGEN_ACTUAL,
   IMAGEN_ANTERIOR,
@@ -39,6 +39,9 @@ function sigueSinRecargar(pagina: Page) {
 }
 
 test.describe("versiones en caché", () => {
+  // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
+  test.use(otroCliente(9));
+
   test("con la versión anterior a /entrar en caché, el enlace del correo llega al canje", async ({ page }, info) => {
     const etiquetas = [`${info.project.name}-${info.repeatEachIndex}-entrar-anterior`, `${info.project.name}-${info.repeatEachIndex}-entrar-actual`];
     try {
@@ -131,7 +134,8 @@ test.describe("versiones en caché", () => {
 test.describe("recarga a mitad del canje", () => {
   // page.route no ve los pedidos que pasan por un service worker; acá lo que se prueba es la
   // página, así que se bloquea el service worker.
-  test.use({ serviceWorkers: "block" });
+  // Además, un cupo propio de /api/v1/auth/: afirma el 401 real del canje (ver otroCliente).
+  test.use({ serviceWorkers: "block", ...otroCliente(8) });
 
   test("una recarga mientras el canje está en curso no pierde el token", async ({ page }) => {
     const pedidos: unknown[] = [];

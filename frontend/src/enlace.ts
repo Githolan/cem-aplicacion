@@ -3,6 +3,8 @@
 // que vive en un módulo sin React, que también puede importar Node al construir.
 
 export const RUTA_ENTRAR = "/entrar";
+/** Adonde lleva todo lo que la persona no puede abrir: sin pantalla de «sin permiso». */
+export const RUTA_INICIO = "/";
 export const PARAMETRO_TOKEN = "token";
 
 /** Vigencia del enlace del correo: 15 minutos (backend, `sesiones.VIGENCIA_ENLACE`). */

@@ -1,9 +1,9 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
+import { useIrAlInicio } from "./sesion";
 
 // Entrar con correo y contraseña (documento 13, §10.3: el método de administradores, consejeros
 // y operadores). Si la persona tiene segundo factor, la contraseña no abre la sesión: el backend
@@ -25,8 +25,7 @@ const FORMATO_HORA = new Intl.DateTimeFormat("es-AR", {
 
 type Paso =
   | { tipo: "contrasena" }
-  | { tipo: "codigo"; venceEn: string }
-  | { tipo: "adentro" };
+  | { tipo: "codigo"; venceEn: string };
 
 type Estado =
   | "listo"
@@ -43,6 +42,7 @@ export function EntrarConContrasena() {
   const [correo, setCorreo] = useState("");
   const [contrasena, setContrasena] = useState("");
   const [codigo, setCodigo] = useState("");
+  const irAlInicio = useIrAlInicio();
   const [paso, setPaso] = useState<Paso>({ tipo: "contrasena" });
   const [estado, setEstado] = useState<Estado>("listo");
   const campoCodigo = useRef<HTMLInputElement>(null);
@@ -70,7 +70,7 @@ export function EntrarConContrasena() {
         // La contraseña ya cumplió: no queda en memoria más de lo necesario.
         setContrasena("");
         setEstado("listo");
-        if (data.estado === "sesion_abierta") setPaso({ tipo: "adentro" });
+        if (data.estado === "sesion_abierta") irAlInicio("Entraste.");
         else {
           setCodigo("");
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
@@ -101,7 +101,7 @@ export function EntrarConContrasena() {
         if (data !== undefined) {
           setCodigo("");
           setEstado("listo");
-          setPaso({ tipo: "adentro" });
+          irAlInicio("Entraste.");
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
         else setEstado(fallo(response.status));
@@ -110,20 +110,6 @@ export function EntrarConContrasena() {
   }
 
   const titulo = <h2 id={`${id}-titulo`}>Entrar con contraseña</h2>;
-
-  if (paso.tipo === "adentro") {
-    return (
-      <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-        {titulo}
-        <div role="status" aria-live="polite">
-          <p className="aviso-ok">Entraste.</p>
-          <p>
-            <Link to="/">Ir al inicio</Link>
-          </p>
-        </div>
-      </section>
-    );
-  }
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">

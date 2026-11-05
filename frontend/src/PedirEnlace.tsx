@@ -9,6 +9,7 @@ import { DIGITOS_CODIGO } from "./EntrarConCodigo";
 // después en el canje): el enlace solo sirve en el navegador donde se pidió. Para otro
 // dispositivo está el código del mismo correo (EntrarConCodigo). El 202 es igual exista o no la
 // cuenta; se muestra el mensaje que manda el servidor, sin agregarle nada que distinga los casos.
+// Con el pedido hecho, /entrar pasa al código con el correo ya escrito (`alPedir`).
 // Diseño provisorio: el definitivo llega con G3.
 
 const ESTADO_INVALIDO = 422;
@@ -17,12 +18,11 @@ const ESTADO_DEMASIADOS = 429;
 type Estado =
   | { tipo: "listo" }
   | { tipo: "enviando" }
-  | { tipo: "pedido"; mensaje: string }
   | { tipo: "invalido" }
   | { tipo: "demasiados" }
   | { tipo: "sin_servicio" };
 
-export function PedirEnlace() {
+export function PedirEnlace({ alPedir }: { alPedir: (correo: string, mensaje: string) => void }) {
   const id = useId();
   const [correo, setCorreo] = useState("");
   const [estado, setEstado] = useState<Estado>({ tipo: "listo" });
@@ -30,10 +30,11 @@ export function PedirEnlace() {
   function enviar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
     setEstado({ tipo: "enviando" });
+    const limpio = correo.trim();
     void api
-      .POST("/api/v1/auth/enlace", { body: { correo: correo.trim() } })
+      .POST("/api/v1/auth/enlace", { body: { correo: limpio } })
       .then(({ data, error, response }) => {
-        if (error === undefined) setEstado({ tipo: "pedido", mensaje: data.mensaje });
+        if (error === undefined) alPedir(limpio, data.mensaje);
         else if (response.status === ESTADO_INVALIDO) setEstado({ tipo: "invalido" });
         else if (response.status === ESTADO_DEMASIADOS) setEstado({ tipo: "demasiados" });
         else setEstado({ tipo: "sin_servicio" });
@@ -67,7 +68,6 @@ export function PedirEnlace() {
       </form>
       <div role="status" aria-live="polite">
         {estado.tipo === "enviando" && <p>Pidiendo el enlace…</p>}
-        {estado.tipo === "pedido" && <p className="aviso-ok">{estado.mensaje}</p>}
         {estado.tipo === "invalido" && (
           <p id={`${id}-invalido`} className="aviso-error">
             Revisá el correo: no parece una dirección válida.

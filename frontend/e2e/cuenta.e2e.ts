@@ -50,13 +50,17 @@ function vigilarErrores(pagina: Page): string[] {
  */
 async function simularApi(pagina: Page, baseURL: string): Promise<Record<string, string | null>> {
   const csrf: Record<string, string | null> = {};
+  let abierta = true;
   // La sección de pedidos sobre los datos (2d-2) consulta sus casos: sin casos no se muestra.
   await pagina.route("**/api/v1/privacidad/casos", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
   await pagina.route("**/api/v1/auth/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
     if (pedido.method() === "GET") {
-      if (camino === "/api/v1/auth/sesion") return ruta.fulfill({ json: YO });
+      if (camino === "/api/v1/auth/sesion") {
+        if (abierta) return ruta.fulfill({ json: YO });
+        return ruta.fulfill({ status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } });
+      }
       if (camino === "/api/v1/auth/sesiones") return ruta.fulfill({ json: { elementos: SESIONES } });
       if (camino === "/api/v1/auth/totp") return ruta.fulfill({ json: TOTP });
       if (camino === "/api/v1/auth/contrasena") return ruta.fulfill({ json: CONTRASENA });
@@ -66,6 +70,8 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
     csrf[camino] = encabezado;
     if (encabezado !== CSRF)
       return ruta.fulfill({ status: 403, json: { codigo: "csrf_invalido", mensaje: "x", id_correlacion: "c" } });
+    // Salir cierra la sesión: /entrar la va a consultar y, con un 200, volvería al inicio.
+    if (camino === "/api/v1/auth/salir") abierta = false;
     if (camino === `/api/v1/auth/sesiones/${OTRA}/revocar` || camino === "/api/v1/auth/salir")
       return ruta.fulfill({ status: 204 });
     return ruta.abort();
@@ -80,7 +86,7 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
 }
 
 test.describe("mi cuenta sin sesión", () => {
-  // Cuatro pedidos reales a /api/v1/auth/ por proyecto, con un cupo propio: ver otroCliente en entorno.ts.
+  // Cinco pedidos reales a /api/v1/auth/ por proyecto (el quinto, la sesión al llegar a /entrar), con un cupo propio: ver otroCliente en entorno.ts.
   test.use(otroCliente(2));
 
   test("sin sesión, el backend real responde 401 y la página manda a /entrar", async ({ page }) => {
@@ -127,10 +133,14 @@ test.describe("mi cuenta", () => {
     expect(csrf[`/api/v1/auth/sesiones/${OTRA}/revocar`]).toBe(CSRF);
     await sinFaltasDeAccesibilidad(page);
 
+    const sinSesion = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/auth/sesion");
     await page.getByRole("button", { name: "Salir" }).click();
+    expect((await sinSesion).status()).toBe(401);
     await expect(page).toHaveURL(/\/entrar$/);
+    await expect(page.getByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeVisible();
     expect(csrf["/api/v1/auth/salir"]).toBe(CSRF);
-    expect(errores).toEqual([]);
+    // La consola informa el 401 de /entrar, que ya no tiene sesión; errores de la página, ninguno.
+    expect(errores.filter((e) => !e.includes("401"))).toEqual([]);
   });
 
   test("control: sin la cookie CSRF, el backend simulado rechaza y la página lo dice", async ({ page, baseURL }) => {

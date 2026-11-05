@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // Entrar con el código del correo en /entrar, contra el cem-backend real a través del nginx de la
 // imagen. El backend de la corrida no tiene base de datos ni CEM_CODIGO_CLAVE, así que responde
@@ -11,8 +11,13 @@ const CORREO = "ana@ejemplo.com";
 const CODIGO = "042917";
 
 test.describe("entrar con el código del correo", () => {
+  // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
+  test.use(otroCliente(11));
+
   test("manda correo y código por POST, en el cuerpo, y avisa si el servicio no responde", async ({ page }) => {
+    await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
+    await page.getByRole("button", { name: "Entrar con un código" }).click();
     await sinFaltasDeAccesibilidad(page);
 
     await page.getByRole("region", { name: "Entrar con un código" }).getByLabel("Correo").fill(CORREO);
@@ -37,7 +42,9 @@ test.describe("entrar con el código del correo", () => {
   test("un código mal formado no sale y se explica junto al campo", async ({ page }) => {
     const pedidos: string[] = [];
     page.on("request", (r) => pedidos.push(new URL(r.url()).pathname));
+    await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
+    await page.getByRole("button", { name: "Entrar con un código" }).click();
 
     await page.getByRole("region", { name: "Entrar con un código" }).getByLabel("Correo").fill(CORREO);
     const campo = page.getByLabel(/^Código de 6 números/);

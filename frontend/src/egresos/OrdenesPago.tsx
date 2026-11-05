@@ -1,13 +1,15 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { codigoDe, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
+import { codigoDe, SIN_CONEXION } from "../fallas";
+import { REQUISITOS, usePuede } from "../permisos";
 import {
   aCentavos,
   aTexto,
+  type Aviso,
   cambioLoVisto,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
@@ -16,11 +18,15 @@ import {
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
+  sinLaFalla,
+  sinPisarLoHecho,
   TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_ESTADO_ORDEN,
   TEXTO_FRANJA,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
+import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
+import { RUTA_PAGOS } from "./PagosManuales";
 import { PedirCodigo } from "./PedirCodigo";
 import { RUTA_PROVEEDORES } from "./Proveedores";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
@@ -38,10 +44,11 @@ export const RUTA_ORDENES = "/egresos/ordenes";
 const MONEDAS = ["ARS", "USD"] as const;
 /** Estados en que la orden se puede modificar (`modificar_orden_pago`, 0045). */
 const MODIFICABLES = new Set<Orden["estado"]>(["borrador", "en_revision", "aprobada", "fallida"]);
+/** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
+const SE_CORRIGE_EN_EL_FORMULARIO = new Set(["sin_cambios", "proveedor_inactivo"]);
 
 type Lectura =
   | { tipo: "cargando" }
-  | { tipo: "sin_permiso" }
   | { tipo: "sin_servicio" }
   | { tipo: "ok"; ordenes: Orden[]; proveedores: Proveedor[]; contratos: Contrato[] };
 
@@ -62,7 +69,6 @@ type Acto =
   | { tipo: "renovar"; orden: Orden }
   | { tipo: "emitir"; orden: Orden; huella: string };
 type Pendiente = { acto: string; reintentar: () => void };
-type Aviso = { texto: string; ok: boolean };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
 
@@ -83,12 +89,14 @@ export const AVISO_MODIFICAR =
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
 export function OrdenesPago() {
-  const elegido = useConsorcio();
+  const elegido = useConsorcio(REQUISITOS.ordenes);
   return <OrdenesPagoDelEdificio key={elegido.consorcio} {...elegido} />;
 }
 
-function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: ReturnType<typeof useConsorcio>) {
+function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const id = useId();
+  const navegar = useNavigate();
+  const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [formulario, setFormulario] = useState<Formulario | null>(null);
@@ -129,10 +137,10 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         const codigo = codigoDe(falla.error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver las órdenes", reintentar: () => setVuelta((v) => v + 1) });
-        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") setLectura({ tipo: "sin_permiso" });
+        else if (falla.response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: mensajeDeError(falla.response.status, codigo), ok: false });
+          setAviso(sinPisarLoHecho(mensajeDeError(falla.response.status, codigo)));
         }
       })
       .catch((e: unknown) => {
@@ -140,17 +148,22 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso({ texto: SIN_CONEXION, ok: false });
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar]);
+  }, [consorcio, vuelta, aEntrar, aInicio]);
 
   function volverAPedir() {
     setLectura({ tipo: "cargando" });
     setVuelta((v) => v + 1);
+  }
+
+  function reintentarLectura() {
+    setAviso(sinLaFalla);
+    volverAPedir();
   }
 
   function abrirPreparar(proveedores: Proveedor[]) {
@@ -322,6 +335,12 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          // Lo que sigue a emitir es pagar. La lista no abre la ficha sola: ver la cuenta es un
+          // acto auditado que hace ejecutor a quien la ve, y lo decide esa persona con su botón.
+          if (acto.tipo === "emitir") {
+            navegar(RUTA_PAGOS, { state: { aviso: texto, consorcio } });
+            return;
+          }
           cerrar();
           setAviso({ texto, ok: true });
           if (acto.tipo === "renovar")
@@ -348,7 +367,8 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
           setSinContrato((s) => new Set(s).add(acto.orden.id));
         if (acto.tipo === "renovar" && cambioLoVisto(response.status, codigo))
           setSinContrato((s) => new Set([...s].filter((x) => x !== acto.orden.id)));
-        if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios") {
+        const seCorrige = acto.tipo === "guardar" && SE_CORRIGE_EN_EL_FORMULARIO.has(codigo ?? "");
+        if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && !seCorrige) {
           cerrar();
           volverAPedir();
         }
@@ -368,16 +388,8 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
-      {pantalla.tipo === "sin_servicio" && (
-        <p className="aviso-error" role="alert">
-          {pantalla.deConexion ? SIN_CONEXION : SERVICIO_NO_DISPONIBLE}
-        </p>
-      )}
-      {aviso !== null && (
-        <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
-          {aviso.texto}
-        </p>
-      )}
+      <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
+      <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo
           acto={pendiente.acto}
@@ -393,14 +405,22 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando las órdenes…</p>}
-          {lectura.tipo === "sin_permiso" && (
-            <p className="tarjeta">No tenés la facultad de preparar órdenes de pago en este edificio.</p>
-          )}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
           {lectura.tipo === "ok" && formulario === null && (
             <>
-              <button type="button" disabled={enviando} onClick={() => abrirPreparar(lectura.proveedores)}>
-                Preparar una orden
-              </button>
+              {lectura.proveedores.some((p) => p.estado === "activo") ? (
+                <button type="button" disabled={enviando} onClick={() => abrirPreparar(lectura.proveedores)}>
+                  Preparar una orden
+                </button>
+              ) : (
+                <p className="tarjeta">
+                  Para preparar una orden hace falta un proveedor activo:{" "}
+                  <Link to={RUTA_PROVEEDORES} state={{ consorcio }}>
+                    cargalo en Proveedores
+                  </Link>
+                  .
+                </p>
+              )}
               {lectura.ordenes.length === 0 ? (
                 <p className="tarjeta">El edificio no tiene órdenes de pago.</p>
               ) : (
@@ -445,7 +465,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar }: 
                               Enviar a revisión
                             </button>
                           )}
-                          {o.estado === "aprobada" && !vencida(o) && !sinContrato.has(o.id) && (
+                          {o.estado === "aprobada" && !vencida(o) && !sinContrato.has(o.id) && puede("egresos.ejecutar_pago") && (
                             <button type="button" disabled={enviando} onClick={() => emitir(o)}>
                               Emitir
                             </button>

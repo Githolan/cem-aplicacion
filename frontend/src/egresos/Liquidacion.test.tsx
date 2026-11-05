@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { components } from "../api/tipos";
+import { alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { mesSiguiente, periodo } from "./Liquidacion";
@@ -61,7 +62,7 @@ type Respuestas = Record<string, () => Response | Promise<Response>>;
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave];
+    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -339,14 +340,18 @@ describe("liquidación (borrador)", () => {
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
   });
 
-  it("sin la facultad lo dice, y un rechazo del backend se explica", async () => {
+  it("un 403 al leer lleva al inicio, y un rechazo del backend al actuar se explica", async () => {
     vi.stubGlobal("fetch", backend({
+      "GET /api/v1/auth/sesion": () => Response.json({}),
+      "GET /health": () => error("servicio_no_disponible", 503),
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones`]: () => error("sin_permiso", 403),
       [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => error("sin_permiso", 403),
     }));
     abrir();
-    expect(await screen.findByText(/La liquidación la prepara la administración/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(screen.queryByText(/La liquidación la prepara la administración/)).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({
@@ -359,5 +364,81 @@ describe("liquidación (borrador)", () => {
     fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText(/ya hay un borrador de ese período/)).toBeTruthy();
+  });
+
+  const LISTAS = {
+    "GET /api/v1/me/consorcios": CONSORCIOS,
+    [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+    [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+  };
+
+  it("descartar cierra la descartada y vuelve a la lista, sin volver a pedirla", async () => {
+    const api = backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
+      [`POST ${BASE}/liquidaciones/${L1}/descartar`]: () => Response.json({ id: L1 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
+    const pedidasAntes = pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`).length;
+    fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
+    expect(await screen.findByText(/Listo: descartaste el borrador/)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Borrador de octubre de 2026" })).toBeNull();
+    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`)).toHaveLength(pedidasAntes);
+  });
+
+  it("quitar un gasto deja abierto el borrador: el descarte es el único que lo cierra", async () => {
+    vi.stubGlobal("fetch", backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(CON_GASTO),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos/${G1}/quitar`]: () => Response.json({ id: G1 }),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Quitar/ }));
+    expect(await screen.findByText(/Listo: quitaste el gasto/)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+  });
+
+  it("si falla el detalle de la abierta, la lista sigue: se reintenta o se vuelve a ella", async () => {
+    let caido = true;
+    vi.stubGlobal("fetch", backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => (caido ? error("error_interno", 500) : Response.json(SIN_GASTOS)),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos abrir esta liquidación");
+    expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    const boton = screen.getByRole("button", { name: /octubre de 2026, versión 1/ });
+    expect(boton.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(boton);
+    const reintentar = await screen.findByRole("button", { name: "Reintentar" });
+    caido = false;
+    fireEvent.click(reintentar);
+    expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("si falla la lista, Reintentar la vuelve a pedir y no hay salida de más", async () => {
+    let caido = true;
+    vi.stubGlobal("fetch", backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [LIQUIDACION] })),
+    }));
+    abrir();
+    const boton = await screen.findByRole("button", { name: "Reintentar" });
+    expect(screen.queryByRole("button", { name: "Volver a la lista" })).toBeNull();
+    caido = false;
+    fireEvent.click(boton);
+    expect(await screen.findByRole("list", { name: "Liquidaciones" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

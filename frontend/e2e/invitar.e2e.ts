@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /invitaciones servida por el nginx de la imagen, con su CSP real. El backend de la
 // corrida no tiene base de datos: sin sesión responde el 401 de verdad y la página manda a
@@ -70,6 +70,10 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
+    // La sesión la responde simularSesion, en el contexto: page.route va primero y la cortaría.
+    if (camino === "/api/v1/auth/sesion") return ruta.fallback();
+    const permisos = simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios")
         return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: quien === "propietaria" ? ["propietario"] : [] }] });
@@ -132,6 +136,7 @@ test.describe("invitar", () => {
     const errores = vigilarErrores(page);
     await page.setViewportSize({ width: 360, height: 740 });
     const { envios } = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.goto("/");
     await page.getByRole("link", { name: "Invitar a una persona" }).click();
 
