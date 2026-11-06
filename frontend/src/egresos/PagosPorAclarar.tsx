@@ -26,7 +26,7 @@ import { AvisoPantalla, FallaDeLectura } from "./EstadoPantalla";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus, useMontado } from "./useConsorcio";
 
-// Página /egresos/por-aclarar (app 0067, P3 179): quien vio la cuenta en el acto de ejecución y
+// Página /pagos/por-aclarar (app 0067, P3 179): quien vio la cuenta en el acto de ejecución y
 // ya no ejecuta pagos en ese edificio (renunció o lo reemplazaron) declara que no transfirió.
 // Sin esa declaración la orden queda trabada: el Consejo no puede confirmar que no se pagó. Lo
 // confirma otro miembro del Consejo. La lista viene de todos los edificios (sin el mandato, el
@@ -37,7 +37,7 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus, useMonta
 
 type PorAclarar = components["schemas"]["PagoPorAclarar"];
 
-export const RUTA_POR_ACLARAR = "/egresos/por-aclarar";
+export const RUTA_POR_ACLARAR = "/pagos/por-aclarar";
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: PorAclarar[] };
 type Pendiente = { acto: string; reintentar: () => void };

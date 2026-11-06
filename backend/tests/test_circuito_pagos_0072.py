@@ -133,6 +133,7 @@ def declarada(motor_migrate, e, quien, o) -> UUID:
 
 def test_enviar_lo_ve_quien_prepara_y_el_consejo_no(motor_migrate, e):
     o = llamar(motor_migrate, e, e.adm, PREPARAR)
+    assert ficha(e, e.adm, o)["puede_modificar"] is True
     x = fila(e, e.adm, o)
     assert (x["paso"], x["grupo"], x["le_toca_a"]) == ("enviar", "para_preparar", "vos")
     f = ficha(e, e.adm, o)
@@ -239,8 +240,10 @@ def test_subir_comprobante_lo_ve_quien_vio_la_cuenta(motor_migrate, motor_app, e
     assert paso(e, e.adm, o) == "subir_comprobante"
     f = ficha(e, e.adm, o)
     assert (f["puede_subir_comprobante"], f["puede_registrar"]) == (True, True)
+    assert f["puede_reabrir_cuenta"] is True
     # Control: quien no vio la cuenta no sube nada.
     assert ficha(e, x, o)["puede_subir_comprobante"] is False
+    assert ficha(e, x, o)["puede_reabrir_cuenta"] is False
     assert paso(e, e.mc1, o) is None
 
 
@@ -456,6 +459,9 @@ def test_si_falta_una_declaracion_la_ficha_dice_a_quien_le_toca(motor_migrate, m
     r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion", {})
     assert r.status_code == 409
     assert paso(e, x, o) == "subir_comprobante"
+    # Retoma quien falta declarar; quien ya declaró no, porque x todavía puede estar pagando.
+    assert ficha(e, x, o)["puede_reabrir_cuenta"] is True
+    assert ficha(e, e.adm, o)["puede_reabrir_cuenta"] is False
     # Control: declara x y ahora sí le toca al Consejo.
     declarada(motor_migrate, e, x, o)
     assert paso(e, x, o) == "espera_confirmar"
@@ -466,7 +472,10 @@ def test_una_declaracion_superada_deja_de_estar_vigente(motor_migrate, e):
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
     declarada(motor_migrate, e, e.adm, o)
-    assert ficha(e, e.adm, o)["situacion"] == "no_pago_declarado"
+    f = ficha(e, e.adm, o)
+    assert (f["situacion"], f["puede_pagar"], f["puede_reabrir_cuenta"]) == (
+        "no_pago_declarado", False, True,
+    )  # fmt: skip
     ver(motor_migrate, e, e.adm, o)  # la vuelve a abrir: la base la deja sin efecto
     f = ficha(e, e.adm, o)
     assert (f["situacion"], f["declaracion_vigente"]) == ("pagando", None)
@@ -722,3 +731,20 @@ def test_0072_ida_y_vuelta(base_aparte):
     assert funciones() == 0
     command.upgrade(cfg, "0072")  # control: vuelve a subir limpio
     assert funciones() == 15
+
+
+def test_ver_la_cuenta_encadena_emitir_y_abrir(motor_migrate, e):
+    """Lo que hace la ficha con «Ver la cuenta para pagar». El gesto vale para las dos rutas."""
+    o = aprobada(motor_migrate, e)
+    f = ficha(e, e.adm, o)
+    assert (f["situacion"], f["paso"]) == ("para_pagar", "pagar")
+    vista = {"version": 1, "huella": f["versiones"][0]["huella"]}
+    # Control: sola, la cuenta no pasa de aprobada a en ejecución.
+    assert post(e, e.adm, f"ordenes-pago/{o}/pago-manual/cuenta", vista).status_code == 409
+    r = post(e, e.adm, f"ordenes-pago/{o}/emitir", vista)
+    assert r.status_code == 200, r.json()
+    r = post(e, e.adm, f"ordenes-pago/{o}/pago-manual/cuenta", vista)
+    assert r.status_code == 200, r.json()
+    assert (r.json()["cuenta_destino"], r.json()["version"]) == (CUENTA, 1)
+    assert r.json()["huella"] == vista["huella"]
+    assert paso(e, e.adm, o) == "subir_comprobante"

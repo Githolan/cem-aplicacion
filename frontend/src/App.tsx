@@ -13,13 +13,9 @@ import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useConsultaDeAccione
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EstadoServicio } from "./EstadoServicio";
-import { ConciliacionPagos, RUTA_CONCILIACION } from "./egresos/ConciliacionPagos";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
-import { OrdenesPago, RUTA_ORDENES } from "./egresos/OrdenesPago";
-import { PagosManuales, RUTA_PAGOS } from "./egresos/PagosManuales";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
-import { RevisionOrdenes, RUTA_REVISION } from "./egresos/RevisionOrdenes";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
 import { InvitacionesPropias, useMisInvitaciones } from "./InvitacionesPropias";
@@ -27,6 +23,11 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
+import { CircuitoPagos } from "./pagos/CircuitoPagos";
+import { ConsultaPagos } from "./pagos/ConsultaPagos";
+import { Pestanas } from "./pagos/Pestanas";
+import { PrepararOrden } from "./pagos/PrepararOrden";
+import { RUTA_CONSULTA, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -37,11 +38,17 @@ const ENLACES_DE_INICIO: readonly { ruta: string; texto: string; requisito: Requ
   { ruta: RUTA_PADRON, texto: "Padrón del edificio", requisito: REQUISITOS.padron },
   { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", requisito: REQUISITOS.contactos },
   { ruta: RUTA_DOCUMENTOS, texto: "Documentos del edificio", requisito: REQUISITOS.documentos },
-  { ruta: RUTA_ORDENES, texto: "Órdenes de pago", requisito: REQUISITOS.ordenes },
-  { ruta: RUTA_REVISION, texto: "Revisar órdenes de pago", requisito: REQUISITOS.revision },
-  { ruta: RUTA_PAGOS, texto: "Pagos a realizar", requisito: REQUISITOS.pagos },
-  { ruta: RUTA_CONCILIACION, texto: "Conciliar pagos", requisito: REQUISITOS.conciliacion },
+  { ruta: RUTA_PAGOS, texto: "Pagos", requisito: REQUISITOS.pagos },
   { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", requisito: REQUISITOS.liquidacion },
+];
+
+/** Las pantallas que reemplazó el circuito de pagos: un enlace viejo sigue llegando. */
+const RUTAS_VIEJAS: readonly (readonly [string, string])[] = [
+  ["/egresos/ordenes", RUTA_PAGOS],
+  ["/egresos/revision", RUTA_PAGOS],
+  ["/egresos/pagos", RUTA_PAGOS],
+  ["/egresos/conciliacion", RUTA_PAGOS],
+  ["/egresos/por-aclarar", RUTA_POR_ACLARAR],
 ];
 
 async function hayPagosPorAclarar(): Promise<boolean> {
@@ -109,6 +116,7 @@ function Inicio() {
       )}
       <EnlaceInstalar />
       <EstadoServicio />
+      <Pestanas />
     </>
   );
 }
@@ -170,10 +178,16 @@ export function App() {
           <Route path={RUTA_DOCUMENTOS} element={<Exige requisito={REQUISITOS.documentos}><Documentos /></Exige>} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />
-          <Route path={RUTA_ORDENES} element={<Exige requisito={REQUISITOS.ordenes}><OrdenesPago /></Exige>} />
-          <Route path={RUTA_REVISION} element={<Exige requisito={REQUISITOS.revision}><RevisionOrdenes /></Exige>} />
-          <Route path={RUTA_PAGOS} element={<Exige requisito={REQUISITOS.pagos}><PagosManuales /></Exige>} />
-          <Route path={RUTA_CONCILIACION} element={<Exige requisito={REQUISITOS.conciliacion}><ConciliacionPagos /></Exige>} />
+          <Route path={RUTA_NUEVA} element={<Exige requisito={REQUISITOS.ordenes}><PrepararOrden /></Exige>} />
+          <Route path={RUTA_CONSULTA} element={<Exige requisito={REQUISITOS.pagos}><ConsultaPagos /></Exige>} />
+          {/* Una sola ruta madre: la bandeja sigue montada al abrir la ficha al lado. */}
+          <Route path={RUTA_PAGOS} element={<Exige requisito={REQUISITOS.pagos}><CircuitoPagos /></Exige>}>
+            <Route index element={null} />
+            <Route path=":orden" element={null} />
+          </Route>
+          {RUTAS_VIEJAS.map(([vieja, nueva]) => (
+            <Route key={vieja} path={vieja} element={<Navigate to={nueva} replace />} />
+          ))}
           <Route path={RUTA_LIQUIDACION} element={<Exige requisito={REQUISITOS.liquidacion}><Liquidacion /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />

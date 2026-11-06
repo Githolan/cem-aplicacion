@@ -1563,6 +1563,8 @@ def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: Moto
         puede_renovar=a.puede_renovar,
         # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
         puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
+        puede_reabrir_cuenta=circuito_pagos.reabre_cuenta(situacion, a),
+        puede_modificar=prepara and orden.estado in circuito_pagos.MODIFICABLES,
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
         puede_declarar=a.puede_declarar,
         puede_corregir=a.puede_corregir, puede_conciliar=a.puede_conciliar,

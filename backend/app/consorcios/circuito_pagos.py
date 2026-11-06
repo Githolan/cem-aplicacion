@@ -70,6 +70,14 @@ class AccionesOrden(HechosPago):
 SIN_ACCIONES = AccionesOrden()
 """La función de la base lee solo las órdenes en curso: las demás no admiten estas acciones."""
 
+MODIFICABLES = {
+    EstadoOrdenPago.BORRADOR,
+    EstadoOrdenPago.EN_REVISION,
+    EstadoOrdenPago.APROBADA,
+    EstadoOrdenPago.FALLIDA,
+}
+"""Los estados en que `modificar_orden_pago` (`0045`) acepta una versión nueva."""
+
 SITUACION_POR_ESTADO = {
     EstadoOrdenPago.BORRADOR: SituacionPago.BORRADOR,
     EstadoOrdenPago.EN_REVISION: SituacionPago.EN_REVISION,
@@ -99,6 +107,19 @@ def ofrece_pagar(situacion: SituacionPago, a: AccionesOrden) -> bool:
     if situacion == SituacionPago.PAGANDO:
         return a.puede_pagar and not a.cuenta_vista
     return a.puede_pagar and situacion == SituacionPago.PARA_PAGAR
+
+
+def reabre_cuenta(situacion: SituacionPago, a: AccionesOrden) -> bool:
+    """Si la ficha ofrece abrir de nuevo una cuenta ya vista. En `pagando`, a quien la vio; con una
+    declaración vigente es «Retomar el pago» (§9), y solo si nadie más la vio sin declarar: si no,
+    la misma orden se podría transferir dos veces."""
+    if not a.puede_pagar:
+        return False
+    if situacion == SituacionPago.PAGANDO:
+        return a.puede_registrar
+    if situacion == SituacionPago.NO_PAGO_DECLARADO:
+        return a.declaracion_confirmable or a.falta_que_declares
+    return False
 
 
 def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPago | None:

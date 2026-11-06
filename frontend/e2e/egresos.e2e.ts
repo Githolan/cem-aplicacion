@@ -127,51 +127,55 @@ test.describe("egresos en un teléfono", () => {
     expect(await page.content()).not.toContain(CUENTA);
     expect(errores).toEqual([]);
   });
-
-  test("revisión: el consejero ve la cuenta completa, la alerta de fraccionamiento y entra en 360 px", async ({ page, baseURL }) => {
-    const errores = vigilarErrores(page);
-    await simularApi(page, baseURL!, "consejero");
-    await page.goto("/egresos/revision");
-    await expect(page.getByText("Posible fraccionamiento: existen órdenes recientes relacionadas")).toBeVisible();
-    await entraEnElTelefono(page);
-    await sinFaltasDeAccesibilidad(page);
-
-    const revisar = page.getByRole("button", { name: `Revisar la orden de ${RAZON_LARGA}` });
-    expect((await revisar.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    await revisar.click();
-    await expect(page.getByText(CUENTA)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toBeVisible();
-    await entraEnElTelefono(page);
-    await sinFaltasDeAccesibilidad(page);
-    expect(errores).toEqual([]);
-  });
-
-  test("revisión: a quien preparó la orden el backend no le da la cuenta y la página muestra los últimos dígitos", async ({ page, baseURL }) => {
-    await simularApi(page, baseURL!, "quien_preparo");
-    await page.goto("/egresos/revision");
-    await page.getByRole("button", { name: `Revisar la orden de ${RAZON_LARGA}` }).click();
-    await expect(page.getByText(`…${CUENTA.slice(-4)}`)).toBeVisible();
-    expect(await page.content()).not.toContain(CUENTA);
-    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toHaveCount(0);
-    await entraEnElTelefono(page);
-  });
 });
 
-// Pago manual del piloto (app 0055): la cuenta completa no está en la página hasta el acto de
-// ejecución (un POST que la API responde con todas las barreras); la conciliación del Consejo
-// nunca la recibe.
+// El circuito de pagos: una bandeja y una ficha, con la API simulada desde el navegador. Cada prueba
+// corre en los tres proyectos (escritorio, movil, tablet) con su ancho, sin fijarlo: en PC la ficha
+// se abre al lado y más angosto va aparte. La cuenta completa no está en la página hasta el acto de
+// ejecución (un POST que la API responde con todas las barreras).
 const EJECUCION = "e7777777-7777-4777-8777-777777777777";
 const PAGO = "f8888888-8888-4888-8888-888888888888";
 const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
 const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
-
+const ANCHO_PC_PX = 1025;
+const ANCHO_PESTANAS_PX = 768;
+const ACCIONES_EN_FALSO = {
+  puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
+  puede_reabrir_cuenta: false, puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false,
+  puede_declarar: false, puede_corregir: false, puede_conciliar: false, puede_confirmar: false,
+};
 const ORDEN_APROBADA = { ...ORDEN_A, estado: "aprobada", aprobaciones: 1, aprobada_en: "2026-10-31T12:00:00Z",
   aprobacion_vence_en: "2099-11-07T12:00:00Z" };
+const EJECUCION_VACIA = { id: EJECUCION, version: 1, creada_en: "2026-10-31T12:30:00Z", resultado: null, referencia: null,
+  declaraciones: [], pagos: [] };
 
-async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
+const fichaDe = (extra: object) => ({
+  ...ACCIONES_EN_FALSO, orden: ORDEN_APROBADA, versiones: [version(null)], situacion: "para_pagar", paso: null, le_toca_a: null,
+  ejecucion: null, comprobante_actual: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
+});
+const PARA_PAGAR = fichaDe({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
+const SUBIENDO = fichaDe({
+  orden: { ...ORDEN_APROBADA, estado: "en_ejecucion" }, situacion: "pagando", paso: "subir_comprobante", le_toca_a: "vos",
+  puede_subir_comprobante: true, puede_registrar: true, puede_declarar: true, puede_reabrir_cuenta: true, ejecucion: EJECUCION_VACIA,
+});
+const PARA_APROBAR = fichaDe({
+  orden: ORDEN_A, situacion: "en_revision", paso: "aprobar", le_toca_a: "vos", puede_aprobar: true, puede_rechazar: true,
+});
+const PARA_CONCILIAR = fichaDe({
+  orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, situacion: "falta_conciliar", paso: "conciliar", le_toca_a: "vos", puede_conciliar: true,
+  comprobante_actual: { documento_id: COMPROBANTE, version_documento_id: ARCHIVO },
+  ejecucion: { ...EJECUCION_VACIA, pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
+    importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO, registrado_por: ADM,
+    registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null, conciliado_en: null,
+    fuera_de_termino: false }] },
+});
+
+const GRUPO_DE: Record<string, string> = { pagar: "para_pagar", aprobar: "para_aprobar", conciliar: "para_conciliar" };
+
+/** La API del circuito con una orden. La ficha cambia con el acto, como en el servidor. */
+async function simularPagos(pagina: Page, baseURL: string, inicial: { paso: string | null }): Promise<string[]> {
   const pedidosHechos: string[] = [];
+  let actual: object = inicial;
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
@@ -180,27 +184,25 @@ async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
     pedidosHechos.push(`${pedido.method()} ${camino}`);
     const c = `/api/v1/consorcios/${A}`;
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
-    if (pedido.method() === "GET" && camino === `${c}/ordenes-pago`) return ruta.fulfill({ json: { elementos: [ORDEN_APROBADA] } });
-    if (camino === `${c}/pagos-manuales`) return ruta.fulfill({ json: { elementos: [] } });
+    if (camino === `${c}/pagos/bandeja`)
+      return ruta.fulfill({ json: { elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA, concepto: ORDEN_A.concepto,
+        importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""], le_toca_a: "vos" }] } });
+    if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: actual });
+    if (camino === `${c}/ordenes-pago/${ORDEN}/revision`)
+      return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(CUENTA)], puede_aprobar: true, puede_rechazar: true } });
     if (camino === `${c}/documentos`)
       return ruta.fulfill({ json: { documentos: [{ id: COMPROBANTE, categoria: "facturas_y_comprobantes",
         titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: ORDEN,
         versiones: [{ id: ARCHIVO, estado: "disponible" }] }] } });
-    if (camino === `${c}/ordenes-pago/${ORDEN}`) return ruta.fulfill({ json: { orden: ORDEN_APROBADA, versiones: [version(null)] } });
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/emitir`)
       return ruta.fulfill({ json: { id: ORDEN, version: 1 } });
-    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/cuenta`)
+    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/cuenta`) {
+      actual = SUBIENDO;
       return ruta.fulfill({ json: { ejecucion_id: EJECUCION, version: 1, huella: "cd".repeat(32), proveedor_id: PROV_A,
         proveedor_version: 1, razon_social: RAZON_LARGA, cuit: "30712345679", cuenta_destino: CUENTA,
         importe_centavos: 12_000_000, moneda: "ARS", concepto: ORDEN_A.concepto, comprobante: "Factura A 0001-00000042",
         aprobada_en: "2026-10-31T12:00:00Z", aprobacion_vence_en: "2026-11-07T12:00:00Z" } });
-    if (camino === `${c}/pagos-manuales/revision`)
-      return ruta.fulfill({ json: { elementos: [{ orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, puede_conciliar: true, ejecucion: {
-        id: EJECUCION, version: 1, creada_en: "2026-10-31T12:30:00Z", resultado: null, referencia: null, declaraciones: [],
-        pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
-          importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO,
-          registrado_por: ADM, registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null,
-          conciliado_por: null, conciliado_en: null }] } }] } });
+    }
     return ruta.abort();
   });
   await pagina.context().addCookies([
@@ -209,37 +211,84 @@ async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
   return pedidosHechos;
 }
 
-test.describe("pago manual en un teléfono", () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
+const anchoDe = (pagina: Page) => pagina.viewportSize()?.width ?? 0;
+
+async function sinDesbordar(pagina: Page) {
+  const { contenido, ventana } = await pagina.evaluate(() => ({
+    contenido: document.documentElement.scrollWidth,
+    ventana: window.innerWidth,
+  }));
+  expect(contenido).toBeLessThanOrEqual(ventana);
+}
+
+/** Entra a la bandeja y llega a la ficha: en PC ya está abierta al lado; más angosto, se toca. */
+async function abrirLaFicha(pagina: Page) {
+  await pagina.goto("/pagos");
+  const fila = pagina.getByRole("link", { name: new RegExp(RAZON_LARGA) });
+  await expect(fila).toBeVisible();
+  expect((await fila.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+  await sinDesbordar(pagina);
+  if (anchoDe(pagina) < ANCHO_PC_PX) await fila.click();
+}
+
+test.describe("circuito de pagos", () => {
+  test("en PC la ficha va al lado de la bandeja; más angosto, aparte", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, PARA_PAGAR);
+    await page.goto("/pagos");
+    const pagar = page.getByRole("button", { name: "Ver la cuenta para pagar" });
+    const fila = page.getByRole("link", { name: new RegExp(RAZON_LARGA) });
+    await expect(fila).toBeVisible();
+    if (anchoDe(page) >= ANCHO_PC_PX) {
+      await expect(pagar).toBeVisible();
+      const [lista, ficha] = [await fila.boundingBox(), await pagar.boundingBox()];
+      expect(ficha?.x).toBeGreaterThan((lista?.x ?? 0) + (lista?.width ?? 0));
+    } else {
+      await expect(pagar).toHaveCount(0);
+      await fila.click();
+      await expect(pagar).toBeVisible();
+      await expect(fila).toHaveCount(0);
+    }
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
   });
 
-  test("la cuenta completa aparece solo en el acto de ejecución, con su aviso", async ({ page, baseURL }) => {
-    const errores = vigilarErrores(page);
-    const hechos = await simularPagos(page, baseURL!);
-    await page.goto("/egresos/pagos");
-    const ejecutar = page.getByRole("button", { name: `Ejecutar pago manual de ${RAZON_LARGA}` });
-    await expect(ejecutar).toBeVisible();
-    expect((await ejecutar.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    expect(await page.content()).not.toContain(CUENTA);
-    expect(hechos.filter((h) => h.endsWith("/pago-manual/cuenta"))).toEqual([]);
-    await entraEnElTelefono(page);
-    await sinFaltasDeAccesibilidad(page);
+  test("las pestañas se ven solo en un ancho de teléfono", async ({ page, baseURL }) => {
+    await simularPagos(page, baseURL!, PARA_PAGAR);
+    await page.goto("/pagos");
+    const pestana = page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Pagos" });
+    await expect(page.getByRole("heading", { level: 1, name: "Pagos" })).toBeVisible();
+    if (anchoDe(page) <= ANCHO_PESTANAS_PX) {
+      await expect(pestana).toBeVisible();
+      expect((await pestana.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    } else await expect(pestana).toBeHidden();
+  });
 
-    await ejecutar.click();
+  test("la cuenta completa aparece solo en el acto de ejecución, con emitir y ver en un toque", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    const hechos = await simularPagos(page, baseURL!, PARA_PAGAR);
+    await abrirLaFicha(page);
+    const pagar = page.getByRole("button", { name: "Ver la cuenta para pagar" });
+    await expect(pagar).toBeVisible();
+    expect((await pagar.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    expect(await page.content()).not.toContain(CUENTA);
+    expect(hechos.filter((h) => h.startsWith("POST"))).toEqual([]);
+
+    await pagar.click();
     await expect(page.getByText(CUENTA)).toBeVisible();
     await expect(page.getByText("Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.")).toBeVisible();
-    await entraEnElTelefono(page);
+    await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeVisible();
+    expect(hechos.filter((h) => h.startsWith("POST")).map((h) => h.split("/").at(-1))).toEqual(["emitir", "cuenta"]);
+    await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
-    await page.getByRole("button", { name: "Cerrar sin registrar" }).click();
-    expect(await page.content()).not.toContain(CUENTA);
     expect(errores).toEqual([]);
   });
 
   test("el importe abre el teclado numérico y al salir se ve con centavos", async ({ page, baseURL }) => {
-    await simularPagos(page, baseURL!);
-    await page.goto("/egresos/pagos");
-    await page.getByRole("button", { name: `Ejecutar pago manual de ${RAZON_LARGA}` }).click();
+    await simularPagos(page, baseURL!, SUBIENDO);
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+    await page.goto(`/pagos/${ORDEN}`);
     const campo = page.getByLabel(/^Importe transferido/);
     await expect(campo).toHaveAttribute("inputmode", "decimal");
     await campo.fill("120000");
@@ -254,16 +303,38 @@ test.describe("pago manual en un teléfono", () => {
     await expect(campo).toHaveValue("12,345,6");
   });
 
-  test("la conciliación del Consejo muestra la evidencia sin la cuenta y entra en 360 px", async ({ page, baseURL }) => {
+  test("aprobar: la alerta de fraccionamiento a la vista y la cuenta completa", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
-    await simularPagos(page, baseURL!);
-    await page.goto("/egresos/conciliacion");
+    await simularPagos(page, baseURL!, PARA_APROBAR);
+    await abrirLaFicha(page);
+    await expect(page.getByText("Posible fraccionamiento: existen órdenes recientes relacionadas")).toBeVisible();
+    await expect(page.getByText(CUENTA)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toBeVisible();
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("conciliar muestra la evidencia sin la cuenta", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, PARA_CONCILIAR);
+    await abrirLaFicha(page);
     await expect(page.getByText("0001234567")).toBeVisible();
     await expect(page.getByRole("link", { name: "Ver el comprobante" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Conforme" })).toBeVisible();
     expect(await page.content()).not.toContain(CUENTA);
-    await entraEnElTelefono(page);
+    await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
+  });
+
+  test("las direcciones viejas llevan a la bandeja", async ({ page, baseURL }) => {
+    await simularPagos(page, baseURL!, PARA_PAGAR);
+    for (const vieja of ["/egresos/ordenes", "/egresos/revision", "/egresos/pagos", "/egresos/conciliacion"]) {
+      await page.goto(vieja);
+      await expect(page.getByRole("heading", { level: 1, name: "Pagos" })).toBeVisible();
+      await expect(page).toHaveURL(/\/pagos$/);
+    }
   });
 });

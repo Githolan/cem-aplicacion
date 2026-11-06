@@ -202,8 +202,7 @@ export const REQUISITOS = {
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],
   ordenes: [["egresos.preparar_orden"]],
-  revision: [["egresos.revisar_orden"]],
-  pagos: [["egresos.preparar_orden", "egresos.ejecutar_pago"]],
-  conciliacion: [["egresos.revisar_orden"]],
+  /** Las lecturas del circuito (`_lector`): quien prepara, y si no, quien revisa. */
+  pagos: [["egresos.preparar_orden"], ["egresos.revisar_orden"]],
   liquidacion: [["liquidacion.preparar"]],
 } as const satisfies Record<string, Requisito>;

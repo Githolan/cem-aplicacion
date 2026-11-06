@@ -25,6 +25,7 @@ import {
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
 import { REQUISITOS } from "../permisos";
+import { RUTA_NUEVA, RUTA_PAGOS } from "../pagos/rutas";
 import { PedirCodigo } from "./PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
 
@@ -256,7 +257,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           cerrar();
           const hecho = f.modo === "alta" ? "Listo: dimos de alta el proveedor." : `Listo: el proveedor quedó en la versión ${data.version}.`;
           if (f.modo === "alta" && vuelveAPreparar) {
-            navegar(RUTA_ORDENES_ENLACE, { state: { consorcio, proveedor: data.id, aviso: hecho } });
+            navegar(RUTA_NUEVA, { state: { consorcio, proveedor: data.id, aviso: hecho } });
             return;
           }
           setAviso({ texto: hecho, ok: true });
@@ -292,7 +293,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
         elegir={setConsorcio} />
       <p>
-        <Link to={RUTA_ORDENES_ENLACE}>Órdenes de pago</Link>
+        <Link to={RUTA_PAGOS}>Pagos</Link>
       </p>
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
@@ -450,5 +451,3 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     </>
   );
 }
-
-const RUTA_ORDENES_ENLACE = "/egresos/ordenes";
