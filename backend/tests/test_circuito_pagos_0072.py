@@ -15,6 +15,7 @@ from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.consorcios import egresos
 from app.db import transaccion
 from tests.test_egresos_1a import aprobada, envejecer, enviada, nueva_cuenta
 from tests.test_mandatos import otra_persona
@@ -37,10 +38,12 @@ from tests.test_pago_manual_0055 import (
     CONFIRMAR,
     CUENTA,
     DECLARAR,
+    REGISTRAR,
     acta,
     comprobante,
     con_ejecutar,
     emitida,
+    evidencia,
     registrada,
     ver,
 )
@@ -377,6 +380,26 @@ def test_corregir_lo_ve_quien_registro(motor_migrate, motor_app, e):
         y = fila(e, quien, o)
         assert (y["paso"], y["le_toca_a"]) == ("espera_corregir", "quien_registro")
     assert ficha(e, x, o)["puede_corregir"] is False
+
+
+def test_una_correccion_en_medio_de_la_lectura_no_rompe_la_ficha(motor_migrate, e, monkeypatch):
+    """La ficha cruza acciones y registros: los dos tienen que salir del mismo momento."""
+    o = emitida(motor_migrate, e)
+    p = registrada(motor_migrate, e, o)
+    observada(motor_migrate, e, o, p)
+    original = egresos._ejecucion_vigente
+
+    def corrigiendo_antes(*argumentos):
+        llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o))
+        return original(*argumentos)
+
+    monkeypatch.setattr(egresos, "_ejecucion_vigente", corrigiendo_antes)
+    f = ficha(e, e.adm, o)
+    assert f["situacion"] == "observado"
+    assert f["observacion_vigente"]["pago_id"] == str(p)
+    monkeypatch.undo()
+    # Control: la corrección se confirmó, y la lectura siguiente ya la ve.
+    assert ficha(e, e.adm, o)["situacion"] == "falta_conciliar"
 
 
 def test_el_comprobante_nuevo_reemplaza_al_observado_para_quien_lo_subio(motor_migrate, e):
