@@ -245,6 +245,12 @@ class CodigoError(StrEnum):
     declaró no confirma su propia declaración."""
     MOTIVO_CON_CUENTA = "motivo_con_cuenta"
     """El motivo lleva una cuenta (22 dígitos): nunca va en un motivo (`0060`)."""
+    SIN_DIFERENCIA = "sin_diferencia"
+    """Lo que se dice que se pagó es lo que se aprobó: no hay ninguna diferencia (`0075`)."""
+    DIFERENCIA_YA_RESUELTA = "diferencia_ya_resuelta"
+    """El Consejo ya resolvió esa diferencia."""
+    SOLO_RECLAMO = "solo_reclamo"
+    """Un pago a otra cuenta o en otra moneda no se da por pagado: solo se reclama."""
     LIQUIDACION_NO_ADMITE = "liquidacion_no_admite"
     """La liquidación no admite eso: ya hay un borrador del período, no es un borrador o el gasto
     ya se quitó."""

@@ -50,11 +50,12 @@ class ColumnasExtracto(BaseModel):
 
 
 class PagoPorCotejar(BaseModel):
-    """Un pago conciliado conforme que falta cotejar. Sin la cuenta."""
+    """Lo que salió del banco y falta cotejar: un pago conciliado conforme o una diferencia ya
+    resuelta, por su importe real. Sin la cuenta."""
 
     model_config = ConfigDict(frozen=True)
 
-    pago_id: UUID
+    pago_id: UUID = Field(description="El id del registro o de la diferencia.")
     orden_id: UUID
     proveedor: str
     concepto: str

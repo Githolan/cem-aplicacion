@@ -7,6 +7,7 @@ import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documen
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
   aCentavos,
+  aDecimal,
   aTexto,
   cambioLaOrden,
   cambioLoVisto,
@@ -18,7 +19,8 @@ import {
 } from "../egresos/comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO } from "./textos";
+import { MONEDAS } from "./FormularioOrden";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_OTRA_COSA } from "./textos";
 import type { ActoEnCurso } from "./useActo";
 import { useUrlDelArchivo, VisorComprobante } from "./VisorComprobante";
 import { ZonaComprobante } from "./ZonaComprobante";
@@ -32,22 +34,27 @@ import { ZonaComprobante } from "./ZonaComprobante";
 //
 // Los datos se escriben del comprobante, nunca de la orden: si no, la comparación no vale. Corregir
 // abre con lo registrado, y no pide la cuenta (§8): ni una apertura nueva, ni escribirla otra vez.
+//
+// «Pagué otra cosa» (§7) usa el mismo comprobante: lo que salió del banco, y qué pasó. Siempre pide
+// la cuenta del comprobante, porque la base es la que compara y decide qué fue distinto.
 
 type Comprobante = components["schemas"]["ComprobanteActual"];
 type Subido = components["schemas"]["ComprobanteSubido"];
 type Version = components["schemas"]["VersionOrdenPago"];
 type Pago = components["schemas"]["PagoManual"];
-type Registro = { numero: string; fecha: string; importe: string; cuenta: string };
+type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
 const hoy = () => new Date().toLocaleDateString("en-CA");
 
-function datosIniciales(corregido: Pago | undefined): Registro {
-  if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", cuenta: "" };
+function datosIniciales(corregido: Pago | undefined, moneda: string): Registro {
+  if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", moneda, cuenta: "", explicacion: "" };
   return {
     numero: corregido.numero_operacion,
     fecha: corregido.fecha_operacion,
     importe: aTexto(corregido.importe_centavos),
+    moneda,
     cuenta: "",
+    explicacion: "",
   };
 }
 
@@ -60,6 +67,8 @@ type Props = {
   comprobante: Comprobante | null;
   subido: Subido | null;
   subtitulo: "h2" | "h3";
+  /** Si se puede registrar lo que pasó de verdad. */
+  puedeOtraCosa: boolean;
   acto: ActoEnCurso;
   aEntrar: () => void;
   alRegistrar: (texto: string) => void;
@@ -70,11 +79,12 @@ type Props = {
 };
 
 export function RegistroPago(props: Props) {
-  const { consorcio, orden, version, corregido, comprobante, subido, subtitulo: Subtitulo, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
+  const { consorcio, orden, version, corregido, comprobante, subido, subtitulo: Subtitulo, puedeOtraCosa, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
   const id = useId();
   const { enviando, setEnviando, setAviso, montado } = acto;
   const corrige = corregido !== undefined;
-  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido));
+  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido, version.moneda));
+  const [otraCosa, setOtraCosa] = useState(false);
   /** Lo elegido en este dispositivo: se ve enseguida, y el reintento no pide elegirlo de nuevo. */
   const [elegido, setElegido] = useState<File | null>(null);
   const [subiendo, setSubiendo] = useState(false);
@@ -200,6 +210,39 @@ export function RegistroPago(props: Props) {
     });
   }
 
+  function registrarOtraCosa(evento: FormEvent, documento: string) {
+    evento.preventDefault();
+    const centavos = aCentavos(registro.importe);
+    if (centavos === null) {
+      setAviso({ texto: "Escribí el importe que salió del banco.", ok: false });
+      return;
+    }
+    void acto.hacer({
+      quePide: ["otra-cosa", orden, version.numero, version.huella, registro, documento],
+      nombre: "registrar lo que pasó",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, orden_id: orden }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: {
+            version: version.numero,
+            huella: version.huella,
+            numero_operacion: registro.numero.trim(),
+            fecha_operacion: registro.fecha,
+            importe_real: aDecimal(centavos),
+            moneda: registro.moneda,
+            cuenta_real: registro.cuenta.replace(/\D/g, ""),
+            documento_id: documento,
+            explicacion: registro.explicacion.trim(),
+          },
+        }),
+      alTerminar: () => alRegistrar(`Listo: registraste lo que pasó. ${AVISO_OTRA_COSA}`),
+      alFallar: (estado, codigo) => {
+        if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
+      },
+    });
+  }
+
   function cambiar<K extends keyof Registro>(campo: K, valor: Registro[K]) {
     setRegistro((r) => ({ ...r, [campo]: valor }));
   }
@@ -248,22 +291,45 @@ export function RegistroPago(props: Props) {
       </section>
 
       {conDatos && (
-        <form className="formulario" onSubmit={(e) => registrar(e, comprobante.documento_id)}>
-          <Subtitulo>{corrige ? "Corregir el registro" : "Registrar el pago"}</Subtitulo>
-          <p>{corrige ? "Cambiá lo que está mal. Queda registrado qué cambió y quién lo cambió." : "Escribí los datos como figuran en el comprobante."}</p>
+        <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, comprobante.documento_id) : registrar(e, comprobante.documento_id))}>
+          {otraCosa ? (
+            <>
+              <Subtitulo>Pagué otra cosa</Subtitulo>
+              <p>Escribí lo que salió del banco, tal como figura en el comprobante.</p>
+            </>
+          ) : (
+            <>
+              <Subtitulo>{corrige ? "Corregir el registro" : "Registrar el pago"}</Subtitulo>
+              <p>{corrige ? "Cambiá lo que está mal. Queda registrado qué cambió y quién lo cambió." : "Escribí los datos como figuran en el comprobante."}</p>
+            </>
+          )}
           <label htmlFor={`${id}-numero`}>Número de operación</label>
           <input id={`${id}-numero`} required maxLength={60} value={registro.numero} disabled={enviando}
             onChange={(e) => cambiar("numero", e.target.value)} />
           <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
           <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
             onChange={(e) => cambiar("fecha", e.target.value)} />
-          <label htmlFor={`${id}-importe`}>Importe transferido (como figura en el comprobante)</label>
+          <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
           <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
             alCambiar={(texto) => cambiar("importe", texto)} />
-          {corrige ? (
+          {otraCosa && (
+            <>
+              <label htmlFor={`${id}-moneda`}>Moneda que salió del banco</label>
+              <input id={`${id}-moneda`} required list={`${id}-monedas`} pattern="[A-Z]{3}" maxLength={3} autoCapitalize="characters"
+                aria-describedby={`${id}-moneda-ayuda`} value={registro.moneda} disabled={enviando}
+                onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
+              <datalist id={`${id}-monedas`}>
+                {MONEDAS.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
+            </>
+          )}
+          {corrige && !otraCosa ? (
             <p>
               Cuenta de destino: {cuentaEnmascarada(version.cuenta_ultimos_digitos)}, la que ya registraste. Si la plata fue a otra
-              cuenta, no la corrijas acá: avisale al Consejo.
+              cuenta, usá «Pagué otra cosa».
             </p>
           ) : (
             <>
@@ -272,12 +338,25 @@ export function RegistroPago(props: Props) {
                 onChange={(e) => cambiar("cuenta", e.target.value)} />
             </>
           )}
+          {otraCosa && (
+            <>
+              <label htmlFor={`${id}-explicacion`}>Qué pasó</label>
+              <textarea id={`${id}-explicacion`} required maxLength={300} rows={3} aria-describedby={`${id}-explicacion-ayuda`}
+                value={registro.explicacion} disabled={enviando} onChange={(e) => cambiar("explicacion", e.target.value)} />
+              <p id={`${id}-explicacion-ayuda`}>Hasta 300 caracteres. No incluyas el número de una cuenta.</p>
+            </>
+          )}
           <div className="acciones">
             <button type="submit" disabled={enviando}>
-              {corrige ? "Guardar la corrección" : "Registrar el pago"}
+              {otraCosa ? "Registrar lo que pasó" : corrige ? "Guardar la corrección" : "Registrar el pago"}
             </button>
+            {puedeOtraCosa && (
+              <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
+                {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
+              </button>
+            )}
           </div>
-          <p>Queda pagada cuando otro miembro del Consejo lo concilie.</p>
+          <p>{otraCosa ? AVISO_OTRA_COSA : "Queda pagada cuando otro miembro del Consejo lo concilie."}</p>
         </form>
       )}
     </div>

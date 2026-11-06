@@ -625,6 +625,9 @@
           "conciliacion_repetida",
           "no_es_quien_ejecuto",
           "motivo_con_cuenta",
+          "sin_diferencia",
+          "diferencia_ya_resuelta",
+          "solo_reclamo",
           "liquidacion_no_admite",
           "orden_no_liquidable",
           "sin_esquema",
@@ -2322,6 +2325,204 @@
         "title": "DesasociacionHecha",
         "type": "object"
       },
+      "DiferenciaPagoManual": {
+        "description": "Lo que se pagó de verdad, sin la cuenta completa.",
+        "properties": {
+          "cuenta_ultimos_digitos": {
+            "title": "Cuenta Ultimos Digitos",
+            "type": "string"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "explicacion": {
+            "title": "Explicacion",
+            "type": "string"
+          },
+          "falta_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuánto faltó pagar, si fue de menos en la moneda de la orden.",
+            "title": "Falta Centavos"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "fuera_de_termino": {
+            "title": "Fuera De Termino",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "importe_orden_centavos": {
+            "title": "Importe Orden Centavos",
+            "type": "integer"
+          },
+          "importe_real": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Importe Real",
+            "type": "string"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "moneda_orden": {
+            "title": "Moneda Orden",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "recuperada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recuperada En"
+          },
+          "registrada_en": {
+            "format": "date-time",
+            "title": "Registrada En",
+            "type": "string"
+          },
+          "registrada_por": {
+            "format": "uuid",
+            "title": "Registrada Por",
+            "type": "string"
+          },
+          "registrada_por_nombre": {
+            "title": "Registrada Por Nombre",
+            "type": "string"
+          },
+          "resolucion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolucionDiferencia"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resuelta_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resuelta En"
+          },
+          "resuelta_por": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resuelta Por"
+          },
+          "se_puede_dar_por_pagada": {
+            "description": "Si admite `pagada_por_lo_real`: la cuenta y la moneda son las de la orden.",
+            "title": "Se Puede Dar Por Pagada",
+            "type": "boolean"
+          },
+          "sobra_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuánto se pagó de más, si fue de más en la moneda de la orden.",
+            "title": "Sobra Centavos"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoDiferencia"
+          },
+          "version_documento_id": {
+            "description": "El archivo exacto que quedó como evidencia.",
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tipo",
+          "importe_real",
+          "moneda",
+          "cuenta_ultimos_digitos",
+          "importe_orden_centavos",
+          "moneda_orden",
+          "numero_operacion",
+          "fecha_operacion",
+          "documento_id",
+          "version_documento_id",
+          "explicacion",
+          "fuera_de_termino",
+          "registrada_por",
+          "registrada_por_nombre",
+          "registrada_en",
+          "resolucion",
+          "resuelta_por",
+          "resuelta_en",
+          "recuperada_en",
+          "falta_centavos",
+          "sobra_centavos",
+          "se_puede_dar_por_pagada"
+        ],
+        "title": "DiferenciaPagoManual",
+        "type": "object"
+      },
+      "DiferenciaRegistrada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id"
+        ],
+        "title": "DiferenciaRegistrada",
+        "type": "object"
+      },
       "DocumentoEnLista": {
         "properties": {
           "cargado_en": {
@@ -2567,6 +2768,18 @@
             "title": "Importe Centavos",
             "type": "integer"
           },
+          "importe_pagado_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que el Consejo dio por pagado, si no es el importe de la orden.",
+            "title": "Importe Pagado Centavos"
+          },
           "moneda": {
             "title": "Moneda",
             "type": "string"
@@ -2580,7 +2793,7 @@
                 "type": "null"
               }
             ],
-            "description": "El del último registro de la versión vigente, si tiene.",
+            "description": "El de la diferencia o, sin ella, el del último registro de la versión vigente, si tiene.",
             "title": "Numero Operacion"
           },
           "orden_id": {
@@ -2604,6 +2817,7 @@
           "moneda",
           "estado",
           "situacion",
+          "importe_pagado_centavos",
           "numero_operacion",
           "fecha_operacion",
           "actualizada_en"
@@ -3152,6 +3366,17 @@
             ],
             "description": "La última declaración de «no se pagó» que nadie superó ni confirmó."
           },
+          "diferencia_vigente": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiferenciaPagoManual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
+          },
           "ejecucion": {
             "anyOf": [
               {
@@ -3230,6 +3455,11 @@
             "title": "Puede Pagar",
             "type": "boolean"
           },
+          "puede_preparar_faltante": {
+            "description": "Si le corresponde preparar una orden por lo que faltó pagar.",
+            "title": "Puede Preparar Faltante",
+            "type": "boolean"
+          },
           "puede_reabrir_cuenta": {
             "description": "Si puede abrir otra vez una cuenta ya vista. Con una declaración vigente es «Retomar el pago», y abrirla deja sin efecto lo declarado.",
             "title": "Puede Reabrir Cuenta",
@@ -3239,12 +3469,22 @@
             "title": "Puede Rechazar",
             "type": "boolean"
           },
+          "puede_recuperar": {
+            "description": "Si puede decir que se recuperó la plata reclamada.",
+            "title": "Puede Recuperar",
+            "type": "boolean"
+          },
           "puede_registrar": {
             "title": "Puede Registrar",
             "type": "boolean"
           },
           "puede_renovar": {
             "title": "Puede Renovar",
+            "type": "boolean"
+          },
+          "puede_resolver_diferencia": {
+            "description": "Si puede resolver la diferencia sin resolver.",
+            "title": "Puede Resolver Diferencia",
             "type": "boolean"
           },
           "puede_subir_comprobante": {
@@ -3281,11 +3521,15 @@
           "puede_corregir",
           "puede_conciliar",
           "puede_confirmar",
+          "puede_resolver_diferencia",
+          "puede_recuperar",
+          "puede_preparar_faltante",
           "ejecucion",
           "comprobante_actual",
           "comprobante_subido",
           "observacion_vigente",
-          "declaracion_vigente"
+          "declaracion_vigente",
+          "diferencia_vigente"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -6537,7 +6781,7 @@
         "type": "object"
       },
       "PagoPorCotejar": {
-        "description": "Un pago conciliado conforme que falta cotejar. Sin la cuenta.",
+        "description": "Lo que salió del banco y falta cotejar: un pago conciliado conforme o una diferencia ya\nresuelta, por su importe real. Sin la cuenta.",
         "properties": {
           "concepto": {
             "title": "Concepto",
@@ -6566,6 +6810,7 @@
             "type": "string"
           },
           "pago_id": {
+            "description": "El id del registro o de la diferencia.",
             "format": "uuid",
             "title": "Pago Id",
             "type": "string"
@@ -6642,6 +6887,7 @@
           "confirmar_no_pago",
           "declarar_no_pago",
           "resolver_diferencia",
+          "preparar_faltante",
           "espera_aprobar",
           "espera_comprobante",
           "espera_declarar",
@@ -7314,6 +7560,89 @@
         "title": "Rechazo",
         "type": "object"
       },
+      "RegistroDiferenciaPago": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/diferencia`: lo que salió del banco, cuando no es lo\nque se aprobó. La orden **no** queda pagada: lo resuelve el Consejo. Si todo coincide con la\norden, `sin_diferencia`.",
+        "properties": {
+          "cuenta_real": {
+            "description": "Como figura en el comprobante.",
+            "pattern": "^[0-9]{22}$",
+            "title": "Cuenta Real",
+            "type": "string"
+          },
+          "documento_id": {
+            "description": "El comprobante: cargado desde el pago de esta orden, con un archivo que pasó el antivirus.",
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "explicacion": {
+            "description": "Qué pasó, sin el número de una cuenta (`motivo_con_cuenta`).",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Explicacion",
+            "type": "string"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
+          "importe_real": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,16}|(?=[\\d.]{1,19}0*$)\\d{0,16}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "description": "Lo que salió del banco, en pesos.",
+            "title": "Importe Real"
+          },
+          "moneda": {
+            "examples": [
+              "ARS"
+            ],
+            "pattern": "^[A-Z]{3}$",
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "description": "El número de operación del comprobante.",
+            "pattern": "^[A-Za-z0-9 ./-]{4,60}$",
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "huella",
+          "numero_operacion",
+          "fecha_operacion",
+          "importe_real",
+          "moneda",
+          "cuenta_real",
+          "documento_id",
+          "explicacion"
+        ],
+        "title": "RegistroDiferenciaPago",
+        "type": "object"
+      },
       "RegistroPagoManual": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/pago-manual`: la evidencia de una transferencia ya hecha. No da la\norden por pagada: queda pendiente de conciliación (En verificación).",
@@ -7425,6 +7754,28 @@
           "version_esperada"
         ],
         "title": "Renovacion",
+        "type": "object"
+      },
+      "ResolucionDiferencia": {
+        "enum": [
+          "pagada_por_lo_real",
+          "reclamo"
+        ],
+        "title": "ResolucionDiferencia",
+        "type": "string"
+      },
+      "ResolucionDiferenciaPago": {
+        "additionalProperties": false,
+        "description": "`POST …/pago-manual/diferencia/{d}/resolucion`: otro ser humano del Consejo. Dar por pagado\nlo real vale solo para otro importe en la moneda de la orden (`solo_reclamo`).",
+        "properties": {
+          "resolucion": {
+            "$ref": "#/components/schemas/ResolucionDiferencia"
+          }
+        },
+        "required": [
+          "resolucion"
+        ],
+        "title": "ResolucionDiferenciaPago",
         "type": "object"
       },
       "RespuestaLlave": {
@@ -7928,6 +8279,16 @@
           "inscripcion_rpa"
         ],
         "title": "TipoDecision",
+        "type": "string"
+      },
+      "TipoDiferencia": {
+        "description": "Qué fue distinto de la orden. Lo deduce la base: otra moneda cuenta como otro importe.",
+        "enum": [
+          "importe",
+          "cuenta",
+          "ambos"
+        ],
+        "title": "TipoDiferencia",
         "type": "string"
       },
       "TipoMandato": {
@@ -13664,6 +14025,262 @@
           }
         },
         "summary": "El acto de ejecución manual: la cuenta completa para transferir",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia": {
+      "post": {
+        "description": "Las mismas facultades, gesto y controles que `registrar_pago_manual`, salvo la igualdad con\nla orden. La orden no queda pagada.",
+        "operationId": "registrar_diferencia_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_diferencia_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroDiferenciaPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiferenciaRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "Sin diferencia o evidencia inválida."
+          }
+        },
+        "summary": "Registrar lo que salió del banco cuando no es lo aprobado: lo resuelve el Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/recuperada": {
+      "post": {
+        "operationId": "recuperar_diferencia_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_diferencia__diferencia_id__recuperada_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diferencia_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diferencia Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Decir que se recuperó la plata reclamada (otro miembro del Consejo): queda Fallida",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/resolucion": {
+      "post": {
+        "operationId": "resolver_diferencia_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_diferencia__diferencia_id__resolucion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diferencia_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diferencia Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolucionDiferenciaPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolver una diferencia (otro miembro del Consejo): dar por pagado lo real o reclamar",
         "tags": [
           "egresos"
         ]
