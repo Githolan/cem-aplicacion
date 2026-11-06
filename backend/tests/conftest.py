@@ -146,7 +146,7 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     end if;"
                 # Los pagos manuales (0055) citan las ejecuciones y los documentos: van antes.
                 "     if to_regclass('nucleo.pago_manual') is not null then"
-                # El cotejo (0080) cita los pagos: va antes.
+                # El cotejo (0074) cita los pagos: va antes.
                 "       if to_regclass('nucleo.cotejo_pago') is not null then"
                 "         alter table nucleo.cotejo_pago disable trigger user;"
                 "         alter table nucleo.movimiento_extracto disable trigger user;"

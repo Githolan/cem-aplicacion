@@ -1,4 +1,4 @@
-"""Cotejar con el banco contra PostgreSQL real (`0080`). Datos SINTETICOS / PRUEBA / NO REAL: las
+"""Cotejar con el banco contra PostgreSQL real (`0074`). Datos SINTETICOS / PRUEBA / NO REAL: las
 cuentas no son de un banco (prefijo 999), los extractos los arma esta prueba y no se mueve dinero.
 
 Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §10 y §14. La escena es la de
@@ -636,16 +636,16 @@ def test_cotejar_deja_auditoria(motor_migrate, e):
 # Migración -------------------------------------------------------------------------------------
 
 
-def _migracion_0080():
-    ruta = Path(__file__).parents[1] / "migrations" / "versions" / "0080_cotejo_con_el_banco.py"
-    spec = importlib.util.spec_from_file_location("migracion_0080", ruta)
+def _migracion_0074():
+    ruta = Path(__file__).parents[1] / "migrations" / "versions" / "0074_cotejo_con_el_banco.py"
+    spec = importlib.util.spec_from_file_location("migracion_0074", ruta)
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
     return modulo
 
 
 def test_la_guarda_del_downgrade_se_niega_con_un_cotejo(motor_migrate, e):
-    guarda = _migracion_0080().GUARDA_DOWNGRADE
+    guarda = _migracion_0074().GUARDA_DOWNGRADE
     _, p = pagado(motor_migrate, e)
     assert tildar(e, e.mc1, p).status_code == 200
     with motor_migrate.connect() as c, c.begin() as tx:
@@ -655,13 +655,17 @@ def test_la_guarda_del_downgrade_se_niega_con_un_cotejo(motor_migrate, e):
         tx.rollback()
 
 
-def test_0080_ida_y_vuelta(base_aparte):
+def test_0074_ida_y_vuelta(base_aparte):
     cfg, motor = base_aparte
-    anterior = _migracion_0080().down_revision
-    command.upgrade(cfg, "0080")
+    anterior = _migracion_0074().down_revision
+    command.upgrade(cfg, "0074")
     command.downgrade(cfg, anterior)
     with motor.connect() as c:
         assert c.execute(text("select to_regclass('nucleo.cotejo_pago')")).scalar_one() is None
-    command.upgrade(cfg, "0080")
+        definicion = c.execute(
+            text("select pg_get_functiondef('nucleo.exportar_pagos(uuid, uuid)'::regprocedure)")
+        ).scalar_one()
+    assert "cotejo_pago" not in definicion and "confirmacion_no_pagado" in definicion
+    command.upgrade(cfg, "0074")
     with motor.connect() as c:
         assert c.execute(text("select to_regclass('nucleo.cotejo_pago')")).scalar_one() is not None

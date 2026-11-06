@@ -4,7 +4,7 @@ import { simularPermisos, sinFaltasDeAccesibilidad } from "./entorno";
 
 // `/pagos/cotejo` servida por el nginx de la imagen, con su CSP real y la API simulada desde el
 // navegador, en los tres proyectos (escritorio, movil, tablet). Datos SINTETICOS: el extracto lo
-// arma esta prueba. Que el servidor lea, compare y separe lo prueba `backend/tests/test_cotejo_0080.py`.
+// arma esta prueba. Que el servidor lea, compare y separe lo prueba `backend/tests/test_cotejo_0074.py`.
 const CSRF = "e2e-csrf-cotejo";
 const A = "a1111111-1111-4111-8111-111111111111";
 const ORDEN = "c5555555-5555-4555-8555-555555555555";

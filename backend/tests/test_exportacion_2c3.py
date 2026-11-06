@@ -141,6 +141,13 @@ CLAVES_POR_ENTIDAD = {
     "declaracion_no_pagado": {"id", "ejecucion_id", "motivo", "declarado_por_nombre",
                               "declarado_en", "sin_facultad"},
     "confirmacion_no_pagado": {"id", "declaracion_id", "confirmado_por_nombre", "confirmado_en"},
+    "cotejo": {"id", "pago_id", "origen", "movimiento_id", "cotejado_por_nombre", "cotejado_en"},
+    "importacion_extracto": {"id", "hash_archivo", "desde", "hasta", "importado_por_nombre",
+                             "importado_en"},
+    "movimiento_extracto": {"id", "importacion_id", "hash_linea", "fecha", "importe_centavos",
+                            "numero_operacion"},
+    "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo",
+                          "guardadas_por_nombre", "guardadas_en"},
     "liquidacion": {"id", "periodo", "version", "estado", "preparada_por_nombre", "creada_en",
                     "descartada_en", "descartada_por_nombre", "motivo_descarte"},
     "gasto": {"id", "liquidacion_id", "orden_id", "ejecucion_id", "importe_centavos", "moneda",
@@ -1256,10 +1263,23 @@ TABLA_DE_LA_ENTIDAD = {
     "conciliacion": "nucleo.conciliacion_pago_manual",
     "declaracion_no_pagado": "nucleo.declaracion_pago_no_realizado",
     "confirmacion_no_pagado": "nucleo.confirmacion_pago_no_realizado",
+    "cotejo": "nucleo.cotejo_pago",
+    "importacion_extracto": "nucleo.importacion_extracto",
+    "movimiento_extracto": "nucleo.movimiento_extracto",
+    "columnas_extracto": "nucleo.columnas_extracto",
     "liquidacion": "nucleo.liquidacion",
     "gasto": "nucleo.liquidacion_gasto",
     "gasto_quitado": "nucleo.liquidacion_gasto_quitado",
 }
+COTEJAR = "select nucleo.cotejar_pagos(cast(:pagos as uuid[]), :actor, :origen, :sesion)"
+IMPORTAR = (
+    "select movimiento_id from nucleo.importar_extracto(:archivo, :desde, :hasta,"
+    " cast(:movimientos as jsonb), 'Fecha', 'Importe', 'Referencia', 'con_signo', :actor, :origen,"
+    " :sesion)"
+)
+COTEJAR_EXTRACTO = (
+    "select nucleo.cotejar_por_extracto(cast(:pares as jsonb), :actor, :origen, :sesion)"
+)
 TRANSICIONES = (
     "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
     " and origen <> 'soporte' and despues ? 'estado'"
@@ -1278,6 +1298,29 @@ def _con_objetos_en_el_almacen(motor_migrate, cons, bucket) -> None:  # noqa: F8
         ).scalars().all()  # fmt: skip
     for clave in claves:
         _s3().put_object(Bucket=bucket, Key=clave, Body=contenido)
+
+
+def cotejadas(motor_migrate, s, ordenes) -> None:
+    """La primera, tildada a mano; la segunda, por un extracto con una línea que coincide."""
+    with motor_migrate.connect() as c:
+        pagos = [dict(c.execute(
+            text("select p.id, p.numero_operacion, p.fecha_operacion, p.importe_centavos"
+                 " from nucleo.pago_manual p join nucleo.ejecucion_orden_pago x"
+                 " on x.id = p.ejecucion_id where x.orden_id = :o"), {"o": o},
+        ).mappings().one()) for o in ordenes]  # fmt: skip
+    a_mano, por_extracto = pagos
+    llamar(motor_migrate, s, s.mc2, COTEJAR, pagos=[a_mano["id"]])
+    movimiento = llamar(
+        motor_migrate, s, s.mc2, IMPORTAR, archivo="a" * 64,
+        desde=por_extracto["fecha_operacion"], hasta=por_extracto["fecha_operacion"],
+        movimientos=json.dumps([{
+            "hash_linea": "b" * 64, "fecha": por_extracto["fecha_operacion"].isoformat(),
+            "importe_centavos": por_extracto["importe_centavos"],
+            "numero_operacion": por_extracto["numero_operacion"],
+        }]),
+    )  # fmt: skip
+    pares = json.dumps([{"movimiento": str(movimiento), "pago": str(por_extracto["id"])}])
+    assert llamar(motor_migrate, s, s.mc2, COTEJAR_EXTRACTO, pares=pares) == 1
 
 
 def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
@@ -1302,6 +1345,7 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     llamar(motor_migrate, s, s.mc1, RECHAZAR, orden=rechazada, version=1,
            motivo="SINTETICO: falta la factura")  # fmt: skip
     pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
+    cotejadas(motor_migrate, s, pagadas)
     no_pagada = emitida(motor_migrate, s)
     ver(motor_migrate, s, s.adm, no_pagada)
     declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
@@ -1358,6 +1402,12 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
     assert {v["version"] for v in datos["proveedor_version"]
             if v["proveedor_id"] == str(e["s"].proveedor)} == {1, 2}  # fmt: skip
     assert len(datos["gasto"]) == 2 and len(datos["gasto_quitado"]) == 1
+    # Lo cotejado, de las dos formas, y el movimiento atado a su pago.
+    assert {t["origen"] for t in datos["cotejo"]} == {"manual", "extracto"}
+    [atado] = [t for t in datos["cotejo"] if t["origen"] == "extracto"]
+    assert atado["movimiento_id"] == datos["movimiento_extracto"][0]["id"]
+    assert all(t["cotejado_por_nombre"] for t in datos["cotejo"])
+    assert datos["columnas_extracto"][0]["columna_importe"] == "Importe"
     # Una orden pagada, paso a paso, por sus transiciones.
     primera = str(e["pagadas"][0])
     assert [t["hacia"] for t in datos["orden_transicion"] if t["orden_id"] == primera] == [
@@ -1472,6 +1522,9 @@ _COLUMNAS_DE_PERSONA = {
     "nucleo.conciliacion_pago_manual": ("conciliado_por", "identidad_concilio"),
     "nucleo.declaracion_pago_no_realizado": ("declarado_por", "identidad_declaro"),
     "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
+    "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo"),
+    "nucleo.importacion_extracto": ("importado_por", "identidad_importo"),
+    "nucleo.columnas_extracto": ("guardadas_por",),
     "nucleo.liquidacion": ("preparada_por", "identidad_preparo"),
     "nucleo.liquidacion_gasto": ("agregado_por", "identidad_agrego"),
     "nucleo.liquidacion_gasto_quitado": ("quitado_por", "identidad_quito"),
@@ -1514,7 +1567,9 @@ def test_lo_economico_de_otro_consorcio_no_aparece(economico, con_url, claves, t
         datos = entidades(paquete)
         return {f["id"] for entidad in ("proveedor", "contrato", "orden", "orden_aprobacion",
                                         "ejecucion", "pago", "conciliacion",
-                                        "declaracion_no_pagado", "liquidacion", "gasto")
+                                        "declaracion_no_pagado", "liquidacion", "gasto",
+                                        "cotejo", "importacion_extracto",
+                                        "movimiento_extracto")
                 for f in datos[entidad]}  # fmt: skip
 
     paquete = _paquete(e, claves, tmp_path)

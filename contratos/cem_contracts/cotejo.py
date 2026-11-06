@@ -1,4 +1,4 @@
-"""Cotejar con el banco (RF12; `0080`): a mano o con el extracto en CSV.
+"""Cotejar con el banco (RF12; `0074`): a mano o con el extracto en CSV.
 
 Diseño: `doc/diseno/Rediseno_Circuito_Pagos_2026-11-06.md` del repositorio CEM, §10. Cotejar dice
 que un pago ya conciliado salió del banco: no cambia la orden y no mueve dinero. De un extracto solo

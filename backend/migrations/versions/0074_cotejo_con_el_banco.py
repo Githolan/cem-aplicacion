@@ -2,9 +2,6 @@
 
 Diseño: `doc/diseno/Rediseno_Circuito_Pagos_2026-11-06.md` del repositorio CEM, §10 y §13 punto 6.
 
-**Número provisional.** Lleva 0080 para no chocar con las fases que corren en paralelo; al fusionar
-se ajustan el número y `down_revision`.
-
 **Cotejar no cambia nada de la orden.** Dice «esto salió del banco», sobre un pago ya conciliado
 conforme. No mueve dinero, no toca `orden_pago` ni su ejecución.
 
@@ -27,16 +24,22 @@ y un pago tiene un solo cotejo. El hash lo calcula el backend (`app/consorcios/e
 **`cotejar_por_extracto` no le cree a la API:** vuelve a mirar que el importe sea el mismo y que el
 número, o a falta de número la fecha, coincidan.
 
-Downgrade: se niega si hay datos: se perdería lo cotejado.
+**Exportación.** Lo cotejado y los movimientos son datos económicos del consorcio: son la evidencia
+de que el pago salió del banco, y el paquete de soporte es íntegro (RF36, `0069`). `exportar_pagos`
+suma `cotejo`, `importacion_extracto`, `movimiento_extracto` y `columnas_extracto`, con las reglas
+de `0069`: el nombre de la persona y nunca sus identificadores.
 
-Revisión: 0080
-Anterior: 0072
+Downgrade: se niega si hay datos: se perdería lo cotejado. `exportar_pagos` vuelve a lo de `0069`.
+
+Revisión: 0074
+Anterior: 0073
 """
 
 from alembic import op
+from sqlalchemy import text
 
-revision = "0080"
-down_revision = "0072"
+revision = "0074"
+down_revision = "0073"
 branch_labels = None
 depends_on = None
 
@@ -441,6 +444,54 @@ INTERNAS = (
     "nucleo.pagos_del_cotejo(uuid)",
 )
 
+EXPORTAR_PAGOS = "nucleo.exportar_pagos(uuid, uuid)"
+FIN_DE_EXPORTAR_PAGOS = """\
+       order by f.confirmado_en, f.id;
+"""
+"""El final de `exportar_pagos` (`0069`): lo nuevo va después."""
+EXPORTAR_COTEJO = """\
+    return query
+      select 'cotejo'::text,
+             jsonb_build_object('id', t.id, 'pago_id', t.pago_id, 'origen', t.origen,
+                                'movimiento_id', t.movimiento_id,
+                                'cotejado_por_nombre',
+                                nucleo.nombre_para_exportar(c, t.cotejado_por, hoy),
+                                'cotejado_en', t.cotejado_en)
+        from nucleo.cotejo_pago t
+       where t.consorcio_id = c
+       order by t.cotejado_en, t.id;
+    return query
+      select 'importacion_extracto'::text,
+             jsonb_build_object('id', i.id, 'hash_archivo', i.hash_archivo, 'desde', i.desde,
+                                'hasta', i.hasta,
+                                'importado_por_nombre',
+                                nucleo.nombre_para_exportar(c, i.importado_por, hoy),
+                                'importado_en', i.importado_en)
+        from nucleo.importacion_extracto i
+       where i.consorcio_id = c
+       order by i.importado_en, i.id;
+    return query
+      select 'movimiento_extracto'::text,
+             jsonb_build_object('id', m.id, 'importacion_id', m.importacion_id,
+                                'hash_linea', m.hash_linea, 'fecha', m.fecha,
+                                'importe_centavos', m.importe_centavos,
+                                'numero_operacion', m.numero_operacion)
+        from nucleo.movimiento_extracto m
+       where m.consorcio_id = c
+       order by m.fecha, m.id;
+    return query
+      select 'columnas_extracto'::text,
+             jsonb_build_object('columna_fecha', nucleo.texto_sin_cuenta(x.columna_fecha),
+                                'columna_importe', nucleo.texto_sin_cuenta(x.columna_importe),
+                                'columna_numero', nucleo.texto_sin_cuenta(x.columna_numero),
+                                'signo', x.signo,
+                                'guardadas_por_nombre',
+                                nucleo.nombre_para_exportar(c, x.guardadas_por, hoy),
+                                'guardadas_en', x.guardadas_en)
+        from nucleo.columnas_extracto x
+       where x.consorcio_id = c;
+"""
+
 GUARDA_DOWNGRADE = """
 lock table nucleo.importacion_extracto, nucleo.cotejo_pago, nucleo.columnas_extracto
   in share row exclusive mode;
@@ -450,12 +501,23 @@ begin
   if exists (select 1 from nucleo.importacion_extracto)
      or exists (select 1 from nucleo.cotejo_pago)
      or exists (select 1 from nucleo.columnas_extracto) then
-    raise exception '0080 no baja con cotejos ni extractos: se perdería lo cotejado'
+    raise exception '0074 no baja con cotejos ni extractos: se perdería lo cotejado'
       using errcode = 'P0001', hint = 'downgrade_con_datos';
   end if;
 end
 $$;
 """
+
+
+def _cambiar_exportar_pagos(antes: str, despues: str) -> None:
+    definicion = (
+        op.get_bind()
+        .execute(text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": EXPORTAR_PAGOS})
+        .scalar_one()
+    )
+    if definicion.count(antes) != 1:
+        raise RuntimeError(f"0074: exportar_pagos no tiene una sola vez {antes!r}")
+    op.get_bind().exec_driver_sql(definicion.replace(antes, despues))
 
 
 def upgrade() -> None:
@@ -465,10 +527,12 @@ def upgrade() -> None:
         op.execute(f"revoke all on function {funcion} from public")
     for funcion in RUTAS:
         op.execute(f"grant execute on function {funcion} to cem_app")
+    _cambiar_exportar_pagos(FIN_DE_EXPORTAR_PAGOS, FIN_DE_EXPORTAR_PAGOS + EXPORTAR_COTEJO)
 
 
 def downgrade() -> None:
     op.execute(GUARDA_DOWNGRADE)
+    _cambiar_exportar_pagos(FIN_DE_EXPORTAR_PAGOS + EXPORTAR_COTEJO, FIN_DE_EXPORTAR_PAGOS)
     for funcion in RUTAS + INTERNAS:
         op.execute(f"drop function {funcion}")
     for tabla in ("cotejo_pago", "movimiento_extracto", "importacion_extracto",

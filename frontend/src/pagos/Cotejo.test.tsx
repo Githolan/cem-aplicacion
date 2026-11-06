@@ -11,7 +11,7 @@ import { App } from "../App";
 import { ContextoVersion } from "../version";
 
 // `/pagos/cotejo`. Datos ficticios, banco 999, y nada se transfiere. La API está simulada: que el
-// servidor lea el archivo, compare y separe lo prueban `backend/tests/test_cotejo_0080.py` y
+// servidor lea el archivo, compare y separe lo prueban `backend/tests/test_cotejo_0074.py` y
 // `test_extracto.py`; acá, qué se pide y qué se muestra.
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };

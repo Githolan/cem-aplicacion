@@ -1,7 +1,7 @@
-"""`/pagos/cotejo`: cotejar con el banco, a mano o con el extracto (RF12; `0080`).
+"""`/pagos/cotejo`: cotejar con el banco, a mano o con el extracto (RF12; `0074`).
 
 Diseño: `doc/diseno/Rediseno_Circuito_Pagos_2026-11-06.md` del repositorio CEM, §10. Quién puede y
-qué se guarda están en `0080`; cómo se lee y se compara el archivo, en `extracto.py`.
+qué se guarda están en `0074`; cómo se lee y se compara el archivo, en `extracto.py`.
 
 Quién: las reglas de `egresos.conciliar_pago`. Esa política tiene separaciones que dependen del
 pago, así que al entrar se pide `egresos.revisar_orden` (la misma facultad y los mismos modos, sin
