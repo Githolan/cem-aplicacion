@@ -443,7 +443,7 @@ def _quien_registro(fila, cuentas: set[UUID]) -> dict[str, bool]:
 def _cuentas_humanas(permiso: Permiso, motor) -> set[UUID]:
     ctx = permiso.ctx
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
-        return permiso.cuentas_humanas(c)
+        return permiso.cuentas_humanas(c, historicas=False)
 
 
 COLUMNAS_RESUMEN = (

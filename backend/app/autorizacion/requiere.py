@@ -77,20 +77,25 @@ class Permiso:
             ctx = self._leer_identidades(conn, personas)
         return [evaluar(self.accion, ctx.autorizacion, e) for e in entidades]
 
-    def cuentas_humanas(self, conn: Connection) -> set[UUID]:
+    def cuentas_humanas(self, conn: Connection, *, historicas: bool) -> set[UUID]:
         """Las cuentas del ser humano que pide en este consorcio, para decir «esto lo hiciste
-        vos». Suma las ya desvinculadas de su identidad: la base compara con la identidad guardada
-        en cada acto, y `cem_app` no la lee. Solo para mostrar: decide `evaluar` y la base."""
+        vos». Solo para mostrar: decide `evaluar` y la base.
+
+        `historicas` suma las ya desvinculadas de su identidad. Va en los actos económicos, donde
+        la base compara con la identidad guardada en cada acto y `cem_app` no la lee: una cuenta
+        separada después sigue contando, también por lo que hizo después, y la pantalla puede
+        esconder algo que la base permitiría. Sin ella van las reglas que comparan la identidad
+        vigente, como A15: una cuenta separada ya es de otra persona."""
         ctx = self.ctx
         if ctx.identidad_humana is None:
             return {ctx.persona_id}
-        filas = conn.execute(
-            text(
-                "select persona_id from nucleo.identidad_persona"
-                " where consorcio_id = :c and identidad_id = :i"
-            ),
-            {"c": ctx.consorcio_id, "i": ctx.identidad_humana},
+        consulta = (
+            "select persona_id from nucleo.identidad_persona"
+            " where consorcio_id = :c and identidad_id = :i"
         )
+        if not historicas:
+            consulta += " and desvinculada_en is null"
+        filas = conn.execute(text(consulta), {"c": ctx.consorcio_id, "i": ctx.identidad_humana})
         return {ctx.persona_id, *filas.scalars()}
 
     def _separa_seres_humanos(self) -> bool:

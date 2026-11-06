@@ -339,7 +339,7 @@ def _aprobadas_por_vos(c: Connection, permiso: Permiso, filas: list) -> set[UUID
     ]
     if not en_curso:
         return set()
-    cuentas = permiso.cuentas_humanas(c)
+    cuentas = permiso.cuentas_humanas(c, historicas=True)
     aprobadas = set()
     for f in en_curso:
         versiones = _ejecutar(
@@ -396,7 +396,7 @@ def _cargo_la_cuenta(c: Connection, aprobar: Permiso, orden: OrdenPago, filas: l
         {"p": vigente["proveedor_id"]},
     ).mappings().all()  # fmt: skip
     fija = next(v for v in historia if v["version"] == vigente["proveedor_version"])
-    cuentas = aprobar.cuentas_humanas(c)
+    cuentas = aprobar.cuentas_humanas(c, historicas=True)
     return any(
         v["preparada_por"] in cuentas
         for v in historia

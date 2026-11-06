@@ -7,6 +7,7 @@ leer (sin oráculo) y 404 solo para quien puede.
 """
 
 import pytest
+from sqlalchemy import text
 
 from app.autorizacion.evaluador import Decision
 from app.autorizacion.requiere import Permiso
@@ -192,6 +193,31 @@ def test_la_lista_de_decisiones_coincide_con_lo_que_decide_a15(escena, motor_mig
     assert _decisiones(e["mc2"], e["cons"]) == {propia: (False, False), equipo: (False, True)}
     r = alta_http(e["mc2"], e["cons"], propia, persona_id=e["vecina"])
     assert r.status_code == 201, r.text
+
+
+def test_una_cuenta_separada_ya_no_registra_por_quien_lee(escena, motor_migrate, motor_app):  # noqa: F811
+    """A15 compara la identidad vigente de quien registró: si soporte separó la cuenta, lo que
+    registró es de otro ser humano, la ruta concede y la pantalla no lo esconde (Codex en #207)."""
+    e = escena
+    otra = _otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e["mc1"])
+    registrada = decision(otra, e["cons"]).json()["id"]
+    # Control: con la cuenta vinculada, la decisión es de quien lee y la ruta niega.
+    assert _decisiones(e["mc1"], e["cons"])[registrada] == (True, False)
+    r = alta_http(e["mc1"], e["cons"], registrada, persona_id=e["vecina"])
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                "update nucleo.identidad_persona set desvinculada_en = now()"
+                " where consorcio_id = :c and persona_id = :p and desvinculada_en is null"
+            ),
+            {"c": e["cons"], "p": otra},
+        )
+    verificar_en_el_consorcio(motor_migrate, e["cons"], otra)
+
+    assert _decisiones(e["mc1"], e["cons"])[registrada] == (False, False)
+    assert alta_http(e["mc1"], e["cons"], registrada, persona_id=e["vecina"]).status_code == 201
 
 
 def test_la_lista_de_decisiones_conserva_el_orden_y_no_saca_quien_registro(escena):  # noqa: F811
