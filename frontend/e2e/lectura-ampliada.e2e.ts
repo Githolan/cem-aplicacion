@@ -251,6 +251,13 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     cargada: "Estudio Sur, Administración externa",
     api: {
       "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/auth/sesion": {
+        persona_id: "99999999-9999-4999-8999-999999999999",
+        nombre: "Ana Pérez",
+        correo: CORREO_LARGO,
+        sesion_id: "22222222-2222-4222-8222-222222222222",
+        vence_en: "2026-11-15T20:00:00Z",
+      },
       [`GET /api/v1/consorcios/${C1}/mandatos`]: {
         elementos: [
           {
@@ -267,21 +274,10 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
       },
       [`GET /api/v1/consorcios/${C1}/decisiones`]: {
         // Del largo máximo (500): la opción del selector no puede ensanchar la página.
-        elementos: [{ id: DECISION, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500) }],
+        elementos: [{ id: DECISION, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: true }],
       },
       [`GET /api/v1/consorcios/${C1}/mandatos/candidatos`]: {
         elementos: [{ persona_id: "88888888-8888-4888-8888-888888888888", nombre: "Beto Pérez", unidades: ["1° A"] }],
-      },
-      // El alta pregunta si quien mira registró la decisión elegida (A15).
-      [`GET /api/v1/consorcios/${C1}/decisiones/${DECISION}`]: {
-        id: DECISION,
-        tipo: "asamblea",
-        fecha: "2026-01-10",
-        descripcion: "Acta muy detallada",
-        referencia: "Acta 14",
-        sha256: null,
-        registrada_por_vos: false,
-        del_equipo: true,
       },
     },
   },
@@ -300,6 +296,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
           { nombre: "Beto Pérez", tipo: "inquilino", vigente_desde: "2026-01-01", vigente_hasta: "2027-01-01", confirmado: false, iniciado: true },
         ].map((f, i) => ({
           ...f,
+          confirmable_por_vos: !f.confirmado,
           vinculo_id: `5555555${i}-5555-4555-8555-555555555555`,
           unidad_id: "44444444-4444-4444-8444-444444444444",
           designacion: "1° A",

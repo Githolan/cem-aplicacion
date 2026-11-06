@@ -372,6 +372,12 @@ class OrdenPago(BaseModel):
     aprobacion_vence_en: datetime | None = Field(
         description="Hasta cuándo se emite; después se renueva. Solo en una orden aprobada."
     )
+    aprobada_por_vos: bool = Field(
+        description="Si quien lee, con esta cuenta u otra del mismo ser humano, aprobó la versión"
+        " vigente: quien aprobó no la emite ni la paga. Solo en una orden en curso (en revisión,"
+        " aprobada, en ejecución o en verificación); en las demás es falso. Solo para mostrar: la"
+        " ruta y la base vuelven a decidir."
+    )
 
 
 class ListaOrdenesPago(BaseModel):
@@ -439,6 +445,17 @@ class OrdenPagoConVersionesRevision(BaseModel):
 
     orden: OrdenPago
     versiones: list[VersionOrdenPagoRevision]
+    puede_aprobar: bool = Field(
+        description="Si quien lee puede aprobar la versión vigente: la orden en revisión, sin haber"
+        " preparado ninguna versión ni haberla aprobado ya, y sin haber firmado la cuenta que paga."
+        " Lo de la cuenta solo se sabe de quien prepara: a quien ya no prepara se lo niega la base"
+        " al aprobar. Solo para mostrar."
+    )
+    puede_rechazar: bool = Field(
+        description="Si quien lee puede rechazar la versión vigente: la orden en revisión y sin"
+        " haber preparado ninguna versión. No mira la cuenta del proveedor: esa separación es solo"
+        " de aprobar. Solo para mostrar."
+    )
 
 
 class Emision(BaseModel):
@@ -749,6 +766,11 @@ class PagoNoRealizado(BaseModel):
         description="Si el Consejo puede confirmarla hoy: nadie vio la cuenta ni registró un pago"
         " después, y cada persona que vio la cuenta declaró después de su última apertura."
     )
+    puede_confirmar: bool = Field(
+        description="Si quien lee puede confirmarla: es `confirmable` y no preparó la orden, ni"
+        " registró un pago ni declaró en ella. Solo para mostrar: la ruta y la base vuelven a"
+        " decidir."
+    )
 
 
 class EjecucionManual(BaseModel):
@@ -768,6 +790,11 @@ class OrdenConPagoManual(BaseModel):
 
     orden: OrdenPago
     ejecucion: EjecucionManual
+    puede_conciliar: bool = Field(
+        description="Si quien lee puede conciliar el pago pendiente: la ejecución abierta, sin"
+        " haber preparado la orden ni registrado un pago de ella. Quién vio la cuenta sin registrar"
+        " no se sabe acá: se lo niega la base al conciliar. Solo para mostrar."
+    )
 
 
 class ListaPagosManuales(BaseModel):

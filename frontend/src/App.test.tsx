@@ -40,11 +40,20 @@ const sinSesion: Respuesta = () =>
   Response.json({ codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" }, { status: 401 });
 
 /** Responde por ruta, con sesión y servicio sanos; lo que no está previsto falla la prueba. */
-function backend({ sesion, salud }: { sesion?: Respuesta; salud?: Respuesta } = {}) {
+function backend({
+  sesion,
+  salud,
+  consorcios = [],
+  invitaciones = [],
+}: { sesion?: Respuesta; salud?: Respuesta; consorcios?: object[]; invitaciones?: object[] } = {}) {
   return vi.fn(async (pedido: Request) => {
     const camino = new URL(pedido.url).pathname;
     if (camino === RUTA_SESION) return sesion ? sesion() : Response.json(SESION);
     if (camino === "/health") return salud ? salud() : Response.json(SALUD);
+    if (camino === "/api/v1/me/consorcios") return Response.json(consorcios);
+    if (camino === "/api/v1/me/invitaciones") return Response.json({ elementos: invitaciones });
+    if (camino === "/api/v1/pagos-por-aclarar") return Response.json({ elementos: [] });
+    if (camino.endsWith("/mis-acciones")) return Response.json({ acciones: [] });
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
   });
 }
@@ -178,6 +187,59 @@ describe("cabecera", () => {
     const cabecera = screen.getByRole("banner");
     const boton = within(cabecera).getByRole("button", { name: NOMBRE_MODO_LECTURA });
     expect(boton.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("la marca es un enlace al inicio, desde cualquier pantalla", async () => {
+    vi.stubGlobal("fetch", backend());
+    montar("/no-existe");
+    const marca = within(screen.getByRole("banner")).getByRole("link", { name: "Consorcio en Mano" });
+    expect(marca.getAttribute("href")).toBe("/");
+
+    fireEvent.click(marca);
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No encontramos esa página" })).toBeNull();
+  });
+});
+
+describe("inicio sin edificios", () => {
+  const SIN_EDIFICIO = /^Todavía no participás de ningún edificio\./;
+  const PARA_SUMARTE = /Para sumarte, abrí el enlace de la invitación que te llegó por correo\./;
+
+  it("dice por qué no hay secciones y cómo sumarse", async () => {
+    vi.stubGlobal("fetch", backend());
+    montar();
+
+    const texto = await screen.findByText(SIN_EDIFICIO);
+    await vi.waitFor(() => expect(texto.textContent).toMatch(PARA_SUMARTE));
+    expect(screen.getByRole("link", { name: "Mi cuenta" })).toBeTruthy();
+  });
+
+  it("control: con un edificio no lo dice", async () => {
+    const pedido = backend({ consorcios: [{ id: "c1", nombre: "Edificio Azul", vinculos: [] }] });
+    vi.stubGlobal("fetch", pedido);
+    montar();
+
+    await vi.waitFor(() => expect(caminosDe(pedido)).toContain("/api/v1/consorcios/c1/mis-acciones"));
+    await screen.findByText("El servicio funciona.");
+    expect(screen.queryByText(SIN_EDIFICIO)).toBeNull();
+  });
+
+  it("con una invitación a la vista no manda a buscarla al correo", async () => {
+    const invitacion = {
+      id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d",
+      consorcio: "Edificio Azul",
+      unidad: "1° A",
+      tipo: "inquilino",
+      nombre: "Ana",
+      invitada_por: null,
+      vence_en: "2026-11-20T00:00:00Z",
+    };
+    vi.stubGlobal("fetch", backend({ invitaciones: [invitacion] }));
+    montar();
+
+    expect(await screen.findByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
+    expect((await screen.findByText(SIN_EDIFICIO)).textContent).not.toMatch(PARA_SUMARTE);
   });
 });
 

@@ -22,9 +22,15 @@ type Estado =
   | { tipo: "demasiados" }
   | { tipo: "sin_servicio" };
 
-export function PedirEnlace({ alPedir }: { alPedir: (correo: string, mensaje: string) => void }) {
+interface Props {
+  /** El correo es de /entrar: sigue escrito al cambiar de forma. */
+  correo: string;
+  alCambiarCorreo: (correo: string) => void;
+  alPedir: (correo: string, mensaje: string) => void;
+}
+
+export function PedirEnlace({ correo, alCambiarCorreo, alPedir }: Props) {
   const id = useId();
-  const [correo, setCorreo] = useState("");
   const [estado, setEstado] = useState<Estado>({ tipo: "listo" });
 
   function enviar(evento: FormEvent<HTMLFormElement>) {
@@ -60,7 +66,7 @@ export function PedirEnlace({ alPedir }: { alPedir: (correo: string, mensaje: st
           aria-invalid={estado.tipo === "invalido"}
           aria-describedby={estado.tipo === "invalido" ? `${id}-invalido` : undefined}
           value={correo}
-          onChange={(e) => setCorreo(e.target.value)}
+          onChange={(e) => alCambiarCorreo(e.target.value)}
         />
         <button type="submit" disabled={estado.tipo === "enviando"}>
           Pedir el enlace

@@ -1,3 +1,5 @@
+import type { MutableRefObject } from "react";
+
 import type { components } from "../api/tipos";
 import { LIMITE_DE_PEDIDOS, mensajeDeFalla } from "../fallas";
 
@@ -11,6 +13,7 @@ export type EstadoOrden = components["schemas"]["EstadoOrdenPago"];
 export type Franja = components["schemas"]["Franja"];
 export type Condicion = components["schemas"]["CondicionBeneficiario"];
 export type EstadoProveedor = components["schemas"]["EstadoProveedor"];
+type OrdenPago = components["schemas"]["OrdenPago"];
 
 export const ESTADO = {
   sinSesion: 401,
@@ -36,13 +39,24 @@ export const TEXTO_SESION_VENCIDA = "Tu sesión tiene más de 12 horas: volvé a
 /** El resultado de lo último que se hizo o se intentó en una pantalla. */
 export type Aviso = { texto: string; ok: boolean };
 
+/** Lo que se dice al repetir sola una lectura que falló. No es algo hecho: si vuelve a fallar, se va. */
+export const VOLVIO_LA_RED = "Volvió la conexión. Actualizamos los datos.";
+
 /** Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo. */
 export function sinPisarLoHecho(falla: string) {
-  return (actual: Aviso | null): Aviso => (actual?.ok === true ? actual : { texto: falla, ok: false });
+  return (actual: Aviso | null): Aviso =>
+    actual?.ok === true && actual.texto !== VOLVIO_LA_RED ? actual : { texto: falla, ok: false };
 }
 
 /** Al volver a pedir se va el error de la lectura anterior; un «Listo» se queda. */
 export const sinLaFalla = (actual: Aviso | null): Aviso | null => (actual?.ok === true ? actual : null);
+
+/** Al volver la red se repite la lectura y se dice; un «Listo» que esté a la vista se queda. */
+export const conLaRedDeVuelta = (actual: Aviso | null): Aviso =>
+  actual?.ok === true ? actual : { texto: VOLVIO_LA_RED, ok: true };
+
+/** La lectura que se repitió volvió a fallar y la pantalla ya lo dice: el aviso de la red se va. */
+export const sinElAvisoDeLaRed = (actual: Aviso | null): Aviso | null => (actual?.texto === VOLVIO_LA_RED ? null : actual);
 
 export const TEXTO_ESTADO_ORDEN: Record<EstadoOrden, string> = {
   borrador: "Borrador",
@@ -56,7 +70,7 @@ export const TEXTO_ESTADO_ORDEN: Record<EstadoOrden, string> = {
   conciliada: "Conciliada",
 };
 
-export const TEXTO_FRANJA: Record<Franja, string> = {
+const TEXTO_FRANJA: Record<Franja, string> = {
   fondo_reserva: "Fondo de reserva: aprueba el Consejo",
   beneficiario_nuevo: "Proveedor nuevo: pide aprobación",
   cuenta_cambiada: "Cuenta cambiada: pide aprobación",
@@ -65,6 +79,23 @@ export const TEXTO_FRANJA: Record<Franja, string> = {
   sobre_umbral: "Supera el umbral: pide aprobación",
   bajo_umbral: "No supera el umbral",
 };
+
+const TEXTO_FRANJA_DECIDIDA: Record<Franja, string> = {
+  ...TEXTO_FRANJA,
+  fondo_reserva: "Fondo de reserva: pasó por el Consejo",
+  beneficiario_nuevo: "Proveedor nuevo: pidió aprobación",
+  cuenta_cambiada: "Cuenta cambiada: pidió aprobación",
+  sin_umbral: "Sin umbral registrado: pidió aprobación",
+  sobre_umbral: "Superó el umbral: pidió aprobación",
+};
+
+/** Si todavía falta decidir la orden: después, nada de ella queda por revisar. */
+export const enDecision = (estado: EstadoOrden) => estado === "borrador" || estado === "en_revision";
+
+/** La franja: con la orden decidida dice lo que pasó, para que no parezca un paso pendiente. */
+export function textoFranja(franja: Franja, estado: EstadoOrden): string {
+  return enDecision(estado) ? TEXTO_FRANJA[franja] : TEXTO_FRANJA_DECIDIDA[franja];
+}
 
 export const TEXTO_CONDICION: Record<Condicion, string> = {
   nuevo: "Proveedor nuevo",
@@ -82,6 +113,11 @@ export const TEXTO_ESTADO_PROVEEDOR: Record<EstadoProveedor, string> = {
 export const TEXTO_ALERTA_FRACCIONAMIENTO =
   "Posible fraccionamiento: existen órdenes recientes relacionadas que en conjunto superan el umbral o el máximo del contrato.";
 
+/** Si la aprobación de una orden aprobada ya venció (la base lo vuelve a controlar al emitir). */
+export function vencida(o: OrdenPago, ahora = Date.now()): boolean {
+  return o.estado === "aprobada" && o.aprobacion_vence_en !== null && Date.parse(o.aprobacion_vence_en) <= ahora;
+}
+
 /** Una cuenta en las listas: los últimos 4 dígitos, que es lo único que manda el backend fuera
  * de la revisión (decisión del 30-10-2026). */
 export function cuentaEnmascarada(ultimos: string | null): string {
@@ -96,14 +132,19 @@ export function importe(centavos: number, moneda: string): string {
 /** Pesos escritos por la persona («1.234,50» o «1234.5») a centavos; null si no es un importe. */
 export function aCentavos(texto: string): number | null {
   const limpio = texto.trim().replace(/\s/g, "");
-  let normal: string;
   // Con separador de miles («1.234», «1.234,5»): los puntos agrupan y la coma es decimal.
-  if (/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/.test(limpio)) normal = limpio.replace(/\./g, "").replace(",", ".");
   // Sin separador de miles («1234», «1234,5», «1234.5»): un solo separador decimal.
-  else if (/^\d+([.,]\d{1,2})?$/.test(limpio)) normal = limpio.replace(",", ".");
-  else return null;
-  const centavos = Math.round(Number(normal) * 100);
+  const partes = /^(\d{1,3}(?:\.\d{3})+)(?:,(\d{1,2}))?$/.exec(limpio) ?? /^(\d+)(?:[.,](\d{1,2}))?$/.exec(limpio);
+  if (partes === null) return null;
+  const [, enteros = "", decimales = ""] = partes;
+  // Se arma con los dígitos: un importe no pasa por un número con decimales.
+  const centavos = Number(enteros.replace(/\./g, "") + decimales.padEnd(2, "0"));
   return Number.isSafeInteger(centavos) && centavos > 0 ? centavos : null;
+}
+
+/** Centavos en el formato del idioma, siempre con los dos decimales («120.000,00»). */
+export function importeEnCampo(centavos: number): string {
+  return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(centavos / 100);
 }
 
 /** Centavos a lo que se escribe en el campo («1234,50»). */
@@ -115,6 +156,26 @@ export function aTexto(centavos: number): string {
 
 const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" });
 export const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
+
+/** Otro acto u otros datos llevan otra clave. Repetir el mismo (después de un 5xx, una caída de la
+ * red o `idempotencia_en_curso`) es el mismo pedido: conserva la suya para recibir lo guardado, en
+ * vez de un error por algo que salió bien. La clave se suelta acá y cuando el intento terminó. */
+export function soltarClaveSiCambio(
+  clave: MutableRefObject<string | null>,
+  ultimoActo: MutableRefObject<string | null>,
+  acto: string,
+) {
+  if (ultimoActo.current !== acto) clave.current = null;
+  ultimoActo.current = acto;
+}
+
+/** Sobre una versión nueva: lo que la persona cambió queda y lo que no tocó toma el valor nuevo,
+ * para que reintentar no deshaga en silencio lo que otro cambió mientras tanto. */
+export function sobreLoNuevo<T extends object>(escrito: T, visto: T, nuevo: T): T {
+  const resultado = { ...nuevo };
+  for (const campo of Object.keys(nuevo) as (keyof T)[]) if (escrito[campo] !== visto[campo]) resultado[campo] = escrito[campo];
+  return resultado;
+}
 
 /** Si el próximo intento lleva otra clave. Ante R10 se conserva: se reintenta el mismo acto. */
 export function renovarClave(estado: number, codigo: string | undefined): boolean {
@@ -187,4 +248,14 @@ export function mensajeDeError(estado: number, codigo: string | undefined): stri
   if (estado === ESTADO.invalido) return "Revisá los datos del formulario.";
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   return mensajeDeFalla(estado, codigo);
+}
+
+/** Al actuar sobre una orden o su pago la API responde `sin_permiso` también cuando frena la
+ * separación de funciones (el motivo no sale, por diseño): decir solo que falta la facultad sería falso. */
+const SIN_PERMISO_EN_LA_ORDEN =
+  "No podés hacer esto en esta orden. Puede ser que tu mandato no lo incluya o que ya hayas participado de ella: quien prepara, aprueba, ejecuta y concilia tienen que ser personas distintas.";
+
+/** Qué decir ante el rechazo de un acto sobre una orden o su pago. */
+export function mensajeDeActo(estado: number, codigo: string | undefined): string {
+  return estado === ESTADO.sinPermiso && codigo === "sin_permiso" ? SIN_PERMISO_EN_LA_ORDEN : mensajeDeError(estado, codigo);
 }

@@ -10,12 +10,14 @@ import {
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
+  mensajeDeActo,
   mensajeDeError,
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  soltarClaveSiCambio,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
@@ -26,7 +28,8 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // Página /egresos/conciliacion (app 0055): el Consejo concilia los pagos manuales. Quien concilia
 // compara el comprobante con la orden (número de operación, fecha, importe y proveedor) y marca
 // «Conforme» u «Observado». Recién con «Conforme» la orden queda Pagada. Quien registró el pago, o
-// preparó la orden, no lo concilia (la API y la base lo niegan, también con otra cuenta suya).
+// preparó la orden, no lo concilia (la API y la base lo niegan, también con otra cuenta suya): cada
+// fila dice qué puede quien lee, y a quien solo vio la cuenta lo frena la base con un 403 en el lugar.
 // Un pago transferido después de que venció la aprobación (app 0067) se da por conforme solo con
 // el motivo por el que se acepta.
 // Acá no viaja la cuenta completa.
@@ -79,6 +82,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const ultimoActo = useRef<string | null>(null);
   const montado = useMontado();
 
   useEffect(() => {
@@ -120,7 +124,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
 
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
-    if (!reintento) clave.current = null;
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(acto));
     clave.current ??= crypto.randomUUID();
     const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     setEnviando(true);
@@ -146,6 +150,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          clave.current = null;
           setEscribiendo(null);
           setMotivo("");
           const texto = {
@@ -170,7 +175,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
         if (cambioLoVisto(response.status, codigo)) setVuelta((v) => v + 1);
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
@@ -239,7 +244,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
-          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
           {lectura.tipo === "ok" &&
             (pendientes.length === 0 ? (
               <p className="tarjeta">No hay pagos esperando conciliación.</p>
@@ -248,6 +253,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
                 {pendientes.map((c) => {
                   const pago = porConciliar(c);
                   const declaracion = porConfirmar(c);
+                  const concilia = puede("egresos.conciliar_pago") && c.puede_conciliar;
                   return (
                     <li key={c.orden.id} className="tarjeta">
                       <h2>
@@ -264,7 +270,10 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
                             {pago.fuera_de_termino && (
                               <>
                                 <dt>Fuera de término</dt>
-                                <dd>Se transfirió después de que venció la aprobación. Para darlo por conforme, escribí por qué lo aceptás.</dd>
+                                <dd>
+                                  Se transfirió después de que venció la aprobación.
+                                  {concilia && " Para darlo por conforme, escribí por qué lo aceptás."}
+                                </dd>
                               </>
                             )}
                             <dt>Importe registrado</dt>
@@ -278,7 +287,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
                               </a>
                             </dd>
                           </dl>
-                          {!puede("egresos.conciliar_pago") ? null : escribiendo?.pago !== pago.id ? (
+                          {!concilia ? null : escribiendo?.pago !== pago.id ? (
                             <div className="acciones">
                               <button type="button" disabled={enviando}
                                 onClick={() => {
@@ -320,7 +329,7 @@ function ConciliacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, a
                           <p>
                             Declarado como no pagado el {momento(declaracion.declarado_en)}: {declaracion.motivo}
                           </p>
-                          {puede("egresos.conciliar_pago") && (
+                          {puede("egresos.conciliar_pago") && declaracion.puede_confirmar && (
                             <button type="button" disabled={enviando}
                               onClick={() => hacer({ tipo: "no_realizado", orden: c.orden.id, declaracion: declaracion.id })}>
                               Confirmar que no se pagó

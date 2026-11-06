@@ -8,13 +8,15 @@ import { otroCliente, simularPermisos, simularSesion, sinFaltasDeAccesibilidad }
 // política, las funciones de `0018` y sus pruebas (test_mandatos_0018, test_mandatos_lectura) y
 // el smoke autenticado de staging. Acá se ve lo que solo un navegador real muestra: que la página
 // entra en un teléfono, el contraste de WCAG AA, que la cookie CSRF y la clave de reintento viajan
-// como encabezados, el aviso A15 y que no hay violaciones de la CSP.
+// como encabezados, que A15 saca de los selectores lo que registró quien mira y que no hay
+// violaciones de la CSP.
 const CSRF = "e2e-csrf-mandatos";
 const C1 = "11111111-1111-4111-8111-111111111111";
 const M_AE = "33333333-3333-4333-8333-333333333333";
 const M_NUEVO = "77777777-7777-4777-8777-777777777777";
 const D_EQUIPO = "44444444-4444-4444-8444-444444444444";
 const D_PROPIA = "55555555-5555-4555-8555-555555555555";
+const D_NEGADA = "88888888-8888-4888-8888-888888888888";
 const D_LARGA = "99999999-9999-4999-8999-999999999999";
 const VECINA = "66666666-6666-4666-8666-666666666666";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -34,10 +36,11 @@ const MANDATO_AE = {
 };
 
 const DECISIONES = [
-  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo" },
-  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio" },
+  { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
+  { id: D_PROPIA, tipo: "asamblea", fecha: "2026-03-05", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false },
+  { id: D_NEGADA, tipo: "asamblea", fecha: "2026-03-20", descripcion: "Remueve al estudio, otra", registrada_por_vos: false, del_equipo: false },
   // Una descripción del largo máximo (500): la opción del selector no puede ensanchar la página.
-  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500) },
+  { id: D_LARGA, tipo: "consejo", fecha: "2026-04-01", descripcion: "Acta muy detallada ".repeat(25).slice(0, 500), registrada_por_vos: false, del_equipo: false },
 ];
 
 const error = (status: number, codigo: string) => ({ status, json: { codigo, mensaje: "x", id_correlacion: "c" } });
@@ -62,7 +65,7 @@ function vigilarErrores(pagina: Page): string[] {
 /**
  * Responde la API de mandatos desde el navegador. El Consejo lee todo; la propietaria recibe 403
  * en las tres listas, como `mandatos.ver`, `decisiones.ver` y `mandatos.ver_candidatos`. Sin CSRF,
- * 403; sin clave, 422; una decisión propia en la remoción, 403 (A15).
+ * 403; sin clave, 422; la remoción con `D_NEGADA`, 403: la API sigue decidiendo.
  */
 async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<Envio[]> {
   const envios: Envio[] = [];
@@ -85,6 +88,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
         return ruta.fulfill({
           json: {
             ...MANDATO_AE,
+            es_propio: false,
             matricula: null,
             decision_id: D_EQUIPO,
             facultades: ["documentos.cargar"],
@@ -98,7 +102,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       const decision = DECISIONES.find((d) => camino === `${BASE}/decisiones/${d.id}`);
       if (decision !== undefined)
         return ruta.fulfill({
-          json: { ...decision, referencia: "Acta 14", sha256: null, registrada_por_vos: decision.id === D_PROPIA, del_equipo: decision.id === D_EQUIPO },
+          json: { ...decision, referencia: "Acta 14", sha256: null },
         });
       return ruta.abort();
     }
@@ -110,7 +114,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     if (clave === null) return ruta.fulfill(error(422, "peticion_invalida"));
     if (camino === `${BASE}/mandatos`) return ruta.fulfill({ status: 201, json: { id: M_NUEVO } });
     if (camino === `${BASE}/mandatos/${M_AE}/baja`) {
-      if (cuerpo.decision_id === D_PROPIA) return ruta.fulfill(error(403, "sin_permiso"));
+      if (cuerpo.decision_id === D_NEGADA) return ruta.fulfill(error(403, "sin_permiso"));
       return ruta.fulfill({ json: { id: M_AE, causa: cuerpo.causa, vigente_hasta: "2026-10-19" } });
     }
     return ruta.abort();
@@ -177,11 +181,9 @@ test.describe("mandatos", () => {
     await page.setViewportSize({ width: 360, height: 740 });
 
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
-    await alta.getByLabel("Decisión que lo respalda").selectOption(D_PROPIA);
-    await expect(alta.getByText(/Esa decisión la registraste vos/)).toBeVisible();
+    await expect(alta.getByLabel("Decisión que lo respalda").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
-    await expect(alta.getByText(/Esa decisión la registraste vos/)).toHaveCount(0);
     await alta.getByLabel("Desde").fill("2026-11-01");
     await alta.getByRole("button", { name: "Dar de alta" }).click();
     await expect(page.getByText("Listo: el mandato quedó dado de alta.")).toBeVisible();
@@ -205,15 +207,16 @@ test.describe("mandatos", () => {
     expect(errores).toEqual([]);
   });
 
-  test("la remoción con una asamblea propia la rechaza la API; con otra, se da de baja", async ({ page, baseURL }) => {
+  test("la asamblea propia no se ofrece; un 403 de la API queda en el lugar y con otra se da de baja", async ({ page, baseURL }) => {
     const envios = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
     await page.getByRole("button", { name: "Ver detalle", exact: true }).first().click();
     await expect(page.getByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeFocused();
     await page.getByLabel("Causa").selectOption("remocion");
     await page.getByLabel("Por qué termina").fill("Remoción por asamblea");
-    await page.getByLabel("Asamblea que lo remueve").selectOption(D_PROPIA);
-    await expect(page.getByText(/no podés usarla para remover/)).toBeVisible();
+    await expect(page.getByLabel("Asamblea que lo remueve").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);
+    await page.getByLabel("Asamblea que lo remueve").selectOption(D_NEGADA);
     await page.getByRole("button", { name: "Dar de baja", exact: true }).click();
     await expect(page.getByRole("button", { name: "Sí, dar de baja" })).toBeFocused();
     await sinFaltasDeAccesibilidad(page);
@@ -225,13 +228,14 @@ test.describe("mandatos", () => {
     await page.getByRole("button", { name: "Dar de baja", exact: true }).click();
     await page.getByRole("button", { name: "Sí, dar de baja" }).click();
     await expect(page.getByText("Listo: dimos de baja el mandato de Estudio Sur.")).toBeVisible();
-    expect(envios.map((e) => e.cuerpo.decision_id)).toEqual([D_PROPIA, D_EQUIPO]);
+    expect(envios.map((e) => e.cuerpo.decision_id)).toEqual([D_NEGADA, D_EQUIPO]);
     // Otro intento (otra asamblea): otra clave.
     expect(envios[1]?.clave).not.toBe(envios[0]?.clave);
   });
 
   test("control: sin la cookie CSRF, el simulador rechaza y la página lo dice", async ({ page, baseURL }) => {
     const envios = await simularApi(page, baseURL!, "consejo");
+    await simularSesion(page, "con_sesion");
     await page.context().clearCookies();
     await page.goto("/mandatos");
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });

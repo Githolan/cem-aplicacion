@@ -31,9 +31,21 @@ body {
   color: #ffffff;
 }
 
+/* Enlace al inicio: blanco como la cabecera, con el área táctil de 44 px. */
 .marca {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  color: inherit;
   font-weight: 600;
   font-size: 1.125rem;
+  text-decoration: none;
+}
+
+.marca:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
 }
 
 main {

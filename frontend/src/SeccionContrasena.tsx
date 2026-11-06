@@ -1,13 +1,12 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
-import { RUTA_ENTRAR } from "./enlace";
-import { ENTRAR_DE_NUEVO } from "./fallas";
+import { mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { AvisoEntrarDeNuevo } from "./VolverAEntrar";
 
 // Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y el formulario para
 // definirla o cambiarla (`PUT /api/v1/auth/contrasena`, con X-CSRF-Token). El backend decide: con
@@ -39,7 +38,6 @@ const CODIGO_DEBIL = "contrasena_debil";
 const CODIGO_CSRF = "csrf_invalido";
 // La primera contraseña pide una entrada reciente (`exigir_entrada_reciente`).
 const CODIGO_ENTRADA_RECIENTE = "reautenticacion_requerida";
-const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
 
 /**
  * Caracteres como los cuenta el backend: puntos de código, después de NFKC (que es lo que
@@ -165,7 +163,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           setAviso({ tipo: "error", texto: "No pudimos verificar el pedido. Recargá la página y probá de nuevo." });
         else if (response.status === ESTADO_DEMASIADOS)
           setAviso({ tipo: "error", texto: "Hubo demasiados intentos. Esperá un rato y probá de nuevo." });
-        else setAviso({ tipo: "error", texto: SIN_CONEXION });
+        else setAviso({ tipo: "error", texto: mensajeDeFalla(response.status, codigo) });
       })
       .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
       .finally(() => setEnviando(false));
@@ -201,12 +199,6 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         <button type="button" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
           {estado.definida ? "Cambiar la contraseña" : "Definir una contraseña"}
         </button>
-      )}
-      {abierto && segundoFactor && (
-        <p>
-          Como tenés el segundo factor activado, al guardar te vamos a pedir que confirmes que sos vos,
-          si no lo hiciste en los últimos 10 minutos.
-        </p>
       )}
       {abierto && estado.definida && (
         <p>Al cambiarla cerramos las sesiones de tus otros dispositivos.</p>
@@ -281,16 +273,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         {enviando && <p>Guardando…</p>}
         {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
         {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
-        {aviso?.tipo === "entrar_de_nuevo" && (
-          <>
-            <p className="aviso-error">{ENTRAR_DE_NUEVO}</p>
-            <p>
-              <Link to={RUTA_ENTRAR} state={{ renovar: true }}>
-                Volver a entrar
-              </Link>
-            </p>
-          </>
-        )}
+        {aviso?.tipo === "entrar_de_nuevo" && <AvisoEntrarDeNuevo />}
       </div>
     </section>
   );

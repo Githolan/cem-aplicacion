@@ -11,12 +11,17 @@ import pytest
 from app.autorizacion.evaluador import Decision
 from app.autorizacion.requiere import Permiso
 from app.consorcios.mandatos import Discrepancia
-from tests.conftest import verificar_en_el_consorcio
+from tests.conftest import misma_identidad, verificar_en_el_consorcio
 from tests.test_contexto_mandatos import cliente, denegaciones
 from tests.test_identidad import app, navegador  # noqa: F401  (`app` es un fixture)
 from tests.test_mandatos import otra_persona, vinculo_confirmado
 from tests.test_mandatos_0012 import CUIT_X, alta
-from tests.test_mandatos_rutas import alta_http, decision, escena  # noqa: F401  (fixture)
+from tests.test_mandatos_rutas import (  # noqa: F401  (`escena` es un fixture)
+    alta_http,
+    baja_http,
+    decision,
+    escena,
+)
 from tests.test_modo_operacion import consorcio_con_persona, decidir_equipo
 
 pytestmark = [pytest.mark.db, pytest.mark.redis]
@@ -27,8 +32,9 @@ COLUMNAS_MANDATO = {
 }  # fmt: skip
 COLUMNAS_DETALLE = COLUMNAS_MANDATO | {
     "matricula", "decision_id", "facultades", "causa_baja", "baja_decision_id",
-    "instrumento_referencia", "motivo_fin", "finalizado_en",
+    "instrumento_referencia", "motivo_fin", "finalizado_en", "es_propio",
 }  # fmt: skip
+COLUMNAS_DECISION = {"id", "tipo", "fecha", "descripcion", "registrada_por_vos", "del_equipo"}
 
 
 def _get(persona, url):
@@ -80,6 +86,43 @@ def test_el_detalle_suma_lo_autorizado(escena):  # noqa: F811
     assert cuerpo["decision_id"] == str(e["acta"])
 
 
+def _otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, de):
+    """Otra cuenta del mismo ser humano que `de`, con mandato del Consejo."""
+    otra = otra_persona(motor_migrate, e["cons"], verificada=False)
+    misma_identidad(motor_migrate, e["cons"], de, otra)
+    alta(motor_app, e["cons"], None, e["acta"], persona=otra, tipo="miembro_consejo",
+         origen="soporte")  # fmt: skip
+    return otra
+
+
+def test_es_propio_coincide_con_lo_que_decide_la_baja(escena, motor_app):  # noqa: F811
+    e = escena
+    detalle = _url(e["cons"], f"mandatos/{e['m_mc1']}")
+    assert _get(e["mc1"], detalle).json()["es_propio"] is True
+    r = baja_http(e["mc1"], e["cons"], e["m_mc1"])
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert _motivos(motor_app, e, e["mc1"]) == [("mandatos.baja", "no_es_su_propio_mandato")]
+    # Control: para otra persona no es propio, y la ruta concede.
+    assert _get(e["mc2"], detalle).json()["es_propio"] is False
+    assert baja_http(e["mc2"], e["cons"], e["m_mc1"]).status_code == 200
+
+
+def test_es_propio_compara_cuentas_como_la_baja(escena, motor_migrate, motor_app):  # noqa: F811
+    """`SOLO_POR_CUENTA`: otra cuenta del mismo ser humano puede dar de baja el mandato, para que
+    una cuenta mal asociada tenga remedio. El dato no se lo oculta."""
+    e = escena
+    otra = _otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e["mc1"])
+    assert _get(otra, _url(e["cons"], f"mandatos/{e['m_mc1']}")).json()["es_propio"] is False
+    assert baja_http(otra, e["cons"], e["m_mc1"]).status_code == 200
+
+
+def test_el_mandato_sin_cuenta_no_es_propio_de_nadie(escena, motor_app):  # noqa: F811
+    e = escena
+    externo = alta(motor_app, e["cons"], None, e["acta"], tipo="administrador_externo",
+                   nombre="Estudio", cuit=CUIT_X, origen="soporte")  # fmt: skip
+    assert _get(e["mc1"], _url(e["cons"], f"mandatos/{externo}")).json()["es_propio"] is False
+
+
 def test_un_mandato_inexistente_da_404_solo_a_quien_puede_leer(escena, motor_app):  # noqa: F811
     e = escena
     r = _get(e["mc1"], _url(e["cons"], f"mandatos/{INEXISTENTE}"))
@@ -111,7 +154,7 @@ def test_las_decisiones_salen_sin_referencia_y_el_detalle_avisa_a15(escena, moto
     assert r.status_code == 200, r.text
     filas = r.json()["elementos"]
     assert {f["id"] for f in filas} == {str(e["acta"]), propia}
-    assert all(set(f) == {"id", "tipo", "fecha", "descripcion"} for f in filas)
+    assert all(set(f) == COLUMNAS_DECISION for f in filas)
     assert "Acta 14" not in r.text  # la referencia va solo en el detalle
     mia = _get(e["mc1"], _url(e["cons"], f"decisiones/{propia}")).json()
     del_equipo = _get(e["mc1"], _url(e["cons"], f"decisiones/{e['acta']}")).json()
@@ -121,6 +164,46 @@ def test_las_decisiones_salen_sin_referencia_y_el_detalle_avisa_a15(escena, moto
     assert (del_equipo["registrada_por_vos"], del_equipo["del_equipo"]) == (False, True)
     assert (de_otro["registrada_por_vos"], de_otro["del_equipo"]) == (False, False)
     assert "registrada_por" not in mia  # quién la registró no sale
+
+
+def _decisiones(persona, cons) -> dict[str, tuple[bool, bool]]:
+    r = _get(persona, _url(cons, "decisiones"))
+    assert r.status_code == 200, r.text
+    return {f["id"]: (f["registrada_por_vos"], f["del_equipo"]) for f in r.json()["elementos"]}
+
+
+def test_la_lista_de_decisiones_coincide_con_lo_que_decide_a15(escena, motor_migrate, motor_app):  # noqa: F811
+    e = escena
+    propia = decision(e["mc1"], e["cons"]).json()["id"]
+    otra = _otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e["mc1"])
+    equipo = str(e["acta"])
+
+    assert _decisiones(e["mc1"], e["cons"]) == {propia: (True, False), equipo: (False, True)}
+    # A15 compara seres humanos: otra cuenta de quien la registró tampoco la usa.
+    assert _decisiones(otra, e["cons"]) == {propia: (True, False), equipo: (False, True)}
+    r = alta_http(otra, e["cons"], propia, persona_id=e["vecina"])
+    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert _motivos(motor_app, e, otra) == [("mandatos.alta", "no_registro_la_decision")]
+    # El detalle dice lo mismo que la lista.
+    detalle = _get(otra, _url(e["cons"], f"decisiones/{propia}")).json()
+    assert (detalle["registrada_por_vos"], detalle["del_equipo"]) == (True, False)
+
+    # Control: para otra persona no es propia, y la ruta concede.
+    assert _decisiones(e["mc2"], e["cons"]) == {propia: (False, False), equipo: (False, True)}
+    r = alta_http(e["mc2"], e["cons"], propia, persona_id=e["vecina"])
+    assert r.status_code == 201, r.text
+
+
+def test_la_lista_de_decisiones_conserva_el_orden_y_no_saca_quien_registro(escena):  # noqa: F811
+    e = escena
+    decision(e["mc1"], e["cons"])
+    r = _get(e["mc2"], _url(e["cons"], "decisiones"))
+    assert r.status_code == 200, r.text
+    filas = r.json()["elementos"]
+    assert len(filas) == 2
+    assert [f["fecha"] for f in filas] == sorted((f["fecha"] for f in filas), reverse=True)
+    assert str(e["mc1"]) not in r.text
+    assert str(e["acta"]) in r.text  # control: la búsqueda encuentra lo que sí sale
 
 
 def test_una_decision_inexistente_da_404_solo_a_quien_puede_leer(escena, motor_app):  # noqa: F811

@@ -12,16 +12,19 @@ import {
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
+  mensajeDeActo,
   mensajeDeError,
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  soltarClaveSiCambio,
   TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_CONDICION,
   TEXTO_ESTADO_ORDEN,
-  TEXTO_FRANJA,
+  enDecision,
+  textoFranja,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
@@ -34,7 +37,7 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // y la cuenta COMPLETA: quien aprueba tiene que ver lo que aprueba. En la lista va enmascarada.
 // «Aprobar esta versión» manda la versión y la huella que se vieron; si la orden cambió mientras
 // tanto (409), la ficha se vuelve a cargar y hay que revisar la versión nueva: una aprobación
-// nunca pasa sola a otra versión.
+// nunca pasa sola a otra versión. Qué puede decidir quien lee lo dice la API en cada ficha.
 
 type Orden = components["schemas"]["OrdenPago"];
 type Detalle = components["schemas"]["OrdenPagoConVersionesRevision"];
@@ -69,7 +72,12 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const ultimoActo = useRef<string | null>(null);
   const montado = useMontado();
+  const vigente = detalle?.versiones.find((v) => v.numero === detalle.orden.version_vigente);
+  const decide = puede("egresos.aprobar_orden");
+  const aprueba = decide && detalle?.puede_aprobar === true;
+  const rechaza = decide && detalle?.puede_rechazar === true;
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -108,20 +116,27 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
     setVuelta((v) => v + 1);
   }
 
-  function abrir(ordenId: string, avisoAlAbrir: Aviso | null = null) {
-    setAviso(avisoAlAbrir);
+  function dejarElRechazo() {
     setRechazando(false);
     setMotivo("");
-    clave.current = null;
+  }
+
+  /** `sigueElRechazo`: la orden cambió mientras se rechazaba. Lo escrito queda para la versión
+   * nueva, salvo que la orden ya no esté en revisión. */
+  function abrir(ordenId: string, avisoAlAbrir: Aviso | null = null, sigueElRechazo = false) {
+    setAviso(avisoAlAbrir);
+    if (!sigueElRechazo) dejarElRechazo();
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/revision", {
         params: { path: { consorcio_id: consorcio, orden_id: ordenId } },
       })
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        if (data !== undefined) setDetalle(data);
-        else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
-          setPendiente({ acto: "ver la orden", reintentar: () => abrir(ordenId, avisoAlAbrir) });
+        if (data !== undefined) {
+          setDetalle(data);
+          if (!data.puede_rechazar) dejarElRechazo();
+        } else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
+          setPendiente({ acto: "ver la orden", reintentar: () => abrir(ordenId, avisoAlAbrir, sigueElRechazo) });
         else {
           setDetalle(null);
           setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
@@ -133,12 +148,13 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
 
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
-    if (!reintento) clave.current = null;
-    clave.current ??= crypto.randomUUID();
-    const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const orden = acto.detalle.orden;
     const vista = acto.detalle.versiones.find((v) => v.numero === orden.version_vigente);
     if (vista === undefined) return;
+    const motivoDelActo = acto.tipo === "rechazar" ? acto.motivo : null;
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify([acto.tipo, orden.id, vista.numero, vista.huella, motivoDelActo]));
+    clave.current ??= crypto.randomUUID();
+    const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const ruta = { path: { consorcio_id: consorcio, orden_id: orden.id }, header: encabezado };
     setEnviando(true);
     setAviso(null);
@@ -158,6 +174,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          clave.current = null;
           setDetalle(null);
           setRechazando(false);
           setAviso({
@@ -180,10 +197,11 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        const texto = mensajeDeError(response.status, codigo);
+        const texto = mensajeDeActo(response.status, codigo);
         // La orden cambió (otra versión, otro estado o ya no está): se vuelve a cargar la ficha y
-        // hay que revisar lo vigente.
-        if (cambioLaOrden(codigo) || cambioLoVisto(response.status, codigo)) abrir(orden.id, { texto, ok: false });
+        // hay que revisar lo vigente. Un motivo escrito sobrevive solo a otra versión.
+        if (cambioLaOrden(codigo) || cambioLoVisto(response.status, codigo))
+          abrir(orden.id, { texto, ok: false }, acto.tipo === "rechazar" && cambioLaOrden(codigo));
         else setAviso({ texto, ok: false });
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
@@ -195,8 +213,6 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
     if (detalle === null || motivo.trim() === "") return;
     hacer({ tipo: "rechazar", detalle, motivo: motivo.trim() });
   }
-
-  const vigente = detalle?.versiones.find((v) => v.numero === detalle.orden.version_vigente);
 
   return (
     <>
@@ -223,7 +239,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando las órdenes…</p>}
-          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
           {lectura.tipo === "ok" && detalle === null && (
             lectura.ordenes.length === 0 ? (
               <p className="tarjeta">No hay órdenes enviadas a revisión.</p>
@@ -238,7 +254,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       <dt>Estado</dt>
                       <dd>{TEXTO_ESTADO_ORDEN[o.estado]}</dd>
                       <dt>Franja</dt>
-                      <dd>{TEXTO_FRANJA[o.franja]}</dd>
+                      <dd>{textoFranja(o.franja, o.estado)}</dd>
                       {o.alerta_fraccionamiento && (
                         <>
                           <dt>Alerta</dt>
@@ -251,7 +267,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                       </dd>
                     </dl>
                     <button type="button" onClick={() => abrir(o.id)}>
-                      Revisar la orden de {o.razon_social}
+                      {enDecision(o.estado) ? "Revisar" : "Ver"} la orden de {o.razon_social}
                     </button>
                   </li>
                 ))}
@@ -281,7 +297,7 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                 <dt>Beneficiario</dt>
                 <dd>{TEXTO_CONDICION[vigente.condicion_beneficiario]}</dd>
                 <dt>Franja</dt>
-                <dd>{TEXTO_FRANJA[vigente.franja]}</dd>
+                <dd>{textoFranja(vigente.franja, detalle.orden.estado)}</dd>
                 {vigente.alerta_fraccionamiento && (
                   <>
                     <dt>Alerta</dt>
@@ -312,15 +328,19 @@ function RevisionOrdenesDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar
                   </ol>
                 </details>
               )}
-              {detalle.orden.estado === "en_revision" && !rechazando && puede("egresos.aprobar_orden") && (
+              {!rechazando && (aprueba || rechaza) && (
                 <div className="formulario">
                   <div className="acciones">
-                    <button type="button" disabled={enviando} onClick={() => hacer({ tipo: "aprobar", detalle })}>
-                      Aprobar esta versión
-                    </button>
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => setRechazando(true)}>
-                      Rechazar
-                    </button>
+                    {aprueba && (
+                      <button type="button" disabled={enviando} onClick={() => hacer({ tipo: "aprobar", detalle })}>
+                        Aprobar esta versión
+                      </button>
+                    )}
+                    {rechaza && (
+                      <button type="button" className="secundario" disabled={enviando} onClick={() => setRechazando(true)}>
+                        Rechazar
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

@@ -55,19 +55,27 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
 
 const CONSULTAR = "/api/v1/auth/invitacion-mandato/consultar";
 const ACEPTAR = "/api/v1/auth/invitacion-mandato/aceptar";
+const SALIR = "/api/v1/auth/salir";
 const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
 const AVISO = "Listo: tu cuenta quedó asociada a la administración de Edificio Alvear 100.";
 const CAMPO_NOMBRE = "Tu nombre (solo si la cuenta es nueva)";
+
+type Respuesta = () => Response | Promise<Response>;
 
 /**
  * Responde la consulta con la invitación y la aceptación con `aceptacion`; aceptar abre la sesión,
  * que es lo que consulta el inicio. Lo que no está previsto falla la prueba.
  */
-function backend(aceptacion: () => Response, consulta: () => Response | Promise<Response> = () => Response.json(RECIBIDA)) {
+function backend(
+  aceptacion: () => Response,
+  consulta: Respuesta = () => Response.json(RECIBIDA),
+  salir: Respuesta = () => new Response(null, { status: 204 }),
+) {
   return vi.fn(async (pedido: Request) => {
     const camino = new URL(pedido.url).pathname;
     if (camino === CONSULTAR) return consulta();
     if (camino === ACEPTAR) return aceptacion();
+    if (camino === SALIR) return salir();
     if (camino === "/api/v1/auth/sesion") return Response.json({});
     if (camino === "/health") return error("servicio_no_disponible", 503);
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
@@ -212,6 +220,90 @@ function retener(simulado: (pedido: Request) => Promise<Response>, camino: strin
   return { retenido, soltar: () => soltar() };
 }
 
+describe("ningún error de /invitacion-mandato termina sin un paso siguiente", () => {
+  const SALIR_DE_ESTA = { name: "Salir de esta cuenta" };
+  const AL_INICIO = { name: "Ir al inicio" };
+  const OTRA_PERSONA = /no es la del correo invitado/;
+  const OTRA_CUENTA = () => error("invitacion_de_otra_persona", 409);
+
+  async function botonSalir() {
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+    return screen.findByRole("button", SALIR_DE_ESTA);
+  }
+
+  it("con otra cuenta abierta, salir vuelve a la invitación con el mismo token, sin ir al correo", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    const simulado = backend(OTRA_CUENTA);
+    vi.stubGlobal("fetch", simulado);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await aceptarBoton()).toBeTruthy();
+    expect(screen.queryByText(OTRA_PERSONA)).toBeNull();
+    const salida = pedidosDe(simulado).find((p) => new URL(p.url).pathname === SALIR);
+    expect(salida?.headers.get("X-CSRF-Token")).toBe("abc123");
+    const consultas = consultasDe(simulado);
+    expect(consultas).toHaveLength(2);
+    expect(await consultas[1]?.json()).toEqual({ token: TOKEN });
+  });
+
+  it("un 401 al salir es que ya estaba afuera: sigue igual", async () => {
+    const simulado = backend(OTRA_CUENTA, undefined, () => error("no_autenticado", 401));
+    vi.stubGlobal("fetch", simulado);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await aceptarBoton()).toBeTruthy();
+    expect(consultasDe(simulado)).toHaveLength(2);
+  });
+
+  it("con un 503 al salir lo dice, se queda ahí y deja probar de nuevo", async () => {
+    const simulado = backend(OTRA_CUENTA, undefined, () => error("servicio_no_disponible", 503));
+    vi.stubGlobal("fetch", simulado);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    expect(screen.getByText(OTRA_PERSONA)).toBeTruthy();
+    const boton = screen.getByRole("button", SALIR_DE_ESTA) as HTMLButtonElement;
+    await vi.waitFor(() => expect(boton.disabled).toBe(false));
+    expect(consultasDe(simulado)).toHaveLength(1);
+  });
+
+  it.each<[string, () => Response, RegExp]>([
+    ["no sirve", () => error("invitacion_invalida", 404), /Esta invitación no sirve/],
+    ["choca con el Consejo", () => error("asociacion_incompatible_con_consejo", 409), /el Consejo fiscaliza/],
+    ["la emitió quien la abre", () => error("asociacion_de_si_mismo", 409), /no puede aceptarla para sí/],
+  ])("si %s, lleva al inicio", async (_, rechazo, texto) => {
+    vi.stubGlobal("fetch", backend(rechazo));
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+    expect(await screen.findByText(texto)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("link", AL_INICIO));
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  });
+
+  it("sin enlace también lleva al inicio", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    abrir(RUTA);
+
+    expect(screen.getByRole("link", AL_INICIO).getAttribute("href")).toBe("/");
+  });
+
+  it("control: quien tiene que entrar no ve otra salida que la confunda", async () => {
+    vi.stubGlobal("fetch", backend(() => error("invitacion_requiere_sesion", 409)));
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+
+    expect(await screen.findByRole("link", { name: "Entrá" })).toBeTruthy();
+    expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
+    expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
+  });
+});
+
 describe("página /invitacion-mandato: estados de pantalla mínima (documento 08, §13.1)", () => {
   it("carga: mientras consulta dice «Buscando la invitación…» y lo saca al llegar la respuesta", async () => {
     const { retenido, soltar } = retener(
@@ -330,7 +422,7 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Beto Estudio" });
 
     // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
-    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }));
+    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }));
     expect(await screen.findByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));

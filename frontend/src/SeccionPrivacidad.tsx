@@ -1,13 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
-import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { EnlaceVolverAEntrar } from "./VolverAEntrar";
 
 // Sección "Tus pedidos sobre tus datos" de /cuenta (RF37, corte 2d-2). Decisión del propietario
 // del 28-10-2026: la confirmación de un caso y la copia de los datos propios van solo dentro de
@@ -61,7 +60,7 @@ function avisoDeError(error: unknown, status: number): Aviso {
     return { tipo: "error", texto: String(campoDe(error, "mensaje") ?? SIN_CONEXION) };
   if (status === ESTADO_DEMASIADOS)
     return { tipo: "error", texto: "Hubo demasiados intentos. Esperá un rato y probá de nuevo." };
-  return { tipo: "error", texto: SIN_CONEXION };
+  return { tipo: "error", texto: mensajeDeFalla(status, codigoDe(error)) };
 }
 
 /**
@@ -84,12 +83,11 @@ function guardarArchivo(contenido: unknown, caso: string) {
 
 interface Props {
   contrasena: boolean;
-  segundoFactor: boolean;
   fecha: (iso: string) => string;
   sinSesion: () => void;
 }
 
-export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion }: Props) {
+export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
   const id = useId();
   const [casos, setCasos] = useState<Caso[] | null>(null);
   const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
@@ -261,13 +259,6 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
       {fallaConsulta === null && casos !== null && !conPedidos && (
         <p role="status">No tenés pedidos pendientes sobre tus datos.</p>
       )}
-      {conPedidos && (
-        <p>
-          Por seguridad, cada paso pide volver a confirmar que sos vos
-          {contrasena ? " con tu contraseña" : ": si entraste hace más de 10 minutos, salí y volvé a entrar"}
-          {segundoFactor ? ", y haber verificado tu segundo factor en los últimos 10 minutos" : ""}.
-        </p>
-      )}
       {pendientes.map((caso) => (
         <article key={caso.id} aria-labelledby={`${id}-${caso.id}`}>
           <h3 id={`${id}-${caso.id}`}>
@@ -333,7 +324,7 @@ export function SeccionPrivacidad({ contrasena, segundoFactor, fecha, sinSesion 
         )}
         {aviso?.tipo === "falta" && aviso.falta === "entrar_de_nuevo" && (
           <p className="aviso-error">
-            Por seguridad, <Link to={RUTA_ENTRAR} state={{ renovar: true }}>volvé a entrar con el enlace del correo</Link> y hacelo
+            Por seguridad, <EnlaceVolverAEntrar>volvé a entrar con el enlace del correo</EnlaceVolverAEntrar> y hacelo
             dentro de los 10 minutos.
           </p>
         )}

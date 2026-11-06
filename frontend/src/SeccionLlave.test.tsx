@@ -1,11 +1,13 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { esDeEsteDispositivo, nombreDelDispositivo, recordarLlave } from "./llaveAcceso";
 import { SeccionLlave } from "./SeccionLlave";
 
 const LLAVE = {
   id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d",
+  credencial_id: "Y3JlZGVuY2lhbA",
   nombre: "Mi PC",
   creada_en: "2026-11-04T10:00:00Z",
   ultimo_uso_en: null,
@@ -15,6 +17,7 @@ const VERIFICADO = {
   vale_hasta: "2026-11-04T10:10:00Z",
   codigos_recuperacion_restantes: 9,
 };
+const OPCIONES_DE_ALTA = { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } };
 const FALTA = () =>
   Response.json({ codigo: "segundo_factor_requerido", mensaje: "x", id_correlacion: "c" }, { status: 403 });
 
@@ -43,6 +46,7 @@ describe("sección de la llave", () => {
 
   afterEach(() => {
     cleanup();
+    window.localStorage.clear();
     vi.unstubAllGlobals();
     Reflect.deleteProperty(navigator, "credentials");
   });
@@ -82,34 +86,75 @@ describe("sección de la llave", () => {
     expect(borrar).toHaveBeenCalledOnce();
   });
 
-  it("quien solo tiene llave puede confirmar con un código de recuperación", async () => {
+  it("si cancela la confirmación no da nada por terminado", async () => {
+    const borrar = vi.fn(FALTA);
     backend({
       "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
-      "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
+      [`DELETE /api/v1/auth/llave/${LLAVE.id}`]: borrar,
     });
-    const alTerminar = vi.fn();
-    mostrar(alTerminar);
+    mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar que soy yo" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Usar un código" }));
-    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
-
-    await waitFor(() => expect(alTerminar).toHaveBeenCalledWith("Listo: confirmaste que sos vos, por 10 minutos."));
-  });
-
-  it("si cancela la confirmación no da nada por terminado", async () => {
-    backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
-    const alTerminar = vi.fn();
-    mostrar(alTerminar);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar que soy yo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
     // PedirCodigo cambia a la vista de la llave al leerlas: se espera a que esté antes de cancelar.
     await screen.findByRole("button", { name: "Usar un código" });
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
-    expect(await screen.findByRole("button", { name: "Confirmar que soy yo" })).not.toBeNull();
-    expect(alTerminar).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Quitar" })).not.toBeNull();
+    expect(screen.queryByText("Listo: quitaste la llave.")).toBeNull();
+    expect(borrar).toHaveBeenCalledOnce();
+  });
+
+  it("con la llave de este dispositivo dice que no falta nada y no ofrece agregar", async () => {
+    recordarLlave(LLAVE.credencial_id);
+    backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
+    mostrar();
+
+    expect(await screen.findByText(/Tu llave ya funciona en este dispositivo/)).not.toBeNull();
+    expect(screen.getByRole("list", { name: "Tus llaves" }).textContent).toContain("Mi PC (este dispositivo)");
+    expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
+  });
+
+  it("control: con la llave de otro dispositivo ofrece agregar este y no dice que está listo", async () => {
+    recordarLlave("otra-credencial");
+    backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
+    mostrar();
+
+    expect(await screen.findByRole("button", { name: "Agregar este dispositivo" })).not.toBeNull();
+    expect(screen.getByText("Si este dispositivo no está en la lista, agregalo.")).not.toBeNull();
+    expect(screen.queryByText(/Tu llave ya funciona en este dispositivo/)).toBeNull();
+    expect(screen.getByRole("list", { name: "Tus llaves" }).textContent).not.toContain("(este dispositivo)");
+  });
+
+  function dispositivoConLlave(nombre: string) {
+    Object.defineProperty(navigator, "credentials", {
+      value: { create: () => Promise.reject(new DOMException("ya está", "InvalidStateError")) },
+      configurable: true,
+    });
+    backend({
+      "GET /api/v1/auth/llave": () => Response.json([{ ...LLAVE, nombre }]),
+      "POST /api/v1/auth/llave/alta/opciones": () => Response.json({ opciones: OPCIONES_DE_ALTA }),
+    });
+    mostrar();
+  }
+
+  it("si el navegador avisa que ya tiene llave, reconoce la de su mismo nombre", async () => {
+    dispositivoConLlave(nombreDelDispositivo(navigator.userAgent));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
+
+    expect(await screen.findByText(/Tu llave ya funciona en este dispositivo/)).not.toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
+    expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(true);
+  });
+
+  it("control: si no hay ninguna con su nombre, lo dice y no marca ninguna", async () => {
+    dispositivoConLlave("Otro nombre");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Este dispositivo ya tiene una llave en tu cuenta.");
+    expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(false);
   });
 
   it.each([
@@ -140,11 +185,18 @@ describe("sección de la llave", () => {
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
-  it("sin llaves no ofrece confirmar", async () => {
+  it("confirmar no es un paso aparte: no hay botón, con llaves o sin ellas", async () => {
     backend({ "GET /api/v1/auth/llave": () => Response.json([]) });
-    mostrar();
+    const sinLlaves = mostrar();
 
     expect(await screen.findByRole("button", { name: "Activar en este dispositivo" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirmar que soy yo" })).toBeNull();
+    sinLlaves.unmount();
+
+    backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
+    mostrar();
+
+    expect(await screen.findByRole("button", { name: "Quitar" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Confirmar que soy yo" })).toBeNull();
   });
 });

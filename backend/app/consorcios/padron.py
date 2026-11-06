@@ -85,6 +85,19 @@ def sobre_unidad(unidad_id: UUID) -> Entidad:
     return Entidad(recursos={TipoRecurso.UNIDAD: str(unidad_id)})
 
 
+def _para_confirmar(
+    unidad_id: UUID, persona_id: UUID, registrado_por: UUID | None, origen: str
+) -> Entidad:
+    """Lo que decide confirmar un vínculo: la misma entidad para la ruta y para el padrón."""
+    return Entidad(
+        recursos={TipoRecurso.UNIDAD: str(unidad_id)},
+        persona_objetivo=persona_id,
+        registrado_por=registrado_por,
+        registrado_por_soporte=registrado_por is None and origen == ORIGEN_SOPORTE,
+        respaldo_presente=True,  # el contrato exige la referencia
+    )
+
+
 class Discrepancia(RuntimeError):
     """La base y el evaluador no coinciden: un defecto, no un caso de uso."""
 
@@ -95,21 +108,33 @@ class Discrepancia(RuntimeError):
     summary="Padrón de vínculos vigentes y futuros",
     responses={403: {"description": "La persona no tiene `padron.ver` en este consorcio."}},
 )
-def padron(permiso: Annotated[Permiso, Depends(requiere("padron.ver"))], motor: MotorDep) -> Padron:
+def padron(
+    permiso: Annotated[Permiso, Depends(requiere("padron.ver"))],
+    confirmacion: Annotated[Permiso, Depends(requiere("padron.confirmar_vinculo"))],
+    motor: MotorDep,
+) -> Padron:
     """Unidad, nombre, carácter, vigencia y si el vínculo está confirmado (D6). Sin correo ni
     teléfono, sin vínculos terminados. Una facultad acotada a unidades ve solo esas."""
+    # `confirmable_por_vos` es solo para mostrar: se decide fila por fila sin tocar la base (P4-c
+    # compara cuentas) y no audita; la ruta de confirmar vuelve a decidir. La persona y quién
+    # registró el vínculo se leen para eso y no salen.
     ctx = permiso.ctx
     try:
         with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
             filas = (
                 conn.execute(
                     text(
-                        "select vinculo_id, unidad_id, designacion, nombre, tipo::text as tipo,"
-                        " vigente_desde, vigente_hasta, confirmado,"
+                        "select p.vinculo_id, p.unidad_id, p.designacion, p.nombre,"
+                        " p.tipo::text as tipo, p.vigente_desde, p.vigente_hasta, p.confirmado,"
                         # La misma fecha y la misma regla que nucleo.finalizar_vinculo (0020):
                         # now() es el de la transacción, el mismo que usa padron_del_consorcio.
-                        " vigente_desde <= nucleo.hoy_del_consorcio(:c) as iniciado"
-                        " from nucleo.padron_del_consorcio()"
+                        " p.vigente_desde <= nucleo.hoy_del_consorcio(:c) as iniciado,"
+                        " v.persona_id, v.registrado_por, v.origen"
+                        # `left`: la función corre siempre, y su 42501 es la barrera de esta ruta.
+                        " from nucleo.padron_del_consorcio() p"
+                        " left join nucleo.vinculo v"
+                        " on v.consorcio_id = :c and v.id = p.vinculo_id"
+                        " order by p.designacion, p.tipo, p.nombre, p.vinculo_id"
                     ),
                     {"c": ctx.consorcio_id},
                 )
@@ -123,10 +148,22 @@ def padron(permiso: Annotated[Permiso, Depends(requiere("padron.ver"))], motor: 
         raise Discrepancia("padron_del_consorcio niega padron.ver y el evaluador lo concede") from e
     return Padron(
         elementos=[
-            FilaPadron(**f)
+            _fila_padron(f, confirmacion)
             for f in filas
             if permiso.decidir(sobre_unidad(f["unidad_id"])).permitido
         ]
+    )
+
+
+def _fila_padron(fila, confirmacion: Permiso) -> FilaPadron:
+    datos = dict(fila)
+    vinculo = _para_confirmar(
+        datos["unidad_id"], datos.pop("persona_id"), datos.pop("registrado_por"),
+        datos.pop("origen"),
+    )  # fmt: skip
+    return FilaPadron(
+        **datos,
+        confirmable_por_vos=not datos["confirmado"] and confirmacion.decidir(vinculo).permitido,
     )
 
 
@@ -204,15 +241,7 @@ def confirmar(
     referencia queda en el vínculo y no sale en ninguna respuesta ni en la auditoría."""
     ctx = permiso.ctx
     v = _vinculo_del_consorcio(motor, ctx, vinculo_id)
-    permiso.verificar(
-        Entidad(
-            recursos={TipoRecurso.UNIDAD: str(v.unidad_id)},
-            persona_objetivo=v.persona_id,
-            registrado_por=v.registrado_por,
-            registrado_por_soporte=v.registrado_por is None and v.origen == ORIGEN_SOPORTE,
-            respaldo_presente=True,  # el contrato exige la referencia
-        )
-    )
+    permiso.verificar(_para_confirmar(v.unidad_id, v.persona_id, v.registrado_por, v.origen))
     respuesta = responder_una_vez(
         motor,
         ctx,

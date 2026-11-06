@@ -5,15 +5,18 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
+import { useAlVolverLaRed, useMiPersona } from "./egresos/useConsorcio";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
 // registrar una decisión y dar de alta o de baja un mandato. Cada lista y cada formulario aparece
-// solo si la persona lo alcanza, y sin ninguno va al inicio. Es solo interfaz: un 403 al actuar se
-// dice en la pantalla, y los avisos de A15 (la decisión la registraste vos) solo advierten antes de
-// enviar: la autoridad es la API, la política y la base. Diseño: `doc/diseno/H2b_4c_Diseno.md` del repositorio CEM, §7.
+// solo si la persona lo alcanza, y sin ninguno va al inicio. Las decisiones que registró quien mira
+// no se ofrecen para dar altas ni para remover (A15) y su propia baja no aparece. Es solo interfaz:
+// un 403 al actuar se dice en la pantalla, y la autoridad es la API, la política y la base. Diseño:
+// `doc/diseno/H2b_4c_Diseno.md` del repositorio CEM, §7.
 // Diseño visual provisorio: el definitivo llega con G3.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
@@ -112,12 +115,8 @@ export type Accion = "decision" | "alta" | "baja";
 
 const SIN_PERMISO: Record<Accion, string> = {
   decision: "No tenés permiso para registrar decisiones en este edificio.",
-  alta:
-    "No tenés permiso para dar este alta. Puede ser que tu mandato no lo incluya, que la decisión" +
-    " la hayas registrado vos (quien la registra no puede usarla) o que el alta sea para vos.",
-  baja:
-    "No tenés permiso para dar esta baja. Puede ser que tu mandato no lo incluya, que la asamblea" +
-    " la hayas registrado vos (quien la registra no puede usarla para remover) o que la baja sea tuya.",
+  alta: "No tenés permiso para dar este alta. Puede ser que tu mandato no lo incluya o que el alta sea para vos.",
+  baja: "No tenés permiso para dar esta baja. Puede ser que tu mandato no lo incluya.",
 };
 
 const NO_ENCONTRADO: Record<Accion, string> = {
@@ -185,7 +184,8 @@ type Lectura<T> = { tipo: "cargando" } | { tipo: "sin_permiso" } | { tipo: "sin_
 
 type Detalle = { tipo: "mandato"; datos: MandatoDetalle } | { tipo: "decision"; datos: DecisionDetalle };
 
-type Aviso = { texto: string; ok: boolean };
+/** `formulario`: el que falló. Va junto a él, para corregirlo sin recorrer la página. */
+type Aviso = { texto: string; ok: boolean; formulario?: Accion };
 
 type Clave = MutableRefObject<string | null>;
 
@@ -207,7 +207,6 @@ function leer<T>({ data, response }: Resultado<{ elementos: T[] }>): Lectura<T> 
 
 const CARGANDO = { tipo: "cargando" } as const;
 const SIN_PERMISO_DE_LECTURA = { tipo: "sin_permiso" } as const;
-const SIN_RESPUESTA = "sin_respuesta";
 const SIN_SERVICIO = { tipo: "sin_servicio" } as const;
 
 /** Una lista que no se pudo consultar no arrastra a las otras; un 401 sí corta todo. */
@@ -221,6 +220,27 @@ function cadaUna<T>(pedido: Promise<Lectura<T>>): Promise<Lectura<T>> {
 /** Una lista que no se pudo consultar vuelve a «Consultando…»; las que están a la vista quedan. */
 function aReconsultar<T>(lectura: Lectura<T>): Lectura<T> {
   return lectura.tipo === "sin_servicio" ? CARGANDO : lectura;
+}
+
+const ENUMERAR = new Intl.ListFormat("es", { type: "conjunction" });
+
+type Alcance = { veMandatos: boolean; veDecisiones: boolean; registra: boolean; daAltas: boolean; daBajas: boolean };
+
+/** La presentación de la pantalla: promete solo lo que la persona alcanza. */
+export function presentacion({ veMandatos, veDecisiones, registra, daAltas, daBajas }: Alcance): string {
+  const ve = [
+    ...(veMandatos ? ["los mandatos del Consejo y de la administración del edificio"] : []),
+    ...(veDecisiones ? [veMandatos ? "las decisiones que los respaldan" : "las decisiones del edificio"] : []),
+  ];
+  const hace = [
+    ...(registra ? ["registrar decisiones"] : []),
+    ...(daAltas ? ["dar de alta un mandato"] : []),
+    ...(daBajas ? ["dar de baja un mandato"] : []),
+  ];
+  return [
+    ...(ve.length > 0 ? [`Acá ves ${ENUMERAR.format(ve)}.`] : []),
+    ...(hace.length > 0 ? [`Podés ${ENUMERAR.format(hace)}.`] : []),
+  ].join(" ");
 }
 
 export function Mandatos() {
@@ -237,15 +257,17 @@ export function Mandatos() {
   const veDecisiones = puede("decisiones.ver");
   const veCandidatos = puede("mandatos.ver_candidatos");
   const registraDecisiones = consorcio !== "" && puede("decisiones.registrar");
+  // El alta pide elegir a quién y qué decisión la respalda; la baja se da desde el detalle.
+  const daAltas = puede("mandatos.alta") && veCandidatos && veDecisiones;
+  const daBajas = puede("mandatos.baja") && veMandatos;
+  // Nadie se da un mandato a sí mismo: quien mira no se ofrece, y sin saberlo decide la API.
+  const yo = useMiPersona(daAltas);
   // Sin mandatos ni decisiones no queda nada, salvo que se sepa que puede registrar.
   const quedaElRegistro = sabeQueAlcanza && registraDecisiones;
   const [mandatos, setMandatos] = useState<Lectura<Mandato>>(CARGANDO);
   const [decisiones, setDecisiones] = useState<Lectura<Decision>>(CARGANDO);
   const [candidatos, setCandidatos] = useState<Lectura<Candidato>>(CARGANDO);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
-  // A15: qué decisiones registró quien mira, según el detalle que manda la API; `sin_respuesta`
-  // si la consulta falló (el aviso es de esa decisión, no de la página).
-  const [propias, setPropias] = useState<Record<string, boolean | "sin_respuesta">>({});
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   // Cada envío vuelve a pedir las listas: qué se ve lo decide la API.
@@ -374,6 +396,7 @@ export function Mandatos() {
         setMandatos(m);
         setDecisiones(d);
         setCandidatos(c);
+        if ([m.tipo, d.tipo, c.tipo].includes("sin_servicio")) setAviso(sinElAvisoDeLaRed);
         if (c.tipo !== "ok") return;
         setPersona((actual) => {
           if (c.elementos.some((x) => x.persona_id === actual)) return actual;
@@ -398,28 +421,15 @@ export function Mandatos() {
     setVuelta((v) => v + 1);
   }
 
-  /** Pregunta a la API si quien mira registró la decisión (A15), para avisar antes de enviar. */
-  const consultarPropia = useCallback(
-    (decision: string) => {
-      // Una consulta que falló se repite al volver a elegir la decisión.
-      if (decision === "" || (decision in propias && propias[decision] !== SIN_RESPUESTA)) return;
-      void api
-        .GET("/api/v1/consorcios/{consorcio_id}/decisiones/{decision_id}", {
-          params: { path: { consorcio_id: consorcio, decision_id: decision } },
-        })
-        .then(({ data, response }) => {
-          exigirSesion(response);
-          if (data === undefined) throw new Error(String(response.status));
-          setPropias((actual) => ({ ...actual, [data.id]: data.registrada_por_vos }));
-        })
-        .catch((e: unknown) => {
-          if (e instanceof SinSesion) aEntrar();
-          // Queda en esa decisión (por su id): una respuesta tardía de otro edificio no se ve acá.
-          else setPropias((actual) => ({ ...actual, [decision]: SIN_RESPUESTA }));
-        });
-    },
-    [consorcio, propias, aEntrar],
-  );
+  const hayListaCaida = [mandatos, decisiones, candidatos].some((l) => l.tipo === "sin_servicio");
+  useAlVolverLaRed(hayListaCaida, () => {
+    reconsultarListas();
+    setAviso(conLaRedDeVuelta);
+  });
+  useAlVolverLaRed(pantalla.tipo === "sin_servicio", () => {
+    setPantalla({ tipo: "cargando" });
+    consultarEdificios();
+  });
 
   /** Cualquier cambio en los datos de un formulario es otro intento: otra clave. */
   function cambiar<T>(clave: Clave, fijar: (v: T) => void) {
@@ -455,7 +465,7 @@ export function Mandatos() {
         if (data === undefined) {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
-          setAviso({ texto: mensajeDeError(response.status, codigo, accion), ok: false });
+          setAviso({ texto: mensajeDeError(response.status, codigo, accion), ok: false, formulario: accion });
           fallo?.(response.status, codigo);
           return;
         }
@@ -464,7 +474,8 @@ export function Mandatos() {
         setVuelta((v) => v + 1);
       })
       .catch((e: unknown) => {
-        atajar(e);
+        if (e instanceof SinSesion) aEntrar();
+        else setAviso({ texto: SIN_CONEXION, ok: false, formulario: accion });
         fallo?.(null, undefined);
       })
       .finally(() => setEnviando(false));
@@ -488,8 +499,6 @@ export function Mandatos() {
           },
         }),
       (datos) => {
-        // Quien la registró es quien mira: A15 ya lo sabe sin preguntar.
-        setPropias((actual) => ({ ...actual, [datos.id]: true }));
         // Con el formulario vacío no se puede registrar dos veces lo mismo con una clave nueva.
         setTipoDecision(TIPO_DECISION_INICIAL);
         setFechaDecision("");
@@ -505,6 +514,9 @@ export function Mandatos() {
   }
 
   const externo = tipoMandato === "administrador_externo";
+  const elegibles = candidatos.tipo === "ok" ? candidatos.elementos.filter((c) => c.persona_id !== yo) : [];
+  // Saber quién mira puede llegar después de la lista: lo elegido nunca es alguien que no se ofrece.
+  const personaElegida = elegibles.some((c) => c.persona_id === persona) ? persona : (elegibles[0]?.persona_id ?? "");
 
   function darDeAlta(evento: FormEvent) {
     evento.preventDefault();
@@ -520,7 +532,7 @@ export function Mandatos() {
             decision_id: decisionAlta,
             desde,
             hasta: hasta === "" ? null : hasta,
-            persona_id: externo ? null : persona,
+            persona_id: externo ? null : personaElegida,
             nombre: externo ? nombre.trim() : null,
             cuit: externo ? cuit : null,
             matricula: tipoMandato === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
@@ -529,7 +541,7 @@ export function Mandatos() {
       (datos) => {
         // Con el formulario vacío no se puede dar dos veces la misma alta con una clave nueva.
         setTipoMandato(TIPO_MANDATO_INICIAL);
-        setPersona(candidatos.tipo === "ok" ? (candidatos.elementos[0]?.persona_id ?? "") : "");
+        setPersona("");
         setNombre("");
         setCuit("");
         setMatricula("");
@@ -594,6 +606,8 @@ export function Mandatos() {
         if (estado === ESTADO.noEncontrado || (codigo !== undefined && BAJA_SOBRE_ESTADO_VIEJO.includes(codigo))) {
           pedidoDetalle.current += 1;
           setDetalle(null);
+          // El formulario se va con el detalle: el aviso sube para que siga a la vista.
+          setAviso((actual) => (actual === null ? actual : { texto: actual.texto, ok: actual.ok }));
           setVuelta((v) => v + 1);
         }
       },
@@ -664,7 +678,6 @@ export function Mandatos() {
         exigirSesion(response);
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
-          setPropias((actual) => ({ ...actual, [data.id]: data.registrada_por_vos }));
           setDetalle({ tipo: "decision", datos: data });
           return;
         }
@@ -688,7 +701,6 @@ export function Mandatos() {
     setDecisiones(CARGANDO);
     setCandidatos(CARGANDO);
     setDetalle(null);
-    setPropias({});
     setDecisionAlta("");
     limpiarBaja();
     setPersona("");
@@ -697,18 +709,21 @@ export function Mandatos() {
   }
 
   const listaDecisiones = decisiones.tipo === "ok" ? decisiones.elementos : [];
-  const asambleas = listaDecisiones.filter((d) => d.tipo === "asamblea");
+  // A15: quien registró una decisión no la usa para dar de alta ni para remover. Las del equipo no lo
+  // activan. Solo los selectores: el detalle y la lista siguen mostrando todas.
+  const usables = listaDecisiones.filter((d) => !d.registrada_por_vos);
+  const asambleas = usables.filter((d) => d.tipo === "asamblea");
+  // Sin una asamblea que usar no hay remoción. Sin la lista todavía no se sabe y sigue a la vista.
+  const sinRemocion = decisiones.tipo === "ok" && asambleas.length === 0 && causa !== "remocion";
   const textoDecision = (d: Decision) => `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}: ${d.descripcion}`;
-  // Siempre montado: el lector anuncia el aviso cuando llega, aunque el foco siga en el selector.
-  const avisoA15 = (decision: string, clave: "alta" | "remover", uso: string) => (
-    <p id={`${id}-a15-${clave}`} aria-live="polite" className={propias[decision] === undefined || propias[decision] === false ? undefined : "aviso-error"}>
-      {propias[decision] === SIN_RESPUESTA &&
-        "No pudimos consultar quién registró esta decisión. Si la registraste vos, la plataforma igual rechaza el envío."}
-      {propias[decision] === true &&
-        `Esa decisión la registraste vos: no podés usarla para ${uso}. Tiene que hacerlo otra persona del Consejo o de la administración.`}
-    </p>
-  );
-  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  const conMensaje = (aviso !== null && aviso.formulario === undefined) || pantalla.tipo !== "lista";
+  /** El aviso en su lugar: arriba el de la página y junto a su formulario el de un envío rechazado. */
+  const avisoEn = (formulario?: Accion) =>
+    aviso !== null && aviso.formulario === formulario ? (
+      <p ref={textoAviso} tabIndex={-1} role={formulario === undefined ? undefined : "alert"} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
+        {aviso.texto}
+      </p>
+    ) : null;
   // Hasta tres listas pueden caerse a la vez: cada botón dice de qué sección es.
   const consultarDeNuevo = (seccion: string) => (
     <button type="button" onClick={reconsultarListas} disabled={enviando} aria-describedby={seccion}>
@@ -720,13 +735,33 @@ export function Mandatos() {
     <>
       <h1>Mandatos y decisiones</h1>
 
+      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
+        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
+        {pantalla.tipo === "sin_servicio" && (
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
+        )}
+        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {avisoEn()}
+      </div>
+
       {pantalla.tipo === "lista" && (
         <>
-          <p className="tarjeta">
-            Acá se registran las decisiones que respaldan cada mandato y se dan de alta o de baja el
-            Consejo y la administración del edificio. Lo que podés ver o hacer lo decide la
-            plataforma según tu mandato.
-          </p>
+          <p className="tarjeta">{presentacion({ veMandatos, veDecisiones, registra: registraDecisiones, daAltas, daBajas })}</p>
 
           {edificios.length > 1 && (
             <div className="tarjeta formulario">
@@ -934,7 +969,7 @@ export function Mandatos() {
                 )}
               </dl>
 
-              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && (
+              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && (
                 <form
                   ref={formularioBaja}
                   className="formulario formulario-movil"
@@ -951,7 +986,7 @@ export function Mandatos() {
                     disabled={enviando}
                     onChange={(e) => cambiarBaja(setCausa)(e.target.value as CausaBaja)}
                   >
-                    {(detalle.datos.estado === "terminado" ? CAUSAS_TERMINADO : CAUSAS).map((c) => (
+                    {(detalle.datos.estado === "terminado" ? CAUSAS_TERMINADO : CAUSAS).filter((c) => c !== "remocion" || !sinRemocion).map((c) => (
                       <option key={c} value={c}>
                         {TEXTO_CAUSA[c]}
                       </option>
@@ -977,11 +1012,7 @@ export function Mandatos() {
                         value={decisionBaja}
                         required
                         disabled={enviando}
-                        aria-describedby={`${id}-a15-remover`}
-                        onChange={(e) => {
-                          consultarPropia(e.target.value);
-                          cambiarBaja(setDecisionBaja)(e.target.value);
-                        }}
+                        onChange={(e) => cambiarBaja(setDecisionBaja)(e.target.value)}
                       >
                         <option value="">Elegí la asamblea</option>
                         {asambleas.map((d) => (
@@ -990,7 +1021,6 @@ export function Mandatos() {
                           </option>
                         ))}
                       </select>
-                      {avisoA15(decisionBaja, "remover", "remover")}
                     </>
                   ) : (
                     <>
@@ -1027,6 +1057,7 @@ export function Mandatos() {
                   )}
                 </form>
               )}
+              {avisoEn("baja")}
               <button type="button" onClick={cerrarDetalle} disabled={enviando}>
                 Cerrar el detalle
               </button>
@@ -1097,6 +1128,7 @@ export function Mandatos() {
                 Registrar decisión
               </button>
             </form>
+            {avisoEn("decision")}
           </section>
           )}
 
@@ -1163,19 +1195,23 @@ export function Mandatos() {
                       onChange={(e) => cambiar(claveAlta, setCuit)(e.target.value)}
                     />
                   </>
-                ) : candidatos.elementos.length === 0 ? (
-                  <p>Nadie tiene todavía un vínculo confirmado en este edificio: sin él no se puede dar el mandato.</p>
+                ) : elegibles.length === 0 ? (
+                  <p>
+                    {candidatos.elementos.length === 0
+                      ? "Nadie tiene todavía un vínculo confirmado en este edificio: sin él no se puede dar el mandato."
+                      : "Nadie más tiene un vínculo confirmado en este edificio, y nadie se da un mandato a sí mismo."}
+                  </p>
                 ) : (
                   <>
                     <label htmlFor={`${id}-persona`}>Persona (con vínculo confirmado en el edificio)</label>
                     <select
                       id={`${id}-persona`}
-                      value={persona}
+                      value={personaElegida}
                       required
                       disabled={enviando}
                       onChange={(e) => cambiar(claveAlta, setPersona)(e.target.value)}
                     >
-                      {candidatos.elementos.map((c) => (
+                      {elegibles.map((c) => (
                         <option key={c.persona_id} value={c.persona_id}>
                           {recortar(`${c.nombre} (${c.unidades.join(", ")})`)}
                         </option>
@@ -1198,26 +1234,31 @@ export function Mandatos() {
                     />
                   </>
                 )}
-                <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
-                <select
-                  id={`${id}-decision-alta`}
-                  value={decisionAlta}
-                  required
-                  disabled={enviando}
-                  aria-describedby={`${id}-a15-alta`}
-                  onChange={(e) => {
-                    consultarPropia(e.target.value);
-                    cambiar(claveAlta, setDecisionAlta)(e.target.value);
-                  }}
-                >
-                  <option value="">Elegí la decisión</option>
-                  {listaDecisiones.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {recortar(textoDecision(d))}
-                    </option>
-                  ))}
-                </select>
-                {avisoA15(decisionAlta, "alta", "dar el alta")}
+                {usables.length === 0 ? (
+                  <p>
+                    {listaDecisiones.length === 0
+                      ? "Todavía no hay decisiones registradas: sin una que lo respalde no se puede dar el mandato."
+                      : "Las decisiones de este edificio las registraste vos, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
+                    <select
+                      id={`${id}-decision-alta`}
+                      value={decisionAlta}
+                      required
+                      disabled={enviando}
+                      onChange={(e) => cambiar(claveAlta, setDecisionAlta)(e.target.value)}
+                    >
+                      <option value="">Elegí la decisión</option>
+                      {usables.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {recortar(textoDecision(d))}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
                 <label htmlFor={`${id}-desde`}>Desde</label>
                 <input
                   id={`${id}-desde`}
@@ -1242,43 +1283,18 @@ export function Mandatos() {
                     hasta === desde &&
                     "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
                 </p>
-                <button type="submit" disabled={enviando || (!externo && candidatos.elementos.length === 0)}>
-                  Dar de alta
-                </button>
+                {(externo || elegibles.length > 0) && usables.length > 0 && (
+                  <button type="submit" disabled={enviando}>
+                    Dar de alta
+                  </button>
+                )}
               </form>
             )}
+            {avisoEn("alta")}
           </section>
           )}
         </>
       )}
-
-      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
-        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
-        {pantalla.tipo === "sin_servicio" && (
-          <>
-            <p className="aviso-error">
-              {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setPantalla({ tipo: "cargando" });
-                consultarEdificios();
-              }}
-            >
-              Consultar de nuevo
-            </button>
-          </>
-        )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
-        {aviso && (
-          <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
-            {aviso.texto}
-          </p>
-        )}
-      </div>
     </>
   );
 }

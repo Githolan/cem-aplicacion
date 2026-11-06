@@ -24,7 +24,7 @@ const VENCIDA = "99999999-9999-4999-8999-999999999999";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const CONSORCIOS = [{ id: C1, nombre: "Edificio Azul", vinculos: ["propietario"] }];
-const UNIDADES = { elementos: [{ id: U1, designacion: "1° A" }, { id: U2, designacion: "2° B" }] };
+const UNIDADES = { elementos: [{ id: U1, designacion: "1° A", invitable: true }, { id: U2, designacion: "2° B", invitable: true }] };
 
 function invitacion(id: string, nombre: string, estado: string, correo: string | null) {
   return {
@@ -66,6 +66,7 @@ function backend(respuestas: Respuestas) {
 }
 
 const RUTA_LISTA = `/api/v1/consorcios/${C1}/invitaciones`;
+const RUTA_UNIDADES = `/api/v1/consorcios/${C1}/unidades`;
 
 function conConsorcio(extra: Respuestas = {}) {
   return backend({
@@ -111,6 +112,9 @@ async function completar(nombre = "Dora Ruiz", correo = "dora@ejemplo.com") {
 }
 
 const invitarBoton = () => screen.getByRole("button", { name: "Invitar" });
+
+/** Si `a` está antes que `b` en la página. */
+const antes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
 beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
@@ -228,6 +232,9 @@ describe("página /invitaciones", () => {
     expect(await post.json()).toEqual({ unidad_id: U2, tipo: "ocupante", correo: "dora@ejemplo.com", nombre: "Dora Ruiz" });
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2));
     expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe("");
+    // Las unidades no se vuelven a pedir: la elegida queda como estaba para la próxima invitación.
+    expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2);
+    expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(1);
   });
 
   it("si se corta la red, el reintento usa la misma clave; si cambian los datos, otra", async () => {
@@ -520,7 +527,7 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
-  it("E46: después de un retiro, invitar devuelve el foco al campo y no al aviso", async () => {
+  it("E46: después de un retiro, invitar lleva el foco al aviso nuevo", async () => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     vi.stubGlobal(
       "fetch",
@@ -536,16 +543,16 @@ describe("página /invitaciones", () => {
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
-    const aviso = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
-    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    const retiro = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
+    await waitFor(() => expect(document.activeElement).toBe(retiro));
     const correo = screen.getByLabelText("Correo");
     correo.focus();
     fireEvent.submit(correo.closest("form") as HTMLFormElement);
-    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
-    await waitFor(() => expect(document.activeElement).toBe(correo));
+    const aviso = await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
-  it("E46 (control): al invitar, el foco sigue volviendo al campo, no al aviso", async () => {
+  it("al invitar, el aviso queda entre el formulario y la lista, y toma el foco", async () => {
     vi.stubGlobal(
       "fetch",
       conConsorcio({
@@ -558,8 +565,61 @@ describe("página /invitaciones", () => {
     const correo = screen.getByLabelText("Correo");
     correo.focus();
     fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    const aviso = await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(antes(invitarBoton(), aviso)).toBe(true);
+    expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
+  });
+
+  it("si invitar falla, el error aparece al lado del formulario, con el foco, y lo escrito sigue", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("sin_permiso", 403) }));
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    const aviso = await screen.findByText("No tenés permiso para invitar a esa unidad.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(antes(invitarBoton(), aviso)).toBe(true);
+    expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
+    expect((screen.getByLabelText("Correo") as HTMLInputElement).value).toBe("dora@ejemplo.com");
+  });
+
+  it("aunque el botón tocado no tome el foco, como en Safari, el aviso lo toma", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("sin_permiso", 403) }));
+    abrir();
+    await completar();
+    // Control: nada tiene el foco al tocar el botón.
+    expect(document.activeElement).toBe(document.body);
+    fireEvent.click(invitarBoton());
+    const aviso = await screen.findByText("No tenés permiso para invitar a esa unidad.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+  });
+
+  it("control: si durante el envío la persona llevó el foco a otro lado, el aviso no se lo saca", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const simulado = conConsorcio();
+    const base = simulado.getMockImplementation() as (p: Request) => Promise<Response>;
+    simulado.mockImplementation(async (pedido: Request) =>
+      pedido.method === "POST"
+        ? new Promise<Response>((r) => {
+            soltar = r;
+          })
+        : base(pedido),
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    const correo = screen.getByLabelText("Correo") as HTMLInputElement;
+    correo.focus();
+    fireEvent.submit(correo.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
+    const titulo = screen.getByRole("heading", { level: 1, name: "Invitar a una persona" });
+    titulo.tabIndex = -1;
+    titulo.focus();
+    soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
     await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
-    await waitFor(() => expect(document.activeElement).toBe(correo));
+    await waitFor(() => expect(correo.disabled).toBe(false));
+    expect(document.activeElement).toBe(titulo);
   });
 
   it("E35: una lista pedida antes del retiro no vuelve a mostrar pendiente la invitación retirada", async () => {
@@ -689,7 +749,7 @@ describe("página /invitaciones", () => {
     const simulado = conConsorcio({
       "GET /api/v1/me/consorcios": () =>
         Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
-      [`GET /api/v1/consorcios/${C2}/unidades`]: () => Response.json({ elementos: [{ id: U2, designacion: "9° Z" }] }),
+      [`GET /api/v1/consorcios/${C2}/unidades`]: () => Response.json({ elementos: [{ id: U2, designacion: "9° Z", invitable: true }, { id: U1, designacion: "9° Y", invitable: true }] }),
       [`GET /api/v1/consorcios/${C2}/invitaciones`]: () => Response.json({ elementos: [] }),
     });
     vi.stubGlobal("fetch", simulado);
@@ -697,7 +757,7 @@ describe("página /invitaciones", () => {
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
     expect(await screen.findByText("Todavía no hay invitaciones que puedas ver.")).toBeTruthy();
-    expect(within(screen.getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z"]);
+    expect(within(screen.getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z", "9° Y"]);
   });
 
   it("al cambiar de edificio no queda elegida una unidad del anterior", async () => {
@@ -827,6 +887,75 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
   });
 
+  it.each<[string, () => Response]>([
+    ["un 503", () => error("servicio_no_disponible", 503)],
+    [
+      "un corte de red",
+      () => {
+        throw new TypeError("Failed to fetch");
+      },
+    ],
+  ])("las unidades que fallan con %s se reintentan en la pantalla, sin perder lo escrito", async (_, falla) => {
+    let caida = true;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_UNIDADES}`]: () => (caida ? falla() : Response.json(UNIDADES)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar las unidades.")).toBeTruthy();
+    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
+    expect((invitarBoton() as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
+    expect(screen.queryByText("No pudimos mostrar las unidades.")).toBeNull();
+    expect(document.querySelector(".aviso-error")).toBeNull();
+    expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(2);
+    // Control: la lista estaba bien y no se volvió a pedir; ya no hay nada que reintentar.
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("si fallan las unidades y la lista, un solo toque reintenta las dos", async () => {
+    let caida = true;
+    const simulado = conConsorcio({
+      [`GET ${RUTA_UNIDADES}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(UNIDADES)),
+      [`GET ${RUTA_LISTA}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Consultar de nuevo" })).toHaveLength(2));
+    caida = false;
+    fireEvent.click(en(screen.getAllByRole("button", { name: "Consultar de nuevo" }), 0));
+    expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
+    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
+    expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(2);
+    expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
+  it("control: al cambiar de edificio no queda el reintento de las unidades del anterior", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+        [`GET ${RUTA_UNIDADES}`]: () => error("error_interno", 500),
+        [`GET /api/v1/consorcios/${C2}/unidades`]: () => Response.json({ elementos: [{ id: U2, designacion: "9° Z", invitable: true }, { id: U1, designacion: "9° Y", invitable: true }] }),
+        [`GET /api/v1/consorcios/${C2}/invitaciones`]: () => Response.json({ elementos: [] }),
+      }),
+    );
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar las unidades.")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+    await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2));
+    expect(screen.queryByText("No pudimos mostrar las unidades.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
+  });
+
   it("si falla la recarga después de invitar, el «Listo» queda y la lista se reintenta", async () => {
     let caida = false;
     const simulado = conConsorcio({
@@ -867,6 +996,45 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
 });
 
 describe("lo que no se puede hacer no aparece en /invitaciones", () => {
+  const unidades = (...invitables: boolean[]) => ({
+    elementos: invitables.map((invitable, i) => ({ id: [U1, U2, C2][i], designacion: `${i + 1}° A`, invitable })),
+  });
+
+  it("solo ofrece las unidades que la persona alcanza", async () => {
+    vi.stubGlobal("fetch", conConsorcio({ [`GET ${RUTA_UNIDADES}`]: () => Response.json(unidades(false, true, true)) }));
+    abrir();
+
+    await screen.findByRole("option", { name: "2° A" });
+    const opciones = within(screen.getByLabelText("Unidad")).getAllByRole("option");
+    expect(opciones.map((o) => o.textContent)).toEqual(["2° A", "3° A"]);
+  });
+
+  it("con una sola unidad no pregunta, y la invitación sale para esa", async () => {
+    const simulado = conConsorcio({
+      [`GET ${RUTA_UNIDADES}`]: () => Response.json(unidades(false, true)),
+      [`POST ${RUTA_LISTA}`]: () => Response.json(invitacion(PENDIENTE, "Ana Díaz", "pendiente", "ana@ejemplo.com"), { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+
+    expect(await screen.findByText("Unidad: 2° A")).toBeTruthy();
+    expect(screen.queryByLabelText("Unidad")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Ana Díaz" } });
+    fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "ana@ejemplo.com" } });
+    fireEvent.click(invitarBoton());
+
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
+    const cuerpo = (await en(pedidos(simulado, "POST", RUTA_LISTA), 0).clone().json()) as { unidad_id: string };
+    expect(cuerpo.unidad_id).toBe(U2);
+  });
+
+  it("control: con todas al alcance sigue preguntando", async () => {
+    vi.stubGlobal("fetch", conConsorcio());
+    abrir();
+
+    expect(await screen.findByLabelText("Unidad")).toBeTruthy();
+  });
+
   it("«Retirar» se ve con `invitaciones.revocar`", async () => {
     vi.stubGlobal(
       "fetch",

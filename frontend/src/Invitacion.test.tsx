@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { PREFIJO_COPIA } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { ContextoVersion } from "./version";
 
@@ -54,18 +55,26 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
 
 const CONSULTAR = "/api/v1/auth/invitacion/consultar";
 const ACEPTAR = "/api/v1/auth/invitacion/aceptar";
+const SALIR = "/api/v1/auth/salir";
 const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
 const AVISO = "Listo: ya sos parte de Edificio Alvear 100.";
+
+type Respuesta = () => Response | Promise<Response>;
 
 /**
  * Responde la consulta con la invitación y la aceptación con `aceptacion`; aceptar abre la sesión,
  * que es lo que consulta el inicio. Lo que no está previsto falla la prueba.
  */
-function backend(aceptacion: () => Response, consulta: () => Response | Promise<Response> = () => Response.json(RECIBIDA)) {
+function backend(
+  aceptacion: () => Response,
+  consulta: Respuesta = () => Response.json(RECIBIDA),
+  salir: Respuesta = () => new Response(null, { status: 204 }),
+) {
   return vi.fn(async (pedido: Request) => {
     const camino = new URL(pedido.url).pathname;
     if (camino === CONSULTAR) return consulta();
     if (camino === ACEPTAR) return aceptacion();
+    if (camino === SALIR) return salir();
     if (camino === "/api/v1/auth/sesion") return Response.json({});
     if (camino === "/health") return error("servicio_no_disponible", 503);
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
@@ -84,6 +93,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  localStorage.clear();
   window.history.replaceState(null, "", "/");
 });
 
@@ -148,6 +158,7 @@ describe("página /invitacion", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
     expect(await screen.findByText(/Ya tenés una cuenta con este correo/)).toBeTruthy();
+    expect(screen.getByText(/la vas a ver en el inicio, lista para aceptar/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Entrá" }).getAttribute("href")).toBe("/entrar");
   });
 
@@ -348,7 +359,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Alberto" });
 
     // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
-    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }));
+    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }));
     expect(await screen.findByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));
@@ -375,6 +386,151 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
 
     expect(await screen.findByText(texto)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+});
+
+describe("ningún error de /invitacion termina sin un paso siguiente", () => {
+  const ACEPTAR_LA = { name: "Aceptar la invitación" };
+  const SALIR_DE_ESTA = { name: "Salir de esta cuenta" };
+  const AL_INICIO = { name: "Ir al inicio" };
+  const OTRA_PERSONA = /no es la del correo invitado/;
+  const OTRA_CUENTA = () => error("invitacion_de_otra_persona", 409);
+  const COPIA = JSON.stringify({
+    consorcio_id: "c1",
+    nombre: "Edificio",
+    guardada_en: "2026-10-21T12:00:00Z",
+    lista: { elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" },
+  });
+
+  /** Lleva al rechazo de quien abrió el enlace con otra cuenta; ya montada la página. */
+  async function botonSalir() {
+    fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
+    return screen.findByRole("button", SALIR_DE_ESTA);
+  }
+
+  it("con otra cuenta abierta, salir vuelve a la invitación con el mismo token, sin ir al correo", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    const pedido = backend(OTRA_CUENTA);
+    vi.stubGlobal("fetch", pedido);
+    localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await screen.findByRole("button", ACEPTAR_LA)).toBeTruthy();
+    expect(screen.queryByText(OTRA_PERSONA)).toBeNull();
+    const [salida, ...otras] = pedidosDe(pedido).filter((p) => new URL(p.url).pathname === SALIR);
+    expect(otras).toEqual([]);
+    expect(salida?.headers.get("X-CSRF-Token")).toBe("abc123");
+    const consultas = consultasDe(pedido);
+    expect(consultas).toHaveLength(2);
+    expect(await consultas[1]?.json()).toEqual({ token: TOKEN });
+    // Como toda salida, borra las copias de los contactos (H2b_7 §5).
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBeNull();
+  });
+
+  it("un 401 al salir es que ya estaba afuera: sigue igual", async () => {
+    const pedido = backend(OTRA_CUENTA, undefined, () => error("no_autenticado", 401));
+    vi.stubGlobal("fetch", pedido);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await screen.findByRole("button", ACEPTAR_LA)).toBeTruthy();
+    expect(consultasDe(pedido)).toHaveLength(2);
+  });
+
+  it.each<[string, Respuesta, RegExp]>([
+    ["un 503", () => error("servicio_no_disponible", 503), /El servicio no está disponible/],
+    ["sin red", () => Promise.reject(new TypeError("Failed to fetch")), /Revisá la conexión/],
+  ])("con %s al salir lo dice, se queda ahí y deja probar de nuevo", async (_, salir, mensaje) => {
+    const pedido = backend(OTRA_CUENTA, undefined, salir);
+    vi.stubGlobal("fetch", pedido);
+    localStorage.setItem(`${PREFIJO_COPIA}c1`, COPIA);
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await botonSalir());
+
+    expect(await screen.findByText(mensaje)).toBeTruthy();
+    expect(screen.getByText(OTRA_PERSONA)).toBeTruthy();
+    const boton = screen.getByRole("button", SALIR_DE_ESTA) as HTMLButtonElement;
+    await vi.waitFor(() => expect(boton.disabled).toBe(false));
+    expect(consultasDe(pedido)).toHaveLength(1);
+    expect(localStorage.getItem(`${PREFIJO_COPIA}c1`)).toBe(COPIA);
+  });
+
+  it.each<[string, () => Response, RegExp]>([
+    ["no sirve", () => error("invitacion_invalida", 404), /Esta invitación no sirve/],
+    ["la creó quien la abre", () => error("invitacion_propia", 409), /Esta invitación la creaste vos/],
+  ])("si %s, lleva al inicio", async (_, rechazo, texto) => {
+    vi.stubGlobal("fetch", backend(rechazo));
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
+    expect(await screen.findByText(texto)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("link", AL_INICIO));
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  });
+
+  it("sin enlace también lleva al inicio", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    abrir("/invitacion");
+
+    expect(screen.getByRole("link", AL_INICIO).getAttribute("href")).toBe("/");
+  });
+
+  it("control: sin sesión, el mismo enlace termina en /entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (pedido: Request) =>
+        new URL(pedido.url).pathname === "/api/v1/auth/sesion"
+          ? error("no_autenticado", 401)
+          : error("invitacion_invalida", 404),
+      ),
+    );
+    abrir(`/invitacion#token=${TOKEN}`);
+
+    fireEvent.click(await screen.findByRole("link", AL_INICIO));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
+  });
+
+  it("control: quien tiene que entrar no ve otra salida que la confunda", async () => {
+    vi.stubGlobal("fetch", backend(() => error("invitacion_requiere_sesion", 409)));
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
+
+    expect(await screen.findByRole("link", { name: "Entrá" })).toBeTruthy();
+    expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
+    expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
+  });
+
+  it("un 409 sin pantalla propia muestra lo que dice el servidor, no un error de conexión", async () => {
+    const mensaje = "El vínculo de esta invitación ya no está en el padrón.";
+    vi.stubGlobal(
+      "fetch",
+      backend(() =>
+        Response.json({ codigo: "invitacion_vinculo_no_corresponde", mensaje, id_correlacion: "c" }, { status: 409 }),
+      ),
+    );
+    abrir(`/invitacion#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
+
+    expect(await screen.findByText(mensaje)).toBeTruthy();
+    expect(screen.getByRole("link", AL_INICIO)).toBeTruthy();
+    expect(screen.queryByRole("button", ACEPTAR_LA)).toBeNull();
+    expect(screen.queryByText(OTRA_PERSONA)).toBeNull();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
+  it("con otra cuenta no tiene faltas de accesibilidad detectables por axe", async () => {
+    vi.stubGlobal("fetch", backend(OTRA_CUENTA));
+    const { container } = abrir(`/invitacion#token=${TOKEN}`);
+    await botonSalir();
+
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
   });
 });
 

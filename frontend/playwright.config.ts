@@ -20,5 +20,6 @@ export default defineConfig({
   projects: [
     { name: "escritorio", use: { ...devices["Desktop Chrome"] } },
     { name: "movil", use: { ...devices["Pixel 7"] } },
+    { name: "tablet", use: { ...devices["Galaxy Tab S4"] } },
   ],
 });

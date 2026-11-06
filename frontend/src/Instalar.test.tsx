@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -11,12 +11,16 @@ const AGENTE_ANDROID =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Mobile Safari/537.36";
 const AGENTE_IPHONE =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+const AGENTE_COMPUTADORA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
 const INSTALAR = { name: /Instalá Consorcio en Mano/ };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
-const ENLACE_INSTALAR = { name: "Instalá la aplicación en tu teléfono" };
+const ENLACE_INSTALAR = { name: "Instalá la aplicación en este dispositivo" };
+const ENLACE_COMPUTADORA = { name: "Instalá la aplicación en esta computadora" };
 const NO_SE_INSTALO = /No se instaló/;
+const REINTENTAR = { name: "Reintentar" };
 
 /** El backend visto desde la instalación: la sesión y el estado del servicio. */
 function backend(sesion: "con_sesion" | "sin_sesion") {
@@ -40,10 +44,10 @@ function montar(ruta = "/instalar") {
   );
 }
 
-function simularNavegador(agente: string, standalone = false) {
+function simularNavegador(agente: string, standalone = false, punteroFino = false) {
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agente);
   vi.stubGlobal("matchMedia", (consulta: string) => ({
-    matches: standalone && consulta === "(display-mode: standalone)",
+    matches: (standalone && consulta === "(display-mode: standalone)") || (punteroFino && consulta === "(pointer: fine)"),
   }));
 }
 
@@ -134,6 +138,60 @@ describe("página /instalar", () => {
     expect(await screen.findByText(NO_SE_INSTALO)).toBeTruthy();
     expect(screen.getByRole("heading", INSTALAR)).toBeTruthy();
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
+  });
+
+  it("sin el evento del navegador, Reintentar recarga para que lo vuelva a ofrecer", async () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+    ofrecerInstalacion("dismissed");
+    await tocarInstalar();
+    const recargar = vi.fn();
+    vi.stubGlobal("location", { reload: recargar });
+
+    fireEvent.click(await screen.findByRole("button", REINTENTAR));
+
+    expect(recargar).toHaveBeenCalledOnce();
+  });
+
+  it("control: si el navegador ya la volvió a ofrecer, queda su botón y no Reintentar", async () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+    ofrecerInstalacion("dismissed");
+    await tocarInstalar();
+    await screen.findByText(NO_SE_INSTALO);
+
+    ofrecerInstalacion();
+
+    expect(screen.getByRole("button", { name: "Instalar la aplicación" })).toBeTruthy();
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+  });
+
+  it("control: antes de pedir la instalación no hay nada que reintentar", () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+  });
+
+  it("los pasos del menú son dos y no hablan de iPhone: el iPhone tiene los suyos", () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+
+    expect(within(screen.getByRole("list")).getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.queryByText(/iPhone/)).toBeNull();
+  });
+
+  it.each([
+    ["instalando", "accepted", "Instalando…"],
+    ["después de cancelar", "dismissed", NO_SE_INSTALO],
+  ] as const)("%s no repite los pasos del menú", async (_, eleccion, estado) => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+    ofrecerInstalacion(eleccion);
+    await tocarInstalar();
+
+    expect(await screen.findByText(estado)).toBeTruthy();
+    expect(screen.queryByText(/Tocá el menú/)).toBeNull();
   });
 
   it("terminada la instalación sigue a /entrar con el aviso", async () => {
@@ -234,6 +292,59 @@ describe("enlace en el inicio", () => {
     montar("/entrar");
     expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
     expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+  });
+});
+
+describe("en una computadora", () => {
+  const EN_COMPUTADORA = { level: 1, name: "Instalá Consorcio en Mano en esta computadora" };
+  const EN_TELEFONO = { level: 1, name: "Instalá Consorcio en Mano en este dispositivo" };
+
+  it("con la oferta del navegador, la página habla de esta computadora, también después de tocar el botón", async () => {
+    simularNavegador(AGENTE_COMPUTADORA, false, true);
+    montar();
+
+    ofrecerInstalacion();
+    expect(screen.getByRole("heading", EN_COMPUTADORA)).toBeTruthy();
+
+    await tocarInstalar();
+    expect(screen.getByRole("heading", EN_COMPUTADORA)).toBeTruthy();
+  });
+
+  it("control: en un teléfono con la misma oferta, la página no habla de computadora", () => {
+    simularNavegador(AGENTE_ANDROID);
+    montar();
+
+    ofrecerInstalacion();
+
+    expect(screen.getByRole("heading", EN_TELEFONO)).toBeTruthy();
+  });
+
+  it("sin la oferta del navegador no hay enlace: ahí no hay nada que hacer", () => {
+    vi.stubGlobal("fetch", backend("sin_sesion"));
+    simularNavegador(AGENTE_COMPUTADORA, false, true);
+    montar("/entrar");
+
+    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Instalá la aplicación/ })).toBeNull();
+  });
+
+  it("con la oferta aparece el enlace, y dice esta computadora", () => {
+    vi.stubGlobal("fetch", backend("sin_sesion"));
+    simularNavegador(AGENTE_COMPUTADORA, false, true);
+    montar("/entrar");
+
+    ofrecerInstalacion();
+
+    expect(screen.getByRole("link", ENLACE_COMPUTADORA).getAttribute("href")).toBe("/instalar");
+    expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
+  });
+
+  it("control: un iPad con mouse sigue siendo un iPad, y conserva el enlace de dispositivo", () => {
+    vi.stubGlobal("fetch", backend("sin_sesion"));
+    simularNavegador(AGENTE_IPHONE, false, true);
+    montar("/entrar");
+
+    expect(screen.getByRole("link", ENLACE_INSTALAR)).toBeTruthy();
   });
 });
 

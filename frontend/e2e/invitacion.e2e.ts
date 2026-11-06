@@ -1,6 +1,6 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
 
-import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
+import { otroCliente, simularPuntero, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /invitacion (RF03) servida por el nginx de la imagen, con su CSP real. El backend de
 // la corrida no tiene base de datos, así que consultar y aceptar se simulan desde el navegador.
@@ -184,6 +184,7 @@ test.describe("invitación", () => {
         return ruta.fulfill({ status: 503, json: { codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" } });
       return ruta.fulfill({ json: ACEPTADA });
     });
+    await simularPuntero(page, false);
     await simularSesion(page, "con_sesion");
     await page.goto(`/invitacion#token=${TOKEN}`);
     await page.getByLabel("Tu nombre").fill("Alberto");
@@ -206,7 +207,7 @@ test.describe("invitación", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);
-    await page.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }).click();
+    await page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }).click();
     await expect(page).toHaveURL(/\/instalar$/);
     await page.goBack();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);

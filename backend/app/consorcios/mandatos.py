@@ -431,6 +431,21 @@ def _leer(permiso: Permiso, motor, sql: str, parametros: dict) -> list:
         raise
 
 
+def _quien_registro(fila, cuentas: set[UUID]) -> dict[str, bool]:
+    """Quién registró la decisión no sale: solo si fue quien lee (A15, por ser humano) o el
+    equipo. Es solo para mostrar: la ruta que la usa vuelve a decidir."""
+    return {
+        "registrada_por_vos": fila["registrada_por"] in cuentas,
+        "del_equipo": fila["registrada_por"] is None and fila["origen"] == ORIGEN_SOPORTE,
+    }
+
+
+def _cuentas_humanas(permiso: Permiso, motor) -> set[UUID]:
+    ctx = permiso.ctx
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as c:
+        return permiso.cuentas_humanas(c)
+
+
 COLUMNAS_RESUMEN = (
     "id, tipo::text as tipo, nombre, cuit, vigente_desde, vigente_hasta, estado, con_cuenta"
 )
@@ -484,13 +499,18 @@ def detalle_mandato(
     permiso: Annotated[Permiso, Depends(requiere("mandatos.ver"))],
     motor: MotorDep,
 ) -> MandatoDetalle:
+    # `es_propio` compara cuentas, como `baja_mandato` (`SOLO_POR_CUENTA`): con otra cuenta del
+    # mismo ser humano la baja se puede, para que una cuenta mal asociada tenga remedio.
+    ctx = permiso.ctx
     filas = _leer(
         permiso,
         motor,
         f"select {COLUMNAS_RESUMEN}, matricula, decision_id, facultades, causa_baja,"
-        " baja_decision_id, instrumento_referencia, motivo_fin, finalizado_en"
+        " baja_decision_id, instrumento_referencia, motivo_fin, finalizado_en,"
+        " exists (select 1 from nucleo.mandato x where x.consorcio_id = :c and x.id = :m"
+        " and x.persona_id = :p) as es_propio"
         " from nucleo.mandato_detalle(:m)",
-        {"m": mandato_id},
+        {"m": mandato_id, "c": ctx.consorcio_id, "p": ctx.persona_id},
     )
     if not filas:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
@@ -509,10 +529,26 @@ def listar_decisiones(
     filas = _leer(
         permiso,
         motor,
-        "select id, tipo::text as tipo, fecha, descripcion from nucleo.decisiones_del_consorcio()",
-        {},
+        "select d.id, d.tipo::text as tipo, d.fecha, d.descripcion, f.registrada_por, f.origen"
+        # `left`: la función corre siempre, y su 42501 es la segunda barrera.
+        " from nucleo.decisiones_del_consorcio() d"
+        " left join nucleo.decision_formal f on f.consorcio_id = :c and f.id = d.id"
+        " order by d.fecha desc, d.id desc",
+        {"c": permiso.ctx.consorcio_id},
     )
-    return ListaDecisiones(elementos=[DecisionResumen(**f) for f in filas])
+    cuentas = _cuentas_humanas(permiso, motor)
+    return ListaDecisiones(
+        elementos=[
+            DecisionResumen(
+                id=f["id"],
+                tipo=f["tipo"],
+                fecha=f["fecha"],
+                descripcion=f["descripcion"],
+                **_quien_registro(f, cuentas),
+            )  # fmt: skip
+            for f in filas
+        ]
+    )
 
 
 @router.get(
@@ -566,6 +602,5 @@ def detalle_decision(
         descripcion=f["descripcion"],
         referencia=f["referencia_acta"],
         sha256=f["sha256_acta"],
-        registrada_por_vos=f["registrada_por"] == permiso.ctx.persona_id,
-        del_equipo=f["registrada_por"] is None and f["origen"] == ORIGEN_SOPORTE,
+        **_quien_registro(f, _cuentas_humanas(permiso, motor)),
     )

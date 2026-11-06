@@ -1921,6 +1921,7 @@
         "description": "El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede\nusarla para dar de alta ni para remover) o el equipo.",
         "properties": {
           "del_equipo": {
+            "description": "Si la cargó el equipo: no activa A15.",
             "title": "Del Equipo",
             "type": "boolean"
           },
@@ -1943,6 +1944,7 @@
             "type": "string"
           },
           "registrada_por_vos": {
+            "description": "Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir.",
             "title": "Registrada Por Vos",
             "type": "boolean"
           },
@@ -1966,10 +1968,10 @@
           "tipo",
           "fecha",
           "descripcion",
-          "referencia",
-          "sha256",
           "registrada_por_vos",
-          "del_equipo"
+          "del_equipo",
+          "referencia",
+          "sha256"
         ],
         "title": "DecisionDetalle",
         "type": "object"
@@ -2048,6 +2050,11 @@
       "DecisionResumen": {
         "description": "Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella.",
         "properties": {
+          "del_equipo": {
+            "description": "Si la cargó el equipo: no activa A15.",
+            "title": "Del Equipo",
+            "type": "boolean"
+          },
           "descripcion": {
             "title": "Descripcion",
             "type": "string"
@@ -2062,6 +2069,11 @@
             "title": "Id",
             "type": "string"
           },
+          "registrada_por_vos": {
+            "description": "Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Registrada Por Vos",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoDecision"
           }
@@ -2070,7 +2082,9 @@
           "id",
           "tipo",
           "fecha",
-          "descripcion"
+          "descripcion",
+          "registrada_por_vos",
+          "del_equipo"
         ],
         "title": "DecisionResumen",
         "type": "object"
@@ -2950,6 +2964,11 @@
       "FilaPadron": {
         "description": "Un vínculo del padrón, con los datos mínimos de D6.",
         "properties": {
+          "confirmable_por_vos": {
+            "description": "Si quien lee puede confirmar este vínculo: sin confirmar, con la facultad sobre la unidad, y ni suyo ni registrado por esa cuenta (P4). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Confirmable Por Vos",
+            "type": "boolean"
+          },
           "confirmado": {
             "title": "Confirmado",
             "type": "boolean"
@@ -3013,7 +3032,8 @@
           "vigente_desde",
           "vigente_hasta",
           "confirmado",
-          "iniciado"
+          "iniciado",
+          "confirmable_por_vos"
         ],
         "title": "FilaPadron",
         "type": "object"
@@ -4575,6 +4595,11 @@
             "title": "Creada En",
             "type": "string"
           },
+          "credencial_id": {
+            "description": "Identificador público de la credencial, en base64url: el que da el navegador.",
+            "title": "Credencial Id",
+            "type": "string"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -4599,6 +4624,7 @@
         },
         "required": [
           "id",
+          "credencial_id",
           "nombre",
           "creada_en",
           "ultimo_uso_en"
@@ -4684,6 +4710,11 @@
             "format": "uuid",
             "title": "Decision Id",
             "type": "string"
+          },
+          "es_propio": {
+            "description": "Si el mandato es de la cuenta de quien lee: nadie registra su propia baja (A4, por cuenta). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Es Propio",
+            "type": "boolean"
           },
           "estado": {
             "$ref": "#/components/schemas/EstadoMandato"
@@ -4788,7 +4819,8 @@
           "baja_decision_id",
           "instrumento_referencia",
           "motivo_fin",
-          "finalizado_en"
+          "finalizado_en",
+          "es_propio"
         ],
         "title": "MandatoDetalle",
         "type": "object"
@@ -5132,11 +5164,17 @@
           },
           "orden": {
             "$ref": "#/components/schemas/OrdenPago"
+          },
+          "puede_conciliar": {
+            "description": "Si quien lee puede conciliar el pago pendiente: la ejecución abierta, sin haber preparado la orden ni registrado un pago de ella. Quién vio la cuenta sin registrar no se sabe acá: se lo niega la base al conciliar. Solo para mostrar.",
+            "title": "Puede Conciliar",
+            "type": "boolean"
           }
         },
         "required": [
           "orden",
-          "ejecucion"
+          "ejecucion",
+          "puede_conciliar"
         ],
         "title": "OrdenConPagoManual",
         "type": "object"
@@ -5231,6 +5269,11 @@
             "description": "Cuándo llegó a Aprobada.",
             "title": "Aprobada En"
           },
+          "aprobada_por_vos": {
+            "description": "Si quien lee, con esta cuenta u otra del mismo ser humano, aprobó la versión vigente: quien aprobó no la emite ni la paga. Solo en una orden en curso (en revisión, aprobada, en ejecución o en verificación); en las demás es falso. Solo para mostrar: la ruta y la base vuelven a decidir.",
+            "title": "Aprobada Por Vos",
+            "type": "boolean"
+          },
           "concepto": {
             "title": "Concepto",
             "type": "string"
@@ -5319,7 +5362,8 @@
           "franja",
           "alerta_fraccionamiento",
           "aprobada_en",
-          "aprobacion_vence_en"
+          "aprobacion_vence_en",
+          "aprobada_por_vos"
         ],
         "title": "OrdenPago",
         "type": "object"
@@ -5372,6 +5416,16 @@
           "orden": {
             "$ref": "#/components/schemas/OrdenPago"
           },
+          "puede_aprobar": {
+            "description": "Si quien lee puede aprobar la versión vigente: la orden en revisión, sin haber preparado ninguna versión ni haberla aprobado ya, y sin haber firmado la cuenta que paga. Lo de la cuenta solo se sabe de quien prepara: a quien ya no prepara se lo niega la base al aprobar. Solo para mostrar.",
+            "title": "Puede Aprobar",
+            "type": "boolean"
+          },
+          "puede_rechazar": {
+            "description": "Si quien lee puede rechazar la versión vigente: la orden en revisión y sin haber preparado ninguna versión. No mira la cuenta del proveedor: esa separación es solo de aprobar. Solo para mostrar.",
+            "title": "Puede Rechazar",
+            "type": "boolean"
+          },
           "versiones": {
             "items": {
               "$ref": "#/components/schemas/VersionOrdenPagoRevision"
@@ -5382,7 +5436,9 @@
         },
         "required": [
           "orden",
-          "versiones"
+          "versiones",
+          "puede_aprobar",
+          "puede_rechazar"
         ],
         "title": "OrdenPagoConVersionesRevision",
         "type": "object"
@@ -5783,6 +5839,11 @@
           "motivo": {
             "title": "Motivo",
             "type": "string"
+          },
+          "puede_confirmar": {
+            "description": "Si quien lee puede confirmarla: es `confirmable` y no preparó la orden, ni registró un pago ni declaró en ella. Solo para mostrar: la ruta y la base vuelven a decidir.",
+            "title": "Puede Confirmar",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5792,7 +5853,8 @@
           "declarado_en",
           "confirmado_por",
           "confirmado_en",
-          "confirmable"
+          "confirmable",
+          "puede_confirmar"
         ],
         "title": "PagoNoRealizado",
         "type": "object"
@@ -6935,11 +6997,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "invitable": {
+            "description": "Si la persona puede invitar a esta unidad. Solo para mostrar.",
+            "title": "Invitable",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "designacion"
+          "designacion",
+          "invitable"
         ],
         "title": "Unidad",
         "type": "object"
@@ -13858,7 +13926,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/unidades": {
       "get": {
-        "description": "Id y designación de las unidades, sin personas (D6). Concede por ámbito: cualquier\nvínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1).",
+        "description": "Id y designación de las unidades, sin personas (D6). Concede por ámbito: cualquier\nvínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1). `invitable` es solo\npara mostrar: `evaluar` no audita, y la ruta de invitar vuelve a decidir.",
         "operationId": "unidades_api_v1_consorcios__consorcio_id__unidades_get",
         "parameters": [
           {

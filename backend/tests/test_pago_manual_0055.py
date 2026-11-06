@@ -200,6 +200,123 @@ def confirmables(e, o) -> dict[str, bool]:
     return {d["id"]: d["confirmable"] for d in elemento["ejecucion"]["declaraciones"]}
 
 
+def en_revision(e, quien, o) -> dict:
+    """La orden en la revisión de pagos manuales, como la lee `quien`."""
+    r = get(e, quien, "pagos-manuales/revision")
+    assert r.status_code == 200, r.json()
+    [elemento] = [x for x in r.json()["elementos"] if x["orden"]["id"] == str(o)]
+    return elemento
+
+
+def puede_confirmar(e, quien, o) -> dict[str, bool]:
+    declaraciones = en_revision(e, quien, o)["ejecucion"]["declaraciones"]
+    return {d["id"]: d["puede_confirmar"] for d in declaraciones}
+
+
+# Lo que la pantalla ofrece a cada persona (solo para mostrar) --------------------------------
+
+
+def test_puede_conciliar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    assert en_revision(e, e.mc2, o)["puede_conciliar"] is False  # todavía no hay pago
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    p = registrada(motor_migrate, e, o, quien=x)
+    conciliacion = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
+
+    # Quien registró: el dato dice que no y la ruta niega.
+    assert en_revision(e, x, o)["puede_conciliar"] is False
+    assert codigo(post(e, x, conciliacion, {"resultado": "conforme"})) == (403, "sin_permiso")
+    # Quien preparó, con otra cuenta del Consejo: lo mismo, por ser humano.
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    assert en_revision(e, otra, o)["puede_conciliar"] is False
+    assert codigo(post(e, otra, conciliacion, {"resultado": "conforme"})) == (403, "sin_permiso")
+
+    # Control: otro consejero. El dato dice que sí y la ruta concede.
+    assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
+    r = post(e, e.mc2, conciliacion, {"resultado": "conforme"})
+    assert r.status_code == 200, r.json()
+    # Pagada, ya no queda nada por conciliar.
+    assert en_revision(e, e.mc1, o)["puede_conciliar"] is False
+
+
+def test_declarar_sin_haber_visto_la_cuenta_no_quita_conciliar(motor_migrate, e):
+    """Declarar no cuenta para conciliar: sin nadie que haya visto la cuenta, se puede declarar sin
+    verla, y la base deja conciliar a esa persona. El dato no le esconde lo que sí puede hacer."""
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO")
+    p = registrada(motor_migrate, e, o)
+    assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
+    r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
+    assert r.status_code == 200, r.json()
+
+
+def test_hueco_conocido_quien_vio_la_cuenta_sin_registrar(motor_migrate, e):
+    """`cem_app` no lee quién abrió la cuenta: a quien la vio y no registró el dato no se lo oculta
+    y lo frena la base. Es un 403 en la misma pantalla (regla 2). Con una lectura nueva, esta
+    prueba cambia: el dato pasa a decir que no."""
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    ver(motor_migrate, e, e.mc2, o)
+    p = registrada(motor_migrate, e, o)
+    assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
+    r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
+    assert codigo(r) == (403, "no_es_quien_ejecuto")
+
+
+def test_puede_confirmar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    x = otro_ejecutor(motor_migrate, motor_app, e)
+    ver(motor_migrate, e, e.mc2, o)
+    ver(motor_migrate, e, x, o)
+    dm = str(llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO"))
+    # Falta que declare x: todavía no es confirmable, para nadie.
+    assert puede_confirmar(e, e.mc1, o) == {dm: False}
+    dx = str(llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO"))
+    confirmar = f"ordenes-pago/{o}/pago-manual/no-realizado/{{}}/confirmacion"
+
+    # Los dos vieron la cuenta y declararon: ninguno confirma la del otro. El dato dice que no y
+    # la base niega, aunque la declaración sea de otra persona.
+    assert puede_confirmar(e, e.mc2, o) == {dm: False, dx: False}
+    assert puede_confirmar(e, x, o) == {dm: False, dx: False}
+    r = post(e, e.mc2, confirmar.format(dx), {})
+    assert codigo(r) == (403, "no_es_quien_ejecuto")
+    # Quien preparó, con otra cuenta del Consejo: tampoco.
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    assert puede_confirmar(e, otra, o) == {dm: False, dx: False}
+    assert codigo(post(e, otra, confirmar.format(dm), {})) == (403, "sin_permiso")
+
+    # Control: quien no ejecutó ni preparó. El dato dice que sí y la ruta concede.
+    assert puede_confirmar(e, e.mc1, o) == {dm: True, dx: True}
+    r = post(e, e.mc1, confirmar.format(dm), {})
+    assert r.status_code == 200, r.json()
+    assert orden(motor_migrate, o)["estado"] == "fallida"
+
+
+def test_aprobada_por_vos_se_calcula_mientras_la_orden_sigue_en_curso(motor_migrate, e):
+    o = emitida(motor_migrate, e)  # la aprobó mc1
+    p = registrada(motor_migrate, e, o)
+    assert en_revision(e, e.mc1, o)["orden"]["aprobada_por_vos"] is True
+    assert en_revision(e, e.mc2, o)["orden"]["aprobada_por_vos"] is False  # control
+    r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
+    assert r.status_code == 200, r.json()
+    # Pagada, ya no hay nada que ocultar: la lista no lee quién aprobó cada orden de la historia.
+    assert en_revision(e, e.mc1, o)["orden"]["aprobada_por_vos"] is False
+
+
+def test_aprobada_por_vos_con_la_cuenta_que_aprobo_desvinculada(motor_migrate, motor_app, e):
+    """La base compara con la identidad guardada al aprobar: otra cuenta del mismo ser humano sigue
+    separada aunque la que aprobó ya no esté vinculada."""
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    o = emitida(motor_migrate, e)  # la aprobó mc1
+    desvincular(motor_migrate, e, e.mc1)
+    assert en_revision(e, otra, o)["orden"]["aprobada_por_vos"] is True
+    con_ejecutar(motor_migrate, e, otra)
+    niega(motor_migrate, e, otra, VER, "no_es_quien_aprobo", orden=o, version=1,
+          huella=huella(motor_migrate, o, 1))  # fmt: skip
+
+
 # El caso del piloto, de punta a punta por HTTP ---------------------------------------------
 
 

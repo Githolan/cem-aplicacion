@@ -1,28 +1,34 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { type FormEvent, type MutableRefObject, useEffect, useId, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS, usePuede } from "../permisos";
+import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
   aTexto,
   type Aviso,
+  cambioLaOrden,
   cambioLoVisto,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
+  mensajeDeActo,
   mensajeDeError,
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  soltarClaveSiCambio,
+  sobreLoNuevo,
   TEXTO_ALERTA_FRACCIONAMIENTO,
   TEXTO_ESTADO_ORDEN,
-  TEXTO_FRANJA,
+  textoFranja,
+  vencida,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "./EstadoPantalla";
@@ -39,6 +45,7 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 type Orden = components["schemas"]["OrdenPago"];
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
+type Version = components["schemas"]["VersionOrdenPago"];
 
 export const RUTA_ORDENES = "/egresos/ordenes";
 const MONEDAS = ["ARS", "USD"] as const;
@@ -62,7 +69,9 @@ type Datos = {
   /** El contrato o abono que la respalda ("" = ninguno): solo así es rutinaria. */
   contrato: string;
 };
-type Formulario = { modo: "preparar" } | { modo: "modificar"; orden: Orden };
+/** `vistos`: los datos de la versión que se abrió, para saber qué cambió la persona. */
+type Modificar = { modo: "modificar"; orden: Orden; vistos: Datos };
+type Formulario = { modo: "preparar" } | Modificar;
 type Acto =
   | { tipo: "guardar"; formulario: Formulario }
   | { tipo: "enviar"; orden: Orden }
@@ -78,22 +87,67 @@ export function contratosAplicables(contratos: Contrato[], proveedor: string, mo
   return contratos.filter((k) => k.estado === "vigente" && k.proveedor_id === proveedor && k.moneda === moneda);
 }
 
-/** Si la aprobación de una orden aprobada ya venció (la base lo vuelve a controlar al emitir). */
-export function vencida(o: Orden, ahora = Date.now()): boolean {
-  return o.estado === "aprobada" && o.aprobacion_vence_en !== null && Date.parse(o.aprobacion_vence_en) <= ahora;
+/** Por qué el proveedor no deja emitir la orden (el código con que respondería la API), o null. Si
+ * no está en la lista no se sabe: decide la API. `proveedor_cambiado` no se puede anticipar acá. */
+export function trabaDelProveedor(o: Orden, proveedores: Proveedor[]): string | null {
+  const proveedor = proveedores.find((p) => p.id === o.proveedor_id);
+  if (proveedor === undefined) return null;
+  if (proveedor.estado !== "activo") return "proveedor_inactivo";
+  return proveedor.cuenta_ultimos_digitos === null ? "proveedor_sin_cuenta" : null;
+}
+
+const esperaUnaAccion = (o: Orden) => o.estado === "borrador" || vencida(o);
+
+/** Lo que espera una acción primero; después, el resto en el orden de la API. */
+export function ordenadas(ordenes: Orden[]): Orden[] {
+  return [...ordenes.filter(esperaUnaAccion), ...ordenes.filter((o) => !esperaUnaAccion(o))];
+}
+
+const datosVacios = (proveedor: string): Datos => ({
+  proveedor,
+  importe: "",
+  moneda: "ARS",
+  concepto: "",
+  comprobante: "",
+  reserva: false,
+  contrato: "",
+});
+
+/** Una versión en el formulario; un contrato que ya no aplica no se trae. */
+function datosDe(v: Version, contratos: Contrato[]): Datos {
+  const aplica = contratosAplicables(contratos, v.proveedor_id, v.moneda).some((k) => k.id === v.contrato_id);
+  return {
+    proveedor: v.proveedor_id,
+    importe: aTexto(v.importe_centavos),
+    moneda: v.moneda,
+    concepto: v.concepto,
+    comprobante: v.comprobante ?? "",
+    reserva: v.usa_fondo_reserva,
+    contrato: aplica && v.contrato_id !== null ? v.contrato_id : "",
+  };
+}
+
+/** El proveedor recién dado de alta con el que se vuelve a preparar la orden (`state.proveedor`). */
+function proveedorDe(estado: unknown): string | null {
+  if (typeof estado !== "object" || estado === null || !("proveedor" in estado)) return null;
+  return typeof estado.proveedor === "string" ? estado.proveedor : null;
 }
 
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";
 
+type PropsDelEdificio = ReturnType<typeof useConsorcio> & { paraPreparar: MutableRefObject<string | null> };
+
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
 export function OrdenesPago() {
   const elegido = useConsorcio(REQUISITOS.ordenes);
-  return <OrdenesPagoDelEdificio key={elegido.consorcio} {...elegido} />;
+  // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve.
+  const paraPreparar = useRef(proveedorDe(useLocation().state));
+  return <OrdenesPagoDelEdificio key={elegido.consorcio} {...elegido} paraPreparar={paraPreparar} />;
 }
 
-function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, paraPreparar }: PropsDelEdificio) {
   const id = useId();
   const navegar = useNavigate();
   const puede = usePuede(consorcio);
@@ -106,9 +160,29 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
+  const ultimoActo = useRef<string | null>(null);
   const montado = useMontado();
   /** Órdenes cuyo contrato dejó de regir (lo dijo la API al emitir): se ofrece renovarlas. */
   const [sinContrato, setSinContrato] = useState<ReadonlySet<string>>(new Set());
+  /** La orden recién guardada: la lista la deja a la vista, con su botón a mano. */
+  const [recien, setRecien] = useState<string | null>(null);
+  const tarjetaRecien = useRef<HTMLLIElement | null>(null);
+  const enfocarRecien = useRef(false);
+
+  useEffect(() => {
+    if (!enfocarRecien.current || tarjetaRecien.current === null) return;
+    enfocarRecien.current = false;
+    tarjetaRecien.current.focus();
+  }, [lectura, recien]);
+
+  useEffect(() => {
+    const proveedor = paraPreparar.current;
+    if (proveedor === null || lectura.tipo !== "ok") return;
+    paraPreparar.current = null;
+    if (!lectura.proveedores.some((p) => p.id === proveedor && p.estado === "activo")) return;
+    setDatos(datosVacios(proveedor));
+    setFormulario({ modo: "preparar" });
+  }, [lectura, paraPreparar]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -127,7 +201,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (ordenes.data !== undefined && proveedores.data !== undefined && contratos.data !== undefined) {
           setLectura({
             tipo: "ok",
-            ordenes: ordenes.data.elementos,
+            ordenes: ordenadas(ordenes.data.elementos),
             proveedores: proveedores.data.elementos,
             contratos: contratos.data.elementos,
           });
@@ -171,15 +245,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setConfirmar(false);
     setAviso(null);
     const activo = proveedores.find((p) => p.estado === "activo");
-    setDatos({
-      proveedor: activo?.id ?? "",
-      importe: "",
-      moneda: "ARS",
-      concepto: "",
-      comprobante: "",
-      reserva: false,
-      contrato: "",
-    });
+    setDatos(datosVacios(activo?.id ?? ""));
     setFormulario({ modo: "preparar" });
   }
 
@@ -196,24 +262,39 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (data !== undefined && v !== undefined) {
           clave.current = null;
           setConfirmar(false);
-          const aplica =
-            lectura.tipo === "ok" &&
-            contratosAplicables(lectura.contratos, v.proveedor_id, v.moneda).some((k) => k.id === v.contrato_id);
-          if (v.contrato_id !== null && !aplica)
+          const vistos = datosDe(v, lectura.tipo === "ok" ? lectura.contratos : []);
+          if (v.contrato_id !== null && vistos.contrato === "")
             setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
-          setDatos({
-            proveedor: v.proveedor_id,
-            importe: aTexto(v.importe_centavos),
-            moneda: v.moneda,
-            concepto: v.concepto,
-            comprobante: v.comprobante ?? "",
-            reserva: v.usa_fondo_reserva,
-            contrato: aplica && v.contrato_id !== null ? v.contrato_id : "",
-          });
-          setFormulario({ modo: "modificar", orden: data.orden });
+          setDatos(vistos);
+          setFormulario({ modo: "modificar", orden: data.orden, vistos });
         } else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "modificar la orden", reintentar: () => abrirModificar(o) });
         else setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
+  }
+
+  /** La orden cambió mientras se modificaba: el formulario sigue abierto con lo escrito, sobre la
+   * versión nueva, y lo que se confirmó para la anterior se vuelve a confirmar. Si ya no se puede
+   * modificar, se cierra. Otra falla lo deja como está: reintentar vuelve a pasar por acá. */
+  function seguirSobreLaVersionNueva(f: Modificar) {
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}", {
+        params: { path: { consorcio_id: consorcio, orden_id: f.orden.id } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (!montado.current) return;
+        const v = data?.versiones.find((x) => x.numero === data.orden.version_vigente);
+        if (data !== undefined && v !== undefined && MODIFICABLES.has(data.orden.estado)) {
+          const vistos = datosDe(v, lectura.tipo === "ok" ? lectura.contratos : []);
+          setDatos((d) => (d === null ? d : sobreLoNuevo(d, f.vistos, vistos)));
+          setFormulario({ modo: "modificar", orden: data.orden, vistos });
+          setConfirmar(false);
+        } else if (data !== undefined || response.status === ESTADO.noEncontrado) {
+          cerrar();
+          volverAPedir();
+        }
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
   }
@@ -276,14 +357,15 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   /** `reintento`: el mismo acto después de verificar el segundo factor, con la misma clave. */
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
-    // Cada botón de la lista es un intento nuevo; el formulario conserva su clave mientras no
-    // cambien los datos.
-    if (!reintento && acto.tipo !== "guardar") clave.current = null;
+    const sobre = acto.tipo !== "guardar" ? acto.orden : acto.formulario.modo === "modificar" ? acto.formulario.orden : null;
+    const quePide = [acto.tipo, sobre?.id, sobre?.version_vigente, acto.tipo === "guardar" ? datos : null, acto.tipo === "emitir" ? acto.huella : null];
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(quePide));
     clave.current ??= crypto.randomUUID();
     const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const opciones = { headers: encabezadoCsrf() };
     setEnviando(true);
     setAviso(null);
+    setRecien(null);
     let pedido;
     let texto: string;
     if (acto.tipo === "guardar") {
@@ -343,6 +425,10 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           }
           cerrar();
           setAviso({ texto, ok: true });
+          if (acto.tipo === "guardar") {
+            enfocarRecien.current = true;
+            setRecien(data.id);
+          }
           if (acto.tipo === "renovar")
             setSinContrato((s) => new Set([...s].filter((x) => x !== acto.orden.id)));
           volverAPedir();
@@ -362,11 +448,17 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
         if (codigo === "contrato_no_vigente" && acto.tipo === "emitir")
           setSinContrato((s) => new Set(s).add(acto.orden.id));
         if (acto.tipo === "renovar" && cambioLoVisto(response.status, codigo))
           setSinContrato((s) => new Set([...s].filter((x) => x !== acto.orden.id)));
+        if (acto.tipo === "guardar" && acto.formulario.modo === "modificar" && cambioLaOrden(codigo)) {
+          seguirSobreLaVersionNueva(acto.formulario);
+          // La lista de atrás también quedó vieja; sin «Cargando», para no sacar el formulario.
+          setVuelta((v) => v + 1);
+          return;
+        }
         const seCorrige = acto.tipo === "guardar" && SE_CORRIGE_EN_EL_FORMULARIO.has(codigo ?? "");
         if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && !seCorrige) {
           cerrar();
@@ -405,7 +497,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando las órdenes…</p>}
-          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
           {lectura.tipo === "ok" && formulario === null && (
             <>
               {lectura.proveedores.some((p) => p.estado === "activo") ? (
@@ -415,7 +507,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               ) : (
                 <p className="tarjeta">
                   Para preparar una orden hace falta un proveedor activo:{" "}
-                  <Link to={RUTA_PROVEEDORES} state={{ consorcio }}>
+                  <Link to={RUTA_PROVEEDORES} state={{ consorcio, paraPreparar: true }}>
                     cargalo en Proveedores
                   </Link>
                   .
@@ -425,8 +517,12 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <p className="tarjeta">El edificio no tiene órdenes de pago.</p>
               ) : (
                 <ul className="versiones" aria-label="Órdenes de pago">
-                  {lectura.ordenes.map((o) => (
-                    <li key={o.id} className="tarjeta">
+                  {lectura.ordenes.map((o) => {
+                    const traba = trabaDelProveedor(o, lectura.proveedores);
+                    const seEmite = o.estado === "aprobada" && !vencida(o) && !sinContrato.has(o.id) && !o.aprobada_por_vos && puede("egresos.ejecutar_pago");
+                    return (
+                    <li key={o.id} className="tarjeta" ref={o.id === recien ? tarjetaRecien : undefined}
+                      tabIndex={o.id === recien ? -1 : undefined}>
                       <h2>
                         {o.razon_social}: {importe(o.importe_centavos, o.moneda)}
                       </h2>
@@ -438,7 +534,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         <dt>Preparada</dt>
                         <dd>{momento(o.creada_en)}</dd>
                         <dt>Franja</dt>
-                        <dd>{TEXTO_FRANJA[o.franja]}</dd>
+                        <dd>{textoFranja(o.franja, o.estado)}</dd>
                         {o.alerta_fraccionamiento && (
                           <>
                             <dt>Alerta</dt>
@@ -449,6 +545,12 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                           <>
                             <dt>Se emite hasta</dt>
                             <dd>{vencida(o) ? "La aprobación venció: renovala" : momento(o.aprobacion_vence_en)}</dd>
+                          </>
+                        )}
+                        {seEmite && traba !== null && (
+                          <>
+                            <dt>Para emitir</dt>
+                            <dd>{mensajeDeError(ESTADO.conflicto, traba)}</dd>
                           </>
                         )}
                         {o.motivo_rechazo !== null && (
@@ -465,7 +567,7 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                               Enviar a revisión
                             </button>
                           )}
-                          {o.estado === "aprobada" && !vencida(o) && !sinContrato.has(o.id) && puede("egresos.ejecutar_pago") && (
+                          {seEmite && traba === null && (
                             <button type="button" disabled={enviando} onClick={() => emitir(o)}>
                               Emitir
                             </button>
@@ -483,7 +585,8 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         </div>
                       </div>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </>
@@ -507,8 +610,8 @@ function OrdenesPagoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   ))}
               </select>
               <label htmlFor={`${id}-importe`}>Importe</label>
-              <input id={`${id}-importe`} required inputMode="decimal" value={datos.importe} disabled={enviando}
-                onChange={(e) => cambiar("importe", e.target.value)} />
+              <CampoImporte id={`${id}-importe`} valor={datos.importe} deshabilitado={enviando}
+                alCambiar={(texto) => cambiar("importe", texto)} />
               <label htmlFor={`${id}-moneda`}>Moneda</label>
               <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
                 {MONEDAS.map((m) => (

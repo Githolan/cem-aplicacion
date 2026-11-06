@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { mensajeDeError } from "./Mandatos";
+import { VOLVIO_LA_RED } from "./egresos/comun";
+import { mensajeDeError, presentacion } from "./Mandatos";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -18,6 +19,7 @@ const M_MC = "22222222-2222-4222-8222-222222222222";
 const M_AE = "33333333-3333-4333-8333-333333333333";
 const D_EQUIPO = "44444444-4444-4444-8444-444444444444";
 const D_PROPIA = "55555555-5555-4555-8555-555555555555";
+const D_OTRA = "99999999-9999-4999-8999-999999999999";
 const VECINA = "66666666-6666-4666-8666-666666666666";
 const NUEVO = "77777777-7777-4777-8777-777777777777";
 const CUIT = "20123456786";
@@ -57,8 +59,8 @@ const MANDATOS = {
 
 const DECISIONES = {
   elementos: [
-    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo" },
-    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio" },
+    { id: D_EQUIPO, tipo: "asamblea", fecha: "2026-01-10", descripcion: "Designa al Consejo", registrada_por_vos: false, del_equipo: true },
+    { id: D_PROPIA, tipo: "consejo", fecha: "2026-03-05", descripcion: "Contrata al estudio", registrada_por_vos: true, del_equipo: false },
   ],
 };
 
@@ -77,6 +79,7 @@ function detalleDecision(id: string, registradaPorVos: boolean) {
 
 const DETALLE_AE = {
   ...MANDATOS.elementos[1],
+  es_propio: false,
   matricula: "RPA 1234",
   decision_id: D_EQUIPO,
   facultades: ["documentos.cargar"],
@@ -285,6 +288,17 @@ describe("página /mandatos", () => {
     expect(within(detalle).getByText("Asamblea del 10 de enero de 2026: Designa al Consejo")).toBeTruthy();
   });
 
+  it("el detalle de un mandato sigue mostrando la decisión que lo respalda aunque no se ofrezca en los selectores", async () => {
+    const respaldado = { ...DETALLE_AE, decision_id: D_PROPIA };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(respaldado) }));
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+    const detalle = titulo.closest("section") as HTMLElement;
+    expect(within(detalle).getByText("Reunión del Consejo del 5 de marzo de 2026: Contrata al estudio")).toBeTruthy();
+  });
+
   it("el detalle de una decisión dice si la registraste vos, sin decir quién", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
@@ -428,33 +442,72 @@ describe("página /mandatos", () => {
     expect([cuerpo.persona_id, cuerpo.nombre, cuerpo.cuit, cuerpo.matricula]).toEqual([null, "Estudio Norte", CUIT, "RPA 99"]);
   });
 
-  it("avisa A15 si la decisión la registraste vos, pero no impide el envío: decide la API", async () => {
-    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => error("sin_permiso", 403) });
-    vi.stubGlobal("fetch", simulado);
+  const opciones = (etiqueta: string) => within(screen.getByLabelText(etiqueta)).getAllByRole("option").map((o) => o.getAttribute("value"));
+
+  it("A15: el alta no ofrece lo que registró quien mira; lo del equipo y lo de otra persona, sí", async () => {
+    const otra = { id: D_OTRA, tipo: "asamblea", fecha: "2026-04-01", descripcion: "Renueva el Consejo", registrada_por_vos: false, del_equipo: false };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [...DECISIONES.elementos, otra] }) }));
     abrir();
-    await completarAlta(D_PROPIA);
-    expect(await screen.findByText(/Esa decisión la registraste vos: no podés usarla para dar el alta/)).toBeTruthy();
-    const decision = screen.getByLabelText("Decisión que lo respalda");
-    // El aviso es la descripción del selector, en una región que el lector anuncia al llegar.
-    const descripcion = document.getElementById(decision.getAttribute("aria-describedby") ?? "");
-    expect(descripcion?.textContent).toMatch(/la registraste vos/);
-    expect(descripcion?.getAttribute("aria-live")).toBe("polite");
-    fireEvent.click(boton("Dar de alta"));
-    expect(await screen.findByText(/No tenés permiso para dar este alta. Puede ser .*la decisión la hayas registrado vos/)).toBeTruthy();
-    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
+    await cargado();
+    expect(opciones("Decisión que lo respalda")).toEqual(["", D_EQUIPO, D_OTRA]);
+    // La lista la sigue mostrando: lo que se saca es la opción.
+    expect(within(seccion("Decisiones")).getByText("Contrata al estudio")).toBeTruthy();
   });
 
-  it("con la decisión del equipo no hay aviso A15 (después de que la API respondió)", async () => {
+  it("control: la misma decisión con `registrada_por_vos` en falso se ofrece", async () => {
+    const ajenas = { elementos: DECISIONES.elementos.map((d) => ({ ...d, registrada_por_vos: false })) };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json(ajenas) }));
+    abrir();
+    await cargado();
+    expect(opciones("Decisión que lo respalda")).toEqual(["", D_EQUIPO, D_PROPIA]);
+  });
+
+  it("elegir una decisión no le pregunta nada a la API; abrir su detalle, sí", async () => {
     const simulado = conConsejo();
     vi.stubGlobal("fetch", simulado);
     abrir();
     await completarAlta(D_EQUIPO);
-    await waitFor(() => expect(pedidos(simulado, "GET", `${RUTA_DECISIONES}/${D_EQUIPO}`)).toHaveLength(1));
-    // Control: la misma espera con la decisión propia sí muestra el aviso.
-    fireEvent.change(screen.getByLabelText("Decisión que lo respalda"), { target: { value: D_PROPIA } });
-    expect(await screen.findByText(/Esa decisión la registraste vos/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Decisión que lo respalda"), { target: { value: D_EQUIPO } });
-    expect(screen.queryByText(/Esa decisión la registraste vos/)).toBeNull();
+    await new Promise((r) => setTimeout(r, 0));
+    const detalles = () => pedidos(simulado, "GET", `${RUTA_DECISIONES}/${D_EQUIPO}`);
+    expect(detalles()).toHaveLength(0);
+    // Control: lo que cuenta los pedidos los encuentra cuando el pedido existe.
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Asamblea del 10 de enero de 2026" }));
+    await waitFor(() => expect(detalles()).toHaveLength(1));
+  });
+
+  it("si todas las decisiones son propias lo dice y no hay selector ni «Dar de alta», tampoco para un externo", async () => {
+    const propias = { elementos: [en(DECISIONES.elementos, 1)] };
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json(propias) }));
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    expect(within(alta).getByText(/las registraste vos, y quien registra una decisión no la usa/)).toBeTruthy();
+    expect(within(alta).queryByLabelText("Decisión que lo respalda")).toBeNull();
+    expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+  });
+
+  it("control: sin ninguna decisión lo dice sin atribuírselas a quien mira", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [] }) }));
+    abrir();
+    await cargado();
+    const alta = seccion("Dar de alta un mandato");
+    expect(within(alta).getByText(/Todavía no hay decisiones registradas: sin una que lo respalde/)).toBeTruthy();
+    expect(within(alta).queryByText(/las registraste vos/)).toBeNull();
+    expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+  });
+
+  it("si la API igual niega el alta, es un error junto al formulario y lo cargado queda", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => error("sin_permiso", 403) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarAlta();
+    fireEvent.click(boton("Dar de alta"));
+    const aviso = await within(seccion("Dar de alta un mandato")).findByRole("alert");
+    expect(aviso.textContent).toMatch(/^No tenés permiso para dar este alta\./);
+    expect((screen.getByLabelText("Decisión que lo respalda") as HTMLSelectElement).value).toBe(D_EQUIPO);
+    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
   });
 
   it("muestra el motivo de dominio por el código: persona sin vínculo", async () => {
@@ -551,12 +604,10 @@ describe("página /mandatos", () => {
     });
   });
 
-  it("la remoción se respalda con una asamblea: solo ofrece asambleas y avisa A15", async () => {
-    const asambleaPropia = { id: NUEVO, tipo: "asamblea", fecha: "2026-09-01", descripcion: "Remueve al estudio" };
+  it("la remoción se respalda con una asamblea: solo ofrece asambleas, y ninguna propia", async () => {
+    const asambleaPropia = { id: NUEVO, tipo: "asamblea", fecha: "2026-09-01", descripcion: "Remueve al estudio", registrada_por_vos: true, del_equipo: false };
     const simulado = conConsejo({
       [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [...DECISIONES.elementos, asambleaPropia] }),
-      [`GET ${RUTA_DECISIONES}/${NUEVO}`]: () =>
-        Response.json({ ...asambleaPropia, referencia: "Acta 20", sha256: null, registrada_por_vos: true, del_equipo: false }),
       [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE),
       [`POST ${RUTA_MANDATOS}/${M_AE}/baja`]: () => Response.json({ id: M_AE, causa: "remocion", vigente_hasta: "2026-10-19" }),
     });
@@ -566,10 +617,7 @@ describe("página /mandatos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     fireEvent.change(screen.getByLabelText("Causa"), { target: { value: "remocion" } });
-    const asambleas = within(screen.getByLabelText("Asamblea que lo remueve")).getAllByRole("option");
-    expect(asambleas.map((o) => o.getAttribute("value"))).toEqual(["", D_EQUIPO, NUEVO]);
-    fireEvent.change(screen.getByLabelText("Asamblea que lo remueve"), { target: { value: NUEVO } });
-    expect(await screen.findByText(/Esa decisión la registraste vos: no podés usarla para remover/)).toBeTruthy();
+    expect(opciones("Asamblea que lo remueve")).toEqual(["", D_EQUIPO]);
     fireEvent.change(screen.getByLabelText("Asamblea que lo remueve"), { target: { value: D_EQUIPO } });
     fireEvent.change(screen.getByLabelText("Por qué termina"), { target: { value: "Remoción" } });
     fireEvent.click(boton("Dar de baja"));
@@ -577,6 +625,36 @@ describe("página /mandatos", () => {
     await screen.findByText("Listo: dimos de baja el mandato de Estudio Sur.");
     const cuerpo = (await en(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${M_AE}/baja`), 0).json()) as Record<string, unknown>;
     expect([cuerpo.causa, cuerpo.decision_id, cuerpo.instrumento]).toEqual(["remocion", D_EQUIPO, null]);
+  });
+
+  describe("la causa «Remoción por asamblea»", () => {
+    const abrirElDetalle = async (decisiones: () => Response) => {
+      vi.stubGlobal(
+        "fetch",
+        conConsejo({ [`GET ${RUTA_DECISIONES}`]: decisiones, [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE) }),
+      );
+      abrir();
+      await cargado();
+      fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+      await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
+    };
+
+    it("sin una asamblea que quien mira pueda usar, no se ofrece", async () => {
+      const soloPropia = { ...en(DECISIONES.elementos, 0), registrada_por_vos: true, del_equipo: false };
+      await abrirElDetalle(() => Response.json({ elementos: [soloPropia] }));
+      expect(opciones("Causa")).not.toContain("remocion");
+      expect(opciones("Causa")).toContain("renuncia");
+    });
+
+    it("control: con una asamblea que puede usar, se ofrece", async () => {
+      await abrirElDetalle(() => Response.json(DECISIONES));
+      expect(opciones("Causa")).toContain("remocion");
+    });
+
+    it("control: si las decisiones no llegaron no se sabe, y sigue a la vista", async () => {
+      await abrirElDetalle(() => error("error_interno", 500));
+      expect(opciones("Causa")).toContain("remocion");
+    });
   });
 
   it("un mandato terminado solo ofrece la baja por error de carga; uno dado de baja, ninguna", async () => {
@@ -654,6 +732,8 @@ describe("página /mandatos", () => {
     fireEvent.click(boton("Sí, dar de baja"));
     expect(await screen.findByText("El mandato ya tiene una baja registrada.")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
+    // El formulario se fue con el detalle: el aviso subió, no quedó sin lugar.
+    expect(within(estadoDePantalla()).getByText("El mandato ya tiene una baja registrada.")).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_MANDATOS)).toHaveLength(2));
   });
 
@@ -924,6 +1004,175 @@ describe("página /mandatos", () => {
     expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
   });
 
+  describe("al volver la red", () => {
+    const volvioLaRed = () => fireEvent(window, new Event("online"));
+
+    it("una lista caída se repite sola, lo dice y no pierde lo escrito", async () => {
+      let caida = true;
+      const simulado = conConsejo({
+        [`GET ${RUTA_MANDATOS}`]: () => (caida ? error("error_interno", 500) : Response.json(MANDATOS)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+      fireEvent.change(screen.getByLabelText("Qué se decidió"), { target: { value: "A medio escribir" } });
+      caida = false;
+      volvioLaRed();
+      expect(await cargado()).toBeTruthy();
+      expect(within(estadoDePantalla()).getByText(VOLVIO_LA_RED)).toBeTruthy();
+      expect((screen.getByLabelText("Qué se decidió") as HTMLTextAreaElement).value).toBe("A medio escribir");
+    });
+
+    it("control: si la lista sigue caída no dice que actualizó", async () => {
+      const simulado = conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => error("error_interno", 500) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByText("No pudimos consultar los mandatos.");
+      const antes = pedidos(simulado, "GET", RUTA_MANDATOS).length;
+      volvioLaRed();
+      await waitFor(() => expect(pedidos(simulado, "GET", RUTA_MANDATOS).length).toBeGreaterThan(antes));
+      expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+      await waitFor(() => expect(screen.queryByText(VOLVIO_LA_RED)).toBeNull());
+    });
+
+    it("control: nunca repite un envío, y con las listas a la vista no pide nada", async () => {
+      const simulado = conConsejo({ [`POST ${RUTA_DECISIONES}`]: () => error("servicio_no_disponible", 503) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await cargado();
+      const form = seccion("Registrar una decisión");
+      fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "2026-10-01" } });
+      fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Algo" } });
+      fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 1" } });
+      fireEvent.click(boton("Registrar decisión"));
+      await within(form).findByRole("alert");
+      const lecturas = pedidos(simulado, "GET", RUTA_MANDATOS).length;
+      volvioLaRed();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toHaveLength(1);
+      expect(pedidos(simulado, "GET", RUTA_MANDATOS)).toHaveLength(lecturas);
+      expect(screen.queryByText(VOLVIO_LA_RED)).toBeNull();
+    });
+
+    it("los edificios que no se pudieron consultar se repiten solos", async () => {
+      let caido = true;
+      vi.stubGlobal(
+        "fetch",
+        conConsejo({ "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)) }),
+      );
+      abrir();
+      await screen.findByText(/No pudimos consultar tus edificios/);
+      caido = false;
+      volvioLaRed();
+      expect(await cargado()).toBeTruthy();
+      expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+    });
+  });
+
+  describe("a quién se le da el alta", () => {
+    const YO = "99999999-9999-4999-8999-999999999999";
+    const YO_CANDIDATO = { persona_id: YO, nombre: "Zoe Mira", unidades: ["3° C"] };
+    const PERSONA = "Persona (con vínculo confirmado en el edificio)";
+    const opciones = () => within(screen.getByLabelText(PERSONA)).getAllByRole("option").map((o) => o.textContent);
+
+    it("quien mira no se ofrece: lo elegido y lo enviado es otra persona", async () => {
+      const simulado = conConsejo({
+        "GET /api/v1/auth/sesion": () => Response.json({ persona_id: YO }),
+        [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [YO_CANDIDATO, ...CANDIDATOS.elementos] }),
+        [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await completarAlta();
+      await waitFor(() => expect(opciones()).toEqual(["Beto Pérez (1° A)"]));
+      expect((screen.getByLabelText(PERSONA) as HTMLSelectElement).value).toBe(VECINA);
+      fireEvent.click(boton("Dar de alta"));
+      await screen.findByText("Listo: el mandato quedó dado de alta.");
+      const cuerpo = (await en(pedidos(simulado, "POST", RUTA_MANDATOS), 0).json()) as Record<string, unknown>;
+      expect(cuerpo.persona_id).toBe(VECINA);
+    });
+
+    it("control: si no se pudo saber quién mira, no se saca a nadie y decide la API", async () => {
+      const simulado = conConsejo({
+        "GET /api/v1/auth/sesion": () => error("error_interno", 500),
+        [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [YO_CANDIDATO, ...CANDIDATOS.elementos] }),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await completarAlta();
+      await waitFor(() => expect(pedidos(simulado, "GET", "/api/v1/auth/sesion").length).toBeGreaterThan(0));
+      // Lo que se controla es que nada cambie: hay que dar tiempo a que la respuesta llegue a la pantalla.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(opciones()).toEqual(["Zoe Mira (3° C)", "Beto Pérez (1° A)"]);
+    });
+
+    it("si el único candidato es quien mira, lo dice y no hay botón", async () => {
+      vi.stubGlobal(
+        "fetch",
+        conConsejo({
+          "GET /api/v1/auth/sesion": () => Response.json({ persona_id: YO }),
+          [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [YO_CANDIDATO] }),
+        }),
+      );
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      expect(await within(alta).findByText(/nadie se da un mandato a sí mismo/)).toBeTruthy();
+      expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+    });
+
+    it("sin candidatos no hay «Dar de alta» para el Consejo; la administración externa lo conserva", async () => {
+      vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => Response.json({ elementos: [] }) }));
+      abrir();
+      await cargado();
+      const alta = seccion("Dar de alta un mandato");
+      expect(await within(alta).findByText(/Nadie tiene todavía un vínculo confirmado/)).toBeTruthy();
+      expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
+      fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+      expect(within(alta).getByRole("button", { name: "Dar de alta" })).toBeTruthy();
+    });
+  });
+
+  describe("dónde queda el aviso", () => {
+    it("el rechazo de un envío queda junto a su formulario, no en el estado de la página", async () => {
+      vi.stubGlobal("fetch", conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => error("mandato_superpuesto", 409) }));
+      abrir();
+      await completarAlta();
+      fireEvent.click(boton("Dar de alta"));
+      const aviso = await within(seccion("Dar de alta un mandato")).findByRole("alert");
+      expect(aviso.textContent).toBe("La persona ya tiene un mandato de ese tipo en esas fechas.");
+      expect(estadoDePantalla().textContent).toBe("");
+    });
+
+    it("sin red también queda junto al formulario", async () => {
+      vi.stubGlobal(
+        "fetch",
+        conConsejo({
+          [`POST ${RUTA_MANDATOS}`]: () => {
+            throw new TypeError("sin red");
+          },
+        }),
+      );
+      abrir();
+      await completarAlta();
+      fireEvent.click(boton("Dar de alta"));
+      expect((await within(seccion("Dar de alta un mandato")).findByRole("alert")).textContent).toMatch(/No pudimos completar el pedido/);
+    });
+
+    it("control: un «Listo» va al estado de la página, y arriba de las secciones", async () => {
+      vi.stubGlobal("fetch", conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) }));
+      abrir();
+      await completarAlta();
+      fireEvent.click(boton("Dar de alta"));
+      const listo = await screen.findByText("Listo: el mandato quedó dado de alta.");
+      expect(estadoDePantalla().contains(listo)).toBe(true);
+      const titulo = screen.getByRole("heading", { level: 1, name: "Mandatos y decisiones" });
+      const delante = seccion("Mandatos").compareDocumentPosition(estadoDePantalla()) & Node.DOCUMENT_POSITION_PRECEDING;
+      expect(delante).not.toBe(0);
+      expect(titulo.compareDocumentPosition(estadoDePantalla()) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    });
+  });
+
   it("una lista que no se pudo consultar no arrastra a las otras", async () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => error("error_interno", 500) }));
     abrir();
@@ -1035,54 +1284,6 @@ describe("página /mandatos", () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
     });
-
-    it("un rechazo tardío de la consulta A15 del edificio anterior no muestra nada en el nuevo", async () => {
-      let soltar: () => void = () => undefined;
-      const retenido = new Promise<void>((r) => {
-        soltar = r;
-      });
-      const base = conDos();
-      let fallos = 0;
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (pedido: Request) => {
-          if (new URL(pedido.url).pathname === `${RUTA_DECISIONES}/${D_PROPIA}`) {
-            await retenido;
-            fallos += 1;
-            throw new TypeError("sin red");
-          }
-          return base(pedido);
-        }),
-      );
-      abrir();
-      await completarAlta(D_PROPIA);
-      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-      await screen.findByText("Eva Sosa, Consejo de propietarios");
-      soltar();
-      await waitFor(() => expect(fallos).toBe(1));
-      await new Promise((r) => setTimeout(r, 0));
-      expect(screen.queryByText(/No pudimos consultar quién registró esta decisión/)).toBeNull();
-    });
-  });
-
-  it("si la consulta A15 falla en el mismo edificio, lo dice sin bloquear el envío", async () => {
-    vi.stubGlobal(
-      "fetch",
-      conConsejo({
-        [`GET ${RUTA_DECISIONES}/${D_PROPIA}`]: () => {
-          throw new TypeError("sin red");
-        },
-      }),
-    );
-    abrir();
-    await completarAlta(D_PROPIA);
-    expect(await screen.findByText(/No pudimos consultar quién registró esta decisión/)).toBeTruthy();
-    expect(boton("Dar de alta").hasAttribute("disabled")).toBe(false);
-    // El aviso es de esa decisión: al elegir otra, que sí se pudo consultar, desaparece.
-    fireEvent.change(screen.getByLabelText("Decisión que lo respalda"), { target: { value: D_EQUIPO } });
-    expect(screen.queryByText(/No pudimos consultar quién registró esta decisión/)).toBeNull();
-    // Y no queda como error de la página.
-    expect(within(estadoDePantalla()).queryByText(/No pudimos consultar/)).toBeNull();
   });
 
   it("el detalle de una baja muestra cuándo se registró, en la hora del edificio", async () => {
@@ -1145,11 +1346,10 @@ describe("página /mandatos", () => {
     expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
   });
 
-  it("no tiene faltas de accesibilidad detectables por axe, con el detalle y el aviso A15 abiertos", async () => {
+  it("no tiene faltas de accesibilidad detectables por axe, con el detalle abierto", async () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE) }));
     const { container } = abrir();
-    await completarAlta(D_PROPIA);
-    await screen.findByText(/Esa decisión la registraste vos/);
+    await completarAlta();
     fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -1250,6 +1450,31 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
   const FORMULARIO_DECISION = { level: 2, name: "Registrar una decisión" };
   const FORMULARIO_ALTA = { level: 2, name: "Dar de alta un mandato" };
 
+  it("la presentación dice solo lo que la persona alcanza", () => {
+    const nada = { veMandatos: false, veDecisiones: false, registra: false, daAltas: false, daBajas: false };
+    expect(presentacion({ ...nada, veMandatos: true })).toBe("Acá ves los mandatos del Consejo y de la administración del edificio.");
+    expect(presentacion({ ...nada, veDecisiones: true, registra: true })).toBe("Acá ves las decisiones del edificio. Podés registrar decisiones.");
+    expect(presentacion({ veMandatos: true, veDecisiones: true, registra: true, daAltas: true, daBajas: true })).toBe(
+      "Acá ves los mandatos del Consejo y de la administración del edificio y las decisiones que los respaldan. Podés registrar decisiones, dar de alta un mandato y dar de baja un mandato.",
+    );
+  });
+
+  it("quien solo lee no ve la promesa de registrar ni de dar altas o bajas", async () => {
+    vi.stubGlobal("fetch", conAcciones(...LECTURAS));
+    abrir();
+    await cargado();
+    expect(screen.getByText(/^Acá ves los mandatos/)).toBeTruthy();
+    expect(screen.queryByText(/Podés (registrar|dar)/)).toBeNull();
+    expect(screen.queryByText(/lo decide la plataforma/)).toBeNull();
+  });
+
+  it("control: con todas las facultades la presentación las nombra", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    expect(screen.getByText(/Podés registrar decisiones, dar de alta un mandato y dar de baja un mandato\.$/)).toBeTruthy();
+  });
+
   it("«Registrar una decisión» se ve con `decisiones.registrar`", async () => {
     vi.stubGlobal("fetch", conAcciones(...LECTURAS, "decisiones.registrar"));
     abrir();
@@ -1286,6 +1511,27 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     abrir();
     await abrirBaja();
     expect(screen.getByRole("button", { name: "Dar de baja" })).toBeTruthy();
+  });
+
+  it.each([
+    [true, 0],
+    [false, 1],
+  ])("con `es_propio` en %s el detalle se ve y «Dar de baja» aparece %i veces", async (propio, veces) => {
+    vi.stubGlobal(
+      "fetch",
+      conConsejo({
+        [`GET ${BASE}/mis-acciones`]: alcanza(...LECTURAS, "mandatos.baja"),
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json({ ...DETALLE_AE, es_propio: propio }),
+      }),
+    );
+    abrir();
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+    const detalle = titulo.closest("section") as HTMLElement;
+    expect(within(detalle).queryAllByRole("heading", { level: 3, name: "Dar de baja" })).toHaveLength(veces);
+    expect(within(detalle).queryAllByRole("button", { name: "Dar de baja" })).toHaveLength(veces);
+    expect(within(detalle).getByRole("button", { name: "Cerrar el detalle" })).toBeTruthy();
   });
 
   it("control: sin `mandatos.baja` el detalle se ve y la baja no", async () => {

@@ -11,13 +11,40 @@ type Descriptor = { id: string; type: PublicKeyCredentialType; transports?: Auth
 
 export type Resultado<T> =
   | { ok: true; valor: T }
-  /** Hay otro medio activo y primero hay que verificarse con él. */
-  | { ok: false; mensaje: string; faltaConfirmar: boolean };
+  /** `faltaConfirmar`: hay otro medio activo y primero hay que verificarse con él. */
+  | { ok: false; mensaje: string; faltaConfirmar: boolean; yaEstaAca?: boolean };
 
 const CANCELADO = "No se confirmó. Probá de nuevo cuando quieras.";
 const NO_CONFIRMADO = "No pudimos confirmar tu llave. Probá de nuevo.";
 const FALTA_CONFIRMAR = "Primero confirmá que sos vos con tu llave o con un código.";
 const YA_REGISTRADA = "Este dispositivo ya tiene una llave en tu cuenta.";
+
+// Qué llaves son de este dispositivo. El navegador no lo dice sin pedir el gesto: se sabe al activar
+// la llave o al usarla acá, y se recuerda su identificador público. Si este navegador no deja
+// guardar, no se recuerda y se sigue ofreciendo agregar el dispositivo.
+const CLAVE_LLAVES_PROPIAS = "cem.llaves-de-este-dispositivo";
+
+function llavesPropias(): string[] {
+  try {
+    const guardadas: unknown = JSON.parse(window.localStorage.getItem(CLAVE_LLAVES_PROPIAS) ?? "[]");
+    return Array.isArray(guardadas) ? guardadas.filter((c) => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function esDeEsteDispositivo(credencial: string): boolean {
+  return llavesPropias().includes(credencial);
+}
+
+export function recordarLlave(credencial: string): void {
+  try {
+    const propias = [...new Set([...llavesPropias(), credencial])];
+    window.localStorage.setItem(CLAVE_LLAVES_PROPIAS, JSON.stringify(propias));
+  } catch {
+    return;
+  }
+}
 
 /** Si el navegador sabe usar llaves de acceso. Si no, se sigue ofreciendo el código. */
 export function llaveDisponible(): boolean {
@@ -128,9 +155,11 @@ export async function registrarLlave(): Promise<Resultado<string[] | null>> {
       headers: encabezadoCsrf(),
     });
     if (alta.data === undefined) return rechazo(alta.response.status, alta.error);
+    recordarLlave(credencial.id);
     return { ok: true, valor: alta.data.codigos_recuperacion ?? null };
   } catch (error) {
-    return { ok: false, mensaje: mensajeDelDispositivo(error), faltaConfirmar: false };
+    const yaEstaAca = error instanceof DOMException && error.name === "InvalidStateError";
+    return { ok: false, mensaje: mensajeDelDispositivo(error), faltaConfirmar: false, yaEstaAca };
   }
 }
 
@@ -162,6 +191,7 @@ export async function confirmarConLlave(): Promise<Resultado<null>> {
       headers: encabezadoCsrf(),
     });
     if (verificacion.data === undefined) return rechazo(verificacion.response.status, verificacion.error);
+    recordarLlave(credencial.id);
     return { ok: true, valor: null };
   } catch (error) {
     return { ok: false, mensaje: mensajeDelDispositivo(error), faltaConfirmar: false };

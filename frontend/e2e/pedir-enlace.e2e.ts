@@ -70,6 +70,8 @@ test.describe("pedir el enlace para entrar", () => {
     const codigo = page.getByRole("region", { name: "Entrar con un código" });
     await expect(codigo.getByText(mensaje)).toBeVisible();
     await expect(codigo.getByLabel("Correo")).toHaveValue(CORREO);
+    // El correo ya está: el foco va a lo que falta, y el código se envía recién con el botón.
+    await expect(codigo.getByLabel(/^Código de 6 números/)).toBeFocused();
     await expect(seccion).toHaveCount(0);
     expect(page.url()).not.toContain(CORREO);
     await sinFaltasDeAccesibilidad(page);

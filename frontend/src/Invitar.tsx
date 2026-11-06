@@ -10,9 +10,9 @@ import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
 // y retirar las que no se aceptaron. Lo que la persona no alcanza no aparece y una lectura negada
-// lleva al inicio, pero es solo interfaz: muestra todas las unidades del consorcio, porque el
-// alcance de quien invita depende de la unidad, y ahí la API responde 403 (política
-// `invitaciones.crear`), que se dice en la pantalla. El correo de una invitación solo llega en las
+// lleva al inicio. La lista ofrece solo las unidades que la persona alcanza (`invitable`), y si hay
+// una sola no se pregunta. Es solo interfaz: invitar decide igual, y un 403 que llegue se dice en
+// la pantalla (política `invitaciones.crear`). El correo de una invitación solo llega en las
 // pendientes que creó quien mira (P6); si la API lo manda nulo, no se muestra. Diseño provisorio:
 // el definitivo llega con G3.
 
@@ -93,6 +93,7 @@ export function Invitar() {
   const [invitaciones, setInvitaciones] = useState<Invitacion[] | null>(null);
   // E54: si la lista no se pudo consultar, la sección deja de decir «Consultando…».
   const [listaFallida, setListaFallida] = useState(false);
+  const [unidadesFallidas, setUnidadesFallidas] = useState(false);
   const [unidad, setUnidad] = useState("");
   const [tipo, setTipo] = useState<TipoVinculo>("inquilino");
   const [correo, setCorreo] = useState("");
@@ -102,25 +103,27 @@ export function Invitar() {
   const [aRetirar, setARetirar] = useState<Invitacion | null>(null);
   // Cada invitación nueva vuelve a pedir la lista: qué se ve (y con qué correo) lo decide la API.
   const [vuelta, setVuelta] = useState(0);
+  // Aparte de `vuelta`: invitar no vuelve a pedir las unidades, y la elegida queda como estaba.
+  const [vueltaUnidades, setVueltaUnidades] = useState(0);
   const consultado = useRef(false);
   // Una clave por intento lógico: se conserva si el pedido se cae (un reintento recibe la misma
   // respuesta, sin otro correo) y se renueva al cambiar los datos o cuando el intento terminó.
   const clave = useRef<string | null>(null);
-  // El campo con el foco al invitar: mientras el envío corre queda deshabilitado y el navegador
-  // pierde el foco; al terminar vuelve ahí, para que el teclado no arranque de nuevo la página.
-  const foco = useRef<HTMLElement | null>(null);
-  // E46: al retirar, la fila cambia de lugar (pasa al historial plegado) y el botón desaparece; el
-  // foco va al aviso del resultado, como en /mandatos, para que el teclado no vuelva al principio.
+  // Lo que tenía el foco al enviar: si al terminar sigue ahí, o en nada porque el envío lo deshabilitó,
+  // la persona no lo llevó a otro lado.
+  const foco = useRef<Element | null>(null);
+  // E46: al terminar de invitar o de retirar, el foco va al aviso del resultado, como en /mandatos.
+  // El teclado no vuelve al principio y, en un teléfono, el aviso entra en la pantalla: devolver el
+  // foco al campo abriría el teclado arriba del aviso.
   const alAviso = useRef(false);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
 
   useEffect(() => {
-    if (enviando || foco.current === null) return;
+    if (enviando || !alAviso.current) return;
+    alAviso.current = false;
     // Solo si nadie tomó el foco en el medio (la persona pudo ir a otra parte de la página).
     const ahora = document.activeElement;
-    if (ahora === null || ahora === document.body || ahora === foco.current)
-      (alAviso.current ? (textoAviso.current ?? foco.current) : foco.current).focus();
-    foco.current = null;
+    if (ahora === null || ahora === document.body || ahora === foco.current) textoAviso.current?.focus();
   }, [enviando]);
 
   const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
@@ -168,20 +171,24 @@ export function Invitar() {
           return;
         }
         if (data === undefined) {
+          setUnidadesFallidas(true);
           setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
           return;
         }
-        setUnidades(data.elementos);
-        setUnidad(data.elementos[0]?.id ?? "");
+        const invitables = data.elementos.filter((u) => u.invitable);
+        setUnidades(invitables);
+        setUnidad(invitables[0]?.id ?? "");
       })
       .catch((e: unknown) => {
         // Un rechazo del edificio anterior no pisa al que ya se eligió.
-        if (vigente) atajar(e);
+        if (!vigente) return;
+        setUnidadesFallidas(true);
+        atajar(e);
       });
     return () => {
       vigente = false;
     };
-  }, [consorcio, atajar, navegar]);
+  }, [consorcio, vueltaUnidades, atajar, navegar]);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -219,11 +226,17 @@ export function Invitar() {
     };
   }, [consorcio, vuelta, aEntrar, navegar]);
 
-  /** Vuelve a pedir la lista que no se pudo consultar; un «Listo» que esté a la vista queda. */
-  function reconsultarLista() {
+  /** Vuelve a pedir lo que no se pudo consultar, de un solo toque; un «Listo» a la vista queda. */
+  function reconsultar() {
     setAviso((actual) => (actual?.ok ? actual : null));
-    setListaFallida(false);
-    setVuelta((v) => v + 1);
+    if (listaFallida) {
+      setListaFallida(false);
+      setVuelta((v) => v + 1);
+    }
+    if (unidadesFallidas) {
+      setUnidadesFallidas(false);
+      setVueltaUnidades((v) => v + 1);
+    }
   }
 
   /** Cualquier cambio en los datos es otro intento: otra clave. */
@@ -236,9 +249,8 @@ export function Invitar() {
 
   function invitar(evento: FormEvent) {
     evento.preventDefault();
-    const activo = document.activeElement;
-    foco.current = activo instanceof HTMLElement && activo !== document.body ? activo : null;
-    alAviso.current = false;
+    foco.current = document.activeElement;
+    alAviso.current = true;
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
@@ -271,8 +283,7 @@ export function Invitar() {
   }
 
   function retirar(invitacion: Invitacion) {
-    const activo = document.activeElement;
-    foco.current = activo instanceof HTMLElement && activo !== document.body ? activo : null;
+    foco.current = document.activeElement;
     alAviso.current = true;
     setEnviando(true);
     setAviso(null);
@@ -358,6 +369,7 @@ export function Invitar() {
                       // Nada del edificio anterior queda elegible mientras llegan los del nuevo.
                       setInvitaciones(null);
                       setListaFallida(false);
+                      setUnidadesFallidas(false);
                       setUnidades([]);
                       setUnidad("");
                       cambiar(setConsorcio)(e.target.value);
@@ -371,20 +383,34 @@ export function Invitar() {
                   </select>
                 </>
               )}
-              <label htmlFor={`${id}-unidad`}>Unidad</label>
-              <select
-                id={`${id}-unidad`}
-                value={unidad}
-                onChange={(e) => cambiar(setUnidad)(e.target.value)}
-                disabled={enviando}
-                required
-              >
-                {unidades.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.designacion}
-                  </option>
-                ))}
-              </select>
+              {unidades.length === 1 ? (
+                <p>Unidad: {unidades[0]?.designacion}</p>
+              ) : (
+                <>
+                  <label htmlFor={`${id}-unidad`}>Unidad</label>
+                  <select
+                    id={`${id}-unidad`}
+                    value={unidad}
+                    onChange={(e) => cambiar(setUnidad)(e.target.value)}
+                    disabled={enviando}
+                    required
+                  >
+                    {unidades.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.designacion}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+              {unidadesFallidas && (
+                <>
+                  <p>No pudimos mostrar las unidades.</p>
+                  <button type="button" onClick={reconsultar} disabled={enviando}>
+                    Consultar de nuevo
+                  </button>
+                </>
+              )}
               <label htmlFor={`${id}-tipo`}>Vínculo con la unidad</label>
               <select
                 id={`${id}-tipo`}
@@ -424,40 +450,11 @@ export function Invitar() {
               </button>
             </form>
           </section>
-
-          <section aria-labelledby={`${id}-lista`} className="tarjeta">
-            <h2 id={`${id}-lista`}>Invitaciones</h2>
-            {invitaciones === null && !listaFallida && <p>Consultando…</p>}
-            {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
-            {listaFallida && (
-              <p>
-                <button type="button" onClick={reconsultarLista} disabled={enviando}>
-                  Consultar de nuevo
-                </button>
-              </p>
-            )}
-            {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
-            {invitaciones !== null && invitaciones.length > 0 && (
-              <>
-                {pendientes.length === 0 ? (
-                  <p>No hay invitaciones pendientes.</p>
-                ) : (
-                  <ul className="sesiones" aria-label="Pendientes">
-                    {pendientes.map(tarjeta)}
-                  </ul>
-                )}
-                {historial.length > 0 && (
-                  <details className="historial">
-                    <summary>Historial: aceptadas, retiradas y vencidas ({historial.length})</summary>
-                    <ul className="sesiones compactas">{historial.map(tarjeta)}</ul>
-                  </details>
-                )}
-              </>
-            )}
-          </section>
         </>
       )}
 
+      {/* Entre el formulario y la lista: el resultado de invitar queda al lado de lo que se escribió, y
+          si falló se corrige ahí mismo, sin bajar por toda la lista para enterarse. */}
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
@@ -485,6 +482,39 @@ export function Invitar() {
           </p>
         )}
       </div>
+
+      {pantalla.tipo === "lista" && (
+        <section aria-labelledby={`${id}-lista`} className="tarjeta">
+          <h2 id={`${id}-lista`}>Invitaciones</h2>
+          {invitaciones === null && !listaFallida && <p>Consultando…</p>}
+          {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
+          {listaFallida && (
+            <p>
+              <button type="button" onClick={reconsultar} disabled={enviando}>
+                Consultar de nuevo
+              </button>
+            </p>
+          )}
+          {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
+          {invitaciones !== null && invitaciones.length > 0 && (
+            <>
+              {pendientes.length === 0 ? (
+                <p>No hay invitaciones pendientes.</p>
+              ) : (
+                <ul className="sesiones" aria-label="Pendientes">
+                  {pendientes.map(tarjeta)}
+                </ul>
+              )}
+              {historial.length > 0 && (
+                <details className="historial">
+                  <summary>Historial: aceptadas, retiradas y vencidas ({historial.length})</summary>
+                  <ul className="sesiones compactas">{historial.map(tarjeta)}</ul>
+                </details>
+              )}
+            </>
+          )}
+        </section>
+      )}
     </>
   );
 

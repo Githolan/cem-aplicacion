@@ -14,13 +14,14 @@ importar la ruta, no en el pedido.
 """
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
 from fastapi import Depends, Request
-from sqlalchemy import text
+from sqlalchemy import Connection, text
 
 from app import auditoria
 from app.autorizacion.evaluador import (
@@ -66,10 +67,39 @@ class Permiso:
         entidad = entidad or Entidad()
         return evaluar(self.accion, self._con_identidades(entidad).autorizacion, entidad)
 
+    def decidir_en(self, conn: Connection, entidades: Sequence[Entidad]) -> list[Decision]:
+        """`decidir` para lo que una pantalla muestra de varias entidades: una sola lectura de
+        identidades y en la transacción de quien llama. No audita ni concede: la ruta de cada
+        acción vuelve a decidir."""
+        ctx = self.ctx
+        personas = set().union(*map(_personas, entidades)) - {ctx.persona_id}
+        if personas and self._separa_seres_humanos():
+            ctx = self._leer_identidades(conn, personas)
+        return [evaluar(self.accion, ctx.autorizacion, e) for e in entidades]
+
+    def cuentas_humanas(self, conn: Connection) -> set[UUID]:
+        """Las cuentas del ser humano que pide en este consorcio, para decir «esto lo hiciste
+        vos». Suma las ya desvinculadas de su identidad: la base compara con la identidad guardada
+        en cada acto, y `cem_app` no la lee. Solo para mostrar: decide `evaluar` y la base."""
+        ctx = self.ctx
+        if ctx.identidad_humana is None:
+            return {ctx.persona_id}
+        filas = conn.execute(
+            text(
+                "select persona_id from nucleo.identidad_persona"
+                " where consorcio_id = :c and identidad_id = :i"
+            ),
+            {"c": ctx.consorcio_id, "i": ctx.identidad_humana},
+        )
+        return {ctx.persona_id, *filas.scalars()}
+
+    def _separa_seres_humanos(self) -> bool:
+        return any(separa_seres_humanos(self.accion, c) for c in POLITICAS[self.accion].separacion)
+
     def _con_identidades(self, entidad: Entidad) -> Contexto:
         """Si la acción separa seres humanos (A13-C), agrega las identidades verificadas en el
         consorcio de las personas de la entidad. Las de quien actúa ya vienen en el contexto."""
-        if not any(separa_seres_humanos(self.accion, c) for c in POLITICAS[self.accion].separacion):
+        if not self._separa_seres_humanos():
             return self.ctx
         personas = _personas(entidad) - {self.ctx.persona_id}
         if not personas:
@@ -77,16 +107,18 @@ class Permiso:
         with transaccion(
             self.motor, persona_id=self.ctx.persona_id, consorcio_id=self.ctx.consorcio_id
         ) as conn:
-            filas = conn.execute(
-                text(
-                    "select persona_id, identidad_id from nucleo.identidad_persona"
-                    " where consorcio_id = :c and persona_id = any(:p)"
-                    " and desvinculada_en is null"
-                ),
-                {"c": self.ctx.consorcio_id, "p": list(personas)},
-            )
-            identidades = {f.persona_id: f.identidad_id for f in filas}
-        return replace(self.ctx, identidades=identidades)
+            return self._leer_identidades(conn, personas)
+
+    def _leer_identidades(self, conn: Connection, personas: set[UUID]) -> Contexto:
+        filas = conn.execute(
+            text(
+                "select persona_id, identidad_id from nucleo.identidad_persona"
+                " where consorcio_id = :c and persona_id = any(:p)"
+                " and desvinculada_en is null"
+            ),
+            {"c": self.ctx.consorcio_id, "p": list(personas)},
+        )
+        return replace(self.ctx, identidades={f.persona_id: f.identidad_id for f in filas})
 
     def verificar(self, entidad: Entidad | None = None, *, estado_negado: int = 403) -> Decision:
         """Evalúa y, si se niega, audita el motivo y responde el error genérico.

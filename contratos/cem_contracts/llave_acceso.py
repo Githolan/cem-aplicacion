@@ -54,6 +54,9 @@ class LlaveResumen(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     id: UUID
+    credencial_id: str = Field(
+        description="Identificador público de la credencial, en base64url: el que da el navegador."
+    )
     nombre: str
     creada_en: datetime
     ultimo_uso_en: datetime | None

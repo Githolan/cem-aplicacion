@@ -3,7 +3,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
-import { useIrAlInicio } from "./sesion";
+import { useTerminarEntrada } from "./sesion";
 
 // Entrar con correo y contraseña (documento 13, §10.3: el método de administradores, consejeros
 // y operadores). Si la persona tiene segundo factor, la contraseña no abre la sesión: el backend
@@ -37,12 +37,17 @@ type Estado =
   | "demasiados"
   | "sin_servicio";
 
-export function EntrarConContrasena() {
+interface Props {
+  /** El correo es de /entrar: sigue escrito al cambiar de forma. */
+  correo: string;
+  alCambiarCorreo: (correo: string) => void;
+}
+
+export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
   const id = useId();
-  const [correo, setCorreo] = useState("");
   const [contrasena, setContrasena] = useState("");
   const [codigo, setCodigo] = useState("");
-  const irAlInicio = useIrAlInicio();
+  const terminarEntrada = useTerminarEntrada();
   const [paso, setPaso] = useState<Paso>({ tipo: "contrasena" });
   const [estado, setEstado] = useState<Estado>("listo");
   const campoCodigo = useRef<HTMLInputElement>(null);
@@ -70,7 +75,7 @@ export function EntrarConContrasena() {
         // La contraseña ya cumplió: no queda en memoria más de lo necesario.
         setContrasena("");
         setEstado("listo");
-        if (data.estado === "sesion_abierta") irAlInicio("Entraste.");
+        if (data.estado === "sesion_abierta") terminarEntrada("Entraste.");
         else {
           setCodigo("");
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
@@ -101,7 +106,7 @@ export function EntrarConContrasena() {
         if (data !== undefined) {
           setCodigo("");
           setEstado("listo");
-          irAlInicio("Entraste.");
+          terminarEntrada("Entraste.");
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
         else setEstado(fallo(response.status));
@@ -125,7 +130,7 @@ export function EntrarConContrasena() {
               autoComplete="username"
               required
               value={correo}
-              onChange={(e) => setCorreo(e.target.value)}
+              onChange={(e) => alCambiarCorreo(e.target.value)}
             />
             <label htmlFor={`${id}-contrasena`}>Contraseña</label>
             <CampoContrasena

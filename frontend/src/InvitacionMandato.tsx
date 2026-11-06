@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { codigoDe, mensajeDeFallaConEnlace, SIN_CONEXION_ENLACE } from "./fallas";
 import { RUTA_ENTRAR, RUTA_INVITACION_MANDATO, tokenDelFragmento } from "./enlace";
+import { EnlaceAlInicio, SalirDeEstaCuenta } from "./SalidaDeInvitacion";
 import { useIrAlInicio } from "./sesion";
 
 // Página /invitacion-mandato: la que abre el enlace con que se asocia la cuenta del administrador
@@ -165,10 +166,13 @@ export function InvitacionMandato() {
         {estado === "aceptando" && <p>Aceptando…</p>}
         {estado === "lista" && fallaAlAceptar !== null && <p className="aviso-error">{fallaAlAceptar}</p>}
         {estado === "invalida" && (
-          <p className="aviso-error">
-            Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada. Pedile una nueva al
-            consorcio.
-          </p>
+          <>
+            <p className="aviso-error">
+              Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada. Pedile una nueva al
+              consorcio.
+            </p>
+            <EnlaceAlInicio />
+          </>
         )}
         {estado === "invitacion_requiere_sesion" && (
           <p className="aviso-error">
@@ -177,18 +181,27 @@ export function InvitacionMandato() {
           </p>
         )}
         {estado === "invitacion_de_otra_persona" && (
-          <p className="aviso-error">
-            Estás con una cuenta que no es la del correo invitado. Salí de esa cuenta y volvé a abrir el enlace.
-          </p>
+          <>
+            <p className="aviso-error">
+              Estás con una cuenta que no es la del correo invitado. Salí de esa cuenta para aceptarla.
+            </p>
+            {token && <SalirDeEstaCuenta alSalir={() => consultar(token)} />}
+          </>
         )}
         {estado === "asociacion_incompatible_con_consejo" && (
-          <p className="aviso-error">
-            Tenés un mandato del Consejo en este consorcio que se superpone con el de administración: el Consejo
-            fiscaliza y no administra. Hablalo con el consorcio.
-          </p>
+          <>
+            <p className="aviso-error">
+              Tenés un mandato del Consejo en este consorcio que se superpone con el de administración: el Consejo
+              fiscaliza y no administra. Hablalo con el consorcio.
+            </p>
+            <EnlaceAlInicio />
+          </>
         )}
         {estado === "asociacion_de_si_mismo" && (
-          <p className="aviso-error">Quien emitió o aprobó la invitación no puede aceptarla para sí.</p>
+          <>
+            <p className="aviso-error">Quien emitió o aprobó la invitación no puede aceptarla para sí.</p>
+            <EnlaceAlInicio />
+          </>
         )}
         {estado === "sin_servicio" && (
           <>
@@ -200,7 +213,12 @@ export function InvitacionMandato() {
             )}
           </>
         )}
-        {estado === "sin_enlace" && <p>Para asociar tu cuenta, abrí el enlace que te llegó por correo.</p>}
+        {estado === "sin_enlace" && (
+          <>
+            <p>Para asociar tu cuenta, abrí el enlace que te llegó por correo.</p>
+            <EnlaceAlInicio />
+          </>
+        )}
       </div>
     </>
   );

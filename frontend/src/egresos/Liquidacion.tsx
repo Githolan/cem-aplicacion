@@ -15,12 +15,13 @@ import {
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  soltarClaveSiCambio,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura, Reintentar } from "./EstadoPantalla";
 import { REQUISITOS } from "../permisos";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorcio";
+import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } from "./useConsorcio";
 
 // Página /liquidacion (app 0057): la administración prepara la liquidación de un período. Abre el
 // borrador, le agrega órdenes pagadas con el grupo de gasto de cada una y ve la simulación: cuánto
@@ -95,7 +96,9 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setFallaDetalle(null);
   }
   const clave = useRef<string | null>(null);
+  const ultimoActo = useRef<string | null>(null);
   const montado = useMontado();
+  useAlVolverLaRed(fallaDetalle !== null, () => setVuelta((v) => v + 1));
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -154,7 +157,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   function hacer(acto: Acto, reintento = false) {
     if (!montado.current) return;
-    if (!reintento) clave.current = null;
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(acto));
     clave.current ??= crypto.randomUUID();
     const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const headers = encabezadoCsrf();
@@ -187,6 +190,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          clave.current = null;
           const texto = {
             preparar: "Listo: abriste el borrador del período.",
             agregar: "Listo: agregaste el gasto. La simulación ya lo reparte.",
@@ -238,7 +242,16 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       setAviso({ texto: "Escribí el período como año y mes, por ejemplo 2026-10.", ok: false });
       return;
     }
-    hacer({ tipo: "preparar", periodo: `${mes}-01` });
+    const periodoElegido = `${mes}-01`;
+    // Un período admite un solo borrador: si ya lo tiene, se abre ese y no se pide otro.
+    const existente = liquidaciones.find((l) => l.periodo === periodoElegido && l.estado === "borrador");
+    if (existente !== undefined) {
+      setAviso(null);
+      setMes("");
+      abrir(existente.id);
+      return;
+    }
+    hacer({ tipo: "preparar", periodo: periodoElegido });
   }
 
   function agregar(evento: FormEvent, liquidacion: string) {
@@ -292,7 +305,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando la liquidación…</p>}
           {lectura.tipo === "sin_servicio" && (
-            <FallaDeLectura alReintentar={reintentarLectura}>
+            <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso}>
               {abierta !== null && (
                 <button type="button" className="secundario" onClick={() => {
                   volverALaLista();

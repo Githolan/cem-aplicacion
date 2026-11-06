@@ -59,10 +59,16 @@ function error(codigo: string, status: number) {
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
+/** La pantalla del código pregunta si hay segundo factor; salvo que la prueba diga otra cosa, lo hay. */
+const CON_SEGUNDO_FACTOR: Respuestas = {
+  "GET /api/v1/auth/totp": () =>
+    Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
+};
+
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
+    const respuesta = respuestas[clave] ?? CON_SEGUNDO_FACTOR[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -356,7 +362,7 @@ describe("liquidación (borrador)", () => {
 
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
-      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
       [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
       [`POST ${BASE}/liquidaciones`]: () => error("liquidacion_no_admite", 409),
     }));
@@ -371,6 +377,70 @@ describe("liquidación (borrador)", () => {
     [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
     [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
   };
+
+  it("si el período ya tiene borrador, «Abrir el borrador» abre ese y no pide otro", async () => {
+    const api = backend({ ...LISTAS, [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS) });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
+  });
+
+  it.each([
+    ["otro estado", { ...LIQUIDACION, estado: "descartada" }],
+    ["otro período", { ...LIQUIDACION, periodo: "2026-09-01" }],
+  ])("control: con una liquidación de %s sí se pide un borrador nuevo", async (_, otra) => {
+    const api = backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [otra] }),
+      [`POST ${BASE}/liquidaciones`]: () => error("liquidacion_no_admite", 409),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
+  });
+
+  it("repetir el mismo acto tras un 500 lleva la misma clave; otro período, otra", async () => {
+    const api = backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/liquidaciones`]: () => error("error_interno", 500),
+    });
+    const intentos = () => pedidos(api, "POST", `${BASE}/liquidaciones`);
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await screen.findByText(/El servicio no está disponible/);
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await waitFor(() => expect(intentos()).toHaveLength(2));
+    await screen.findByText(/El servicio no está disponible/);
+    fireEvent.change(screen.getByLabelText("Período"), { target: { value: "2026-11" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await waitFor(() => expect(intentos()).toHaveLength(3));
+    const [primera, segunda, tercera] = intentos().map((q) => q.headers.get("Idempotency-Key"));
+    expect(segunda).toBe(primera);
+    expect(tercera).not.toBe(segunda);
+  });
+
+  it("si falló el detalle de la abierta, se repite solo al volver la red", async () => {
+    let caido = true;
+    vi.stubGlobal("fetch", backend({
+      ...LISTAS,
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => (caido ? error("error_interno", 500) : Response.json(SIN_GASTOS)),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    await screen.findByRole("alert");
+    caido = false;
+    fireEvent(window, new Event("online"));
+    expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 
   it("descartar cierra la descartada y vuelve a la lista, sin volver a pedirla", async () => {
     const api = backend({

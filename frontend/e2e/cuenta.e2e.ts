@@ -53,6 +53,10 @@ async function simularApi(pagina: Page, baseURL: string): Promise<Record<string,
   let abierta = true;
   // La sección de pedidos sobre los datos (2d-2) consulta sus casos: sin casos no se muestra.
   await pagina.route("**/api/v1/privacidad/casos", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+  // Lo que pide el inicio: el backend de la corrida no tiene base y, con la PC cargada, contesta 503.
+  await pagina.route("**/api/v1/me/consorcios", (ruta) => ruta.fulfill({ json: [] }));
+  await pagina.route("**/api/v1/me/invitaciones", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+  await pagina.route("**/api/v1/pagos-por-aclarar", (ruta) => ruta.fulfill({ json: { elementos: [] } }));
   await pagina.route("**/api/v1/auth/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
