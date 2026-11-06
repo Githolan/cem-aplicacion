@@ -150,17 +150,26 @@ async function pideEntrar(ruta: string, respuesta: Response): Promise<boolean> {
   return codigo === "reautenticacion_requerida" && (detalle?.falta ?? FALTA_ENTRAR) === FALTA_ENTRAR;
 }
 
+/**
+ * El `fetch` de quien solo pregunta si hay sesión: la hoja, el inicio y /entrar. Anota lo que responde
+ * sin abrir la hoja ni esperarla: la hoja se cierra con esta respuesta, y en esas pantallas un 401 no
+ * deja nada escrito atrás.
+ */
+export async function comprobarSesion(pedir: Request): Promise<Response> {
+  const respuesta = await globalThis.fetch(pedir);
+  if (activa) await anotarSesion(respuesta);
+  return respuesta;
+}
+
 /** El `fetch` del cliente de la API. */
 export async function pedirConSesion(pedir: Request): Promise<Response> {
   const repetible = activa && pedir.method === "GET" ? pedir.clone() : null;
   const respuesta = await globalThis.fetch(pedir);
   if (!activa) return respuesta;
   const ruta = new URL(pedir.url).pathname;
-  if (ruta === RUTA_SESION) {
-    await anotarSesion(respuesta);
-    return respuesta;
-  }
-  if (ruta === RUTA_SALIR) conocida = null;
+  if (ruta === RUTA_SESION) await anotarSesion(respuesta);
+  // Si salir falló, la sesión sigue y puede vencer con algo escrito.
+  if (ruta === RUTA_SALIR && (respuesta.ok || respuesta.status === ESTADO_SIN_SESION)) conocida = null;
   if (!(await pideEntrar(ruta, respuesta))) return respuesta;
   abrir();
   if (repetible === null || pedido === null) return respuesta;

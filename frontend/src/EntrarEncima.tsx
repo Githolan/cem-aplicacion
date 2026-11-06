@@ -7,7 +7,7 @@ import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { FormasDeEntrar } from "./FormasDeEntrar";
 import { Hoja } from "./Hoja";
 import { salirDeLaCuenta } from "./sesion";
-import { faltaConocerSesion, olvidarRecuperada, olvidarSesion, salidas, useEstadoEncima } from "./sesionEncima";
+import { comprobarSesion, faltaConocerSesion, olvidarRecuperada, olvidarSesion, salidas, useEstadoEncima } from "./sesionEncima";
 
 // La hoja de entrar encima (`sesionEncima.ts`) y el aviso de que se sigue donde se estaba. En /entrar
 // no hace falta: la persona ya está entrando, y al terminar se suelta lo que esperaba.
@@ -16,7 +16,7 @@ import { faltaConocerSesion, olvidarRecuperada, olvidarSesion, salidas, useEstad
 const SIN_LECTURA_PROPIA: ReadonlySet<string> = new Set([RUTA_INICIO, RUTA_ENTRAR, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO]);
 
 /** Sin respuesta tampoco se sabe nada: la sesión sigue sin conocerse y decide el servidor. */
-const leerSesion = () => api.GET("/api/v1/auth/sesion").then(undefined, () => undefined);
+const leerSesion = () => api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion }).then(undefined, () => undefined);
 
 function HojaEntrar({ correo }: { correo: string }) {
   const [escrito, setEscrito] = useState<string | null>(null);
@@ -39,7 +39,7 @@ function HojaEntrar({ correo }: { correo: string }) {
   /** Leer la sesión nueva es lo que cierra la hoja. Si esa lectura falla, se dice y se repite. */
   const seguir = useCallback(() => {
     setFalla(null);
-    void api.GET("/api/v1/auth/sesion").then(
+    void api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion }).then(
       ({ data, error, response }) => {
         if (data === undefined) setFalla(mensajeDeFalla(response.status, codigoDe(error)));
       },
@@ -91,7 +91,20 @@ export function EntrarEncima() {
   useEffect(() => {
     olvidarRecuperada();
     if (pathname === RUTA_ENTRAR) olvidarSesion();
-    if (faltaConocerSesion() && !SIN_LECTURA_PROPIA.has(pathname)) void leerSesion();
+    if (SIN_LECTURA_PROPIA.has(pathname)) return undefined;
+    // Sin saber de quién es la sesión la hoja no se puede abrir: si esta lectura falló, se repite.
+    const conocer = () => {
+      if (faltaConocerSesion() && document.visibilityState === "visible") void leerSesion();
+    };
+    conocer();
+    window.addEventListener("online", conocer);
+    window.addEventListener("focus", conocer);
+    document.addEventListener("visibilitychange", conocer);
+    return () => {
+      window.removeEventListener("online", conocer);
+      window.removeEventListener("focus", conocer);
+      document.removeEventListener("visibilitychange", conocer);
+    };
   }, [pathname]);
 
   return (

@@ -6,6 +6,7 @@ import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
 import { codigoDe } from "./fallas";
+import { comprobarSesion } from "./sesionEncima";
 
 // Si hay sesión, para decidir a qué pantalla va la persona (decisión del propietario del
 // 05-11-2026, §2). Cada pantalla pregunta al montarse y no se guarda en caché: recién entrada,
@@ -26,7 +27,7 @@ function useLectura(activa: boolean): Lectura {
   useEffect(() => {
     if (!activa) return;
     let vigente = true;
-    void api.GET("/api/v1/auth/sesion").then(
+    void api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion }).then(
       ({ data, response }) => {
         if (!vigente) return;
         if (data !== undefined) setLectura({ estado: "con_sesion", correo: data.correo });

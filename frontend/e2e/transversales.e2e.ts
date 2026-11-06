@@ -216,6 +216,57 @@ test.describe("hojas superpuestas", () => {
   });
 });
 
+test.describe("entrar encima en mi cuenta", () => {
+  test("reintentar «Tus datos» con la sesión vencida abre la hoja y no sale de la página", async ({ page }) => {
+    type Sesion = "bien" | "falla" | "vencida" | "nueva";
+    let estado: Sesion = "bien";
+    const SIN_SESION = { status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } };
+    await page.route("**/api/v1/**", async (ruta) => {
+      const camino = new URL(ruta.request().url()).pathname;
+      if (camino === "/api/v1/auth/sesion") {
+        if (estado === "falla") return ruta.fulfill({ status: 503, json: { codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" } });
+        if (estado === "vencida") return ruta.fulfill(SIN_SESION);
+        return ruta.fulfill({ json: sesion(estado === "nueva" ? "sesion-nueva" : "sesion-vieja") });
+      }
+      if (camino === "/api/v1/auth/codigo") {
+        estado = "nueva";
+        return ruta.fulfill({ json: {} });
+      }
+      const permisos = simularPermisos(ruta, camino);
+      if (permisos !== null) return permisos;
+      if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [] });
+      if (camino === "/api/v1/auth/sesiones") return ruta.fulfill({ json: { elementos: [] } });
+      if (camino === "/api/v1/auth/totp")
+        return ruta.fulfill({ json: { activo: false, llaves: 0, codigos_recuperacion_restantes: 0, verificado_en: null } });
+      if (camino === "/api/v1/auth/contrasena") return ruta.fulfill({ json: { definida: false, cambiada_en: null } });
+      if (camino === "/api/v1/privacidad/casos") return ruta.fulfill({ json: { elementos: [] } });
+      return ruta.abort();
+    });
+
+    await page.goto("/");
+    const miCuenta = page.getByRole("link", { name: "Mi cuenta" });
+    await expect(miCuenta).toBeVisible();
+    estado = "falla";
+    await miCuenta.click();
+    const datos = page.getByRole("region", { name: "Tus datos" });
+    await expect(datos.getByRole("button", { name: "Reintentar" })).toBeVisible();
+
+    estado = "vencida";
+    await datos.getByRole("button", { name: "Reintentar" }).click();
+    const hoja = page.getByRole("dialog", { name: "Tu sesión venció" });
+    await expect(hoja).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/cuenta");
+
+    await hoja.getByRole("button", { name: "Entrar con un código" }).click();
+    await hoja.getByLabel(/Código de/).fill("042917");
+    await hoja.getByRole("button", { name: "Entrar con el código" }).click();
+
+    await expect(hoja).toHaveCount(0);
+    await expect(datos.getByText("ana@ejemplo.com")).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe("/cuenta");
+  });
+});
+
 test.describe("datos del proveedor", () => {
   test("el CUIT es obligatorio: sin él el formulario no sale", async ({ page, baseURL }) => {
     const estado = await simularApi(page, baseURL!, () => creado);

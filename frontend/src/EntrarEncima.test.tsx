@@ -13,7 +13,7 @@ import { PedirCodigo } from "./egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "./egresos/useConsorcio";
 import { recordarLlave } from "./llaveAcceso";
 import { recordarMetodo } from "./metodoConfirmar";
-import { activarEntrarEncima, pidiendoEntrar, salidas, useAEntrar } from "./sesionEncima";
+import { activarEntrarEncima, comprobarSesion, faltaConocerSesion, pidiendoEntrar, salidas, useAEntrar } from "./sesionEncima";
 
 const PERSONA = "99999999-9999-4999-8999-999999999999";
 const CONSORCIO = "c1c1c1c1-0000-4000-8000-000000000001";
@@ -167,6 +167,65 @@ describe("entrar encima", () => {
     expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
     expect(fallo.inert).toBeFalsy();
     expect(fallo.contains(document.activeElement)).toBe(true);
+  });
+
+  it("una lectura de la sesión que da 401 abre la hoja, espera y se repite sola, sin ir a /entrar", async () => {
+    const { estado } = backend({
+      "POST /api/v1/auth/codigo": () => {
+        estado.sesion = NUEVA;
+        return Response.json({ persona_id: PERSONA });
+      },
+    });
+    await montar();
+    fireEvent.change(screen.getByLabelText("Escrito"), { target: { value: "lo que escribí" } });
+
+    estado.sesion = null;
+    const lectura = api.GET("/api/v1/auth/sesion");
+
+    await screen.findByRole("heading", { name: HOJA });
+    await entrarConCodigo();
+    const { data } = await lectura;
+    expect(data?.sesion_id).toBe(NUEVA.sesion_id);
+    expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
+    expect(screen.getByLabelText<HTMLInputElement>("Escrito").value).toBe("lo que escribí");
+  });
+
+  it("control: comprobar la sesión con un 401 no abre la hoja ni queda esperando", async () => {
+    const { estado } = backend({});
+    await montar();
+
+    estado.sesion = null;
+    const { response } = await api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion });
+
+    expect(response.status).toBe(401);
+    expect(pidiendoEntrar()).toBe(false);
+  });
+
+  it("si la lectura que da a conocer la sesión falló, se repite al volver a la ventana", async () => {
+    const { estado, simulado } = backend({});
+    simulado.mockRejectedValueOnce(new TypeError("sin red"));
+    await montar();
+    await waitFor(() => expect(veces(simulado, "GET", "/api/v1/auth/sesion")).toBe(1));
+
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(() => expect(veces(simulado, "GET", "/api/v1/auth/sesion")).toBe(2));
+    await waitFor(() => expect(faltaConocerSesion()).toBe(false));
+
+    estado.sesion = null;
+    void api.GET("/api/v1/auth/sesion");
+    await screen.findByRole("heading", { name: HOJA });
+  });
+
+  it("si salir falló, la sesión sigue conocida y al vencer abre la hoja", async () => {
+    const { estado } = backend({ "POST /api/v1/auth/salir": () => error("servicio_no_disponible", 503) });
+    await montar();
+
+    await api.POST("/api/v1/auth/salir", { headers: encabezadoCsrf() });
+    expect(faltaConocerSesion()).toBe(false);
+    estado.sesion = null;
+    void api.GET("/api/v1/auth/sesion");
+
+    await screen.findByRole("heading", { name: HOJA });
   });
 
   it("una lectura con la sesión vencida espera en la hoja y se repite sola al entrar, sin perder lo escrito", async () => {
