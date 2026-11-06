@@ -4,16 +4,22 @@ import { Link, useLocation } from "react-router";
 import { api } from "../api/cliente";
 import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { confirmarConLlave, llaveDisponible } from "../llaveAcceso";
-import { codigoVerificacion, RUTA_SEGUNDO_FACTOR } from "../SegundoFactor";
+import { Hoja } from "../Hoja";
+import { confirmarConLlave, esDeEsteDispositivo, llaveDisponible } from "../llaveAcceso";
+import { type MetodoConfirmar, recordarMetodo, ultimoMetodo } from "../metodoConfirmar";
+import { FallaDeLectura, mensajeDeLectura } from "../permisos";
+import { codigoAplicacion, codigoVerificacion, RUTA_SEGUNDO_FACTOR } from "../SegundoFactor";
 import { mensajeDeError } from "./comun";
 
-// Renovar el segundo factor (pantalla 4, aprobada el 30-10-2026): ante `segundo_factor_requerido`
-// la pantalla pide el código, lo verifica en esta sesión (`POST /api/v1/auth/totp/verificar`) y
-// recién entonces reintenta el mismo acto. La pantalla que la usa conserva la misma
-// `Idempotency-Key`: el reintento es el mismo pedido, nunca uno nuevo. Quien tiene una llave de
-// acceso confirma con el PIN, la huella o la cara; el código queda como otra opción. Quien no
-// activó ni una cosa ni la otra no tiene código que escribir: se le dice de entrada, sin el campo.
+// Confirmar en el momento (rediseño de pagos, §12): ante `segundo_factor_requerido` aparece directo
+// el último método usado en este dispositivo, sin un paso «Confirmá que sos vos». Con la llave es el
+// aviso del sistema; con un código, una hoja encima de la pantalla. «Directo» es elegir el método, no
+// saltear el gesto: lo sigue pidiendo y controlando el servidor. Al confirmar, la pantalla repite el
+// mismo acto con la misma `Idempotency-Key`. «Usar otro método» aparece recién si falla o se vuelve
+// atrás, y ofrece solo lo que la persona tiene activo.
+//
+// Un navegador puede negar la llave si el gesto del botón ya quedó lejos (Safari): cae en «No se pudo
+// confirmar», y «Probar de nuevo» la pide con un toque propio.
 
 interface Props {
   /** Qué se va a reintentar, en palabras («aprobar la orden»). */
@@ -22,12 +28,61 @@ interface Props {
   alCancelar: () => void;
 }
 
-/** Sin aplicación de verificación activa no hay código que pedir: el camino es darla de alta. */
+type Activos = Record<MetodoConfirmar, boolean>;
+type Clase = Exclude<MetodoConfirmar, "llave">;
+
+type Paso =
+  | { tipo: "leyendo" }
+  | { tipo: "llave" }
+  | { tipo: "codigo"; clase: Clase }
+  | { tipo: "fallo"; mensaje: string }
+  | { tipo: "otro" }
+  | { tipo: "sin_alta" };
+
+const TEXTO_METODO: Record<MetodoConfirmar, string> = {
+  llave: "PIN, huella o cara",
+  aplicacion: "Código de la aplicación",
+  recuperacion: "Código de recuperación",
+};
+const METODOS = Object.keys(TEXTO_METODO) as MetodoConfirmar[];
+
+const TITULO_CODIGO: Record<Clase, string> = {
+  aplicacion: "Escribí el código de tu aplicación",
+  recuperacion: "Escribí un código de recuperación",
+};
+
+const LLAVE_EN_OTRO_LADO = "Este navegador no puede usar tu llave de acceso. Probá desde el dispositivo donde la tenés.";
+
+async function leerActivos(): Promise<{ activos: Activos; llaves: number }> {
+  const { data, error, response } = await api.GET("/api/v1/auth/totp");
+  if (data === undefined) throw new FallaDeLectura(mensajeDeError(response.status, codigoDe(error)));
+  return {
+    activos: {
+      llave: llaveDisponible() && data.llaves > 0,
+      aplicacion: data.activo,
+      recuperacion: data.codigos_recuperacion_restantes > 0,
+    },
+    llaves: data.llaves,
+  };
+}
+
+/** El último si sigue activo; si no, lo que menos pide: la llave de acá, después la aplicación. */
+async function primerMetodo(activos: Activos): Promise<MetodoConfirmar | null> {
+  const ultimo = ultimoMetodo();
+  if (ultimo !== null && activos[ultimo]) return ultimo;
+  if (activos.llave) {
+    const { data } = await api.GET("/api/v1/auth/llave");
+    if (data?.some((k) => esDeEsteDispositivo(k.credencial_id)) === true) return "llave";
+  }
+  return (["aplicacion", "llave", "recuperacion"] as const).find((m) => activos[m]) ?? null;
+}
+
+/** Sin ningún método no hay nada que pedir: el camino es darlo de alta. */
 function SinAlta() {
   const { pathname } = useLocation();
   return (
     <p role="alert">
-      Todavía no activaste la verificación en dos pasos.{" "}
+      Todavía no la activaste.{" "}
       <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
         Activala ahora
       </Link>{" "}
@@ -38,150 +93,217 @@ function SinAlta() {
 
 export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const id = useId();
+  const [paso, setPaso] = useState<Paso>({ tipo: "leyendo" });
+  const [activos, setActivos] = useState<Activos | null>(null);
+  const [vuelta, setVuelta] = useState(0);
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [conLlave, setConLlave] = useState(false);
-  const [sinAlta, setSinAlta] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
+  const llave = useRef<AbortController | null>(null);
 
-  // Si la pantalla se desmonta (otro edificio, otra página) mientras se verifica, el pedido
-  // pendiente no sigue: se descarta con ella.
+  // Si la pantalla se desmonta (otro edificio, otra página) mientras se verifica, lo pendiente no
+  // sigue: se descarta con ella, y el aviso del sistema se cierra.
   const montado = useRef(true);
   useEffect(() => {
     montado.current = true;
-    campo.current?.focus();
-    // Anticipa lo que igual respondería la verificación: mientras no se sabe, el campo sigue.
-    void api
-      .GET("/api/v1/auth/totp")
-      .then(({ data }) => {
-        if (montado.current && data !== undefined && !data.activo && data.llaves === 0) setSinAlta(true);
-      })
-      .catch(() => setError(SIN_CONEXION));
-    if (llaveDisponible())
-      void api
-        .GET("/api/v1/auth/llave")
-        .then(({ data }) => {
-          if (montado.current && data !== undefined && data.length > 0) setConLlave(true);
-        })
-        .catch(() => setError(SIN_CONEXION));
     return () => {
       montado.current = false;
+      llave.current?.abort();
     };
   }, []);
 
   function confirmar() {
-    setEnviando(true);
-    setError(null);
-    void confirmarConLlave()
-      .then((resultado) => {
-        if (!montado.current) return;
-        if (resultado.ok) alVerificar();
-        else setError(resultado.mensaje);
-      })
-      .finally(() => setEnviando(false));
+    const controlador = new AbortController();
+    llave.current = controlador;
+    setPaso({ tipo: "llave" });
+    void confirmarConLlave(controlador.signal).then((resultado) => {
+      if (!montado.current || controlador.signal.aborted) return;
+      if (resultado.ok) {
+        recordarMetodo("llave");
+        alVerificar();
+      } else setPaso({ tipo: "fallo", mensaje: resultado.mensaje });
+    });
   }
 
-  function verificar(evento: FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
-    const limpio = codigoVerificacion(codigo);
-    if (!limpio) {
-      setError("Escribí los seis números de la aplicación o un código de recuperación.");
-      return;
-    }
+  function usar(metodo: MetodoConfirmar) {
+    setError(null);
+    setCodigo("");
+    if (metodo === "llave") confirmar();
+    else setPaso({ tipo: "codigo", clase: metodo });
+  }
+
+  useEffect(() => {
+    let vigente = true;
+    leerActivos()
+      .then(async ({ activos: leidos, llaves }) => {
+        const primero = await primerMetodo(leidos);
+        if (!vigente) return;
+        setActivos(leidos);
+        if (primero !== null) usar(primero);
+        else if (llaves > 0) setPaso({ tipo: "fallo", mensaje: LLAVE_EN_OTRO_LADO });
+        else setPaso({ tipo: "sin_alta" });
+      })
+      .catch((falla: unknown) => {
+        if (vigente) setPaso({ tipo: "fallo", mensaje: mensajeDeLectura(falla) });
+      });
+    return () => {
+      vigente = false;
+    };
+    // `usar` cambia en cada render; lo que vuelve a leer es `vuelta`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vuelta]);
+
+  // El campo se apaga mientras se verifica: si el código no sirvió, se sigue escribiendo ahí.
+  useEffect(() => {
+    if (!enviando) campo.current?.focus();
+  }, [enviando]);
+
+  function verificar(limpio: string, clase: Clase) {
     setEnviando(true);
     setError(null);
-    setSinAlta(false);
     void api
       .POST("/api/v1/auth/totp/verificar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
       .then(({ data, error: falla, response }) => {
         if (!montado.current) return;
         if (data !== undefined) {
           setCodigo("");
+          recordarMetodo(clase);
           alVerificar();
-        } else if (codigoDe(falla) === "segundo_factor_invalido" || codigoDe(falla) === "codigo_invalido")
+          return;
+        }
+        const motivo = codigoDe(falla);
+        if (motivo === "segundo_factor_invalido" || motivo === "codigo_invalido") {
+          setCodigo("");
           setError("El código no es válido. Probá con el que muestra ahora la aplicación.");
-        else if (codigoDe(falla) === "segundo_factor_sin_alta") setSinAlta(true);
-        else setError(mensajeDeError(response.status, codigoDe(falla)));
+        } else if (motivo === "segundo_factor_sin_alta") setPaso({ tipo: "sin_alta" });
+        else setError(mensajeDeError(response.status, motivo));
       })
-      .catch(() => setError(SIN_CONEXION))
-      .finally(() => setEnviando(false));
+      .catch(() => {
+        if (montado.current) setError(SIN_CONEXION);
+      })
+      .finally(() => {
+        if (montado.current) setEnviando(false);
+      });
   }
 
-  if (sinAlta)
+  function escribir(valor: string, clase: Clase) {
+    setCodigo(valor);
+    const completo = clase === "aplicacion" ? codigoAplicacion(valor) : null;
+    if (completo !== null) verificar(completo, clase);
+  }
+
+  function enviar(evento: FormEvent<HTMLFormElement>, clase: Clase) {
+    evento.preventDefault();
+    const limpio = codigoVerificacion(codigo);
+    if (limpio === null) setError("Escribí los seis números de la aplicación o un código de recuperación.");
+    else verificar(limpio, clase);
+  }
+
+  const hayOtro = activos !== null && METODOS.filter((m) => activos[m]).length > 1;
+  const cancelar = (
+    <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+      Cancelar
+    </button>
+  );
+  const usarOtro = hayOtro && (
+    <button type="button" className="secundario" disabled={enviando} onClick={() => setPaso({ tipo: "otro" })}>
+      Usar otro método
+    </button>
+  );
+
+  if (paso.tipo === "leyendo") return <p role="status">Preparando la confirmación…</p>;
+
+  if (paso.tipo === "llave")
     return (
-      <section className="formulario tarjeta" aria-labelledby={`${id}-titulo`}>
-        <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
+      <Hoja key="llave" titulo="Usá tu PIN, huella o cara" alEscapar={alCancelar}>
+        <p>Para {acto}. Lo pide tu dispositivo y después seguimos con el mismo pedido.</p>
+        <div className="formulario">
+          <div className="acciones">{cancelar}</div>
+        </div>
+      </Hoja>
+    );
+
+  if (paso.tipo === "fallo")
+    return (
+      <Hoja key="fallo" titulo="No se pudo confirmar" alEscapar={alCancelar}>
+        <p role="alert">{paso.mensaje}</p>
+        <div className="formulario">
+          <div className="acciones">
+            <button
+              type="button"
+              data-foco
+              onClick={() => (activos?.llave === true ? confirmar() : setVuelta((v) => v + 1))}
+            >
+              Probar de nuevo
+            </button>
+            {usarOtro}
+            {cancelar}
+          </div>
+        </div>
+      </Hoja>
+    );
+
+  if (paso.tipo === "otro")
+    return (
+      <Hoja key="otro" titulo="Usar otro método" alEscapar={alCancelar}>
+        <div className="formulario">
+          <div className="acciones">
+            {METODOS.filter((m) => activos?.[m] === true).map((m, i) => (
+              <button key={m} type="button" data-foco={i === 0 ? true : undefined} onClick={() => usar(m)}>
+                {TEXTO_METODO[m]}
+              </button>
+            ))}
+            {cancelar}
+          </div>
+        </div>
+      </Hoja>
+    );
+
+  if (paso.tipo === "sin_alta")
+    return (
+      <Hoja key="sin_alta" titulo="Falta la verificación en dos pasos" alEscapar={alCancelar}>
         <p>Para {acto} hace falta la verificación en dos pasos.</p>
         <SinAlta />
-        <div className="acciones">
-          <button type="button" className="secundario" onClick={alCancelar}>
-            Cancelar
-          </button>
+        <div className="formulario">
+          <div className="acciones">{cancelar}</div>
         </div>
-      </section>
+      </Hoja>
     );
 
-  if (conLlave)
-    return (
-      <section className="formulario tarjeta" aria-labelledby={`${id}-titulo`}>
-        <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
-        <p>Para {acto}, confirmá con tu PIN, huella o cara. Después seguimos con el mismo pedido.</p>
-        {error !== null && <p role="alert">{error}</p>}
-        <div className="acciones">
-          <button type="button" disabled={enviando} onClick={confirmar}>
-            {enviando ? "Confirmando…" : "Confirmar con tu PIN o huella"}
-          </button>
-          <button
-            type="button"
-            className="secundario"
-            disabled={enviando}
-            onClick={() => {
-              setError(null);
-              setConLlave(false);
-            }}
-          >
-            Usar un código
-          </button>
-          <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
-            Cancelar
-          </button>
-        </div>
-      </section>
-    );
-
+  const { clase } = paso;
   return (
-    <form className="formulario tarjeta" onSubmit={verificar} noValidate aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
-      <p>
-        Para {acto} hace falta el código de tu aplicación de verificación o uno de recuperación.
-        Después seguimos con el mismo pedido.
-      </p>
-      <label htmlFor={`${id}-codigo`}>Código</label>
-      <input
-        id={`${id}-codigo`}
-        ref={campo}
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        value={codigo}
-        disabled={enviando}
-        aria-invalid={error !== null}
-        aria-describedby={error === null ? undefined : `${id}-error`}
-        onChange={(e) => setCodigo(e.target.value)}
-      />
-      {error !== null && (
-        <p id={`${id}-error`} role="alert">
-          {error}
-        </p>
-      )}
-      <div className="acciones">
-        <button type="submit" disabled={enviando}>
-          {enviando ? "Verificando…" : "Verificar y seguir"}
-        </button>
-        <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
-          Cancelar
-        </button>
-      </div>
-    </form>
+    <Hoja key={clase} titulo={TITULO_CODIGO[clase]} alEscapar={alCancelar}>
+      <p>Para {acto}. Después seguimos con el mismo pedido.</p>
+      <form className="formulario" onSubmit={(e) => enviar(e, clase)} noValidate>
+        <label htmlFor={`${id}-codigo`}>Código</label>
+        <input
+          id={`${id}-codigo`}
+          ref={campo}
+          data-foco
+          inputMode={clase === "aplicacion" ? "numeric" : "text"}
+          autoComplete="one-time-code"
+          value={codigo}
+          disabled={enviando}
+          aria-invalid={error !== null}
+          aria-describedby={error === null ? undefined : `${id}-error`}
+          onChange={(e) => escribir(e.target.value, clase)}
+        />
+        {error !== null && (
+          <p id={`${id}-error`} role="alert">
+            {error}
+          </p>
+        )}
+        <div className="acciones">
+          {clase === "recuperacion" && (
+            <button type="submit" disabled={enviando}>
+              {enviando ? "Verificando…" : "Verificar y seguir"}
+            </button>
+          )}
+          {usarOtro}
+          {cancelar}
+        </div>
+      </form>
+    </Hoja>
   );
 }

@@ -7211,6 +7211,10 @@
             "title": "Alta Por",
             "type": "string"
           },
+          "atiende_emergencias": {
+            "title": "Atiende Emergencias",
+            "type": "boolean"
+          },
           "contacto": {
             "anyOf": [
               {
@@ -7221,6 +7225,17 @@
               }
             ],
             "title": "Contacto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
           },
           "creado_en": {
             "format": "date-time",
@@ -7262,6 +7277,17 @@
             ],
             "title": "Documento Id"
           },
+          "domicilio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoProveedor"
           },
@@ -7289,11 +7315,33 @@
             ],
             "title": "Rubro"
           },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
           "version": {
             "exclusiveMinimum": 0.0,
             "maximum": 2147483647.0,
             "title": "Version",
             "type": "integer"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
           }
         },
         "required": [
@@ -7303,6 +7351,11 @@
           "razon_social",
           "rubro",
           "contacto",
+          "telefono",
+          "whatsapp",
+          "correo",
+          "domicilio",
+          "atiende_emergencias",
           "estado",
           "documento_id",
           "cuenta_ultimos_digitos",
@@ -7359,6 +7412,11 @@
         "additionalProperties": false,
         "description": "`POST …/proveedores`. Queda `activo` en su versión 1.",
         "properties": {
+          "atiende_emergencias": {
+            "default": false,
+            "title": "Atiende Emergencias",
+            "type": "boolean"
+          },
           "contacto": {
             "anyOf": [
               {
@@ -7372,6 +7430,20 @@
               }
             ],
             "title": "Contacto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "minLength": 3,
+                "pattern": "^[^@\\s]+@[^@\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
           },
           "cuenta_destino": {
             "anyOf": [
@@ -7387,17 +7459,10 @@
             "title": "Cuenta Destino"
           },
           "cuit": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9]{11}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Si se carga, es único en el consorcio.",
-            "title": "Cuit"
+            "description": "Obligatorio y único en el consorcio.",
+            "pattern": "^[0-9]{11}$",
+            "title": "Cuit",
+            "type": "string"
           },
           "documento_id": {
             "anyOf": [
@@ -7411,6 +7476,20 @@
             ],
             "description": "Un documento vigente del consorcio que respalda los datos.",
             "title": "Documento Id"
+          },
+          "domicilio": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
           },
           "razon_social": {
             "maxLength": 200,
@@ -7432,10 +7511,39 @@
               }
             ],
             "title": "Rubro"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
           }
         },
         "required": [
-          "razon_social"
+          "razon_social",
+          "cuit"
         ],
         "title": "ProveedorNuevo",
         "type": "object"
@@ -7444,6 +7552,11 @@
         "additionalProperties": false,
         "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.\n\nQuien prepara nunca recibe la cuenta completa, así que no puede reenviarla:\n`conservar_cuenta` deja la de la versión esperada, y entonces `cuenta_destino` no viene.\nSin `conservar_cuenta`, `cuenta_destino` es la cuenta nueva o ninguna.",
         "properties": {
+          "atiende_emergencias": {
+            "default": false,
+            "title": "Atiende Emergencias",
+            "type": "boolean"
+          },
           "conservar_cuenta": {
             "description": "Obligatorio: así un cliente que no manda la cuenta nunca la borra sin querer.",
             "title": "Conservar Cuenta",
@@ -7462,6 +7575,20 @@
               }
             ],
             "title": "Contacto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "maxLength": 254,
+                "minLength": 3,
+                "pattern": "^[^@\\s]+@[^@\\s]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
           },
           "cuenta_destino": {
             "anyOf": [
@@ -7488,6 +7615,20 @@
             ],
             "description": "Un documento vigente del consorcio que respalda los datos.",
             "title": "Documento Id"
+          },
+          "domicilio": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
           },
           "estado": {
             "$ref": "#/components/schemas/EstadoProveedor"
@@ -7513,11 +7654,39 @@
             ],
             "title": "Rubro"
           },
+          "telefono": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
           "version_esperada": {
             "exclusiveMinimum": 0.0,
             "maximum": 2147483647.0,
             "title": "Version Esperada",
             "type": "integer"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
           }
         },
         "required": [
@@ -8911,6 +9080,10 @@
       },
       "VersionProveedor": {
         "properties": {
+          "atiende_emergencias": {
+            "title": "Atiende Emergencias",
+            "type": "boolean"
+          },
           "contacto": {
             "anyOf": [
               {
@@ -8921,6 +9094,17 @@
               }
             ],
             "title": "Contacto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
           },
           "creada_en": {
             "format": "date-time",
@@ -8951,6 +9135,17 @@
             ],
             "title": "Documento Id"
           },
+          "domicilio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoProveedor"
           },
@@ -8978,11 +9173,33 @@
             ],
             "title": "Rubro"
           },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
           "version": {
             "exclusiveMinimum": 0.0,
             "maximum": 2147483647.0,
             "title": "Version",
             "type": "integer"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
           }
         },
         "required": [
@@ -8990,6 +9207,11 @@
           "razon_social",
           "rubro",
           "contacto",
+          "telefono",
+          "whatsapp",
+          "correo",
+          "domicilio",
+          "atiende_emergencias",
           "estado",
           "documento_id",
           "cuenta_ultimos_digitos",

@@ -33,7 +33,7 @@ export const SEGUNDO_FACTOR_REQUERIDO = "segundo_factor_requerido";
 /** R10: la sesión tiene más de 12 horas (hay que volver a entrar). */
 export const SESION_RECIENTE_REQUERIDA = "sesion_reciente_requerida";
 const CAMBIO_LA_ORDEN = new Set(["version_desactualizada", "huella_distinta"]);
-/** Lo que dice la pantalla ante R10 por sesión vieja; `AvisoPantalla` le suma el enlace a /entrar. */
+/** Lo que se anota ante R10 por sesión vieja. `AvisoPantalla` no lo muestra: lo pide la hoja encima. */
 export const TEXTO_SESION_VENCIDA = "Tu sesión tiene más de 12 horas: volvé a entrar para seguir.";
 
 /** El resultado de lo último que se hizo o se intentó en una pantalla. */

@@ -35,14 +35,14 @@ Downgrade: se niega (`downgrade_con_datos`) si hay alguna lectura. Sin eso, vuel
 definiciones anteriores.
 
 Revisión: 0077
-Anterior: 0075
+Anterior: 0076
 """
 
 from alembic import op
 from sqlalchemy import text
 
 revision = "0077"
-down_revision = "0075"
+down_revision = "0076"
 branch_labels = None
 depends_on = None
 

@@ -12,9 +12,14 @@ describe("mensajeDeFalla (E34)", () => {
     expect(mensajeDeFalla(503, undefined)).toBe(SERVICIO_NO_DISPONIBLE);
   });
 
-  it("una respuesta sin código que no es 503 se explica como conexión", () => {
-    expect(mensajeDeFalla(502, undefined)).toBe(SIN_CONEXION);
-    expect(mensajeDeFalla(504, undefined)).toBe(SIN_CONEXION);
+  it("un 5xx sin cuerpo de la aplicación (el borde) también es del servicio", () => {
+    expect(mensajeDeFalla(502, undefined)).toBe(SERVICIO_NO_DISPONIBLE);
+    expect(mensajeDeFalla(504, undefined)).toBe(SERVICIO_NO_DISPONIBLE);
+  });
+
+  it("la conexión se nombra solo si no hubo respuesta", () => {
+    expect(mensajeDeFalla(0, undefined)).toBe(SIN_CONEXION);
+    expect(mensajeDeFalla(404, undefined)).toBe(RECARGAR); // control: respondió alguien
   });
 
   it("un 429 de la aplicación es el límite de pedidos, no el servicio", () => {
@@ -31,8 +36,9 @@ describe("mensajeDeFalla (E34)", () => {
     expect(mensajeDeFalla(403, "sin_permiso")).toBe(RECARGAR); // control
   });
 
-  it("esDeConexion solo cuando no respondió la aplicación", () => {
-    expect(esDeConexion(502, undefined)).toBe(true);
+  it("esDeConexion solo cuando no hubo respuesta", () => {
+    expect(esDeConexion(0, undefined)).toBe(true);
+    expect(esDeConexion(502, undefined)).toBe(false);
     expect(esDeConexion(503, "servicio_no_disponible")).toBe(false);
     expect(esDeConexion(503, undefined)).toBe(false);
   });

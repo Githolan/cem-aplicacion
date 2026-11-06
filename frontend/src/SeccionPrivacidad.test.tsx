@@ -126,7 +126,7 @@ describe("sección de pedidos sobre los datos", () => {
     vi.useRealTimers();
   });
 
-  it("sin contraseña no la pide y explica que hay que volver a entrar", async () => {
+  it("sin contraseña no la pide: lo resuelve la hoja de entrar encima", async () => {
     const simulado = backend({
       [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("confirmado")] }),
       [`POST ${CASOS}/${CASO}/copia`]: () =>
@@ -136,15 +136,18 @@ describe("sección de pedidos sobre los datos", () => {
     mostrar(false);
     fireEvent.click(await screen.findByRole("button", { name: "Descargar la copia de mis datos" }));
     expect(screen.queryByLabelText("Tu contraseña")).toBeNull();
-    const enlace = await screen.findByRole("link", { name: "volvé a entrar con el enlace del correo" });
-    expect(enlace.getAttribute("href")).toBe("/entrar");
-    expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([{ contrasena: null }]);
+    // Lo pide la hoja de entrar encima: acá no queda un mensaje viejo para después de entrar.
+    await waitFor(async () => expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([{ contrasena: null }]));
+    expect(screen.getByRole("button", { name: "Descargar la copia de mis datos" })).toBeTruthy();
+    expect(screen.queryByText(/Por seguridad/)).toBeNull();
   });
 
   it("con segundo factor sin verificar lo pide acá mismo y repite el paso con lo que ya estaba escrito", async () => {
     let verificado = false;
     const simulado = backend({
       [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+      "GET /api/v1/auth/totp": () =>
+        Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
       "POST /api/v1/auth/totp/verificar": () => {
         verificado = true;
         return Response.json({
@@ -163,7 +166,6 @@ describe("sección de pedidos sobre los datos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
     expect(await screen.findByText("Listo: confirmaste tu pedido.")).toBeTruthy();
     expect(await Promise.all(cuerpos(simulado, "POST"))).toEqual([

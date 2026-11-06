@@ -277,6 +277,8 @@ describe("página /cuenta/segundo-factor", () => {
     abrir();
 
     fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
     escribirCodigo("Código", " K7M2Q X9P4T ");
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
@@ -322,26 +324,20 @@ describe("página /cuenta/segundo-factor", () => {
     expect((screen.getByLabelText("Código de la aplicación") as HTMLInputElement).value).toBe("042917");
   });
 
-  it("el alta con una sesión vieja (403 reautenticacion_requerida) da la salida a volver a entrar", async () => {
+  it("el alta con una sesión vieja (403 reautenticacion_requerida) no dice nada: lo pide la hoja", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
         "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
         "POST /api/v1/auth/totp/alta": () => error("reautenticacion_requerida", 403),
-        "GET /api/v1/auth/sesion": () => Response.json(YO),
       }),
     );
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
 
-    const enlace = await screen.findByRole("link", { name: "Volver a entrar" });
-    expect(screen.getByText(ENTRAR_DE_NUEVO)).toBeTruthy();
-    fireEvent.click(enlace);
-
-    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    expect(lugar()).toBe("/entrar");
-    await waitFor(() => expect(localStorage.getItem("cem.entrar.origen")).toContain("/cuenta/segundo-factor"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activar el segundo factor" })).toHaveProperty("disabled", false));
+    expect(screen.queryByText(ENTRAR_DE_NUEVO)).toBeNull();
+    expect(lugar()).toBe("/cuenta/segundo-factor");
   });
 
   it("control: otro rechazo del alta no ofrece volver a entrar", async () => {
@@ -380,9 +376,8 @@ describe("página /cuenta/segundo-factor", () => {
     expect(screen.getByRole("heading", { name: "Está activado" })).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
 
-    await screen.findByRole("button", { name: "Verificar y seguir" });
+    await screen.findByLabelText("Código");
     escribirCodigo("Código", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
     expect(await screen.findByText("Listo: el segundo factor quedó desactivado.")).toBeTruthy();
     expect(await screen.findByRole("heading", MI_CUENTA)).toBeTruthy();
@@ -409,7 +404,7 @@ describe("página /cuenta/segundo-factor", () => {
     vi.stubGlobal(
       "fetch",
       backend({
-        "GET /api/v1/auth/totp": () => Response.json(SOLO_LLAVE),
+        "GET /api/v1/auth/totp": () => Response.json({ ...SOLO_LLAVE, codigos_recuperacion_restantes: 5 }),
         "POST /api/v1/auth/totp/verificar": () => {
           confirmado = true;
           return Response.json(VERIFICADO);

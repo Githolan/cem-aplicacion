@@ -4,9 +4,10 @@ import { useLocation, useNavigate } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
-import { RUTA_ENTRAR, RUTA_INICIO } from "../enlace";
+import { RUTA_INICIO } from "../enlace";
 import { codigoDe, esDeConexion } from "../fallas";
 import { type Requisito, useEdificioElegido } from "../permisos";
+import { useAEntrar } from "../sesionEncima";
 import { ESTADO } from "./comun";
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
@@ -138,7 +139,7 @@ export function useConsorcio(requisito: Requisito) {
   );
   const consultado = useRef(false);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  const aEntrar = useAEntrar();
   const aInicio = useCallback(() => navegar(RUTA_INICIO, { replace: true }), [navegar]);
 
   const consultar = useCallback(() => {

@@ -25,6 +25,7 @@ from tests.test_contexto_mandatos import IP, denegaciones
 from tests.test_orden_pago_neutra import (
     Escena,
     cbu_sintetico,
+    cuit_sintetico,
     escena_economica,
     exigir,
     nueva_sesion,
@@ -44,6 +45,11 @@ ORDEN = {
     "usa_fondo_reserva": False,
 }
 PROVEEDOR = {"razon_social": "Proveedor SINTETICO de prueba (NO REAL)", "rubro": "Plomería"}
+
+
+def con_cuit() -> dict:
+    """Lo que pide el alta: el CUIT es obligatorio y no cambia en una versión nueva."""
+    return PROVEEDOR | {"cuit": cuit_sintetico()}
 
 
 @pytest.fixture
@@ -117,7 +123,7 @@ def cuit_valido(base: str) -> str:
 
 
 def test_alta_de_proveedor_y_su_historia(e):
-    r = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": cbu_sintetico(10)})
+    r = post(e, e.adm, "proveedores", con_cuit() | {"cuenta_destino": cbu_sintetico(10)})
     assert r.status_code == 201, r.json()
     p = r.json()["id"]
     assert r.json()["version"] == 1
@@ -206,7 +212,7 @@ def test_un_error_de_la_base_llega_al_registro_sin_la_cuenta():
 
 
 def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
-    p = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": cbu_sintetico(14)}).json()[
+    p = post(e, e.adm, "proveedores", con_cuit() | {"cuenta_destino": cbu_sintetico(14)}).json()[
         "id"
     ]
     cambio = PROVEEDOR | {"rubro": "Gas", "estado": "activo", "version_esperada": 1}
@@ -239,15 +245,15 @@ def test_cambiar_un_proveedor_conservando_la_cuenta_que_no_ve(e, motor_migrate):
 def test_cuenta_y_cuit_invalidos(e):
     bien = cbu_sintetico(12)
     mal = bien[:21] + str((int(bien[21]) + 1) % 10)
-    r = post(e, e.adm, "proveedores", PROVEEDOR | {"cuenta_destino": mal})
+    r = post(e, e.adm, "proveedores", con_cuit() | {"cuenta_destino": mal})
     assert codigo(r) == (422, "peticion_invalida")
     cuit = cuit_valido("2012345678")
     otro_digito = cuit[:10] + str((int(cuit[10]) + 1) % 10)
-    r = post(e, e.adm, "proveedores", PROVEEDOR | {"cuit": otro_digito})
+    r = post(e, e.adm, "proveedores", con_cuit() | {"cuit": otro_digito})
     assert codigo(r) == (422, "cuit_invalido")
     # Control: el mismo CUIT con su dígito pasa, y repetido en el consorcio se niega.
-    assert post(e, e.adm, "proveedores", PROVEEDOR | {"cuit": cuit}).status_code == 201
-    r = post(e, e.adm, "proveedores", PROVEEDOR | {"cuit": cuit, "cuenta_destino": bien})
+    assert post(e, e.adm, "proveedores", con_cuit() | {"cuit": cuit}).status_code == 201
+    r = post(e, e.adm, "proveedores", con_cuit() | {"cuit": cuit, "cuenta_destino": bien})
     assert codigo(r) == (409, "cuit_repetido")
 
 
@@ -279,7 +285,7 @@ def test_el_control_de_la_cuenta_coincide_con_la_base(motor_migrate):
 
 def test_el_alta_se_reintenta_sin_duplicar(e, motor_migrate):
     clave = clave_idempotencia()
-    cuerpo = PROVEEDOR | {"cuenta_destino": cbu_sintetico(13)}
+    cuerpo = con_cuit() | {"cuenta_destino": cbu_sintetico(13)}
     primera = post(e, e.adm, "proveedores", cuerpo, clave)
     repetida = post(e, e.adm, "proveedores", cuerpo, clave)
     assert primera.status_code == repetida.status_code == 201
@@ -379,7 +385,7 @@ def test_cada_rol_en_su_lugar(e):
     r = post(e, e.adm, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
     assert codigo(r) == (403, "sin_permiso")
     assert codigo(get(e, e.mc1, "ordenes-pago")) == (403, "sin_permiso")
-    assert codigo(post(e, e.mc1, "proveedores", PROVEEDOR)) == (403, "sin_permiso")
+    assert codigo(post(e, e.mc1, "proveedores", con_cuit())) == (403, "sin_permiso")
     r = post(e, e.mc1, "ordenes-pago", ORDEN | {"proveedor_id": str(e.proveedor)})
     assert codigo(r) == (403, "sin_permiso")
     # Controles: cada uno en lo suyo.
@@ -406,7 +412,7 @@ def test_r10_segundo_factor_y_sesion_recientes(e, motor_migrate):
     vieja_totp = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=11)
     # Mirar no pide el gesto (`0071`); dar de alta un proveedor, sí: define a quién se le paga.
     assert get(e, e.adm, "ordenes-pago", sesion=vieja_totp).status_code == 200
-    cuerpo = PROVEEDOR | {"cuenta_destino": cbu_sintetico(77)}
+    cuerpo = con_cuit() | {"cuenta_destino": cbu_sintetico(77)}
     with cliente(e.adm, vieja_totp) as c:
         r = c.post(url(e, "proveedores"), json=cuerpo, headers=clave_idempotencia())
     assert codigo(r) == (403, "segundo_factor_requerido")

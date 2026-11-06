@@ -14,7 +14,8 @@ import {
   vigentes,
 } from "./copiaContactos";
 import { RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
-import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { RUTA_INICIO } from "./enlace";
+import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
@@ -81,10 +82,7 @@ export function Contactos() {
   const consultado = useRef(false);
 
   // Sin sesión no queda ninguna copia: el próximo que use el dispositivo no ve las listas.
-  const aEntrar = useCallback(() => {
-    borrarCopias();
-    navegar(RUTA_ENTRAR, { replace: true });
-  }, [navegar]);
+  const aEntrar = useAEntrar(borrarCopias);
 
   /** La API no respondió (sin red o caída): los edificios salen de las copias guardadas. */
   const desdeCopias = useCallback((mensaje: string) => {

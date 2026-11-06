@@ -29,10 +29,11 @@ test.describe("inicio contra el cem-backend real", () => {
     const cuerpo = (await salud.json()) as Salud;
     expect(cuerpo.sha_imagen).toBe(SHA_BACKEND);
 
-    const estado = page.getByRole("status");
-    await expect(estado.getByText("El servicio funciona.")).toBeVisible();
-    await expect(estado.locator("code")).toHaveText(SHA_BACKEND.slice(0, LARGO_SHA_CORTA));
-    await expect(estado.locator("dd").first()).toHaveText(cuerpo.version);
+    // Un punto en la barra, con nombre accesible; la versión queda al pie de Mi cuenta.
+    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    await expect(page.getByRole("banner").getByRole("img", { name: "El servicio funciona" })).toBeVisible();
+    await expect(page.getByText(SHA_BACKEND.slice(0, LARGO_SHA_CORTA))).toHaveCount(0);
+    await expect(page.getByText("El servicio no funciona")).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -53,7 +54,7 @@ test.describe("inicio contra el cem-backend real", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
-    await expect(page.getByText("El servicio funciona.")).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });
 
@@ -138,9 +139,9 @@ test.describe("inicio sin backend", () => {
     const consulta = page.waitForResponse((r) => new URL(r.url()).pathname === "/api/v1/auth/sesion");
     await page.goto(URL_SIN_BACKEND + "/");
     expect((await consulta).status()).toBeGreaterThanOrEqual(500);
-    const estado = page.getByRole("status");
-    await expect(estado.getByText(/No pudimos contactar al servicio/)).toBeVisible();
-    await expect(estado.getByRole("button", { name: "Reintentar" })).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio no funciona" })).toBeVisible();
+    await expect(page.getByRole("alert").filter({ hasText: "El servicio no funciona en este momento" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Reintentar" }).first()).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     expect(new URL(page.url()).pathname).toBe("/");
     await sinFaltasDeAccesibilidad(page);

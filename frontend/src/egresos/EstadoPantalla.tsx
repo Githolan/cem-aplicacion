@@ -1,25 +1,18 @@
 import type { ReactNode } from "react";
 
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
-import { EnlaceVolverAEntrar } from "../VolverAEntrar";
 import { type Aviso, conLaRedDeVuelta, TEXTO_SESION_VENCIDA } from "./comun";
 import { type PantallaConsorcio, useAlVolverLaRed } from "./useConsorcio";
 
 // Lo que las pantallas de egresos muestran cuando algo salió o no salió (regla de fricción del
 // 05-11-2026): el resultado en la misma pantalla y, si falló, una salida a mano para reintentar.
 
-/** El resultado de lo último. Con la sesión vencida para el acto, el camino para renovarla y volver acá. */
+/** El resultado de lo último. Una sesión de más de 12 horas no se dice acá: la pide la hoja encima. */
 export function AvisoPantalla({ aviso }: { aviso: Aviso | null }) {
-  if (aviso === null) return null;
+  if (aviso === null || aviso.texto === TEXTO_SESION_VENCIDA) return null;
   return (
     <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
       {aviso.texto}
-      {aviso.texto === TEXTO_SESION_VENCIDA && (
-        <>
-          {" "}
-          <EnlaceVolverAEntrar>Volver a entrar</EnlaceVolverAEntrar>
-        </>
-      )}
     </p>
   );
 }

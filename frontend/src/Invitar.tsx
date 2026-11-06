@@ -4,7 +4,8 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { RUTA_INICIO } from "./enlace";
+import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
@@ -126,7 +127,7 @@ export function Invitar() {
     if (ahora === null || ahora === document.body || ahora === foco.current) textoAviso.current?.focus();
   }, [enviando]);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  const aEntrar = useAEntrar();
 
   const atajar = useCallback(
     (e: unknown) => {

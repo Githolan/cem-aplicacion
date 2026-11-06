@@ -57,7 +57,7 @@ test.describe("modo lectura ampliada", () => {
     test(`esquema ${esquema}: apagado AA; prendido AAA, 125 % de letra y botones grandes`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: esquema });
       await page.goto("/");
-      await expect(page.getByRole("status").getByText("El servicio funciona.")).toBeVisible();
+      await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
       await expect(boton(page)).toHaveAttribute("aria-pressed", "false");
       await sinFaltasDeAccesibilidad(page);
       const antes = await tamanios(page);
@@ -449,10 +449,10 @@ async function simular(pagina: Page, api: Respuestas): Promise<string[]> {
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
     const camino = new URL(pedido.url()).pathname;
-    const permisos = simularPermisos(ruta, camino);
-    if (permisos !== null) return permisos;
     const clave = `${pedido.method()} ${camino}`;
     if (clave in api) return ruta.fulfill({ json: api[clave] });
+    const permisos = simularPermisos(ruta, camino);
+    if (permisos !== null) return permisos;
     imprevistos.push(clave);
     return ruta.abort();
   });

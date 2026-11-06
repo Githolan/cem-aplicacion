@@ -6,7 +6,8 @@ import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { conLaRedDeVuelta, sinPisarLoHecho } from "./egresos/comun";
 import { useAlVolverLaRed } from "./egresos/useConsorcio";
-import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { RUTA_INICIO } from "./enlace";
+import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
@@ -167,7 +168,7 @@ export function Padron() {
     textoAviso.current?.focus();
   }, [enviando]);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  const aEntrar = useAEntrar();
 
   const consultarEdificios = useCallback(() => {
     void api

@@ -2,6 +2,7 @@ import { type FormEvent, useId, useState } from "react";
 
 import { api } from "./api/cliente";
 import { DIGITOS_CODIGO } from "./EntrarConCodigo";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Pedir la entrada por correo (documento 13, §10.3): `POST /api/v1/auth/enlace` con el correo en
 // el cuerpo, nunca en la URL. La respuesta deja en este navegador la cookie `nonce` a la que
@@ -20,7 +21,7 @@ type Estado =
   | { tipo: "enviando" }
   | { tipo: "invalido" }
   | { tipo: "demasiados" }
-  | { tipo: "sin_servicio" };
+  | { tipo: "sin_servicio"; mensaje: string };
 
 interface Props {
   /** El correo es de /entrar: sigue escrito al cambiar de forma. */
@@ -43,9 +44,9 @@ export function PedirEnlace({ correo, alCambiarCorreo, alPedir }: Props) {
         if (error === undefined) alPedir(limpio, data.mensaje);
         else if (response.status === ESTADO_INVALIDO) setEstado({ tipo: "invalido" });
         else if (response.status === ESTADO_DEMASIADOS) setEstado({ tipo: "demasiados" });
-        else setEstado({ tipo: "sin_servicio" });
+        else setEstado({ tipo: "sin_servicio", mensaje: mensajeDeFalla(response.status, codigoDe(error)) });
       })
-      .catch(() => setEstado({ tipo: "sin_servicio" }));
+      .catch(() => setEstado({ tipo: "sin_servicio", mensaje: SIN_CONEXION }));
   }
 
   return (
@@ -84,9 +85,7 @@ export function PedirEnlace({ correo, alCambiarCorreo, alPedir }: Props) {
             Hubo demasiados pedidos con este correo. Esperá un rato y probá de nuevo.
           </p>
         )}
-        {estado.tipo === "sin_servicio" && (
-          <p className="aviso-error">No pudimos completar el pedido. Revisá la conexión y probá en un rato.</p>
-        )}
+        {estado.tipo === "sin_servicio" && <p className="aviso-error">{estado.mensaje}</p>}
       </div>
     </section>
   );
