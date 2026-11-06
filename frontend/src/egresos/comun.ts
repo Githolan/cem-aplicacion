@@ -239,6 +239,13 @@ const MENSAJES: Record<string, string> = {
   comprobante_de_otra_orden: "Ese comprobante ya respalda otro pago.",
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
   conciliacion_repetida: "Ese pago ya está conciliado.",
+  pago_sin_conciliar: "Ese pago todavía no está conciliado: se coteja después de conciliarlo.",
+  extracto_invalido: "No pudimos leer el archivo como un extracto en CSV: revisá que sea el que bajaste del banco.",
+  extracto_demasiadas_lineas: "El archivo tiene demasiadas líneas: bajá del banco un período más corto.",
+  extracto_sin_movimientos: "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
+  columnas_no_encontradas: "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
+  columnas_sin_elegir: "Falta elegir qué columna es cada dato.",
+  archivo_demasiado_grande: "El archivo pasa del tamaño máximo. Elegí uno más chico.",
   no_es_quien_ejecuto:
     "Carga el comprobante y registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución. Quien vio la cuenta o registró un pago no lo concilia ni confirma que no se pagó, y quien declaró no confirma su propia declaración.",
   motivo_con_cuenta: "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla. Si no es una cuenta, separá los números con una coma.",

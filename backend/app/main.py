@@ -7,6 +7,7 @@ from app.config import Config, cargar
 from app.consorcios.auditoria import router as auditoria
 from app.consorcios.coeficientes import router as coeficientes
 from app.consorcios.contactos import router as contactos
+from app.consorcios.cotejo import router as cotejo
 from app.consorcios.documentos import router as documentos
 from app.consorcios.egresos import router as egresos
 from app.consorcios.importacion import router as importacion
@@ -77,6 +78,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
     app.include_router(mandatos_invitaciones)
     app.include_router(contactos)
     app.include_router(documentos)
+    app.include_router(cotejo)  # antes que `egresos`: `/pagos/{orden}` tomaría `/pagos/cotejo`
     app.include_router(egresos)
     app.include_router(liquidaciones)
     app.include_router(soporte)

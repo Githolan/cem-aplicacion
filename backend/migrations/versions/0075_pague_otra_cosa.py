@@ -41,6 +41,10 @@ en un período (`pagada_despues_del_periodo`). Las órdenes sin diferencia no ca
 **Exportación económica (`0069`):** `exportar_pagos` suma `diferencia_pago`, con los últimos dígitos
 de la cuenta y la explicación sin cuentas.
 
+**Cotejo (`0074`):** `cotejo_pago` cita `pago_manual`, y una diferencia no es un registro: su
+transferencia todavía no se coteja. `pagos_del_cotejo` deja de ofrecer el registro observado que la
+diferencia reemplazó, porque no es lo que salió del banco.
+
 **Volver a pagar (§9).** `modificar_orden_pago` acepta desde `fallida` una versión sin cambios, que
 pasa otra vez por aprobación. Desde cualquier otro estado sigue dando `sin_cambios`.
 
@@ -48,14 +52,14 @@ Downgrade: se niega (`downgrade_con_datos`) si hay alguna diferencia. Sin eso, v
 definiciones anteriores.
 
 Revisión: 0075
-Anterior: 0073
+Anterior: 0074
 """
 
 from alembic import op
 from sqlalchemy import text
 
 revision = "0075"
-down_revision = "0073"
+down_revision = "0074"
 branch_labels = None
 depends_on = None
 
@@ -79,6 +83,7 @@ MODIFICAR = (
     " uuid, text, uuid)"
 )
 EXPORTAR = "nucleo.exportar_pagos(uuid, uuid)"
+COTEJO = "nucleo.pagos_del_cotejo(uuid)"
 
 IMPORTE_PAGADO = "nucleo.importe_pagado_ejecucion(c, e.id)"
 
@@ -738,6 +743,16 @@ EXPORTAR_CAMBIOS = (
     ),
 )
 
+COTEJO_CAMBIOS = (
+    (
+        "       and not exists (select 1 from nucleo.pago_manual q where q.corrige_a = p.id)\n",
+        "       and not exists (select 1 from nucleo.pago_manual q where q.corrige_a = p.id)\n"
+        "       -- Con una diferencia, el registro observado ya no es lo que salió del banco.\n"
+        "       and not exists (select 1 from nucleo.diferencia_pago_manual f\n"
+        "                        where f.ejecucion_id = e.id)\n",
+    ),
+)
+
 REEMPLAZOS = (
     (SIN_PAGO, SIN_PAGO_CAMBIOS),
     (DECLARACIONES, DECLARACIONES_CAMBIOS),
@@ -747,6 +762,7 @@ REEMPLAZOS = (
     (LIQUIDABLES, LIQUIDABLES_CAMBIOS),
     (MODIFICAR, MODIFICAR_CAMBIOS),
     (EXPORTAR, EXPORTAR_CAMBIOS),
+    (COTEJO, COTEJO_CAMBIOS),
 )
 OTRAS_LECTURAS = ((ACCIONES, ACCIONES_CAMBIOS), (CONSULTA, CONSULTA_CAMBIOS))
 

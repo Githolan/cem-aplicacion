@@ -71,7 +71,8 @@ PARTES: dict[str, tuple[str, ...]] = {
                      "aprobaciones_configuradas"),
     "pagos": ("ejecucion", "ejecucion_resultado", "apertura_cuenta", "comprobante", "pago",
               "conciliacion", "diferencia_pago", "declaracion_no_pagado",
-              "confirmacion_no_pagado"),
+              "confirmacion_no_pagado", "cotejo", "importacion_extracto",
+              "movimiento_extracto", "columnas_extracto"),
     "liquidaciones": ("liquidacion", "gasto", "gasto_quitado"),
 }  # fmt: skip
 """Cada parte es una función `nucleo.exportar_<parte>` y cada entidad, un archivo del paquete."""

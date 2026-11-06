@@ -385,7 +385,8 @@ button:focus-visible {
 }
 
 /* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
-main:has(.circuito-pagos--al-lado) {
+main:has(.circuito-pagos--al-lado),
+main:has(.cotejo) {
   max-width: 80rem;
 }
 
@@ -468,6 +469,73 @@ main:has(.circuito-pagos--al-lado) {
 .filtros-pago button[aria-pressed="true"] {
   background: var(--azul);
   color: #ffffff;
+}
+
+/* Cotejar con el banco: el extracto y la lista a mano, una al lado de la otra desde tablet ancha. */
+.cotejo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 2rem;
+  align-items: start;
+}
+
+.cotejo[hidden] {
+  display: none;
+}
+
+@media (min-width: 64.0625em) {
+  .cotejo {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.zona-archivo {
+  padding: 1rem;
+  border: 2px dashed var(--azul);
+  border-radius: 0.75rem;
+}
+
+.zona-archivo__soltar {
+  margin: 0;
+  font-weight: 600;
+}
+
+.zona-archivo input {
+  max-width: 100%;
+}
+
+.fila-pago--con-borde {
+  background: var(--fondo);
+}
+
+.tildes-pago {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tilde-pago {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+
+.tilde-pago input {
+  flex: none;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.tilde-pago__datos {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.125rem;
 }
 
 .ficha-pago h1,
@@ -630,6 +698,15 @@ fieldset.formulario legend {
 }
 
 @media (max-width: 48em) {
+  .zona-archivo {
+    padding: 0;
+    border: 0;
+  }
+
+  .zona-archivo__soltar {
+    display: none;
+  }
+
   main:has(.pestanas) {
     padding-bottom: 6rem;
   }

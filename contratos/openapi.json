@@ -630,7 +630,14 @@
           "solo_reclamo",
           "liquidacion_no_admite",
           "orden_no_liquidable",
-          "sin_esquema"
+          "sin_esquema",
+          "extracto_invalido",
+          "extracto_demasiadas_lineas",
+          "extracto_sin_movimientos",
+          "columnas_no_encontradas",
+          "columnas_sin_elegir",
+          "pago_sin_conciliar",
+          "movimiento_no_coincide"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -776,6 +783,47 @@
           "hay_esquema_vigente"
         ],
         "title": "CoeficientesGrupo",
+        "type": "object"
+      },
+      "ColumnasExtracto": {
+        "description": "Qué columna del archivo es cada dato. Queda guardado por edificio.",
+        "properties": {
+          "fecha": {
+            "maxLength": 80,
+            "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe": {
+            "maxLength": 80,
+            "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+            "title": "Importe",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sin ella se compara por importe y fecha.",
+            "title": "Numero Operacion"
+          },
+          "signo": {
+            "$ref": "#/components/schemas/SignoExtracto"
+          }
+        },
+        "required": [
+          "fecha",
+          "importe",
+          "signo"
+        ],
+        "title": "ColumnasExtracto",
         "type": "object"
       },
       "ComprobanteActual": {
@@ -4878,6 +4926,49 @@
         "title": "ListaContratosRevision",
         "type": "object"
       },
+      "ListaCotejo": {
+        "description": "`GET …/pagos/cotejo`: del pago registrado primero al último.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoPorCotejar"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "maximo_pagos": {
+            "description": "Cuántos pagos entran en un pedido de cotejar a mano.",
+            "title": "Maximo Pagos",
+            "type": "integer"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          },
+          "tope_bytes": {
+            "description": "El tamaño máximo de un extracto.",
+            "title": "Tope Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente",
+          "tope_bytes",
+          "maximo_pagos"
+        ],
+        "title": "ListaCotejo",
+        "type": "object"
+      },
       "ListaDecisiones": {
         "properties": {
           "elementos": {
@@ -5771,6 +5862,38 @@
         "title": "MotivoRechazo",
         "type": "string"
       },
+      "MovimientoSinRegistrar": {
+        "description": "Un débito del banco sin pago en Consorcio en Mano. El extracto no dice la moneda.",
+        "properties": {
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          }
+        },
+        "required": [
+          "fecha",
+          "importe_centavos",
+          "numero_operacion"
+        ],
+        "title": "MovimientoSinRegistrar",
+        "type": "object"
+      },
       "NaturalezaContacto": {
         "enum": [
           "empresa",
@@ -6657,6 +6780,97 @@
         "title": "PagoPorAclarar",
         "type": "object"
       },
+      "PagoPorCotejar": {
+        "description": "Un pago conciliado conforme que falta cotejar. Sin la cuenta.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "pago_id": {
+            "format": "uuid",
+            "title": "Pago Id",
+            "type": "string"
+          },
+          "proveedor": {
+            "title": "Proveedor",
+            "type": "string"
+          },
+          "puede_cotejar": {
+            "description": "No, si quien pide preparó la orden, vio la cuenta o registró el pago.",
+            "title": "Puede Cotejar",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pago_id",
+          "orden_id",
+          "proveedor",
+          "concepto",
+          "numero_operacion",
+          "fecha_operacion",
+          "importe_centavos",
+          "moneda",
+          "puede_cotejar"
+        ],
+        "title": "PagoPorCotejar",
+        "type": "object"
+      },
+      "PagosACotejar": {
+        "properties": {
+          "pagos": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Pagos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "pagos"
+        ],
+        "title": "PagosACotejar",
+        "type": "object"
+      },
+      "PagosCotejados": {
+        "properties": {
+          "cotejados": {
+            "description": "Los que quedaron cotejados con este pedido.",
+            "title": "Cotejados",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cotejados"
+        ],
+        "title": "PagosCotejados",
+        "type": "object"
+      },
       "PasoPago": {
         "description": "El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la\nacción; los `espera_*` son de quien la ve y no le toca.",
         "enum": [
@@ -7418,6 +7632,101 @@
         "title": "ResultadoConciliacion",
         "type": "string"
       },
+      "ResultadoCotejo": {
+        "description": "`POST …/pagos/cotejo/extracto`. Lo que coincide se cuenta; se lista lo que hay que mirar.\n\n`aca_no_banco` son los pagos conformes sin cotejar con fecha dentro de lo que cubre el extracto:\nde otro período no se puede decir nada.",
+        "properties": {
+          "aca_no_banco": {
+            "items": {
+              "$ref": "#/components/schemas/PagoPorCotejar"
+            },
+            "title": "Aca No Banco",
+            "type": "array"
+          },
+          "banco_no_aca": {
+            "items": {
+              "$ref": "#/components/schemas/MovimientoSinRegistrar"
+            },
+            "title": "Banco No Aca",
+            "type": "array"
+          },
+          "cotejados": {
+            "description": "Coincidieron y quedaron cotejados con este extracto.",
+            "title": "Cotejados",
+            "type": "integer"
+          },
+          "desde": {
+            "format": "date",
+            "title": "Desde",
+            "type": "string"
+          },
+          "esperan_conciliar": {
+            "description": "Coinciden con un pago que falta conciliar.",
+            "title": "Esperan Conciliar",
+            "type": "integer"
+          },
+          "filas_no_leidas": {
+            "description": "Las primeras 20, por su número de línea en el archivo.",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Filas No Leidas",
+            "type": "array"
+          },
+          "hasta": {
+            "format": "date",
+            "title": "Hasta",
+            "type": "string"
+          },
+          "lineas_no_leidas": {
+            "title": "Lineas No Leidas",
+            "type": "integer"
+          },
+          "movimientos_nuevos": {
+            "title": "Movimientos Nuevos",
+            "type": "integer"
+          },
+          "movimientos_repetidos": {
+            "description": "Ya estaban de un extracto anterior.",
+            "title": "Movimientos Repetidos",
+            "type": "integer"
+          },
+          "para_otra_persona": {
+            "description": "Coinciden con un pago que quien subió el extracto no puede cotejar.",
+            "title": "Para Otra Persona",
+            "type": "integer"
+          },
+          "total_aca_no_banco": {
+            "title": "Total Aca No Banco",
+            "type": "integer"
+          },
+          "total_banco_no_aca": {
+            "title": "Total Banco No Aca",
+            "type": "integer"
+          },
+          "ya_cotejados": {
+            "title": "Ya Cotejados",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "desde",
+          "hasta",
+          "movimientos_nuevos",
+          "movimientos_repetidos",
+          "cotejados",
+          "ya_cotejados",
+          "esperan_conciliar",
+          "para_otra_persona",
+          "lineas_no_leidas",
+          "filas_no_leidas",
+          "aca_no_banco",
+          "total_aca_no_banco",
+          "banco_no_aca",
+          "total_banco_no_aca"
+        ],
+        "title": "ResultadoCotejo",
+        "type": "object"
+      },
       "RevisionMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1\ndel propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de\nrevisión. No toca el mandato ni cubre el período en que estuvo sin efecto.",
         "properties": {
@@ -7683,6 +7992,15 @@
         ],
         "title": "SesionesRevocadas",
         "type": "object"
+      },
+      "SignoExtracto": {
+        "description": "Cómo se reconoce un débito: lo positivo de una columna con signo es un crédito.",
+        "enum": [
+          "con_signo",
+          "sin_signo"
+        ],
+        "title": "SignoExtracto",
+        "type": "string"
       },
       "SimulacionLiquidacion": {
         "description": "El reparto de los gastos del borrador entre las unidades. La suma de cada grupo es\nexactamente su total (RN05). `bloqueo` dice por qué no se pudo repartir (por ejemplo, una\nunidad sin coeficiente en el esquema): entonces no hay unidades.",
@@ -8617,6 +8935,48 @@
           "finalizado_en"
         ],
         "title": "VinculoFinalizado",
+        "type": "object"
+      },
+      "VistaExtracto": {
+        "description": "`POST …/pagos/cotejo/columnas`: lo que hace falta para elegir. No guarda nada.",
+        "properties": {
+          "columnas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Columnas",
+            "type": "array"
+          },
+          "columnas_guardadas": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnasExtracto"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Las del edificio, si este archivo las tiene todas."
+          },
+          "muestra": {
+            "description": "La primera línea de datos, columna por columna, sin números de cuenta.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Muestra",
+            "type": "array"
+          },
+          "signo_sugerido": {
+            "$ref": "#/components/schemas/SignoExtracto"
+          }
+        },
+        "required": [
+          "columnas",
+          "muestra",
+          "signo_sugerido",
+          "columnas_guardadas"
+        ],
+        "title": "VistaExtracto",
         "type": "object"
       }
     }
@@ -15036,6 +15396,362 @@
           }
         },
         "summary": "Consultar pagos, por proveedor, concepto o número de operación, sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/cotejo": {
+      "get": {
+        "operationId": "listar_cotejo_api_v1_consorcios__consorcio_id__pagos_cotejo_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaCotejo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que falta cotejar con el banco: pagos conciliados conformes, sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      },
+      "post": {
+        "operationId": "cotejar_a_mano_api_v1_consorcios__consorcio_id__pagos_cotejo_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PagosACotejar"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagosCotejados"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese pago no existe en este consorcio."
+          },
+          "409": {
+            "description": "El pago todavía no está conciliado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cotejar a mano: el pago salió del banco. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/cotejo/columnas": {
+      "post": {
+        "operationId": "columnas_del_extracto_api_v1_consorcios__consorcio_id__pagos_cotejo_columnas_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "text/csv": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VistaExtracto"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "413": {
+            "description": "El archivo pasa del tope (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No se declaró como `text/csv`."
+          },
+          "422": {
+            "description": "El archivo no se puede leer como un extracto (`extracto_invalido`)."
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+          }
+        },
+        "summary": "Las columnas de un extracto, para elegir qué es cada una. No guarda nada",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/cotejo/extracto": {
+      "post": {
+        "operationId": "subir_extracto_api_v1_consorcios__consorcio_id__pagos_cotejo_extracto_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fecha",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Fecha"
+            }
+          },
+          {
+            "in": "query",
+            "name": "importe",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Importe"
+            }
+          },
+          {
+            "in": "query",
+            "name": "numero_operacion",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "pattern": "^[^\\x00-\\x1f\\x7f=+@-][^\\x00-\\x1f\\x7f]{0,79}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Numero Operacion"
+            }
+          },
+          {
+            "in": "query",
+            "name": "signo",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SignoExtracto"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Signo"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "text/csv": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResultadoCotejo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "409": {
+            "description": "Falta elegir las columnas (`columnas_sin_elegir`)."
+          },
+          "413": {
+            "description": "El archivo pasa del tope (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No se declaró como `text/csv`."
+          },
+          "422": {
+            "description": "El archivo no se puede leer como un extracto (`extracto_invalido`)."
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+          }
+        },
+        "summary": "Subir un extracto: lo que coincide queda cotejado, y responde lo que hay que mirar. No cambia ninguna orden",
         "tags": [
           "egresos"
         ]

@@ -278,6 +278,22 @@ def test_desde_un_registro_observado(motor_migrate, e):
     assert f["diferencia_vigente"]["id"] == str(d)
 
 
+def test_el_cotejo_no_ofrece_el_registro_que_la_diferencia_reemplazo(motor_migrate, e):
+    def en_el_cotejo() -> list[UUID]:
+        with motor_migrate.connect() as c:
+            return list(
+                c.execute(text("select pago_id from nucleo.pagos_del_cotejo(:c)"), {"c": e.cons})
+                .scalars()
+            )  # fmt: skip
+
+    o = emitida(motor_migrate, e)
+    p = registrada(motor_migrate, e, o)
+    observada(motor_migrate, e, o, p)
+    assert p in en_el_cotejo()  # control: sin la diferencia, figura
+    llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos(motor_migrate, e, o))
+    assert p not in en_el_cotejo()
+
+
 def test_una_declaracion_anterior_queda_superada(motor_migrate, e):
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
@@ -791,7 +807,7 @@ def test_0075_ida_y_vuelta(base_aparte):
                 for f in firmas
             }
 
-    anterior = "0073"
+    anterior = "0074"
     command.upgrade(cfg, anterior)
     antes = definiciones()
     assert not any("diferencia" in d for d in antes.values())

@@ -59,6 +59,10 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 `CEM_PAGOS_DIAS_BANDEJA` dice cuántos días queda lo rechazado en `GET /api/v1/consorcios/{id}/pagos/bandeja` antes de quedar solo en la consulta. Sin la variable son 7. Un valor que no es un entero, o uno negativo, impide el arranque.
 
+## Cotejar con el banco
+
+`CEM_COTEJO_TOPE_BYTES` es el tamaño máximo de un extracto en `POST /api/v1/consorcios/{id}/pagos/cotejo/extracto` (sin la variable, 20 MB) y `CEM_COTEJO_MAXIMO_LINEAS`, sus líneas (sin la variable, 50000). Un valor que no es un entero positivo impide el arranque. nginx deja pasar hasta 21 MB en esas rutas: un tope mayor pide cambiar también `frontend/nginx/cem-frontend.conf.template`.
+
 ## Modelo de lenguaje
 
 `app/llm.py` es la única capa que habla con un modelo: el resto de la aplicación llama a `complete(messages, opts)` y ningún otro módulo importa el SDK de un proveedor. La llamada sale solo del backend; la clave nunca llega al frontend.
