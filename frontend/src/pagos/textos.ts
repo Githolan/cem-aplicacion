@@ -78,6 +78,7 @@ export const AVISO_VER_LA_CUENTA =
   "Para pagar hay que ver la cuenta. Queda registrado quién la vio, y esa persona no puede conciliar este pago.";
 export const AVISO_ANTIVIRUS_TARDA =
   "El antivirus está tardando. Podés salir: la orden queda en Pagos como «Subir el comprobante», con el archivo ya cargado.";
+export const AVISO_LECTURA_FALLO = "No pudimos leer el comprobante. Completá los datos a mano.";
 export const AVISO_ARCHIVO_RECHAZADO = "Este archivo no se puede usar: no pasó el antivirus. Subí otro.";
 export const AVISO_SIN_CUENTA =
   "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste, registrá el pago con los datos del comprobante (si fue después del vencimiento, queda marcado fuera de término y el Consejo lo concilia con un motivo); si no, declará que no se pagó.";
@@ -87,5 +88,7 @@ export const AVISO_DIFERENCIA_ESPERA = "No transfieras de nuevo hasta que el Con
 export const AVISO_OTRA_COSA = "La orden no queda pagada: lo resuelve el Consejo.";
 export const AVISO_RETOMAR = "Retomar deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nuevo.";
+export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
+export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";

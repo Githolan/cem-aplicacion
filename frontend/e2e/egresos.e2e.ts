@@ -153,7 +153,7 @@ const EJECUCION_VACIA = { id: EJECUCION, version: 1, creada_en: "2026-10-31T12:3
 
 const fichaDe = (extra: object) => ({
   ...ACCIONES_EN_FALSO, orden: ORDEN_APROBADA, versiones: [version(null)], situacion: "para_pagar", paso: null, le_toca_a: null,
-  ejecucion: null, comprobante_actual: null, comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null,
+  ejecucion: null, comprobante_actual: null, comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null,
   diferencia_vigente: null, ...extra,
 });
 const PARA_PAGAR = fichaDe({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
@@ -175,6 +175,26 @@ const PARA_CONCILIAR = fichaDe({
     registrado_por_nombre: "Marta Ficticia", registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null, conciliado_en: null,
     fuera_de_termino: false }] },
 });
+
+const LO_LEIDO = {
+  version_documento_id: ARCHIVO, estado: "leida", importe_centavos: 12_000_000, moneda: "ARS", cuenta_ultimos_digitos: CUENTA.slice(-4),
+  cuenta_coincide: true, titular_destino: RAZON_LARGA, numero_operacion: "0048213377", fecha: "2026-10-31", distinto_de_la_orden: [],
+  titular_distinto: false, distinto_de_lo_registrado: [],
+};
+const LEIDO_COINCIDE = { ...CON_COMPROBANTE, lectura_comprobante: LO_LEIDO };
+const LEIDO_DISTINTO = {
+  ...CON_COMPROBANTE,
+  lectura_comprobante: { ...LO_LEIDO, importe_centavos: 5_800_000, distinto_de_la_orden: ["importe"] },
+};
+const NO_LEIDO = {
+  ...CON_COMPROBANTE,
+  lectura_comprobante: { ...LO_LEIDO, estado: "no_leida", importe_centavos: null, moneda: null, cuenta_ultimos_digitos: null, cuenta_coincide: null,
+    titular_destino: null, numero_operacion: null, fecha: null },
+};
+const CONCILIAR_DISTINTO = {
+  ...PARA_CONCILIAR,
+  lectura_comprobante: { ...LO_LEIDO, importe_centavos: 5_800_000, distinto_de_la_orden: ["importe"], distinto_de_lo_registrado: ["importe"] },
+};
 
 const PARA_RESOLVER = fichaDe({
   orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, situacion: "con_diferencia", paso: "resolver_diferencia", le_toca_a: "vos",
@@ -470,6 +490,63 @@ test.describe("circuito de pagos", () => {
     await expect(page.getByLabel(/^Importe transferido/)).toHaveValue("");
     await expect(page.getByLabel(/^CBU\/CVU de destino/)).toHaveValue("");
     expect(hechos.filter((h) => h.startsWith("POST")).map((h) => h.split("/").at(-1))).toEqual(["comprobante", "versiones"]);
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("lectura: si coincide, los datos vienen del comprobante y no se escribe la cuenta", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, LEIDO_COINCIDE, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await abrirLaFicha(page);
+    await expect(page.getByText("Importe, cuenta y titular coinciden con la orden.")).toBeVisible();
+    await expect(page.getByLabel("Número de operación")).toHaveValue("0048213377");
+    await expect(page.getByLabel(/^CBU\/CVU de destino/)).toBeHidden();
+    await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeVisible();
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("lectura: si no coincide con la orden, avisa antes de registrar y la persona elige", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, LEIDO_DISTINTO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await abrirLaFicha(page);
+    await expect(page.getByRole("alert").filter({ hasText: "El comprobante dice" })).toContainText("$ 58.000,00");
+    await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeHidden();
+    const pague = page.getByRole("button", { name: "Pagué otra cosa" });
+    await expect(pague).toBeVisible();
+    expect((await pague.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    await page.getByRole("button", { name: "Se leyó mal: corregir el dato" }).click();
+    await expect(page.getByLabel(/^Importe transferido/)).toHaveValue("58.000,00");
+    await expect(page.getByLabel(/^CBU\/CVU de destino/)).toHaveValue("");
+    expect(errores).toEqual([]);
+  });
+
+  test("lectura: si no se pudo leer, a mano y sin trabarse", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, NO_LEIDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await abrirLaFicha(page);
+    await expect(page.getByText("No pudimos leer el comprobante. Completá los datos a mano.")).toBeVisible();
+    await expect(page.getByLabel("Número de operación")).toHaveValue("");
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("conciliar: si el comprobante dice otra cosa, Observar es el principal y Conforme sigue", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, CONCILIAR_DISTINTO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await abrirLaFicha(page);
+    await expect(page.getByRole("alert").filter({ hasText: "El comprobante dice" })).toContainText("registraron");
+    const observar = page.getByRole("button", { name: "Observar", exact: true });
+    const conforme = page.getByRole("button", { name: "Conforme", exact: true });
+    await expect(observar).toBeVisible();
+    await expect(conforme).toBeVisible();
+    await expect(conforme).toHaveClass(/secundario/);
+    await expect(observar).not.toHaveClass(/secundario/);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);

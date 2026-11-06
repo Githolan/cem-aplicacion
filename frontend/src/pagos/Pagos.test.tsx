@@ -58,6 +58,7 @@ type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
 type Declaracion = components["schemas"]["PagoNoRealizado"];
+type LecturaComprobante = components["schemas"]["LecturaComprobante"];
 
 function orden(extra: Partial<Orden> = {}): Orden {
   return {
@@ -106,7 +107,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
     puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
-    comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null, ...extra,
+    comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null, ...extra,
   };
 }
 
@@ -659,6 +660,26 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   it("la alerta de fraccionamiento se ve al decidir", async () => {
     abrirFicha({ ...APROBAR, versiones: [version({ alerta_fraccionamiento: true, aprobada_por: [] })] });
     expect(await screen.findByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
+  });
+
+  it("en borrador la alerta dice que la aprueba el Consejo, y al enviar lo repite", async () => {
+    const RUTA_ENVIO = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
+    abrirFicha({ ...BORRADOR, versiones: [version({ alerta_fraccionamiento: true, aprobada_por: [], franja: "bajo_umbral" })] }, {
+      [`POST ${RUTA_ENVIO}`]: () => Response.json({ id: O1, version: 1 }),
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+    });
+    expect(await screen.findByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
+    expect(screen.getByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeTruthy();
+    fireEvent.click(await boton("Enviar a aprobar"));
+    expect(await screen.findByText("Listo: la orden se envió. La aprueba el Consejo.")).toBeTruthy();
+  });
+
+  it("control: sin la alerta, ni el aviso ni ese texto", async () => {
+    const RUTA_ENVIO = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
+    abrirFicha(BORRADOR, { [`POST ${RUTA_ENVIO}`]: () => Response.json({ id: O1, version: 1 }), [`GET ${BASE}/pagos/bandeja`]: bandejaCon() });
+    fireEvent.click(await boton("Enviar a aprobar"));
+    expect(await screen.findByText(/Si su franja no pide aprobación, ya quedó aprobada/)).toBeTruthy();
+    expect(screen.queryByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeNull();
   });
 
   it("control: decidida, la alerta ya no se ve y la franja dice lo que pasó", async () => {
@@ -1357,6 +1378,241 @@ describe("el comprobante en un paso", () => {
     caido = false;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("la lectura con IA del comprobante", () => {
+  const RUTA_REGISTRO = `${BASE}/ordenes-pago/${O1}/pago-manual`;
+  const RUTA_CONCILIACION = `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`;
+  const leida = (extra: Partial<LecturaComprobante> = {}): LecturaComprobante => ({
+    version_documento_id: ARCHIVO, estado: "leida", importe_centavos: 1_500_000, moneda: "ARS",
+    cuenta_ultimos_digitos: CUENTA.slice(-4), cuenta_coincide: true, titular_destino: "Limpieza Ficticia S.R.L.",
+    numero_operacion: "0048213377", fecha: "2026-11-05", distinto_de_la_orden: [], titular_distinto: false,
+    distinto_de_lo_registrado: [], ...extra,
+  });
+  const VACIA = {
+    importe_centavos: null, moneda: null, cuenta_ultimos_digitos: null, cuenta_coincide: null, titular_destino: null,
+    numero_operacion: null, fecha: null,
+  };
+  const LEYENDO = { ...LISTO, lectura_comprobante: leida({ ...VACIA, estado: "leyendo" }) };
+  const NO_LEIDA = { ...LISTO, lectura_comprobante: leida({ ...VACIA, estado: "no_leida" }) };
+  const COINCIDE = { ...LISTO, lectura_comprobante: leida() };
+  const OTRO_IMPORTE = { ...LISTO, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_la_orden: ["importe"] }) };
+  const TEXTO_FALLO = "No pudimos leer el comprobante. Completá los datos a mano.";
+  const valor = (etiqueta: string | RegExp) => (screen.getByLabelText(etiqueta) as HTMLInputElement).value;
+  /** Los importes llevan un espacio duro después del signo. */
+  const sinDuros = (texto: string | null) => texto?.replaceAll(" ", " ");
+
+  it("mientras lee dice en qué va, no ofrece escribir y se vuelve a mirar sola", async () => {
+    conEsperaManual();
+    let actual: Ficha = LEYENDO;
+    const api = abrirFicha(() => actual);
+    expect(await screen.findByText("Leyendo los datos…")).toBeTruthy();
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
+    expect(screen.queryByText("Soltá acá otro comprobante")).toBeNull();
+    actual = COINCIDE;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await screen.findByText("Importe, cuenta y titular coinciden con la orden.")).toBeTruthy();
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`).length).toBeGreaterThan(1);
+  });
+
+  it("si coincide, los campos traen lo leído y se registra sin escribir la cuenta", async () => {
+    const api = abrirFicha(COINCIDE, { [`POST ${RUTA_REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    await screen.findByText("Importe, cuenta y titular coinciden con la orden.");
+    expect(valor("Número de operación")).toBe("0048213377");
+    expect(valor("Fecha de la transferencia")).toBe("2026-11-05");
+    expect(screen.queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
+    expect(screen.queryByLabelText(/^Importe transferido/)).toBeNull();
+    fireEvent.click(await boton("Registrar el pago"));
+    await screen.findByText(/Listo: registraste el pago/);
+    const enviado = await cuerpo(pedidos(api, "POST", RUTA_REGISTRO)[0]);
+    expect(enviado).toMatchObject({ importe_centavos: 1_500_000, numero_operacion: "0048213377", fecha_operacion: "2026-11-05" });
+    expect(enviado).not.toHaveProperty("cuenta_destino");
+  });
+
+  it("corregir lo que se leyó pide la cuenta y deja lo leído, sin traer nada de la orden", async () => {
+    abrirFicha(COINCIDE);
+    fireEvent.click(await boton("Corregir lo que se leyó"));
+    expect(valor(/^CBU\/CVU de destino/)).toBe("");
+    expect(valor(/^Importe transferido/)).toBe("15.000,00");
+    expect(valor("Número de operación")).toBe("0048213377");
+  });
+
+  it("lo que no se leyó queda vacío: nunca se llena con lo de la orden", async () => {
+    abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, numero_operacion: "0048213377" }) });
+    expect(await screen.findByText("Revisá lo que se leyó del comprobante y completá lo que falta.")).toBeTruthy();
+    expect(valor("Número de operación")).toBe("0048213377");
+    expect(valor(/^Importe transferido/)).toBe("");
+    expect(valor(/^CBU\/CVU de destino/)).toBe("");
+    expect(valor("Fecha de la transferencia")).toBe("");
+  });
+
+  it("si difiere de la orden lo dice antes de registrar y la persona elige qué pasó", async () => {
+    abrirFicha(OTRO_IMPORTE);
+    expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y la orden es por $ 15.000,00.");
+    sinBoton("Registrar el pago");
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
+    expect(await boton("Es otro comprobante: cambiarlo")).toBeTruthy();
+    expect(await boton("Se leyó mal: corregir el dato")).toBeTruthy();
+    expect(await boton("Pagué otra cosa")).toBeTruthy();
+    await sinFaltasDeAccesibilidad(document.body);
+  });
+
+  it("otra cuenta se dice por sus últimos dígitos", async () => {
+    abrirFicha({ ...LISTO, lectura_comprobante: leida({ cuenta_coincide: false, cuenta_ultimos_digitos: "7710", distinto_de_la_orden: ["cuenta"] }) });
+    expect((await screen.findByRole("alert")).textContent).toContain(`El comprobante dice la cuenta …7710 y la orden es a la cuenta …${CUENTA.slice(-4)}.`);
+  });
+
+  it("se leyó mal: se escribe sobre lo leído, y el aviso sigue a la vista", async () => {
+    abrirFicha(OTRO_IMPORTE);
+    fireEvent.click(await boton("Se leyó mal: corregir el dato"));
+    expect(valor(/^Importe transferido/)).toBe("8.500,00");
+    expect(valor(/^CBU\/CVU de destino/)).toBe("");
+    expect(screen.getByRole("alert").textContent).toContain("El comprobante dice");
+    expect(await boton("Registrar el pago")).toBeTruthy();
+  });
+
+  it("es otro comprobante: recién ahí aparece dónde subirlo", async () => {
+    abrirFicha(OTRO_IMPORTE);
+    await boton("Es otro comprobante: cambiarlo");
+    expect(screen.queryByText("Soltá acá otro comprobante")).toBeNull();
+    fireEvent.click(await boton("Es otro comprobante: cambiarlo"));
+    expect(await screen.findByText("Soltá acá otro comprobante")).toBeTruthy();
+  });
+
+  it("pagué otra cosa arranca con lo leído", async () => {
+    abrirFicha(OTRO_IMPORTE);
+    fireEvent.click(await boton("Pagué otra cosa"));
+    expect(valor("Importe que salió del banco")).toBe("8.500,00");
+    expect(valor("Número de operación")).toBe("0048213377");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("un titular distinto avisa y no traba", async () => {
+    abrirFicha({ ...LISTO, lectura_comprobante: leida({ titular_destino: "Otra Razón SRL", titular_distinto: true }) });
+    expect(await screen.findByText("Importe y cuenta coinciden con la orden.")).toBeTruthy();
+    expect(screen.getByText(/El comprobante dice que el titular es «Otra Razón SRL»/)).toBeTruthy();
+    expect(await boton("Registrar el pago")).toBeTruthy();
+  });
+
+  it("si no se pudo leer, se carga a mano con el texto del diseño y sin reintentar", async () => {
+    conEsperaManual();
+    const api = abrirFicha(NO_LEIDA);
+    expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
+    expect(valor("Número de operación")).toBe("");
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 3));
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
+    sinBoton(/Reintentar/);
+  });
+
+  it("control: con la lectura apagada no dice nada y es el formulario de siempre", async () => {
+    abrirFicha(LISTO);
+    expect(await screen.findByText("Escribí los datos como figuran en el comprobante.")).toBeTruthy();
+    expect(screen.queryByText(TEXTO_FALLO)).toBeNull();
+    expect(valor(/^CBU\/CVU de destino/)).toBe("");
+  });
+
+  it("si la lectura tarda de más se deja de esperar, y la que llega tarde no pisa lo escrito", async () => {
+    conEsperaManual();
+    let actual: Ficha = LEYENDO;
+    const api = abrirFicha(() => actual, { [`POST ${RUTA_REGISTRO}`]: () => error("orden_no_admite", 409) });
+    await screen.findByText("Leyendo los datos…");
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 21));
+    expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
+    escribirRegistro();
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "ESCRITO1" } });
+    // Dejó de mirar sola.
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 3));
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
+    // Una lectura de la ficha por otro motivo trae la lectura que llegó tarde.
+    actual = COINCIDE;
+    fireEvent.click(await boton("Registrar el pago"));
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`).length).toBeGreaterThan(lecturas));
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(valor("Número de operación")).toBe("ESCRITO1");
+    expect(valor(/^CBU\/CVU de destino/)).toBe(CUENTA);
+    expect(screen.queryByText("Importe, cuenta y titular coinciden con la orden.")).toBeNull();
+  });
+
+  it("con otro comprobante, lo leído del anterior se va", async () => {
+    let actual: Ficha = COINCIDE;
+    abrirFicha(() => actual, {
+      [`POST ${RUTA_REGISTRO}/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () => {
+        actual = {
+          ...LISTO, comprobante_actual: { documento_id: NUEVO, version_documento_id: K1 },
+          lectura_comprobante: leida({ ...VACIA, estado: "no_leida", version_documento_id: K1 }),
+        };
+        return Response.json({ id: K1, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 201 });
+      },
+      [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
+    });
+    await screen.findByText("Importe, cuenta y titular coinciden con la orden.");
+    expect(valor("Número de operación")).toBe("0048213377");
+    const archivo = new File(["%PDF-1.4 SINTETICO"], "otro.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
+    expect(await screen.findByText(TEXTO_FALLO)).toBeTruthy();
+    expect(valor("Número de operación")).toBe("");
+    expect(valor(/^Importe transferido/)).toBe("");
+  });
+
+  it("corregir abre con lo registrado aunque haya una lectura", async () => {
+    abrirFicha({ ...CORREGIR, lectura_comprobante: leida({ numero_operacion: "OTRO999", importe_centavos: 850_000, distinto_de_la_orden: ["importe"] }) });
+    await screen.findByRole("heading", { name: "Corregir el registro" });
+    expect(valor("Número de operación")).toBe("0001234567");
+    expect(sinDuros(screen.getByRole("alert").textContent)).toContain("El comprobante dice $ 8.500,00");
+  });
+
+  const CONCILIAR_DISTINTO = { ...CONCILIAR, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_la_orden: ["importe"], distinto_de_lo_registrado: ["importe"] }) };
+  const nombres = () => screen.getAllByRole("button").map((b) => b.textContent).filter((t) => t === "Conforme" || t === "Observar");
+
+  it("si lo leído difiere de lo registrado, el Consejo lo ve y Observar pasa a principal", async () => {
+    abrirFicha(CONCILIAR_DISTINTO);
+    expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y registraron $ 15.000,00.");
+    await boton("Conforme");
+    expect(nombres()).toEqual(["Observar", "Conforme"]);
+    expect((await boton("Observar")).className).toBe("");
+    expect((await boton("Conforme")).className).toBe("secundario");
+  });
+
+  it("conforme sigue, porque la lectura puede equivocarse", async () => {
+    const api = abrirFicha(CONCILIAR_DISTINTO, {
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+      [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
+    });
+    fireEvent.click(await boton("Conforme"));
+    await screen.findByText(/Listo: conciliaste/);
+    expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
+  });
+
+  it("cada dato distinto se dice, con lo leído y lo registrado", async () => {
+    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ cuenta_ultimos_digitos: "7710", numero_operacion: "9999", fecha: "2026-10-30", distinto_de_lo_registrado: ["cuenta", "numero_operacion", "fecha"] }) });
+    const aviso = (await screen.findByRole("alert")).textContent;
+    expect(aviso).toContain("la cuenta …7710, que no es la registrada");
+    expect(aviso).toContain("la operación 9999 y registraron 0001234567");
+    expect(aviso).toContain("la fecha 2026-10-30 y registraron 2026-10-31");
+  });
+
+  it("control: si coincide lo dice y Conforme sigue siendo el principal", async () => {
+    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida() });
+    expect(await screen.findByText("La lectura del comprobante coincide con lo registrado.")).toBeTruthy();
+    await boton("Conforme");
+    expect(nombres()).toEqual(["Conforme", "Observar"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("control: sin lectura no dice que coincida", async () => {
+    abrirFicha(CONCILIAR);
+    await boton("Conforme");
+    expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
+    expect(nombres()).toEqual(["Conforme", "Observar"]);
+  });
+
+  it("al resolver una diferencia también se ve lo leído", async () => {
+    abrirFicha(ficha({ ...RESOLVER, comprobante_actual: EL_COMPROBANTE, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_lo_registrado: ["importe"] }) }));
+    expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y registraron");
   });
 });
 
