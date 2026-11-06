@@ -1021,6 +1021,11 @@ class FichaPago(BaseModel):
     puede_rechazar: bool
     puede_renovar: bool
     puede_pagar: bool
+    puede_reabrir_cuenta: bool = Field(
+        description="Si puede abrir otra vez una cuenta ya vista. Con una declaración vigente es"
+        " «Retomar el pago», y abrirla deja sin efecto lo declarado."
+    )
+    puede_modificar: bool = Field(description="Si puede guardar una versión nueva de la orden.")
     puede_subir_comprobante: bool
     puede_registrar: bool
     puede_declarar: bool
