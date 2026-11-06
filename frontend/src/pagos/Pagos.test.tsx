@@ -39,6 +39,8 @@ const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
 const CONSULTA_AL_LADO = "(min-width: 64.0625em)";
+const RUTA_REVISION = `${BASE}/ordenes-pago/${O1}/revision`;
+const REVISION = `GET ${RUTA_REVISION}`;
 
 type Ficha = components["schemas"]["FichaPago"];
 type Orden = components["schemas"]["OrdenPago"];
@@ -235,8 +237,13 @@ const ESPERA = 3000;
 
 /** Abre la ficha de esa orden con esas respuestas. */
 function abrirFicha(f: Ficha | (() => Ficha), extra: Respuestas = {}) {
+  const leer = () => (typeof f === "function" ? f() : f);
   const api = backend({
-    [`GET ${BASE}/pagos/${O1}`]: () => Response.json(typeof f === "function" ? f() : f),
+    [`GET ${BASE}/pagos/${O1}`]: () => Response.json(leer()),
+    [REVISION]: () => {
+      const { orden: o, versiones } = leer();
+      return Response.json({ orden: o, versiones: versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true });
+    },
     ...extra,
   });
   vi.stubGlobal("fetch", api);
@@ -1253,12 +1260,85 @@ describe("preparar, enviar y renovar", () => {
 });
 
 describe("aprobar y rechazar", () => {
-  it("la cuenta va enmascarada, también con la orden en decisión", async () => {
-    abrirFicha(APROBAR);
-    await boton("Aprobar esta versión");
-    expect(screen.getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
-    expect(document.body.textContent).not.toContain(CUENTA);
+  /** El botón ya se puede tocar: llegó la cuenta que se aprueba. */
+  async function listoParaAprobar() {
+    await waitFor(async () => expect(((await boton("Aprobar esta versión")) as HTMLButtonElement).disabled).toBe(false));
+  }
+
+  it("quien decide ve la cuenta completa, porque es lo que aprueba", async () => {
+    const api = abrirFicha(APROBAR);
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    expect(screen.queryByText(`…${CUENTA.slice(-4)}`)).toBeNull();
     expect(screen.getByText("0 de 1")).toBeTruthy();
+    expect(pedidos(api, "GET", RUTA_REVISION).length).toBeGreaterThan(0);
+    await listoParaAprobar();
+  });
+
+  it("quien solo puede rechazar también la ve", async () => {
+    abrirFicha({ ...APROBAR, paso: "espera_aprobar", puede_aprobar: false });
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+  });
+
+  it.each([
+    ["quien prepara, en borrador", BORRADOR],
+    ["quien prepara, con la orden en revisión", { ...APROBAR, paso: "espera_aprobar" as const, le_toca_a: "consejo" as const, puede_aprobar: false, puede_rechazar: false, puede_modificar: true }],
+    ["quien espera, sin decidir", { ...APROBAR, paso: "espera_aprobar" as const, le_toca_a: "consejo" as const, puede_aprobar: false, puede_rechazar: false }],
+  ] as [string, Ficha][])("control: %s no la ve y no se hace el pedido", async (_, f) => {
+    const api = abrirFicha(f);
+    expect(await screen.findByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.body.textContent).not.toContain(CUENTA);
+    expect(pedidos(api, "GET", RUTA_REVISION)).toHaveLength(0);
+  });
+
+  it("control: si la revisión no manda la cuenta (preparó la orden), quedan los últimos dígitos", async () => {
+    abrirFicha(APROBAR, {
+      [REVISION]: () => Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: null })), puede_aprobar: false, puede_rechazar: false }),
+    });
+    expect(await screen.findByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
+    expect(document.body.textContent).not.toContain(CUENTA);
+  });
+
+  it("sin la cuenta no se aprueba: lo dice, deja volver a pedirla y rechazar sigue", async () => {
+    let caido = true;
+    abrirFicha(APROBAR, {
+      [REVISION]: () =>
+        caido
+          ? error("error_interno", 500)
+          : Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+    });
+    const volver = await boton("Volver a pedir la cuenta");
+    expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
+    expect(((await boton("Aprobar esta versión")) as HTMLButtonElement).disabled).toBe(true);
+    expect(((await boton("Rechazar")) as HTMLButtonElement).disabled).toBe(false);
+    caido = false;
+    fireEvent.click(volver);
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    await listoParaAprobar();
+    sinBoton("Volver a pedir la cuenta");
+  });
+
+  it("con una versión nueva, la cuenta de la anterior se va y se pide la de la nueva", async () => {
+    const OTRA = "9990003100000000009876";
+    let actual = APROBAR;
+    abrirFicha(() => actual, {
+      [REVISION]: () =>
+        Response.json({
+          orden: actual.orden, puede_aprobar: true, puede_rechazar: true,
+          versiones: actual.versiones.map((x) => ({ ...x, cuenta_destino: x.numero === 2 ? OTRA : CUENTA })),
+        }),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => {
+        actual = {
+          ...APROBAR, orden: orden({ estado: "en_revision", version_vigente: 2 }),
+          versiones: [version({ aprobada_por: [] }), version({ numero: 2, huella: H2, aprobada_por: [], cuenta_ultimos_digitos: OTRA.slice(-4) })],
+        };
+        return error("huella_distinta", 409);
+      },
+    });
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar esta versión"));
+    expect(await screen.findByText(OTRA)).toBeTruthy();
+    expect(screen.queryByText(CUENTA)).toBeNull();
   });
 
   it("aprobar manda versión y huella y vuelve a la bandeja; ante R10 reintenta con la misma clave", async () => {
@@ -1271,6 +1351,7 @@ describe("aprobar y rechazar", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () =>
         conFactor ? Response.json({ id: O1, version: 1 }, { status: 201 }) : error("segundo_factor_requerido", 403),
     });
+    await listoParaAprobar();
     fireEvent.click(await boton("Aprobar esta versión"));
     await verificarCodigo();
     expect(await screen.findByText("Listo: aprobaste la versión 1.")).toBeTruthy();
@@ -1291,6 +1372,7 @@ describe("aprobar y rechazar", () => {
         return error("huella_distinta", 409);
       },
     });
+    await listoParaAprobar();
     fireEvent.click(await boton("Aprobar esta versión"));
     expect(await screen.findByText(/Cambió el importe/)).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("Revisá la versión nueva");
@@ -1305,6 +1387,7 @@ describe("aprobar y rechazar", () => {
         return error("orden_no_admite", 409);
       },
     });
+    await listoParaAprobar();
     fireEvent.click(await boton("Aprobar esta versión"));
     await waitFor(() => sinBoton("Aprobar esta versión"));
   });
@@ -1350,8 +1433,10 @@ describe("aprobar y rechazar", () => {
         return error("error_interno", 500);
       },
     });
+    await listoParaAprobar();
     fireEvent.click(await boton("Aprobar esta versión"));
     await screen.findByRole("alert");
+    await listoParaAprobar();
     fireEvent.click(await boton("Aprobar esta versión"));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(2));
     const [a, b] = claves(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`));

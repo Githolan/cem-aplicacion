@@ -1025,11 +1025,12 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
             ).scalars()
         )
     # `condicion_beneficiario` (0048) solo la lee: cuenta las órdenes que ya pasaron una
-    # aprobación completa.
+    # aprobación completa. Las de `0072` solo la leen: dicen sí o no y no escriben ninguna tabla.
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
         "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
         "nucleo.aprobar_por_franja", "nucleo.renovar_orden_vencida",
+        "nucleo.admite_pagar", "nucleo.admite_renovar", "nucleo.acciones_de_ordenes_lectura",
     }  # fmt: skip
 
 

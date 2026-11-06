@@ -44,8 +44,10 @@ import { useActo } from "./useActo";
 // `situacion`, y lo que ofrece, de `paso` y `puede_*`, que el servidor saca de las reglas de la
 // base. Revisar no es una pantalla más: la ficha muestra los datos y el botón principal confirma.
 //
-// La cuenta completa no viaja con la ficha. Llega solo con el acto de ejecución, vive en el estado
-// de esta ficha y se va al cerrarla o cuando la orden cambia de versión.
+// La cuenta completa no viaja con la ficha. Llega con el acto de ejecución o, a quien decide la
+// orden, con `ordenes-pago/{id}/revision`, porque es lo que aprueba: quien preparó no la recibe (la
+// revisión la manda nula). Vive en el estado de esta ficha y se va al cerrarla o cuando la orden
+// cambia de versión. Sin ver la cuenta no se aprueba.
 
 type FichaPago = components["schemas"]["FichaPago"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
@@ -103,6 +105,45 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [modificando, setModificando] = useState(false);
   const [conMotivo, setConMotivo] = useState<ConMotivo | null>(null);
   const [motivo, setMotivo] = useState("");
+  /** La cuenta que se decide, con la versión que muestra; `cuenta` nula si no hay qué mostrar. */
+  const [decision, setDecision] = useState<{ version: number; cuenta: string | null } | null>(null);
+  const [vueltaDecision, setVueltaDecision] = useState(0);
+  const [faltaCuenta, setFaltaCuenta] = useState(false);
+
+  const leida = lectura.tipo === "ok" ? lectura.ficha : null;
+  const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar);
+  const versionLeida = leida?.orden.version_vigente;
+
+  useEffect(() => {
+    if (!decide) return;
+    let vigente = true;
+    setFaltaCuenta(false);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/revision", {
+        params: { path: { consorcio_id: consorcio, orden_id: orden } },
+      })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (!vigente) return;
+        const version = data?.versiones.find((x) => x.numero === data.orden.version_vigente);
+        if (version !== undefined) setDecision({ version: version.numero, cuenta: version.cuenta_destino });
+        else {
+          setFaltaCuenta(true);
+          setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigoDe(error))));
+        }
+      })
+      .catch((e: unknown) => {
+        if (!vigente) return;
+        if (e instanceof SinSesion) aEntrar();
+        else {
+          setFaltaCuenta(true);
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
+        }
+      });
+    return () => {
+      vigente = false;
+    };
+  }, [consorcio, orden, decide, versionLeida, vueltaDecision, aEntrar, setAviso]);
 
   useEffect(() => {
     let vigente = true;
@@ -178,6 +219,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const pago = ejecucion?.pagos.at(-1);
   // La cuenta era de la versión que se abrió: de otra versión no se muestra.
   const cuentaVista = cuenta?.version === v.numero ? cuenta : null;
+  const cuentaDecidida = decide && decision?.version === v.numero ? decision : null;
   const anterior = ficha.versiones.find((x) => x.numero === v.numero - 1);
   const enDecision = situacion === "borrador" || situacion === "en_revision";
   const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
@@ -466,7 +508,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 {enDecision && (
                   <>
                     <dt>Cuenta destino</dt>
-                    <dd>{cuentaEnmascarada(v.cuenta_ultimos_digitos)}</dd>
+                    <dd>{cuentaDecidida?.cuenta ?? cuentaEnmascarada(v.cuenta_ultimos_digitos)}</dd>
                     <dt>Comprobante</dt>
                     <dd>{v.comprobante ?? "Sin comprobante"}</dd>
                   </>
@@ -567,8 +609,17 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         </button>
                       )}
                       {ficha.puede_aprobar && (
-                        <button type="button" disabled={enviando} onClick={aprobar}>
+                        <button type="button" disabled={enviando || cuentaDecidida === null} onClick={aprobar}>
                           Aprobar esta versión
+                        </button>
+                      )}
+                      {decide && faltaCuenta && (
+                        <button type="button" className="secundario" disabled={enviando}
+                          onClick={() => {
+                            setAviso(sinLaFalla);
+                            setVueltaDecision((n) => n + 1);
+                          }}>
+                          Volver a pedir la cuenta
                         </button>
                       )}
                       {ficha.puede_rechazar && (

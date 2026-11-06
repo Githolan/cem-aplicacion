@@ -188,6 +188,8 @@ async function simularPagos(pagina: Page, baseURL: string, inicial: { paso: stri
       return ruta.fulfill({ json: { elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA, concepto: ORDEN_A.concepto,
         importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""], le_toca_a: "vos" }] } });
     if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: actual });
+    if (camino === `${c}/ordenes-pago/${ORDEN}/revision`)
+      return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(CUENTA)], puede_aprobar: true, puede_rechazar: true } });
     if (camino === `${c}/documentos`)
       return ruta.fulfill({ json: { documentos: [{ id: COMPROBANTE, categoria: "facturas_y_comprobantes",
         titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: ORDEN,
@@ -301,15 +303,14 @@ test.describe("circuito de pagos", () => {
     await expect(campo).toHaveValue("12,345,6");
   });
 
-  test("aprobar: la alerta de fraccionamiento a la vista y la cuenta enmascarada", async ({ page, baseURL }) => {
+  test("aprobar: la alerta de fraccionamiento a la vista y la cuenta completa", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, PARA_APROBAR);
     await abrirLaFicha(page);
     await expect(page.getByText("Posible fraccionamiento: existen órdenes recientes relacionadas")).toBeVisible();
-    await expect(page.getByText(`…${CUENTA.slice(-4)}`)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeVisible();
+    await expect(page.getByText(CUENTA)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toBeVisible();
-    expect(await page.content()).not.toContain(CUENTA);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
