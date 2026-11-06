@@ -12,13 +12,17 @@ import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
 import { ContextoVersion } from "../version";
 import { cambiosDeVersion } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
-import { comprobantesDisponibles, comprobantesEnRevision } from "./RegistroPago";
-import { AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, AVISO_VERIFICAR_CUENTA, type Paso, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, type Paso, VERBO } from "./textos";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
 // banco 999, y nada se transfiere. La API está simulada: que el servidor mande el `paso` correcto lo
 // prueban `backend/tests/test_circuito_pagos*.py`; acá, que cada `paso` tenga su acción y que sin el
 // `puede_*` no aparezca.
+
+// jsdom no tiene trabajadores ni canvas: el dibujo real lo prueba `e2e/egresos.e2e.ts`.
+const pdf = vi.hoisted(() => ({ abrirPdf: vi.fn() }));
+vi.mock("./pdf", async (original) => ({ ...(await original<typeof import("./pdf")>()), ...pdf }));
+const PAGINA = { getViewport: () => ({ width: 100, height: 100 }), render: () => ({ promise: Promise.resolve() }) };
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -39,6 +43,8 @@ const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
 const CONSULTA_AL_LADO = "(min-width: 64.0625em)";
+const CONSULTA_TELEFONO = "(max-width: 30em)";
+const CONTENIDO = `${BASE}/documentos/${DOC}/versiones/${ARCHIVO}/contenido`;
 const RUTA_REVISION = `${BASE}/ordenes-pago/${O1}/revision`;
 const REVISION = `GET ${RUTA_REVISION}`;
 
@@ -76,7 +82,7 @@ function version(extra: Partial<Version> = {}): Version {
 function pago(extra: Partial<Pago> = {}): Pago {
   return {
     id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000,
-    moneda: "ARS", documento_id: DOC, version_documento_id: ARCHIVO, registrado_por: PERSONA,
+    moneda: "ARS", documento_id: DOC, version_documento_id: ARCHIVO, registrado_por: PERSONA, registrado_por_nombre: "Marta Ficticia",
     registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null,
     conciliado_en: null, fuera_de_termino: false, ...extra,
   };
@@ -97,7 +103,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false,
     puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, ejecucion: null, comprobante_actual: null,
-    observacion_vigente: null, declaracion_vigente: null, ...extra,
+    comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
   };
 }
 
@@ -106,15 +112,18 @@ const SUBIR = ficha({
   orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", paso: "subir_comprobante", le_toca_a: "vos",
   puede_subir_comprobante: true, puede_registrar: true, puede_declarar: true, puede_reabrir_cuenta: true, ejecucion: ejecucion(),
 });
+const EL_COMPROBANTE = { documento_id: DOC, version_documento_id: ARCHIVO };
+/** Con la cuenta vista y el comprobante ya revisado: el formulario está a la vista. */
+const LISTO = { ...SUBIR, comprobante_actual: EL_COMPROBANTE };
 const OBSERVACION = { pago_id: PAGO, motivo: "No coincide el número", observado_por: PERSONA, observado_en: "2026-11-01T12:00:00Z" };
 const CORREGIR = ficha({
   orden: orden({ estado: "en_verificacion" }), situacion: "observado", paso: "corregir", le_toca_a: "vos", puede_corregir: true,
   puede_registrar: true, puede_declarar: true, ejecucion: ejecucion([pago({ conciliacion: "observado", motivo_conciliacion: "No coincide el número" })]),
-  observacion_vigente: OBSERVACION,
+  observacion_vigente: OBSERVACION, comprobante_actual: EL_COMPROBANTE,
 });
 const CONCILIAR = ficha({
   orden: orden({ estado: "en_verificacion" }), situacion: "falta_conciliar", paso: "conciliar", le_toca_a: "vos", puede_conciliar: true,
-  ejecucion: ejecucion([pago()]), comprobante_actual: { documento_id: DOC, version_documento_id: ARCHIVO },
+  ejecucion: ejecucion([pago()]), comprobante_actual: EL_COMPROBANTE,
 });
 const APROBAR = ficha({
   orden: orden({ estado: "en_revision", aprobaciones: 0 }), versiones: [version({ aprobada_por: [] })], situacion: "en_revision",
@@ -135,13 +144,6 @@ function elemento(paso: Paso, grupo: Elemento["grupo"], extra: Partial<Elemento>
   return {
     orden_id: O1, proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre", importe_centavos: 1_500_000, moneda: "ARS",
     paso, grupo, le_toca_a: "vos", ...extra,
-  };
-}
-
-function documento(id: string, estado: string, ordenId: string | null = O1) {
-  return {
-    id, categoria: "facturas_y_comprobantes", titulo: `Transferencia ${id.slice(0, 4)}`, fecha: "2026-10-31",
-    cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: ordenId, versiones: [{ id: ARCHIVO, estado }],
   };
 }
 
@@ -222,9 +224,10 @@ function abrir(ruta: string) {
 }
 
 /** El ancho: en PC la ficha va al lado de la bandeja. */
-function ancho(alLado: boolean) {
+function ancho(alLado: boolean, telefono = false) {
   vi.stubGlobal("matchMedia", (consulta: string) => {
-    return { matches: consulta === CONSULTA_AL_LADO && alLado, addEventListener: () => undefined, removeEventListener: () => undefined };
+    const matches = (consulta === CONSULTA_AL_LADO && alLado) || (consulta === CONSULTA_TELEFONO && telefono);
+    return { matches, addEventListener: () => undefined, removeEventListener: () => undefined };
   });
 }
 
@@ -234,6 +237,8 @@ const sinBoton = (nombre: string | RegExp) => expect(screen.queryByRole("button"
 const volvioLaRed = () => fireEvent(window, new Event("online"));
 const conEsperaManual = () => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
 const ESPERA = 3000;
+/** Un PNG: el archivo que `…/contenido` devuelve si la prueba no dice otra cosa. */
+const IMAGEN = () => new Response(new Blob(["\x89PNG SINTETICO"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } });
 
 /** Abre la ficha de esa orden con esas respuestas. */
 function abrirFicha(f: Ficha | (() => Ficha), extra: Respuestas = {}) {
@@ -244,6 +249,7 @@ function abrirFicha(f: Ficha | (() => Ficha), extra: Respuestas = {}) {
       const { orden: o, versiones } = leer();
       return Response.json({ orden: o, versiones: versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true });
     },
+    [`GET ${CONTENIDO}`]: IMAGEN,
     ...extra,
   });
   vi.stubGlobal("fetch", api);
@@ -256,16 +262,11 @@ async function verificarCodigo() {
   fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 }
 
-function escribirRegistroSinComprobante() {
+function escribirRegistro() {
   fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
   fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
   fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
   fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
-}
-
-function escribirRegistro() {
-  escribirRegistroSinComprobante();
-  fireEvent.change(screen.getByLabelText("Comprobante de la transferencia"), { target: { value: DOC } });
 }
 
 async function sinFaltasDeAccesibilidad(contenedor: HTMLElement) {
@@ -273,12 +274,11 @@ async function sinFaltasDeAccesibilidad(contenedor: HTMLElement) {
   expect(resultado.violations.map((v) => v.id)).toEqual([]);
 }
 
-const DOCUMENTOS = () => Response.json({ documentos: [documento(DOC, "disponible"), documento(X1, "disponible", null)] });
-
 beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
   localStorage.clear();
   ancho(false);
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:sintetico", revokeObjectURL: () => undefined }));
 });
 
 afterEach(() => {
@@ -441,7 +441,6 @@ describe("el ancho de la pantalla", () => {
       [`GET ${BASE}/pagos/bandeja`]: () =>
         reordenada ? bandejaCon(OTRA, elemento("subir_comprobante", "para_pagar"))() : bandejaCon(elemento("pagar", "para_pagar"), OTRA)(),
       [`GET ${BASE}/pagos/${O1}`]: () => Response.json(actual),
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
       [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => {
         actual = { ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() };
         reordenada = true;
@@ -519,29 +518,35 @@ describe("el ancho de la pantalla", () => {
     expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
   });
 
-  it("la descarga pedida en una ficha ya cerrada no arranca", async () => {
+  it("la subida que termina con la ficha ya cerrada no mueve la que se abrió después", async () => {
     ancho(true);
-    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
     let soltar: (r: Response) => void = () => undefined;
     const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
-    const DESCARGA = `${BASE}/documentos/${DOC}/versiones/${ARCHIVO}/descargar`;
+    const ARCHIVO_NUEVO = `${BASE}/documentos/${NUEVO}/versiones`;
     const api = backend({
-      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("conciliar", "para_conciliar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })),
-      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(CONCILIAR),
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("subir_comprobante", "para_pagar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(SUBIR),
       [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
-      [`GET ${DESCARGA}`]: () => new Promise<Response>((r) => (soltar = r)),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${ARCHIVO_NUEVO}`]: () => new Promise<Response>((r) => (soltar = r)),
     });
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
-    fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
-    await waitFor(() => expect(pedidos(api, "GET", DESCARGA)).toHaveLength(1));
+    fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), {
+      target: { files: [new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(pedidos(api, "POST", ARCHIVO_NUEVO)).toHaveLength(1));
     fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
     await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" });
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
     await act(async () => {
-      soltar(Object.defineProperty(new Response(null), "type", { value: "opaqueredirect" }));
+      soltar(Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }));
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(clic).not.toHaveBeenCalled();
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(screen.getByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
   });
 
   it("control: en tablet y teléfono la bandeja no abre ninguna ficha", async () => {
@@ -570,7 +575,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     ["volver_a_pagar", ficha({ situacion: "no_se_pago", paso: "volver_a_pagar", puede_modificar: true }), "Volver a pagar", "puede_modificar"],
     ["aprobar", APROBAR, "Aprobar esta versión", "puede_aprobar"],
     ["pagar", PAGAR, "Ver la cuenta para pagar", "puede_pagar"],
-    ["subir_comprobante", SUBIR, "Registrar el pago", "puede_subir_comprobante"],
+    ["subir_comprobante", SUBIR, "Elegir el archivo", "puede_subir_comprobante"],
     ["corregir", CORREGIR, "Guardar la corrección", "puede_corregir"],
     ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "No se pudo pagar", "puede_declarar"],
     ["conciliar", CONCILIAR, "Conforme", "puede_conciliar"],
@@ -583,10 +588,10 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   ];
 
   it.each(CASOS)("%s", async (_, f, nombre, puede) => {
-    abrirFicha(f, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
+    abrirFicha(f);
     expect(await boton(nombre)).toBeTruthy();
     cleanup();
-    abrirFicha({ ...f, [puede]: false }, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
+    abrirFicha({ ...f, [puede]: false });
     await screen.findByRole("heading", { level: 1, name: "Limpieza Ficticia SRL" });
     sinBoton(nombre);
   });
@@ -652,7 +657,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   });
 
   it("sin faltas de accesibilidad con el formulario a la vista", async () => {
-    abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
+    abrirFicha(LISTO);
     await boton("Registrar el pago");
     await sinFaltasDeAccesibilidad(document.body);
   });
@@ -663,7 +668,6 @@ describe("pagar", () => {
   function circuito(extra: Respuestas = {}) {
     let actual = PAGAR;
     const api = abrirFicha(() => actual, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
       [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => {
         actual = { ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() };
         return Response.json({ id: O1, version: 1 });
@@ -709,12 +713,12 @@ describe("pagar", () => {
     const api = circuito();
     fireEvent.click(await boton("Ver la cuenta para pagar"));
     expect(await screen.findByText(CUENTA)).toBeTruthy();
-    expect(screen.getByText(AVISO_VERIFICAR_CUENTA)).toBeTruthy();
+    expect(screen.getByText(/mirá que el titular sea/).textContent).toContain("Limpieza Ficticia SRL");
     expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/emitir`, `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]);
     const [emision] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/emitir`);
     expect(await cuerpo(emision)).toEqual({ version: 1, huella: H1 });
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)[0])).toEqual({ version: 1, huella: H1 });
-    expect(await boton("Registrar el pago")).toBeTruthy();
+    expect(await boton("Elegir el archivo")).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
   });
 
@@ -808,8 +812,7 @@ describe("pagar", () => {
   });
 
   it("quien ya la vio la vuelve a pedir con un botón aparte", async () => {
-    const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    const api = abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
     });
     await boton("Registrar el pago");
@@ -820,7 +823,7 @@ describe("pagar", () => {
   });
 
   it("sin poder reabrirla, lo dice y deja registrar o declarar", async () => {
-    abrirFicha({ ...SUBIR, puede_reabrir_cuenta: false }, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
+    abrirFicha({ ...LISTO, puede_reabrir_cuenta: false });
     expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
     sinBoton("Ver la cuenta de nuevo");
     expect(await boton("Registrar el pago")).toBeTruthy();
@@ -828,13 +831,12 @@ describe("pagar", () => {
   });
 
   it("si la orden cambió de versión, la cuenta de la anterior se va y lo escrito queda", async () => {
-    let actual = SUBIR;
+    let actual = LISTO;
     abrirFicha(() => actual, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => {
         actual = {
-          ...SUBIR, orden: orden({ estado: "en_ejecucion", version_vigente: 2 }), puede_reabrir_cuenta: false,
+          ...LISTO, orden: orden({ estado: "en_ejecucion", version_vigente: 2 }), puede_reabrir_cuenta: false,
           versiones: [version(), version({ numero: 2, huella: H2 })],
         };
         return error("version_desactualizada", 409);
@@ -842,7 +844,7 @@ describe("pagar", () => {
     });
     fireEvent.click(await boton("Ver la cuenta de nuevo"));
     await screen.findByText(CUENTA);
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
@@ -853,11 +855,10 @@ describe("pagar", () => {
 
 describe("registrar y corregir", () => {
   it("registra lo escrito por la persona, no lo de la orden, y vuelve a la bandeja con el aviso", async () => {
-    const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    const api = abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     expect((screen.getByLabelText(/^Importe transferido/) as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
     escribirRegistro();
@@ -872,15 +873,14 @@ describe("registrar y corregir", () => {
 
   it("si falla la recarga después de registrar, el «Listo» queda y se puede reintentar", async () => {
     let caido = false;
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    abrirFicha(LISTO, {
       [`GET ${BASE}/pagos/bandeja`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => {
         caido = true;
         return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
       },
     });
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     expect(await boton("Reintentar")).toBeTruthy();
@@ -888,11 +888,10 @@ describe("registrar y corregir", () => {
   });
 
   it("un error queda en la ficha con lo escrito", async () => {
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error("no_coincide_con_la_orden", 422),
     });
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     expect((await screen.findByRole("alert")).textContent).toContain("no son los de la orden");
@@ -901,11 +900,10 @@ describe("registrar y corregir", () => {
   });
 
   it("con otra operación ya usada sigue en la ficha", async () => {
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error("operacion_de_otra_orden", 409),
     });
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     expect((await screen.findByRole("alert")).textContent).toContain("ya respalda otra orden");
@@ -914,8 +912,7 @@ describe("registrar y corregir", () => {
 
   it("el segundo factor no se lleva lo escrito y reintenta con la misma clave", async () => {
     let conFactor = false;
-    const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+    const api = abrirFicha(LISTO, {
       "POST /api/v1/auth/totp/verificar": () => {
         conFactor = true;
         return VERIFICADO();
@@ -923,7 +920,7 @@ describe("registrar y corregir", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () =>
         conFactor ? Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) : error("segundo_factor_requerido", 403),
     });
-    await screen.findByRole("option", { name: /Transferencia/ });
+    await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     await verificarCodigo();
@@ -933,17 +930,33 @@ describe("registrar y corregir", () => {
     expect(new Set(claves(registros)).size).toBe(1);
   });
 
-  it("corregir muestra el motivo y no vuelve a pedir la cuenta", async () => {
+  it("corregir abre con lo registrado y el comprobante al lado, y no vuelve a pedir la cuenta", async () => {
     const api = abrirFicha(CORREGIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     expect((await screen.findByText(/no transfieras de nuevo/)).textContent).toContain("No coincide el número");
-    await screen.findByRole("option", { name: /Transferencia/ });
-    escribirRegistro();
+    expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
+    expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("0001234567");
+    expect(screen.getByLabelText<HTMLInputElement>("Fecha de la transferencia").value).toBe("2026-10-31");
+    expect(screen.getByLabelText<HTMLInputElement>(/^Importe transferido/).value).toBe("15.000,00");
+    expect(screen.queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
+    expect(screen.getByText(/la que ya registraste/).textContent).toContain(CUENTA.slice(-4));
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-999" } });
     fireEvent.click(await boton("Guardar la corrección"));
     await screen.findByText(/Listo: registraste el pago/);
+    // Una sola escritura: ni `pago-manual/cuenta`, ni otra subida.
     expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/pago-manual`]);
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toEqual({
+      version: 1, huella: H1, numero_operacion: "0001-999", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
+      documento_id: DOC,
+    });
+  });
+
+  it("control: un registro nuevo no se llena con nada de la orden y pide la cuenta", async () => {
+    abrirFicha(LISTO);
+    expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("");
+    expect(screen.getByLabelText<HTMLInputElement>(/^Importe transferido/).value).toBe("");
+    expect(screen.getByLabelText<HTMLInputElement>(/^CBU\/CVU de destino/).value).toBe("");
   });
 
   it("observado, sin ser quien registró: no corrige y sabe a quién le toca", async () => {
@@ -954,179 +967,316 @@ describe("registrar y corregir", () => {
   });
 });
 
-describe("el comprobante dentro de la ficha", () => {
-  it("una lectura vieja de los comprobantes no pisa la nueva", async () => {
-    const colgadas: ((r: Response) => void)[] = [];
-    let caido = true;
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: () => (caido ? error("error_interno", 500) : new Promise<Response>((r) => colgadas.push(r))),
-    });
-    const actualizar = await boton("Actualizar comprobantes");
-    caido = false;
-    fireEvent.click(actualizar);
-    fireEvent.click(actualizar);
-    await waitFor(() => expect(colgadas).toHaveLength(2));
-    await act(async () => {
-      (colgadas[1] as (r: Response) => void)(DOCUMENTOS());
-      await new Promise((r) => setTimeout(r, 20));
-    });
-    await screen.findByRole("option", { name: /Transferencia/ });
-    await act(async () => {
-      (colgadas[0] as (r: Response) => void)(Response.json({ documentos: [] }));
-      await new Promise((r) => setTimeout(r, 20));
-    });
-    expect(screen.getByRole("option", { name: /Transferencia/ })).toBeTruthy();
-  });
-
+describe("el comprobante en un paso", () => {
+  const CREAR = `${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`;
+  const SUBIDA = `${BASE}/documentos/${NUEVO}/versiones`;
   const COMPROBANTE = {
-    [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
-    [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () => Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
+    [`POST ${CREAR}`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+    [`POST ${SUBIDA}`]: () => Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
   };
-  const elegido = () => (screen.getByLabelText("Comprobante de la transferencia") as HTMLSelectElement).value;
+  const EN_REVISION = { ...SUBIR, comprobante_subido: { documento_id: NUEVO, version_documento_id: K1, estado: "en_cuarentena" as const } };
+  const RECHAZADO = { ...SUBIR, comprobante_subido: { documento_id: NUEVO, version_documento_id: K1, estado: "rechazado" as const } };
+  const APROBADO = { ...SUBIR, comprobante_actual: { documento_id: NUEVO, version_documento_id: K1 } };
+  const PDF = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
+  const FOTO = new File(["\xff\xd8\xff SINTETICO"], "foto.jpg", { type: "image/jpeg" });
 
-  async function subir() {
-    await screen.findByLabelText(/^Archivo del comprobante/);
-    const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+  async function elegir(archivo = PDF) {
+    fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
   }
 
-  it("solo ofrece lo cargado desde el pago de esa orden y que pasó el antivirus", () => {
-    const documentos = [documento(DOC, "disponible"), documento(X1, "disponible", null), documento(NUEVO, "en_cuarentena")] as never[];
-    expect(comprobantesDisponibles(documentos, O1).map((d: { id: string }) => d.id)).toEqual([DOC]);
-    expect(comprobantesEnRevision(documentos, O1)).toBe(1);
-    expect(comprobantesDisponibles(documentos, O2)).toEqual([]);
-  });
-
-  it("primero crea el documento con la orden, después sube el archivo", async () => {
-    const api = abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: DOCUMENTOS, ...COMPROBANTE });
-    await subir();
-    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
-    expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`, `${BASE}/documentos/${NUEVO}/versiones`]);
-    const [archivo] = pedidos(api, "POST", `${BASE}/documentos/${NUEVO}/versiones`);
-    expect(archivo?.headers.get("Content-Type")).toBe("application/pdf");
-  });
-
-  it("si el archivo no entra, el reintento sube solo el archivo al mismo comprobante", async () => {
-    let caido = true;
-    const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
+  /** La ficha cambia cuando se sube el archivo, como en el servidor. */
+  function conSubida(extra: Respuestas = {}) {
+    let actual: Ficha = SUBIR;
+    const cambiar = (f: Ficha) => {
+      actual = f;
+    };
+    const api = abrirFicha(() => actual, {
       ...COMPROBANTE,
-      [`POST ${BASE}/documentos/${NUEVO}/versiones`]: () =>
-        caido ? error("error_interno", 500) : Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }),
+      [`POST ${SUBIDA}`]: () => {
+        actual = EN_REVISION;
+        return Response.json({ id: K1, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 201 });
+      },
+      [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
+      ...extra,
     });
-    await subir();
-    const reintentar = await boton("Reintentar la subida");
+    return { api, cambiar };
+  }
+
+  it("elegir el archivo dispara todo, sin un botón de subir ni una lista", async () => {
+    const api = abrirFicha(SUBIR, COMPROBANTE);
+    expect(await boton("Elegir el archivo")).toBeTruthy();
+    expect(screen.getByText("Soltá acá el comprobante")).toBeTruthy();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    sinBoton("Subir");
+    sinBoton("Registrar el pago");
+    await elegir();
+    await waitFor(() => expect(escrituras(api)).toEqual([CREAR, SUBIDA]));
+    const [archivo] = pedidos(api, "POST", SUBIDA);
+    expect(archivo?.headers.get("Content-Type")).toBe("application/pdf");
+    expect(await cuerpo(pedidos(api, "POST", CREAR)[0])).toMatchObject({ titulo: "Transferencia a Limpieza Ficticia SRL" });
+    expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(0);
+  });
+
+  it("soltar un archivo en la zona también lo sube", async () => {
+    const api = abrirFicha(SUBIR, COMPROBANTE);
+    const zona = (await screen.findByText("Soltá acá el comprobante")).parentElement as HTMLElement;
+    fireEvent.drop(zona, { dataTransfer: { files: [PDF] } });
+    await waitFor(() => expect(escrituras(api)).toEqual([CREAR, SUBIDA]));
+  });
+
+  it("en el teléfono ofrece la cámara y la galería, y no la zona para soltar", async () => {
+    ancho(false, true);
+    abrirFicha(SUBIR);
+    expect(await boton("Sacar una foto")).toBeTruthy();
+    expect(await boton("Elegir de la galería")).toBeTruthy();
+    expect(screen.getByLabelText("Foto del comprobante").getAttribute("capture")).toBe("environment");
+    expect(screen.queryByText("Soltá acá el comprobante")).toBeNull();
+  });
+
+  it("control: fuera del teléfono no hay cámara", async () => {
+    abrirFicha(SUBIR);
+    await boton("Elegir el archivo");
+    sinBoton("Sacar una foto");
+    expect(screen.queryByLabelText("Foto del comprobante")).toBeNull();
+  });
+
+  it("una imagen se ve enseguida desde el archivo local y un PDF dice su nombre", async () => {
+    const { cambiar } = conSubida();
+    await elegir(FOTO);
+    expect((await screen.findByRole("img", { name: "Vista previa de foto.jpg" })).getAttribute("src")).toBe("blob:sintetico");
+    cambiar(SUBIR);
+  });
+
+  it("control: de un PDF se ve el nombre, porque se muestra recién cuando pasa el antivirus", async () => {
+    conSubida();
+    await elegir();
+    expect(await screen.findByText("comprobante.pdf")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("la ficha dice en qué va, consulta sola y al pasar abre el formulario con el comprobante", async () => {
+    conEsperaManual();
+    const { api, cambiar } = conSubida();
+    await elegir();
+    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    expect(await screen.findByText("El antivirus lo está revisando…")).toBeTruthy();
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
+    sinBoton("Actualizar comprobantes");
+    cambiar(APROBADO);
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await screen.findByLabelText("Número de operación")).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
+    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    // Dejó de consultar.
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 3));
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
+  });
+
+  it("una consulta vieja del antivirus no pisa la nueva", async () => {
+    conEsperaManual();
+    const colgadas: ((r: Response) => void)[] = [];
+    let responder = (): Response | Promise<Response> => Response.json(EN_REVISION);
+    abrirFicha(EN_REVISION, { [`GET ${BASE}/pagos/${O1}`]: () => responder() });
+    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    responder = () => new Promise<Response>((r) => colgadas.push(r));
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    await waitFor(() => expect(colgadas).toHaveLength(1));
+    responder = () => Response.json(APROBADO);
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await screen.findByLabelText("Número de operación")).toBeTruthy();
+    await act(async () => {
+      (colgadas[0] as (r: Response) => void)(Response.json(EN_REVISION));
+      await Promise.resolve();
+    });
+    expect(screen.getByLabelText("Número de operación")).toBeTruthy();
+    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+  });
+
+  it("registra con el comprobante actual: el documento no se elige", async () => {
+    const api = abrirFicha(APROBADO, {
+      [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Registrar el pago"));
+    await screen.findByText(/Listo: registraste el pago/);
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toMatchObject({ documento_id: NUEVO });
+  });
+
+  it("tras un minuto avisa que se puede salir y sigue consultando", async () => {
+    conEsperaManual();
+    const api = abrirFicha(EN_REVISION);
+    await screen.findByText("Estamos revisando el comprobante");
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 19));
+    expect(screen.queryByText(AVISO_ANTIVIRUS_TARDA)).toBeNull();
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await screen.findByText(AVISO_ANTIVIRUS_TARDA)).toBeTruthy();
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 2));
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`).length).toBeGreaterThan(lecturas);
+  });
+
+  it("al volver a la ficha con un archivo en revisión sigue la consulta, sin subir nada", async () => {
+    const api = abrirFicha(EN_REVISION);
+    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
+    expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
+  });
+
+  it("rechazado, lo dice en la ficha y deja subir otro", async () => {
+    conEsperaManual();
+    const { cambiar } = conSubida();
+    await elegir();
+    await screen.findByText("Estamos revisando el comprobante");
+    cambiar(RECHAZADO);
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect((await screen.findByRole("alert")).textContent).toBe(AVISO_ARCHIVO_RECHAZADO);
+    expect(await boton("Elegir el archivo")).toBeTruthy();
+    expect(screen.queryByLabelText("Número de operación")).toBeNull();
+  });
+
+  it("volver a subir reemplaza al actual y lo escrito queda", async () => {
+    conEsperaManual();
+    let actual: Ficha = LISTO;
+    abrirFicha(() => actual, {
+      ...COMPROBANTE,
+      [`POST ${SUBIDA}`]: () => {
+        actual = { ...LISTO, comprobante_subido: { documento_id: NUEVO, version_documento_id: K1, estado: "en_cuarentena" } };
+        return Response.json({ id: K1, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 201 });
+      },
+      [`GET ${BASE}/documentos/${NUEVO}/versiones/${K1}/contenido`]: IMAGEN,
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    await boton("Elegir otro archivo");
+    await elegir();
+    await screen.findByText("Estamos revisando el comprobante");
+    // Mientras se revisa el nuevo, no se registra con el anterior.
+    sinBoton("Registrar el pago");
+    actual = APROBADO;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("0001-234567");
+  });
+
+  it("si el archivo no entra, reintentar sube solo el archivo, al mismo comprobante y con la misma clave", async () => {
+    let caido = true;
+    const { api } = conSubida({
+      [`POST ${SUBIDA}`]: () => (caido ? error("error_interno", 500) : Response.json({ id: K1, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 201 })),
+    });
+    await elegir();
+    const reintentar = await boton("Reintentar");
     expect(screen.getByRole("alert").textContent).toContain("El archivo no se subió");
+    expect(screen.getByText("comprobante.pdf")).toBeTruthy();
     caido = false;
     fireEvent.click(reintentar);
-    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
-    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`)).toHaveLength(1);
-    expect(new Set(claves(pedidos(api, "POST", `${BASE}/documentos/${NUEVO}/versiones`))).size).toBe(1);
+    await waitFor(() => expect(pedidos(api, "POST", SUBIDA)).toHaveLength(2));
+    expect(pedidos(api, "POST", CREAR)).toHaveLength(1);
+    expect(new Set(claves(pedidos(api, "POST", SUBIDA))).size).toBe(1);
+  });
+
+  it("sin red queda el archivo a la vista y se reintenta con un toque", async () => {
+    const api = abrirFicha(SUBIR, {
+      [`POST ${CREAR}`]: () => {
+        throw new TypeError("sin red");
+      },
+    });
+    await elegir();
+    expect(await boton("Reintentar")).toBeTruthy();
+    expect(screen.getByText("comprobante.pdf")).toBeTruthy();
+    expect(escrituras(api)).toEqual([CREAR]);
+  });
+
+  it("subir no pide el código: el gesto se pide recién al registrar", async () => {
+    const { api } = conSubida();
+    await elegir();
+    await waitFor(() => expect(escrituras(api)).toEqual([CREAR, SUBIDA]));
+    expect(screen.queryByLabelText("Código")).toBeNull();
   });
 
   it("si no vio la cuenta, la carga se niega y no sube el archivo", async () => {
-    const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
-      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => error("no_es_quien_ejecuto", 403),
-    });
-    await subir();
+    const api = abrirFicha(SUBIR, { [`POST ${CREAR}`]: () => error("no_es_quien_ejecuto", 403) });
+    await elegir();
     expect((await screen.findByRole("alert")).textContent).toContain("quien vio la cuenta");
-    expect(pedidos(api, "POST", `${BASE}/documentos/${NUEVO}/versiones`)).toHaveLength(0);
+    expect(pedidos(api, "POST", SUBIDA)).toHaveLength(0);
   });
 
-  it("un archivo que no es PDF, JPEG ni PNG no se manda", async () => {
-    const api = abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
-    await screen.findByLabelText(/^Archivo del comprobante/);
-    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [new File(["x"], "a.exe", { type: "application/x-msdownload" })] } });
+  it("un archivo que no es PDF, JPEG ni PNG no se manda y deja elegir otro", async () => {
+    const api = abrirFicha(SUBIR);
+    await elegir(new File(["x"], "a.exe", { type: "application/x-msdownload" }));
     expect((await screen.findByRole("alert")).textContent).toContain("PDF, JPEG o PNG");
     expect(escrituras(api)).toEqual([]);
+    expect(await boton("Elegir el archivo")).toBeTruthy();
   });
 
-  it("el comprobante subido se elige solo cuando el antivirus lo aprueba", async () => {
+  it("una lectura que falla mientras se espera se dice y se va con la siguiente", async () => {
     conEsperaManual();
-    let estado = "en_cuarentena";
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [documento(NUEVO, estado)] }),
-      ...COMPROBANTE,
-    });
-    await subir();
-    await screen.findByText(/En revisión: 1/);
-    estado = "disponible";
-    vi.advanceTimersByTime(ESPERA);
-    await waitFor(() => expect(elegido()).toBe(NUEVO));
-    expect(screen.getByText(/ya quedó elegido/)).toBeTruthy();
-  });
-
-  it("un comprobante rechazado por el antivirus no se elige y se dice", async () => {
-    conEsperaManual();
-    let estado = "en_cuarentena";
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [documento(NUEVO, estado)] }),
-      ...COMPROBANTE,
-    });
-    await subir();
-    await screen.findByText(/En revisión: 1/);
-    estado = "rechazado";
-    vi.advanceTimersByTime(ESPERA);
-    expect((await screen.findByRole("alert")).textContent).toContain("rechazó el archivo");
-    expect(elegido()).toBe("");
-  });
-
-  it("si falla actualizar los comprobantes, lo escrito queda y deja actualizar", async () => {
-    let caido = true;
-    abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: () => (caido ? error("error_interno", 500) : DOCUMENTOS()) });
-    const actualizar = await boton("Actualizar comprobantes");
-    escribirRegistroSinComprobante();
-    expect(screen.getByRole("alert").textContent).toContain("No pudimos actualizar los comprobantes.");
-    caido = false;
-    fireEvent.click(actualizar);
-    await screen.findByRole("option", { name: /Transferencia/ });
-    expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
-    sinBoton("Actualizar comprobantes");
-  });
-
-  it("los comprobantes que fallaron se repiten solos al volver la red", async () => {
-    let caido = true;
-    abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: () => {
-        if (caido) throw new TypeError("sin red");
-        return DOCUMENTOS();
-      },
-    });
-    await boton("Actualizar comprobantes");
-    caido = false;
-    volvioLaRed();
-    expect(await screen.findByRole("option", { name: /Transferencia/ })).toBeTruthy();
-  });
-
-  it("control: con los comprobantes a la vista no hay nada que actualizar", async () => {
-    abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
-    await screen.findByRole("option", { name: /Transferencia/ });
-    sinBoton("Actualizar comprobantes");
-  });
-
-  it("si el antivirus agota la espera, lo dice y recién ahí ofrece actualizar", async () => {
-    conEsperaManual();
-    let estado = "en_cuarentena";
-    const api = abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [documento(NUEVO, estado)] }) });
-    await screen.findByText(/En revisión: 1/);
-    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 20));
-    sinBoton("Actualizar comprobantes");
+    let caido = false;
+    const lectura = () => (caido ? error("error_interno", 500) : Response.json(EN_REVISION));
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/${O1}`]: lectura,
+    }));
+    abrir(`/pagos/${O1}`);
+    await screen.findByText("Estamos revisando el comprobante");
+    caido = true;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
-    expect((await screen.findByRole("alert")).textContent).toContain("sigue revisando");
-    const lecturas = pedidos(api, "GET", `${BASE}/documentos`).length;
-    await act(() => vi.advanceTimersByTimeAsync(ESPERA * 2));
-    expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(lecturas);
-    estado = "disponible";
-    fireEvent.click(await boton("Actualizar comprobantes"));
-    await waitFor(() => sinBoton("Actualizar comprobantes"));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    caido = false;
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("copiar", () => {
+  const conLaCuenta = async () => {
+    abrirFicha(LISTO, { [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json({ ...CUENTA_DEL_ACTO, cuenta_destino: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` }) });
+    fireEvent.click(await boton("Ver la cuenta de nuevo"));
+    await boton("Copiar el CBU");
+  };
+
+  it("el CBU sin espacios y el importe sin miles y con coma decimal", async () => {
+    const escribir = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { clipboard: { writeText: escribir } }));
+    await conLaCuenta();
+    fireEvent.click(await boton("Copiar el CBU"));
+    expect(await boton("Copiado el CBU")).toBeTruthy();
+    fireEvent.click(await boton("Copiar el importe"));
+    expect(await boton("Copiado el importe")).toBeTruthy();
+    expect(escribir.mock.calls).toEqual([[CUENTA], ["15000,00"]]);
+  });
+
+  it("si el navegador no deja, el texto queda seleccionado", async () => {
+    vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { clipboard: { writeText: () => Promise.reject(new Error("no")) } }));
+    await conLaCuenta();
+    fireEvent.click(await boton("Copiar el CBU"));
+    const campo = await screen.findByLabelText<HTMLInputElement>("Copiá el CBU");
+    expect(campo.value).toBe(CUENTA);
+    expect([campo.selectionStart, campo.selectionEnd]).toEqual([0, CUENTA.length]);
+  });
+
+  it("sin el portapapeles, también", async () => {
+    vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { clipboard: undefined }));
+    await conLaCuenta();
+    fireEvent.click(await boton("Copiar el importe"));
+    expect((await screen.findByLabelText<HTMLInputElement>("Copiá el importe")).value).toBe("15000,00");
+  });
+
+  it("el titular a la vista, con el texto del diseño", async () => {
+    await conLaCuenta();
+    expect(screen.getByText(/Antes de confirmar en tu banco, mirá que el titular sea/).textContent).toContain("Limpieza Ficticia SRL");
+  });
+
+  it("control: antes de ver la cuenta no hay nada para copiar", async () => {
+    abrirFicha(LISTO);
+    await boton("Registrar el pago");
+    sinBoton(/^Copiar/);
   });
 });
 
 describe("no se pagó", () => {
   it("con la cuenta vista, declara sobre la ficha y vuelve a la bandeja", async () => {
     const api = abrirFicha(SUBIR, {
-      [`GET ${BASE}/documentos`]: DOCUMENTOS,
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
     });
     fireEvent.click(await boton("No se pudo pagar"));
@@ -1138,9 +1288,9 @@ describe("no se pagó", () => {
   });
 
   it("cancelar la declaración no pierde lo escrito en el registro", async () => {
-    abrirFicha(SUBIR, { [`GET ${BASE}/documentos`]: DOCUMENTOS });
-    await screen.findByRole("option", { name: /Transferencia/ });
-    escribirRegistroSinComprobante();
+    abrirFicha(LISTO);
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
     fireEvent.click(await boton("No se pudo pagar"));
     fireEvent.click(await boton("Cancelar"));
     expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
@@ -1679,13 +1829,14 @@ describe("conciliar", () => {
   it("conforme abre el pago siguiente, con el aviso", async () => {
     const api = abrirFicha(CONCILIAR, {
       [`GET ${BASE}/pagos/${O2}`]: () => Response.json({ ...CONCILIAR, orden: orden({ id: O2, estado: "en_verificacion" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] }),
+      [`GET ${BASE}/ordenes-pago/${O2}/revision`]: () => Response.json({ orden: CONCILIAR.orden, versiones: CONCILIAR.versiones, puede_aprobar: false, puede_rechazar: false }),
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("conciliar", "para_conciliar", { orden_id: O2 })),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     fireEvent.click(await boton("Conforme"));
     expect(await screen.findByRole("heading", { name: "Ascensores Ficticios SA" })).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O2}`);
-    expect(screen.getByText("Listo: conciliaste el pago. La orden quedó pagada.")).toBeTruthy();
+    expect(await screen.findByText("Listo: conciliaste el pago. La orden quedó pagada.")).toBeTruthy();
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
   });
 
@@ -1723,11 +1874,32 @@ describe("conciliar", () => {
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme", motivo: "Lo autorizó el Consejo" });
   });
 
-  it("muestra lo registrado y nunca la cuenta completa", async () => {
+  it("muestra el comprobante y, al lado, la orden contra lo registrado, con la cuenta y quién registró", async () => {
     abrirFicha(CONCILIAR);
     await boton("Conforme");
+    expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
+    const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
+    expect(within(tabla).getAllByText(/15\.000,00/)).toHaveLength(2);
+    expect(await within(tabla).findByText(CUENTA)).toBeTruthy();
     expect(screen.getByText("0001234567")).toBeTruthy();
-    expect(document.body.textContent).not.toContain(CUENTA);
+    expect(screen.getByText(/Marta Ficticia/)).toBeTruthy();
+  });
+
+  it("control: si la revisión no manda la cuenta, quedan los últimos dígitos", async () => {
+    abrirFicha(CONCILIAR, {
+      [REVISION]: () => Response.json({ orden: CONCILIAR.orden, versiones: CONCILIAR.versiones.map((x) => ({ ...x, cuenta_destino: null })), puede_aprobar: false, puede_rechazar: false }),
+    });
+    await boton("Conforme");
+    const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
+    expect(within(tabla).getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
+    await waitFor(() => expect(document.body.textContent).not.toContain(CUENTA));
+  });
+
+  it("control: quien mira sin conciliar no pide la cuenta", async () => {
+    const api = abrirFicha({ ...CONCILIAR, paso: "espera_conciliar", le_toca_a: "consejo", puede_conciliar: false });
+    await screen.findByText("Le toca al Consejo.");
+    expect(pedidos(api, "GET", RUTA_REVISION)).toHaveLength(0);
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("quien vio la cuenta no recibe los botones: decide `puede_conciliar`", async () => {
@@ -1735,7 +1907,6 @@ describe("conciliar", () => {
     expect(await screen.findByText("Le toca al Consejo.")).toBeTruthy();
     sinBoton("Conforme");
     sinBoton("Observar");
-    expect(screen.queryByRole("link", { name: "Ver el comprobante" })).toBeNull();
   });
 
   it("si igual llega un 403, se dice en la ficha", async () => {
@@ -1746,30 +1917,72 @@ describe("conciliar", () => {
   });
 
   describe("ver el comprobante", () => {
-    const DESCARGA = `${BASE}/documentos/${DOC}/versiones/${ARCHIVO}/descargar`;
-
-    it("un error se dice en la pantalla y no se navega al JSON", async () => {
-      abrirFicha(CONCILIAR, { [`GET ${DESCARGA}`]: () => error("version_no_disponible", 409) });
-      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
-      expect((await screen.findByRole("alert")).textContent).toContain("todavía se está revisando");
+    it("un error se dice en la pantalla y deja reintentar", async () => {
+      let caido = true;
+      abrirFicha(CONCILIAR, { [`GET ${CONTENIDO}`]: () => (caido ? error("archivo_vencido", 410) : IMAGEN()) });
+      expect((await screen.findByRole("alert")).textContent).toContain("ya no está disponible");
+      caido = false;
+      fireEvent.click(await boton("Reintentar"));
+      expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
     });
 
-    it("si está, sin seguir el 302 en el pedido, navega a la descarga", async () => {
-      const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-      const redireccion = Object.defineProperty(new Response(null), "type", { value: "opaqueredirect" });
-      const api = abrirFicha(CONCILIAR, { [`GET ${DESCARGA}`]: () => redireccion });
-      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
-      await waitFor(() => expect(clic).toHaveBeenCalled());
-      expect(pedidos(api, "GET", DESCARGA)[0]?.redirect).toBe("manual");
+    it("sin comprobante en la ficha no lo pide", async () => {
+      const api = abrirFicha({ ...CONCILIAR, comprobante_actual: null });
+      await boton("Conforme");
+      expect(pedidos(api, "GET", CONTENIDO)).toHaveLength(0);
     });
 
-    it("una respuesta 200 que no es la redirección no se toma por un éxito", async () => {
-      const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
-      abrirFicha(CONCILIAR, { [`GET ${DESCARGA}`]: () => Response.json({}) });
-      fireEvent.click(await screen.findByRole("link", { name: "Ver el comprobante" }));
-      await screen.findByRole("alert");
-      expect(clic).not.toHaveBeenCalled();
+    it("abrir un PDF no evalúa código y el trabajador sale del mismo origen", async () => {
+      const { abrirPdf } = await vi.importActual<typeof import("./pdf")>("./pdf");
+      const getDocument = vi.fn(() => "tarea");
+      const GlobalWorkerOptions = { workerSrc: "" };
+      const cargar = () => Promise.resolve({ getDocument, GlobalWorkerOptions }) as never;
+      const datos = new Uint8Array([1]);
+      expect(await abrirPdf(datos, cargar)).toBe("tarea");
+      expect(getDocument).toHaveBeenCalledWith({ data: datos, isEvalSupported: false });
+      expect(GlobalWorkerOptions.workerSrc).toMatch(/^\/.*pdf\.worker/);
     });
+
+    it("un PDF se dibuja en un canvas, sin volverse una página", async () => {
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as never);
+      pdf.abrirPdf.mockImplementation(() => Promise.resolve({
+        promise: Promise.resolve({ numPages: 1, getPage: () => Promise.resolve(PAGINA) }),
+        destroy: () => undefined,
+      }));
+      abrirFicha(CONCILIAR, {
+        [`GET ${CONTENIDO}`]: () => new Response(new Blob(["%PDF-1.4 SINTETICO"], { type: "application/pdf" }), { headers: { "Content-Type": "application/pdf" } }),
+      });
+      const lienzo = await screen.findByRole("img", { name: "Comprobante de la transferencia, página 1" });
+      expect(lienzo.tagName).toBe("CANVAS");
+      expect(document.querySelector("iframe, embed, object")).toBeNull();
+    });
+
+    it("un PDF que no se puede dibujar lo dice", async () => {
+      pdf.abrirPdf.mockImplementation(() => Promise.resolve({ promise: Promise.reject(new Error("roto")), destroy: () => undefined }));
+      abrirFicha(CONCILIAR, {
+        [`GET ${CONTENIDO}`]: () => new Response(new Blob(["%PDF roto"], { type: "application/pdf" }), { headers: { "Content-Type": "application/pdf" } }),
+      });
+      expect((await screen.findByRole("alert")).textContent).toContain("No pudimos mostrar este PDF");
+    });
+  });
+});
+
+describe("consultar pagos: el comprobante en pantalla", () => {
+  it("una orden cerrada muestra su comprobante, de solo lectura", async () => {
+    abrirFicha(ficha({
+      orden: orden({ estado: "pagada" }), situacion: "pagada", ejecucion: ejecucion([pago({ conciliacion: "conforme" })]),
+      comprobante_actual: EL_COMPROBANTE,
+    }));
+    expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
+    expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
+    sinBoton("Conforme");
+  });
+
+  it("control: quien no puede abrirlo no recibe el comprobante y no se pide", async () => {
+    const api = abrirFicha(ficha({ orden: orden({ estado: "pagada" }), situacion: "pagada", ejecucion: ejecucion([pago({ conciliacion: "conforme" })]) }));
+    await screen.findByText("0001234567");
+    expect(pedidos(api, "GET", CONTENIDO)).toHaveLength(0);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 
