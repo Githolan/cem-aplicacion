@@ -175,6 +175,20 @@ describe("página /cuenta", () => {
     expect((await screen.findByRole("link", { name: "Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
   });
 
+  it("la versión va al pie, y sin saberla no se muestra nada", async () => {
+    const salud = { estado: "ok", version: "1.2.3", version_contrato: "0.50.0", sha_imagen: "0849ee9abcdef" };
+    vi.stubGlobal("fetch", conSesion({ "GET /health": () => Response.json(salud) }));
+    abrir();
+    expect(await screen.findByText("0849ee9")).toBeTruthy();
+    expect(screen.getByText(/Versión 1\.2\.3 · Contrato 0\.50\.0/)).toBeTruthy();
+    cleanup();
+
+    vi.stubGlobal("fetch", conSesion({ "GET /health": () => error("servicio_no_disponible", 503) }));
+    abrir();
+    await screen.findByText("Ana Pérez");
+    expect(screen.queryByText(/Versión/)).toBeNull();
+  });
+
   it("sin sesión (401) manda a /entrar", async () => {
     const simulado = backend({
       "GET /api/v1/auth/sesion": () => error("no_autenticado", 401),
@@ -367,7 +381,7 @@ describe("página /cuenta", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("sin red"))));
     abrir();
 
-    expect(await screen.findByText(/No pudimos consultar tu cuenta/)).toBeTruthy();
+    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
   });
 
   it("sin nada de la cuenta, un solo aviso; Reintentar la vuelve a leer entera", async () => {
@@ -385,7 +399,7 @@ describe("página /cuenta", () => {
     fireEvent.click(boton);
 
     expect(await screen.findByText("Ana Pérez")).toBeTruthy();
-    expect(screen.queryByText(/No pudimos consultar tu cuenta/)).toBeNull();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
@@ -407,7 +421,7 @@ describe("página /cuenta", () => {
     const region = within(screen.getByRole("region", { name: parte }));
     expect(region.getByRole("alert").textContent).toBe(SERVICIO_NO_DISPONIBLE);
     expect(screen.queryByText(recupera)).toBeNull();
-    expect(screen.queryByText(/No pudimos consultar tu cuenta/)).toBeNull();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
     // Salir tiene que seguir a mano aunque falte una parte.
     expect(screen.getByRole("button", { name: "Salir" })).toBeTruthy();
     const pedidosAntes = simulado.mock.calls.length;
@@ -473,7 +487,7 @@ describe("página /cuenta", () => {
         : conSesion({ [`POST /api/v1/auth/sesiones/${OTRA}/revocar`]: sinCuerpo(204) }),
     );
     const { container } = abrir();
-    if (estado === "sin_servicio") await screen.findByText(/No pudimos consultar tu cuenta/);
+    if (estado === "sin_servicio") await screen.findByText(/El servicio no está disponible/);
     else await screen.findByText("Ana Pérez");
     if (estado === "aviso") {
       fireEvent.click(await botonCerrar("Chrome en Android"));
@@ -548,7 +562,7 @@ describe("contraseña en /cuenta", () => {
     expect(document.activeElement).toBe(seccion().getByRole("button", { name: "Cambiar la contraseña" }));
   });
 
-  it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) da la salida a volver a entrar", async () => {
+  it("la primera contraseña con una sesión vieja (403 reautenticacion_requerida) no pisa lo escrito: lo pide la hoja", async () => {
     const simulado = conSesion({ "PUT /api/v1/auth/contrasena": () => error("reautenticacion_requerida", 403) });
     vi.stubGlobal("fetch", simulado);
     abrir();
@@ -556,19 +570,11 @@ describe("contraseña en /cuenta", () => {
     desplegar();
     completar(NUEVA);
 
-    expect(await seccion().findByText(ENTRAR_DE_NUEVO)).toBeTruthy();
+    await waitFor(() => expect(seccion().getByRole("button", { name: /^Guardar la contraseña/ })).toHaveProperty("disabled", false));
+    expect(seccion().queryByText(ENTRAR_DE_NUEVO)).toBeNull();
     expect(seccion().queryByText(/Revisá la conexión/)).toBeNull();
     expect(seccion().queryByText(/Listo:/)).toBeNull();
-
-    fireEvent.click(seccion().getByRole("link", { name: "Volver a entrar" }));
-
-    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    // Solo la usa para dejar el correo escrito; al terminar vuelve a esta pantalla.
-    const pedir = within(screen.getByRole("region", { name: "Pedir el enlace para entrar" }));
-    await waitFor(() => expect((pedir.getByLabelText("Correo") as HTMLInputElement).value).toBe(YO.correo));
-    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
-    expect(localStorage.getItem("cem.entrar.origen")).toContain("/cuenta");
+    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
   });
 
   it("control: otro rechazo no ofrece volver a entrar", async () => {
@@ -672,7 +678,6 @@ describe("contraseña en /cuenta", () => {
     completar(NUEVA);
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
     expect(await screen.findByText("Listo: cambiaste tu contraseña. Te avisamos por correo.")).toBeTruthy();
     const puts = pedidosDe(simulado).filter((p) => p.method === "PUT");
@@ -696,13 +701,12 @@ describe("contraseña en /cuenta", () => {
     completar(NUEVA);
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
     expect(await screen.findByRole("alert")).toBeTruthy();
     expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
-    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe(NUEVA);
+    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
     expect((seccion().getByLabelText("Repetí la contraseña") as HTMLInputElement).value).toBe(NUEVA);
     expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
   });
@@ -731,7 +735,7 @@ describe("contraseña en /cuenta", () => {
     expect(await seccion().findByText(mensaje)).toBeTruthy();
     expect(seccion().queryByText(/Listo:/)).toBeNull();
     // Los campos quedan como estaban, para corregir sin volver a escribir todo.
-    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe(NUEVA);
+    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
   });
 
   it("Cancelar pliega el formulario, borra lo escrito y devuelve el foco al botón", async () => {
@@ -748,7 +752,7 @@ describe("contraseña en /cuenta", () => {
     const cambiar = seccion().getByRole("button", { name: "Cambiar la contraseña" });
     expect(document.activeElement).toBe(cambiar);
     desplegar();
-    expect((seccion().getByLabelText("Contraseña nueva") as HTMLInputElement).value).toBe("");
+    expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe("");
     expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
@@ -800,8 +804,8 @@ describe("contraseña en /cuenta", () => {
     if (paso === "corta") completar("corta");
     else if (paso !== null) {
       completar(NUEVA, NUEVA, contrasena.definida && !totp.activo ? ANTERIOR : undefined);
-      if (paso === "falta_verificacion") await screen.findByRole("button", { name: "Verificar y seguir" });
-      else await seccion().findByText(paso === "ok" ? /Listo:/ : /Por seguridad|actual no es correcta/);
+      if (paso === "falta_verificacion") await screen.findByRole("dialog");
+      else if (paso !== "entrar_de_nuevo") await seccion().findByText(paso === "ok" ? /Listo:/ : /actual no es correcta/);
     }
 
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -845,7 +849,7 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     const estado = estadoDePantalla();
     expect(estado.textContent).toBe("Consultando…");
     // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
-    await waitFor(() => expect(retenido).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(retenido).toHaveBeenCalledTimes(5)); // las cuatro y la versión
     expect(screen.queryByText("Ana Pérez")).toBeNull();
     soltar();
 

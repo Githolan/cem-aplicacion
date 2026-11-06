@@ -109,7 +109,6 @@ async function subir(nombre = "extracto.csv", contenido = CSV) {
 
 async function verificarCodigo() {
   fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
-  fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 }
 
 beforeEach(() => {

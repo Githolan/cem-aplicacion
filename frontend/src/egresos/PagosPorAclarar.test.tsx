@@ -165,7 +165,6 @@ describe("pagos para aclarar (app 0067)", () => {
     fireEvent.change(screen.getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié antes de pagar" } });
     fireEvent.click(boton);
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
     expect(await screen.findByText(/Ahora lo confirma otro miembro del Consejo/)).toBeTruthy();
     expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
     const [uno, dos] = pedidos(api, "POST", DECLARAR);

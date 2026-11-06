@@ -8,6 +8,7 @@ los dos consejeros de la escena la reciben con su alta. Sin configuración hace 
 aprobación; las pruebas que necesitan dos las cargan como soporte (`exigir`).
 """
 
+import random
 import threading
 from dataclasses import dataclass
 from uuid import UUID
@@ -84,15 +85,28 @@ def cbu_sintetico(semilla: int) -> str:
     return f"{b1}{d1}{b2}{d2}"
 
 
+def cuit_sintetico() -> str:
+    """Un CUIT con su dígito verificador, al azar: es único en el consorcio."""
+    while True:
+        base = f"30{random.randrange(10**8):08d}"
+        resto = (
+            11
+            - sum(int(x) * w for x, w in zip(base, (5, 4, 3, 2, 7, 6, 5, 4, 3, 2), strict=True))
+            % 11
+        )
+        if resto != 10:
+            return base + str(0 if resto == 11 else resto)
+
+
 def nuevo_proveedor(motor_migrate, cons, quien, *, cuenta=None, razon=RAZON_SOCIAL,
                     estado="activo") -> UUID:  # fmt: skip
     """Un proveedor con su versión 1, cargado como dueño de la base (las funciones de alta se
     prueban en `test_proveedor_0048.py`)."""
     with motor_migrate.begin() as c:
         p = c.execute(
-            text("insert into nucleo.proveedor (consorcio_id, alta_por, identidad_alta)"
-                 " values (:c, :q, nucleo.identidad_humana_de(:c, :q)) returning id"),
-            {"c": cons, "q": quien},
+            text("insert into nucleo.proveedor (consorcio_id, cuit, alta_por, identidad_alta)"
+                 " values (:c, :cuit, :q, nucleo.identidad_humana_de(:c, :q)) returning id"),
+            {"c": cons, "q": quien, "cuit": cuit_sintetico()},
         ).scalar_one()  # fmt: skip
         c.execute(
             text("insert into nucleo.proveedor_version (consorcio_id, proveedor_id, numero,"

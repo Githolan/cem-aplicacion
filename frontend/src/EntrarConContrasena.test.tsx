@@ -194,7 +194,7 @@ describe("entrar con contraseña", () => {
   it.each([
     [error("credenciales_invalidas", 401), /El correo o la contraseña no son correctos/],
     [error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
-    [error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+    [error("servicio_no_disponible", 503), /El servicio no está disponible/],
     [error("csrf_invalido", 403), /No pudimos completar el pedido/],
   ])("ante un rechazo de la contraseña muestra un mensaje genérico (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", backend({ [ENTRAR]: [() => respuesta] }));
@@ -238,7 +238,7 @@ describe("entrar con contraseña", () => {
   it.each([
     [error("segundo_factor_invalido", 400), /El código no sirve/],
     [error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
-    [error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+    [error("servicio_no_disponible", 503), /El servicio no está disponible/],
   ])("ante un código rechazado se queda en el código y lo explica (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal(
       "fetch",

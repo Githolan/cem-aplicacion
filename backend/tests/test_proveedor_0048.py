@@ -22,6 +22,7 @@ from tests.test_orden_pago_neutra import (  # noqa: F401  (`e` es un fixture)
     RECHAZAR,
     _aprobada,
     cbu_sintetico,
+    cuit_sintetico,
     e,
     escena_economica,
     eventos,
@@ -163,7 +164,7 @@ def test_el_alta_se_niega_sin_lo_que_exige(motor_migrate, e, cambio, motivo):  #
 def test_el_cuit_no_se_repite_en_el_consorcio(motor_migrate, e):  # noqa: F811
     alta(motor_migrate, e)
     niega(motor_migrate, e, e.adm, ALTA, "cuit_repetido", **DATOS)
-    assert alta(motor_migrate, e, cuit=None) is not None  # control: sin CUIT no choca
+    assert alta(motor_migrate, e, cuit=cuit_sintetico()) is not None  # control: otro CUIT pasa
 
 
 def test_solo_quien_prepara_da_de_alta(motor_migrate, motor_app):

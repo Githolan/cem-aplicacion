@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, Fragment, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 
 import { api } from "../api/cliente";
@@ -45,8 +45,32 @@ type Lectura =
   | { tipo: "sin_servicio" }
   | { tipo: "ok"; proveedores: Proveedor[] };
 
-type Datos = { cuit: string; razon: string; rubro: string; contacto: string; cuenta: string; estado: EstadoProveedor };
-const VACIO: Datos = { cuit: "", razon: "", rubro: "", contacto: "", cuenta: "", estado: "activo" };
+type Datos = {
+  cuit: string;
+  razon: string;
+  rubro: string;
+  contacto: string;
+  telefono: string;
+  whatsapp: string;
+  correo: string;
+  domicilio: string;
+  emergencias: boolean;
+  cuenta: string;
+  estado: EstadoProveedor;
+};
+const VACIO: Datos = {
+  cuit: "",
+  razon: "",
+  rubro: "",
+  contacto: "",
+  telefono: "",
+  whatsapp: "",
+  correo: "",
+  domicilio: "",
+  emergencias: false,
+  cuenta: "",
+  estado: "activo",
+};
 
 type Cambio = { modo: "cambio"; proveedor: Proveedor };
 type Formulario = { modo: "alta" } | Cambio;
@@ -61,6 +85,11 @@ const datosDe = (p: Proveedor): Datos => ({
   razon: p.razon_social,
   rubro: p.rubro ?? "",
   contacto: p.contacto ?? "",
+  telefono: p.telefono ?? "",
+  whatsapp: p.whatsapp ?? "",
+  correo: p.correo ?? "",
+  domicilio: p.domicilio ?? "",
+  emergencias: p.atiende_emergencias,
   cuenta: "",
   estado: p.estado,
 });
@@ -90,6 +119,26 @@ export function Proveedores() {
   const elegido = useConsorcio(REQUISITOS.proveedores);
   const vuelveAPreparar = useRef(vieneAPreparar(useLocation().state));
   return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} />;
+}
+
+/** Lo que se sabe para ubicarlo: solo lo que está cargado. */
+function DatosDeContacto({ proveedor: p }: { proveedor: Proveedor }) {
+  const filas: readonly (readonly [string, string | null])[] = [
+    ["Contacto", p.contacto],
+    ["Teléfono", p.telefono],
+    ["WhatsApp", p.whatsapp],
+    ["Correo", p.correo],
+    ["Domicilio", p.domicilio],
+    ["Emergencias", p.atiende_emergencias ? "Atiende emergencias" : null],
+  ];
+  return filas
+    .filter(([, valor]) => valor !== null)
+    .map(([nombre, valor]) => (
+      <Fragment key={nombre}>
+        <dt>{nombre}</dt>
+        <dd>{valor}</dd>
+      </Fragment>
+    ));
 }
 
 function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar }: PropsDelEdificio) {
@@ -228,6 +277,11 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       razon_social: datos.razon.trim(),
       rubro: opcional(datos.rubro),
       contacto: opcional(datos.contacto),
+      telefono: opcional(datos.telefono),
+      whatsapp: opcional(datos.whatsapp),
+      correo: opcional(datos.correo),
+      domicilio: opcional(datos.domicilio),
+      atiende_emergencias: datos.emergencias,
       cuenta_destino: conservaCuenta(f, datos) ? null : opcional(datos.cuenta),
     };
     setEnviando(true);
@@ -237,7 +291,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         ? api.POST("/api/v1/consorcios/{consorcio_id}/proveedores", {
             headers: encabezadoCsrf(),
             params: { path: { consorcio_id: consorcio }, header: encabezado },
-            body: { ...comunes, cuit: opcional(datos.cuit) },
+            body: { ...comunes, cuit: datos.cuit.trim() },
           })
         : api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/versiones", {
             headers: encabezadoCsrf(),
@@ -317,7 +371,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         />
       )}
 
-      {pantalla.tipo === "lista" && pendiente === null && (
+      {pantalla.tipo === "lista" && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando los proveedores…</p>}
           {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
@@ -359,6 +413,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <dd>{ficha.proveedor.cuit ?? "Sin CUIT"}</dd>
                 <dt>Rubro</dt>
                 <dd>{ficha.proveedor.rubro ?? "Sin rubro"}</dd>
+                <DatosDeContacto proveedor={ficha.proveedor} />
                 <dt>Estado</dt>
                 <dd>{TEXTO_ESTADO_PROVEEDOR[ficha.proveedor.estado]}</dd>
                 <dt>Cuenta</dt>
@@ -399,8 +454,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               </h2>
               {formulario.modo === "alta" && (
                 <>
-                  <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones; opcional)</label>
-                  <input id={`${id}-cuit`} inputMode="numeric" pattern={CUIT} value={datos.cuit} disabled={enviando}
+                  <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
+                  <input id={`${id}-cuit`} inputMode="numeric" required pattern={CUIT} value={datos.cuit} disabled={enviando}
                     onChange={(e) => cambiar("cuit", e.target.value)} />
                 </>
               )}
@@ -413,6 +468,23 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               <label htmlFor={`${id}-contacto`}>Contacto (opcional)</label>
               <input id={`${id}-contacto`} maxLength={200} value={datos.contacto} disabled={enviando}
                 onChange={(e) => cambiar("contacto", e.target.value)} />
+              <label htmlFor={`${id}-telefono`}>Teléfono (opcional)</label>
+              <input id={`${id}-telefono`} type="tel" autoComplete="off" maxLength={50} value={datos.telefono} disabled={enviando}
+                onChange={(e) => cambiar("telefono", e.target.value)} />
+              <label htmlFor={`${id}-whatsapp`}>WhatsApp (opcional)</label>
+              <input id={`${id}-whatsapp`} type="tel" autoComplete="off" maxLength={50} value={datos.whatsapp} disabled={enviando}
+                onChange={(e) => cambiar("whatsapp", e.target.value)} />
+              <label htmlFor={`${id}-correo`}>Correo (opcional)</label>
+              <input id={`${id}-correo`} type="email" autoComplete="off" maxLength={254} value={datos.correo} disabled={enviando}
+                onChange={(e) => cambiar("correo", e.target.value)} />
+              <label htmlFor={`${id}-domicilio`}>Domicilio (opcional)</label>
+              <input id={`${id}-domicilio`} autoComplete="off" maxLength={200} value={datos.domicilio} disabled={enviando}
+                onChange={(e) => cambiar("domicilio", e.target.value)} />
+              <label className="opcion">
+                <input type="checkbox" checked={datos.emergencias} disabled={enviando}
+                  onChange={(e) => cambiar("emergencias", e.target.checked)} />
+                Atiende emergencias
+              </label>
               <label htmlFor={`${id}-cuenta`}>
                 {formulario.modo === "alta"
                   ? "Cuenta destino: CBU o CVU de 22 números (opcional)"

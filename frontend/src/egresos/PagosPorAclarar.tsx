@@ -1,10 +1,9 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { RUTA_ENTRAR } from "../enlace";
+import { useAEntrar } from "../sesionEncima";
 import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { CampoImporte } from "./CampoImporte";
@@ -58,8 +57,7 @@ function textoDelComprobante(p: PorAclarar): string {
 
 export function PagosPorAclarar() {
   const id = useId();
-  const navegar = useNavigate();
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  const aEntrar = useAEntrar();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [motivos, setMotivos] = useState<Record<string, string>>({});

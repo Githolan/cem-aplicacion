@@ -8,6 +8,7 @@ import { AvisoVersion } from "./AvisoVersion";
 import { escucharInstalacion } from "./instalacion";
 import { aplicarLecturaAmpliada, preferenciaInicial } from "./lecturaAmpliada";
 import { ProveedorVersion } from "./ProveedorVersion";
+import { activarEntrarEncima } from "./sesionEncima";
 import "./estilos.css";
 import "./lecturaAmpliada.css";
 
@@ -15,6 +16,8 @@ import "./lecturaAmpliada.css";
 aplicarLecturaAmpliada(preferenciaInicial());
 
 escucharInstalacion();
+
+activarEntrarEncima();
 
 const consultas = new QueryClient({ defaultOptions: { queries: { retry: 1 } } });
 

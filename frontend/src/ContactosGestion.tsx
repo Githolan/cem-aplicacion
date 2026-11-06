@@ -5,7 +5,8 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { RUTA_INICIO } from "./enlace";
+import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido } from "./permisos";
 
@@ -225,10 +226,7 @@ export function ContactosGestion() {
   }, [enviando]);
 
   // Sin sesión no queda ninguna copia de /contactos, igual que allá y en /cuenta.
-  const aEntrar = useCallback(() => {
-    borrarCopias();
-    navegar(RUTA_ENTRAR, { replace: true });
-  }, [navegar]);
+  const aEntrar = useAEntrar(borrarCopias);
 
   const consultarEdificios = useCallback(() => {
     void api

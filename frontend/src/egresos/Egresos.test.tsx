@@ -22,6 +22,7 @@ import {
   soltarClaveSiCambio,
   vencida,
   VOLVIO_LA_RED,
+  TEXTO_SESION_VENCIDA,
 } from "./comun";
 import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO } from "./Proveedores";
 
@@ -50,6 +51,11 @@ function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
     razon_social: "Limpieza Ficticia SRL",
     rubro: "limpieza",
     contacto: null,
+    telefono: null,
+    whatsapp: null,
+    correo: null,
+    domicilio: null,
+    atiende_emergencias: false,
     cuenta_ultimos_digitos: CUENTA.slice(-4),
     documento_id: null,
     estado: "activo",
@@ -160,7 +166,6 @@ const volvioLaRed = () => fireEvent(window, new Event("online"));
 /** Verifica el código TOTP en el formulario que aparece ante `segundo_factor_requerido`. */
 async function verificarCodigo() {
   fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
-  fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 }
 
 const VERIFICADO = () =>
@@ -422,6 +427,7 @@ describe("página /egresos/proveedores", () => {
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
     fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await verificarCodigo();
@@ -655,28 +661,15 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 
-  it("la sesión de más de 12 horas lleva a entrar con el correo escrito y recuerda de qué pantalla salió", async () => {
-    let codigo = "sesion_reciente_requerida";
+  it("la sesión de más de 12 horas no lleva a otra pantalla ni deja un aviso viejo: la pide la hoja", async () => {
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
-      "GET /api/v1/auth/sesion": () => Response.json({ persona_id: PERSONA, correo: "vecina@ejemplo.com" }),
-      [`GET ${BASE}/proveedores`]: () => error(codigo, 403),
+      [`GET ${BASE}/proveedores`]: () => error("sesion_reciente_requerida", 403),
     });
     vi.stubGlobal("fetch", api);
     abrir("/egresos/proveedores");
-    const enlace = await screen.findByRole("link", { name: "Volver a entrar" });
-    expect(enlace.getAttribute("href")).toBe("/entrar");
-    fireEvent.click(enlace);
-    // Con `renovar`, /entrar no la manda de vuelta adentro; con `volver`, deja el correo y guarda el origen.
-    const pedir = within(await screen.findByRole("region", { name: "Pedir el enlace para entrar" }));
-    await waitFor(() => expect((pedir.getByLabelText("Correo") as HTMLInputElement).value).toBe("vecina@ejemplo.com"));
-    expect(screen.queryByRole("heading", { name: "Proveedores" })).toBeNull();
-    expect(localStorage.getItem("cem.entrar.origen")).toContain("/egresos/proveedores");
-    cleanup();
-
-    codigo = "error_interno";
-    abrir("/egresos/proveedores");
     await screen.findByRole("button", { name: "Reintentar" });
-    expect(screen.queryByRole("link", { name: "Volver a entrar" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Proveedores" })).toBeTruthy();
+    expect(screen.queryByText(TEXTO_SESION_VENCIDA)).toBeNull();
   });
 });

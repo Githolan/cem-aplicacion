@@ -284,7 +284,8 @@ describe("página /mandatos", () => {
     await waitFor(() => expect(document.activeElement).toBe(titulo));
     const detalle = titulo.closest("section") as HTMLElement;
     expect(within(detalle).getByText("RPA 1234")).toBeTruthy();
-    expect(within(detalle).getByText("documentos.cargar")).toBeTruthy();
+    expect(within(detalle).getByText("Cargar documentos")).toBeTruthy();
+    expect(within(detalle).queryByText("documentos.cargar")).toBeNull();
     expect(within(detalle).getByText("Asamblea del 10 de enero de 2026: Designa al Consejo")).toBeTruthy();
   });
 
@@ -1366,7 +1367,7 @@ describe("página /mandatos", () => {
       expect(rutas[ruta]?.post?.parameters?.find((p) => p.name === "Idempotency-Key")?.required, ruta).toBe(true);
     }
     expect(rutas["/api/v1/consorcios/{consorcio_id}/mandatos/candidatos"]?.get).toBeTruthy();
-    expect(mensajeDeError(500, undefined, "alta")).toMatch(/No pudimos completar/);
+    expect(mensajeDeError(500, undefined, "alta")).toMatch(/El servicio no está disponible/);
     expect(mensajeDeError(403, "csrf_invalido", "baja")).toMatch(/Recargá la página/);
     expect(mensajeDeError(422, "codigo_desconocido", "decision")).toBe("Revisá los datos del formulario.");
   });

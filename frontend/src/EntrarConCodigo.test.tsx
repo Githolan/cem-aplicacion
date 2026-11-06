@@ -154,7 +154,7 @@ describe("entrar con el código del correo", () => {
   it.each([
     [error("codigo_invalido", 401), /No pudimos hacerte entrar con ese código/],
     [error("demasiadas_peticiones", 429), /demasiados intentos con este correo/],
-    [error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+    [error("servicio_no_disponible", 503), /El servicio no está disponible/],
   ])("ante un rechazo muestra un mensaje genérico (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", backend({ codigo: () => respuesta }));
 

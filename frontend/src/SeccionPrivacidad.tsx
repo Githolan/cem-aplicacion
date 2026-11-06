@@ -6,7 +6,6 @@ import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { EnlaceVolverAEntrar } from "./VolverAEntrar";
 
 // Sección "Tus pedidos sobre tus datos" de /cuenta (RF37, corte 2d-2). Decisión del propietario
 // del 28-10-2026: la confirmación de un caso y la copia de los datos propios van solo dentro de
@@ -321,12 +320,6 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
         {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
         {aviso?.tipo === "falta" && aviso.falta === "contrasena" && (
           <p className="aviso-error">Escribí tu contraseña actual.</p>
-        )}
-        {aviso?.tipo === "falta" && aviso.falta === "entrar_de_nuevo" && (
-          <p className="aviso-error">
-            Por seguridad, <EnlaceVolverAEntrar>volvé a entrar con el enlace del correo</EnlaceVolverAEntrar> y hacelo
-            dentro de los 10 minutos.
-          </p>
         )}
       </div>
     </section>

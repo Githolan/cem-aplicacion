@@ -103,6 +103,14 @@ Cuenta = Annotated[
 RazonSocial = _texto(1, 200)
 Rubro = _texto(1, 100)
 Contacto = _texto(1, 200)
+Telefono = _texto(1, 50)
+Domicilio = _texto(1, 200)
+CorreoProveedor = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+$"
+    ),
+]
 Concepto = _texto(1, 300)
 Comprobante = _texto(1, 200)
 Motivo = _texto(1, 500)
@@ -178,6 +186,11 @@ class DatosProveedor(BaseModel):
     razon_social: RazonSocial
     rubro: Rubro | None = None
     contacto: Contacto | None = None
+    telefono: Telefono | None = None
+    whatsapp: Telefono | None = None
+    correo: CorreoProveedor | None = None
+    domicilio: Domicilio | None = None
+    atiende_emergencias: bool = False
     documento_id: UUID | None = Field(
         default=None, description="Un documento vigente del consorcio que respalda los datos."
     )
@@ -187,9 +200,7 @@ class DatosProveedor(BaseModel):
 class ProveedorNuevo(DatosProveedor):
     """`POST …/proveedores`. Queda `activo` en su versión 1."""
 
-    cuit: str | None = Field(
-        default=None, pattern=FORMATO_CUIT, description="Si se carga, es único en el consorcio."
-    )
+    cuit: str = Field(pattern=FORMATO_CUIT, description="Obligatorio y único en el consorcio.")
 
 
 class ProveedorVersionNueva(DatosProveedor):
@@ -231,6 +242,11 @@ class Proveedor(BaseModel):
     razon_social: str
     rubro: str | None
     contacto: str | None
+    telefono: str | None
+    whatsapp: str | None
+    correo: str | None
+    domicilio: str | None
+    atiende_emergencias: bool
     estado: EstadoProveedor
     documento_id: UUID | None
     cuenta_ultimos_digitos: str | None = Field(
@@ -256,6 +272,11 @@ class VersionProveedor(BaseModel):
     razon_social: str
     rubro: str | None
     contacto: str | None
+    telefono: str | None
+    whatsapp: str | None
+    correo: str | None
+    domicilio: str | None
+    atiende_emergencias: bool
     estado: EstadoProveedor
     documento_id: UUID | None
     cuenta_ultimos_digitos: str | None = Field(

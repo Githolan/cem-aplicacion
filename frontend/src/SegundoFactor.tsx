@@ -8,10 +8,9 @@ import { borrarCopias } from "./copiaContactos";
 import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
-import { RUTA_ENTRAR } from "./enlace";
-import { ENTRAR_DE_NUEVO, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { CODIGO_ENTRAR_DE_NUEVO, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { SeccionLlave } from "./SeccionLlave";
-import { AvisoEntrarDeNuevo } from "./VolverAEntrar";
+import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
@@ -100,6 +99,8 @@ function codigoDe(error: unknown): string | undefined {
 export function SegundoFactor() {
   const id = useId();
   const navegar = useNavigate();
+  // Toda salida a /entrar borra las copias de los contactos (H2b_7 §5).
+  const aEntrar = useAEntrar(borrarCopias);
   const lugar = useLocation();
   // El estado del historial puede cambiar mientras se está en la página: vale el de la llegada.
   const [volver] = useState(() => volverDe(lugar.state));
@@ -146,11 +147,9 @@ export function SegundoFactor() {
   // Las dos salidas de la página pasan por `pasarA`: con códigos a la vista, ninguna ocurre.
   useEffect(() => {
     if (pantalla.tipo === "sin_sesion") {
-      // Toda salida a /entrar borra las copias de los contactos (H2b_7 §5).
-      borrarCopias();
-      navegar(RUTA_ENTRAR, { replace: true });
+      aEntrar();
     } else if (pantalla.tipo === "terminado") navegar(volver ?? RUTA_CUENTA, { state: { aviso: pantalla.aviso } });
-  }, [pantalla, volver, navegar]);
+  }, [pantalla, volver, navegar, aEntrar]);
 
   /** El aviso para un código rechazado al confirmar. */
   function avisoDeRechazo(status: number, cuerpo: unknown): Aviso {
@@ -164,10 +163,20 @@ export function SegundoFactor() {
     return fallo(mensajeDeFalla(status, codigoDe(cuerpo)));
   }
 
+  /** Con la hoja de entrar encima, la pantalla sigue como está. */
+  function sinSesion() {
+    if (!pidiendoEntrar()) pasarA({ tipo: "sin_sesion" });
+  }
+
+  /** Una falla que no es del código. Pedir una entrada reciente no se dice: lo pide la hoja encima. */
+  function avisarFalla(status: number, cuerpo: unknown) {
+    if (codigoDe(cuerpo) !== CODIGO_ENTRAR_DE_NUEVO) setAviso(fallo(mensajeDeFalla(status, codigoDe(cuerpo))));
+  }
+
   /** E53: con la sesión vencida, ofrecer entrar de nuevo en cualquier acción, como `empezarAlta`. */
   function rechazar(status: number, cuerpo: unknown) {
-    if (status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
-    else setAviso(avisoDeRechazo(status, cuerpo));
+    if (status !== ESTADO_SIN_SESION) setAviso(avisoDeRechazo(status, cuerpo));
+    else sinSesion();
   }
 
   function empezarAlta() {
@@ -183,8 +192,8 @@ export function SegundoFactor() {
         // Quien ya tiene una llave suma la aplicación confirmando con ella.
         else if (codigoDe(error) === CODIGO_REQUERIDO)
           setPendiente({ acto: "agregar la aplicación", reintentar: empezarAlta });
-        else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
-        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
+        else if (response.status === ESTADO_SIN_SESION) sinSesion();
+        else avisarFalla(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -223,8 +232,8 @@ export function SegundoFactor() {
         if (error === undefined && response.ok) terminar("Listo: el segundo factor quedó desactivado.");
         else if (codigoDe(error) === CODIGO_REQUERIDO)
           setPendiente({ acto: "desactivar el segundo factor", reintentar: desactivar });
-        else if (response.status === ESTADO_SIN_SESION) pasarA({ tipo: "sin_sesion" });
-        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
+        else if (response.status === ESTADO_SIN_SESION) sinSesion();
+        else avisarFalla(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -375,8 +384,7 @@ export function SegundoFactor() {
             </button>
           </>
         )}
-        {aviso?.texto === ENTRAR_DE_NUEVO && <AvisoEntrarDeNuevo />}
-        {aviso && aviso.texto !== ENTRAR_DE_NUEVO && (
+        {aviso && (
           <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>
         )}
       </div>

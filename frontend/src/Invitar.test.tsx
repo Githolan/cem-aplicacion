@@ -323,7 +323,7 @@ describe("página /invitaciones", () => {
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 
-  it("E34: sin respuesta, o con un 502 sin cuerpo de la aplicación, sí se habla de la conexión", async () => {
+  it("E34: sin respuesta se habla de la conexión; con un 502 sin cuerpo de la aplicación, del servicio", async () => {
     let caida = true;
     const simulado = conConsorcio({
       [`POST ${RUTA_LISTA}`]: () => {
@@ -340,8 +340,8 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect(invitarBoton()).not.toHaveProperty("disabled", true));
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
-    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
-    expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 
   it("un 5xx del proxy conserva la clave: el reintento recibe lo que el backend guardó", async () => {
@@ -801,7 +801,7 @@ describe("página /invitaciones", () => {
     const crear = rutas["/api/v1/consorcios/{consorcio_id}/invitaciones"]?.post;
     expect(crear?.parameters?.find((p) => p.name === "Idempotency-Key")?.required).toBe(true);
     expect(rutas["/api/v1/consorcios/{consorcio_id}/invitaciones/{invitacion_id}/revocar"]?.post).toBeTruthy();
-    expect(mensajeAlInvitar(500, undefined)).toMatch(/No pudimos completar/);
+    expect(mensajeAlInvitar(500, undefined)).toMatch(/El servicio no está disponible/);
   });
 });
 

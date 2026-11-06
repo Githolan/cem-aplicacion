@@ -186,3 +186,8 @@
   background: var(--fondo);
   color: var(--texto);
 }
+
+/* El pie gris no llega al contraste sobre el negro del modo oscuro. */
+.lectura-ampliada .pie-version {
+  color: var(--texto);
+}

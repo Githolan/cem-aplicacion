@@ -9,7 +9,6 @@ import { App } from "./App";
 import { VIGENCIA_ENLACE_MS, tokenDelFragmento } from "./enlace";
 import { guardarToken } from "./Entrar";
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION_ENLACE } from "./fallas";
-import { recordarOrigen } from "./sesion";
 import { ContextoVersion } from "./version";
 
 const CLAVE_GUARDADO = "cem.entrar.enlace";
@@ -49,8 +48,6 @@ const CONTRASENA = { name: "Entrar con contraseña" };
 const RECHAZADO = /No pudimos hacerte entrar con este enlace/;
 const REINTENTAR = { name: "Reintentar" };
 // Una pantalla que no pide nada al backend: la de origen de quien vuelve a entrar.
-const ORIGEN = "/instalar";
-const EN_ORIGEN = { level: 1, name: /Instalá Consorcio en Mano/ };
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -470,108 +467,6 @@ describe("después de un enlace rechazado", () => {
   });
 });
 
-describe("volver a entrar (state.renovar con state.volver)", () => {
-  const conSesion: Respuesta = () => Response.json(SESION);
-  const VOLVER = { renovar: true, volver: ORIGEN };
-
-  async function entrarConCodigo() {
-    elegir("Entrar con un código");
-    fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: "042917" } });
-    fireEvent.submit(screen.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
-  }
-
-  it("el correo ya está escrito y no manda al inicio aunque haya sesión", async () => {
-    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
-    abrir("/entrar", VOLVER);
-
-    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
-    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.queryByRole("heading", INICIO)).toBeNull();
-  });
-
-  it("lo que escribió la persona no lo pisa la respuesta de la sesión", async () => {
-    let soltar: () => void = () => undefined;
-    const listo = new Promise<void>((r) => {
-      soltar = r;
-    });
-    vi.stubGlobal(
-      "fetch",
-      backend({
-        sesion: async () => {
-          await listo;
-          return Response.json(SESION);
-        },
-      }),
-    );
-    abrir("/entrar", VOLVER);
-    escribirCorreo(PEDIR, "otra@ejemplo.com");
-
-    soltar();
-    await new Promise((fin) => setTimeout(fin, 0));
-
-    expect(correoDe(PEDIR).value).toBe("otra@ejemplo.com");
-  });
-
-  it("al terminar vuelve a la pantalla de origen, con el aviso", async () => {
-    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
-    abrir("/entrar", VOLVER);
-    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
-
-    await entrarConCodigo();
-
-    expect(await screen.findByRole("heading", EN_ORIGEN)).toBeTruthy();
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
-    expect(screen.queryByRole("heading", INICIO)).toBeNull();
-  });
-
-  it("el enlace del correo, abierto en otra pestaña, también vuelve al origen", async () => {
-    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
-    abrir("/entrar", VOLVER);
-    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
-    // Otra pestaña: no hereda el historial ni el sessionStorage de esta.
-    cleanup();
-    window.sessionStorage.clear();
-
-    vi.stubGlobal("fetch", backend());
-    abrir(`/entrar#token=${TOKEN}`);
-
-    expect(await screen.findByRole("heading", EN_ORIGEN)).toBeTruthy();
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
-  });
-
-  it("el origen se usa una sola vez: la entrada siguiente va al inicio", async () => {
-    recordarOrigen(ORIGEN, Date.now());
-    vi.stubGlobal("fetch", backend());
-    abrir(`/entrar#token=${TOKEN}`);
-    await screen.findByRole("heading", EN_ORIGEN);
-    cleanup();
-
-    vi.stubGlobal("fetch", backend());
-    abrir(`/entrar#token=${TOKEN}`);
-
-    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-  });
-
-  it("un origen vencido no se usa", async () => {
-    recordarOrigen(ORIGEN, Date.now() - VIGENCIA_ENLACE_MS - 1);
-    vi.stubGlobal("fetch", backend());
-    abrir(`/entrar#token=${TOKEN}`);
-
-    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-  });
-
-  it("control: una entrada común termina en el inicio", async () => {
-    vi.stubGlobal("fetch", backend());
-    abrir("/entrar");
-    escribirCorreo(PEDIR, CORREO);
-
-    await entrarConCodigo();
-
-    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByRole("heading", EN_ORIGEN)).toBeNull();
-  });
-});
-
 describe("tokenDelFragmento", () => {
   it("lee token= del fragmento y nada más", () => {
     expect(tokenDelFragmento(`#token=${TOKEN}`)).toBe(TOKEN);
@@ -644,19 +539,6 @@ describe("/entrar decide por la sesión", () => {
     await new Promise((listo) => setTimeout(listo, 0));
     expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
-  });
-
-  it("con state.renovar se queda aunque haya sesión: viene a entrar de nuevo por seguridad", async () => {
-    const pedido = backend({ sesion: conSesion });
-    vi.stubGlobal("fetch", pedido);
-
-    abrir("/entrar", { renovar: true });
-
-    await new Promise((listo) => setTimeout(listo, 0));
-    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.getByRole("region", PEDIR)).toBeTruthy();
-    expect(screen.queryByRole("heading", INICIO)).toBeNull();
-    expect(pedido).not.toHaveBeenCalled();
   });
 
   it("con un token en el fragmento canjea aunque haya sesión: no se lo saltea yendo al inicio", async () => {

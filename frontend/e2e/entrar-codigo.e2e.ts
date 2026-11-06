@@ -34,7 +34,7 @@ test.describe("entrar con el código del correo", () => {
     expect(respuesta?.status()).toBe(503);
     expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("servicio_no_disponible");
 
-    await expect(page.getByText(/No pudimos completar el pedido/)).toBeVisible();
+    await expect(page.getByText(/El servicio no está disponible/)).toBeVisible();
     expect(page.url()).not.toContain(CODIGO);
     await sinFaltasDeAccesibilidad(page);
   });

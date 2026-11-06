@@ -44,7 +44,7 @@ function backend(acciones: Acciones, extra: Record<string, Respuesta> = {}, lect
     const propia = extra[camino];
     if (propia !== undefined) return propia();
     if (camino === "/api/v1/auth/sesion") return Response.json({});
-    if (camino === "/health") return error("servicio_no_disponible", 503);
+    if (camino === "/health") return Response.json({ estado: "ok", version: "1", version_contrato: "1", sha_imagen: "abc1234" });
     if (camino === "/api/v1/pagos-por-aclarar") return Response.json({ elementos: [] });
     if (camino === "/api/v1/me/invitaciones") return Response.json({ elementos: [] });
     if (camino === "/api/v1/me/consorcios") return Response.json(EDIFICIOS.filter((e) => e.id in acciones));
@@ -643,16 +643,17 @@ describe("un 403 al leer lleva al inicio", () => {
   });
 
   it("control: el segundo factor no es falta de permiso, pide el código ahí", async () => {
-    vi.stubGlobal("fetch", backend({ [C1]: ["egresos.preparar_orden"] }, {}, () => error("segundo_factor_requerido", 403)));
+    const totp = { "/api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 0 }) };
+    vi.stubGlobal("fetch", backend({ [C1]: ["egresos.preparar_orden"] }, totp, () => error("segundo_factor_requerido", 403)));
     abrirApp("/egresos/proveedores");
-    expect(await screen.findByLabelText(/código/i)).toBeTruthy();
+    expect(await screen.findByLabelText("Código")).toBeTruthy();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
   });
 
-  it("control: la sesión vieja no es falta de permiso, se dice ahí", async () => {
+  it("control: la sesión vieja no es falta de permiso, sigue en la pantalla", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: ["egresos.preparar_orden"] }, {}, () => error("sesion_reciente_requerida", 403)));
     abrirApp("/egresos/proveedores");
-    expect(await screen.findByRole("link", { name: "Volver a entrar" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
   });
 });

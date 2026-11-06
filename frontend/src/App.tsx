@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
@@ -7,12 +8,13 @@ import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
-import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INICIO, RUTA_INSTALAR, RUTA_INVITACION, RUTA_INVITACION_MANDATO } from "./enlace";
 import { api } from "./api/cliente";
 import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useConsultaDeAcciones } from "./permisos";
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
-import { EstadoServicio } from "./EstadoServicio";
+import { EntrarEncima } from "./EntrarEncima";
+import { AvisoServicio, PuntoServicio } from "./EstadoServicio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
@@ -58,7 +60,7 @@ async function hayPagosPorAclarar(): Promise<boolean> {
   return data.elementos.length > 0;
 }
 
-function Inicio() {
+function Inicio({ barra }: { barra: HTMLElement | null }) {
   const sesion = useSesion();
   const { porEdificio, falla, reintentar, reintentando } = useConsultaDeAcciones();
   const invitaciones = useMisInvitaciones(sesion === "con_sesion");
@@ -79,7 +81,9 @@ function Inicio() {
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   return (
     <>
+      {barra !== null && createPortal(<PuntoServicio />, barra)}
       <h1>Tu consorcio, en tu mano</h1>
+      <AvisoServicio />
       <p>
         Estamos construyendo la aplicación. Pronto vas a poder ver tus expensas, documentos y
         avisos desde acá.
@@ -116,7 +120,6 @@ function Inicio() {
         </p>
       )}
       <EnlaceInstalar />
-      <EstadoServicio />
       <Pestanas />
     </>
   );
@@ -153,6 +156,7 @@ function NoEncontrada() {
 }
 
 export function App() {
+  const [barra, setBarra] = useState<HTMLElement | null>(null);
   return (
     <>
       <header className="cabecera">
@@ -160,13 +164,17 @@ export function App() {
           <img src="/icono.svg" alt="" width="40" height="40" />
           <span>Consorcio en Mano</span>
         </Link>
-        <ModoLectura />
+        <div className="cabecera-fin">
+          <div ref={setBarra} className="cabecera-punto" />
+          <ModoLectura />
+        </div>
       </header>
       <main id="contenido">
         <AvisoLlegada />
+        <EntrarEncima />
         <Routes>
-          <Route path="/" element={<Inicio />} />
-          <Route path="/instalar" element={<Instalar />} />
+          <Route path="/" element={<Inicio barra={barra} />} />
+          <Route path={RUTA_INSTALAR} element={<Instalar />} />
           <Route path={RUTA_ENTRAR} element={<Entrar />} />
           <Route path={RUTA_INVITACION} element={<Invitacion />} />
           <Route path={RUTA_INVITACION_MANDATO} element={<InvitacionMandato />} />

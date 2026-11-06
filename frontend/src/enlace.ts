@@ -22,6 +22,8 @@ export function tokenDelFragmento(fragmento: string): string | null {
  */
 export const NAVEGACION_ENTRAR = new RegExp(`^${RUTA_ENTRAR}(?:[/?]|$)`);
 
+export const RUTA_INSTALAR = "/instalar";
+
 // El enlace de la invitación del correo (RF03): /invitacion#token=…. Como /entrar, su navegación
 // va siempre a la red: el correo puede llegar a un teléfono con una versión vieja en caché.
 export const RUTA_INVITACION = "/invitacion";

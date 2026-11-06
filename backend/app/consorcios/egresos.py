@@ -253,8 +253,7 @@ ERRORES = {
     ),
     "fecha_operacion_invalida": (
         422, CodigoError.FECHA_OPERACION_INVALIDA,
-        "La fecha no puede ser anterior a la emisión, futura ni posterior al vencimiento de la"
-        " aprobación.",
+        "La fecha no puede ser anterior a la emisión ni futura.",
     ),
     "comprobante_invalido": (
         422, CodigoError.COMPROBANTE_INVALIDO,
@@ -560,6 +559,11 @@ def _datos_proveedor(d: DatosProveedor) -> dict:
         "contacto": d.contacto,
         "doc": d.documento_id,
         "cuenta": d.cuenta_destino,
+        "telefono": d.telefono,
+        "whatsapp": d.whatsapp,
+        "correo": d.correo,
+        "domicilio": d.domicilio,
+        "atiende": d.atiende_emergencias,
     }
 
 
@@ -580,7 +584,7 @@ def crear_proveedor(
         nuevo_id = _ejecutar(
             conn, permiso,
             "select nucleo.alta_proveedor(:cuit, :razon, :rubro, :contacto, :doc, :cuenta,"
-            " :actor, 'api', :sesion)",
+            " :actor, 'api', :sesion, :telefono, :whatsapp, :correo, :domicilio, :atiende)",
             {"cuit": nuevo.cuit, **_datos_proveedor(nuevo)},
         ).scalar_one()  # fmt: skip
         return 201, ProveedorCreado(id=nuevo_id, version=1)
@@ -616,7 +620,8 @@ def versionar_proveedor(
         version = _ejecutar(
             conn, permiso,
             "select nucleo.nueva_version_proveedor(:p, :esperada, :razon, :rubro, :contacto,"
-            " cast(:estado as nucleo.estado_proveedor), :doc, :cuenta, :actor, 'api', :sesion)",
+            " cast(:estado as nucleo.estado_proveedor), :doc, :cuenta, :actor, 'api', :sesion,"
+            " :telefono, :whatsapp, :correo, :domicilio, :atiende)",
             {"p": proveedor_id, "esperada": datos.version_esperada, "estado": datos.estado.value,
              **datos_nuevos},
             # El proveedor viene en la ruta: si no existe es 404, como al verlo.

@@ -342,7 +342,6 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
   });
 

@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { sinFaltasDeAccesibilidad } from "./entorno";
+import { simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /cuenta/segundo-factor servida por el nginx de la imagen, con su CSP real. El backend
 // de la corrida no tiene base de datos, así que no hay sesión con qué dar de alta un factor: el
@@ -30,6 +30,7 @@ function vigilarErrores(pagina: Page): string[] {
 
 /** Responde la API del segundo factor desde el navegador: la página y su CSP siguen siendo reales. */
 async function simularApi(pagina: Page) {
+  await simularSesion(pagina, "con_sesion");
   await pagina.route("**/api/v1/auth/llave", (ruta) => ruta.fulfill({ json: [] }));
   await pagina.route("**/api/v1/auth/totp**", async (ruta) => {
     const camino = new URL(ruta.request().url()).pathname;
