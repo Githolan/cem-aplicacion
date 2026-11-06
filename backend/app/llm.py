@@ -3,6 +3,9 @@
 El resto de la aplicación llama solo a `complete()`: ningún otro módulo importa el SDK de un
 proveedor. Se llama solo desde el backend; la clave nunca llega al frontend. Cambiar de proveedor
 es cambiar las cuatro variables `CEM_LLM_*`, sin tocar código.
+
+Una llamada es un pedido: la capa no reintenta. Lo que el proveedor no resuelve sale como
+`ErrorDeModelo`, y quien llama decide qué hacer con eso.
 """
 
 import base64
@@ -15,11 +18,18 @@ PROVEEDORES_ANTHROPIC = frozenset({"anthropic", "zai"})
 """Hablan el protocolo de Anthropic. Cualquier otro se trata como compatible con OpenAI."""
 
 
+TipoAdjunto = Literal["application/pdf", "image/jpeg", "image/png"]
+
+
+class ErrorDeModelo(RuntimeError):
+    """El proveedor no dio una respuesta usable. Lleva el tipo de la falla, nunca el pedido."""
+
+
 @dataclass(frozen=True)
 class Adjunto:
     """Un PDF o una imagen que acompaña al texto del mensaje."""
 
-    tipo: Literal["application/pdf", "image/jpeg", "image/png"]
+    tipo: TipoAdjunto
     datos: bytes
 
 
@@ -58,7 +68,7 @@ def complete(messages: list[Mensaje], opts: Opciones) -> Respuesta:
     else:
         respuesta = _con_openai(messages, opts, variables)
     if not respuesta.texto:
-        raise RuntimeError(f"El modelo {respuesta.modelo} respondió sin texto")
+        raise ErrorDeModelo(f"El modelo {respuesta.modelo} respondió sin texto")
     return respuesta
 
 
@@ -95,37 +105,45 @@ def _mensaje_openai(mensaje: Mensaje) -> dict:
 
 
 def _con_anthropic(messages: list[Mensaje], opts: Opciones, variables: dict[str, str]) -> Respuesta:
-    from anthropic import Anthropic
+    from anthropic import Anthropic, AnthropicError
 
     cliente = Anthropic(
         api_key=variables["CEM_LLM_API_KEY"],
         base_url=variables["CEM_LLM_BASE_URL"],
         timeout=opts.espera_s,
+        max_retries=0,
     )
     # El protocolo de Anthropic lleva las instrucciones de sistema aparte de la conversación.
     sistema = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
     extra = {"system": sistema} if sistema else {}
-    respuesta = cliente.messages.create(
-        model=variables["CEM_LLM_MODEL"],
-        max_tokens=opts.max_tokens,
-        messages=[_mensaje_anthropic(m) for m in messages if m["role"] != "system"],
-        **extra,
-    )
+    try:
+        respuesta = cliente.messages.create(
+            model=variables["CEM_LLM_MODEL"],
+            max_tokens=opts.max_tokens,
+            messages=[_mensaje_anthropic(m) for m in messages if m["role"] != "system"],
+            **extra,
+        )
+    except AnthropicError as e:
+        raise ErrorDeModelo(type(e).__name__) from e
     texto = "".join(bloque.text for bloque in respuesta.content if bloque.type == "text")
     return Respuesta(texto=texto, modelo=respuesta.model)
 
 
 def _con_openai(messages: list[Mensaje], opts: Opciones, variables: dict[str, str]) -> Respuesta:
-    from openai import OpenAI
+    from openai import OpenAI, OpenAIError
 
     cliente = OpenAI(
         api_key=variables["CEM_LLM_API_KEY"],
         base_url=variables["CEM_LLM_BASE_URL"],
         timeout=opts.espera_s,
+        max_retries=0,
     )
-    respuesta = cliente.chat.completions.create(
-        model=variables["CEM_LLM_MODEL"],
-        max_tokens=opts.max_tokens,
-        messages=[_mensaje_openai(m) for m in messages],
-    )
+    try:
+        respuesta = cliente.chat.completions.create(
+            model=variables["CEM_LLM_MODEL"],
+            max_tokens=opts.max_tokens,
+            messages=[_mensaje_openai(m) for m in messages],
+        )
+    except OpenAIError as e:
+        raise ErrorDeModelo(type(e).__name__) from e
     return Respuesta(texto=respuesta.choices[0].message.content or "", modelo=respuesta.model)

@@ -692,9 +692,10 @@ class RegistroPagoManual(BaseModel):
     moneda: Moneda
     cuenta_destino: Cuenta | None = Field(
         default=None,
-        description="Como figura en el comprobante. Nula solo al corregir un registro observado:"
-        " sigue la que ese registro ya acreditó, y la base la niega en un registro nuevo"
-        " (`no_coincide_con_la_orden`). Así corregir no pide la cuenta otra vez.",
+        description="Como figura en el comprobante. Nula al corregir un registro observado, porque"
+        " sigue la que ese registro ya acreditó, o si la lectura del archivo dio que coincide con"
+        " la orden. En cualquier otro registro nuevo la base la niega"
+        " (`no_coincide_con_la_orden`).",
     )
     documento_id: UUID = Field(
         description="El comprobante: cargado desde el pago de esta orden"
@@ -1125,6 +1126,61 @@ class ComprobanteSubido(BaseModel):
     estado: EstadoVersion
 
 
+class EstadoLectura(StrEnum):
+    """En qué quedó la lectura con IA del comprobante."""
+
+    LEYENDO = "leyendo"
+    LEIDA = "leida"
+    NO_LEIDA = "no_leida"
+    """No se pudo leer: se carga a mano."""
+
+
+class CampoComprobante(StrEnum):
+    """Un dato que se compara entre lo leído y la orden o lo registrado."""
+
+    IMPORTE = "importe"
+    MONEDA = "moneda"
+    CUENTA = "cuenta"
+    NUMERO_OPERACION = "numero_operacion"
+    FECHA = "fecha"
+
+
+class LecturaComprobante(BaseModel):
+    """Lo que la IA leyó de `comprobante_actual`. Propone, no decide: llena campos y avisa. La
+    comparación la hace el servidor. La cuenta leída no se guarda ni viaja: solo sus últimos dígitos
+    y si coincide con la de la orden."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version_documento_id: UUID
+    estado: EstadoLectura
+    importe_centavos: int | None
+    moneda: str | None
+    cuenta_ultimos_digitos: str | None
+    cuenta_coincide: bool | None = Field(
+        description="Si la cuenta leída es, dígito a dígito, la de la orden. Nula si no se leyó."
+    )
+    titular_destino: str | None
+    numero_operacion: str | None
+    fecha: date | None
+    distinto_de_la_orden: list[CampoComprobante] = Field(
+        description="Lo que se leyó y no es lo de la orden. Lo que no se leyó no cuenta."
+    )
+    titular_distinto: bool = Field(
+        description="Si el titular leído no es el de la orden, una vez normalizados. Solo avisa:"
+        " una razón social se escribe de varias maneras."
+    )
+    distinto_de_lo_registrado: list[CampoComprobante] = Field(
+        description="Lo que se leyó y no es lo que se registró con este archivo. El Consejo lo ve"
+        " al conciliar. Vacía si todavía no hay registro. Vacía no quiere decir que coincida: lo"
+        " que no se leyó no se compara."
+    )
+    coincide_con_lo_registrado: bool = Field(
+        description="Si importe, cuenta y fecha se leyeron, se compararon con lo registrado con"
+        " este archivo y nada difiere. Con una lectura parcial o vacía es falso."
+    )
+
+
 class ObservacionVigente(BaseModel):
     """Por qué el Consejo observó el último registro."""
 
@@ -1180,6 +1236,10 @@ class FichaPago(BaseModel):
     comprobante_subido: ComprobanteSubido | None = Field(
         description="Nulo si no subió nada, si lo último ya es el actual o si hay un registro"
         " vigente."
+    )
+    lectura_comprobante: LecturaComprobante | None = Field(
+        description="La de `comprobante_actual`. Nula si la lectura no corrió para ese archivo: con"
+        " la lectura apagada, siempre."
     )
     observacion_vigente: ObservacionVigente | None
     declaracion_vigente: PagoNoRealizado | None = Field(

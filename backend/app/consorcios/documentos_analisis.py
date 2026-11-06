@@ -13,6 +13,11 @@
 `documentos.limpiar_huerfanos` borra cada día los objetos que quedaron sin fila (una carga que
 subió el archivo y no llegó a confirmar).
 
+Con `CEM_LECTURA_COMPROBANTES=encendida`, una versión aprobada de un comprobante de pago encola en
+la misma transacción `documentos.leer`, que le pide a la capa `llm` que la lea (§6 del rediseño del
+circuito de pagos). Nunca corre en el pedido web. Una sola llamada: lo que falla queda como no leído
+y la persona carga a mano. El resultado llena campos y nada más.
+
 Si no se puede completar (`clamd` caído, firmas viejas, almacén que falla), el trabajo falla, la
 versión sigue en cuarentena y la cola reintenta con espera creciente; `vigilar_cuarentena` avisa
 a Kuma si alguna queda demorada o si las firmas envejecen.
@@ -22,6 +27,7 @@ import hashlib
 import io
 import logging
 import os
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -32,6 +38,7 @@ from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject
 from sqlalchemy import Connection, text
 
+from app.consorcios import lectura_comprobantes
 from app.consorcios.documentos import INTENTOS_VERIFICAR, TRABAJO_VERIFICAR, tipo_real
 from app.plataforma import almacen, antivirus, cola, copias
 from app.plataforma.planificador import periodica
@@ -168,6 +175,18 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
             clave_unica=f"{TRABAJO_BORRAR}:{version}",
             maximo_intentos=INTENTOS_VERIFICAR,
         )
+    if resuelta and motivo is None and lectura_comprobantes.encendida():
+        es_comprobante = conn.execute(
+            text("select nucleo.version_es_comprobante_de_pago(:v)"), {"v": version}
+        ).scalar_one()
+        if es_comprobante:
+            cola.encolar(
+                conn,
+                lectura_comprobantes.TRABAJO_LEER,
+                carga={"version": str(version)},
+                consorcio_id=trabajo.consorcio_id,
+                clave_unica=f"{lectura_comprobantes.TRABAJO_LEER}:{version}",
+            )
     return {"estado": "rechazado" if motivo else "disponible", "motivo": motivo}
 
 
@@ -176,6 +195,29 @@ def _lugar(origen: almacen.AlmacenDocumentos, v) -> dict[str, str]:
     if v["version_objeto"]:
         lugar["VersionId"] = v["version_objeto"]
     return lugar
+
+
+@cola.REGISTRO.tipo(lectura_comprobantes.TRABAJO_LEER, maximo_intentos=1)
+def leer_comprobante(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Lee una versión aprobada y guarda lo leído. Si se apagó con el trabajo en la cola, no llama a
+    nadie. El resultado no lleva lo leído: `plataforma.jobs` la lee soporte."""
+    if not lectura_comprobantes.encendida():
+        return {"leida": False, "motivo": "apagada"}
+    version = UUID(trabajo.carga["version"])
+    v = _version(conn, version)
+    if v is None or v["estado"] != "disponible":
+        raise cola.ErrorDefinitivo(f"la versión {version} no está disponible: no se lee")
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
+    contenido = origen.cliente().get_object(**_lugar(origen, v))["Body"].read()
+    lectura = lectura_comprobantes.leer(contenido, v["tipo"])
+    conn.execute(
+        text(
+            "select nucleo.guardar_lectura_comprobante(:v, :modelo, :prompt, :legible, :error,"
+            " :importe, :moneda, :cuenta, :titular, :numero, :fecha)"
+        ),
+        {"v": version, "prompt": lectura_comprobantes.VERSION_PROMPT, **asdict(lectura)},
+    )
+    return {"leida": lectura.legible, "error": lectura.error}
 
 
 @cola.REGISTRO.tipo(

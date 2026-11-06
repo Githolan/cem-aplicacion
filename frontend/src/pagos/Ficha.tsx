@@ -32,6 +32,9 @@ import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
 import {
   AVISO_DIFERENCIA_ESPERA,
+  AVISO_LECTURA_COINCIDE,
+  AVISO_LECTURA_INCOMPLETA,
+  AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_NO_TRANSFIERAS,
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
@@ -61,6 +64,9 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_est
 type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
+type LecturaComprobante = components["schemas"]["LecturaComprobante"];
+/** Lo que se registró con el comprobante: un pago o lo que salió del banco. */
+type Registrado = { centavos: number; moneda: string; numero_operacion: string; fecha_operacion: string };
 
 /** Los pasos en que quien puede declarar tiene a mano «No se pudo pagar». */
 const SE_DECLARA = new Set<Paso | null>(["subir_comprobante", "corregir", "declarar_no_pago", "espera_comprobante"]);
@@ -70,6 +76,43 @@ function centavosReales(d: Diferencia): number {
   const centavos = aCentavos(d.importe_real);
   if (centavos === null) throw new Error(`la diferencia ${d.id} trae un importe que no se entiende`);
   return centavos;
+}
+
+/** Lo que el comprobante dice y no es lo que se registró. La lectura puede equivocarse: quien
+ * concilia lo mira y decide. */
+function DistintoDeLoRegistrado({ lectura, registrado }: { lectura: LecturaComprobante; registrado: Registrado }) {
+  const campos = lectura.distinto_de_lo_registrado;
+  const leido = lectura.importe_centavos;
+  return (
+    <div className="aviso-error" role="alert">
+      {campos.includes("importe") && leido !== null && (
+        <p>
+          El comprobante dice <strong>{importe(leido, lectura.moneda ?? registrado.moneda)}</strong> y registraron{" "}
+          <strong>{importe(registrado.centavos, registrado.moneda)}</strong>.
+        </p>
+      )}
+      {campos.includes("moneda") && (
+        <p>
+          El comprobante dice <strong>{lectura.moneda}</strong> y registraron <strong>{registrado.moneda}</strong>.
+        </p>
+      )}
+      {campos.includes("cuenta") && (
+        <p>
+          El comprobante dice la cuenta <strong>{cuentaEnmascarada(lectura.cuenta_ultimos_digitos)}</strong>, que no es la registrada.
+        </p>
+      )}
+      {campos.includes("numero_operacion") && (
+        <p>
+          El comprobante dice la operación <strong>{lectura.numero_operacion}</strong> y registraron <strong>{registrado.numero_operacion}</strong>.
+        </p>
+      )}
+      {campos.includes("fecha") && (
+        <p>
+          El comprobante dice la fecha <strong>{lectura.fecha}</strong> y registraron <strong>{registrado.fecha_operacion}</strong>.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function vigenteDe(f: FichaPago): Version {
@@ -249,6 +292,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
   const declara = ficha.puede_declarar && SE_DECLARA.has(paso);
   const conVisor = ficha.comprobante_actual !== null && !registra;
+  const comprobanteLeido = ficha.lectura_comprobante;
+  const registrado: Registrado | null =
+    diferencia !== null
+      ? { ...diferencia, centavos: centavosReales(diferencia) }
+      : pago !== undefined
+        ? { ...pago, centavos: pago.importe_centavos }
+        : null;
+  // Lo ve quien decide sobre lo registrado. Si no coincide, Observar pasa a ser el botón principal.
+  const decideElPago = (paso === "conciliar" || ficha.puede_resolver_diferencia) && registrado !== null && comprobanteLeido !== null;
+  const lecturaDistinta = decideElPago && comprobanteLeido.distinto_de_lo_registrado.length > 0;
+  const lecturaIgual = decideElPago && comprobanteLeido.coincide_con_lo_registrado;
+  // Sin diferencias no quiere decir que coincida: lo que no se leyó no se comparó.
+  const lecturaIncompleta = decideElPago && comprobanteLeido.estado === "leida" && !lecturaDistinta && !lecturaIgual;
 
   function escribir(cual: ConMotivo) {
     setMotivo("");
@@ -307,7 +363,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version_esperada: v.numero },
         }),
-      alTerminar: () => terminar("Listo: la orden se envió. Si su franja no pide aprobación, ya quedó aprobada."),
+      alTerminar: () =>
+        terminar(v.alerta_fraccionamiento ? "Listo: la orden se envió. La aprueba el Consejo." : "Listo: la orden se envió. Si su franja no pide aprobación, ya quedó aprobada."),
       alFallar: siCambio,
     });
   }
@@ -523,6 +580,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               {TEXTO_ALERTA_FRACCIONAMIENTO}
             </p>
           )}
+          {situacion === "borrador" && v.alerta_fraccionamiento && <p role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
           {enDecision && anterior !== undefined && cambiosDeVersion(v, anterior).map((c) => <p key={c}>{c}</p>)}
           {ficha.orden.motivo_rechazo !== null && situacion === "rechazada" && (
             <p>
@@ -580,6 +638,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 documento={ficha.comprobante_actual.documento_id} version={ficha.comprobante_actual.version_documento_id} aEntrar={aEntrar} />
             )}
             <div className="tarjeta">
+              {lecturaDistinta && <DistintoDeLoRegistrado lectura={comprobanteLeido} registrado={registrado} />}
+              {lecturaIgual && <p className="aviso-ok">{AVISO_LECTURA_COINCIDE}</p>}
+              {lecturaIncompleta && <p role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
               {diferencia !== null && (
                 <>
                   <table className="comparar-pago">
@@ -737,7 +798,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               <div hidden={motivoAbierto !== null}>
                   {registra && (
                     <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
-                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} subtitulo={Subtitulo}
+                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido} subtitulo={Subtitulo}
                       puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
@@ -819,13 +880,20 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                       )}
                       {ficha.puede_conciliar && pago !== undefined && (
                         <>
-                          <button type="button" disabled={enviando}
+                          {lecturaDistinta && (
+                            <button type="button" disabled={enviando} onClick={() => escribir("observar")}>
+                              Observar
+                            </button>
+                          )}
+                          <button type="button" className={lecturaDistinta ? "secundario" : undefined} disabled={enviando}
                             onClick={() => (pago.fuera_de_termino ? escribir("conforme") : conciliar(pago.id, "conforme", null))}>
                             Conforme
                           </button>
-                          <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("observar")}>
-                            Observar
-                          </button>
+                          {!lecturaDistinta && (
+                            <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("observar")}>
+                              Observar
+                            </button>
+                          )}
                         </>
                       )}
                       {ficha.puede_confirmar && declaracion !== null && (

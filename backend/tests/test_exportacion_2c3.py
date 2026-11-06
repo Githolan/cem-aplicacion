@@ -156,6 +156,10 @@ CLAVES_POR_ENTIDAD = {
                             "numero_operacion"},
     "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo",
                           "guardadas_por_nombre", "guardadas_en"},
+    "lectura_comprobante": {"id", "version_documento_id", "documento_id", "ejecucion_id", "modelo",
+                            "version_prompt", "legible", "error", "importe", "moneda",
+                            "cuenta_ultimos_digitos", "cuenta_coincide", "titular_destino",
+                            "numero_operacion", "fecha", "leida_en"},
     "liquidacion": {"id", "periodo", "version", "estado", "preparada_por_nombre", "creada_en",
                     "descartada_en", "descartada_por_nombre", "motivo_descarte"},
     "gasto": {"id", "liquidacion_id", "orden_id", "ejecucion_id", "importe_centavos", "moneda",
@@ -1276,6 +1280,7 @@ TABLA_DE_LA_ENTIDAD = {
     "importacion_extracto": "nucleo.importacion_extracto",
     "movimiento_extracto": "nucleo.movimiento_extracto",
     "columnas_extracto": "nucleo.columnas_extracto",
+    "lectura_comprobante": "nucleo.lectura_comprobante",
     "liquidacion": "nucleo.liquidacion",
     "gasto": "nucleo.liquidacion_gasto",
     "gasto_quitado": "nucleo.liquidacion_gasto_quitado",
@@ -1332,6 +1337,22 @@ def cotejadas(motor_migrate, s, ordenes) -> None:
     assert llamar(motor_migrate, s, s.mc2, COTEJAR_EXTRACTO, pares=pares) == 1
 
 
+def leida(motor_migrate, motor_app, s, o) -> None:
+    """Como la guarda `cem-trabajos`, sobre el archivo del pago de la orden."""
+    with motor_migrate.connect() as c:
+        version = c.execute(
+            text("select p.version_documento_id from nucleo.pago_manual p"
+                 " join nucleo.ejecucion_orden_pago x on x.id = p.ejecucion_id"
+                 " where x.orden_id = :o"), {"o": o},
+        ).scalar_one()  # fmt: skip
+    with transaccion(motor_app, persona_id=None, consorcio_id=s.cons) as c:
+        c.execute(
+            text("select nucleo.guardar_lectura_comprobante(:v, 'modelo-sintetico',"
+                 " 'prompt-sintetico', true, null, 10.00, 'ARS', :cuenta, 'SINTETICO', 'OP-1',"
+                 " null)"), {"v": version, "cuenta": cbu_sintetico(1)},
+        )  # fmt: skip
+
+
 def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     """La escena de egresos con una fila, al menos, en cada entidad económica: dos contratos (uno
     de baja), una orden en borrador, una rechazada, dos pagadas y conciliadas, una con «no se
@@ -1355,6 +1376,7 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
            motivo="SINTETICO: falta la factura")  # fmt: skip
     pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
     cotejadas(motor_migrate, s, pagadas)
+    leida(motor_migrate, motor_app, s, pagadas[0])
     no_pagada = emitida(motor_migrate, s)
     ver(motor_migrate, s, s.adm, no_pagada)
     declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
@@ -1433,6 +1455,9 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
     assert (diferencia["tipo"], diferencia["resolucion"]) == ("ambos", "reclamo")
     assert diferencia["cuenta_ultimos_digitos"] == cbu_sintetico(50)[-4:]
     assert None not in (diferencia["registrada_por_nombre"], diferencia["resuelta_por_nombre"])
+    [lectura] = datos["lectura_comprobante"]
+    assert (lectura["modelo"], lectura["legible"]) == ("modelo-sintetico", True)
+    assert lectura["cuenta_ultimos_digitos"] == cbu_sintetico(1)[-4:]
 
 
 def test_el_nombre_sale_solo_con_el_criterio_del_paquete(economico, motor_migrate):

@@ -25,6 +25,7 @@ from sqlalchemy import Engine
 
 from app import registros
 from app.config import cargar
+from app.consorcios import lectura_comprobantes
 from app.db import crear_motor, transaccion
 from app.plataforma import cola, latido
 
@@ -132,6 +133,7 @@ def main() -> None:
     registros.configurar()
     import app.plataforma.tareas  # noqa: F401  (registra los tipos de trabajo)
 
+    lectura_comprobantes.exigir_configuracion()
     lote = lote_configurado()
     detener = threading.Event()
     for senal in (signal.SIGTERM, signal.SIGINT):
