@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from redis import Redis
 
-from app import errores, limite, registros
+from app import errores, limite, llm, registros
 from app.acceso import crear_verificador
 from app.config import Config, cargar
 from app.consorcios.auditoria import router as auditoria
@@ -30,7 +30,10 @@ from app.soporte.router import router as soporte
 
 
 def crear_app(config: Config | None = None) -> FastAPI:
-    config = config or cargar()
+    # Solo el arranque real exige el modelo; las pruebas y el OpenAPI pasan su propia Config.
+    if config is None:
+        llm.exigir_variables()
+        config = cargar()
     if not config.redis_url:
         raise RuntimeError("CEM_REDIS_URL es obligatoria: sin Redis no hay límite de tasa (TB-8)")
     if config.origen_publico:
