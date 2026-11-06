@@ -25,9 +25,10 @@ import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
+import { Cotejo } from "./pagos/Cotejo";
 import { Pestanas } from "./pagos/Pestanas";
 import { PrepararOrden } from "./pagos/PrepararOrden";
-import { RUTA_CONSULTA, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
+import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -180,6 +181,7 @@ export function App() {
           <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />
           <Route path={RUTA_NUEVA} element={<Exige requisito={REQUISITOS.ordenes}><PrepararOrden /></Exige>} />
           <Route path={RUTA_CONSULTA} element={<Exige requisito={REQUISITOS.pagos}><ConsultaPagos /></Exige>} />
+          <Route path={RUTA_COTEJO} element={<Exige requisito={REQUISITOS.cotejo}><Cotejo /></Exige>} />
           {/* Una sola ruta madre: la bandeja sigue montada al abrir la ficha al lado. */}
           <Route path={RUTA_PAGOS} element={<Exige requisito={REQUISITOS.pagos}><CircuitoPagos /></Exige>}>
             <Route index element={null} />

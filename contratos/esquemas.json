@@ -977,7 +977,13 @@
           "motivo_con_cuenta",
           "liquidacion_no_admite",
           "orden_no_liquidable",
-          "sin_esquema"
+          "sin_esquema",
+          "extracto_invalido",
+          "extracto_sin_movimientos",
+          "columnas_no_encontradas",
+          "columnas_sin_elegir",
+          "pago_sin_conciliar",
+          "movimiento_no_coincide"
         ],
         "title": "CodigoError",
         "type": "string"
