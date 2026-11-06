@@ -21,22 +21,13 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
 pytestmark = pytest.mark.db
 
 
-@pytest.mark.parametrize(
-    ("horas_atras", "totp_min_atras", "motivo"),
-    [
-        (1, 11, "requiere_segundo_factor_reciente"),
-        (1, None, "requiere_segundo_factor_reciente"),
-        (13, 0, "requiere_sesion_reciente"),
-    ],
-)
-def test_sin_sesion_reciente_con_segundo_factor_no_se_carga_el_comprobante(
-    motor_migrate, e, horas_atras, totp_min_atras, motivo
-):
+def test_sin_sesion_reciente_no_se_carga_el_comprobante(motor_migrate, e):
+    # Desde 0073 subir no pide gesto (registrar sí): lo que sigue pidiendo es la sesión reciente.
     o = emitida(motor_migrate, e)
     ver_version(motor_migrate, e, e.adm, o, 1)  # vio la cuenta de la ejecución abierta
-    vieja = nueva_sesion(motor_migrate, e.adm, horas_atras=horas_atras,
-                         totp_min_atras=totp_min_atras)  # fmt: skip
-    niega(motor_migrate, e, e.adm, CREAR, motivo, sesion=vieja, orden=o, titulo=TITULO)
+    vieja = nueva_sesion(motor_migrate, e.adm, horas_atras=13, totp_min_atras=0)
+    niega(motor_migrate, e, e.adm, CREAR, "requiere_sesion_reciente", sesion=vieja, orden=o,
+          titulo=TITULO)  # fmt: skip
     # Control: la misma persona, con su sesión reciente, sí lo carga.
     assert llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO) is not None
 

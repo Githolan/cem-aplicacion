@@ -139,6 +139,7 @@ const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
 const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
 const ANCHO_PC_PX = 1025;
 const ANCHO_PESTANAS_PX = 768;
+const ANCHO_CON_CAMARA_PX = 480;
 const ACCIONES_EN_FALSO = {
   puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
   puede_reabrir_cuenta: false, puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false,
@@ -151,29 +152,55 @@ const EJECUCION_VACIA = { id: EJECUCION, version: 1, creada_en: "2026-10-31T12:3
 
 const fichaDe = (extra: object) => ({
   ...ACCIONES_EN_FALSO, orden: ORDEN_APROBADA, versiones: [version(null)], situacion: "para_pagar", paso: null, le_toca_a: null,
-  ejecucion: null, comprobante_actual: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
+  ejecucion: null, comprobante_actual: null, comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
 });
 const PARA_PAGAR = fichaDe({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
 const SUBIENDO = fichaDe({
   orden: { ...ORDEN_APROBADA, estado: "en_ejecucion" }, situacion: "pagando", paso: "subir_comprobante", le_toca_a: "vos",
   puede_subir_comprobante: true, puede_registrar: true, puede_declarar: true, puede_reabrir_cuenta: true, ejecucion: EJECUCION_VACIA,
 });
+const EL_COMPROBANTE = { documento_id: COMPROBANTE, version_documento_id: ARCHIVO };
+const CON_COMPROBANTE = { ...SUBIENDO, comprobante_actual: EL_COMPROBANTE };
+const REVISANDO = { ...SUBIENDO, comprobante_subido: { ...EL_COMPROBANTE, estado: "en_cuarentena" } };
 const PARA_APROBAR = fichaDe({
   orden: ORDEN_A, situacion: "en_revision", paso: "aprobar", le_toca_a: "vos", puede_aprobar: true, puede_rechazar: true,
 });
 const PARA_CONCILIAR = fichaDe({
   orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, situacion: "falta_conciliar", paso: "conciliar", le_toca_a: "vos", puede_conciliar: true,
-  comprobante_actual: { documento_id: COMPROBANTE, version_documento_id: ARCHIVO },
+  comprobante_actual: EL_COMPROBANTE,
   ejecucion: { ...EJECUCION_VACIA, pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
     importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO, registrado_por: ADM,
-    registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null, conciliado_en: null,
+    registrado_por_nombre: "Marta Ficticia", registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null, conciliado_en: null,
     fuera_de_termino: false }] },
 });
+
+// Un PDF de verdad, con el texto en una fuente que no trae adentro, y un PNG de un píxel rojo.
+const PDF_SINTETICO = Buffer.from(
+  `%PDF-1.4
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 200]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
+4 0 obj<</Length 58>>stream
+BT /F1 24 Tf 20 100 Td (COMPROBANTE SINTETICO) Tj ET
+endstream endobj
+5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
+trailer<</Root 1 0 R>>
+`,
+);
+const PNG_SINTETICO = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 const GRUPO_DE: Record<string, string> = { pagar: "para_pagar", aprobar: "para_aprobar", conciliar: "para_conciliar" };
 
 /** La API del circuito con una orden. La ficha cambia con el acto, como en el servidor. */
-async function simularPagos(pagina: Page, baseURL: string, inicial: { paso: string | null }): Promise<string[]> {
+async function simularPagos(
+  pagina: Page,
+  baseURL: string,
+  inicial: { paso: string | null },
+  archivo: { cuerpo: Buffer; tipo: string } = { cuerpo: PDF_SINTETICO, tipo: "application/pdf" },
+): Promise<string[]> {
   const pedidosHechos: string[] = [];
   let actual: object = inicial;
   await pagina.route("**/api/v1/**", async (ruta) => {
@@ -190,10 +217,18 @@ async function simularPagos(pagina: Page, baseURL: string, inicial: { paso: stri
     if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: actual });
     if (camino === `${c}/ordenes-pago/${ORDEN}/revision`)
       return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(CUENTA)], puede_aprobar: true, puede_rechazar: true } });
-    if (camino === `${c}/documentos`)
-      return ruta.fulfill({ json: { documentos: [{ id: COMPROBANTE, categoria: "facturas_y_comprobantes",
-        titulo: "Transferencia SINTETICA", fecha: "2026-10-31", cargado_en: "2026-10-31T13:00:00Z", orden_pago_id: ORDEN,
-        versiones: [{ id: ARCHIVO, estado: "disponible" }] }] } });
+    if (camino === `${c}/documentos/${COMPROBANTE}/versiones/${ARCHIVO}/contenido`)
+      return ruta.fulfill({ body: archivo.cuerpo, contentType: archivo.tipo });
+    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/comprobante`)
+      return ruta.fulfill({ status: 201, json: { id: COMPROBANTE } });
+    if (pedido.method() === "POST" && camino === `${c}/documentos/${COMPROBANTE}/versiones`) {
+      actual = REVISANDO;
+      // El antivirus termina enseguida: la ficha lo ve en la consulta siguiente.
+      setTimeout(() => {
+        actual = CON_COMPROBANTE;
+      }, 500);
+      return ruta.fulfill({ status: 201, json: { id: ARCHIVO, estado: "en_cuarentena", tipo: "image/png", tamano: 1, sha256: "a".repeat(64) } });
+    }
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/emitir`)
       return ruta.fulfill({ json: { id: ORDEN, version: 1 } });
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/cuenta`) {
@@ -277,8 +312,9 @@ test.describe("circuito de pagos", () => {
 
     await pagar.click();
     await expect(page.getByText(CUENTA)).toBeVisible();
-    await expect(page.getByText("Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeVisible();
+    await expect(page.getByText("Antes de confirmar en tu banco, mirá que el titular sea")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Copiar el CBU" })).toBeVisible();
+    expect((await page.getByRole("button", { name: "Copiar el CBU" }).boundingBox())?.height).toBeGreaterThanOrEqual(44);
     expect(hechos.filter((h) => h.startsWith("POST")).map((h) => h.split("/").at(-1))).toEqual(["emitir", "cuenta"]);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
@@ -286,7 +322,7 @@ test.describe("circuito de pagos", () => {
   });
 
   test("el importe abre el teclado numérico y al salir se ve con centavos", async ({ page, baseURL }) => {
-    await simularPagos(page, baseURL!, SUBIENDO);
+    await simularPagos(page, baseURL!, CON_COMPROBANTE);
     await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
     await page.goto(`/pagos/${ORDEN}`);
     const campo = page.getByLabel(/^Importe transferido/);
@@ -316,14 +352,69 @@ test.describe("circuito de pagos", () => {
     expect(errores).toEqual([]);
   });
 
-  test("conciliar muestra la evidencia sin la cuenta", async ({ page, baseURL }) => {
+  test("conciliar: el PDF dibujado con pdf.js, sin violar la CSP, y la orden contra lo registrado", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, PARA_CONCILIAR);
+    const trabajador = page.waitForResponse((r) => r.url().includes("pdf.worker"));
     await abrirLaFicha(page);
+    const lienzo = page.getByRole("img", { name: "Comprobante de la transferencia, página 1" });
+    await expect(lienzo).toBeVisible();
+    // Dibujó de verdad: en el lienzo hay algo más que blanco. Control: uno vacío no pasaría.
+    const dibujados = await lienzo.evaluate((c: HTMLCanvasElement) => {
+      const { data } = c.getContext("2d")!.getImageData(0, 0, c.width, c.height);
+      let oscuros = 0;
+      for (let i = 0; i < data.length; i += 4) if ((data[i + 3] ?? 0) > 0 && (data[i] ?? 255) < 128) oscuros += 1;
+      return oscuros;
+    });
+    expect(dibujados).toBeGreaterThan(0);
+    expect((await trabajador).headers()["content-type"]).toContain("javascript");
+    await expect(page.getByRole("table", { name: "La orden contra lo registrado" }).getByText(CUENTA)).toBeVisible();
     await expect(page.getByText("0001234567")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Ver el comprobante" })).toBeVisible();
+    await expect(page.getByText(/Marta Ficticia/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Conforme" })).toBeVisible();
-    expect(await page.content()).not.toContain(CUENTA);
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("una imagen se ve en un <img> sobre blob:, que la CSP permite", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, PARA_CONCILIAR, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await abrirLaFicha(page);
+    const imagen = page.getByRole("img", { name: "Comprobante de la transferencia" });
+    await expect(imagen).toBeVisible();
+    expect(await imagen.getAttribute("src")).toMatch(/^blob:/);
+    await expect.poll(() => imagen.evaluate((i: HTMLImageElement) => i.naturalWidth)).toBe(1);
+    await sinDesbordar(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("elegir el archivo dispara todo y la ficha sigue sola hasta los datos", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    const hechos = await simularPagos(page, baseURL!, SUBIENDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+    await page.goto(`/pagos/${ORDEN}`);
+    const telefono = anchoDe(page) <= ANCHO_CON_CAMARA_PX;
+    if (telefono) {
+      await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Elegir de la galería" })).toBeVisible();
+      await expect(page.getByText("Soltá acá el comprobante")).toBeHidden();
+      await expect(page.getByLabel("Foto del comprobante")).toHaveAttribute("capture", "environment");
+    } else {
+      await expect(page.getByText("Soltá acá el comprobante")).toBeVisible();
+      await expect(page.getByRole("button", { name: "Elegir el archivo" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeHidden();
+    }
+    await sinDesbordar(page);
+    await page.getByLabel("Archivo del comprobante").setInputFiles({ name: "transferencia.png", mimeType: "image/png", buffer: PNG_SINTETICO });
+    await expect(page.getByRole("img", { name: "Vista previa de transferencia.png" })).toBeVisible();
+    await expect(page.getByText("Estamos revisando el comprobante")).toBeVisible();
+    // Sin tocar nada: la consulta sola ve que pasó el antivirus.
+    await expect(page.getByLabel("Número de operación")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByRole("img", { name: "Comprobante de la transferencia" })).toBeVisible();
+    await expect(page.getByLabel(/^Importe transferido/)).toHaveValue("");
+    await expect(page.getByLabel(/^CBU\/CVU de destino/)).toHaveValue("");
+    expect(hechos.filter((h) => h.startsWith("POST")).map((h) => h.split("/").at(-1))).toEqual(["comprobante", "versiones"]);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);

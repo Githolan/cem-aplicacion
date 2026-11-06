@@ -27,11 +27,15 @@ contrato): la categoría elige la acción.
   firmada de `VIGENCIA_DESCARGA` segundos, solo si la versión está `disponible` (documento 13
   §9.2). Nunca hay una URL permanente. Si el objeto ya no está en el almacén (staging lo borra a
   los 30 días), 410.
+- **`GET …/documentos/{id}/versiones/{v}/contenido`** (el mismo control): el archivo por el mismo
+  origen, para verlo en la pantalla (`Rediseno_Circuito_Pagos_2026-11-06.md`, §4). Lo subió una
+  persona: va con el tipo verificado al subirlo, `nosniff` y una CSP que no deja ejecutar nada.
 """
 
 import hashlib
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import closing
 from typing import Annotated
 from urllib.parse import quote
 from uuid import UUID
@@ -54,7 +58,7 @@ from cem_contracts.documentos import (
 )
 from cem_contracts.errores import CodigoError
 from fastapi import APIRouter, Depends, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
@@ -98,6 +102,15 @@ FIRMAS = (
 VIGENCIA_DESCARGA = 300
 """Segundos que vale la URL firmada de una descarga (documento 13 §9.2: 5 minutos)."""
 EXTENSIONES = {TipoArchivo.PDF: ".pdf", TipoArchivo.JPEG: ".jpg", TipoArchivo.PNG: ".png"}
+CABECERAS_CONTENIDO = SIN_CACHE | {
+    "Content-Disposition": "inline",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox; default-src 'none'",
+}
+"""Un archivo subido por una persona, abierto directo en el navegador, no ejecuta nada (§4)."""
+TRAMO_CONTENIDO = 64 * 1024
+"""El archivo pasa en tramos: 20 MB no se guardan en la memoria del proceso (§3)."""
+SIN_OBJETO = ("404", "NoSuchKey", "NoSuchVersion")
 
 ERRORES = {"no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)}
 """Motivos de las funciones de `0035`. `origen_invalido` lo fija esta ruta: si llega, es un
@@ -422,34 +435,28 @@ def _disposicion(titulo: str, tipo: TipoArchivo) -> str:
     return f"attachment; filename=\"{ascii_}\"; filename*=UTF-8''{quote(nombre, safe='')}"
 
 
-@router.get(
-    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar",
-    status_code=302,
-    response_class=RedirectResponse,
-    summary="Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
-    responses={
-        302: {"description": "`Location` es la URL firmada del almacén; vence a los 5 minutos."},
-        403: {"description": "Sin `documentos.ver` en el consorcio."},
-        404: {
-            "description": "La versión o el documento no existen en este consorcio; su"
-            " categoría es restringida y la persona no tiene la facultad `documentos.ver`; o"
-            " respalda un pago manual, la persona no subió esa versión y no es del Consejo"
-            " (`egresos.aprobar_orden`) o preparó esa orden."
-        },
-        409: {
-            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"
-            " a otros, 404)."
-        },
-        410: {"description": "El archivo ya no está en el almacén (staging, a los 30 días)."},
+RESPUESTAS_VERSION = {
+    403: {"description": "Sin `documentos.ver` en el consorcio."},
+    404: {
+        "description": "La versión o el documento no existen en este consorcio; su"
+        " categoría es restringida y la persona no tiene la facultad `documentos.ver`; o"
+        " respalda un pago manual, la persona no subió esa versión y no es del Consejo"
+        " (`egresos.aprobar_orden`) o preparó esa orden."
     },
-)
-def descargar_version(
-    documento_id: UUID,
-    version_id: UUID,
-    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
-    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
-    motor: MotorDep,
-) -> RedirectResponse:
+    409: {
+        "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió;"
+        " a otros, 404)."
+    },
+    410: {"description": "El archivo ya no está en el almacén (staging, a los 30 días)."},
+}
+"""Lo que niegan por igual `descargar` y `contenido`."""
+
+
+def _version_disponible(
+    documento_id: UUID, version_id: UUID, ver: Permiso, restringidos: Permiso, motor
+):
+    """La fila de una versión `disponible` que quien pide puede leer. Toda lectura del archivo pasa
+    por acá: es el control de acceso de §9.2 y de `0061`/`0062`."""
     ctx = ver.ctx
     ver.verificar(Entidad())
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
@@ -493,19 +500,48 @@ def descargar_version(
             CodigoError.VERSION_NO_DISPONIBLE,
             "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
         )
-    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
-    s3 = origen.cliente()
-    objeto = {"Bucket": origen.bucket, "Key": f["clave_objeto"]}
+    return f
+
+
+def _objeto(bucket: str, f) -> dict:
+    objeto = {"Bucket": bucket, "Key": f["clave_objeto"]}
     if f["version_objeto"]:
         objeto["VersionId"] = f["version_objeto"]
+    return objeto
+
+
+def _vencido(e: ClientError) -> ErrorApi:
+    """El objeto ya no está en el almacén; cualquier otro error del almacén sigue siendo error."""
+    if e.response.get("Error", {}).get("Code") not in SIN_OBJETO:
+        raise e
+    return ErrorApi(410, CodigoError.ARCHIVO_VENCIDO, "Este archivo ya no está disponible.")
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar",
+    status_code=302,
+    response_class=RedirectResponse,
+    summary="Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
+    responses={
+        302: {"description": "`Location` es la URL firmada del almacén; vence a los 5 minutos."},
+        **RESPUESTAS_VERSION,
+    },
+)
+def descargar_version(
+    documento_id: UUID,
+    version_id: UUID,
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    motor: MotorDep,
+) -> RedirectResponse:
+    f = _version_disponible(documento_id, version_id, ver, restringidos, motor)
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
+    s3 = origen.cliente()
+    objeto = _objeto(origen.bucket, f)
     try:
         s3.head_object(**objeto)
     except ClientError as e:
-        if e.response.get("Error", {}).get("Code") not in ("404", "NoSuchKey", "NoSuchVersion"):
-            raise
-        raise ErrorApi(
-            410, CodigoError.ARCHIVO_VENCIDO, "Este archivo ya no está disponible."
-        ) from e
+        raise _vencido(e) from e
     tipo = TipoArchivo(f["tipo"])
     url = s3.generate_presigned_url(
         "get_object",
@@ -514,3 +550,44 @@ def descargar_version(
         ExpiresIn=VIGENCIA_DESCARGA,
     )  # fmt: skip
     return RedirectResponse(url, status_code=302, headers=SIN_CACHE)
+
+
+def _tramos(cuerpo) -> Iterator[bytes]:
+    """Los tramos del objeto; la conexión con el almacén se cierra aunque el cliente se vaya."""
+    with closing(cuerpo):
+        yield from cuerpo.iter_chunks(TRAMO_CONTENIDO)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/contenido",
+    response_class=StreamingResponse,
+    summary="Ver una versión disponible en la pantalla: el archivo por el mismo origen",
+    responses={
+        200: {
+            "description": "El archivo, con `inline`, `nosniff` y una CSP que no deja ejecutar"
+            " nada.",
+            "content": {
+                t.value: {"schema": {"type": "string", "format": "binary"}} for t in TipoArchivo
+            },
+        },
+        **RESPUESTAS_VERSION,
+    },
+)
+def contenido_de_version(
+    documento_id: UUID,
+    version_id: UUID,
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    motor: MotorDep,
+) -> StreamingResponse:
+    f = _version_disponible(documento_id, version_id, ver, restringidos, motor)
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS)
+    try:
+        leido = origen.cliente().get_object(**_objeto(origen.bucket, f))
+    except ClientError as e:
+        raise _vencido(e) from e
+    return StreamingResponse(
+        _tramos(leido["Body"]),
+        media_type=TipoArchivo(f["tipo"]).value,
+        headers=CABECERAS_CONTENIDO | {"Content-Length": str(leido["ContentLength"])},
+    )

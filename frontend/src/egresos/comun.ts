@@ -147,6 +147,11 @@ export function importeEnCampo(centavos: number): string {
   return new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(centavos / 100);
 }
 
+/** Centavos a lo que se pega en el banco: sin miles y con coma decimal («184350,00»). */
+export function importeParaCopiar(centavos: number): string {
+  return `${Math.trunc(centavos / 100)},${String(centavos % 100).padStart(2, "0")}`;
+}
+
 /** Centavos a lo que se escribe en el campo («1234,50»). */
 export function aTexto(centavos: number): string {
   const enteros = Math.trunc(centavos / 100);

@@ -565,6 +565,106 @@ main:has(.cotejo) {
   overflow-wrap: anywhere;
 }
 
+/* El comprobante al lado de los datos; en un ancho angosto, uno arriba del otro. */
+.comprobante-y-datos {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.visor-comprobante img,
+.visor-comprobante canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #c9d2dd;
+  border-radius: 0.5rem;
+}
+
+.visor-comprobante canvas + canvas {
+  margin-top: 0.5rem;
+}
+
+.zona-comprobante {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.25rem 1rem;
+  border: 2px dashed #c9d2dd;
+  border-radius: 0.5rem;
+  text-align: center;
+}
+
+.visor-comprobante + .zona-comprobante {
+  margin-top: 0.75rem;
+}
+
+.zona-comprobante--encima {
+  border-color: var(--azul);
+}
+
+.zona-comprobante button {
+  min-height: 44px;
+  width: 100%;
+  max-width: 20rem;
+}
+
+.zona-comprobante .secundario,
+.boton-copiar {
+  border: 1px solid var(--azul);
+  background: transparent;
+  color: var(--azul);
+}
+
+.boton-copiar {
+  min-height: 44px;
+  margin-left: 0.5rem;
+  padding: 0.25rem 0.75rem;
+}
+
+.copiar-a-mano {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.fila-importe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.archivo-elegido {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.avance-comprobante {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.avance-comprobante [aria-current="step"] {
+  font-weight: 600;
+}
+
+.comparar-pago {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  border-collapse: collapse;
+}
+
+.comparar-pago th,
+.comparar-pago td {
+  padding: 0.25rem 0.5rem 0.25rem 0;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
 /* Las pestañas: solo en un ancho de teléfono (hasta 768 px = 48em). */
 .pestanas {
   display: none;

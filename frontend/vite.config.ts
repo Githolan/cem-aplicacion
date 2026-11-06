@@ -35,7 +35,8 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
         // La extensión se carga con importScripts; no hace falta además en la precaché.
-        globIgnores: [ARCHIVO_SW_ENTRAR],
+        // pdf.js se baja recién al ver un comprobante, y eso pide conexión igual.
+        globIgnores: [ARCHIVO_SW_ENTRAR, "assets/pdf-*.js"],
         importScripts: [`/${ARCHIVO_SW_ENTRAR}`],
         // Las navegaciones van a la red (src/swNavegacion.ts: por qué, y qué rutas quedan afuera).
         // Si la red falla, cualquier ruta recibe el index.html de la precaché, que es el de la

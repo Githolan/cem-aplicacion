@@ -75,8 +75,9 @@ export const FILTROS: readonly { valor: Filtro; texto: string }[] = [
 
 export const AVISO_VER_LA_CUENTA =
   "Para pagar hay que ver la cuenta. Queda registrado quién la vio, y esa persona no puede conciliar este pago.";
-export const AVISO_VERIFICAR_CUENTA =
-  "Verificá que la cuenta mostrada coincida con la cuenta autorizada para esta versión.";
+export const AVISO_ANTIVIRUS_TARDA =
+  "El antivirus está tardando. Podés salir: la orden queda en Pagos como «Subir el comprobante», con el archivo ya cargado.";
+export const AVISO_ARCHIVO_RECHAZADO = "Este archivo no se puede usar: no pasó el antivirus. Subí otro.";
 export const AVISO_SIN_CUENTA =
   "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste, registrá el pago con los datos del comprobante (si fue después del vencimiento, queda marcado fuera de término y el Consejo lo concilia con un motivo); si no, declará que no se pagó.";
 export const AVISO_SIN_SALIDA =
