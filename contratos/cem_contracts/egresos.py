@@ -868,9 +868,16 @@ class PasoPago(StrEnum):
     APROBAR = "aprobar"
     CONCILIAR = "conciliar"
     CONFIRMAR_NO_PAGO = "confirmar_no_pago"
+    DECLARAR_NO_PAGO = "declarar_no_pago"
+    """Nadie vio la cuenta y ya no se puede abrir (la aprobación venció, por ejemplo): la orden en
+    ejecución no se renueva, y la salida es declarar que no se pagó."""
     RESOLVER_DIFERENCIA = "resolver_diferencia"
     """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
     ESPERA_APROBAR = "espera_aprobar"
+    ESPERA_COMPROBANTE = "espera_comprobante"
+    """Otra persona ya vio la cuenta: se espera su comprobante y no se ofrece pagar, para que la
+    misma orden no se transfiera dos veces."""
+    ESPERA_DECLARAR = "espera_declarar"
     ESPERA_CONCILIAR = "espera_conciliar"
     ESPERA_CONFIRMAR = "espera_confirmar"
     ESPERA_RESOLVER = "espera_resolver"
@@ -894,6 +901,7 @@ class GrupoPago(StrEnum):
 GRUPO_DE_PASO = {
     PasoPago.PAGAR: GrupoPago.PARA_PAGAR,
     PasoPago.SUBIR_COMPROBANTE: GrupoPago.PARA_PAGAR,
+    PasoPago.DECLARAR_NO_PAGO: GrupoPago.PARA_PAGAR,
     PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
     PasoPago.ENVIAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
@@ -904,6 +912,8 @@ GRUPO_DE_PASO = {
     PasoPago.CONFIRMAR_NO_PAGO: GrupoPago.PARA_CONFIRMAR,
     PasoPago.RESOLVER_DIFERENCIA: GrupoPago.PARA_RESOLVER,
     PasoPago.ESPERA_APROBAR: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_COMPROBANTE: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_DECLARAR: GrupoPago.ESPERANDO,
     PasoPago.ESPERA_CONCILIAR: GrupoPago.ESPERANDO,
     PasoPago.ESPERA_CONFIRMAR: GrupoPago.ESPERANDO,
     PasoPago.ESPERA_RESOLVER: GrupoPago.ESPERANDO,
@@ -918,6 +928,7 @@ class LeTocaA(StrEnum):
     CONSEJO = "consejo"
     QUIEN_REGISTRO = "quien_registro"
     QUIEN_VIO_LA_CUENTA = "quien_vio_la_cuenta"
+    QUIEN_EJECUTA = "quien_ejecuta"
 
 
 class SituacionPago(StrEnum):
@@ -1012,6 +1023,7 @@ class FichaPago(BaseModel):
     puede_pagar: bool
     puede_subir_comprobante: bool
     puede_registrar: bool
+    puede_declarar: bool
     puede_corregir: bool
     puede_conciliar: bool
     puede_confirmar: bool

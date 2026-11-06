@@ -30,6 +30,7 @@ from app.consorcios.circuito_pagos import (
     HechosPago,
     bandeja,
     le_toca_a,
+    ofrece_pagar,
     paso_de,
     situacion_de,
 )
@@ -149,6 +150,27 @@ def test_con_una_declaracion_vigente_quien_falta_declarar_no_recibe_pagar():
     # Control: quien ya declaró espera, aunque la base le aceptaría otra cosa.
     ya = AccionesOrden(puede_pagar=True, puede_subir_comprobante=True)
     assert paso_de(S.NO_PAGO_DECLARADO, ya, True) == P.ESPERA_CONFIRMAR
+
+
+def test_con_la_cuenta_ya_vista_otro_ejecutor_espera_el_comprobante():
+    a = AccionesOrden(puede_pagar=True, cuenta_vista=True)
+    assert paso_de(S.PAGANDO, a, True) == P.ESPERA_COMPROBANTE
+    assert ofrece_pagar(S.PAGANDO, a) is False
+    assert le_toca_a(P.ESPERA_COMPROBANTE, a) == LeTocaA.QUIEN_VIO_LA_CUENTA
+    # Control: sin nadie que la haya visto, paga.
+    b = AccionesOrden(puede_pagar=True)
+    assert paso_de(S.PAGANDO, b, True) == P.PAGAR
+    assert ofrece_pagar(S.PAGANDO, b) is True
+
+
+def test_un_pago_sin_salida_lo_ve_quien_declara_y_el_resto_espera():
+    trabado = AccionesOrden(pago_sin_salida=True)
+    assert paso_de(S.PAGANDO, trabado, False) == P.ESPERA_DECLARAR
+    assert le_toca_a(P.ESPERA_DECLARAR, trabado) == LeTocaA.QUIEN_EJECUTA
+    puede = AccionesOrden(pago_sin_salida=True, puede_declarar=True)
+    assert paso_de(S.PAGANDO, puede, True) == P.DECLARAR_NO_PAGO
+    # Control: poder declarar no alcanza; sin estar trabada, a quien no paga no le aparece.
+    assert paso_de(S.PAGANDO, AccionesOrden(puede_declarar=True), True) is None
 
 
 def test_un_pago_observado_no_se_vuelve_a_pagar():

@@ -51,7 +51,8 @@ create function nucleo.hechos_de_pago_manual(c uuid, o nucleo.orden_pago,
                                              out manual boolean, out pago_sin_conciliar boolean,
                                              out pago_observado boolean,
                                              out declaracion_vigente boolean,
-                                             out declaracion_confirmable boolean)
+                                             out declaracion_confirmable boolean,
+                                             out cuenta_vista boolean)
   language plpgsql stable
   set search_path = pg_catalog, pg_temp
   as $$
@@ -65,12 +66,15 @@ create function nucleo.hechos_de_pago_manual(c uuid, o nucleo.orden_pago,
     pago_observado := false;
     declaracion_vigente := false;
     declaracion_confirmable := false;
+    cuenta_vista := false;
     select * into e from nucleo.ejecucion_orden_pago x
      where x.consorcio_id = c and x.orden_id = o.id and x.version = o.version_vigente;
     if not found or e.modalidad <> 'manual' then
       return;
     end if;
     manual := true;
+    cuenta_vista := exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                             where a.ejecucion_id = e.id);
     p := nucleo.ultimo_pago_manual(e.id);
     if p.id is not null then
       pago_observado := nucleo.pago_manual_observado(p.id);
@@ -193,6 +197,57 @@ create function nucleo.admite_registrar(c uuid, o nucleo.orden_pago, actor uuid,
   end
   $$;
 
+-- Lo que `declarar_pago_no_realizado` exige de quien tiene la facultad: si alguien vio la cuenta,
+-- declara alguien que la vio.
+create function nucleo.admite_declarar(c uuid, o nucleo.orden_pago, actor uuid, identidad uuid)
+  returns boolean
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    e nucleo.ejecucion_orden_pago;
+  begin
+    e := nucleo.ejecucion_manual_abierta(c, o);
+    perform nucleo.exigir_no_aprobo(c, o.id, e.version, actor, identidad);
+    perform nucleo.exigir_sin_pago_vigente(e.id);
+    return not exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                        where a.ejecucion_id = e.id)
+        or exists (select 1 from nucleo.apertura_cuenta_pago_manual a
+                    where a.ejecucion_id = e.id and a.identidad_abrio = identidad);
+  exception when raise_exception then
+    return false;
+  end
+  $$;
+
+-- La ejecución abierta que nadie vio y que ya nadie puede abrir (la aprobación venció, el proveedor
+-- cambió): no se renueva ni se modifica, y queda solo declarar que no se pagó.
+create function nucleo.pago_sin_salida(c uuid, o nucleo.orden_pago)
+  returns boolean
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    e nucleo.ejecucion_orden_pago;
+  begin
+    begin
+      e := nucleo.ejecucion_manual_abierta(c, o);
+    exception when raise_exception then
+      return false;
+    end;
+    if exists (select 1 from nucleo.apertura_cuenta_pago_manual a where a.ejecucion_id = e.id)
+       or exists (select 1 from nucleo.pago_manual x where x.ejecucion_id = e.id) then
+      return false;
+    end if;
+    begin
+      perform nucleo.exigir_proveedor_sin_cambios(c, o.id, e.version);
+      perform nucleo.exigir_orden_emitible(c, o, e.version);
+      return false;
+    exception when raise_exception then
+      return true;
+    end;
+  end
+  $$;
+
 -- Corrige quien registró el pago observado (decisión del propietario del 05-11-2026, §9).
 create function nucleo.registro_el_pago_observado(c uuid, o nucleo.orden_pago, identidad uuid)
   returns boolean
@@ -280,10 +335,11 @@ create function nucleo.acciones_de_ordenes_lectura(orden uuid, actor uuid, orige
                                                    sesion uuid)
   returns table (orden_id uuid, manual boolean, pago_sin_conciliar boolean,
                  pago_observado boolean, declaracion_vigente boolean,
-                 declaracion_confirmable boolean, puede_aprobar boolean, puede_rechazar boolean,
-                 puede_pagar boolean, puede_renovar boolean, puede_registrar boolean,
+                 declaracion_confirmable boolean, cuenta_vista boolean, puede_aprobar boolean,
+                 puede_rechazar boolean, puede_pagar boolean, puede_renovar boolean,
+                 puede_registrar boolean, puede_declarar boolean,
                  puede_subir_comprobante boolean, puede_corregir boolean, puede_conciliar boolean,
-                 puede_confirmar boolean, falta_que_declares boolean)
+                 puede_confirmar boolean, falta_que_declares boolean, pago_sin_salida boolean)
   language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -311,19 +367,21 @@ create function nucleo.acciones_de_ordenes_lectura(orden uuid, actor uuid, orige
     identidad := nucleo.exigir_sesion_operativa(c, actor, sesion, origen_pedido, false);
     return query
       select o.id, h.manual, h.pago_sin_conciliar, h.pago_observado, h.declaracion_vigente,
-             h.declaracion_confirmable,
+             h.declaracion_confirmable, h.cuenta_vista,
              aprueba and nucleo.admite_aprobar(c, o, actor, identidad),
              aprueba and nucleo.admite_rechazar(c, o, actor, identidad),
              ejecuta and nucleo.admite_pagar(c, o, actor, identidad),
              prepara and nucleo.admite_renovar(c, o),
              ejecuta and nucleo.admite_registrar(c, o, actor, identidad),
+             ejecuta and nucleo.admite_declarar(c, o, actor, identidad),
              ejecuta and carga and nucleo.admite_registrar(c, o, actor, identidad),
              ejecuta and nucleo.admite_registrar(c, o, actor, identidad)
                and nucleo.registro_el_pago_observado(c, o, identidad),
              aprueba and nucleo.admite_conciliar(c, o, actor, identidad),
              aprueba and h.declaracion_confirmable
                and nucleo.admite_confirmar(c, o, actor, identidad),
-             nucleo.falta_que_declare(c, o, identidad)
+             nucleo.falta_que_declare(c, o, identidad),
+             nucleo.pago_sin_salida(c, o)
         from nucleo.orden_pago o
        cross join lateral nucleo.hechos_de_pago_manual(c, o) h
        where o.consorcio_id = c and (orden is null or o.id = orden)
@@ -445,6 +503,8 @@ RUTAS = (
 )
 INTERNAS = (
     "nucleo.falta_que_declare(uuid, nucleo.orden_pago, uuid)",
+    "nucleo.pago_sin_salida(uuid, nucleo.orden_pago)",
+    "nucleo.admite_declarar(uuid, nucleo.orden_pago, uuid, uuid)",
     "nucleo.admite_confirmar(uuid, nucleo.orden_pago, uuid, uuid)",
     "nucleo.admite_conciliar(uuid, nucleo.orden_pago, uuid, uuid)",
     "nucleo.registro_el_pago_observado(uuid, nucleo.orden_pago, uuid)",

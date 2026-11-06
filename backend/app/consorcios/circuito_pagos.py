@@ -11,8 +11,15 @@ a pagar y la ficha tiene que decir qué falta.
 **Sin ejecución manual** (el riel) una orden en ejecución o en verificación queda `pagando`: §3 no
 la nombra, y ninguna persona la resuelve.
 
-**`para_pagar` y `pagando` no tienen `espera_*`:** §2 no lo define, así que a quien no le toca pagar
-no le aparece.
+**Una sola persona paga.** Con la orden en `pagando` y alguien que ya vio la cuenta, a otro ejecutor
+no se le ofrece pagar aunque la base se lo acepte: espera el comprobante. Evita la doble
+transferencia (decisión del hilo principal, 06-11-2026).
+
+**Un pago sin salida no queda invisible.** En ejecución, sin nadie que haya visto la cuenta y sin
+poder abrirla (la aprobación venció, por ejemplo), `renovar` no sirve: la base solo renueva una
+orden aprobada. La salida es declarar que no se pagó, y después volver a pagar.
+
+**`para_pagar` no tiene `espera_*`:** §2 no lo define: a quien no le toca pagar no le aparece.
 """
 
 from dataclasses import dataclass
@@ -39,6 +46,7 @@ class HechosPago:
     pago_observado: bool = False
     declaracion_vigente: bool = False
     declaracion_confirmable: bool = False
+    cuenta_vista: bool = False
 
 
 @dataclass(frozen=True)
@@ -50,11 +58,13 @@ class AccionesOrden(HechosPago):
     puede_pagar: bool = False
     puede_renovar: bool = False
     puede_registrar: bool = False
+    puede_declarar: bool = False
     puede_subir_comprobante: bool = False
     puede_corregir: bool = False
     puede_conciliar: bool = False
     puede_confirmar: bool = False
     falta_que_declares: bool = False
+    pago_sin_salida: bool = False
 
 
 SIN_ACCIONES = AccionesOrden()
@@ -84,6 +94,13 @@ def situacion_de(estado: EstadoOrdenPago, hechos: HechosPago) -> SituacionPago:
     return SituacionPago.PAGANDO
 
 
+def ofrece_pagar(situacion: SituacionPago, a: AccionesOrden) -> bool:
+    """Si se le ofrece pagar: la base lo acepta, la orden está por pagarse y nadie vio la cuenta."""
+    if situacion == SituacionPago.PAGANDO:
+        return a.puede_pagar and not a.cuenta_vista
+    return a.puede_pagar and situacion == SituacionPago.PARA_PAGAR
+
+
 def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPago | None:
     """§2. `prepara`: si quien pide lee la orden como quien prepara. Nulo si no le toca ni espera
     nada."""
@@ -97,11 +114,15 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
         case SituacionPago.PARA_PAGAR:
             if a.puede_renovar:
                 return PasoPago.RENOVAR
-            return PasoPago.PAGAR if a.puede_pagar else None
+            return PasoPago.PAGAR if ofrece_pagar(situacion, a) else None
         case SituacionPago.PAGANDO:
             if a.puede_subir_comprobante:
                 return PasoPago.SUBIR_COMPROBANTE
-            return PasoPago.PAGAR if a.puede_pagar else None
+            if a.pago_sin_salida:
+                return PasoPago.DECLARAR_NO_PAGO if a.puede_declarar else PasoPago.ESPERA_DECLARAR
+            if ofrece_pagar(situacion, a):
+                return PasoPago.PAGAR
+            return PasoPago.ESPERA_COMPROBANTE if a.puede_pagar else None
         case SituacionPago.FALTA_CONCILIAR:
             return PasoPago.CONCILIAR if a.puede_conciliar else PasoPago.ESPERA_CONCILIAR
         case SituacionPago.OBSERVADO:
@@ -124,6 +145,10 @@ def le_toca_a(paso: PasoPago, hechos: HechosPago) -> LeTocaA:
     match paso:
         case PasoPago.ESPERA_CORREGIR:
             return LeTocaA.QUIEN_REGISTRO
+        case PasoPago.ESPERA_DECLARAR:
+            return LeTocaA.QUIEN_EJECUTA
+        case PasoPago.ESPERA_COMPROBANTE:
+            return LeTocaA.QUIEN_VIO_LA_CUENTA
         case PasoPago.ESPERA_CONFIRMAR if not hechos.declaracion_confirmable:
             return LeTocaA.QUIEN_VIO_LA_CUENTA
         case (

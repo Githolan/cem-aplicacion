@@ -93,7 +93,6 @@ from cem_contracts.egresos import (
     Rechazo,
     RegistroPagoManual,
     Renovacion,
-    SituacionPago,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
     VersionProveedor,
@@ -1392,8 +1391,6 @@ ESTADOS_DE_FILTRO = {
 HECHOS = ("manual", "pago_sin_conciliar", "pago_observado", "declaracion_vigente",
           "declaracion_confirmable")  # fmt: skip
 
-PUEDE_PAGARSE = {SituacionPago.PARA_PAGAR, SituacionPago.PAGANDO}
-
 Preparar = Annotated[Permiso, Depends(requiere(PREPARAR, sin_gesto=True))]
 Revisar = Annotated[Permiso, Depends(requiere(REVISAR, sin_gesto=True))]
 
@@ -1414,7 +1411,8 @@ def _acciones(
     acciones = {}
     for fila in _ejecutar(c, lector, sql, {"o": orden}).mappings():
         datos = dict(fila)
-        acciones[datos.pop("orden_id")] = circuito_pagos.AccionesOrden(**datos)
+        orden_id = datos.pop("orden_id")
+        acciones[orden_id] = circuito_pagos.AccionesOrden(**datos)
     return acciones
 
 
@@ -1557,9 +1555,10 @@ def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: Moto
         puede_enviar=prepara and orden.estado == EstadoOrdenPago.BORRADOR,
         puede_aprobar=a.puede_aprobar, puede_rechazar=a.puede_rechazar,
         puede_renovar=a.puede_renovar,
-        # Con una declaración vigente o un registro observado la ficha no ofrece pagar (§9).
-        puede_pagar=a.puede_pagar and situacion in PUEDE_PAGARSE,
+        # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
+        puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
+        puede_declarar=a.puede_declarar,
         puede_corregir=a.puede_corregir, puede_conciliar=a.puede_conciliar,
         puede_confirmar=a.puede_confirmar, ejecucion=ejecucion, comprobante_actual=comprobante,
         observacion_vigente=observacion,

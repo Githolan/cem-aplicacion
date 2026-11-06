@@ -236,10 +236,60 @@ def test_subir_comprobante_lo_ve_quien_vio_la_cuenta(motor_migrate, motor_app, e
     assert paso(e, e.adm, o) == "subir_comprobante"
     f = ficha(e, e.adm, o)
     assert (f["puede_subir_comprobante"], f["puede_registrar"]) == (True, True)
-    # Control: quien no vio la cuenta no sube nada; todavía puede abrirla.
-    assert paso(e, x, o) == "pagar"
+    # Control: quien no vio la cuenta no sube nada.
     assert ficha(e, x, o)["puede_subir_comprobante"] is False
     assert paso(e, e.mc1, o) is None
+
+
+def test_con_la_cuenta_ya_vista_otro_ejecutor_no_recibe_pagar(motor_migrate, motor_app, e):
+    """Para que la misma orden no se transfiera dos veces. La base se lo aceptaría."""
+    x = segundo_ejecutor(motor_migrate, motor_app, e)
+    o = emitida(motor_migrate, e)
+    # Control: mientras nadie la vio, los dos pueden.
+    assert (paso(e, e.adm, o), paso(e, x, o)) == ("pagar", "pagar")
+    assert ficha(e, x, o)["puede_pagar"] is True
+    ver(motor_migrate, e, e.adm, o)
+    y = fila(e, x, o)
+    assert (y["paso"], y["grupo"], y["le_toca_a"]) == (
+        "espera_comprobante", "esperando", "quien_vio_la_cuenta",
+    )  # fmt: skip
+    assert ficha(e, x, o)["puede_pagar"] is False
+    assert paso(e, e.mc1, o) is None  # control: quien no ejecuta no espera nada acá
+
+
+def test_un_pago_con_la_aprobacion_vencida_que_nadie_vio_no_queda_invisible(motor_migrate, e):
+    """La base no renueva una orden en ejecución y ya no da la cuenta: la salida es declarar que no
+    se pagó, confirmarlo y volver a pagar."""
+    o = emitida(motor_migrate, e)
+    assert paso(e, e.adm, o) == "pagar"  # control: con la aprobación vigente
+    assert paso(e, e.mc2, o) is None
+    envejecer(motor_migrate, o, timedelta(days=8))
+    x = fila(e, e.adm, o)
+    assert (x["paso"], x["grupo"]) == ("declarar_no_pago", "para_pagar")
+    f = ficha(e, e.adm, o)
+    assert (f["puede_declarar"], f["puede_pagar"], f["puede_renovar"]) == (True, False, False)
+    y = fila(e, e.mc2, o)
+    assert (y["paso"], y["le_toca_a"]) == ("espera_declarar", "quien_ejecuta")
+    # La base: renovar no se admite, y por eso `renovar` no se ofrece.
+    r = post(e, e.adm, f"ordenes-pago/{o}/renovar", {"version_esperada": 1})
+    assert codigo(r) == (409, "orden_no_admite")
+    r = post(e, e.adm, f"ordenes-pago/{o}/pago-manual/no-realizado",
+             {"version": 1, "motivo": "SINTETICO: venció la aprobación"})  # fmt: skip
+    assert r.status_code == 201, r.json()
+    d = r.json()["id"]
+    assert paso(e, e.mc2, o) == "confirmar_no_pago"
+    r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion", {})
+    assert r.status_code == 200, r.json()
+    assert paso(e, e.adm, o) == "volver_a_pagar"
+
+
+def test_con_la_aprobacion_vencida_quien_vio_la_cuenta_sigue_registrando(motor_migrate, e):
+    """Control del anterior: alguien la vio, así que no está trabada (`0067`, fuera de término)."""
+    o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
+    envejecer(motor_migrate, o, timedelta(days=8))
+    assert paso(e, e.adm, o) == "subir_comprobante"
+    assert paso(e, e.mc2, o) is None
 
 
 def test_quien_vio_la_cuenta_y_no_prepara_no_recibe_lo_que_la_ruta_le_niega(motor_migrate, e):
@@ -638,14 +688,14 @@ def test_0072_ida_y_vuelta(base_aparte):
                      " where n.nspname = 'nucleo' and (p.proname like 'admite\\_%'"
                      " or p.proname in ('acciones_de_ordenes_lectura', 'pagos_consulta_lectura',"
                      " 'comprobante_subido_lectura', 'hechos_de_pago_manual', 'falta_que_declare',"
-                     " 'registro_el_pago_observado'))"),
+                     " 'registro_el_pago_observado', 'pago_sin_salida'))"),
             ).scalar_one()  # fmt: skip
 
     command.upgrade(cfg, "0071")
     assert funciones() == 0
     command.upgrade(cfg, "0072")
-    assert funciones() == 13
+    assert funciones() == 15
     command.downgrade(cfg, "0071")
     assert funciones() == 0
     command.upgrade(cfg, "0072")  # control: vuelve a subir limpio
-    assert funciones() == 13
+    assert funciones() == 15

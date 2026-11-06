@@ -3128,6 +3128,10 @@
             "title": "Puede Corregir",
             "type": "boolean"
           },
+          "puede_declarar": {
+            "title": "Puede Declarar",
+            "type": "boolean"
+          },
           "puede_enviar": {
             "title": "Puede Enviar",
             "type": "boolean"
@@ -3176,6 +3180,7 @@
           "puede_pagar",
           "puede_subir_comprobante",
           "puede_registrar",
+          "puede_declarar",
           "puede_corregir",
           "puede_conciliar",
           "puede_confirmar",
@@ -4325,7 +4330,8 @@
           "vos",
           "consejo",
           "quien_registro",
-          "quien_vio_la_cuenta"
+          "quien_vio_la_cuenta",
+          "quien_ejecuta"
         ],
         "title": "LeTocaA",
         "type": "string"
@@ -6365,8 +6371,11 @@
           "aprobar",
           "conciliar",
           "confirmar_no_pago",
+          "declarar_no_pago",
           "resolver_diferencia",
           "espera_aprobar",
+          "espera_comprobante",
+          "espera_declarar",
           "espera_conciliar",
           "espera_confirmar",
           "espera_resolver",
