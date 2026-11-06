@@ -222,12 +222,17 @@ def test_proveedor_nuevo_pide_aprobacion_aunque_este_bajo_el_umbral(motor_migrat
 
 def test_conocido_bajo_y_sobre_el_umbral(motor_migrate, motor_app, e):
     conocido(motor_migrate, e)
-    umbral(motor_app, e.cons, IMPORTE)
-    igual = enviada(motor_migrate, e)  # igual al umbral: no lo supera
-    assert (franja(motor_migrate, igual), orden(motor_migrate, igual)["estado"]) == (
+    umbral(motor_app, e.cons, IMPORTE * 2)
+    sola = enviada(motor_migrate, e)  # sumada a la anterior llega al umbral y no lo supera
+    assert (franja(motor_migrate, sola), orden(motor_migrate, sola)["estado"]) == (
         "bajo_umbral", "aprobada")  # fmt: skip
-    assert orden(motor_migrate, igual)["aprobada_en"] is not None
-    arriba = enviada(motor_migrate, e, importe=IMPORTE + 1)
+    assert orden(motor_migrate, sola)["aprobada_en"] is not None
+    # Igual al umbral no lo supera, y su franja no pide aprobación. La pide la alerta (`0077`).
+    igual = enviada(motor_migrate, e, importe=IMPORTE * 2)
+    assert (franja(motor_migrate, igual), orden(motor_migrate, igual)["estado"]) == (
+        "bajo_umbral", "en_revision")  # fmt: skip
+    assert versiones(motor_migrate, igual)[0]["alerta_fraccionamiento"] is True
+    arriba = enviada(motor_migrate, e, importe=IMPORTE * 2 + 1)
     assert (franja(motor_migrate, arriba), orden(motor_migrate, arriba)["estado"]) == (
         "sobre_umbral", "en_revision")  # fmt: skip
 
@@ -455,11 +460,14 @@ def test_lo_rutinario_del_mismo_contrato_en_el_mes_alerta_al_pasar_el_maximo(mot
     conocido(motor_migrate, e)
     k = confirmado(motor_migrate, e, tope=IMPORTE)
     alertas = []
+    estados = []
     for _ in range(2):
         o = enviada(motor_migrate, e, contrato=k)
-        assert orden(motor_migrate, o)["estado"] == "aprobada"  # no se bloquea
+        estados.append(orden(motor_migrate, o)["estado"])
         alertas.append(versiones(motor_migrate, o)[0]["alerta_fraccionamiento"])
     assert alertas == [False, True]
+    # No se bloquea: se envía igual y la decide el Consejo (`0077`).
+    assert estados == ["aprobada", "en_revision"]
 
 
 def test_la_alerta_mira_la_ventana_de_fraccionamiento_no_el_mes(motor_migrate, motor_app, e):
