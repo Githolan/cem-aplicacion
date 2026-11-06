@@ -333,6 +333,12 @@ def _lectura(permiso: Permiso, motor) -> Iterator[Connection]:
         yield c
 
 
+def _una_foto(motor):
+    """Bandeja y ficha cruzan varias lecturas: con READ COMMITTED, un acto confirmado en el medio
+    daría una respuesta que mezcla dos momentos."""
+    return motor.execution_options(isolation_level="REPEATABLE READ") if motor else motor
+
+
 def _evaluaciones(c: Connection, permiso: Permiso, orden: UUID | None) -> dict:
     """La franja de cada versión (`0050`), por `(orden, número)`. Se lee **después** de las
     órdenes o las versiones: las versiones solo se agregan, así que toda versión ya leída está."""
@@ -1470,7 +1476,7 @@ def bandeja_pagos(
 ) -> BandejaPagos:
     lector = _lector(preparar, revisar)
     dias = request.app.state.config.pagos_dias_bandeja
-    with _lectura(lector, motor) as c:
+    with _lectura(lector, _una_foto(motor)) as c:
         ordenes = _ordenes(c, lector, None)
         acciones = _acciones(c, lector, None)
     return BandejaPagos(elementos=circuito_pagos.bandeja(
@@ -1534,7 +1540,7 @@ def consulta_pagos(
 def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: MotorDep) -> FichaPago:
     lector = _lector(preparar, revisar)
     prepara = lector.accion == PREPARAR
-    with _lectura(lector, motor) as c:
+    with _lectura(lector, _una_foto(motor)) as c:
         detalle = _leer_orden_con_versiones(c, lector, orden_id)
         orden = detalle.orden
         a = _acciones(c, lector, orden_id).get(orden_id, circuito_pagos.SIN_ACCIONES)
