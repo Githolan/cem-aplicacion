@@ -177,6 +177,17 @@ def pdf_sintetico(corrida_id: str) -> bytes:
     return salida.getvalue()
 
 
+def cuit_sintetico(n: int) -> str:
+    """Un CUIT con su dígito verificador: cada proveedor de la corrida lleva el suyo."""
+    for intento in range(n, n + 20):
+        base = f"30{intento % 10**8:08d}"
+        pares = zip(base, (5, 4, 3, 2, 7, 6, 5, 4, 3, 2), strict=True)
+        resto = 11 - sum(int(x) * w for x, w in pares) % 11
+        if resto != 10:
+            return base + str(0 if resto == 11 else resto)
+    raise RuntimeError("sin CUIT sintético")
+
+
 def cbu_sintetico(n: int) -> str:
     """Una cuenta con sus dos dígitos verificadores y el prefijo 999, que no es de ningún banco."""
     bloque1 = f"9990{n % 1000:03d}"
@@ -457,6 +468,7 @@ def proveedor(corrida: Corrida, n: int) -> str:
     adm = corrida.n("administracion")
     r = adm.pedir("POST", corrida.c("/proveedores"),
                   {"razon_social": f"Proveedor LAB {corrida.id}-{n} SINTETICO (NO REAL)",
+                   "cuit": cuit_sintetico(int(corrida.id, 16) % 10**7 + n),
                    "rubro": "Mantenimiento SINTETICO", "cuenta_destino": cuenta},
                   csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"alta del proveedor {n}: {r.texto}")
