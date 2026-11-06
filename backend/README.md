@@ -55,6 +55,10 @@ Las pruebas `db` crean y borran la base `cem_prueba`, aplican la migración (ida
 
 Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.py`; si es intencional se regenera con `python -m scripts.exportar_openapi` y la diferencia se revisa en el PR.
 
+## Bandeja de pagos
+
+`CEM_PAGOS_DIAS_BANDEJA` dice cuántos días queda lo rechazado en `GET /api/v1/consorcios/{id}/pagos/bandeja` antes de quedar solo en la consulta. Sin la variable son 7. Un valor que no es un entero, o uno negativo, impide el arranque.
+
 ## Modelo de lenguaje
 
 `app/llm.py` es la única capa que habla con un modelo: el resto de la aplicación llama a `complete(messages, opts)` y ningún otro módulo importa el SDK de un proveedor. La llamada sale solo del backend; la clave nunca llega al frontend.

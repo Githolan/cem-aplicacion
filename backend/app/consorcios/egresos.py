@@ -28,18 +28,27 @@ nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 from uuid import UUID
 
 import anyio
 from cem_contracts.documentos import DocumentoId, VersionCargada
 from cem_contracts.egresos import (
+    LARGO_MAXIMO_BUSQUEDA_PAGOS,
+    LIMITE_CONSULTA_PAGOS_MAXIMO,
+    LIMITE_CONSULTA_PAGOS_POR_DEFECTO,
+    MAXIMO_SALTAR_CONSULTA_PAGOS,
+    SIN_CONTROLES,
     VIGENCIA_APROBACION,
     Aprobacion,
     AprobacionRegistrada,
+    BandejaPagos,
+    ComprobanteActual,
     ComprobantePagoNuevo,
     ConciliacionPagoManual,
     Confirmacion,
+    ConsultaPagos,
     Contrato,
     ContratoCambiado,
     ContratoNuevo,
@@ -50,15 +59,19 @@ from cem_contracts.egresos import (
     DeclaracionPagoNoRealizado,
     DeclaracionRegistrada,
     EjecucionManual,
+    ElementoConsultaPagos,
     Emision,
     EnvioARevision,
     EstadoOrdenPago,
+    FichaPago,
+    FiltroConsultaPagos,
     ListaContratos,
     ListaContratosRevision,
     ListaOrdenesPago,
     ListaPagosManuales,
     ListaPagosPorAclarar,
     ListaProveedores,
+    ObservacionVigente,
     OrdenConPagoManual,
     OrdenPago,
     OrdenPagoCambiada,
@@ -86,13 +99,14 @@ from cem_contracts.egresos import (
     ultimos_digitos,
 )
 from cem_contracts.errores import CodigoError
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
+from app.consorcios import circuito_pagos
 from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
 from app.contexto import Contexto, IdentidadDep, MotorDep
@@ -319,6 +333,12 @@ def _lectura(permiso: Permiso, motor) -> Iterator[Connection]:
         yield c
 
 
+def _una_foto(motor):
+    """Bandeja y ficha cruzan varias lecturas: con READ COMMITTED, un acto confirmado en el medio
+    daría una respuesta que mezcla dos momentos."""
+    return motor.execution_options(isolation_level="REPEATABLE READ") if motor else motor
+
+
 def _evaluaciones(c: Connection, permiso: Permiso, orden: UUID | None) -> dict:
     """La franja de cada versión (`0050`), por `(orden, número)`. Se lee **después** de las
     órdenes o las versiones: las versiones solo se agregan, así que toda versión ya leída está."""
@@ -431,39 +451,43 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, aprobar: Permi
     Quien preparó la orden o alguna de sus versiones no la aprueba (`no_es_quien_preparo`), así
     que tampoco en la revisión recibe la cuenta completa: un consejero que además prepara la ve
     como quien prepara."""
-    revision = aprobar is not None
     with _lectura(permiso, motor) as c:
-        ordenes = _ordenes(c, permiso, orden_id)
-        if not ordenes:
-            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-        filas = list(
-            _ejecutar(
-                c, permiso, VERSIONES, {"o": orden_id, "f": LEE_COMO[permiso.accion]}
-            ).mappings()
-        )
-        evaluaciones = _evaluaciones(c, permiso, orden_id)
-        # Por la identidad humana guardada en cada versión, no por cuenta ni por los vínculos de
-        # hoy: quien preparó y revisa con otra cuenta suya tampoco recibe la cuenta completa,
-        # aunque la cuenta con la que preparó ya no esté vinculada (#175; P3 115).
-        preparo = revision and _ejecutar(c, permiso, PREPARO, {"o": orden_id}).scalar_one()
-        versiones = []
-        for f in filas:
-            ev = evaluaciones[(orden_id, f["numero"])]
-            datos = _recortada(f)
-            modelo = VersionOrdenPago
-            if revision:
-                modelo = VersionOrdenPagoRevision
-                datos["cuenta_destino"] = None if preparo else f["cuenta_destino"]
-            versiones.append(modelo(
-                **datos, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
-                umbral_importe_centavos=ev["umbral_importe_centavos"],
-                umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
-            ))  # fmt: skip
+        return _leer_orden_con_versiones(c, permiso, orden_id, aprobar)
+
+
+def _leer_orden_con_versiones(
+    c: Connection, permiso: Permiso, orden_id: UUID, aprobar: Permiso | None = None
+):
+    revision = aprobar is not None
+    ordenes = _ordenes(c, permiso, orden_id)
+    if not ordenes:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    filas = list(
+        _ejecutar(c, permiso, VERSIONES, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
+    )
+    evaluaciones = _evaluaciones(c, permiso, orden_id)
+    # Por la identidad humana guardada en cada versión, no por cuenta ni por los vínculos de
+    # hoy: quien preparó y revisa con otra cuenta suya tampoco recibe la cuenta completa,
+    # aunque la cuenta con la que preparó ya no esté vinculada (#175; P3 115).
+    preparo = revision and _ejecutar(c, permiso, PREPARO, {"o": orden_id}).scalar_one()
+    versiones = []
+    for f in filas:
+        ev = evaluaciones[(orden_id, f["numero"])]
+        datos = _recortada(f)
+        modelo = VersionOrdenPago
         if revision:
-            return OrdenPagoConVersionesRevision(
-                orden=ordenes[0], versiones=versiones,
-                **_puede_decidir(c, aprobar, ordenes[0], filas, preparo),
-            )  # fmt: skip
+            modelo = VersionOrdenPagoRevision
+            datos["cuenta_destino"] = None if preparo else f["cuenta_destino"]
+        versiones.append(modelo(
+            **datos, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
+            umbral_importe_centavos=ev["umbral_importe_centavos"],
+            umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
+        ))  # fmt: skip
+    if revision:
+        return OrdenPagoConVersionesRevision(
+            orden=ordenes[0], versiones=versiones,
+            **_puede_decidir(c, aprobar, ordenes[0], filas, preparo),
+        )  # fmt: skip
     return OrdenPagoConVersiones(orden=ordenes[0], versiones=versiones)
 
 
@@ -1041,15 +1065,10 @@ def _puede_resolver(
     return bool(registraron) and negadas.isdisjoint(registraron), bool(personas) and not negadas
 
 
-def _pagos_manuales(
-    c: Connection, permiso: Permiso, conciliar: Permiso, orden: UUID | None
-) -> list[OrdenConPagoManual]:
-    """Las órdenes con una ejecución manual de su versión vigente, con sus registros y
-    declaraciones, sin la cuenta. Las ejecuciones se leen **después** de las órdenes: una que no
-    sea de la versión leída (la orden cambió en el medio) no se muestra. Qué puede resolver quien
-    lee se calcula solo en las órdenes que esperan el pago y tienen algo por resolver."""
+def _leer_ejecuciones(c: Connection, permiso: Permiso, orden: UUID | None):
+    """Las ejecuciones manuales con sus registros y declaraciones, y quiénes registraron o
+    declararon en cada orden. Sin la cuenta."""
     datos_lectura = {"o": orden, "f": LEE_COMO[permiso.accion]}
-    ordenes = {o.id: o for o in _ordenes(c, permiso, orden)}
     ejecuciones = _ejecutar(
         c, permiso, "select * from nucleo.ejecuciones_manuales_lectura(:o, :f, :actor, 'api',"
         " :sesion)", datos_lectura,
@@ -1072,6 +1091,20 @@ def _pagos_manuales(
         datos = dict(fila)
         declararon.setdefault(datos.pop("orden_id"), set()).add(datos["declarado_por"])
         declaraciones.setdefault(datos.pop("ejecucion_id"), []).append(datos)
+    return ejecuciones, pagos, registraron, declaraciones, declararon
+
+
+def _pagos_manuales(
+    c: Connection, permiso: Permiso, conciliar: Permiso, orden: UUID | None
+) -> list[OrdenConPagoManual]:
+    """Las órdenes con una ejecución manual de su versión vigente, con sus registros y
+    declaraciones, sin la cuenta. Las ejecuciones se leen **después** de las órdenes: una que no
+    sea de la versión leída (la orden cambió en el medio) no se muestra. Qué puede resolver quien
+    lee se calcula solo en las órdenes que esperan el pago y tienen algo por resolver."""
+    ordenes = {o.id: o for o in _ordenes(c, permiso, orden)}
+    ejecuciones, pagos, registraron, declaraciones, declararon = _leer_ejecuciones(
+        c, permiso, orden
+    )
     alcanza_conciliar = alcanza(CONCILIAR, conciliar.ctx.autorizacion)
     elementos = []
     for e in ejecuciones:
@@ -1348,6 +1381,195 @@ def confirmar_pago_no_realizado(
         return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Circuito de pagos: bandeja, ficha y consulta (`0072`) --------------------------------------
+# Las lee quien prepara o quien revisa, sin el gesto. Lo que cada persona puede hacer lo decide la
+# base con `nucleo.acciones_de_ordenes_lectura`. Ninguna de estas rutas da la cuenta completa.
+
+ESTADOS_DE_FILTRO = {
+    FiltroConsultaPagos.TODOS: None,
+    FiltroConsultaPagos.PAGADOS: [EstadoOrdenPago.PAGADA, EstadoOrdenPago.CONCILIADA],
+    FiltroConsultaPagos.NO_SE_PAGARON: [EstadoOrdenPago.FALLIDA],
+    FiltroConsultaPagos.RECHAZADOS: [EstadoOrdenPago.RECHAZADA],
+    FiltroConsultaPagos.EN_CURSO: [EstadoOrdenPago.BORRADOR, *EN_CURSO],
+}
+HECHOS = ("manual", "pago_sin_conciliar", "pago_observado", "declaracion_vigente",
+          "declaracion_confirmable")  # fmt: skip
+
+Preparar = Annotated[Permiso, Depends(requiere(PREPARAR, sin_gesto=True))]
+Revisar = Annotated[Permiso, Depends(requiere(REVISAR, sin_gesto=True))]
+
+
+def _lector(preparar: Permiso, revisar: Permiso) -> Permiso:
+    """Quien prepara lee como quien prepara (ve los borradores); si no, como quien revisa. Se elige
+    por lo que alcanza, no por lo que se concede hoy: si falta renovar la sesión, la negación lo
+    tiene que decir."""
+    permiso = preparar if alcanza(PREPARAR, preparar.ctx.autorizacion) else revisar
+    permiso.verificar()
+    return permiso
+
+
+def _acciones(
+    c: Connection, lector: Permiso, orden: UUID | None
+) -> dict[UUID, circuito_pagos.AccionesOrden]:
+    sql = "select * from nucleo.acciones_de_ordenes_lectura(:o, :actor, 'api', :sesion)"
+    acciones = {}
+    for fila in _ejecutar(c, lector, sql, {"o": orden}).mappings():
+        datos = dict(fila)
+        orden_id = datos.pop("orden_id")
+        acciones[orden_id] = circuito_pagos.AccionesOrden(**datos)
+    return acciones
+
+
+def _ejecucion_vigente(
+    c: Connection, lector: Permiso, orden: OrdenPago, a: circuito_pagos.AccionesOrden
+) -> EjecucionManual | None:
+    """La ejecución manual de la versión vigente. `puede_confirmar` es de la última declaración: es
+    la que mira la base."""
+    ejecuciones, pagos, _, declaraciones, _ = _leer_ejecuciones(c, lector, orden.id)
+    e = next((x for x in ejecuciones if x["version"] == orden.version_vigente), None)
+    if e is None:
+        return None
+    declaradas = declaraciones.get(e["id"], [])
+    return EjecucionManual(
+        id=e["id"], version=e["version"], creada_en=e["creada_en"], resultado=e["resultado"],
+        referencia=e["referencia"], pagos=pagos.get(e["id"], []),
+        declaraciones=[
+            PagoNoRealizado(**d, puede_confirmar=a.puede_confirmar and d is declaradas[-1])
+            for d in declaradas
+        ],
+    )  # fmt: skip
+
+
+def _comprobante_actual(
+    c: Connection, lector: Permiso, orden_id: UUID, ultimo: PagoManual | None, observado: bool
+) -> ComprobanteActual | None:
+    """El del registro vigente; sin él, lo último que subió quien mira y, si no subió nada, el del
+    registro observado."""
+    if ultimo is not None and not observado:
+        return ComprobanteActual(
+            documento_id=ultimo.documento_id, version_documento_id=ultimo.version_documento_id
+        )
+    subido = _ejecutar(
+        c, lector,
+        "select * from nucleo.comprobante_subido_lectura(:o, :f, :actor, 'api', :sesion)",
+        {"o": orden_id, "f": LEE_COMO[lector.accion]},
+    ).mappings().one_or_none()  # fmt: skip
+    if subido is not None:
+        return ComprobanteActual(**subido)
+    if ultimo is None:
+        return None
+    return ComprobanteActual(
+        documento_id=ultimo.documento_id, version_documento_id=ultimo.version_documento_id
+    )
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/bandeja",
+    response_model=BandejaPagos,
+    summary="Lo que quien pide tiene que hacer ahora, agrupado por el próximo paso, sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def bandeja_pagos(
+    request: Request, preparar: Preparar, revisar: Revisar, motor: MotorDep
+) -> BandejaPagos:
+    lector = _lector(preparar, revisar)
+    dias = request.app.state.config.pagos_dias_bandeja
+    with _lectura(lector, _una_foto(motor)) as c:
+        ordenes = _ordenes(c, lector, None)
+        acciones = _acciones(c, lector, None)
+    return BandejaPagos(elementos=circuito_pagos.bandeja(
+        ordenes, acciones, lector.accion == PREPARAR, datetime.now(UTC) - timedelta(days=dias),
+    ))  # fmt: skip
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/consulta",
+    response_model=ConsultaPagos,
+    summary="Consultar pagos, por proveedor, concepto o número de operación, sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def consulta_pagos(
+    preparar: Preparar,
+    revisar: Revisar,
+    motor: MotorDep,
+    busqueda: Annotated[
+        str | None, Query(max_length=LARGO_MAXIMO_BUSQUEDA_PAGOS, pattern=SIN_CONTROLES)
+    ] = None,
+    filtro: FiltroConsultaPagos = FiltroConsultaPagos.TODOS,
+    limite: Annotated[
+        int, Query(ge=1, le=LIMITE_CONSULTA_PAGOS_MAXIMO)
+    ] = LIMITE_CONSULTA_PAGOS_POR_DEFECTO,
+    saltar: Annotated[int, Query(ge=0, le=MAXIMO_SALTAR_CONSULTA_PAGOS)] = 0,
+) -> ConsultaPagos:
+    lector = _lector(preparar, revisar)
+    estados = ESTADOS_DE_FILTRO[filtro]
+    with _lectura(lector, motor) as c:
+        # Uno de más, para saber si hay otra página.
+        filas = _ejecutar(
+            c, lector,
+            "select * from nucleo.pagos_consulta_lectura(:b, :e, :l, :s, :f, :actor, 'api',"
+            " :sesion)",
+            {"b": busqueda, "e": None if estados is None else [e.value for e in estados],
+             "l": limite + 1, "s": saltar, "f": LEE_COMO[lector.accion]},
+        ).mappings().all()  # fmt: skip
+    elementos = []
+    for f in filas[:limite]:
+        hechos = circuito_pagos.HechosPago(**{k: f[k] for k in HECHOS})
+        estado = EstadoOrdenPago(f["estado"])
+        elementos.append(ElementoConsultaPagos(
+            orden_id=f["orden_id"], proveedor=f["razon_social"], concepto=f["concepto"],
+            importe_centavos=f["importe_centavos"], moneda=f["moneda"], estado=estado,
+            situacion=circuito_pagos.situacion_de(estado, hechos),
+            numero_operacion=f["numero_operacion"], fecha_operacion=f["fecha_operacion"],
+            actualizada_en=f["actualizada_en"],
+        ))  # fmt: skip
+    return ConsultaPagos(
+        elementos=elementos, siguiente=saltar + limite if len(filas) > limite else None
+    )
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/{orden_id}",
+    response_model=FichaPago,
+    summary="La ficha de una orden en cualquier estado: en qué anda y qué puede hacer quien pide,"
+    " sin la cuenta",
+    responses=RESPUESTAS_LECTURA | {404: {"description": "No existe en este consorcio."}},
+)
+def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: MotorDep) -> FichaPago:
+    lector = _lector(preparar, revisar)
+    prepara = lector.accion == PREPARAR
+    with _lectura(lector, _una_foto(motor)) as c:
+        detalle = _leer_orden_con_versiones(c, lector, orden_id)
+        orden = detalle.orden
+        a = _acciones(c, lector, orden_id).get(orden_id, circuito_pagos.SIN_ACCIONES)
+        ejecucion = _ejecucion_vigente(c, lector, orden, a)
+        ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
+        comprobante = _comprobante_actual(c, lector, orden_id, ultimo, a.pago_observado)
+    situacion = circuito_pagos.situacion_de(orden.estado, a)
+    paso = circuito_pagos.paso_de(situacion, a, prepara)
+    observacion = None
+    if a.pago_observado:
+        observacion = ObservacionVigente(
+            pago_id=ultimo.id, motivo=ultimo.motivo_conciliacion,
+            observado_por=ultimo.conciliado_por, observado_en=ultimo.conciliado_en,
+        )  # fmt: skip
+    return FichaPago(
+        orden=orden, versiones=detalle.versiones, situacion=situacion, paso=paso,
+        le_toca_a=None if paso is None else circuito_pagos.le_toca_a(paso, a),
+        puede_enviar=prepara and orden.estado == EstadoOrdenPago.BORRADOR,
+        puede_aprobar=a.puede_aprobar, puede_rechazar=a.puede_rechazar,
+        puede_renovar=a.puede_renovar,
+        # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
+        puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
+        puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
+        puede_declarar=a.puede_declarar,
+        puede_corregir=a.puede_corregir, puede_conciliar=a.puede_conciliar,
+        puede_confirmar=a.puede_confirmar, ejecucion=ejecucion, comprobante_actual=comprobante,
+        observacion_vigente=observacion,
+        declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
+    )  # fmt: skip
 
 
 # --- Quien vio la cuenta y ya no ejecuta (`0067`, P3 179) ---------------------------------------

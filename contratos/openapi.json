@@ -256,6 +256,23 @@
         "title": "BajaMandato",
         "type": "object"
       },
+      "BandejaPagos": {
+        "description": "`GET …/pagos/bandeja`: lo que quien pide tiene que hacer ahora, por grupo y de lo más viejo\na lo más nuevo. Lo pagado no está; lo rechazado, solo `CEM_PAGOS_DIAS_BANDEJA` días.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ElementoBandejaPagos"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "BandejaPagos",
+        "type": "object"
+      },
       "CambioEvento": {
         "description": "Un campo de la lista blanca funcional de la acción, con su valor antes y después.",
         "properties": {
@@ -758,6 +775,27 @@
         "title": "CoeficientesGrupo",
         "type": "object"
       },
+      "ComprobanteActual": {
+        "description": "El archivo que corresponde mostrar: el del registro vigente o, sin él, el último que quien\nmira subió para esta ejecución y pasó el antivirus.",
+        "properties": {
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_documento_id"
+        ],
+        "title": "ComprobanteActual",
+        "type": "object"
+      },
       "ComprobantePagoNuevo": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/pago-manual/comprobante`: el documento del comprobante, cargado\ndesde el pago (`0063`). Lo crea quien vio la cuenta en el acto de ejecución de esa orden. Nace\nen «Facturas y comprobantes» y restringido: lo ven quien sube cada versión y el Consejo que no\npreparó la orden. El archivo se sube después a `…/documentos/{id}/versiones`.",
@@ -924,6 +962,36 @@
           "vinculos"
         ],
         "title": "ConsorcioResumen",
+        "type": "object"
+      },
+      "ConsultaPagos": {
+        "description": "`GET …/pagos/consulta`: de lo último que cambió a lo más viejo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ElementoConsultaPagos"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `saltar` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente"
+        ],
+        "title": "ConsultaPagos",
         "type": "object"
       },
       "Contacto": {
@@ -2347,6 +2415,129 @@
         "title": "EjecucionManual",
         "type": "object"
       },
+      "ElementoBandejaPagos": {
+        "description": "Una orden en la bandeja de quien pide, sin la cuenta.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "grupo": {
+            "$ref": "#/components/schemas/GrupoPago"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "le_toca_a": {
+            "$ref": "#/components/schemas/LeTocaA"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "paso": {
+            "$ref": "#/components/schemas/PasoPago"
+          },
+          "proveedor": {
+            "description": "La razón social de la versión vigente de la orden.",
+            "title": "Proveedor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "proveedor",
+          "concepto",
+          "importe_centavos",
+          "moneda",
+          "paso",
+          "grupo",
+          "le_toca_a"
+        ],
+        "title": "ElementoBandejaPagos",
+        "type": "object"
+      },
+      "ElementoConsultaPagos": {
+        "description": "Una orden en la consulta, sin la cuenta. Abre la misma ficha.",
+        "properties": {
+          "actualizada_en": {
+            "format": "date-time",
+            "title": "Actualizada En",
+            "type": "string"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "fecha_operacion": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fecha Operacion"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El del último registro de la versión vigente, si tiene.",
+            "title": "Numero Operacion"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "proveedor": {
+            "title": "Proveedor",
+            "type": "string"
+          },
+          "situacion": {
+            "$ref": "#/components/schemas/SituacionPago"
+          }
+        },
+        "required": [
+          "orden_id",
+          "proveedor",
+          "concepto",
+          "importe_centavos",
+          "moneda",
+          "estado",
+          "situacion",
+          "numero_operacion",
+          "fecha_operacion",
+          "actualizada_en"
+        ],
+        "title": "ElementoConsultaPagos",
+        "type": "object"
+      },
       "Emision": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/emitir`: la versión aprobada que se emite (Aprobada →\nEnEjecucion). No mueve dinero.",
@@ -2852,6 +3043,155 @@
         "title": "FaltaSegundoFactor",
         "type": "object"
       },
+      "FichaPago": {
+        "description": "`GET …/pagos/{orden}`: una sola ficha para todos los estados, sin la cuenta completa. Los\n`puede_*` dicen lo que la base va a aceptar hoy de quien pide, sin contar el gesto (se pide al\nactuar); solo sirven para mostrar: la ruta y la base vuelven a decidir.",
+        "properties": {
+          "comprobante_actual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComprobanteActual"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "declaracion_vigente": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PagoNoRealizado"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La última declaración de «no se pagó» que nadie superó ni confirmó."
+          },
+          "ejecucion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EjecucionManual"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La ejecución manual de la versión vigente, si tiene."
+          },
+          "le_toca_a": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LeTocaA"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observacion_vigente": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservacionVigente"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "orden": {
+            "$ref": "#/components/schemas/OrdenPago"
+          },
+          "paso": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PasoPago"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo si a quien mira no le toca ni espera nada."
+          },
+          "puede_aprobar": {
+            "title": "Puede Aprobar",
+            "type": "boolean"
+          },
+          "puede_conciliar": {
+            "title": "Puede Conciliar",
+            "type": "boolean"
+          },
+          "puede_confirmar": {
+            "title": "Puede Confirmar",
+            "type": "boolean"
+          },
+          "puede_corregir": {
+            "title": "Puede Corregir",
+            "type": "boolean"
+          },
+          "puede_declarar": {
+            "title": "Puede Declarar",
+            "type": "boolean"
+          },
+          "puede_enviar": {
+            "title": "Puede Enviar",
+            "type": "boolean"
+          },
+          "puede_pagar": {
+            "title": "Puede Pagar",
+            "type": "boolean"
+          },
+          "puede_rechazar": {
+            "title": "Puede Rechazar",
+            "type": "boolean"
+          },
+          "puede_registrar": {
+            "title": "Puede Registrar",
+            "type": "boolean"
+          },
+          "puede_renovar": {
+            "title": "Puede Renovar",
+            "type": "boolean"
+          },
+          "puede_subir_comprobante": {
+            "title": "Puede Subir Comprobante",
+            "type": "boolean"
+          },
+          "situacion": {
+            "$ref": "#/components/schemas/SituacionPago"
+          },
+          "versiones": {
+            "items": {
+              "$ref": "#/components/schemas/VersionOrdenPago"
+            },
+            "title": "Versiones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "orden",
+          "versiones",
+          "situacion",
+          "paso",
+          "le_toca_a",
+          "puede_enviar",
+          "puede_aprobar",
+          "puede_rechazar",
+          "puede_renovar",
+          "puede_pagar",
+          "puede_subir_comprobante",
+          "puede_registrar",
+          "puede_declarar",
+          "puede_corregir",
+          "puede_conciliar",
+          "puede_confirmar",
+          "ejecucion",
+          "comprobante_actual",
+          "observacion_vigente",
+          "declaracion_vigente"
+        ],
+        "title": "FichaPago",
+        "type": "object"
+      },
       "FilaInforme": {
         "description": "Lo que haría una fila. Sin correo ni nombre.",
         "properties": {
@@ -3037,6 +3377,17 @@
         ],
         "title": "FilaPadron",
         "type": "object"
+      },
+      "FiltroConsultaPagos": {
+        "enum": [
+          "todos",
+          "pagados",
+          "no_se_pagaron",
+          "rechazados",
+          "en_curso"
+        ],
+        "title": "FiltroConsultaPagos",
+        "type": "string"
       },
       "FinVinculo": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/finalizar` (PA17).",
@@ -3234,6 +3585,21 @@
         ],
         "title": "GrupoLiquidable",
         "type": "object"
+      },
+      "GrupoPago": {
+        "description": "Los grupos de la bandeja, en el orden en que se muestran (§2).",
+        "enum": [
+          "para_pagar",
+          "para_corregir",
+          "para_preparar",
+          "para_aprobar",
+          "para_conciliar",
+          "para_confirmar",
+          "para_resolver",
+          "esperando"
+        ],
+        "title": "GrupoPago",
+        "type": "string"
       },
       "GrupoSimulado": {
         "properties": {
@@ -3957,6 +4323,18 @@
         ],
         "title": "InvitacionRecibida",
         "type": "object"
+      },
+      "LeTocaA": {
+        "description": "A quién le toca el próximo paso, por su lugar en el circuito: no nombra personas.",
+        "enum": [
+          "vos",
+          "consejo",
+          "quien_registro",
+          "quien_vio_la_cuenta",
+          "quien_ejecuta"
+        ],
+        "title": "LeTocaA",
+        "type": "string"
       },
       "Liquidacion": {
         "properties": {
@@ -5141,6 +5519,38 @@
         "title": "NuevaContrasena",
         "type": "object"
       },
+      "ObservacionVigente": {
+        "description": "Por qué el Consejo observó el último registro.",
+        "properties": {
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "observado_en": {
+            "format": "date-time",
+            "title": "Observado En",
+            "type": "string"
+          },
+          "observado_por": {
+            "format": "uuid",
+            "title": "Observado Por",
+            "type": "string"
+          },
+          "pago_id": {
+            "format": "uuid",
+            "title": "Pago Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pago_id",
+          "motivo",
+          "observado_por",
+          "observado_en"
+        ],
+        "title": "ObservacionVigente",
+        "type": "object"
+      },
       "OpcionesLlave": {
         "description": "Respuesta de `POST …/alta/opciones` y `POST …/verificar/opciones`.",
         "properties": {
@@ -5947,6 +6357,32 @@
         ],
         "title": "PagoPorAclarar",
         "type": "object"
+      },
+      "PasoPago": {
+        "description": "El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la\nacción; los `espera_*` son de quien la ve y no le toca.",
+        "enum": [
+          "pagar",
+          "subir_comprobante",
+          "corregir",
+          "enviar",
+          "renovar",
+          "volver_a_pagar",
+          "rechazada",
+          "aprobar",
+          "conciliar",
+          "confirmar_no_pago",
+          "declarar_no_pago",
+          "resolver_diferencia",
+          "espera_aprobar",
+          "espera_comprobante",
+          "espera_declarar",
+          "espera_conciliar",
+          "espera_confirmar",
+          "espera_resolver",
+          "espera_corregir"
+        ],
+        "title": "PasoPago",
+        "type": "string"
       },
       "PedidoCopia": {
         "description": "`POST /api/v1/privacidad/casos/{caso_id}/copia`.",
@@ -6889,6 +7325,25 @@
         ],
         "title": "SimulacionLiquidacion",
         "type": "object"
+      },
+      "SituacionPago": {
+        "description": "Lo que se le dice a la persona (§3), derivado en el servidor: puede diferir del estado de\nla base. Los estados que §3 no nombra conservan su nombre.",
+        "enum": [
+          "borrador",
+          "en_revision",
+          "rechazada",
+          "para_pagar",
+          "pagando",
+          "no_pago_declarado",
+          "falta_conciliar",
+          "observado",
+          "con_diferencia",
+          "reclamo",
+          "pagada",
+          "no_se_pago"
+        ],
+        "title": "SituacionPago",
+        "type": "string"
       },
       "TipoActor": {
         "enum": [
@@ -13672,6 +14127,208 @@
           }
         },
         "summary": "Registrar lo que transferiste, sin ejecutar ya pagos en el consorcio: lo concilia otro miembro del Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/bandeja": {
+      "get": {
+        "operationId": "bandeja_pagos_api_v1_consorcios__consorcio_id__pagos_bandeja_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BandejaPagos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que quien pide tiene que hacer ahora, agrupado por el próximo paso, sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/consulta": {
+      "get": {
+        "operationId": "consulta_pagos_api_v1_consorcios__consorcio_id__pagos_consulta_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "busqueda",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Busqueda"
+            }
+          },
+          {
+            "in": "query",
+            "name": "filtro",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/FiltroConsultaPagos",
+              "default": "todos"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "saltar",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 2147483647,
+              "minimum": 0,
+              "title": "Saltar",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsultaPagos"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Consultar pagos, por proveedor, concepto o número de operación, sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/{orden_id}": {
+      "get": {
+        "operationId": "ficha_pago_api_v1_consorcios__consorcio_id__pagos__orden_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FichaPago"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "La ficha de una orden en cualquier estado: en qué anda y qué puede hacer quien pide, sin la cuenta",
         "tags": [
           "egresos"
         ]

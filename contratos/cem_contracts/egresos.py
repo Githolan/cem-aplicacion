@@ -840,3 +840,228 @@ class ListaPagosPorAclarar(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[PagoPorAclarar]
+
+
+# --- Circuito de pagos: bandeja, ficha y consulta (`0072`) --------------------------------------
+# Diseño: `doc/diseno/Rediseno_Circuito_Pagos_2026-11-06.md` del repositorio CEM, §2, §3 y §11. El
+# frontend no deduce estados: el servidor dice en qué anda la orden y qué le toca a quien mira. La
+# cuenta completa no sale nunca por acá: solo en el acto de ejecución.
+
+LIMITE_CONSULTA_PAGOS_POR_DEFECTO = 25
+LIMITE_CONSULTA_PAGOS_MAXIMO = 100
+LARGO_MAXIMO_BUSQUEDA_PAGOS = 100
+MAXIMO_SALTAR_CONSULTA_PAGOS = VERSION_MAXIMA
+"""`saltar` es `integer` en la base."""
+
+
+class PasoPago(StrEnum):
+    """El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la
+    acción; los `espera_*` son de quien la ve y no le toca."""
+
+    PAGAR = "pagar"
+    SUBIR_COMPROBANTE = "subir_comprobante"
+    CORREGIR = "corregir"
+    ENVIAR = "enviar"
+    RENOVAR = "renovar"
+    VOLVER_A_PAGAR = "volver_a_pagar"
+    RECHAZADA = "rechazada"
+    APROBAR = "aprobar"
+    CONCILIAR = "conciliar"
+    CONFIRMAR_NO_PAGO = "confirmar_no_pago"
+    DECLARAR_NO_PAGO = "declarar_no_pago"
+    """Nadie vio la cuenta y ya no se puede abrir (la aprobación venció, por ejemplo): la orden en
+    ejecución no se renueva, y la salida es declarar que no se pagó."""
+    RESOLVER_DIFERENCIA = "resolver_diferencia"
+    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
+    ESPERA_APROBAR = "espera_aprobar"
+    ESPERA_COMPROBANTE = "espera_comprobante"
+    """Otra persona ya vio la cuenta: se espera su comprobante y no se ofrece pagar, para que la
+    misma orden no se transfiera dos veces."""
+    ESPERA_DECLARAR = "espera_declarar"
+    ESPERA_CONCILIAR = "espera_conciliar"
+    ESPERA_CONFIRMAR = "espera_confirmar"
+    ESPERA_RESOLVER = "espera_resolver"
+    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
+    ESPERA_CORREGIR = "espera_corregir"
+
+
+class GrupoPago(StrEnum):
+    """Los grupos de la bandeja, en el orden en que se muestran (§2)."""
+
+    PARA_PAGAR = "para_pagar"
+    PARA_CORREGIR = "para_corregir"
+    PARA_PREPARAR = "para_preparar"
+    PARA_APROBAR = "para_aprobar"
+    PARA_CONCILIAR = "para_conciliar"
+    PARA_CONFIRMAR = "para_confirmar"
+    PARA_RESOLVER = "para_resolver"
+    ESPERANDO = "esperando"
+
+
+GRUPO_DE_PASO = {
+    PasoPago.PAGAR: GrupoPago.PARA_PAGAR,
+    PasoPago.SUBIR_COMPROBANTE: GrupoPago.PARA_PAGAR,
+    PasoPago.DECLARAR_NO_PAGO: GrupoPago.PARA_PAGAR,
+    PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
+    PasoPago.ENVIAR: GrupoPago.PARA_PREPARAR,
+    PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
+    PasoPago.VOLVER_A_PAGAR: GrupoPago.PARA_PREPARAR,
+    PasoPago.RECHAZADA: GrupoPago.PARA_PREPARAR,
+    PasoPago.APROBAR: GrupoPago.PARA_APROBAR,
+    PasoPago.CONCILIAR: GrupoPago.PARA_CONCILIAR,
+    PasoPago.CONFIRMAR_NO_PAGO: GrupoPago.PARA_CONFIRMAR,
+    PasoPago.RESOLVER_DIFERENCIA: GrupoPago.PARA_RESOLVER,
+    PasoPago.ESPERA_APROBAR: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_COMPROBANTE: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_DECLARAR: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_CONCILIAR: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_CONFIRMAR: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_RESOLVER: GrupoPago.ESPERANDO,
+    PasoPago.ESPERA_CORREGIR: GrupoPago.ESPERANDO,
+}
+
+
+class LeTocaA(StrEnum):
+    """A quién le toca el próximo paso, por su lugar en el circuito: no nombra personas."""
+
+    VOS = "vos"
+    CONSEJO = "consejo"
+    QUIEN_REGISTRO = "quien_registro"
+    QUIEN_VIO_LA_CUENTA = "quien_vio_la_cuenta"
+    QUIEN_EJECUTA = "quien_ejecuta"
+
+
+class SituacionPago(StrEnum):
+    """Lo que se le dice a la persona (§3), derivado en el servidor: puede diferir del estado de
+    la base. Los estados que §3 no nombra conservan su nombre."""
+
+    BORRADOR = "borrador"
+    EN_REVISION = "en_revision"
+    RECHAZADA = "rechazada"
+    PARA_PAGAR = "para_pagar"
+    PAGANDO = "pagando"
+    NO_PAGO_DECLARADO = "no_pago_declarado"
+    FALTA_CONCILIAR = "falta_conciliar"
+    OBSERVADO = "observado"
+    CON_DIFERENCIA = "con_diferencia"
+    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
+    RECLAMO = "reclamo"
+    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
+    PAGADA = "pagada"
+    NO_SE_PAGO = "no_se_pago"
+
+
+class FiltroConsultaPagos(StrEnum):
+    TODOS = "todos"
+    PAGADOS = "pagados"
+    NO_SE_PAGARON = "no_se_pagaron"
+    RECHAZADOS = "rechazados"
+    EN_CURSO = "en_curso"
+
+
+class ElementoBandejaPagos(BaseModel):
+    """Una orden en la bandeja de quien pide, sin la cuenta."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    proveedor: str = Field(description="La razón social de la versión vigente de la orden.")
+    concepto: str
+    importe_centavos: int
+    moneda: str
+    paso: PasoPago
+    grupo: GrupoPago
+    le_toca_a: LeTocaA
+
+
+class BandejaPagos(BaseModel):
+    """`GET …/pagos/bandeja`: lo que quien pide tiene que hacer ahora, por grupo y de lo más viejo
+    a lo más nuevo. Lo pagado no está; lo rechazado, solo `CEM_PAGOS_DIAS_BANDEJA` días."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[ElementoBandejaPagos]
+
+
+class ComprobanteActual(BaseModel):
+    """El archivo que corresponde mostrar: el del registro vigente o, sin él, el último que quien
+    mira subió para esta ejecución y pasó el antivirus."""
+
+    model_config = ConfigDict(frozen=True)
+
+    documento_id: UUID
+    version_documento_id: UUID
+
+
+class ObservacionVigente(BaseModel):
+    """Por qué el Consejo observó el último registro."""
+
+    model_config = ConfigDict(frozen=True)
+
+    pago_id: UUID
+    motivo: str
+    observado_por: UUID
+    observado_en: datetime
+
+
+class FichaPago(BaseModel):
+    """`GET …/pagos/{orden}`: una sola ficha para todos los estados, sin la cuenta completa. Los
+    `puede_*` dicen lo que la base va a aceptar hoy de quien pide, sin contar el gesto (se pide al
+    actuar); solo sirven para mostrar: la ruta y la base vuelven a decidir."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden: OrdenPago
+    versiones: list[VersionOrdenPago]
+    situacion: SituacionPago
+    paso: PasoPago | None = Field(description="Nulo si a quien mira no le toca ni espera nada.")
+    le_toca_a: LeTocaA | None
+    puede_enviar: bool
+    puede_aprobar: bool
+    puede_rechazar: bool
+    puede_renovar: bool
+    puede_pagar: bool
+    puede_subir_comprobante: bool
+    puede_registrar: bool
+    puede_declarar: bool
+    puede_corregir: bool
+    puede_conciliar: bool
+    puede_confirmar: bool
+    ejecucion: EjecucionManual | None = Field(
+        description="La ejecución manual de la versión vigente, si tiene."
+    )
+    comprobante_actual: ComprobanteActual | None
+    observacion_vigente: ObservacionVigente | None
+    declaracion_vigente: PagoNoRealizado | None = Field(
+        description="La última declaración de «no se pagó» que nadie superó ni confirmó."
+    )
+
+
+class ElementoConsultaPagos(BaseModel):
+    """Una orden en la consulta, sin la cuenta. Abre la misma ficha."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    proveedor: str
+    concepto: str
+    importe_centavos: int
+    moneda: str
+    estado: EstadoOrdenPago
+    situacion: SituacionPago
+    numero_operacion: str | None = Field(
+        description="El del último registro de la versión vigente, si tiene."
+    )
+    fecha_operacion: date | None
+    actualizada_en: datetime
+
+
+class ConsultaPagos(BaseModel):
+    """`GET …/pagos/consulta`: de lo último que cambió a lo más viejo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[ElementoConsultaPagos]
+    siguiente: int | None = Field(
+        description="El `saltar` de la página siguiente; sin él, no hay más."
+    )
