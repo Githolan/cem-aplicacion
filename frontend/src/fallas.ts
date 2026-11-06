@@ -1,11 +1,10 @@
 /**
  * Qué decir cuando un pedido no salió y no hay un mensaje propio para su estado (E34).
  *
- * Un 5xx con el cuerpo uniforme de la aplicación (`codigo`), o un 503 del borde, es un problema del
- * servicio y no de la conexión de quien usa la página: decirle que revise su conexión la manda a
- * buscar donde no está. Un 429 es el límite de pedidos. Un 4xx de la aplicación sin mensaje propio
- * en la pantalla (p. ej. un 404 porque perdió el acceso al edificio con la página abierta) pide
- * recargar. Solo un pedido que no tuvo respuesta, o una respuesta sin cuerpo de la aplicación, se
+ * Un 5xx, de la aplicación o del borde, es un problema del servicio y no de la conexión de quien usa
+ * la página: decirle que revise su conexión la manda a buscar donde no está. Un 429 es el límite de
+ * pedidos. Un 4xx sin mensaje propio en la pantalla (p. ej. un 404 porque perdió el acceso al
+ * edificio con la página abierta) pide recargar. Solo un pedido que no tuvo respuesta (estado 0) se
  * explica como conexión.
  */
 export const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
@@ -13,17 +12,17 @@ export const SERVICIO_NO_DISPONIBLE = "El servicio no está disponible en este m
 export const LIMITE_DE_PEDIDOS = "Llegaste al límite de pedidos por ahora. Probá más tarde.";
 export const RECARGAR = "No pudimos completar el pedido. Recargá la página y probá de nuevo.";
 
+const SIN_RESPUESTA = 0;
 const ESTADO_LIMITE = 429;
 const ESTADO_ERROR_DEL_SERVIDOR = 500;
-const ESTADO_NO_DISPONIBLE = 503;
 
-/** Una acción sensible pide una entrada reciente (alta del segundo factor, primera contraseña). */
-export const ENTRAR_DE_NUEVO = "Por seguridad, salí, volvé a entrar y hacelo apenas entres.";
+/** Una acción sensible pide una entrada reciente. Lo resuelve la hoja de entrar encima. */
+export const CODIGO_ENTRAR_DE_NUEVO = "reautenticacion_requerida";
+export const ENTRAR_DE_NUEVO = "Por seguridad, volvé a entrar y hacelo apenas entres.";
 
 export function mensajeDeFalla(estado: number, codigo: string | undefined): string {
-  if (estado === ESTADO_NO_DISPONIBLE) return SERVICIO_NO_DISPONIBLE;
-  if (codigo === undefined) return SIN_CONEXION;
-  if (codigo === "reautenticacion_requerida") return ENTRAR_DE_NUEVO;
+  if (estado === SIN_RESPUESTA) return SIN_CONEXION;
+  if (codigo === CODIGO_ENTRAR_DE_NUEVO) return ENTRAR_DE_NUEVO;
   if (estado === ESTADO_LIMITE) return LIMITE_DE_PEDIDOS;
   if (estado >= ESTADO_ERROR_DEL_SERVIDOR) return SERVICIO_NO_DISPONIBLE;
   return RECARGAR;
@@ -45,7 +44,7 @@ export function mensajeDeFallaConEnlace(estado: number, codigo: string | undefin
   return mensaje;
 }
 
-/** Si la falla fue de la red (sin respuesta de la aplicación) y no del servicio. */
+/** Si la falla fue de la red (sin respuesta) y no del servicio. */
 export function esDeConexion(estado: number, codigo: string | undefined): boolean {
   return mensajeDeFalla(estado, codigo) === SIN_CONEXION;
 }

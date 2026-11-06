@@ -68,7 +68,7 @@ test.describe("cabeceras de seguridad del nginx de la imagen", () => {
     await page.goto("/instalar");
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await page.goto("/");
-    await expect(page.getByText("El servicio funciona.")).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     expect(errores).toEqual([]);
   });
 });

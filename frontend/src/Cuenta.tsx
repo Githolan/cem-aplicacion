@@ -1,17 +1,18 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
+import { PieDeVersion } from "./EstadoServicio";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { olvidarEdificio } from "./permisos";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
+import { useAEntrar } from "./sesionEncima";
 
 // Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
 // con la actual marcada (cada una se puede cerrar, o todas las otras de una vez), salir, y el
@@ -46,7 +47,7 @@ interface Partes {
   contrasena: Parte<EstadoContrasena>;
 }
 
-type Pantalla = { tipo: "cargando" } | { tipo: "sin_servicio" } | ({ tipo: "lista" } & Partes);
+type Pantalla = { tipo: "cargando" } | { tipo: "sin_servicio"; mensaje: string } | ({ tipo: "lista" } & Partes);
 
 type Aviso = { texto: string; ok: boolean };
 
@@ -103,7 +104,6 @@ function FallaDeParte({ mensaje, deshabilitado, alReintentar }: FallaDeParteProp
 
 export function Cuenta() {
   const id = useId();
-  const navegar = useNavigate();
   const cliente = useQueryClient();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [enviando, setEnviando] = useState(false);
@@ -119,11 +119,12 @@ export function Cuenta() {
 
   // Toda salida a /entrar (salir, cerrar la sesión actual o una sesión vencida) borra las copias de
   // los contactos (H2b_7 §5) y el edificio elegido.
-  const aEntrar = useCallback(() => {
-    borrarCopias();
-    olvidarEdificio(cliente);
-    navegar(RUTA_ENTRAR, { replace: true });
-  }, [navegar, cliente]);
+  const aEntrar = useAEntrar(
+    useCallback(() => {
+      borrarCopias();
+      olvidarEdificio(cliente);
+    }, [cliente]),
+  );
 
   /** Ante un pedido sin respuesta: sin sesión, a /entrar; si no, el aviso de conexión. */
   const atajar = useCallback(
@@ -138,8 +139,8 @@ export function Cuenta() {
     void Promise.all([LECTURAS.yo(), LECTURAS.sesiones(), LECTURAS.segundoFactor(), LECTURAS.contrasena()])
       .then(([yo, sesiones, segundoFactor, contrasena]) => {
         // Sin ninguna parte no hay nada que conservar: un solo aviso y no cuatro iguales.
-        if (![yo, sesiones, segundoFactor, contrasena].some((parte) => parte.ok))
-          setPantalla({ tipo: "sin_servicio" });
+        if (!yo.ok && !sesiones.ok && !segundoFactor.ok && !contrasena.ok)
+          setPantalla({ tipo: "sin_servicio", mensaje: yo.mensaje });
         else setPantalla({ tipo: "lista", yo, sesiones, segundoFactor, contrasena });
       })
       .catch(atajar);
@@ -376,15 +377,14 @@ export function Cuenta() {
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
           <>
-            <p className="aviso-error">
-              No pudimos consultar tu cuenta. Revisá la conexión y probá de nuevo.
-            </p>
+            <p className="aviso-error">{pantalla.mensaje}</p>
             <button type="button" onClick={reintentarTodo}>
               Reintentar
             </button>
           </>
         )}
       </div>
+      <PieDeVersion />
     </>
   );
 }

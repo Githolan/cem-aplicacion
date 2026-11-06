@@ -124,7 +124,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("servicio_no_disponible");
     expect(respuesta?.headers()["cache-control"]).toBe("no-store");
 
-    await expect(seccion.getByRole("status")).toContainText("No pudimos completar el pedido.");
+    await expect(seccion.getByRole("status")).toContainText("El servicio no está disponible");
     await expect(seccion.getByRole("button", { name: "Entrar con la contraseña" })).toBeEnabled();
     expect(page.url()).not.toContain("frase");
     await sinFaltasDeAccesibilidad(page);
@@ -155,7 +155,7 @@ test.describe("contraseña contra el backend real sin base", () => {
     expect(respuesta?.status()).toBe(503);
     expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("servicio_no_disponible");
 
-    await expect(seccion.getByRole("status")).toContainText("No pudimos completar el pedido.");
+    await expect(seccion.getByRole("status")).toContainText("El servicio no está disponible");
     await expect(seccion.getByLabel("Código de la aplicación o de recuperación")).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
   });
@@ -317,7 +317,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.goto("/cuenta");
     await cambiar(page);
 
-    await expect(page.getByRole("heading", { name: "Confirmá que sos vos" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Escribí el código de tu aplicación" })).toBeVisible();
     await expect(page).toHaveURL(/\/cuenta$/);
   });
 
@@ -327,7 +327,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.getByRole("banner").getByRole("button", { name: "Letra grande y alto contraste" }).click();
     await expect(page.locator("html")).toHaveClass("lectura-ampliada");
     await cambiar(page);
-    await expect(page.getByRole("heading", { name: "Confirmá que sos vos" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Escribí el código de tu aplicación" })).toBeVisible();
 
     const resultado = await new AxeBuilder({ page })
       .withRules(["color-contrast", "color-contrast-enhanced"])

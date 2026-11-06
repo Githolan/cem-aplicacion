@@ -1,6 +1,7 @@
 import { api } from "./api/cliente";
 import { encabezadoCsrf } from "./csrf";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { recordarMetodo } from "./metodoConfirmar";
 
 // Llave de acceso (WebAuthn): el PIN, la huella o la cara del dispositivo. El backend arma las
 // opciones y comprueba la respuesta; acá solo se traducen los binarios entre base64url y los
@@ -156,6 +157,7 @@ export async function registrarLlave(): Promise<Resultado<string[] | null>> {
     });
     if (alta.data === undefined) return rechazo(alta.response.status, alta.error);
     recordarLlave(credencial.id);
+    recordarMetodo("llave");
     return { ok: true, valor: alta.data.codigos_recuperacion ?? null };
   } catch (error) {
     const yaEstaAca = error instanceof DOMException && error.name === "InvalidStateError";
@@ -177,7 +179,7 @@ export async function quitarLlave(llaveId: string): Promise<Resultado<null>> {
 }
 
 /** Confirma con la llave: la sesión queda verificada durante 10 minutos. */
-export async function confirmarConLlave(): Promise<Resultado<null>> {
+export async function confirmarConLlave(signal?: AbortSignal): Promise<Resultado<null>> {
   try {
     const pedido = await api.POST("/api/v1/auth/llave/verificar/opciones", {
       headers: encabezadoCsrf(),
@@ -185,6 +187,7 @@ export async function confirmarConLlave(): Promise<Resultado<null>> {
     if (pedido.data === undefined) return rechazo(pedido.response.status, pedido.error);
     const credencial = (await navigator.credentials.get({
       publicKey: opcionesDeVerificacion(pedido.data.opciones),
+      signal,
     })) as PublicKeyCredential;
     const verificacion = await api.POST("/api/v1/auth/llave/verificar", {
       body: { credencial: credencialDeVerificacion(credencial) },

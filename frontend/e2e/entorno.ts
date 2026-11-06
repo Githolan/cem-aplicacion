@@ -45,11 +45,12 @@ const SESION_SIMULADA = {
 export type Sesion = "con_sesion" | "sin_sesion";
 
 /**
- * Lo que `/` y `Exige` piden para saber qué mostrar, para las pruebas que simulan toda la API en un
+ * Lo que `/`, `Exige` y la hoja de entrar encima piden para saber qué mostrar, para las pruebas que simulan toda la API en un
  * `page.route`: lo responde (todo el catálogo, salvo que digan otra cosa) o devuelve null. Sin esto
  * el pedido se corta, la consola lo informa y el inicio no ofrece ningún enlace.
  */
 export function simularPermisos(ruta: Route, camino: string, acciones: readonly string[] = accionesDeLasPoliticas()) {
+  if (camino === "/api/v1/auth/sesion") return ruta.fulfill({ json: SESION_SIMULADA });
   if (camino.endsWith("/mis-acciones")) return ruta.fulfill({ json: { acciones } });
   if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")
     return ruta.fulfill({ json: { elementos: [] } });

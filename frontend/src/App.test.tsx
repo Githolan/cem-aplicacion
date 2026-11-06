@@ -91,8 +91,10 @@ describe("página de inicio", () => {
 
     montar();
 
-    expect(await screen.findByText("El servicio funciona.")).toBeTruthy();
-    expect(screen.getByText("0849ee9")).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "El servicio funciona" })).toBeTruthy();
+    // La versión queda al pie de Mi cuenta: el inicio no la muestra.
+    expect(screen.queryByText("0849ee9")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(caminosDe(pedido)).toContain("/health");
   });
 
@@ -101,14 +103,15 @@ describe("página de inicio", () => {
 
     montar();
 
-    expect(await screen.findByText(/No pudimos contactar al servicio/)).toBeTruthy();
+    expect(await screen.findByRole("img", { name: "El servicio no funciona" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("El servicio no funciona");
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
     vi.stubGlobal("fetch", backend());
     const { container } = montar();
-    await screen.findByText("El servicio funciona.");
+    await screen.findByRole("img", { name: "El servicio funciona" });
 
     // jsdom no calcula estilos: el contraste se mide en el navegador, no aquí.
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
@@ -134,7 +137,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByText("El servicio funciona.");
+    await screen.findByRole("img", { name: "El servicio funciona" });
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
 
@@ -148,7 +151,7 @@ describe("/ decide por la sesión", () => {
     montar();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    await screen.findByText("El servicio funciona.");
+    await screen.findByRole("img", { name: "El servicio funciona" });
     expect(caminosDe(pedido)).toContain(RUTA_SESION);
     expect(screen.queryByRole("heading", ENTRAR)).toBeNull();
   });
@@ -221,7 +224,7 @@ describe("inicio sin edificios", () => {
     montar();
 
     await vi.waitFor(() => expect(caminosDe(pedido)).toContain("/api/v1/consorcios/c1/mis-acciones"));
-    await screen.findByText("El servicio funciona.");
+    await screen.findByRole("img", { name: "El servicio funciona" });
     expect(screen.queryByText(SIN_EDIFICIO)).toBeNull();
   });
 
@@ -263,7 +266,7 @@ describe("versión nueva (documento 13, §14.4)", () => {
 
     const { container } = montar("/", { hayVersionNueva: true, actualizar });
 
-    await screen.findByText("El servicio funciona.");
+    await screen.findByRole("img", { name: "El servicio funciona" });
     expect(screen.getByRole("alert").textContent).toContain("Hay una versión nueva");
     expect(actualizar).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));

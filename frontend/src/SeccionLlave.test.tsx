@@ -25,12 +25,14 @@ function mostrar(alTerminar: (aviso: string) => void = () => undefined) {
   return render(<SeccionLlave alCambiar={() => undefined} alCodigos={() => undefined} alTerminar={alTerminar} />);
 }
 
+const TOTP = () => Response.json({ activo: false, llaves: 1, codigos_recuperacion_restantes: 5, verificado_en: null });
+
 function backend(respuestas: Record<string, () => Response>) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (pedido: Request) => {
       const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-      const respuesta = respuestas[clave];
+      const respuesta = { "GET /api/v1/auth/totp": TOTP, ...respuestas }[clave];
       if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
       return respuesta();
     }),
@@ -64,8 +66,9 @@ describe("sección de la llave", () => {
     mostrar();
 
     fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Usar un código" }));
-    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
     expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
@@ -95,8 +98,8 @@ describe("sección de la llave", () => {
     mostrar();
 
     fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
-    // PedirCodigo cambia a la vista de la llave al leerlas: se espera a que esté antes de cancelar.
-    await screen.findByRole("button", { name: "Usar un código" });
+    // PedirCodigo dispara la llave al leer lo activo: se espera a que falle antes de cancelar.
+    await screen.findByRole("button", { name: "Probar de nuevo" });
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
     expect(await screen.findByRole("button", { name: "Quitar" })).not.toBeNull();

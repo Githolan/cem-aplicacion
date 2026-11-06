@@ -128,14 +128,14 @@ test.describe("PWA servida por la imagen", () => {
     await page.goto("/");
     await page.evaluate(() => navigator.serviceWorker.ready);
     await page.reload();
-    await expect(page.getByText("El servicio funciona.")).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
 
     // Sin la simulación: la consulta de la sesión falla por la red, como le pasa a la persona.
     await dejarDeSimularSesion(page);
     await context.setOffline(true);
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
-    await expect(page.getByText(/No pudimos contactar al servicio/)).toBeVisible();
+    await expect(page.getByRole("img", { name: "El servicio no funciona" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });
 });

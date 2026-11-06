@@ -176,6 +176,7 @@ test.describe("invitar", () => {
   test("la propietaria no puede invitar a otra unidad, pero sí a la suya", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     const { envios } = await simularApi(page, baseURL!, "propietaria");
+    await simularSesion(page, "con_sesion");
     await page.goto("/invitaciones");
     await expect(page.getByText("beto@ejemplo.com")).toBeVisible(); // la creó ella: P6
 

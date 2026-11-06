@@ -1,7 +1,8 @@
 import { type FormEvent, useId, useState } from "react";
 
 import { api } from "./api/cliente";
-import { useTerminarEntrada } from "./sesion";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { useIrAlInicio } from "./sesion";
 
 // Entrar con el código de seis dígitos del correo (documento 13, §10.3): para quien pidió la
 // entrada en un dispositivo y lee el correo en otro, donde el enlace no sirve (está ligado al
@@ -30,11 +31,15 @@ interface Props {
   alCambiarCorreo: (correo: string) => void;
   /** Lo que respondió el pedido del enlace. */
   aviso: string | null;
+  /** Sin esto, terminar sigue al inicio. */
+  alEntrar?: (aviso: string) => void;
 }
 
-export function EntrarConCodigo({ correo, alCambiarCorreo, aviso }: Props) {
+export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Props) {
   const id = useId();
-  const terminarEntrada = useTerminarEntrada();
+  const irAlInicio = useIrAlInicio();
+  const terminarEntrada = alEntrar ?? irAlInicio;
+  const [falla, setFalla] = useState(SIN_CONEXION);
   const [codigo, setCodigo] = useState("");
   const [estado, setEstado] = useState<Estado>("listo");
   const [formatoMal, setFormatoMal] = useState(false);
@@ -54,9 +59,15 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso }: Props) {
         if (error === undefined) terminarEntrada("Entraste.");
         else if (response.status === ESTADO_RECHAZADO) setEstado("rechazado");
         else if (response.status === ESTADO_DEMASIADOS) setEstado("demasiados");
-        else setEstado("sin_servicio");
+        else {
+          setFalla(mensajeDeFalla(response.status, codigoDe(error)));
+          setEstado("sin_servicio");
+        }
       })
-      .catch(() => setEstado("sin_servicio"));
+      .catch(() => {
+        setFalla(SIN_CONEXION);
+        setEstado("sin_servicio");
+      });
   }
 
   return (
@@ -112,9 +123,7 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso }: Props) {
             Hubo demasiados intentos con este correo. Esperá un rato y probá de nuevo.
           </p>
         )}
-        {estado === "sin_servicio" && (
-          <p className="aviso-error">No pudimos completar el pedido. Revisá la conexión y probá en un rato.</p>
-        )}
+        {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { otroCliente, sinFaltasDeAccesibilidad } from "./entorno";
+import { LARGO_SHA_CORTA, otroCliente, SHA_BACKEND, sinFaltasDeAccesibilidad } from "./entorno";
 
 // La página /cuenta servida por el nginx de la imagen, con su CSP real. El backend de la corrida
 // no tiene base de datos: sin sesión responde el 401 de verdad, y con eso se prueba que la página
@@ -123,6 +123,8 @@ test.describe("mi cuenta", () => {
     await page.getByRole("link", { name: "Mi cuenta" }).click();
 
     await expect(page.getByText("Ana Pérez")).toBeVisible();
+    // La versión pasó del inicio al pie de esta pantalla.
+    await expect(page.getByText(`Compilación ${SHA_BACKEND.slice(0, LARGO_SHA_CORTA)}`)).toBeVisible();
     await expect(page.getByText(/Está activado/)).toBeVisible();
     await expect(page.locator(".sesiones li[aria-current=true]")).toContainText("(este dispositivo)");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);

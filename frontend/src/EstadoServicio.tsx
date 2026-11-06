@@ -2,44 +2,54 @@ import { useQuery } from "@tanstack/react-query";
 
 import { api, type Salud } from "./api/cliente";
 
+// El estado del servicio (rediseño de pagos, §12): un punto en la barra de Inicio y un aviso chico
+// solo si no funciona. La versión va al pie de Mi cuenta. La consulta es una sola, compartida.
+
+export const TEXTO_FUNCIONA = "El servicio funciona";
+export const TEXTO_NO_FUNCIONA = "El servicio no funciona";
+const TEXTO_CONSULTANDO = "Consultando el servicio";
+const LARGO_SHA_CORTA = 7;
+
 async function consultarSalud(): Promise<Salud> {
   const { data, error } = await api.GET("/health");
   if (error !== undefined || data === undefined) throw new Error("sin respuesta");
   return data;
 }
 
-export function EstadoServicio() {
-  const salud = useQuery({ queryKey: ["salud"], queryFn: consultarSalud });
+const useSalud = () => useQuery({ queryKey: ["salud"], queryFn: consultarSalud });
 
+export function PuntoServicio() {
+  const salud = useSalud();
+  const [clase, nombre] = salud.isError
+    ? ["punto-servicio--mal", TEXTO_NO_FUNCIONA]
+    : salud.isSuccess
+      ? ["punto-servicio--bien", TEXTO_FUNCIONA]
+      : ["", TEXTO_CONSULTANDO];
+  return <span role="img" aria-label={nombre} className={`punto-servicio ${clase}`} />;
+}
+
+export function AvisoServicio() {
+  const salud = useSalud();
+  if (!salud.isError) return null;
   return (
-    <section aria-labelledby="titulo-estado" className="tarjeta">
-      <h2 id="titulo-estado">Estado del servicio</h2>
-      <div role="status" aria-live="polite">
-        {salud.isPending && <p>Consultando…</p>}
-        {salud.isError && (
-          <>
-            <p className="aviso-error">No pudimos contactar al servicio. Probá de nuevo en unos minutos.</p>
-            <button type="button" onClick={() => void salud.refetch()}>
-              Reintentar
-            </button>
-          </>
-        )}
-        {salud.isSuccess && (
-          <>
-            <p className="aviso-ok">El servicio funciona.</p>
-            <dl className="detalles">
-              <dt>Versión</dt>
-              <dd>{salud.data.version}</dd>
-              <dt>Contrato</dt>
-              <dd>{salud.data.version_contrato}</dd>
-              <dt>Compilación</dt>
-              <dd>
-                <code>{salud.data.sha_imagen.slice(0, 7)}</code>
-              </dd>
-            </dl>
-          </>
-        )}
-      </div>
-    </section>
+    <div className="tarjeta">
+      <p className="aviso-error" role="alert">
+        {TEXTO_NO_FUNCIONA} en este momento. Probá de nuevo en unos minutos.
+      </p>
+      <button type="button" disabled={salud.isFetching} onClick={() => void salud.refetch()}>
+        Reintentar
+      </button>
+    </div>
+  );
+}
+
+export function PieDeVersion() {
+  const { data } = useSalud();
+  if (data === undefined) return null;
+  return (
+    <p className="pie-version">
+      Versión {data.version} · Contrato {data.version_contrato} · Compilación{" "}
+      <code>{data.sha_imagen.slice(0, LARGO_SHA_CORTA)}</code>
+    </p>
   );
 }

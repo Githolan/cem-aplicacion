@@ -1,16 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
-import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { TIPOS } from "./Invitacion";
 import { FallaDeLectura, mensajeDeLectura, releerAcciones, SIN_CACHE } from "./permisos";
 import { useIrAlInicio } from "./sesion";
+import { useAEntrar } from "./sesionEncima";
 
 // Las invitaciones dirigidas al correo de la persona, en el inicio (RF02): quien ya tiene cuenta
 // acepta con su sesión, sin volver al correo, y es lo único que puede hacer un importado pendiente.
@@ -36,7 +35,8 @@ export function useMisInvitaciones(activa: boolean) {
 export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof useMisInvitaciones> }) {
   const id = useId();
   const cliente = useQueryClient();
-  const navegar = useNavigate();
+  // Toda salida a /entrar borra las copias de los contactos (H2b_7 §5).
+  const aEntrar = useAEntrar(borrarCopias);
   const irAlInicio = useIrAlInicio();
   const [aceptando, setAceptando] = useState<string | null>(null);
   const [falla, setFalla] = useState<string | null>(null);
@@ -55,9 +55,7 @@ export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof 
           void consulta.refetch();
           irAlInicio(`Listo: ya sos parte de ${invitacion.consorcio}.`);
         } else if (response.status === ESTADO_SIN_SESION) {
-          // Toda salida a /entrar borra las copias de los contactos (H2b_7 §5).
-          borrarCopias();
-          navegar(RUTA_ENTRAR, { replace: true });
+          aEntrar();
         } else if ((response.status === ESTADO_NO_SIRVE || response.status === ESTADO_CONFLICTO) && error && "mensaje" in error) {
           // El servidor explica por qué esa invitación ya no se puede aceptar; la lista se actualiza.
           setFalla(error.mensaje);

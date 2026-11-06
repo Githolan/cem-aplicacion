@@ -31,6 +31,36 @@ body {
   color: #ffffff;
 }
 
+/* Lo que va a la derecha de la cabecera. */
+.cabecera-fin {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.cabecera-punto {
+  display: flex;
+}
+
+/* El estado del servicio: el color no va solo, el nombre lo da el lector de pantalla. */
+.punto-servicio {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.punto-servicio--bien {
+  background: #3fbf6b;
+}
+
+.punto-servicio--mal {
+  background: #ff5a5f;
+}
+
 /* Enlace al inicio: blanco como la cabecera, con el área táctil de 44 px. */
 .marca {
   display: inline-flex;
@@ -718,4 +748,69 @@ main:has(.cotejo) {
     outline: 3px solid #f2a900;
     outline-offset: -3px;
   }
+}
+
+/* Una hoja sobre la pantalla: desde abajo en el teléfono, al centro con más ancho. */
+.hoja-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(0 0 0 / 45%);
+  overscroll-behavior: contain;
+}
+
+.hoja {
+  width: 100%;
+  max-height: 100dvh;
+  overflow-y: auto;
+  padding: 1.25rem 1rem calc(1.25rem + env(safe-area-inset-bottom));
+  border-radius: 1rem 1rem 0 0;
+  background: var(--fondo);
+  overflow-wrap: anywhere;
+}
+
+.hoja:focus {
+  outline: none;
+}
+
+.hoja h2 {
+  margin-top: 0;
+}
+
+@media (min-width: 769px) {
+  .hoja-fondo {
+    align-items: center;
+    padding: 1rem;
+  }
+
+  .hoja {
+    max-width: 32rem;
+    max-height: calc(100dvh - 2rem);
+    padding-bottom: 1.25rem;
+    border-radius: 1rem;
+  }
+}
+
+/* Queda a la vista aunque la persona esté abajo de un formulario largo. */
+.aviso-fijo {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pie-version {
+  margin-top: 2rem;
+  color: #4a5568;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.opcion {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 44px;
 }

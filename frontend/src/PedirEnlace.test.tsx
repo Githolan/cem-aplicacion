@@ -126,7 +126,7 @@ describe("pedir el enlace para entrar", () => {
   it.each([
     [error("validacion", 422), /Revisá el correo: no parece una dirección válida/],
     [error("demasiadas_peticiones", 429), /demasiados pedidos con este correo/],
-    [error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+    [error("servicio_no_disponible", 503), /El servicio no está disponible/],
   ])("ante un rechazo muestra un mensaje en español y no el del 202 (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", backend(() => respuesta));
 

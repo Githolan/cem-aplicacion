@@ -3,7 +3,8 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
-import { useTerminarEntrada } from "./sesion";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { useIrAlInicio } from "./sesion";
 
 // Entrar con correo y contraseña (documento 13, §10.3: el método de administradores, consejeros
 // y operadores). Si la persona tiene segundo factor, la contraseña no abre la sesión: el backend
@@ -41,13 +42,17 @@ interface Props {
   /** El correo es de /entrar: sigue escrito al cambiar de forma. */
   correo: string;
   alCambiarCorreo: (correo: string) => void;
+  /** Sin esto, terminar sigue al inicio. */
+  alEntrar?: (aviso: string) => void;
 }
 
-export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
+export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props) {
   const id = useId();
   const [contrasena, setContrasena] = useState("");
   const [codigo, setCodigo] = useState("");
-  const terminarEntrada = useTerminarEntrada();
+  const irAlInicio = useIrAlInicio();
+  const terminarEntrada = alEntrar ?? irAlInicio;
+  const [falla, setFalla] = useState(SIN_CONEXION);
   const [paso, setPaso] = useState<Paso>({ tipo: "contrasena" });
   const [estado, setEstado] = useState<Estado>("listo");
   const campoCodigo = useRef<HTMLInputElement>(null);
@@ -58,8 +63,14 @@ export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
     if (paso.tipo === "codigo") campoCodigo.current?.focus();
   }, [paso]);
 
-  function fallo(status: number): Estado {
+  function fallo(status: number, error: unknown): Estado {
+    setFalla(mensajeDeFalla(status, codigoDe(error)));
     return status === ESTADO_DEMASIADOS ? "demasiados" : "sin_servicio";
+  }
+
+  function sinRespuesta() {
+    setFalla(SIN_CONEXION);
+    setEstado("sin_servicio");
   }
 
   function entrar(evento: FormEvent<HTMLFormElement>) {
@@ -67,9 +78,9 @@ export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
     setEstado("enviando");
     void api
       .POST("/api/v1/auth/contrasena/entrar", { body: { correo: correo.trim(), contrasena } })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         if (data === undefined) {
-          setEstado(response.status === ESTADO_RECHAZADO ? "rechazado" : fallo(response.status));
+          setEstado(response.status === ESTADO_RECHAZADO ? "rechazado" : fallo(response.status, error));
           return;
         }
         // La contraseña ya cumplió: no queda en memoria más de lo necesario.
@@ -81,7 +92,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
         }
       })
-      .catch(() => setEstado("sin_servicio"));
+      .catch(sinRespuesta);
   }
 
   function volverALaContrasena(final: Estado) {
@@ -102,16 +113,16 @@ export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
     setEstado("enviando");
     void api
       .POST("/api/v1/auth/contrasena/segundo-factor", { body: { codigo: limpio } })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         if (data !== undefined) {
           setCodigo("");
           setEstado("listo");
           terminarEntrada("Entraste.");
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
-        else setEstado(fallo(response.status));
+        else setEstado(fallo(response.status, error));
       })
-      .catch(() => setEstado("sin_servicio"));
+      .catch(sinRespuesta);
   }
 
   const titulo = <h2 id={`${id}-titulo`}>Entrar con contraseña</h2>;
@@ -205,9 +216,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo }: Props) {
         {estado === "demasiados" && (
           <p className="aviso-error">Hubo demasiados intentos. Esperá un rato y probá de nuevo.</p>
         )}
-        {estado === "sin_servicio" && (
-          <p className="aviso-error">No pudimos completar el pedido. Revisá la conexión y probá en un rato.</p>
-        )}
+        {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}
       </div>
     </section>
   );

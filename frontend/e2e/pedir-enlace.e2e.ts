@@ -37,7 +37,7 @@ test.describe("pedir el enlace para entrar", () => {
     expect(respuesta?.status()).toBe(503);
     expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("servicio_no_disponible");
 
-    await expect(seccion.getByText(/No pudimos completar el pedido/)).toBeVisible();
+    await expect(seccion.getByText(/El servicio no está disponible/)).toBeVisible();
     expect(page.url()).not.toContain(CORREO);
     await sinFaltasDeAccesibilidad(page);
   });

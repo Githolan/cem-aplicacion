@@ -1,10 +1,12 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { recordarLlave } from "../llaveAcceso";
+import { recordarMetodo, ultimoMetodo } from "../metodoConfirmar";
 import { PedirCodigo } from "./PedirCodigo";
 
-const LLAVE = { id: "1", nombre: "Mi PC", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null };
+const LLAVE = { id: "1", nombre: "Mi PC", credencial_id: "AQID", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null };
 const OPCIONES = { opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } };
 const VERIFICADO = {
   verificado_en: "2026-11-04T10:00:00Z",
@@ -19,39 +21,55 @@ const CREDENCIAL = {
   getClientExtensionResults: () => ({}),
   response: { clientDataJSON: bytes(), authenticatorData: bytes(), signature: bytes(), userHandle: null },
 };
+const HOJA_LLAVE = "Usá tu PIN, huella o cara";
+const HOJA_CODIGO = "Escribí el código de tu aplicación";
 
 type Respuestas = Record<string, () => Response>;
 
-const estadoTotp = (activo: boolean, llaves: number) => () =>
-  Response.json({ activo, llaves, codigos_recuperacion_restantes: 0, verificado_en: null });
+const estadoTotp = (activo: boolean, llaves: number, codigos = 0) => () =>
+  Response.json({ activo, llaves, codigos_recuperacion_restantes: codigos, verificado_en: null });
+
+const conLlave = (extra: Respuestas = {}): Respuestas => ({
+  "GET /api/v1/auth/totp": estadoTotp(true, 1, 5),
+  "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
+  "POST /api/v1/auth/llave/verificar/opciones": () => Response.json(OPCIONES),
+  "POST /api/v1/auth/llave/verificar": () => Response.json(VERIFICADO),
+  ...extra,
+});
 
 function backend(respuestas: Respuestas) {
   const lista: Respuestas = { "GET /api/v1/auth/totp": estadoTotp(true, 0), ...respuestas };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (pedido: Request) => {
-      const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-      const respuesta = lista[clave];
-      if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-      return respuesta();
-    }),
-  );
+  const simulado = vi.fn(async (pedido: Request) => {
+    const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
+    const respuesta = lista[clave];
+    if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
+    return respuesta();
+  });
+  vi.stubGlobal("fetch", simulado);
+  return simulado;
 }
 
-function dispositivo(get: () => Promise<unknown>) {
+const pedidos = (simulado: ReturnType<typeof backend>, ruta: string) =>
+  simulado.mock.calls.filter(([p]) => new URL(p.url).pathname === ruta).length;
+
+function dispositivo(get: (opciones?: CredentialRequestOptions) => Promise<unknown>) {
   vi.stubGlobal("PublicKeyCredential", class {});
   Object.defineProperty(navigator, "credentials", { value: { get }, configurable: true });
 }
 
 function mostrar() {
   const alVerificar = vi.fn();
-  render(<PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={() => undefined} />);
-  return alVerificar;
+  const alCancelar = vi.fn();
+  const vista = render(<PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={alCancelar} />);
+  return { alVerificar, alCancelar, vista };
 }
 
-describe("confirmar con la llave", () => {
+const titulo = (nombre: string) => screen.findByRole("heading", { name: nombre });
+
+describe("confirmar en el momento", () => {
   beforeEach(() => {
     document.cookie = "__Host-cem_csrf=x";
+    window.localStorage.clear();
   });
 
   afterEach(() => {
@@ -60,168 +78,259 @@ describe("confirmar con la llave", () => {
     Reflect.deleteProperty(navigator, "credentials");
   });
 
-  it("con llave ofrece el gesto y sigue con el mismo pedido", async () => {
-    backend({
-      "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
-      "POST /api/v1/auth/llave/verificar/opciones": () => Response.json(OPCIONES),
-      "POST /api/v1/auth/llave/verificar": () => Response.json(VERIFICADO),
-    });
+  it("con la llave como último método dispara el aviso del sistema sin otro toque y sigue con el pedido", async () => {
+    recordarMetodo("llave");
+    const simulado = backend(conLlave());
     const get = vi.fn(async () => CREDENCIAL);
     dispositivo(get);
-    const alVerificar = mostrar();
+    const { alVerificar } = mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar con tu PIN o huella" }));
-
-    await vi.waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
     expect(get).toHaveBeenCalledOnce();
+    // «Directo» no saltea el gesto: lo que sigue es después de que el servidor lo comprobó.
+    expect(pedidos(simulado, "/api/v1/auth/llave/verificar")).toBe(1);
+    expect(screen.queryByRole("heading", { name: "Confirmá que sos vos" })).toBeNull();
   });
 
-  it("si la persona cancela, lo dice y no sigue", async () => {
+  it("mientras espera el gesto no ofrece «Usar otro método»", async () => {
+    recordarMetodo("llave");
+    backend(conLlave());
+    dispositivo(() => new Promise(() => undefined));
+    mostrar();
+
+    await titulo(HOJA_LLAVE);
+    expect(screen.queryByRole("button", { name: "Usar otro método" })).toBeNull();
+  });
+
+  it("recuerda solo el tipo de método, sin nada de la llave ni del código", async () => {
     backend({
-      "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
-      "POST /api/v1/auth/llave/verificar/opciones": () => Response.json(OPCIONES),
+      "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
     });
-    dispositivo(async () => {
+    const { alVerificar } = mostrar();
+
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    expect(ultimoMetodo()).toBe("aplicacion");
+    expect(Object.values({ ...window.localStorage })).toEqual(["aplicacion"]);
+  });
+
+  it("con el código como último método lo pide encima y se confirma solo al completar los seis números", async () => {
+    recordarMetodo("aplicacion");
+    const simulado = backend(conLlave({ "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO) }));
+    const get = vi.fn(async () => CREDENCIAL);
+    dispositivo(get);
+    const { alVerificar } = mostrar();
+
+    await titulo(HOJA_CODIGO);
+    expect(get).not.toHaveBeenCalled();
+    const campo = screen.getByLabelText("Código");
+    fireEvent.change(campo, { target: { value: "12345" } });
+    expect(pedidos(simulado, "/api/v1/auth/totp/verificar")).toBe(0); // control: incompleto no sale
+    fireEvent.change(campo, { target: { value: "123456" } });
+
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    expect(pedidos(simulado, "/api/v1/auth/totp/verificar")).toBe(1);
+  });
+
+  it("la primera vez en un dispositivo usa la llave de ese dispositivo", async () => {
+    recordarLlave(LLAVE.credencial_id);
+    backend(conLlave());
+    const get = vi.fn(async () => CREDENCIAL);
+    dispositivo(get);
+    const { alVerificar } = mostrar();
+
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    expect(ultimoMetodo()).toBe("llave");
+  });
+
+  it("control: la llave de otro dispositivo no se dispara si hay código", async () => {
+    backend(conLlave());
+    const get = vi.fn(async () => CREDENCIAL);
+    dispositivo(get);
+    mostrar();
+
+    await titulo(HOJA_CODIGO);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("si el último método ya no está activo, usa uno que sí", async () => {
+    recordarMetodo("llave");
+    backend({ "GET /api/v1/auth/totp": estadoTotp(true, 0) });
+    const get = vi.fn(async () => CREDENCIAL);
+    dispositivo(get);
+    mostrar();
+
+    await titulo(HOJA_CODIGO);
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("si la persona cancela el aviso del sistema, ofrece probar de nuevo y otro método, y no sigue", async () => {
+    recordarMetodo("llave");
+    backend(conLlave());
+    const get = vi.fn(async (): Promise<unknown> => {
       throw new DOMException("cancelado", "NotAllowedError");
     });
-    const alVerificar = mostrar();
+    dispositivo(get);
+    const { alVerificar } = mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar con tu PIN o huella" }));
-
-    expect((await screen.findByRole("alert")).textContent).toContain("No se confirmó");
+    await titulo("No se pudo confirmar");
+    expect(screen.getByRole("alert").textContent).toContain("No se confirmó");
+    expect(screen.getByRole("button", { name: "Usar otro método" })).toBeTruthy();
     expect(alVerificar).not.toHaveBeenCalled();
+
+    get.mockResolvedValueOnce(CREDENCIAL);
+    fireEvent.click(screen.getByRole("button", { name: "Probar de nuevo" }));
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    expect(get).toHaveBeenCalledTimes(2);
   });
 
   it("si el backend rechaza la firma, no sigue", async () => {
-    backend({
-      "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
-      "POST /api/v1/auth/llave/verificar/opciones": () => Response.json(OPCIONES),
-      "POST /api/v1/auth/llave/verificar": () =>
-        Response.json({ codigo: "segundo_factor_invalido", mensaje: "x", id_correlacion: "c" }, { status: 400 }),
-    });
+    recordarMetodo("llave");
+    backend(
+      conLlave({
+        "POST /api/v1/auth/llave/verificar": () =>
+          Response.json({ codigo: "segundo_factor_invalido", mensaje: "x" }, { status: 400 }),
+      }),
+    );
     dispositivo(async () => CREDENCIAL);
-    const alVerificar = mostrar();
+    const { alVerificar } = mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar con tu PIN o huella" }));
-
-    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos confirmar tu llave");
+    await titulo("No se pudo confirmar");
     expect(alVerificar).not.toHaveBeenCalled();
   });
 
-  it("deja usar un código en su lugar", async () => {
-    backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
-    dispositivo(async () => CREDENCIAL);
-    mostrar();
+  it("«Usar otro método» muestra solo lo activo, y el que se usa queda como último", async () => {
+    recordarMetodo("llave");
+    backend(
+      conLlave({
+        "GET /api/v1/auth/totp": estadoTotp(false, 1, 5),
+        "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
+      }),
+    );
+    dispositivo(async () => {
+      throw new DOMException("cancelado", "NotAllowedError");
+    });
+    const { alVerificar } = mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Usar un código" }));
+    await titulo("No se pudo confirmar");
+    fireEvent.click(screen.getByRole("button", { name: "Usar otro método" }));
+    await titulo("Usar otro método");
+    expect(screen.queryByRole("button", { name: "Código de la aplicación" })).toBeNull();
+    expect(screen.getByRole("button", { name: "PIN, huella o cara" })).toBeTruthy();
 
-    expect(screen.getByLabelText("Código")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Código de recuperación" }));
+    await titulo("Escribí un código de recuperación");
+    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
+    expect(alVerificar).not.toHaveBeenCalled(); // control: uno de recuperación no sale solo
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+
+    await waitFor(() => expect(alVerificar).toHaveBeenCalledOnce());
+    expect(ultimoMetodo()).toBe("recuperacion");
   });
 
-  it("sin llaves muestra el código, como siempre", async () => {
-    const consulta = vi.fn(() => Response.json([]));
-    backend({ "GET /api/v1/auth/llave": consulta });
-    dispositivo(async () => CREDENCIAL);
+  it("con un solo método no ofrece otro", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(true, 0, 0) });
     mostrar();
 
-    await vi.waitFor(() => expect(consulta).toHaveBeenCalledOnce());
-    expect(screen.getByLabelText("Código")).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "Confirmar con tu PIN o huella" })).toBeNull();
+    await titulo(HOJA_CODIGO);
+    expect(screen.queryByRole("button", { name: "Usar otro método" })).toBeNull();
   });
 
-  function Alta() {
-    return <p>Alta con vuelta a {(useLocation().state as { volver: string }).volver}</p>;
-  }
+  it("un código equivocado se dice en la misma hoja y no sigue", async () => {
+    backend({
+      "POST /api/v1/auth/totp/verificar": () =>
+        Response.json({ codigo: "segundo_factor_invalido", mensaje: "x" }, { status: 400 }),
+    });
+    const { alVerificar } = mostrar();
 
-  function mostrarEnRuta() {
-    const pantalla = <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />;
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(alVerificar).not.toHaveBeenCalled();
+    expect(ultimoMetodo()).toBeNull();
+    expect((screen.getByLabelText("Código") as HTMLInputElement).value).toBe("");
+  });
+
+  it("sin red al preguntar lo dice y deja probar de nuevo", async () => {
+    let conRed = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (pedido: Request) => {
+        if (!conRed) throw new TypeError("Failed to fetch");
+        return new URL(pedido.url).pathname === "/api/v1/auth/totp" ? estadoTotp(true, 0)() : new Response(null);
+      }),
+    );
+    mostrar();
+
+    await titulo("No se pudo confirmar");
+    conRed = true;
+    fireEvent.click(screen.getByRole("button", { name: "Probar de nuevo" }));
+    await titulo(HOJA_CODIGO);
+  });
+
+  it("sin ningún método lleva a darlo de alta y a volver a esta pantalla", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
+    function Destino() {
+      const { state } = useLocation();
+      return <p>Volver a {(state as { volver: string }).volver}</p>;
+    }
     render(
-      <MemoryRouter initialEntries={["/egresos/revision"]}>
+      <MemoryRouter initialEntries={["/pagos"]}>
         <Routes>
-          <Route path="/egresos/revision" element={pantalla} />
-          <Route path="/cuenta/segundo-factor" element={<Alta />} />
+          <Route
+            path="/pagos"
+            element={<PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />}
+          />
+          <Route path="/cuenta/segundo-factor" element={<Destino />} />
         </Routes>
       </MemoryRouter>,
     );
-  }
-
-  function mandarCodigo() {
-    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "123456" } });
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
-  }
-
-  it("sin alta del segundo factor lleva a darla de alta y a volver acá", async () => {
-    backend({
-      "POST /api/v1/auth/totp/verificar": () =>
-        Response.json({ codigo: "segundo_factor_sin_alta", mensaje: "x", id_correlacion: "c" }, { status: 409 }),
-    });
-    mostrarEnRuta();
-    mandarCodigo();
 
     fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
-
-    expect(await screen.findByText("Alta con vuelta a /egresos/revision")).not.toBeNull();
+    expect(await screen.findByText("Volver a /pagos")).toBeTruthy();
   });
 
-  it("sin segundo factor lo dice de entrada, sin campo para un código que no existe", async () => {
-    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
-    mostrarEnRuta();
-
-    fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
-
-    expect(await screen.findByText("Alta con vuelta a /egresos/revision")).not.toBeNull();
-  });
-
-  it("la vista sin segundo factor dice para qué hace falta, sin campo ni botón de verificar", async () => {
-    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
-    mostrarEnRuta();
-
-    await screen.findByRole("link", { name: "Activala ahora" });
-
-    expect(screen.getByText("Para aprobar la orden hace falta la verificación en dos pasos.")).not.toBeNull();
-    expect(screen.queryByLabelText("Código")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Verificar y seguir" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Cancelar" })).not.toBeNull();
-  });
-
-  it.each([
-    ["una aplicación activa", estadoTotp(true, 0)],
-    ["una llave", estadoTotp(false, 1)],
-    ["una falla al preguntar", () => Response.json({ codigo: "error_interno", mensaje: "x", id_correlacion: "c" }, { status: 500 })],
-  ])("control: con %s el campo sigue", async (_, totp) => {
-    const consulta = vi.fn(totp);
-    backend({ "GET /api/v1/auth/totp": consulta });
-    mostrarEnRuta();
-
-    await vi.waitFor(() => expect(consulta).toHaveBeenCalledOnce());
-    // Lo que se controla es que nada cambie: hay que dar tiempo a que la respuesta llegue a la pantalla.
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(screen.getByLabelText("Código")).not.toBeNull();
-    expect(screen.queryByRole("link", { name: "Activala ahora" })).toBeNull();
-  });
-
-  it("control: sin red al preguntar, lo dice y el campo sigue", async () => {
-    backend({
-      "GET /api/v1/auth/totp": () => {
-        throw new TypeError("sin red");
-      },
+  it("si la pantalla se cierra mientras espera el gesto, corta el aviso y no sigue", async () => {
+    recordarMetodo("llave");
+    backend(conLlave());
+    let soltar: (valor: unknown) => void = () => undefined;
+    let señal: AbortSignal | null | undefined;
+    dispositivo((opciones) => {
+      señal = opciones?.signal;
+      return new Promise((resolver) => {
+        soltar = resolver;
+      });
     });
-    mostrarEnRuta();
+    const { alVerificar, vista } = mostrar();
 
-    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos completar");
-    expect(screen.getByLabelText("Código")).not.toBeNull();
+    await titulo(HOJA_LLAVE);
+    vista.unmount();
+    expect(señal?.aborted).toBe(true);
+    soltar(CREDENCIAL);
+    await Promise.resolve();
+    expect(alVerificar).not.toHaveBeenCalled();
   });
 
-  it("un código equivocado no manda a ninguna parte", async () => {
-    backend({
-      "POST /api/v1/auth/totp/verificar": () =>
-        Response.json({ codigo: "segundo_factor_invalido", mensaje: "x", id_correlacion: "c" }, { status: 400 }),
-    });
-    mostrarEnRuta();
-    mandarCodigo();
+  it("la hoja deja inerte lo de atrás y devuelve el foco al cerrarse", async () => {
+    backend({});
+    const atras = document.createElement("button");
+    document.body.append(atras);
+    atras.focus();
+    const { vista } = mostrar();
 
-    expect((await screen.findByRole("alert")).textContent).toContain("El código no es válido");
-    expect(screen.queryByRole("link", { name: "Activala ahora" })).toBeNull();
+    await titulo(HOJA_CODIGO);
+    expect(atras.inert).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText("Código"));
+    vista.unmount();
+    expect(atras.inert).toBe(false);
+    expect(document.activeElement).toBe(atras);
+    atras.remove();
+  });
+
+  it("Escape cancela", async () => {
+    backend({});
+    const { alCancelar } = mostrar();
+
+    fireEvent.keyDown(await screen.findByLabelText("Código"), { key: "Escape" });
+    expect(alCancelar).toHaveBeenCalledOnce();
   });
 });

@@ -149,7 +149,8 @@ function elemento(paso: Paso, grupo: Elemento["grupo"], extra: Partial<Elemento>
 
 function proveedor(extra: Partial<Proveedor> = {}): Proveedor {
   return {
-    id: P1, cuit: "20000000001", razon_social: "Limpieza Ficticia SRL", rubro: "limpieza", contacto: null,
+    id: P1, cuit: "20000000001", razon_social: "Limpieza Ficticia SRL", rubro: "limpieza", contacto: null, telefono: null,
+    whatsapp: null, correo: null, domicilio: null, atiende_emergencias: false,
     cuenta_ultimos_digitos: CUENTA.slice(-4), documento_id: null, estado: "activo", version: 1, huella: H1, alta_por: PERSONA,
     creado_en: "2026-10-20T15:00:00Z", actualizado_en: "2026-10-20T15:00:00Z", ...extra,
   };
@@ -259,7 +260,6 @@ function abrirFicha(f: Ficha | (() => Ficha), extra: Respuestas = {}) {
 
 async function verificarCodigo() {
   fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
-  fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 }
 
 function escribirRegistro() {

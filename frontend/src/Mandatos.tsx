@@ -4,9 +4,11 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
+import { RUTA_INICIO } from "./enlace";
+import { useAEntrar } from "./sesionEncima";
 import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
 import { useAlVolverLaRed, useMiPersona } from "./egresos/useConsorcio";
+import { nombreDeFacultad } from "./facultades";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
@@ -338,7 +340,7 @@ export function Mandatos() {
     if (detalle !== null) tituloDetalle.current?.focus();
   }, [detalle]);
 
-  const aEntrar = useCallback(() => navegar(RUTA_ENTRAR, { replace: true }), [navegar]);
+  const aEntrar = useAEntrar();
 
   const atajar = useCallback(
     (e: unknown) => {
@@ -928,7 +930,7 @@ export function Mandatos() {
                 <dd>
                   <ul>
                     {detalle.datos.facultades.map((f) => (
-                      <li key={f}>{f}</li>
+                      <li key={f}>{nombreDeFacultad(f)}</li>
                     ))}
                   </ul>
                 </dd>

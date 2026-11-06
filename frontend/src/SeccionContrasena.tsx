@@ -5,8 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
-import { mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { AvisoEntrarDeNuevo } from "./VolverAEntrar";
+import { CODIGO_ENTRAR_DE_NUEVO, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Sección "Contraseña" de /cuenta: si la persona tiene una y desde cuándo, y el formulario para
 // definirla o cambiarla (`PUT /api/v1/auth/contrasena`, con X-CSRF-Token). El backend decide: con
@@ -36,8 +35,6 @@ const CODIGO_REQUERIDO = "segundo_factor_requerido";
 const CODIGO_ACTUAL_INVALIDA = "contrasena_actual_invalida";
 const CODIGO_DEBIL = "contrasena_debil";
 const CODIGO_CSRF = "csrf_invalido";
-// La primera contraseña pide una entrada reciente (`exigir_entrada_reciente`).
-const CODIGO_ENTRADA_RECIENTE = "reautenticacion_requerida";
 
 /**
  * Caracteres como los cuenta el backend: puntos de código, después de NFKC (que es lo que
@@ -50,7 +47,6 @@ export function largoContrasena(valor: string): number {
 type Aviso =
   | { tipo: "ok"; texto: string }
   | { tipo: "error"; texto: string }
-  | { tipo: "entrar_de_nuevo" };
 
 /** Respuesta de error con el cuerpo uniforme (`Error`), para leer su código y su mensaje. */
 function campoDe(error: unknown, campo: "codigo" | "mensaje"): string | undefined {
@@ -158,7 +154,8 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         else if (codigo === CODIGO_DEBIL)
           // El backend explica la regla (largo y que no sea el correo): se muestra tal cual.
           setAviso({ tipo: "error", texto: campoDe(error, "mensaje") ?? SIN_CONEXION });
-        else if (codigo === CODIGO_ENTRADA_RECIENTE) setAviso({ tipo: "entrar_de_nuevo" });
+        // La primera contraseña pide una entrada reciente: lo resuelve la hoja, y lo escrito queda.
+        else if (codigo === CODIGO_ENTRAR_DE_NUEVO) setAviso(null);
         else if (codigo === CODIGO_CSRF)
           setAviso({ tipo: "error", texto: "No pudimos verificar el pedido. Recargá la página y probá de nuevo." });
         else if (response.status === ESTADO_DEMASIADOS)
@@ -273,7 +270,6 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         {enviando && <p>Guardando…</p>}
         {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
         {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
-        {aviso?.tipo === "entrar_de_nuevo" && <AvisoEntrarDeNuevo />}
       </div>
     </section>
   );

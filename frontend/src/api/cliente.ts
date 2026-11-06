@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 
+import { pedirConSesion } from "../sesionEncima";
 import type { components, paths } from "./tipos";
 
 // Cliente tipado ligero (documento 13, §11.4): las formas salen de contratos/openapi.json,
@@ -8,7 +9,7 @@ import type { components, paths } from "./tipos";
 export const api = createClient<paths>({
   baseUrl: globalThis.location?.origin ?? "",
   // Se resuelve en cada pedido (no al importar) para que las pruebas puedan simular fetch.
-  fetch: (pedido) => globalThis.fetch(pedido),
+  fetch: pedirConSesion,
 });
 
 export type Salud = components["schemas"]["Salud"];

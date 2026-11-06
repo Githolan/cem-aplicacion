@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Navigate, useLocation } from "react-router";
+import { Navigate } from "react-router";
 
 import { api } from "./api/cliente";
-import { EntrarConCodigo } from "./EntrarConCodigo";
-import { EntrarConContrasena } from "./EntrarConContrasena";
+import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceInstalar } from "./Instalar";
-import { PedirEnlace } from "./PedirEnlace";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
 import { codigoDe, mensajeDeFallaConEnlace } from "./fallas";
-import { recordarOrigen, useCorreoDeSesion, useSesion, useTerminarEntrada } from "./sesion";
+import { useIrAlInicio, useSesion } from "./sesion";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
 // fragmento (#token=…), que el navegador nunca manda al servidor: no queda en el registro de
@@ -24,8 +22,8 @@ import { recordarOrigen, useCorreoDeSesion, useSesion, useTerminarEntrada } from
 // Es el paso de Acceso donde se elige cómo entrar (decisión del propietario del 05-11-2026, §2):
 // primero el enlace por correo y, debajo, las otras formas, de a una por vez, con un solo correo
 // para las tres. Terminada la entrada sigue sola al inicio. Con sesión abierta no hay nada que hacer
-// acá y sigue también, salvo que la persona venga a entrar de nuevo por seguridad (`state.renovar`):
-// entonces el correo ya está escrito y al terminar vuelve a la pantalla de origen (`state.volver`).
+// acá y sigue también. Una sesión que vence mientras se trabaja no pasa por acá: se entra encima de
+// la pantalla (`EntrarEncima.tsx`).
 
 const CLAVE_GUARDADO = "cem.entrar.enlace";
 
@@ -44,19 +42,6 @@ type Estado =
   | { tipo: "entrando" }
   | { tipo: "rechazado" }
   | { tipo: "fallo"; mensaje: string };
-
-type Metodo = "enlace" | "codigo" | "contrasena";
-
-interface Llegada {
-  renovar?: boolean;
-  volver?: string;
-}
-
-const OTRAS_FORMAS: Record<Metodo, string> = {
-  enlace: "Pedir el enlace por correo",
-  codigo: "Entrar con un código",
-  contrasena: "Entrar con contraseña",
-};
 
 interface Lectura {
   token: string | null;
@@ -99,34 +84,11 @@ export function Entrar() {
   // En el inicializador: StrictMode monta dos veces y la segunda vez el fragmento ya no está.
   const [{ token, delFragmento }] = useState(leerToken);
   const [estado, setEstado] = useState<Estado>({ tipo: token ? "entrando" : "sin_enlace" });
-  const [metodo, setMetodo] = useState<Metodo>("enlace");
-  const [escrito, setEscrito] = useState<string | null>(null);
-  const [avisoDelPedido, setAvisoDelPedido] = useState<string | null>(null);
+  const [correo, setCorreo] = useState("");
   const canjeado = useRef(false);
   const saliendo = useRef(false);
-  const formas = useRef<HTMLDivElement>(null);
-  const eligio = useRef(false);
-  const terminarEntrada = useTerminarEntrada();
-  const { state } = useLocation();
-  const llegada = state as Llegada | null;
-  const renovar = llegada?.renovar === true;
-  const volver = renovar && typeof llegada?.volver === "string" ? llegada.volver : null;
-  const sesion = useSesion(token === null && !renovar);
-  const correoDeSesion = useCorreoDeSesion(volver !== null);
-  // Lo que escribió la persona manda: la respuesta de la sesión no le pisa nada.
-  const correo = escrito ?? correoDeSesion ?? "";
-
-  // Al cambiar de forma, el foco va al primer campo por completar: lo de arriba ya no es lo que se
-  // eligió, y con el correo ya escrito lo que falta es lo que sigue.
-  useEffect(() => {
-    if (!eligio.current) return;
-    const campos = Array.from<HTMLInputElement>(formas.current?.querySelectorAll("input") ?? []);
-    (campos.find((campo) => campo.value === "") ?? campos[0])?.focus();
-  }, [metodo]);
-
-  useEffect(() => {
-    if (volver !== null) recordarOrigen(volver, Date.now());
-  }, [volver]);
+  const terminarEntrada = useIrAlInicio();
+  const sesion = useSesion(token === null);
 
   // Al recargar o irse, el navegador corta el canje en curso y fetch falla: ese canje no
   // terminó, así que el token se queda guardado para la página que viene.
@@ -176,11 +138,9 @@ export function Entrar() {
   }, [token, delFragmento]);
 
   /** Elegir otra forma deja atrás el enlace que falló: ni su error ni su token siguen. */
-  function elegir(forma: Metodo) {
-    eligio.current = true;
+  function alElegir() {
     olvidarToken();
     setEstado({ tipo: "sin_enlace" });
-    setMetodo(forma);
   }
 
   if (sesion === "con_sesion") return <Navigate to="/" replace />;
@@ -208,35 +168,7 @@ export function Entrar() {
       </div>
       {estado.tipo !== "entrando" && (
         <>
-          <div ref={formas}>
-            {metodo === "enlace" && (
-              <PedirEnlace
-                correo={correo}
-                alCambiarCorreo={setEscrito}
-                alPedir={(pedido, mensaje) => {
-                  setEscrito(pedido);
-                  setAvisoDelPedido(mensaje);
-                  elegir("codigo");
-                }}
-              />
-            )}
-            {metodo === "codigo" && (
-              <EntrarConCodigo correo={correo} alCambiarCorreo={setEscrito} aviso={avisoDelPedido} />
-            )}
-            {metodo === "contrasena" && <EntrarConContrasena correo={correo} alCambiarCorreo={setEscrito} />}
-          </div>
-          <section aria-labelledby="titulo-otras-formas" className="tarjeta">
-            <h2 id="titulo-otras-formas">Otras formas de entrar</h2>
-            {(Object.keys(OTRAS_FORMAS) as Metodo[])
-              .filter((forma) => forma !== metodo)
-              .map((forma) => (
-                <p key={forma}>
-                  <button type="button" onClick={() => elegir(forma)}>
-                    {OTRAS_FORMAS[forma]}
-                  </button>
-                </p>
-              ))}
-          </section>
+          <FormasDeEntrar correo={correo} alCambiarCorreo={setCorreo} alElegir={alElegir} />
           <EnlaceInstalar />
         </>
       )}

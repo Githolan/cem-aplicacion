@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate } from "react-router";
 
-import { RUTA_ENTRAR } from "./enlace";
+import { RUTA_ENTRAR, RUTA_INSTALAR } from "./enlace";
 import { enComputadora, instalar, useInstalacion } from "./instalacion";
 
 export const AVISO_INSTALADA =
@@ -107,7 +107,7 @@ export function EnlaceInstalar() {
   if (computadora && forma !== "boton") return null;
   return (
     <p>
-      <Link to="/instalar">Instalá la aplicación {computadora ? "en esta computadora" : "en este dispositivo"}</Link>
+      <Link to={RUTA_INSTALAR}>Instalá la aplicación {computadora ? "en esta computadora" : "en este dispositivo"}</Link>
     </p>
   );
 }
