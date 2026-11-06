@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 
@@ -41,6 +42,41 @@ export function useEsperaAntivirus(activa: boolean, mirar: () => void, alAgotar:
     }, ESPERA_ANTIVIRUS_MS);
     return () => clearInterval(temporizador);
   }, [activa]);
+}
+
+/** Mientras `activa`, repite `leer` cuando el navegador avisa que volvió la red. Solo para lecturas:
+ * un pedido que escribe sigue esperando el toque de la persona. */
+export function useAlVolverLaRed(activa: boolean, leer: () => void) {
+  const ultima = useRef(leer);
+  ultima.current = leer;
+  useEffect(() => {
+    if (!activa) return;
+    const alVolver = () => ultima.current();
+    window.addEventListener("online", alVolver);
+    return () => window.removeEventListener("online", alVolver);
+  }, [activa]);
+}
+
+async function personaDeLaSesion(): Promise<string> {
+  const { data } = await api.GET("/api/v1/auth/sesion");
+  if (data === undefined) throw new Error("no se pudo leer la sesión");
+  return data.persona_id;
+}
+
+/** La persona de la sesión, o null mientras no se sabe. Como con `mis-acciones`, sirve solo para
+ * mostrar: sin el dato no se oculta nada y decide el servidor. Compara cuentas, no seres humanos, y
+ * no queda guardada para quien entre después en este navegador. */
+export function useMiPersona(activa: boolean): string | null {
+  const consulta = useQuery({
+    queryKey: ["mi-persona"],
+    queryFn: personaDeLaSesion,
+    enabled: activa,
+    gcTime: 0,
+    retry: false,
+    retryOnMount: false,
+    networkMode: "always",
+  });
+  return consulta.data ?? null;
 }
 
 /** Si la pantalla sigue montada: una escritura nunca sale de una pantalla descartada. */

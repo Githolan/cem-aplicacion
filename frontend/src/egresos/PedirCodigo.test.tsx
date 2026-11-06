@@ -22,12 +22,16 @@ const CREDENCIAL = {
 
 type Respuestas = Record<string, () => Response>;
 
+const estadoTotp = (activo: boolean, llaves: number) => () =>
+  Response.json({ activo, llaves, codigos_recuperacion_restantes: 0, verificado_en: null });
+
 function backend(respuestas: Respuestas) {
+  const lista: Respuestas = { "GET /api/v1/auth/totp": estadoTotp(true, 0), ...respuestas };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (pedido: Request) => {
       const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-      const respuesta = respuestas[clave];
+      const respuesta = lista[clave];
       if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
       return respuesta();
     }),
@@ -157,6 +161,56 @@ describe("confirmar con la llave", () => {
     fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
 
     expect(await screen.findByText("Alta con vuelta a /egresos/revision")).not.toBeNull();
+  });
+
+  it("sin segundo factor lo dice de entrada, sin campo para un código que no existe", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
+    mostrarEnRuta();
+
+    fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
+
+    expect(await screen.findByText("Alta con vuelta a /egresos/revision")).not.toBeNull();
+  });
+
+  it("la vista sin segundo factor dice para qué hace falta, sin campo ni botón de verificar", async () => {
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 0) });
+    mostrarEnRuta();
+
+    await screen.findByRole("link", { name: "Activala ahora" });
+
+    expect(screen.getByText("Para aprobar la orden hace falta la verificación en dos pasos.")).not.toBeNull();
+    expect(screen.queryByLabelText("Código")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Verificar y seguir" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Cancelar" })).not.toBeNull();
+  });
+
+  it.each([
+    ["una aplicación activa", estadoTotp(true, 0)],
+    ["una llave", estadoTotp(false, 1)],
+    ["una falla al preguntar", () => Response.json({ codigo: "error_interno", mensaje: "x", id_correlacion: "c" }, { status: 500 })],
+  ])("control: con %s el campo sigue", async (_, totp) => {
+    const consulta = vi.fn(totp);
+    backend({ "GET /api/v1/auth/totp": consulta });
+    mostrarEnRuta();
+
+    await vi.waitFor(() => expect(consulta).toHaveBeenCalledOnce());
+    // Lo que se controla es que nada cambie: hay que dar tiempo a que la respuesta llegue a la pantalla.
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(screen.getByLabelText("Código")).not.toBeNull();
+    expect(screen.queryByRole("link", { name: "Activala ahora" })).toBeNull();
+  });
+
+  it("control: sin red al preguntar, lo dice y el campo sigue", async () => {
+    backend({
+      "GET /api/v1/auth/totp": () => {
+        throw new TypeError("sin red");
+      },
+    });
+    mostrarEnRuta();
+
+    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos completar");
+    expect(screen.getByLabelText("Código")).not.toBeNull();
   });
 
   it("un código equivocado no manda a ninguna parte", async () => {

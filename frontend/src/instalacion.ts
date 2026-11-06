@@ -60,6 +60,11 @@ function formaActual(): FormaDeInstalar {
   return "menu";
 }
 
+/** Si es una computadora: el puntero principal es fino. Un iPad con mouse sigue siendo un iPad. */
+export function enComputadora(forma: FormaDeInstalar): boolean {
+  return forma !== "iphone" && window.matchMedia?.("(pointer: fine)").matches === true;
+}
+
 /** Abre la instalación del navegador y dice qué eligió la persona; un fallo del navegador sube. */
 export async function instalar(): Promise<"accepted" | "dismissed"> {
   const evento = eventoGuardado;

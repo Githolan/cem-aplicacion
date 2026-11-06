@@ -223,7 +223,7 @@ export function Contactos() {
 
       {consorcio !== "" && puede("contactos.gestionar") && (
         <p className="tarjeta">
-          <Link to={RUTA_CONTACTOS_GESTION}>Gestionar la lista</Link> (administración y Consejo)
+          <Link to={RUTA_CONTACTOS_GESTION}>Gestionar la lista</Link>
         </p>
       )}
     </>

@@ -4,14 +4,24 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { llaveDisponible, quitarLlave, registrarLlave, type Resultado } from "./llaveAcceso";
+import {
+  esDeEsteDispositivo,
+  llaveDisponible,
+  nombreDelDispositivo,
+  quitarLlave,
+  recordarLlave,
+  registrarLlave,
+  type Resultado,
+} from "./llaveAcceso";
 
 // La llave de acceso en /cuenta/segundo-factor: activarla es un solo botón, sin aplicación aparte.
-// Si el navegador no sabe usarlas, la sección no aparece y queda la aplicación de códigos. Cuando
-// falta confirmar, `PedirCodigo` ofrece la llave o un código, también el de recuperación, y el
-// pedido se repite: quien perdió el dispositivo puede quitar su llave o sumar otra. Los códigos de
-// recuperación salen de acá apenas llegan (`alCodigos`): los muestra la página, que no los suelta
-// hasta que la persona dice que los guardó, y hasta entonces no se consulta nada más.
+// Si el navegador no sabe usarlas, la sección no aparece y queda la aplicación de códigos. Con la
+// llave de este dispositivo no queda nada para hacer, y la sección lo dice: confirmar no es un paso
+// aparte, se pide en el momento. Cuando falta, `PedirCodigo` ofrece la llave o un código, también
+// el de recuperación, y el pedido se repite: quien perdió el dispositivo puede quitar su llave o
+// sumar otra. Los códigos de recuperación salen de acá apenas llegan (`alCodigos`): los muestra la
+// página, que no los suelta hasta que la persona dice que los guardó, y hasta entonces no se
+// consulta nada más.
 
 type Llave = components["schemas"]["LlaveResumen"];
 
@@ -63,9 +73,17 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
       .then((r) => {
         if (r.ok) alListo(r.valor);
         else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo));
-        else setAviso(r.mensaje);
+        else if (r.yaEstaAca !== true || !reconocerEste()) setAviso(r.mensaje);
       })
       .finally(() => setEnviando(false));
+  }
+
+  /** El navegador dijo que este dispositivo ya tiene llave: es la de la lista con su mismo nombre. */
+  function reconocerEste(): boolean {
+    const nombre = nombreDelDispositivo(navigator.userAgent);
+    const suyas = (llaves ?? []).filter((k) => k.nombre === nombre);
+    suyas.forEach((k) => recordarLlave(k.credencial_id));
+    return suyas.length > 0;
   }
 
   function activar() {
@@ -86,12 +104,6 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
     );
   }
 
-  function confirmarSolo() {
-    setAviso(null);
-    setListo(null);
-    setPendiente(() => () => alTerminar("Listo: confirmaste que sos vos, por 10 minutos."));
-  }
-
   if (pendiente !== null)
     return (
       <PedirCodigo
@@ -104,6 +116,8 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
       />
     );
 
+  const enEste = llaves?.some((k) => esDeEsteDispositivo(k.credencial_id)) ?? false;
+
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
       <h2 id={`${id}-titulo`}>Tu llave de acceso</h2>
@@ -111,6 +125,12 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
         Confirmás con el PIN, la huella o la cara de este dispositivo, sin escribir códigos y sin
         instalar nada.
       </p>
+      {enEste && (
+        <p className="aviso-ok">
+          Tu llave ya funciona en este dispositivo. No tenés que hacer nada más: cuando una acción lo
+          pida, confirmás ahí mismo.
+        </p>
+      )}
       {listo !== null && <p className="aviso-ok">{listo}</p>}
       {aviso !== null && <p role="alert">{aviso}</p>}
       {fallaConsulta !== null && (
@@ -125,7 +145,8 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
         <ul aria-label="Tus llaves">
           {llaves.map((k) => (
             <li key={k.id}>
-              {k.nombre}{" "}
+              {k.nombre}
+              {esDeEsteDispositivo(k.credencial_id) && " (este dispositivo)"}{" "}
               <button
                 type="button"
                 className="secundario"
@@ -138,14 +159,12 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
           ))}
         </ul>
       )}
-      {llaves !== null && (
+      {llaves !== null && llaves.length > 0 && !enEste && (
+        <p>Si este dispositivo no está en la lista, agregalo.</p>
+      )}
+      {llaves !== null && !enEste && (
         <button type="button" onClick={activar} disabled={enviando}>
           {llaves.length === 0 ? "Activar en este dispositivo" : "Agregar este dispositivo"}
-        </button>
-      )}
-      {llaves !== null && llaves.length > 0 && (
-        <button type="button" className="secundario" onClick={confirmarSolo} disabled={enviando}>
-          Confirmar que soy yo
         </button>
       )}
     </section>

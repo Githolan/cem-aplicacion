@@ -4,17 +4,19 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { conLaRedDeVuelta, sinPisarLoHecho } from "./egresos/comun";
+import { useAlVolverLaRed } from "./egresos/useConsorcio";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
 // mínimo de D6 (unidad, nombre, carácter, vigencia y si está confirmado; nunca correo ni teléfono),
-// confirmar un vínculo con la referencia del título y finalizarlo con el motivo. Cada acción se
-// ofrece según el estado del vínculo (sin confirmar, ya empezado) y lo que la persona alcanza
-// (`padron.confirmar_vinculo`, `padron.gestionar`), y si no puede leer el padrón va al inicio. Es
-// solo interfaz: la API decide cada pedido y la base vuelve a controlar, y un 403 al actuar se dice
-// acá, porque nadie confirma su propio vínculo ni el que registró.
+// confirmar un vínculo con la referencia del título y finalizarlo con el motivo. «Confirmar» se
+// ofrece en las filas que la API marca (`confirmable_por_vos`: nadie confirma su propio vínculo ni
+// el que registró) y «Finalizar» según si ya empezó y `padron.gestionar`; si no puede leer el padrón
+// va al inicio. Es solo interfaz: la API decide cada pedido y la base vuelve a controlar, y un 403
+// al actuar se dice acá.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Fila = components["schemas"]["FilaPadron"];
@@ -62,7 +64,7 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
   if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
   if (estado === ESTADO.sinPermiso)
     return accion === "confirmar"
-      ? "No tenés permiso para confirmar este vínculo. Hace falta la facultad sobre la unidad, y nadie confirma su propio vínculo ni el que registró."
+      ? "No tenés permiso para confirmar este vínculo: hace falta la facultad sobre la unidad."
       : "No tenés permiso para finalizar este vínculo: hace falta la facultad sobre la unidad.";
   if (estado === ESTADO.noEncontrado) return "Ese vínculo ya no está en el padrón de este edificio.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
@@ -88,6 +90,11 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
 function renovarClave(estado: number, codigo: string | undefined): boolean {
   if (codigo === "idempotencia_reutilizada") return true;
   return estado < ESTADO.errorDelServidor && codigo !== "idempotencia_en_curso";
+}
+
+/** Lo que espera a quien puede confirmar va primero; después, el resto en el orden de la API. */
+export function sinConfirmarPrimero(filas: Fila[]): Fila[] {
+  return [...filas.filter((f) => !f.confirmado), ...filas.filter((f) => f.confirmado)];
 }
 
 /** Una respuesta que deja la lista vieja: el vínculo cambió o ya no está. */
@@ -198,8 +205,7 @@ export function Padron() {
         else {
           setLectura({ tipo: "sin_servicio" });
           // Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo.
-          const falla = mensajeDeFalla(response.status, codigoDe(error));
-          setAviso((actual) => (actual?.ok ? actual : { texto: falla, ok: false }));
+          setAviso(sinPisarLoHecho(mensajeDeFalla(response.status, codigoDe(error))));
         }
       })
       .catch((e: unknown) => {
@@ -207,7 +213,7 @@ export function Padron() {
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura({ tipo: "sin_servicio" });
-          setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
+          setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
     return () => {
@@ -221,6 +227,15 @@ export function Padron() {
     setLectura({ tipo: "cargando" });
     setVuelta((v) => v + 1);
   }
+
+  useAlVolverLaRed(lectura.tipo === "sin_servicio", () => {
+    reconsultar();
+    setAviso(conLaRedDeVuelta);
+  });
+  useAlVolverLaRed(pantalla.tipo === "sin_servicio", () => {
+    setPantalla({ tipo: "cargando" });
+    consultarEdificios();
+  });
 
   function abrir(fila: Fila, accion: Accion) {
     clave.current = null;
@@ -310,11 +325,41 @@ export function Padron() {
       .finally(() => setEnviando(false));
   }
 
-  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  // Un rechazo con el formulario abierto va junto a él, para corregirlo sin recorrer la página.
+  const avisoEnElFormulario = abierto !== null && lectura.tipo === "ok" && aviso !== null && !aviso.ok;
+  const conMensaje = (aviso !== null && !avisoEnElFormulario) || pantalla.tipo !== "lista";
 
   return (
     <>
       <h1>Padrón del edificio</h1>
+
+      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
+        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
+        {pantalla.tipo === "sin_servicio" && (
+          <>
+            <p className="aviso-error">
+              {pantalla.deConexion
+                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
+                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPantalla({ tipo: "cargando" });
+                consultarEdificios();
+              }}
+            >
+              Consultar de nuevo
+            </button>
+          </>
+        )}
+        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {aviso && !avisoEnElFormulario && (
+          <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
+            {aviso.texto}
+          </p>
+        )}
+      </div>
 
       {pantalla.tipo === "lista" && (
         <>
@@ -363,40 +408,12 @@ export function Padron() {
             {lectura.tipo === "ok" && lectura.filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {lectura.tipo === "ok" && lectura.filas.length > 0 && (
               <ul className="sesiones" aria-label="Padrón">
-                {lectura.filas.map((f) => tarjeta(f))}
+                {(puede("padron.confirmar_vinculo") ? sinConfirmarPrimero(lectura.filas) : lectura.filas).map((f) => tarjeta(f))}
               </ul>
             )}
           </section>
         </>
       )}
-
-      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
-        {pantalla.tipo === "cargando" && <p>Consultando…</p>}
-        {pantalla.tipo === "sin_servicio" && (
-          <>
-            <p className="aviso-error">
-              {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                setPantalla({ tipo: "cargando" });
-                consultarEdificios();
-              }}
-            >
-              Consultar de nuevo
-            </button>
-          </>
-        )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
-        {aviso && (
-          <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
-            {aviso.texto}
-          </p>
-        )}
-      </div>
     </>
   );
 
@@ -406,7 +423,7 @@ export function Padron() {
     // Si ya empezó lo dice la API con la fecha del consorcio, la misma con la que decide el fin.
     const futuro = !f.iniciado;
     const esteAbierto = abierto?.fila.vinculo_id === f.vinculo_id ? abierto.accion : null;
-    const confirmable = !f.confirmado && puede("padron.confirmar_vinculo");
+    const confirmable = f.confirmable_por_vos;
     const finalizable = !futuro && puede("padron.gestionar");
     return (
       <li key={f.vinculo_id}>
@@ -478,6 +495,11 @@ export function Padron() {
             setTexto(e.target.value);
           }}
         />
+        {avisoEnElFormulario && (
+          <p ref={textoAviso} tabIndex={-1} role="alert" className="aviso-error">
+            {aviso.texto}
+          </p>
+        )}
         {confirmarFin ? (
           <div role="group" aria-labelledby={pregunta}>
             <p id={pregunta}>

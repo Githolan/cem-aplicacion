@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
-import { ENTRAR_DE_NUEVO, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { ENTRAR_DE_NUEVO, RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { LARGO_MAXIMO_CONTRASENA, LARGO_MINIMO_CONTRASENA, largoContrasena } from "./SeccionContrasena";
 import { ContextoVersion } from "./version";
 
@@ -165,6 +165,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  localStorage.clear();
 });
 
 describe("página /cuenta", () => {
@@ -242,6 +243,39 @@ describe("página /cuenta", () => {
     expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
     const revocar = pedido(simulado, "POST", `/api/v1/auth/sesiones/${OTRA}/revocar`);
     expect(revocar?.headers.get("X-CSRF-Token")).toBe("abc123");
+  });
+
+  it("el resultado de cerrar una sesión queda en esa tarjeta y lleva el foco: la fila ya no está", async () => {
+    vi.stubGlobal("fetch", conSesion({ [`POST /api/v1/auth/sesiones/${OTRA}/revocar`]: sinCuerpo(204) }));
+    abrir();
+
+    fireEvent.click(await botonCerrar("Chrome en Android"));
+
+    const aviso = await screen.findByText("Listo: cerramos la sesión de Chrome en Android.");
+    expect(screen.getByRole("region", { name: "Dónde tenés la sesión abierta" }).contains(aviso)).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+  });
+
+  it.each([
+    [`POST /api/v1/auth/sesiones/${OTRA}/revocar`, 503],
+    [`POST /api/v1/auth/sesiones/${OTRA}/revocar`, 500],
+    ["POST /api/v1/auth/sesiones/revocar-otras", 503],
+    ["POST /api/v1/auth/sesiones/revocar-otras", 500],
+    ["POST /api/v1/auth/salir", 503],
+    ["POST /api/v1/auth/salir", 500],
+  ])("un %s con %i habla del servicio, no de la conexión, y no cambia de pantalla", async (ruta, status) => {
+    vi.stubGlobal("fetch", conSesion({ [ruta]: () => error("error_interno", status) }));
+    abrir();
+    await screen.findByText("Ana Pérez");
+    if (ruta.endsWith("revocar")) fireEvent.click(await botonCerrar("Chrome en Android"));
+    else if (ruta.endsWith("salir")) fireEvent.click(screen.getByRole("button", { name: "Salir" }));
+    else fireEvent.click(screen.getByRole("button", { name: "Cerrar las otras sesiones" }));
+
+    const aviso = await screen.findByText(SERVICIO_NO_DISPONIBLE);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
+    expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 
   it("cerrar la sesión actual lleva a /entrar", async () => {
@@ -526,13 +560,15 @@ describe("contraseña en /cuenta", () => {
     expect(seccion().queryByText(/Revisá la conexión/)).toBeNull();
     expect(seccion().queryByText(/Listo:/)).toBeNull();
 
-    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
-    const consultasDeSesion = () =>
-      pedidosDe(simulado).filter((p) => new URL(p.url).pathname === "/api/v1/auth/sesion").length;
-    const antes = consultasDeSesion();
     fireEvent.click(seccion().getByRole("link", { name: "Volver a entrar" }));
+
+    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    expect(consultasDeSesion()).toBe(antes);
+    // Solo la usa para dejar el correo escrito; al terminar vuelve a esta pantalla.
+    const pedir = within(screen.getByRole("region", { name: "Pedir el enlace para entrar" }));
+    await waitFor(() => expect((pedir.getByLabelText("Correo") as HTMLInputElement).value).toBe(YO.correo));
+    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+    expect(localStorage.getItem("cem.entrar.origen")).toContain("/cuenta");
   });
 
   it("control: otro rechazo no ofrece volver a entrar", async () => {
@@ -603,15 +639,17 @@ describe("contraseña en /cuenta", () => {
     codigos_recuperacion_restantes: 9,
   };
 
-  it("con segundo factor no pide la actual y avisa de entrada que va a pedir confirmar, sin mandar a otra página", async () => {
+  it("con segundo factor no pide la actual, no anticipa lo que va a pedir y no manda a otra página", async () => {
     vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO, CON_CONTRASENA));
     abrir();
     await screen.findByText(/La cambiaste por última vez/);
 
     desplegar();
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
-    expect(seccion().getByText(/te vamos a pedir que confirmes que sos vos/)).toBeTruthy();
+    expect(seccion().queryByText(/te vamos a pedir/)).toBeNull();
     expect(seccion().queryByRole("link")).toBeNull();
+    // Control: el formulario está abierto.
+    expect(seccion().getByLabelText("Contraseña nueva")).toBeTruthy();
   });
 
   it("sin la verificación reciente (403) pide el código acá mismo y guarda lo que estaba escrito", async () => {
@@ -681,7 +719,9 @@ describe("contraseña en /cuenta", () => {
     ],
     [() => error("csrf_invalido", 403), /No pudimos verificar el pedido. Recargá la página/],
     [() => error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
-    [() => error("servicio_no_disponible", 503), /No pudimos completar el pedido/],
+    [() => error("servicio_no_disponible", 503), SERVICIO_NO_DISPONIBLE],
+    [() => error("error_interno", 500), SERVICIO_NO_DISPONIBLE],
+    [() => error("no_permitido", 403), RECARGAR],
   ])("muestra el rechazo del backend a la vista (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": respuesta }, TOTP_INACTIVO, CON_CONTRASENA));
     abrir();

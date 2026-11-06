@@ -122,6 +122,11 @@ function cambioLaLista(estado: number, codigo: string | undefined): boolean {
   return estado === ESTADO.noEncontrado || (estado === ESTADO.conflicto && codigo !== "idempotencia_en_curso");
 }
 
+/** El contacto ya no se puede corregir: no está, o terminó su vigencia. */
+function yaNoEsta(estado: number, codigo: string | undefined): boolean {
+  return estado === ESTADO.noEncontrado || codigo === "contacto_terminado";
+}
+
 type Datos = {
   funcion: Funcion;
   naturaleza: Naturaleza;
@@ -199,7 +204,6 @@ export function ContactosGestion() {
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [motivo, setMotivo] = useState("");
-  const [confirmar, setConfirmar] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [vuelta, setVuelta] = useState(0);
@@ -207,17 +211,12 @@ export function ContactosGestion() {
   // Una clave por intento lógico: se conserva si el pedido se cae y se renueva al cambiar los datos.
   const clave = useRef<string | null>(null);
   const primerCampo = useRef<HTMLElement | null>(null);
-  const confirmarSi = useRef<HTMLButtonElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
   const alAviso = useRef(false);
 
   useEffect(() => {
-    if (abierto !== null && !confirmar) primerCampo.current?.focus();
-  }, [abierto, confirmar]);
-
-  useEffect(() => {
-    if (confirmar) confirmarSi.current?.focus();
-  }, [confirmar]);
+    if (abierto !== null) primerCampo.current?.focus();
+  }, [abierto]);
 
   useEffect(() => {
     if (enviando || !alAviso.current) return;
@@ -300,14 +299,12 @@ export function ContactosGestion() {
     clave.current = null;
     setDatos(contacto === null ? VACIO : datosDe(contacto));
     setMotivo("");
-    setConfirmar(false);
     setAviso(null);
     setAbierto({ accion, contacto });
   }
 
   function cerrar() {
     clave.current = null;
-    setConfirmar(false);
     setAbierto(null);
   }
 
@@ -318,13 +315,7 @@ export function ContactosGestion() {
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    if (abierto === null) return;
-    // Retirar no se puede deshacer: primero se pide la confirmación explícita.
-    if (abierto.accion === "retirar" && !confirmar) {
-      setConfirmar(true);
-      return;
-    }
-    pedir(abierto);
+    if (abierto !== null) pedir(abierto);
   }
 
   function pedir({ accion, contacto }: Abierto) {
@@ -380,9 +371,11 @@ export function ContactosGestion() {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
           setAviso({ texto: mensajeDeError(response.status, codigo, accion, camposDe(error)), ok: false });
-          setConfirmar(false);
           if (cambioLaLista(response.status, codigo)) {
-            cerrar();
+            // Lo escrito no se pierde: una corrección que ya no tiene contacto sigue como uno nuevo, y el
+            // motivo espera la lista nueva, que muestra el formulario solo si el contacto sigue ahí.
+            if (accion === "corregir" && yaNoEsta(response.status, codigo)) setAbierto({ accion: "agregar", contacto: null });
+            else if (accion !== "senalar" && accion !== "agregar") cerrar();
             volverAPedir();
           }
           return;
@@ -462,17 +455,19 @@ export function ContactosGestion() {
                     {lectura.contactos.map((c) => tarjeta(c))}
                   </ul>
                 )}
-                {abierto?.accion === "agregar" ? (
-                  formularioDatos(null, `${id}-nuevo`)
-                ) : (
+              </>
+            )}
+            {/* Agregar no depende de la lista leída: con la lista caída sigue a la vista, y un formulario
+                abierto no se va mientras llega la lista. */}
+            {abierto?.accion === "agregar"
+              ? formularioDatos(null, `${id}-nuevo`)
+              : lectura.tipo !== "cargando" && (
                   <p>
                     <button type="button" onClick={() => abrir("agregar", null)} disabled={enviando}>
                       Agregar un contacto
                     </button>
                   </p>
                 )}
-              </>
-            )}
           </section>
         </>
       )}
@@ -563,8 +558,10 @@ export function ContactosGestion() {
           </p>
         ) : accion === "corregir" ? (
           formularioDatos(c, titulo)
+        ) : accion === "retirar" ? (
+          preguntaRetirar(c, titulo)
         ) : (
-          accion !== "agregar" && formularioAccion(c, accion, titulo)
+          accion !== "agregar" && formularioAccion(accion, titulo)
         )}
       </li>
     );
@@ -576,9 +573,11 @@ export function ContactosGestion() {
     const profesional = datos.naturaleza === "profesional";
     const ayudaTelefono = `${titulo}-ayuda-telefono`;
     const ayudaTexto = `${titulo}-ayuda-texto`;
+    // Agregar cuelga de la sección, también sin tarjetas a la vista; corregir, de la tarjeta.
+    const Nivel = nuevo ? "h3" : "h4";
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        <h4 id={`${titulo}-accion`}>{nuevo ? "Agregar un contacto" : "Corregir el contacto"}</h4>
+        <Nivel id={`${titulo}-accion`}>{nuevo ? "Agregar un contacto" : "Corregir el contacto"}</Nivel>
         <label htmlFor={`${titulo}-funcion`}>Función</label>
         <select
           id={`${titulo}-funcion`}
@@ -685,16 +684,34 @@ export function ContactosGestion() {
     );
   }
 
-  /** Retirar, dejar constancia de la comprobación o señalar un error. */
-  function formularioAccion(c: Contacto, accion: "retirar" | "verificar" | "senalar", titulo: string) {
-    const ayuda = `${titulo}-ayuda`;
+  /** Retirar no se puede deshacer: se pregunta una vez, en la tarjeta, sin un paso previo. */
+  function preguntaRetirar(c: Contacto, titulo: string) {
     const pregunta = `${titulo}-pregunta`;
+    return (
+      <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={pregunta}>
+        <p id={pregunta}>¿Retirar el contacto {c.nombre}? No se puede deshacer.</p>
+        <p>
+          <button
+            type="submit"
+            disabled={enviando}
+            ref={(e) => {
+              primerCampo.current = e;
+            }}
+          >
+            Sí, retirar
+          </button>{" "}
+          <button type="button" onClick={cerrar} disabled={enviando}>
+            No
+          </button>
+        </p>
+      </form>
+    );
+  }
+
+  /** Dejar constancia de la comprobación o señalar un error. */
+  function formularioAccion(accion: "verificar" | "senalar", titulo: string) {
+    const ayuda = `${titulo}-ayuda`;
     const texto = {
-      retirar: {
-        titulo: "Retirar el contacto",
-        ayuda: "Desde hoy deja de figurar en la lista. La fila no se borra: queda quién y cuándo. No se puede deshacer.",
-        boton: "Retirar el contacto",
-      },
       verificar: {
         titulo: "Dejar constancia de la comprobación",
         ayuda: "Confirmá que llamaste o comprobaste de otra forma que el contacto es correcto. Resuelve el dato señalado, si había.",
@@ -733,36 +750,24 @@ export function ContactosGestion() {
             />
           </>
         )}
-        {confirmar ? (
-          <div role="group" aria-labelledby={pregunta}>
-            <p id={pregunta}>¿Retirar el contacto {c.nombre}? No se puede deshacer.</p>
-            <button type="submit" ref={confirmarSi} disabled={enviando}>
-              Sí, retirar
-            </button>{" "}
-            <button type="button" onClick={() => setConfirmar(false)} disabled={enviando}>
-              No
-            </button>
-          </div>
-        ) : (
-          <p>
-            <button
-              type="submit"
-              disabled={enviando}
-              ref={
-                accion === "senalar"
-                  ? undefined
-                  : (e) => {
-                      primerCampo.current = e;
-                    }
-              }
-            >
-              {texto.boton}
-            </button>{" "}
-            <button type="button" onClick={cerrar} disabled={enviando}>
-              Cancelar
-            </button>
-          </p>
-        )}
+        <p>
+          <button
+            type="submit"
+            disabled={enviando}
+            ref={
+              accion === "senalar"
+                ? undefined
+                : (e) => {
+                    primerCampo.current = e;
+                  }
+            }
+          >
+            {texto.boton}
+          </button>{" "}
+          <button type="button" onClick={cerrar} disabled={enviando}>
+            Cancelar
+          </button>
+        </p>
       </form>
     );
   }

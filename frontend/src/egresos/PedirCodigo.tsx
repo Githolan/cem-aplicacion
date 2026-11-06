@@ -12,7 +12,8 @@ import { mensajeDeError } from "./comun";
 // la pantalla pide el código, lo verifica en esta sesión (`POST /api/v1/auth/totp/verificar`) y
 // recién entonces reintenta el mismo acto. La pantalla que la usa conserva la misma
 // `Idempotency-Key`: el reintento es el mismo pedido, nunca uno nuevo. Quien tiene una llave de
-// acceso confirma con el PIN, la huella o la cara; el código queda como otra opción.
+// acceso confirma con el PIN, la huella o la cara; el código queda como otra opción. Quien no
+// activó ni una cosa ni la otra no tiene código que escribir: se le dice de entrada, sin el campo.
 
 interface Props {
   /** Qué se va a reintentar, en palabras («aprobar la orden»). */
@@ -50,6 +51,13 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   useEffect(() => {
     montado.current = true;
     campo.current?.focus();
+    // Anticipa lo que igual respondería la verificación: mientras no se sabe, el campo sigue.
+    void api
+      .GET("/api/v1/auth/totp")
+      .then(({ data }) => {
+        if (montado.current && data !== undefined && !data.activo && data.llaves === 0) setSinAlta(true);
+      })
+      .catch(() => setError(SIN_CONEXION));
     if (llaveDisponible())
       void api
         .GET("/api/v1/auth/llave")
@@ -99,6 +107,20 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
       .catch(() => setError(SIN_CONEXION))
       .finally(() => setEnviando(false));
   }
+
+  if (sinAlta)
+    return (
+      <section className="formulario tarjeta" aria-labelledby={`${id}-titulo`}>
+        <h2 id={`${id}-titulo`}>Confirmá que sos vos</h2>
+        <p>Para {acto} hace falta la verificación en dos pasos.</p>
+        <SinAlta />
+        <div className="acciones">
+          <button type="button" className="secundario" onClick={alCancelar}>
+            Cancelar
+          </button>
+        </div>
+      </section>
+    );
 
   if (conLlave)
     return (
@@ -152,7 +174,6 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
           {error}
         </p>
       )}
-      {sinAlta && <SinAlta />}
       <div className="acciones">
         <button type="submit" disabled={enviando}>
           {enviando ? "Verificando…" : "Verificar y seguir"}

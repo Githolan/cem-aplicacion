@@ -122,6 +122,21 @@ describe("entrar con el código del correo", () => {
     expect(window.location.href).not.toContain(CODIGO);
   });
 
+  it("completar los seis números no envía nada: confirma actos de dinero y espera el botón (WCAG 3.2.2)", async () => {
+    const pedido = backend({ codigo: () => Response.json(SESION) });
+    vi.stubGlobal("fetch", pedido);
+    abrirCodigo();
+    fireEvent.change(seccionCodigo().getByLabelText("Correo"), { target: { value: CORREO } });
+
+    fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: CODIGO } });
+    await new Promise((listo) => setTimeout(listo, 0));
+
+    expect(postsDe(pedido)).toEqual([]);
+    // Control: con el botón sí sale.
+    fireEvent.submit(screen.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
+    await vi.waitFor(() => expect(postsDe(pedido)).toHaveLength(1));
+  });
+
   it("un código mal formado no sale y se explica junto al campo", () => {
     const pedido = backend({});
     vi.stubGlobal("fetch", pedido);

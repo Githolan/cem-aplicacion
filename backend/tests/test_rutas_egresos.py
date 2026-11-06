@@ -26,6 +26,7 @@ from tests.test_orden_pago_neutra import (
     Escena,
     cbu_sintetico,
     escena_economica,
+    exigir,
     nueva_sesion,
     nuevo_proveedor,
     otorgar,
@@ -464,7 +465,7 @@ def test_0049_ida_y_vuelta(base_aparte):  # noqa: F811
     assert _rutas(motor) == (4, 11)
 
 
-def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
+def _mc2_con(motor_migrate, e: Escena, facultad: str) -> None:
     with motor_migrate.connect() as c:
         m, acta = c.execute(
             # P3 103: el mandato de Consejo vigente de mc2, no «el único que tenga».
@@ -472,7 +473,11 @@ def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
                  " and persona_id = :p and tipo = 'miembro_consejo' and finalizado_en is null"),
             {"c": e.cons, "p": e.mc2},
         ).one()  # fmt: skip
-    otorgar(motor_migrate, e.cons, m, acta, "egresos.preparar_orden")
+    otorgar(motor_migrate, e.cons, m, acta, facultad)
+
+
+def _mc2_tambien_prepara(motor_migrate, e: Escena) -> None:
+    _mc2_con(motor_migrate, e, "egresos.preparar_orden")
 
 
 def test_quien_preparo_una_version_posterior_no_aprueba(motor_migrate, e):
@@ -504,6 +509,158 @@ def test_quien_cargo_la_cuenta_no_aprueba_el_pago(motor_migrate, e):
     assert codigo(r) == (403, "no_es_quien_cargo_la_cuenta")
     r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
     assert r.status_code == 201, r.json()  # control
+
+
+def _puede(e: Escena, quien: UUID, o: UUID) -> tuple[bool, bool]:
+    r = get(e, quien, f"ordenes-pago/{o}/revision")
+    assert r.status_code == 200, r.json()
+    return r.json()["puede_aprobar"], r.json()["puede_rechazar"]
+
+
+def _de_la_lista(e: Escena, quien: UUID, resto: str, o: UUID) -> dict:
+    r = get(e, quien, resto)
+    assert r.status_code == 200, r.json()
+    return next(x for x in r.json()["elementos"] if x["id"] == str(o))
+
+
+def _firma_la_cuenta(e: Escena, quien: UUID) -> None:
+    """Quien tiene `egresos.preparar_orden` firma una versión del proveedor con la misma cuenta."""
+    r = post(e, quien, f"proveedores/{e.proveedor}/versiones",
+             {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
+              "cuenta_destino": cbu_sintetico(1), "estado": "activo",
+              "version_esperada": 1, "conservar_cuenta": False})  # fmt: skip
+    assert r.status_code == 200, r.json()
+
+
+def test_puede_aprobar_y_rechazar_con_quien_preparo_por_ser_humano(motor_migrate, motor_app, e):
+    o = enviada(e)
+    h = huella(e, o, 1)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    assert _puede(e, otra, o) == (False, False)
+    r = post(e, otra, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert codigo(r) == (403, "sin_permiso")
+    r = post(e, otra, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "No"})
+    assert codigo(r) == (403, "sin_permiso")
+    # Control: otro ser humano del Consejo puede, y la ruta concede.
+    assert _puede(e, e.mc1, o) == (True, True)
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert r.status_code == 201, r.json()
+    # Aprobada, ya nadie la decide: lo que queda en la revisión es para leer.
+    assert _puede(e, e.mc2, o) == (False, False)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "No"})
+    assert codigo(r) == (409, "orden_no_admite")
+
+
+def test_puede_aprobar_y_rechazar_con_quien_preparo_una_version_posterior(motor_migrate, e):
+    _mc2_tambien_prepara(motor_migrate, e)
+    o = enviada(e)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/versiones",
+             ORDEN | {"proveedor_id": str(e.proveedor), "importe_centavos": 777,
+                      "version_esperada": 1})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    h2 = huella(e, o, 2)
+    assert _puede(e, e.mc2, o) == (False, False)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 2, "huella": h2})
+    assert codigo(r) == (403, "no_es_quien_preparo")
+    r = post(e, e.mc2, f"ordenes-pago/{o}/rechazar", {"version": 2, "motivo": "No"})
+    assert codigo(r) == (403, "no_es_quien_preparo")
+    assert _puede(e, e.mc1, o) == (True, True)  # control
+
+
+def test_quien_ya_aprobo_no_puede_aprobar_y_si_rechazar(motor_app, e):
+    exigir(motor_app, e.cons, 2)
+    o = enviada(e)
+    h = huella(e, o, 1)
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert r.status_code == 201, r.json()
+    assert _puede(e, e.mc1, o) == (False, True)
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert codigo(r) == (409, "aprobacion_repetida")
+    assert _puede(e, e.mc2, o) == (True, True)  # control: quien no aprobó todavía
+    r = post(e, e.mc1, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "Falta factura"})
+    assert r.status_code == 200, r.json()
+    assert _puede(e, e.mc2, o) == (False, False)  # rechazada
+
+
+def test_quien_cargo_la_cuenta_no_puede_aprobar_y_si_rechazar(motor_migrate, e):
+    _mc2_tambien_prepara(motor_migrate, e)
+    _firma_la_cuenta(e, e.mc2)
+    o = enviada(e)
+    assert _puede(e, e.mc2, o) == (False, True)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": huella(e, o, 1)})
+    assert codigo(r) == (403, "no_es_quien_cargo_la_cuenta")
+    assert _puede(e, e.mc1, o) == (True, True)  # control: quien no la firmó
+    r = post(e, e.mc2, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "Cuenta dudosa"})
+    assert r.status_code == 200, r.json()
+
+
+def test_una_cuenta_anterior_del_proveedor_no_separa(motor_migrate, e):
+    """Quien firmó otra cuenta del proveedor, no la que paga la orden, sí aprueba."""
+    _mc2_tambien_prepara(motor_migrate, e)
+    r = post(e, e.mc2, f"proveedores/{e.proveedor}/versiones",
+             {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
+              "cuenta_destino": cbu_sintetico(40), "estado": "activo",
+              "version_esperada": 1, "conservar_cuenta": False})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    r = post(e, e.adm, f"proveedores/{e.proveedor}/versiones",
+             {"razon_social": "Proveedor SINTETICO (NO REAL)", "rubro": "Otro rubro",
+              "cuenta_destino": cbu_sintetico(41), "estado": "activo",
+              "version_esperada": 2, "conservar_cuenta": False})  # fmt: skip
+    assert r.status_code == 200, r.json()
+    o = enviada(e)
+    assert _puede(e, e.mc2, o) == (True, True)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": huella(e, o, 1)})
+    assert r.status_code == 201, r.json()
+
+
+def test_hueco_conocido_quien_cargo_la_cuenta_y_ya_no_prepara(motor_migrate, e):
+    """`proveedor_versiones_lectura` pide `egresos.preparar_orden`, y `cem_app` no tiene otra
+    lectura de quién firmó cada versión: a quien ya no prepara el dato no se lo oculta y lo frena
+    la base. Es un 403 en la misma pantalla (regla 2). Con una lectura nueva, esta prueba cambia:
+    el dato pasa a decir que no."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text("insert into nucleo.proveedor_version (consorcio_id, proveedor_id, numero,"
+                 " razon_social, estado, cuenta_destino, huella, preparada_por,"
+                 " identidad_preparo) values (:c, :p, 2, 'Proveedor SINTETICO (NO REAL)',"
+                 " 'activo', :cta, nucleo.huella_proveedor(:p, 2, null,"
+                 " 'Proveedor SINTETICO (NO REAL)', :cta), :q,"
+                 " nucleo.identidad_humana_de(:c, :q))"),
+            {"c": e.cons, "p": e.proveedor, "cta": cbu_sintetico(1), "q": e.mc2},
+        )  # fmt: skip
+    o = enviada(e)
+    assert _puede(e, e.mc2, o) == (True, True)
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": huella(e, o, 1)})
+    assert codigo(r) == (403, "no_es_quien_cargo_la_cuenta")
+
+
+def test_aprobada_por_vos_coincide_con_lo_que_decide_emitir(motor_migrate, e):
+    """Un consejero que además prepara y ejecuta aprueba: la lista lo dice y emitir lo niega."""
+    _mc2_tambien_prepara(motor_migrate, e)
+    _mc2_con(motor_migrate, e, "egresos.ejecutar_pago")
+    o = enviada(e)
+    h = huella(e, o, 1)
+    assert _de_la_lista(e, e.mc2, "ordenes-pago", o)["aprobada_por_vos"] is False  # sin aprobar
+    r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
+    assert r.status_code == 201, r.json()
+    assert _de_la_lista(e, e.mc2, "ordenes-pago", o)["aprobada_por_vos"] is True
+    r = post(e, e.mc2, f"ordenes-pago/{o}/emitir", {"version": 1, "huella": h})
+    assert codigo(r) == (403, "sin_permiso")
+    # Control: para quien no aprobó es falso, y la ruta concede.
+    assert _de_la_lista(e, e.adm, "ordenes-pago", o)["aprobada_por_vos"] is False
+    r = post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1, "huella": h})
+    assert r.status_code == 200, r.json()
+
+
+def test_aprobada_por_vos_compara_seres_humanos(motor_migrate, motor_app, e):
+    o = enviada(e)
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": huella(e, o, 1)})
+    assert r.status_code == 201, r.json()
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc1)
+    assert _de_la_lista(e, otra, "ordenes-pago/revision", o)["aprobada_por_vos"] is True
+    assert get(e, otra, f"ordenes-pago/{o}/revision").json()["orden"]["aprobada_por_vos"] is True
+    # Control: otro ser humano del Consejo.
+    assert _de_la_lista(e, e.mc2, "ordenes-pago/revision", o)["aprobada_por_vos"] is False
 
 
 def test_el_consejo_no_lee_los_proveedores_por_su_cuenta(e):

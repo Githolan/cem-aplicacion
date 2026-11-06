@@ -4,9 +4,9 @@ import { join } from "node:path";
 
 import { expect, type Page, test } from "@playwright/test";
 
-import { AGENTE_IPHONE, simularSesion, simularStandalone, sinFaltasDeAccesibilidad } from "./entorno";
+import { AGENTE_IPHONE, simularPuntero, simularSesion, simularStandalone, sinFaltasDeAccesibilidad } from "./entorno";
 
-const TITULO = "Instalá Consorcio en Mano en tu teléfono";
+const TITULO = "Instalá Consorcio en Mano en este dispositivo";
 const BOTON = "Instalar la aplicación";
 
 // Chrome solo dispara `beforeinstallprompt` fuera de incógnito y cuando juzga que hubo uso
@@ -75,7 +75,17 @@ test.describe("página /instalar", () => {
     await page.goto("/instalar");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO);
     await expect(page.getByText(/Tocá el menú \(los tres puntos\)/)).toBeVisible();
+    await expect(page.locator("ol.pasos li")).toHaveCount(2);
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
+    await sinFaltasDeAccesibilidad(page);
+  });
+
+  test("en una computadora, con la oferta del navegador, habla de esta computadora", async ({ page }) => {
+    await simularPuntero(page, true);
+    await page.goto("/instalar");
+    await ofrecerInstalacion(page, "accepted");
+
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalá Consorcio en Mano en esta computadora");
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -88,7 +98,7 @@ test.describe("página /instalar", () => {
     expect(new URL(page.url()).pathname).toBe("/");
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
     await expect(page.locator("ol.pasos")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Instalá la aplicación en tu teléfono" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" })).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -102,7 +112,8 @@ test.describe("página /instalar", () => {
   });
 
   for (const respuesta of ["dismissed", "falla"] as const) {
-    test(`si la instalación no se hace (${respuesta}), lo dice y sigue en /instalar`, async ({ page }) => {
+    test(`si la instalación no se hace (${respuesta}), lo dice, sigue en /instalar y deja reintentar`, async ({ page }) => {
+      await simularPuntero(page, false);
       await page.goto("/instalar");
       await ofrecerInstalacion(page, respuesta);
       await page.getByRole("button", { name: BOTON }).click();
@@ -110,9 +121,25 @@ test.describe("página /instalar", () => {
       await expect(page.getByText(/No se instaló/)).toBeVisible();
       await expect(page).toHaveURL(/\/instalar$/);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO);
+      await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
+      await expect(page.locator("ol.pasos")).toHaveCount(0);
       await sinFaltasDeAccesibilidad(page);
     });
   }
+
+  test("Reintentar recarga la página: sin el evento quedan los pasos del menú", async ({ page }) => {
+    await simularPuntero(page, false);
+    await page.goto("/instalar");
+    await ofrecerInstalacion(page, "dismissed");
+    await page.getByRole("button", { name: BOTON }).click();
+
+    const recarga = page.waitForEvent("load");
+    await page.getByRole("button", { name: "Reintentar" }).click();
+    await recarga;
+
+    await expect(page.getByText(/No se instaló/)).toHaveCount(0);
+    await expect(page.getByText(/Tocá el menú/)).toBeVisible();
+  });
 
   test("terminada la instalación sigue a /entrar con el aviso", async ({ page }) => {
     await simularSesion(page, "sin_sesion");

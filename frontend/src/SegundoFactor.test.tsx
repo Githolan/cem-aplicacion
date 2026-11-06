@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter, useLocation } from "react-router";
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { trazoQr } from "./CodigoQr";
 import { PREFIJO_COPIA } from "./copiaContactos";
+import { ENTRAR_DE_NUEVO, RECARGAR } from "./fallas";
 import { codigoAplicacion, codigoVerificacion, secretoEnBloques } from "./SegundoFactor";
 import { ContextoVersion } from "./version";
 
@@ -31,6 +32,7 @@ const VERIFICADO = {
 const SOLO_LLAVE = { ...INACTIVO, llaves: 1 };
 const LLAVE = {
   id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d",
+  credencial_id: "Y3JlZGVuY2lhbA",
   nombre: "Mi PC",
   creada_en: "2026-11-04T10:00:00Z",
   ultimo_uso_en: null,
@@ -246,24 +248,41 @@ describe("página /cuenta/segundo-factor", () => {
     expect(screen.getByRole("button", { name: "Activar el segundo factor" })).toBeTruthy();
   });
 
-  it("verifica con un código de recuperación escrito como venga y sigue a /cuenta con el aviso", async () => {
+  it("activado no ofrece verificar por adelantado: el código se pide cuando una acción lo necesita", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
+    abrir();
+
+    await screen.findByRole("heading", { name: "Está activado" });
+    expect(screen.queryByRole("button", { name: "Verificar" })).toBeNull();
+    expect(screen.queryByLabelText("Código de la aplicación o de recuperación")).toBeNull();
+    expect(screen.queryByText("Verificado en esta sesión")).toBeNull();
+    // Control: lo demás de la tarjeta sigue ahí.
+    expect(screen.getByText("Códigos de recuperación sin usar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Desactivar el segundo factor" })).toBeTruthy();
+  });
+
+  it("al pedir confirmación acepta un código de recuperación escrito como venga, con CSRF", async () => {
+    let reciente = false;
     const pedido = backend({
       "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
-      "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
+      "POST /api/v1/auth/totp/verificar": () => {
+        reciente = true;
+        return Response.json(VERIFICADO);
+      },
+      "POST /api/v1/auth/totp/baja": () =>
+        reciente ? new Response(null, { status: 204 }) : error("segundo_factor_requerido", 403),
       ...LECTURAS_DE_CUENTA,
     });
     vi.stubGlobal("fetch", pedido);
     abrir();
 
-    await screen.findByRole("heading", { name: "Está activado" });
-    expect(screen.getByText("Todavía no")).toBeTruthy();
-    escribirCodigo("Código de la aplicación o de recuperación", " K7M2Q X9P4T ");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await screen.findByRole("button", { name: "Verificar y seguir" });
+    escribirCodigo("Código", " K7M2Q X9P4T ");
+    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
-    expect(await screen.findByText("Listo: verificado hasta las 18:10.")).toBeTruthy();
-    expect(await screen.findByRole("heading", MI_CUENTA)).toBeTruthy();
-    expect(lugar()).toBe("/cuenta");
-    const verificacion = pedidosDe(pedido)[1];
+    expect(await screen.findByText("Listo: el segundo factor quedó desactivado.")).toBeTruthy();
+    const verificacion = pedidosDe(pedido).find((p) => p.url.endsWith("/verificar"));
     expect(verificacion?.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(await verificacion?.json()).toEqual({ codigo: "k7m2q-x9p4t" });
   });
@@ -273,15 +292,13 @@ describe("página /cuenta/segundo-factor", () => {
       "fetch",
       backend({
         "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
-        "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
+        "POST /api/v1/auth/totp/baja": () => new Response(null, { status: 204 }),
       }),
     );
     abrir({ pathname: "/cuenta/segundo-factor", state: { volver: "/instalar" } });
-    await screen.findByRole("heading", { name: "Está activado" });
-    escribirCodigo("Código de la aplicación o de recuperación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
 
-    expect(await screen.findByText("Listo: verificado hasta las 18:10.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el segundo factor quedó desactivado.")).toBeTruthy();
     expect(lugar()).toBe("/instalar");
   });
 
@@ -289,18 +306,57 @@ describe("página /cuenta/segundo-factor", () => {
     vi.stubGlobal(
       "fetch",
       backend({
-        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
-        "POST /api/v1/auth/totp/verificar": () => error("demasiadas_peticiones", 429),
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => error("demasiadas_peticiones", 429),
       }),
     );
     abrir();
-    await screen.findByRole("heading", { name: "Está activado" });
-    escribirCodigo("Código de la aplicación o de recuperación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByRole("img", { name: /Código QR/ });
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
 
     expect(await screen.findByText(/demasiados intentos/)).toBeTruthy();
     // El código sigue escrito, para corregirlo sin empezar de nuevo.
-    expect((screen.getByLabelText("Código de la aplicación o de recuperación") as HTMLInputElement).value).toBe("042917");
+    expect((screen.getByLabelText("Código de la aplicación") as HTMLInputElement).value).toBe("042917");
+  });
+
+  it("el alta con una sesión vieja (403 reautenticacion_requerida) da la salida a volver a entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => error("reautenticacion_requerida", 403),
+        "GET /api/v1/auth/sesion": () => Response.json(YO),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    const enlace = await screen.findByRole("link", { name: "Volver a entrar" });
+    expect(screen.getByText(ENTRAR_DE_NUEVO)).toBeTruthy();
+    fireEvent.click(enlace);
+
+    // La sesión sigue viva: sin `state.renovar`, /entrar devolvería al inicio y no habría salida.
+    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(lugar()).toBe("/entrar");
+    await waitFor(() => expect(localStorage.getItem("cem.entrar.origen")).toContain("/cuenta/segundo-factor"));
+  });
+
+  it("control: otro rechazo del alta no ofrece volver a entrar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => error("csrf_invalido", 403),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    expect(await screen.findByText(RECARGAR)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Volver a entrar" })).toBeNull();
   });
 
   it("desactivar sin verificación reciente pide el código acá mismo; con él, desactiva y sigue a /cuenta", async () => {
@@ -513,23 +569,26 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     expect(screen.queryByRole("img", { name: /Código QR/ })).toBeNull();
   });
 
-  it("sin red al verificar: lo dice y no marca la sesión como verificada", async () => {
+  it("sin red al confirmar el alta: lo dice y sigue en el alta, con el código escrito", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
-        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
-        "POST /api/v1/auth/totp/verificar": () => {
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => {
           throw new TypeError("Failed to fetch");
         },
       }),
     );
     abrir();
-    await screen.findByRole("heading", { name: "Está activado" });
-    escribirCodigo("Código de la aplicación o de recuperación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByRole("img", { name: /Código QR/ });
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
 
     expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
-    expect(screen.getByText("Todavía no")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /Código QR/ })).toBeTruthy();
+    expect((screen.getByLabelText("Código de la aplicación") as HTMLInputElement).value).toBe("042917");
   });
 
   it("sesión vencida (401) al empezar el alta: va sola a entrar", async () => {
@@ -547,24 +606,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
   });
 
-  it("sesión vencida (401) al verificar: va sola a entrar y no habla de la conexión", async () => {
-    vi.stubGlobal(
-      "fetch",
-      backend({
-        "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
-        "POST /api/v1/auth/totp/verificar": () => error("no_autenticado", 401),
-        ...SIN_SESION,
-      }),
-    );
-    abrir();
-    await screen.findByRole("heading", { name: "Está activado" });
-    escribirCodigo("Código de la aplicación o de recuperación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
-
-    expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
-  });
-  it("sesión vencida (401) al confirmar el alta: va sola a entrar", async () => {
+  it("sesión vencida (401) al confirmar el alta: va sola a entrar y no habla de la conexión", async () => {
     vi.stubGlobal(
       "fetch",
       backend({
@@ -581,6 +623,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
   });
 
   it("sesión vencida (401) al desactivar: va sola a entrar", async () => {
@@ -599,20 +642,26 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
   });
 
   it.each([
-    ["POST /api/v1/auth/totp/verificar", 503],
-    ["POST /api/v1/auth/totp/verificar", 500],
+    ["POST /api/v1/auth/totp/confirmar", 503],
+    ["POST /api/v1/auth/totp/confirmar", 500],
     ["POST /api/v1/auth/totp/baja", 503],
   ])("un %s con %i habla del servicio y no de la conexión", async (ruta, status) => {
+    const enElAlta = ruta.endsWith("confirmar");
     vi.stubGlobal(
       "fetch",
-      backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO), [ruta]: () => error("error_interno", status) }),
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(enElAlta ? INACTIVO : ACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        [ruta]: () => error("error_interno", status),
+      }),
     );
     abrir();
-    await screen.findByRole("heading", { name: "Está activado" });
-    if (ruta.endsWith("verificar")) {
-      escribirCodigo("Código de la aplicación o de recuperación", "042917");
-      fireEvent.click(screen.getByRole("button", { name: "Verificar" }));
-    } else fireEvent.click(screen.getByRole("button", { name: "Desactivar el segundo factor" }));
+    if (enElAlta) {
+      fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+      await screen.findByRole("img", { name: /Código QR/ });
+      escribirCodigo("Código de la aplicación", "042917");
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    } else fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
 
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
@@ -782,23 +831,20 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
     expect(screen.queryByRole("button", { name: "Ya los guardé" })).toBeNull();
   });
 
-  it("«Confirmar que soy yo» no se queda en el «Listo»: vuelve a donde se pidió", async () => {
+  it("activar la llave no se queda en el «Listo»: vuelve a donde se pidió", async () => {
     conLlaves();
     vi.stubGlobal(
       "fetch",
       backend({
         "GET /api/v1/auth/totp": () => Response.json(SOLO_LLAVE),
-        "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
-        "POST /api/v1/auth/totp/verificar": () => Response.json(VERIFICADO),
+        "GET /api/v1/auth/llave": () => Response.json([]),
+        ...altaDeLlave(null),
       }),
     );
     abrir({ pathname: "/cuenta/segundo-factor", state: { volver: "/instalar" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Confirmar que soy yo" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Usar un código" }));
-    escribirCodigo("Código", "k7m2q-x9p4t");
-    fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar en este dispositivo" }));
 
-    expect(await screen.findByText("Listo: confirmaste que sos vos, por 10 minutos.")).toBeTruthy();
+    expect(await screen.findByText("Listo: tu llave quedó activada.")).toBeTruthy();
     expect(lugar()).toBe("/instalar");
   });
 });

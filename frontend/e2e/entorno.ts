@@ -30,6 +30,7 @@ export function otroCliente(n: number): { extraHTTPHeaders: Record<string, strin
 
 const RUTA_SESION = "**/api/v1/auth/sesion";
 const RUTA_EDIFICIOS = "**/api/v1/me/consorcios";
+const RUTA_MIS_INVITACIONES = "**/api/v1/me/invitaciones";
 const RUTA_MIS_ACCIONES = "**/api/v1/consorcios/*/mis-acciones";
 const RUTA_POR_ACLARAR = "**/api/v1/pagos-por-aclarar";
 
@@ -50,7 +51,8 @@ export type Sesion = "con_sesion" | "sin_sesion";
  */
 export function simularPermisos(ruta: Route, camino: string, acciones: readonly string[] = accionesDeLasPoliticas()) {
   if (camino.endsWith("/mis-acciones")) return ruta.fulfill({ json: { acciones } });
-  if (camino === "/api/v1/pagos-por-aclarar") return ruta.fulfill({ json: { elementos: [] } });
+  if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")
+    return ruta.fulfill({ json: { elementos: [] } });
   return null;
 }
 
@@ -70,13 +72,15 @@ export async function simularSesion(pagina: Page, sesion: Sesion | (() => Sesion
   });
   const conSesion = (json: unknown) => (ruta: Route) => (vigente() === "con_sesion" ? ruta.fulfill({ json }) : ruta.fallback());
   await pagina.context().route(RUTA_EDIFICIOS, conSesion([]));
+  await pagina.context().route(RUTA_MIS_INVITACIONES, conSesion({ elementos: [] }));
   await pagina.context().route(RUTA_MIS_ACCIONES, conSesion({ acciones: accionesDeLasPoliticas() }));
   await pagina.context().route(RUTA_POR_ACLARAR, conSesion({ elementos: [] }));
 }
 
 /** Deja de simular: la consulta vuelve a salir a la red (o a fallar, si la prueba la cortó). */
 export async function dejarDeSimularSesion(pagina: Page) {
-  for (const ruta of [RUTA_SESION, RUTA_EDIFICIOS, RUTA_MIS_ACCIONES, RUTA_POR_ACLARAR]) await pagina.context().unroute(ruta);
+  for (const ruta of [RUTA_SESION, RUTA_EDIFICIOS, RUTA_MIS_INVITACIONES, RUTA_MIS_ACCIONES, RUTA_POR_ACLARAR])
+    await pagina.context().unroute(ruta);
 }
 
 export const AGENTE_IPHONE =
@@ -104,4 +108,17 @@ export async function simularStandalone(pagina: Page) {
       return Object.create(real, { matches: { value: true } }) as MediaQueryList;
     };
   });
+}
+
+// El enlace y el título de la instalación cambian en una computadora (`pointer: fine`). Se fija
+// acá para que la prueba no dependa de qué informa cada proyecto de Playwright sin pantalla.
+export async function simularPuntero(pagina: Page, fino: boolean) {
+  await pagina.addInitScript((respuesta) => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = (consulta: string) => {
+      const real = original(consulta);
+      if (consulta.replace(/\s/g, "") !== "(pointer:fine)") return real;
+      return Object.create(real, { matches: { value: respuesta } }) as MediaQueryList;
+    };
+  }, fino);
 }

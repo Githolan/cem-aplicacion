@@ -41,6 +41,7 @@ from webauthn import (
     verify_authentication_response,
     verify_registration_response,
 )
+from webauthn.helpers import bytes_to_base64url
 from webauthn.helpers.exceptions import WebAuthnException
 from webauthn.helpers.structs import (
     AuthenticatorSelectionCriteria,
@@ -148,10 +149,19 @@ def listar(identidad: IdentidadDep, motor: MotorDep, response: Response) -> list
     response.headers.update(sf.SIN_CACHE)
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         filas = conn.execute(
-            text("select id, nombre, creada_en, ultimo_uso_en from nucleo.llave_acceso order by id")
+            text(
+                "select id, credencial_id, nombre, creada_en, ultimo_uso_en"
+                " from nucleo.llave_acceso order by id"
+            )
         ).all()
     return [
-        LlaveResumen(id=f.id, nombre=f.nombre, creada_en=f.creada_en, ultimo_uso_en=f.ultimo_uso_en)
+        LlaveResumen(
+            id=f.id,
+            credencial_id=bytes_to_base64url(f.credencial_id),
+            nombre=f.nombre,
+            creada_en=f.creada_en,
+            ultimo_uso_en=f.ultimo_uso_en,
+        )
         for f in filas
     ]
 

@@ -9,7 +9,8 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { mensajeDeError } from "./Padron";
+import { VOLVIO_LA_RED } from "./egresos/comun";
+import { mensajeDeError, sinConfirmarPrimero } from "./Padron";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -34,6 +35,7 @@ type Fila = components["schemas"]["FilaPadron"];
 /** Una fila del contrato: si le falta un campo, el tipo no compila. */
 function fila(vinculo_id: string, nombre: string, extra: Partial<Fila> = {}): Fila {
   return {
+    confirmable_por_vos: extra.confirmado !== true,
     vinculo_id,
     unidad_id: U1,
     designacion: "1° A",
@@ -109,6 +111,13 @@ function escribir(etiqueta: string, valor: string) {
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } });
 }
 
+/** Los vínculos en el orden en que se ven. */
+function titulos() {
+  return within(screen.getByRole("list", { name: "Padrón" }))
+    .getAllByRole("heading", { level: 3 })
+    .map((h) => h.textContent);
+}
+
 beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
 });
@@ -167,12 +176,8 @@ describe("página /padron", () => {
     // `vigente_hasta` es exclusivo: el último día es el anterior.
     expect(within(beto).getByText("Desde el 1 de marzo de 2024; último día: 31 de diciembre de 2026")).toBeTruthy();
     expect(within(beto).getByText("Sin confirmar")).toBeTruthy();
-    const lista = screen.getByRole("list", { name: "Padrón" });
-    expect(within(lista).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
-      "1° A: Ana Ruiz",
-      "1° A: Beto Pérez",
-      "2° B: Carla Gómez",
-    ]);
+    // Quien puede confirmar ve primero lo que espera su confirmación.
+    expect(titulos()).toEqual(["1° A: Beto Pérez", "2° B: Carla Gómez", "1° A: Ana Ruiz"]);
     // Ni correo ni teléfono en el texto, los atributos ni los campos de la página (la cabecera
     // común queda afuera: sus rutas de recursos no vienen de la API).
     const principal = container.querySelector("main") as HTMLElement;
@@ -235,7 +240,7 @@ describe("página /padron", () => {
 
   it("confirma con CSRF, una clave de reintento y la referencia; actualiza la fila y vuelve a pedir el padrón", async () => {
     const confirmado = { vinculo_id: V_INQ, unidad_id: U1, tipo: "inquilino", confirmado: true, confirmado_en: "2026-10-24T12:00:00Z" };
-    const despues = { elementos: PADRON.elementos.map((f) => (f.vinculo_id === V_INQ ? { ...f, confirmado: true } : f)) };
+    const despues = { elementos: PADRON.elementos.map((f) => (f.vinculo_id === V_INQ ? { ...f, confirmado: true, confirmable_por_vos: false } : f)) };
     let vueltas = 0;
     const simulado = conPadron({
       [`GET ${RUTA_PADRON}`]: () => Response.json(vueltas++ === 0 ? PADRON : despues),
@@ -334,7 +339,7 @@ describe("página /padron", () => {
   });
 
   it.each([
-    [403, "sin_permiso", "No tenés permiso para confirmar este vínculo."],
+    [403, "sin_permiso", "No tenés permiso para confirmar este vínculo: hace falta la facultad sobre la unidad."],
     [404, "no_encontrado", "Ese vínculo ya no está en el padrón de este edificio."],
     [409, "vinculo_ya_confirmado", "Ese vínculo ya estaba confirmado."],
     [409, "vinculo_finalizado", "Ese vínculo ya terminó."],
@@ -379,6 +384,45 @@ describe("página /padron", () => {
     // jsdom no agrupa los renders como el navegador: el orden de los efectos lo vigila padron.e2e.ts.
     // El formulario sigue abierto con el motivo, para corregir o cancelar.
     expect((screen.getByLabelText("Motivo") as HTMLInputElement).value).toBe("Venta");
+  });
+
+  it("sinConfirmarPrimero conserva el orden de la API dentro de cada grupo", () => {
+    const filas = [fila(V_PROP, "A", { confirmado: true }), fila(V_INQ, "B"), fila(V_OTRO, "C", { confirmado: true }), fila(V_FUT, "D")];
+    expect(sinConfirmarPrimero(filas).map((f) => f.nombre)).toEqual(["B", "D", "A", "C"]);
+  });
+
+  it("un rechazo queda dentro del formulario abierto, junto a lo escrito", async () => {
+    vi.stubGlobal("fetch", conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("datos_invalidos", 422) }));
+    abrir();
+    const beto = await tarjeta("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
+    escribir("Referencia del título", "Escritura 1234");
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
+    const aviso = await within(beto).findByRole("alert");
+    expect(aviso.textContent).toMatch(/^Revisá la referencia/);
+    expect(aviso.closest("form")).toBeTruthy();
+    expect(estadoDePantalla().textContent).toBe("");
+    expect((screen.getByLabelText("Referencia del título") as HTMLInputElement).value).toBe("Escritura 1234");
+  });
+
+  it("control: un rechazo que cierra el formulario queda en el estado de la página", async () => {
+    vi.stubGlobal("fetch", conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("vinculo_ya_confirmado", 409) }));
+    abrir();
+    const beto = await tarjeta("1° A: Beto Pérez");
+    fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
+    escribir("Referencia del título", "Escritura 1234");
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
+    expect(await within(estadoDePantalla()).findByText("Ese vínculo ya estaba confirmado.")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByLabelText("Referencia del título")).toBeNull();
+  });
+
+  it("el estado de la página va arriba de la lista", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir();
+    await tarjeta("1° A: Ana Ruiz");
+    const lista = screen.getByRole("list", { name: "Padrón" });
+    expect(lista.compareDocumentPosition(estadoDePantalla()) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
   it("un 5xx conserva la clave para el reintento; un 4xx definitivo la renueva", async () => {
@@ -504,7 +548,7 @@ describe("página /padron", () => {
     }
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(Object.keys(esquemas.FilaPadron?.properties ?? {}).sort()).toEqual(
-      ["confirmado", "designacion", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
+      ["confirmable_por_vos", "confirmado", "designacion", "iniciado", "nombre", "tipo", "unidad_id", "vigente_desde", "vigente_hasta", "vinculo_id"].sort(),
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);
@@ -627,10 +671,78 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     abrir();
     expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
   });
+
+  describe("al volver la red", () => {
+    const volvioLaRed = () => fireEvent(window, new Event("online"));
+
+    it("el padrón que no se pudo consultar se repite solo y lo dice", async () => {
+      let caido = true;
+      const simulado = conPadron({
+        [`GET ${RUTA_PADRON}`]: () => (caido ? error("servicio_no_disponible", 503) : Response.json(PADRON)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByText("No pudimos mostrar el padrón.");
+      caido = false;
+      volvioLaRed();
+      expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+      expect(within(estadoDePantalla()).getByText(VOLVIO_LA_RED)).toBeTruthy();
+      expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
+    });
+
+    it("control: si sigue caído no dice que actualizó", async () => {
+      const simulado = conPadron({ [`GET ${RUTA_PADRON}`]: () => error("servicio_no_disponible", 503) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByText("No pudimos mostrar el padrón.");
+      const antes = pedidos(simulado, "GET", RUTA_PADRON).length;
+      volvioLaRed();
+      await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThan(antes));
+      expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
+      expect(screen.queryByText(VOLVIO_LA_RED)).toBeNull();
+    });
+
+    it("control: nunca repite un envío, y con el padrón a la vista no pide nada", async () => {
+      const simulado = conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("servicio_no_disponible", 503) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const beto = await tarjeta("1° A: Beto Pérez");
+      fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
+      escribir("Referencia del título", "Escritura 1234");
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
+      await within(beto).findByRole("alert");
+      const lecturas = pedidos(simulado, "GET", RUTA_PADRON).length;
+      volvioLaRed();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(pedidos(simulado, "POST", confirmarRuta(V_INQ))).toHaveLength(1);
+      expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(lecturas);
+      expect(screen.queryByText(VOLVIO_LA_RED)).toBeNull();
+    });
+
+    it("los edificios que no se pudieron consultar se repiten solos", async () => {
+      let caido = true;
+      vi.stubGlobal(
+        "fetch",
+        conPadron({ "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)) }),
+      );
+      abrir();
+      await screen.findByText(/No pudimos consultar tus edificios/);
+      caido = false;
+      volvioLaRed();
+      expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+      expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+    });
+  });
 });
 
 describe("lo que no se puede hacer no aparece en /padron", () => {
-  const conAcciones = (...acciones: string[]) => conPadron({ [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", ...acciones) });
+  // Sin la facultad, `confirmable_por_vos` llega en falso: la API lo calcula fila por fila con ella.
+  const sinConfirmables = { elementos: PADRON.elementos.map((f) => ({ ...f, confirmable_por_vos: false })) };
+  const conAcciones = (...acciones: string[]) =>
+    conPadron({
+      [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", ...acciones),
+      ...(acciones.includes("padron.confirmar_vinculo") ? {} : { [`GET ${RUTA_PADRON}`]: () => Response.json(sinConfirmables) }),
+    });
   const nombres = (nombre: string) => screen.queryAllByRole("button", { name: nombre }).length;
 
   it("«Confirmar» se ve con `padron.confirmar_vinculo`, y «Finalizar» no", async () => {
@@ -642,6 +754,24 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
     expect(screen.getByText(/Confirmar acredita el carácter/)).toBeTruthy();
   });
 
+  it.each([
+    [true, 1],
+    [false, 0],
+  ])("sin confirmar: con `confirmable_por_vos` en %s, «Confirmar» aparece %i veces", async (confirmable, veces) => {
+    const propio = fila(V_INQ, "Beto Pérez", { confirmable_por_vos: confirmable });
+    vi.stubGlobal(
+      "fetch",
+      conPadron({
+        [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", "padron.confirmar_vinculo"),
+        [`GET ${RUTA_PADRON}`]: () => Response.json({ elementos: [propio] }),
+      }),
+    );
+    abrir();
+    const beto = await tarjeta("1° A: Beto Pérez");
+    expect(within(beto).getByText("Sin confirmar")).toBeTruthy();
+    expect(within(beto).queryAllByRole("button", { name: "Confirmar" })).toHaveLength(veces);
+  });
+
   it("«Finalizar» se ve con `padron.gestionar`, y «Confirmar» no", async () => {
     vi.stubGlobal("fetch", conAcciones("padron.gestionar"));
     abrir();
@@ -649,6 +779,13 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
     expect(nombres("Finalizar")).toBeGreaterThan(0);
     expect(nombres("Confirmar")).toBe(0);
     expect(screen.queryByText(/Confirmar acredita el carácter/)).toBeNull();
+  });
+
+  it("control: sin `padron.confirmar_vinculo` queda el orden de la API, porque nada espera a quien mira", async () => {
+    vi.stubGlobal("fetch", conAcciones("padron.gestionar"));
+    abrir();
+    await tarjeta("1° A: Beto Pérez");
+    expect(titulos()).toEqual(["1° A: Ana Ruiz", "1° A: Beto Pérez", "2° B: Carla Gómez"]);
   });
 
   it("control: solo con `padron.ver` se lee el padrón sin ningún botón", async () => {

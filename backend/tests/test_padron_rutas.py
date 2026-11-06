@@ -43,9 +43,10 @@ pytestmark = pytest.mark.db
 REFERENCIA = "Escritura 1234, registro notarial 56"
 ESPERA_MAXIMA_S = 10
 """Tope de las esperas entre pedidos concurrentes: si se traba, la prueba falla sin colgar la CI."""
-# Los datos de D6 y `iniciado` (corte 4, contrato 0.18.0), que no es un dato de la persona.
+# Los datos de D6, `iniciado` (corte 4, contrato 0.18.0) y `confirmable_por_vos` (0.46.0), que no
+# son datos de la persona.
 COLUMNAS_D6 = {"vinculo_id", "unidad_id", "designacion", "nombre", "tipo", "vigente_desde",
-               "vigente_hasta", "confirmado", "iniciado"}  # fmt: skip
+               "vigente_hasta", "confirmado", "iniciado", "confirmable_por_vos"}  # fmt: skip
 COLUMNAS_CONFIRMADO = {"vinculo_id", "unidad_id", "tipo", "confirmado", "confirmado_en"}
 
 
@@ -249,6 +250,54 @@ def test_un_reintento_con_la_misma_clave_no_repite_el_efecto(motor_migrate, esce
     assert (otra.status_code, otra.json()["codigo"]) == (422, "idempotencia_reutilizada")
     # Control: con otra clave ya no es un reintento, y el vínculo ya está confirmado.
     assert (nueva.status_code, nueva.json()["codigo"]) == (409, "vinculo_ya_confirmado")
+
+
+def _confirmables(persona, cons) -> dict[str, bool]:
+    with cliente(persona) as c:
+        r = c.get(padron_url(cons))
+    assert r.status_code == 200, r.text
+    return {f["vinculo_id"]: f["confirmable_por_vos"] for f in r.json()["elementos"]}
+
+
+def test_confirmable_por_vos_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor_app, escena):
+    e = escena
+    propio = invitar_y_aceptar(motor_migrate, e["cons"], e["u1"], e["mc"], persona=e["admin"])
+    vinculos = (e["v_inq_mc"], e["v_inq_admin"], e["v_prop1"], propio)
+
+    filas = _confirmables(e["admin"], e["cons"])
+    assert [filas[str(v)] for v in vinculos] == [True, False, True, False]
+    with cliente(e["admin"]) as c:
+        # El que registró él y el suyo: el dato dice que no y la ruta niega.
+        assert confirmar(c, e["cons"], e["v_inq_admin"]).status_code == 403
+        assert confirmar(c, e["cons"], propio).status_code == 403
+    motivos = [d["motivo"] for d in denegaciones(motor_app, e["cons"], e["admin"], e["admin"])]
+    assert sorted(motivos) == ["no_es_quien_registro", "no_es_su_propio_vinculo"]
+
+    # Sin la facultad, ninguno, aunque pueda leer el padrón.
+    assert not any(_confirmables(e["mc"], e["cons"]).values())
+    with cliente(e["mc"]) as c:
+        assert confirmar(c, e["cons"], e["v_prop1"]).status_code == 403
+
+    # Control: el dato dice que sí y la ruta concede, también con el vínculo del equipo. Una vez
+    # confirmado, ya no se ofrece.
+    with cliente(e["admin"]) as c:
+        assert confirmar(c, e["cons"], e["v_inq_mc"]).status_code == 200
+        assert confirmar(c, e["cons"], e["v_prop1"]).status_code == 200
+        r = confirmar(c, e["cons"], e["v_inq_mc"])
+    assert (r.status_code, r.json()["codigo"]) == (409, "vinculo_ya_confirmado")
+    filas = _confirmables(e["admin"], e["cons"])
+    assert (filas[str(e["v_inq_mc"])], filas[str(e["v_prop1"])]) == (False, False)
+
+
+def test_el_padron_no_saca_a_quien_registro_ni_a_la_persona(motor_migrate, escena):
+    """`confirmable_por_vos` se calcula con la persona y quien registró, sin exponerlos (D6)."""
+    e = escena
+    with cliente(e["admin"]) as c:
+        r = c.get(padron_url(e["cons"]))
+    assert r.status_code == 200, r.text
+    assert str(e["mc"]) not in r.text and str(e["admin"]) not in r.text
+    # Control: la misma búsqueda encuentra lo que sí sale, los vínculos de esas dos personas.
+    assert str(e["v_inq_mc"]) in r.text and str(e["v_inq_admin"]) in r.text
 
 
 def test_quien_registro_el_vinculo_no_lo_confirma(motor_migrate, motor_app, escena):

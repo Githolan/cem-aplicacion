@@ -6,9 +6,10 @@ from cem_contracts.consorcios import ConsorcioResumen, ListaUnidades, MisAccione
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 
-from app.autorizacion.evaluador import alcanza
+from app.autorizacion.evaluador import alcanza, evaluar
 from app.autorizacion.politicas import POLITICAS
 from app.autorizacion.requiere import Permiso, requiere
+from app.consorcios.padron import sobre_unidad
 from app.contexto import IdentidadDep, MotorDep
 from app.db import transaccion
 
@@ -85,8 +86,10 @@ def unidades(
     motor: MotorDep,
 ) -> ListaUnidades:
     """Id y designación de las unidades, sin personas (D6). Concede por ámbito: cualquier
-    vínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1)."""
+    vínculo vigente o mandato vigente con cuenta (tabla de verdad, §2.1). `invitable` es solo
+    para mostrar: `evaluar` no audita, y la ruta de invitar vuelve a decidir."""
     ctx = permiso.ctx
+    contexto = ctx.autorizacion
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
         filas = conn.execute(
             text(
@@ -94,4 +97,14 @@ def unidades(
                 " where eliminado_en is null order by designacion"
             )
         ).mappings()
-        return ListaUnidades(elementos=[Unidad(**f) for f in filas])
+        return ListaUnidades(
+            elementos=[
+                Unidad(
+                    **f,
+                    invitable=evaluar(
+                        "invitaciones.crear", contexto, sobre_unidad(f["id"])
+                    ).permitido,
+                )
+                for f in filas
+            ]
+        )

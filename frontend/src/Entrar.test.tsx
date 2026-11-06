@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { VIGENCIA_ENLACE_MS, tokenDelFragmento } from "./enlace";
 import { guardarToken } from "./Entrar";
+import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION_ENLACE } from "./fallas";
+import { recordarOrigen } from "./sesion";
 import { ContextoVersion } from "./version";
 
 const CLAVE_GUARDADO = "cem.entrar.enlace";
@@ -35,6 +37,7 @@ const CORREO = "ana@ejemplo.com";
 const RUTA_SESION = "/api/v1/auth/sesion";
 const RUTA_CANJE = "/api/v1/auth/canje";
 const RUTA_ENLACE = "/api/v1/auth/enlace";
+const RUTA_CODIGO = "/api/v1/auth/codigo";
 // El texto lo arma el backend (router.py, MENSAJE_PEDIDO); la página muestra el que llega.
 const MENSAJE = "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar.";
 
@@ -43,6 +46,11 @@ const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const PEDIR = { name: "Pedir el enlace para entrar" };
 const CODIGO = { name: "Entrar con un código" };
 const CONTRASENA = { name: "Entrar con contraseña" };
+const RECHAZADO = /No pudimos hacerte entrar con este enlace/;
+const REINTENTAR = { name: "Reintentar" };
+// Una pantalla que no pide nada al backend: la de origen de quien vuelve a entrar.
+const ORIGEN = "/instalar";
+const EN_ORIGEN = { level: 1, name: /Instalá Consorcio en Mano/ };
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -69,12 +77,19 @@ function backend({ canje, sesion }: { canje?: Respuesta; sesion?: Respuesta } = 
       adentro = respuesta.ok;
       return respuesta;
     }
+    if (camino === RUTA_CODIGO) {
+      adentro = true;
+      return Response.json(SESION);
+    }
     if (camino === RUTA_ENLACE) return Response.json({ estado: "pedido", mensaje: MENSAJE }, { status: 202 });
+    if (camino === "/api/v1/me/consorcios") return Response.json([]);
+    if (camino === "/api/v1/me/invitaciones" || camino === "/api/v1/pagos-por-aclarar")
+      return Response.json({ elementos: [] });
     throw new Error(`pedido no previsto: ${pedido.method} ${camino}`);
   });
 }
 
-function abrir(url: string, llegada?: { renovar: boolean }) {
+function abrir(url: string, llegada?: { renovar: boolean; volver?: string }) {
   window.history.replaceState(null, "", url);
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // StrictMode, como en main.tsx: monta dos veces y el canje tiene que salir una sola.
@@ -118,11 +133,24 @@ function elegir(forma: string) {
   fireEvent.click(otrasFormas().getByRole("button", { name: forma }));
 }
 
+const correoDe = (forma: { name: string }) =>
+  within(screen.getByRole("region", forma)).getByLabelText("Correo") as HTMLInputElement;
+
+function escribirCorreo(forma: { name: string }, correo: string) {
+  fireEvent.change(correoDe(forma), { target: { value: correo } });
+}
+
+function pedirElEnlace(correo: string) {
+  escribirCorreo(PEDIR, correo);
+  fireEvent.submit(within(screen.getByRole("region", PEDIR)).getByRole("button", { name: "Pedir el enlace" }).closest("form")!);
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.sessionStorage.clear();
+  window.localStorage.clear();
   window.history.replaceState(null, "", "/");
 });
 
@@ -156,14 +184,6 @@ describe("página /entrar", () => {
     expect(screen.queryByText("Entraste.")).toBeNull();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(window.location.hash).toBe("");
-  });
-
-  it("sin la red, también muestra el error genérico", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("sin red"))));
-
-    abrir(`/entrar#token=${TOKEN}`);
-
-    expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
   });
 
   it("sin token en el fragmento no canjea nada: solo pregunta por la sesión y ofrece el enlace", async () => {
@@ -260,13 +280,13 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
     expect(guardado()).toBeNull();
   });
 
-  it("lo borra al terminar aunque no haya red", async () => {
+  it("sin red no lo borra: el enlace no se gastó", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("sin red"))));
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    await screen.findByText(/No pudimos hacerte entrar con este enlace/);
-    expect(guardado()).toBeNull();
+    await screen.findByText(SIN_CONEXION_ENLACE);
+    expect(guardado()?.token).toBe(TOKEN);
   });
 
   it("si la recarga corta el canje, no lo borra: ese canje no terminó", async () => {
@@ -310,6 +330,245 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     expect(() => abrir("/entrar")).toThrow(/no tiene la forma esperada/);
+  });
+});
+
+describe("un canje que falla por algo que no es el enlace", () => {
+  const guardadoEnLaPestana = () => window.sessionStorage.getItem(CLAVE_GUARDADO);
+  const canjesDe = (simulado: ReturnType<typeof vi.fn>) =>
+    postsDe(simulado).filter((p) => new URL(p.url).pathname === RUTA_CANJE);
+  const limite = () => Response.json({ codigo: "demasiadas_peticiones", mensaje: "x", id_correlacion: "c" }, { status: 429 });
+  const caido = (status: number) => () =>
+    Response.json({ codigo: "servicio_no_disponible", mensaje: "x", id_correlacion: "c" }, { status });
+
+  it.each<[string, Respuesta, string | RegExp]>([
+    ["un 503", caido(503), SERVICIO_NO_DISPONIBLE],
+    ["un 500", caido(500), SERVICIO_NO_DISPONIBLE],
+    ["un 429", limite, /Llegaste al límite de pedidos/],
+    ["sin red", () => Promise.reject(new TypeError("Failed to fetch")), SIN_CONEXION_ENLACE],
+  ])("con %s conserva el token, y Reintentar repite el canje y entra", async (_, falla, mensaje) => {
+    let fallando = true;
+    const pedido = backend({ canje: () => (fallando ? falla() : Response.json(SESION)) });
+    vi.stubGlobal("fetch", pedido);
+
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByText(mensaje)).toBeTruthy();
+    expect(screen.queryByText(RECHAZADO)).toBeNull();
+    expect(guardadoEnLaPestana()).toContain(TOKEN);
+
+    fallando = false;
+    fireEvent.click(screen.getByRole("button", REINTENTAR));
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    const canjes = canjesDe(pedido);
+    expect(canjes).toHaveLength(2);
+    expect(await canjes[1]?.json()).toEqual({ token: TOKEN });
+    expect(guardadoEnLaPestana()).toBeNull();
+  });
+
+  it("mientras tanto se puede entrar de otra forma: los formularios siguen a la vista", async () => {
+    vi.stubGlobal("fetch", backend({ canje: caido(503) }));
+    abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByText(SERVICIO_NO_DISPONIBLE);
+
+    expect(screen.getByRole("region", PEDIR)).toBeTruthy();
+  });
+
+  it("control: un 401 es del enlace, se borra y no ofrece reintentar", async () => {
+    vi.stubGlobal("fetch", backend({ canje: enlaceInvalido }));
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByText(RECHAZADO)).toBeTruthy();
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+    expect(guardadoEnLaPestana()).toBeNull();
+  });
+
+  it("control: un token sin la forma del contrato (422) tampoco se reintenta", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({ canje: () => Response.json({ codigo: "validacion", mensaje: "x", id_correlacion: "c" }, { status: 422 }) }),
+    );
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByText(RECHAZADO)).toBeTruthy();
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+    expect(guardadoEnLaPestana()).toBeNull();
+  });
+
+  it("si el enlace ya se había consumido, el reintento cae en el 401 y lo dice", async () => {
+    let intentos = 0;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        canje: () => {
+          intentos += 1;
+          return intentos === 1 ? caido(503)() : enlaceInvalido();
+        },
+      }),
+    );
+    abrir(`/entrar#token=${TOKEN}`);
+    fireEvent.click(await screen.findByRole("button", REINTENTAR));
+
+    expect(await screen.findByText(RECHAZADO)).toBeTruthy();
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+    expect(guardadoEnLaPestana()).toBeNull();
+  });
+
+  it("elegir otra forma deja atrás el enlace: ni el error ni el token siguen", async () => {
+    vi.stubGlobal("fetch", backend({ canje: caido(503) }));
+    abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByText(SERVICIO_NO_DISPONIBLE);
+
+    elegir("Entrar con un código");
+
+    expect(screen.queryByText(SERVICIO_NO_DISPONIBLE)).toBeNull();
+    expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
+    expect(guardadoEnLaPestana()).toBeNull();
+  });
+
+  it("no tiene faltas de accesibilidad detectables por axe", async () => {
+    vi.stubGlobal("fetch", backend({ canje: caido(503) }));
+    const { container } = abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByRole("button", REINTENTAR);
+
+    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("después de un enlace rechazado", () => {
+  it("pedir uno nuevo saca el error: no queda junto al aviso de que va en camino", async () => {
+    vi.stubGlobal("fetch", backend({ canje: enlaceInvalido }));
+    abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByText(RECHAZADO);
+
+    pedirElEnlace(CORREO);
+
+    expect(await screen.findByText(MENSAJE)).toBeTruthy();
+    expect(screen.queryByText(RECHAZADO)).toBeNull();
+  });
+
+  it("elegir otra forma también lo saca", async () => {
+    vi.stubGlobal("fetch", backend({ canje: enlaceInvalido }));
+    abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByText(RECHAZADO);
+
+    elegir("Entrar con contraseña");
+
+    expect(screen.queryByText(RECHAZADO)).toBeNull();
+  });
+
+  it("control: mientras no haga nada, el error sigue", async () => {
+    vi.stubGlobal("fetch", backend({ canje: enlaceInvalido }));
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByText(RECHAZADO)).toBeTruthy();
+    await new Promise((listo) => setTimeout(listo, 0));
+    expect(screen.getByText(RECHAZADO)).toBeTruthy();
+  });
+});
+
+describe("volver a entrar (state.renovar con state.volver)", () => {
+  const conSesion: Respuesta = () => Response.json(SESION);
+  const VOLVER = { renovar: true, volver: ORIGEN };
+
+  async function entrarConCodigo() {
+    elegir("Entrar con un código");
+    fireEvent.change(screen.getByLabelText(/^Código de 6 números/), { target: { value: "042917" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
+  }
+
+  it("el correo ya está escrito y no manda al inicio aunque haya sesión", async () => {
+    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
+    abrir("/entrar", VOLVER);
+
+    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
+    expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
+  });
+
+  it("lo que escribió la persona no lo pisa la respuesta de la sesión", async () => {
+    let soltar: () => void = () => undefined;
+    const listo = new Promise<void>((r) => {
+      soltar = r;
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        sesion: async () => {
+          await listo;
+          return Response.json(SESION);
+        },
+      }),
+    );
+    abrir("/entrar", VOLVER);
+    escribirCorreo(PEDIR, "otra@ejemplo.com");
+
+    soltar();
+    await new Promise((fin) => setTimeout(fin, 0));
+
+    expect(correoDe(PEDIR).value).toBe("otra@ejemplo.com");
+  });
+
+  it("al terminar vuelve a la pantalla de origen, con el aviso", async () => {
+    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
+    abrir("/entrar", VOLVER);
+    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
+
+    await entrarConCodigo();
+
+    expect(await screen.findByRole("heading", EN_ORIGEN)).toBeTruthy();
+    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(screen.queryByRole("heading", INICIO)).toBeNull();
+  });
+
+  it("el enlace del correo, abierto en otra pestaña, también vuelve al origen", async () => {
+    vi.stubGlobal("fetch", backend({ sesion: conSesion }));
+    abrir("/entrar", VOLVER);
+    await vi.waitFor(() => expect(correoDe(PEDIR).value).toBe(CORREO));
+    // Otra pestaña: no hereda el historial ni el sessionStorage de esta.
+    cleanup();
+    window.sessionStorage.clear();
+
+    vi.stubGlobal("fetch", backend());
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByRole("heading", EN_ORIGEN)).toBeTruthy();
+    expect(await screen.findByText("Entraste.")).toBeTruthy();
+  });
+
+  it("el origen se usa una sola vez: la entrada siguiente va al inicio", async () => {
+    recordarOrigen(ORIGEN, Date.now());
+    vi.stubGlobal("fetch", backend());
+    abrir(`/entrar#token=${TOKEN}`);
+    await screen.findByRole("heading", EN_ORIGEN);
+    cleanup();
+
+    vi.stubGlobal("fetch", backend());
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  });
+
+  it("un origen vencido no se usa", async () => {
+    recordarOrigen(ORIGEN, Date.now() - VIGENCIA_ENLACE_MS - 1);
+    vi.stubGlobal("fetch", backend());
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+  });
+
+  it("control: una entrada común termina en el inicio", async () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    escribirCorreo(PEDIR, CORREO);
+
+    await entrarConCodigo();
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(screen.queryByRole("heading", EN_ORIGEN)).toBeNull();
   });
 });
 
@@ -476,6 +735,43 @@ describe("/entrar: una forma por vez", () => {
     const codigo = within(screen.getByRole("region", CODIGO));
     expect((codigo.getByLabelText("Correo") as HTMLInputElement).value).toBe("");
     expect(screen.queryByText(MENSAJE)).toBeNull();
+  });
+
+  it("el correo escrito sigue al cambiar de forma, en las tres", () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    elegir("Entrar con un código");
+    escribirCorreo(CODIGO, CORREO);
+
+    elegir("Pedir el enlace por correo");
+    expect(correoDe(PEDIR).value).toBe(CORREO);
+
+    elegir("Entrar con contraseña");
+    expect(correoDe(CONTRASENA).value).toBe(CORREO);
+
+    escribirCorreo(CONTRASENA, "otra@ejemplo.com");
+    elegir("Entrar con un código");
+    expect(correoDe(CODIGO).value).toBe("otra@ejemplo.com");
+  });
+
+  it("pedir el enlace deja el foco en el código, no en el correo ya escrito", async () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+
+    pedirElEnlace(CORREO);
+
+    const codigo = within(await screen.findByRole("region", CODIGO));
+    expect(document.activeElement).toBe(codigo.getByLabelText(/^Código de 6 números/));
+  });
+
+  it("con el correo escrito, elegir otra forma lleva el foco a lo que falta", () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    escribirCorreo(PEDIR, CORREO);
+
+    elegir("Entrar con contraseña");
+
+    expect(document.activeElement).toBe(within(screen.getByRole("region", CONTRASENA)).getByLabelText("Contraseña"));
   });
 
   it("no tiene faltas de accesibilidad detectables por axe en ninguna de las formas", async () => {

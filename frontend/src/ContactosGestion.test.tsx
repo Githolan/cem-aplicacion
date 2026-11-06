@@ -182,15 +182,39 @@ describe("página /contactos/gestion", () => {
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
   });
 
-  it("sin conexión al pedir la lista lo dice, sin lista ni botón para agregar", async () => {
+  it("sin conexión al pedir la lista lo dice, sin lista pero con el botón para agregar", async () => {
     vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => Promise.reject(new TypeError("Failed to fetch")) }));
     abrir();
     expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
     expect(screen.getByText(SIN_CONEXION)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
     // La gestión nunca guarda nada en el dispositivo, tampoco cuando falla.
     expect(Object.keys(localStorage)).toEqual([]);
+  });
+
+  it("con la lista caída se agrega igual, y lo escrito sigue mientras se vuelve a consultar", async () => {
+    let caida = true;
+    const simulado = conLista({
+      [`GET ${GESTION}`]: () => (caida ? Promise.reject(new TypeError("Failed to fetch")) : Response.json(LISTA)),
+      [`POST ${BASE}`]: () => Response.json({ id: K1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    const { container } = abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
+    const reglas = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    const nombre = screen.getByLabelText("Nombre") as HTMLInputElement;
+    escribir("Nombre", "Bomberos");
+    caida = false;
+    fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
+    await tarjeta("Emergencias: Plomería Rápida");
+    // El mismo campo: el formulario no se desarmó mientras llegaba la lista.
+    expect(screen.getByLabelText("Nombre")).toBe(nombre);
+    expect(nombre.value).toBe("Bomberos");
+    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    expect(await screen.findByText("Listo: agregamos el contacto Bomberos.")).toBeTruthy();
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
   });
 
   it("la lista que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
@@ -344,23 +368,59 @@ describe("página /contactos/gestion", () => {
     expect(await screen.findAllByRole("button", { name: "Corregir" })).toHaveLength(2);
   });
 
-  it("retirar pide una confirmación explícita; «No» no envía y «Sí, retirar» sí", async () => {
+  it("retirar pregunta de una, en dos toques; «No» no envía y «Sí, retirar» sí", async () => {
     const simulado = conLista({ [`POST ${BASE}/${K1}/retirar`]: () => Response.json({ id: K1 }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
     const plomeria = await tarjeta("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
-    fireEvent.click(screen.getByRole("button", { name: "Retirar el contacto" }));
     expect(screen.getByText("¿Retirar el contacto Plomería Rápida? No se puede deshacer.")).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, retirar" }));
+    // Control: el paso intermedio ya no existe, y abrir la pregunta no mandó nada.
+    expect(screen.queryByRole("button", { name: "Retirar el contacto" })).toBeNull();
+    expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "No" }));
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Retirar el contacto" }));
+    // «No» deja la tarjeta como estaba.
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
     await screen.findByText("Listo: retiramos el contacto Plomería Rápida.");
     const [pedido] = pedidos(simulado, "POST", `${BASE}/${K1}/retirar`);
     expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await pedido?.text()).toBe("");
+  });
+
+  it("si retirar falla, la pregunta sigue para reintentar con la misma clave", async () => {
+    const ruta = `${BASE}/${K1}/retirar`;
+    const simulado = conLista({ [`POST ${ruta}`]: () => error("servicio_no_disponible", 503) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
+    const si = screen.getByRole("button", { name: "Sí, retirar" }) as HTMLButtonElement;
+    fireEvent.click(si);
+    const aviso = await screen.findByText(/El servicio no está disponible/);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(si.disabled).toBe(false);
+    fireEvent.click(si);
+    await waitFor(() => expect(pedidos(simulado, "POST", ruta)).toHaveLength(2));
+    const [primera, segunda] = pedidos(simulado, "POST", ruta).map((p) => p.headers.get("Idempotency-Key"));
+    expect(segunda).toBe(primera);
+  });
+
+  it("retirar un contacto que ya terminó lo explica, cierra la pregunta y recarga la lista", async () => {
+    const simulado = conLista({ [`POST ${BASE}/${K1}/retirar`]: () => error("contacto_terminado", 409) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
+    expect(await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.")).toBeTruthy();
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    await tarjeta("Emergencias: Plomería Rápida");
+    expect(screen.queryByRole("button", { name: "Sí, retirar" })).toBeNull();
+    // No había nada escrito: retirar no abre Agregar.
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
   });
 
   it("comprobar y señalar mandan sus pedidos; señalar lleva el motivo", async () => {
@@ -384,9 +444,12 @@ describe("página /contactos/gestion", () => {
     expect(await pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)[0]?.json()).toEqual({ motivo: "Cambió de dirección" });
   });
 
-  it("un 422 dice qué campo revisar y por qué; un 409 contacto_terminado lo explica y recarga la lista", async () => {
+  it("un 422 dice qué campo revisar y por qué; un 409 contacto_terminado lo explica, recarga la lista y lo escrito pasa a Agregar", async () => {
     let respuesta = () => error("peticion_invalida", 422, { campos: ["body.nombre"] });
-    const simulado = conLista({ [`PUT ${BASE}/${K1}`]: () => respuesta() });
+    const simulado = conLista({
+      [`PUT ${BASE}/${K1}`]: () => respuesta(),
+      [`POST ${BASE}`]: () => Response.json({ id: K2 }, { status: 201 }),
+    });
     vi.stubGlobal("fetch", simulado);
     abrir();
     const plomeria = await tarjeta("Emergencias: Plomería Rápida");
@@ -399,9 +462,93 @@ describe("página /contactos/gestion", () => {
     respuesta = () => error("contacto_terminado", 409);
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    expect(await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.")).toBeTruthy();
+    const aviso = await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.");
     expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    // Lo escrito sigue, ahora en Agregar, y sale como un pedido nuevo y no como otro PUT.
+    expect(screen.getByRole("heading", { level: 3, name: "Agregar un contacto" })).toBeTruthy();
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida SRL");
+    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    expect(await screen.findByText("Listo: agregamos el contacto Plomería Rápida SRL.")).toBeTruthy();
+    const correcciones = pedidos(simulado, "PUT", `${BASE}/${K1}`);
+    expect(correcciones).toHaveLength(2);
+    const [alta] = pedidos(simulado, "POST", BASE);
+    expect(alta?.headers.get("Idempotency-Key")).not.toBe(correcciones[1]?.headers.get("Idempotency-Key"));
+    expect(await alta?.json()).toEqual({
+      funcion: "emergencias",
+      naturaleza: "servicio",
+      nombre: "Plomería Rápida SRL",
+      telefono: "0800-555-1234",
+      consentimiento_referencia: null,
+      indicaciones: "De 8 a 20; fuera de hora, el número de guardia",
+      vigente_desde: null,
+    });
+  });
+
+  it("corregir un contacto que ya no está (404) también deja lo escrito en Agregar", async () => {
+    vi.stubGlobal("fetch", conLista({ [`PUT ${BASE}/${K1}`]: () => error("no_encontrado", 404) }));
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
+    escribir("Nombre", "Plomería Rápida SRL");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
+    expect(await screen.findByText("Ese contacto ya no está en este edificio.")).toBeTruthy();
+    expect((await screen.findByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida SRL");
+    expect(screen.getByRole("button", { name: "Agregar el contacto" })).toBeTruthy();
+  });
+
+  it("control: otro 409 al corregir cierra el formulario, porque un PUT viejo desharía el cambio de otro", async () => {
+    const simulado = conLista({ [`PUT ${BASE}/${K1}`]: () => error("conflicto", 409) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
+    escribir("Nombre", "Plomería Rápida SRL");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
+    expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    await tarjeta("Emergencias: Plomería Rápida");
+    expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
+    expect(screen.queryByLabelText("Nombre")).toBeNull();
+  });
+
+  it("si señalar choca con la lista, el motivo sigue cuando la lista nueva trae el contacto", async () => {
+    const simulado = conLista({ [`POST ${BASE}/${K1}/senalar`]: () => error("conflicto", 409) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
+    escribir("Motivo", "No atiende");
+    fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
+    expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    const nueva = await tarjeta("Emergencias: Plomería Rápida");
+    expect((within(nueva).getByLabelText("Motivo") as HTMLInputElement).value).toBe("No atiende");
+  });
+
+  it("control: si la lista nueva ya no trae el contacto, el formulario de señalar se va", async () => {
+    let terminado = false;
+    const simulado = conLista({
+      [`GET ${GESTION}`]: () => Response.json(terminado ? { elementos: LISTA.elementos.slice(1) } : LISTA),
+      [`POST ${BASE}/${K1}/senalar`]: () => {
+        terminado = true;
+        return error("contacto_terminado", 409);
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
+    escribir("Motivo", "No atiende");
+    fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
+    expect(await screen.findByText(/^Ese contacto ya no está vigente/)).toBeTruthy();
+    await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    await tarjeta("Encargado o encargada: Marta Ruiz");
+    expect(screen.queryByRole("heading", { level: 3, name: "Emergencias: Plomería Rápida" })).toBeNull();
+    expect(screen.queryByLabelText("Motivo")).toBeNull();
+    // Un motivo no alcanza para un contacto nuevo: señalar no abre Agregar.
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
   });
 
   it("un 5xx conserva la clave para el reintento; un 4xx definitivo la renueva; cambiar los datos también", async () => {
@@ -439,10 +586,15 @@ describe("página /contactos/gestion", () => {
     const reglas = { rules: { "color-contrast": { enabled: false } } };
     const faltas = async () => (await axe.run(container, reglas)).violations.map((v) => v.id);
     expect(await faltas()).toEqual([]);
-    for (const boton of ["Corregir", "Comprobado", "Señalar un error", "Retirar"]) {
+    for (const [boton, cierre] of [
+      ["Corregir", "Cancelar"],
+      ["Comprobado", "Cancelar"],
+      ["Señalar un error", "Cancelar"],
+      ["Retirar", "No"],
+    ] as const) {
       fireEvent.click(within(marta).getByRole("button", { name: boton }));
       expect(await faltas()).toEqual([]);
-      fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+      fireEvent.click(screen.getByRole("button", { name: cierre }));
     }
     fireEvent.click(screen.getByRole("button", { name: "Agregar un contacto" }));
     fireEvent.change(screen.getByLabelText("Naturaleza"), { target: { value: "profesional" } });

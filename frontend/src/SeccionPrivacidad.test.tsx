@@ -3,7 +3,7 @@ import axe from "axe-core";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { RECARGAR, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
 
 const CASO = "01a18105-0000-7000-8000-000000000001";
@@ -45,15 +45,10 @@ function cuerpos(simulado: ReturnType<typeof vi.fn>, metodo: string): Promise<un
     .map((p) => p.clone().json());
 }
 
-function mostrar(contrasena = true, segundoFactor = false, sinSesion: () => void = () => undefined) {
+function mostrar(contrasena = true, sinSesion: () => void = () => undefined) {
   return render(
     <MemoryRouter>
-      <SeccionPrivacidad
-        contrasena={contrasena}
-        segundoFactor={segundoFactor}
-        fecha={(iso) => iso.slice(0, 10)}
-        sinSesion={sinSesion}
-      />
+      <SeccionPrivacidad contrasena={contrasena} fecha={(iso) => iso.slice(0, 10)} sinSesion={sinSesion} />
     </MemoryRouter>,
   );
 }
@@ -162,7 +157,7 @@ describe("sección de pedidos sobre los datos", () => {
         verificado ? new Response(null, { status: 204 }) : error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
     });
     vi.stubGlobal("fetch", simulado);
-    mostrar(true, true);
+    mostrar();
     fireEvent.change(await screen.findByLabelText("Código que te llegó por correo"), { target: { value: "ABCDE" } });
     fireEvent.change(screen.getByLabelText("Tu contraseña"), { target: { value: "una frase" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
@@ -184,7 +179,7 @@ describe("sección de pedidos sobre los datos", () => {
       [`POST ${CASOS}/${CASO}/confirmar`]: () => error("reautenticacion_requerida", 403, { falta: "segundo_factor" }),
     });
     vi.stubGlobal("fetch", simulado);
-    mostrar(true, true);
+    mostrar();
     fireEvent.change(await screen.findByLabelText("Código que te llegó por correo"), { target: { value: "ABCDE" } });
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el pedido" }));
 
@@ -203,11 +198,54 @@ describe("sección de pedidos sobre los datos", () => {
         [`POST ${CASOS}/${CASO}/copia`]: () => error("reautenticacion_requerida", 403, { falta: "contrasena" }),
       }),
     );
-    mostrar(true, true);
+    mostrar();
     fireEvent.click(await screen.findByRole("button", { name: "Descargar la copia de mis datos" }));
 
     expect(await screen.findByText("Escribí tu contraseña actual.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Verificar y seguir" })).toBeNull();
+  });
+
+  it("no avisa por adelantado lo que va a pedir: lo pide si hace falta", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }) }));
+    mostrar();
+
+    expect(await screen.findByRole("button", { name: "Confirmar el pedido" })).toBeTruthy();
+    expect(screen.queryByText(/Por seguridad/)).toBeNull();
+  });
+
+  it.each([
+    [503, "servicio_no_disponible", SERVICIO_NO_DISPONIBLE],
+    [500, "error_interno", SERVICIO_NO_DISPONIBLE],
+    [403, "csrf_invalido", RECARGAR],
+  ])("un %i (%s) al confirmar no se explica como un problema de conexión", async (status, codigo, mensaje) => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+        [`POST ${CASOS}/${CASO}/confirmar`]: () => error(codigo, status),
+      }),
+    );
+    mostrar();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar el pedido" }));
+
+    expect(await screen.findByText(mensaje)).toBeTruthy();
+    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+  });
+
+  it("control: sin respuesta sí habla de la conexión", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${CASOS}`]: () => Response.json({ elementos: [caso("abierto")] }),
+        [`POST ${CASOS}/${CASO}/confirmar`]: () => {
+          throw new TypeError("Failed to fetch");
+        },
+      }),
+    );
+    mostrar();
+    fireEvent.click(await screen.findByRole("button", { name: "Confirmar el pedido" }));
+
+    expect(await screen.findByText(SIN_CONEXION)).toBeTruthy();
   });
 
   it("un código que no sirve muestra el mensaje del backend y es accesible", async () => {
@@ -242,7 +280,7 @@ describe("sección de pedidos sobre los datos", () => {
   it("con la sesión vencida lleva a entrar y no muestra nada", async () => {
     vi.stubGlobal("fetch", backend({ [`GET ${CASOS}`]: () => error("no_autenticado", 401) }));
     const sinSesion = vi.fn();
-    const { container } = mostrar(true, false, sinSesion);
+    const { container } = mostrar(true, sinSesion);
     await waitFor(() => expect(sinSesion).toHaveBeenCalledOnce());
     expect(container.innerHTML).toBe("");
   });

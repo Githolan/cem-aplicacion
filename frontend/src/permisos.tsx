@@ -1,9 +1,10 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
-import { type ReactNode, useRef, useState } from "react";
+import { type QueryClient, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type ReactNode, useCallback, useRef, useState } from "react";
 import { Navigate } from "react-router";
 
 import { api } from "./api/cliente";
 import { RUTA_INICIO } from "./enlace";
+import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Qué le mostramos a cada persona (regla de fricción, decisión del propietario del 05-11-2026): lo
 // que no puede hacer no aparece. `GET /consorcios/{id}/mis-acciones` trae lo que alcanza en cada
@@ -12,22 +13,43 @@ import { RUTA_INICIO } from "./enlace";
 // al salir, la lista de una persona no queda para la siguiente que entre en este navegador.
 // `networkMode: "always"`: sin red la consulta falla enseguida en vez de quedar en pausa, y la
 // pantalla sigue (la copia de los contactos es justo para ese momento). `retryOnMount: false`: una
-// pantalla que se monta no repite lo que acaba de fallar.
+// pantalla que se monta no repite lo que acaba de fallar. `refetchOnReconnect: true`: con
+// `networkMode: "always"` TanStack lo apaga, y lo que falló sin red no volvería al reconectar.
 
-const SIN_CACHE = { gcTime: 0, retry: false, retryOnMount: false, networkMode: "always" } as const;
+export const SIN_CACHE = {
+  gcTime: 0,
+  retry: false,
+  retryOnMount: false,
+  networkMode: "always",
+  refetchOnReconnect: true,
+} as const;
+
+/** Una lectura que respondió mal: el mensaje ya dice de quién es la falla (E34). */
+export class FallaDeLectura extends Error {}
+
+/** Lo que hay que decir de una consulta fallida; sin respuesta del servidor, es la conexión. */
+export function mensajeDeLectura(error: unknown): string {
+  return error instanceof FallaDeLectura ? error.message : SIN_CONEXION;
+}
 
 async function misConsorcios() {
-  const { data } = await api.GET("/api/v1/me/consorcios");
-  if (data === undefined) throw new Error("no se pudieron leer los edificios");
+  const { data, error, response } = await api.GET("/api/v1/me/consorcios");
+  if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
   return data;
 }
 
 async function misAcciones(consorcio: string): Promise<readonly string[]> {
-  const { data } = await api.GET("/api/v1/consorcios/{consorcio_id}/mis-acciones", {
+  const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/mis-acciones", {
     params: { path: { consorcio_id: consorcio } },
   });
-  if (data === undefined) throw new Error("no se pudieron leer las acciones");
+  if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
   return data.acciones;
+}
+
+/** Lo que alcanza la persona cambió (aceptó una invitación): se vuelve a leer. */
+export function releerAcciones(cliente: QueryClient) {
+  void cliente.invalidateQueries({ queryKey: ["mis-consorcios"] });
+  void cliente.invalidateQueries({ queryKey: ["mis-acciones"] });
 }
 
 /** Lo que alcanza en un edificio, o null mientras no se sabe. */
@@ -51,9 +73,14 @@ type AccionesPorEdificio = {
   porEdificio: ReadonlyMap<string, readonly string[]> | null;
   /** Falta alguna respuesta: si ya se sabe que no va a llegar (sin red, error), es false. */
   consultando: boolean;
+  /** Qué decirle a la persona si no se pudo saber lo que alcanza; null si no hubo falla. */
+  falla: string | null;
+  /** Vuelve a pedir lo que falló. */
+  reintentar: () => void;
+  reintentando: boolean;
 };
 
-function useConsultaDeAcciones(): AccionesPorEdificio {
+export function useConsultaDeAcciones(): AccionesPorEdificio {
   const consorcios = useQuery({ queryKey: ["mis-consorcios"], queryFn: misConsorcios, ...SIN_CACHE });
   const ids = (consorcios.data ?? []).map((c) => c.id);
   const acciones = useQueries({
@@ -63,11 +90,28 @@ function useConsultaDeAcciones(): AccionesPorEdificio {
       ...SIN_CACHE,
     })),
   });
+  const reintentar = () => {
+    void consorcios.refetch();
+    for (const a of acciones) if (a.isError) void a.refetch();
+  };
+  const reintentando = consorcios.isFetching || acciones.some((a) => a.isFetching);
   if (consorcios.data === undefined || acciones.some((a) => a.data === undefined)) {
-    const fallo = consorcios.isError || acciones.some((a) => a.isError);
-    return { porEdificio: null, consultando: !fallo };
+    const error = consorcios.error ?? acciones.find((a) => a.isError)?.error ?? null;
+    return {
+      porEdificio: null,
+      consultando: error === null,
+      falla: error === null ? null : mensajeDeLectura(error),
+      reintentar,
+      reintentando,
+    };
   }
-  return { porEdificio: new Map(ids.map((id, i) => [id, acciones[i]?.data ?? []])), consultando: false };
+  return {
+    porEdificio: new Map(ids.map((id, i) => [id, acciones[i]?.data ?? []])),
+    consultando: false,
+    falla: null,
+    reintentar,
+    reintentando,
+  };
 }
 
 /** Por cada edificio de la persona, lo que alcanza; null mientras no se sepa de todos. */
@@ -93,25 +137,48 @@ export function useEdificiosCon<T extends { id: string }>(consorcios: readonly T
   return consorcios.filter((c) => cumple(porEdificio.get(c.id) ?? [], requisito));
 }
 
+// El edificio elegido, entre pantallas. Solo en memoria, nunca en el dispositivo: se guarda por
+// cliente de consultas, que hay uno por carga de la página, así que muere con ella.
+const recordados = new WeakMap<QueryClient, string>();
+
+/** Al salir de la cuenta: el edificio de una persona no queda para la siguiente. */
+export function olvidarEdificio(cliente: QueryClient) {
+  recordados.delete(cliente);
+}
+
 /**
- * El edificio de una pantalla: el que eligió la persona, si no el `preferido` (el que trae la
- * navegación) y si no el primero, siempre entre los que la pantalla sirve. Hasta tener la respuesta
- * no hay edificio ni selector: la pantalla no le pide datos a uno que no va a ofrecer, y un 403
- * de ese edificio no la manda al inicio. Si la respuesta no llega (sin red), siguen todos.
+ * El edificio de una pantalla: el que eligió la persona en ella, si no el `preferido` (el que trae
+ * la navegación), si no el que eligió en otra pantalla y si no el primero, siempre entre los que la
+ * pantalla sirve. Hasta tener la respuesta no hay edificio ni selector: la pantalla no le pide
+ * datos a uno que no va a ofrecer, y un 403 de ese edificio no la manda al inicio. Si la respuesta
+ * no llega (sin red), siguen todos.
  */
 export function useEdificioElegido<T extends { id: string }>(
   consorcios: readonly T[],
   requisito: Requisito,
   preferido: string | null = null,
 ) {
+  const cliente = useQueryClient();
   const { consultando } = useConsultaDeAcciones();
   const ofrecidos = useEdificiosCon(consorcios, requisito);
-  const [elegido, setConsorcio] = useState("");
+  const [elegido, setElegido] = useState("");
+  const setConsorcio = useCallback(
+    (id: string) => {
+      recordados.set(cliente, id);
+      setElegido(id);
+    },
+    [cliente],
+  );
   // Una vez resuelto no se vuelve atrás: otra consulta que falle después (al volver a la ventana) no
   // le saca el edificio a la pantalla, que lo perdería todo.
   const resuelto = useRef(false);
   resuelto.current ||= !consultando;
-  const actual = ofrecidos.find((c) => c.id === elegido) ?? ofrecidos.find((c) => c.id === preferido) ?? ofrecidos[0];
+  const recordado = recordados.get(cliente);
+  const actual =
+    ofrecidos.find((c) => c.id === elegido) ??
+    ofrecidos.find((c) => c.id === preferido) ??
+    ofrecidos.find((c) => c.id === recordado) ??
+    ofrecidos[0];
   return {
     edificios: resuelto.current ? ofrecidos : [],
     consorcio: resuelto.current ? (actual?.id ?? "") : "",

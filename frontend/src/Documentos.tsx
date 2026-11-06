@@ -186,6 +186,8 @@ type Lectura = { tipo: "cargando" } | { tipo: "solo_carga" } | { tipo: "sin_serv
 /** El formulario abierto: el de un documento nuevo, o el de subir el archivo de uno que ya existe. */
 type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: string };
 
+const NUEVO: Abierto = { tipo: "nuevo" };
+
 type Aviso = { texto: string; ok: boolean };
 
 class SinSesion extends Error {}
@@ -233,8 +235,15 @@ export function Documentos() {
   const quedaLaCarga = sabeQueAlcanza && carga;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [abierto, setAbierto] = useState<Abierto | null>(null);
+  // Quien solo carga no tiene otra cosa que hacer en la pantalla: el formulario ya está abierto y no
+  // hay a qué volver. No toma el foco al llegar: eso queda para cuando la persona abre uno.
+  const soloCarga = lectura.tipo === "solo_carga";
+  const formulario = abierto ?? (soloCarga ? NUEVO : null);
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [archivo, setArchivo] = useState<File | null>(null);
+  // Cada formulario cerrado: el navegador no vacía solo el campo del archivo, y quien solo carga
+  // sigue con el mismo formulario a la vista.
+  const [tanda, setTanda] = useState(0);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [vuelta, setVuelta] = useState(0);
@@ -264,6 +273,12 @@ export function Documentos() {
   function bajar(evento: MouseEvent<HTMLAnchorElement>, documento: string, version: string) {
     evento.preventDefault();
     setAviso(null);
+    // El aviso queda al final de la página: sin el foco, tocar «Descargar» parece no hacer nada. Se
+    // marca recién con la falla, para que una descarga buena no le deje el foco a un aviso posterior.
+    const fallo = (texto: string) => {
+      alAviso.current = true;
+      setAviso({ texto, ok: false });
+    };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
         params: { path: { consorcio_id: consorcio, documento_id: documento, version_id: version } },
@@ -275,11 +290,11 @@ export function Documentos() {
           const enlace = window.document.createElement("a");
           enlace.href = descarga(consorcio, documento, version);
           enlace.click();
-        } else setAviso({ texto: mensajeDeDescarga(response.status, codigoDe(error)), ok: false });
+        } else fallo(mensajeDeDescarga(response.status, codigoDe(error)));
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else setAviso({ texto: SIN_CONEXION, ok: false });
+        else fallo(SIN_CONEXION);
       });
   }
 
@@ -372,6 +387,11 @@ export function Documentos() {
     setVuelta((v) => v + 1);
   }
 
+  /** Después de una carga, lo que se ve lo decide la API. Quien solo carga no tiene lista que pedir. */
+  function actualizarLista() {
+    if (!soloCarga) volverAPedir();
+  }
+
   function abrir(nuevo: Abierto) {
     claveCrear.current = null;
     claveSubir.current = null;
@@ -384,7 +404,9 @@ export function Documentos() {
   function cerrar() {
     claveCrear.current = null;
     claveSubir.current = null;
+    setDatos(VACIO);
     setArchivo(null);
+    setTanda((t) => t + 1);
     setAbierto(null);
   }
 
@@ -400,7 +422,7 @@ export function Documentos() {
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    if (abierto === null) return;
+    if (formulario === null) return;
     // El archivo se revisa antes de crear nada: un archivo que no va a entrar no deja un documento
     // vacío. El servidor vuelve a controlar el tipo real y el tamaño.
     const problema = archivo === null ? "Elegí el archivo." : problemaDelArchivo(archivo);
@@ -412,8 +434,8 @@ export function Documentos() {
     alAviso.current = true;
     setEnviando(true);
     setAviso(null);
-    if (abierto.tipo === "subir") {
-      void subir(abierto.documento, abierto.titulo, archivo, false).finally(() => setEnviando(false));
+    if (formulario.tipo === "subir") {
+      void subir(formulario.documento, formulario.titulo, archivo, false).finally(() => setEnviando(false));
       return;
     }
     const titulo = datos.titulo.trim();
@@ -460,7 +482,7 @@ export function Documentos() {
       if (recienCreado) {
         claveCrear.current = null;
         setAbierto({ tipo: "subir", documento, titulo });
-        volverAPedir();
+        actualizarLista();
       }
     };
     try {
@@ -485,15 +507,13 @@ export function Documentos() {
       cerrar();
       // Sin acceso a la lista, quien solo carga no ve el resultado del análisis. Con la lista caída
       // no hay refresco automático: queda «Actualizar».
-      const despues =
-        lectura.tipo === "solo_carga"
-          ? "Queda «En revisión» mientras lo analizamos."
-          : lectura.tipo === "sin_servicio"
-            ? "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible."
-            : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; la lista se actualiza sola.";
+      const despues = soloCarga
+        ? "Queda «En revisión» mientras lo analizamos."
+        : lectura.tipo === "sin_servicio"
+          ? "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible."
+          : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; la lista se actualiza sola.";
       setAviso({ texto: `Listo: subimos el archivo de «${titulo}». ${despues}`, ok: true });
-      // Lo que se ve lo decide la API: la lista se vuelve a pedir.
-      volverAPedir();
+      actualizarLista();
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
       else fallo(SIN_CONEXION);
@@ -531,7 +551,7 @@ export function Documentos() {
             </div>
           )}
 
-          {lectura.tipo !== "solo_carga" && (
+          {!soloCarga && (
             <section aria-labelledby={`${id}-lista`} className="tarjeta">
               <h2 id={`${id}-lista`}>Documentos</h2>
               {lectura.tipo === "cargando" && <p>Consultando…</p>}
@@ -553,18 +573,17 @@ export function Documentos() {
           )}
 
           {/* También sin acceso a la lista: el administrador externo solo carga (documento 08 §4). Con la
-              lista caída, solo si queda un archivo por reintentar: el documento ya existe y no se pierde el
-              segundo paso. */}
-          {carga &&
-            (lectura.tipo === "ok" || lectura.tipo === "solo_carga" || (lectura.tipo === "sin_servicio" && abierto?.tipo === "subir")) && (
+              lista caída sigue a la vista, porque cargar no depende de ella, y un formulario nuevo abierto
+              no se va mientras llega la lista. */}
+          {carga && (lectura.tipo !== "cargando" || abierto?.tipo === "nuevo") && (
             <section aria-labelledby={`${id}-carga`} className="tarjeta">
               <h2 id={`${id}-carga`}>Cargar un documento</h2>
-              {abierto?.tipo === "nuevo" ? (
+              {formulario?.tipo === "nuevo" ? (
                 formularioNuevo()
-              ) : abierto?.tipo === "subir" && !enLaLista(abierto.documento) ? (
+              ) : formulario?.tipo === "subir" && !enLaLista(formulario.documento) ? (
                 // El reintento del archivo de un documento que la lista no muestra: quien solo carga
-                // (sin acceso a la lista) o una categoría que la persona carga pero no ve.
-                formularioArchivo(`${id}-reintento`, `Subir el archivo de «${abierto.titulo}»`, "h3")
+                // (sin acceso a la lista), una categoría que la persona carga pero no ve, o la lista caída.
+                formularioArchivo(`${id}-reintento`, `Subir el archivo de «${formulario.titulo}»`, "h3")
               ) : (
                 <p>
                   <button type="button" onClick={() => abrir({ tipo: "nuevo" })} disabled={enviando}>
@@ -687,6 +706,7 @@ export function Documentos() {
       <>
         <label htmlFor={`${titulo}-archivo`}>Archivo</label>
         <input
+          key={tanda}
           id={`${titulo}-archivo`}
           type="file"
           accept={ACEPTA}
@@ -778,10 +798,15 @@ export function Documentos() {
         <p>
           <button type="submit" disabled={enviando}>
             Cargar el documento
-          </button>{" "}
-          <button type="button" onClick={cerrar} disabled={enviando}>
-            Cancelar
           </button>
+          {!soloCarga && (
+            <>
+              {" "}
+              <button type="button" onClick={cerrar} disabled={enviando}>
+                Cancelar
+              </button>
+            </>
+          )}
         </p>
       </form>
     );

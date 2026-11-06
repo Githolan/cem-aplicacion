@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
@@ -7,6 +8,7 @@ import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_ENTRAR } from "./enlace";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { olvidarEdificio } from "./permisos";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
@@ -102,19 +104,28 @@ function FallaDeParte({ mensaje, deshabilitado, alReintentar }: FallaDeParteProp
 export function Cuenta() {
   const id = useId();
   const navegar = useNavigate();
+  const cliente = useQueryClient();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const consultado = useRef(false);
+  const textoAviso = useRef<HTMLParagraphElement>(null);
+
+  // El aviso va en la tarjeta de las sesiones y lleva el foco: al cerrar una, su fila desaparece y
+  // en un teléfono el resultado podría quedar fuera de la vista.
+  useEffect(() => {
+    if (aviso !== null) textoAviso.current?.focus();
+  }, [aviso]);
 
   // Toda salida a /entrar (salir, cerrar la sesión actual o una sesión vencida) borra las copias de
-  // los contactos (H2b_7 §5).
+  // los contactos (H2b_7 §5) y el edificio elegido.
   const aEntrar = useCallback(() => {
     borrarCopias();
+    olvidarEdificio(cliente);
     navegar(RUTA_ENTRAR, { replace: true });
-  }, [navegar]);
+  }, [navegar, cliente]);
 
-  /** Ante un error: sin sesión, a /entrar; si no, el aviso de conexión. */
+  /** Ante un pedido sin respuesta: sin sesión, a /entrar; si no, el aviso de conexión. */
   const atajar = useCallback(
     (e: unknown) => {
       if (e instanceof SinSesion) aEntrar();
@@ -173,10 +184,13 @@ export function Cuenta() {
         params: { path: { sesion_id: sesion.id } },
         headers: encabezadoCsrf(),
       })
-      .then(({ response }) => {
+      .then(({ error, response }) => {
         exigirSesion(response);
         // 404: la sesión ya no existe (venció o se cerró desde otro lado); el resultado es el mismo.
-        if (!response.ok && response.status !== ESTADO_NO_EXISTE) throw new Error(String(response.status));
+        if (!response.ok && response.status !== ESTADO_NO_EXISTE) {
+          setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
+          return;
+        }
         if (sesion.actual) {
           aEntrar();
           return;
@@ -193,9 +207,12 @@ export function Cuenta() {
     setAviso(null);
     void api
       .POST("/api/v1/auth/sesiones/revocar-otras", { headers: encabezadoCsrf() })
-      .then(({ data, response }) => {
+      .then(({ data, error, response }) => {
         exigirSesion(response);
-        if (data === undefined) throw new Error(String(response.status));
+        if (data === undefined) {
+          setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
+          return;
+        }
         quitar((s) => s.actual);
         setAviso({
           texto:
@@ -214,10 +231,10 @@ export function Cuenta() {
     setAviso(null);
     void api
       .POST("/api/v1/auth/salir", { headers: encabezadoCsrf() })
-      .then(({ response }) => {
+      .then(({ error, response }) => {
         exigirSesion(response);
-        if (!response.ok) throw new Error(String(response.status));
-        aEntrar();
+        if (response.ok) aEntrar();
+        else setAviso(fallo(mensajeDeFalla(response.status, codigoDe(error))));
       })
       .catch(atajar)
       .finally(() => setEnviando(false));
@@ -225,7 +242,6 @@ export function Cuenta() {
 
   const lista = pantalla.tipo === "lista" ? pantalla : null;
   const hayOtras = lista?.sesiones.ok === true && lista.sesiones.valor.some((s) => !s.actual);
-  const conMensaje = aviso !== null || lista === null;
 
   /** El error de una parte con su Reintentar; nada si la lectura salió bien. */
   const fallaDe = (parte: keyof Partes, lectura: Parte<unknown>) =>
@@ -257,6 +273,13 @@ export function Cuenta() {
 
           <section aria-labelledby={`${id}-sesiones`} className="tarjeta">
             <h2 id={`${id}-sesiones`}>Dónde tenés la sesión abierta</h2>
+            <div role="status" aria-live="polite">
+              {aviso && (
+                <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
+                  {aviso.texto}
+                </p>
+              )}
+            </div>
             {fallaDe("sesiones", lista.sesiones)}
             {lista.sesiones.ok && (
               <ul className="sesiones">
@@ -342,19 +365,14 @@ export function Cuenta() {
             </section>
           )}
 
-          {/* Pide o no la contraseña según estas dos lecturas: sin ellas no se puede armar. */}
-          {lista.contrasena.ok && lista.segundoFactor.ok && (
-            <SeccionPrivacidad
-              contrasena={lista.contrasena.valor.definida}
-              segundoFactor={lista.segundoFactor.valor}
-              fecha={fecha}
-              sinSesion={aEntrar}
-            />
+          {/* Pide o no la contraseña según esta lectura: sin ella no se puede armar. */}
+          {lista.contrasena.ok && (
+            <SeccionPrivacidad contrasena={lista.contrasena.valor.definida} fecha={fecha} sinSesion={aEntrar} />
           )}
         </>
       )}
 
-      <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
+      <div role="status" aria-live="polite" className={lista === null ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
           <>
@@ -366,7 +384,6 @@ export function Cuenta() {
             </button>
           </>
         )}
-        {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
       </div>
     </>
   );

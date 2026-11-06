@@ -264,6 +264,10 @@ class MandatoDetalle(MandatoResumen):
     instrumento_referencia: str | None
     motivo_fin: str | None
     finalizado_en: datetime | None
+    es_propio: bool = Field(
+        description="Si el mandato es de la cuenta de quien lee: nadie registra su propia baja (A4,"
+        " por cuenta). Solo para mostrar: la ruta vuelve a decidir."
+    )
 
 
 class DecisionResumen(BaseModel):
@@ -275,6 +279,11 @@ class DecisionResumen(BaseModel):
     tipo: TipoDecision
     fecha: date
     descripcion: str
+    registrada_por_vos: bool = Field(
+        description="Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la"
+        " usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir."
+    )
+    del_equipo: bool = Field(description="Si la cargó el equipo: no activa A15.")
 
 
 class ListaDecisiones(BaseModel):
@@ -310,8 +319,6 @@ class DecisionDetalle(DecisionResumen):
 
     referencia: str
     sha256: str | None
-    registrada_por_vos: bool
-    del_equipo: bool
 
 
 class CandidatoMandato(BaseModel):

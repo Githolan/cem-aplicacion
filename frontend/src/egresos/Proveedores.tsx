@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
@@ -7,6 +7,7 @@ import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
   type Aviso,
+  cambioLaOrden,
   cambioLoVisto,
   cuentaEnmascarada,
   ENCABEZADO_IDEMPOTENCIA,
@@ -18,6 +19,7 @@ import {
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  sobreLoNuevo,
   TEXTO_ESTADO_PROVEEDOR,
 } from "./comun";
 import { ElegirConsorcio } from "./ElegirConsorcio";
@@ -45,10 +47,27 @@ type Lectura =
 type Datos = { cuit: string; razon: string; rubro: string; contacto: string; cuenta: string; estado: EstadoProveedor };
 const VACIO: Datos = { cuit: "", razon: "", rubro: "", contacto: "", cuenta: "", estado: "activo" };
 
-type Formulario = { modo: "alta" } | { modo: "cambio"; proveedor: Proveedor };
+type Cambio = { modo: "cambio"; proveedor: Proveedor };
+type Formulario = { modo: "alta" } | Cambio;
 type Pendiente = { acto: string; reintentar: () => void };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
+
+/** Un proveedor en el formulario. La cuenta completa solo llega a la revisión del Consejo: acá el
+ * campo empieza vacío y vacío quiere decir «conservar la que tiene». */
+const datosDe = (p: Proveedor): Datos => ({
+  cuit: p.cuit ?? "",
+  razon: p.razon_social,
+  rubro: p.rubro ?? "",
+  contacto: p.contacto ?? "",
+  cuenta: "",
+  estado: p.estado,
+});
+
+/** Si se llegó desde Órdenes de pago porque faltaba un proveedor (`state.paraPreparar`). */
+function vieneAPreparar(estado: unknown): boolean {
+  return typeof estado === "object" && estado !== null && "paraPreparar" in estado && estado.paraPreparar === true;
+}
 
 /** En un cambio, el campo vacío conserva la cuenta del proveedor. La pantalla nunca la tiene
  * completa: lo pide con `conservar_cuenta` y el backend la toma de la versión esperada. */
@@ -60,15 +79,21 @@ function conservaCuenta(f: Formulario, d: Datos): boolean {
 export const AVISO_CUENTA =
   "Cambiar la cuenta crea una versión nueva del proveedor. Las órdenes ya preparadas siguen apuntando a la versión anterior; las nuevas usan la cuenta nueva. Un cambio material obliga a una revisión nueva cuando corresponde.";
 
+export const AVISO_PROVEEDOR_CAMBIO = "El proveedor cambió mientras lo editabas. Revisá los datos y volvé a guardar.";
+
+type PropsDelEdificio = ReturnType<typeof useConsorcio> & { vuelveAPreparar: boolean };
+
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
 export function Proveedores() {
   const elegido = useConsorcio(REQUISITOS.proveedores);
-  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} />;
+  const vuelveAPreparar = useRef(vieneAPreparar(useLocation().state));
+  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} />;
 }
 
-function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
+function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar }: PropsDelEdificio) {
   const id = useId();
+  const navegar = useNavigate();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
@@ -143,20 +168,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     clave.current = null;
     setConfirmarCuenta(false);
     setAviso(null);
-    setDatos(
-      f.modo === "alta"
-        ? VACIO
-        : {
-            cuit: f.proveedor.cuit ?? "",
-            razon: f.proveedor.razon_social,
-            rubro: f.proveedor.rubro ?? "",
-            contacto: f.proveedor.contacto ?? "",
-            // La cuenta completa solo llega a la revisión del Consejo: acá el campo empieza vacío y
-            // vacío quiere decir «conservar la que tiene».
-            cuenta: "",
-            estado: f.proveedor.estado,
-          },
-    );
+    setDatos(f.modo === "alta" ? VACIO : datosDe(f.proveedor));
     setFormulario(f);
   }
 
@@ -181,6 +193,30 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       return;
     }
     pedir(formulario);
+  }
+
+  /** El proveedor cambió mientras se editaba: el formulario sigue con lo escrito sobre la versión
+   * nueva, y cambiar la cuenta se vuelve a confirmar. Otra falla lo deja como está: reintentar
+   * vuelve a pasar por acá. */
+  function seguirSobreLaVersionNueva(f: Cambio) {
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}", {
+        params: { path: { consorcio_id: consorcio, proveedor_id: f.proveedor.id } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (!montado.current) return;
+        if (data !== undefined) {
+          const { proveedor } = data;
+          setDatos((d) => sobreLoNuevo(d, datosDe(f.proveedor), datosDe(proveedor)));
+          setFormulario({ modo: "cambio", proveedor });
+          setConfirmarCuenta(false);
+        } else if (response.status === ESTADO.noEncontrado) {
+          cerrar();
+          volverAPedir();
+        }
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
   }
 
   function pedir(f: Formulario) {
@@ -218,7 +254,12 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         exigirSesion(response);
         if (data !== undefined) {
           cerrar();
-          setAviso({ texto: f.modo === "alta" ? "Listo: dimos de alta el proveedor." : `Listo: el proveedor quedó en la versión ${data.version}.`, ok: true });
+          const hecho = f.modo === "alta" ? "Listo: dimos de alta el proveedor." : `Listo: el proveedor quedó en la versión ${data.version}.`;
+          if (f.modo === "alta" && vuelveAPreparar) {
+            navegar(RUTA_ORDENES_ENLACE, { state: { consorcio, proveedor: data.id, aviso: hecho } });
+            return;
+          }
+          setAviso({ texto: hecho, ok: true });
           volverAPedir();
           return;
         }
@@ -228,6 +269,13 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
+        if (f.modo === "cambio" && cambioLaOrden(codigo)) {
+          setAviso({ texto: AVISO_PROVEEDOR_CAMBIO, ok: false });
+          seguirSobreLaVersionNueva(f);
+          // La lista de atrás también quedó vieja; sin «Cargando», para no sacar el formulario.
+          setVuelta((v) => v + 1);
+          return;
+        }
         setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
         if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && codigo !== "cuit_repetido") {
           cerrar();
@@ -271,7 +319,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       {pantalla.tipo === "lista" && pendiente === null && (
         <>
           {lectura.tipo === "cargando" && <p role="status">Cargando los proveedores…</p>}
-          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
+          {lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
           {lectura.tipo === "ok" && formulario === null && ficha === null && (
             <>
               <button type="button" onClick={() => abrir({ modo: "alta" })}>
@@ -315,15 +363,21 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <dt>Cuenta</dt>
                 <dd>{cuentaEnmascarada(ficha.proveedor.cuenta_ultimos_digitos)}</dd>
               </dl>
-              <h3>Historia</h3>
-              <ol className="versiones" aria-label="Versiones del proveedor">
-                {ficha.versiones.map((v) => (
-                  <li key={v.version}>
-                    Versión {v.version}, {momento(v.creada_en)}: {v.razon_social}, {TEXTO_ESTADO_PROVEEDOR[v.estado]},
-                    cuenta {cuentaEnmascarada(v.cuenta_ultimos_digitos)}
-                  </li>
-                ))}
-              </ol>
+              {ficha.versiones.length > 1 && (
+                <details className="historial">
+                  <summary>Versiones anteriores</summary>
+                  <ol className="versiones">
+                    {ficha.versiones
+                      .filter((v) => v.version !== ficha.proveedor.version)
+                      .map((v) => (
+                        <li key={v.version}>
+                          Versión {v.version}, {momento(v.creada_en)}: {v.razon_social},{" "}
+                          {TEXTO_ESTADO_PROVEEDOR[v.estado]}, cuenta {cuentaEnmascarada(v.cuenta_ultimos_digitos)}
+                        </li>
+                      ))}
+                  </ol>
+                </details>
+              )}
               <div className="formulario">
                 <div className="acciones">
                   <button type="button" onClick={() => abrir({ modo: "cambio", proveedor: ficha.proveedor })}>

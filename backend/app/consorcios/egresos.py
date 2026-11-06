@@ -91,7 +91,7 @@ from psycopg.errors import InsufficientPrivilege
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
-from app.autorizacion.evaluador import Entidad
+from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
 from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
@@ -117,6 +117,11 @@ RESPALDADAS = {
 }  # fmt: skip
 """Las órdenes que ya pasaron una aprobación completa y, después, su emisión (también la que
 falló): el reintento de la emisión con la misma clave devuelve la respuesta guardada."""
+ESPERAN_PAGO = {EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION}
+"""Las órdenes con su ejecución manual abierta (`nucleo.ejecucion_manual_abierta`)."""
+EN_CURSO = ESPERAN_PAGO | {EstadoOrdenPago.EN_REVISION, EstadoOrdenPago.APROBADA}
+"""Las órdenes en las que haber aprobado todavía separa: quien aprobó no repite, ni emite, ni paga.
+Son pocas y no crecen con la historia del consorcio."""
 LEE_COMO = {PREPARAR: PREPARAR, REVISAR: APROBAR}
 """La facultad con que cada acción lee en la base (`exigir_lectura_egresos`, `0049`)."""
 
@@ -322,10 +327,35 @@ def _evaluaciones(c: Connection, permiso: Permiso, orden: UUID | None) -> dict:
     return {(f["orden_id"], f["numero"]): f for f in filas.mappings()}
 
 
+VERSIONES = "select * from nucleo.orden_pago_versiones_lectura(:o, :f, :actor, 'api', :sesion)"
+
+
+def _aprobadas_por_vos(c: Connection, permiso: Permiso, filas: list) -> set[UUID]:
+    """Las órdenes en curso cuya versión vigente aprobó el ser humano que lee. Quién aprobó se lee
+    orden por orden (`cem_app` no tiene otra lectura): por eso solo en las que están en curso y ya
+    tienen alguna aprobación, y no en toda la historia. Solo para mostrar."""
+    en_curso = [
+        f for f in filas if EstadoOrdenPago(f["estado"]) in EN_CURSO and f["aprobaciones"] > 0
+    ]
+    if not en_curso:
+        return set()
+    cuentas = permiso.cuentas_humanas(c, historicas=True)
+    aprobadas = set()
+    for f in en_curso:
+        versiones = _ejecutar(
+            c, permiso, VERSIONES, {"o": f["id"], "f": LEE_COMO[permiso.accion]}
+        ).mappings().all()  # fmt: skip
+        vigente = next(v for v in versiones if v["numero"] == f["version_vigente"])
+        if not cuentas.isdisjoint(vigente["aprobada_por"]):
+            aprobadas.add(f["id"])
+    return aprobadas
+
+
 def _ordenes(c: Connection, permiso: Permiso, orden: UUID | None) -> list[OrdenPago]:
     sql = "select * from nucleo.ordenes_pago_lectura(:o, :f, :actor, 'api', :sesion)"
     filas = list(_ejecutar(c, permiso, sql, {"o": orden, "f": LEE_COMO[permiso.accion]}).mappings())
     evaluaciones = _evaluaciones(c, permiso, orden)
+    aprobadas = _aprobadas_por_vos(c, permiso, filas)
     ordenes = []
     for f in filas:
         ev = evaluaciones[(f["id"], f["version_vigente"])]
@@ -335,6 +365,7 @@ def _ordenes(c: Connection, permiso: Permiso, orden: UUID | None) -> list[OrdenP
             **f, franja=ev["franja"], alerta_fraccionamiento=ev["alerta_fraccionamiento"],
             aprobada_en=aprobada_en,
             aprobacion_vence_en=aprobada_en + VIGENCIA_APROBACION if aprobada else None,
+            aprobada_por_vos=f["id"] in aprobadas,
         ))  # fmt: skip
     return ordenes
 
@@ -353,18 +384,62 @@ en el acto y no por los vínculos de hoy (P3 115, `0054`). Fallan cerradas: sin 
 de quien lee, verdadero."""
 
 
-def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool):
-    """Con `revision`, cada versión trae la cuenta completa para que el Consejo la verifique;
-    si no, solo sus últimos dígitos. Quien preparó la orden o alguna de sus versiones no la
-    aprueba (`no_es_quien_preparo`), así que tampoco en la revisión recibe la cuenta completa:
-    un consejero que además prepara la ve como quien prepara."""
+def _cargo_la_cuenta(c: Connection, aprobar: Permiso, orden: OrdenPago, filas: list) -> bool:
+    """Si el ser humano que lee firmó la cuenta que paga la versión vigente: la lógica de
+    `nucleo.exigir_no_cargo_la_cuenta`, para mostrar. La historia del proveedor la lee solo quien
+    prepara: a quien la firmó y ya no prepara se lo niega la base al aprobar (403, regla 2)."""
+    if not alcanza(PREPARAR, aprobar.ctx.autorizacion):
+        return False
+    vigente = next(f for f in filas if f["numero"] == orden.version_vigente)
+    historia = _ejecutar(
+        c, aprobar, "select * from nucleo.proveedor_versiones_lectura(:p, :actor, 'api', :sesion)",
+        {"p": vigente["proveedor_id"]},
+    ).mappings().all()  # fmt: skip
+    fija = next(v for v in historia if v["version"] == vigente["proveedor_version"])
+    cuentas = aprobar.cuentas_humanas(c, historicas=True)
+    return any(
+        v["preparada_por"] in cuentas
+        for v in historia
+        if v["version"] <= fija["version"] and v["cuenta_destino"] == fija["cuenta_destino"]
+    )
+
+
+def _puede_decidir(
+    c: Connection, aprobar: Permiso, orden: OrdenPago, filas: list, preparo: bool
+) -> dict[str, bool]:
+    """`puede_aprobar` y `puede_rechazar`: la misma separación que `_decision`, con cada persona
+    que preparó una versión, como la base (`exigir_decision_sobre_orden`). `preparo` suma la
+    identidad guardada en cada acto. No audita ni concede: las rutas vuelven a decidir."""
+    preparadores = {orden.preparada_por, *(f["preparada_por"] for f in filas)}
+    decisiones = aprobar.decidir_en(c, [Entidad(preparado_por=p) for p in preparadores])
+    rechaza = (
+        orden.estado == EstadoOrdenPago.EN_REVISION
+        and not preparo
+        and all(d.permitido for d in decisiones)
+    )
+    return {
+        "puede_rechazar": rechaza,
+        "puede_aprobar": rechaza
+        and not orden.aprobada_por_vos
+        and not _cargo_la_cuenta(c, aprobar, orden, filas),
+    }
+
+
+def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, aprobar: Permiso | None = None):
+    """Con `aprobar`, la revisión: cada versión trae la cuenta completa para que el Consejo la
+    verifique, y la respuesta dice qué puede decidir quien lee; si no, solo sus últimos dígitos.
+    Quien preparó la orden o alguna de sus versiones no la aprueba (`no_es_quien_preparo`), así
+    que tampoco en la revisión recibe la cuenta completa: un consejero que además prepara la ve
+    como quien prepara."""
+    revision = aprobar is not None
     with _lectura(permiso, motor) as c:
         ordenes = _ordenes(c, permiso, orden_id)
         if not ordenes:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-        sql = "select * from nucleo.orden_pago_versiones_lectura(:o, :f, :actor, 'api', :sesion)"
         filas = list(
-            _ejecutar(c, permiso, sql, {"o": orden_id, "f": LEE_COMO[permiso.accion]}).mappings()
+            _ejecutar(
+                c, permiso, VERSIONES, {"o": orden_id, "f": LEE_COMO[permiso.accion]}
+            ).mappings()
         )
         evaluaciones = _evaluaciones(c, permiso, orden_id)
         # Por la identidad humana guardada en cada versión, no por cuenta ni por los vínculos de
@@ -384,8 +459,11 @@ def _orden_con_versiones(permiso: Permiso, motor, orden_id: UUID, revision: bool
                 umbral_importe_centavos=ev["umbral_importe_centavos"],
                 umbral_moneda=ev["umbral_moneda"], contrato_id=ev["contrato_id"],
             ))  # fmt: skip
-    if revision:
-        return OrdenPagoConVersionesRevision(orden=ordenes[0], versiones=versiones)
+        if revision:
+            return OrdenPagoConVersionesRevision(
+                orden=ordenes[0], versiones=versiones,
+                **_puede_decidir(c, aprobar, ordenes[0], filas, preparo),
+            )  # fmt: skip
     return OrdenPagoConVersiones(orden=ordenes[0], versiones=versiones)
 
 
@@ -549,7 +627,7 @@ def ver_orden(
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> OrdenPagoConVersiones:
-    return _orden_con_versiones(permiso, motor, orden_id, revision=False)
+    return _orden_con_versiones(permiso, motor, orden_id)
 
 
 @router.get(
@@ -561,9 +639,10 @@ def ver_orden(
 def ver_orden_revision(
     orden_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
+    aprobar: Annotated[Permiso, Depends(requiere(APROBAR, sin_gesto=True))],
     motor: MotorDep,
 ) -> OrdenPagoConVersionesRevision:
-    return _orden_con_versiones(permiso, motor, orden_id, revision=True)
+    return _orden_con_versiones(permiso, motor, orden_id, aprobar)
 
 
 def _datos_orden(d: DatosOrdenPago) -> dict:
@@ -770,7 +849,7 @@ def emitir_orden(
     facultades) y la separación se evalúa con quienes aprobaron la versión vigente (A5). La base
     vuelve a exigir todo: la franja, las aprobaciones, los 7 días, el proveedor, la cuenta y la
     separación por identidad humana."""
-    detalle = _orden_con_versiones(lectura, motor, orden_id, revision=False)
+    detalle = _orden_con_versiones(lectura, motor, orden_id)
     vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
     # Lo que se emite es la versión y la huella vistas. La versión de la orden no cambia nunca
     # (solo se agregan versiones), así que la base, que exige la versión vigente, exige también
@@ -940,12 +1019,35 @@ def baja_contrato(
 # --- Pago manual (`0055`) ----------------------------------------------------------------------
 
 
+def _puede_resolver(
+    c: Connection, conciliar: Permiso, o: OrdenPago, registraron: set[UUID], declararon: set[UUID]
+) -> tuple[bool, bool]:
+    """Si quien lee queda separado de la orden para conciliar y para confirmar que no se pagó: la
+    separación de esas rutas, con todos los que registraron o declararon en cualquier ejecución
+    de la orden, como `nucleo.exigir_no_ejecuto`.
+
+    Quién vio la cuenta no lo lee `cem_app`. Confirmar no lo necesita: con una declaración
+    `confirmable`, todos los que la vieron declararon, y por eso declarar cuenta. Conciliar sí:
+    a quien la vio y no registró se lo niega la base (403, regla 2). Declarar no cuenta para
+    conciliar porque se puede declarar sin haberla visto, y no se le esconde a nadie lo que sí
+    puede hacer. No audita ni concede: las rutas vuelven a decidir."""
+    if _ejecutar(c, conciliar, PREPARO, {"o": o.id}).scalar_one():
+        return False, False
+    personas = list(registraron | declararon)
+    decisiones = conciliar.decidir_en(
+        c, [Entidad(preparado_por=o.preparada_por, ejecutado_por=p) for p in personas]
+    )
+    negadas = {p for p, d in zip(personas, decisiones, strict=True) if not d.permitido}
+    return bool(registraron) and negadas.isdisjoint(registraron), bool(personas) and not negadas
+
+
 def _pagos_manuales(
-    c: Connection, permiso: Permiso, orden: UUID | None
+    c: Connection, permiso: Permiso, conciliar: Permiso, orden: UUID | None
 ) -> list[OrdenConPagoManual]:
     """Las órdenes con una ejecución manual de su versión vigente, con sus registros y
     declaraciones, sin la cuenta. Las ejecuciones se leen **después** de las órdenes: una que no
-    sea de la versión leída (la orden cambió en el medio) no se muestra."""
+    sea de la versión leída (la orden cambió en el medio) no se muestra. Qué puede resolver quien
+    lee se calcula solo en las órdenes que esperan el pago y tienen algo por resolver."""
     datos_lectura = {"o": orden, "f": LEE_COMO[permiso.accion]}
     ordenes = {o.id: o for o in _ordenes(c, permiso, orden)}
     ejecuciones = _ejecutar(
@@ -953,31 +1055,50 @@ def _pagos_manuales(
         " :sesion)", datos_lectura,
     ).mappings().all()  # fmt: skip
     pagos: dict[UUID, list[PagoManual]] = {}
+    registraron: dict[UUID, set[UUID]] = {}
     for fila in _ejecutar(
         c, permiso, "select * from nucleo.pagos_manuales_lectura(:o, :f, :actor, 'api', :sesion)",
         datos_lectura,
     ).mappings():  # fmt: skip
         datos = dict(fila)
-        del datos["orden_id"]
+        registraron.setdefault(datos.pop("orden_id"), set()).add(datos["registrado_por"])
         pagos.setdefault(datos.pop("ejecucion_id"), []).append(PagoManual(**datos))
-    declaraciones: dict[UUID, list[PagoNoRealizado]] = {}
+    declaraciones: dict[UUID, list[dict]] = {}
+    declararon: dict[UUID, set[UUID]] = {}
     for fila in _ejecutar(
         c, permiso, "select * from nucleo.declaraciones_pago_no_realizado_lectura(:o, :f, :actor,"
         " 'api', :sesion)", datos_lectura,
     ).mappings():  # fmt: skip
         datos = dict(fila)
-        del datos["orden_id"]
-        declaraciones.setdefault(datos.pop("ejecucion_id"), []).append(PagoNoRealizado(**datos))
+        declararon.setdefault(datos.pop("orden_id"), set()).add(datos["declarado_por"])
+        declaraciones.setdefault(datos.pop("ejecucion_id"), []).append(datos)
+    alcanza_conciliar = alcanza(CONCILIAR, conciliar.ctx.autorizacion)
     elementos = []
     for e in ejecuciones:
         o = ordenes.get(e["orden_id"])
         if o is None or o.version_vigente != e["version"]:
             continue
-        elementos.append(OrdenConPagoManual(orden=o, ejecucion=EjecucionManual(
-            id=e["id"], version=e["version"], creada_en=e["creada_en"], resultado=e["resultado"],
-            referencia=e["referencia"], pagos=pagos.get(e["id"], []),
-            declaraciones=declaraciones.get(e["id"], []),
-        )))  # fmt: skip
+        de_la_ejecucion = pagos.get(e["id"], [])
+        declaradas = declaraciones.get(e["id"], [])
+        por_conciliar = (
+            o.estado in ESPERAN_PAGO
+            and e["resultado"] is None
+            and any(p.conciliacion is None for p in de_la_ejecucion)
+        )
+        concilia = confirma = False
+        if alcanza_conciliar and (por_conciliar or any(d["confirmable"] for d in declaradas)):
+            concilia, confirma = _puede_resolver(
+                c, conciliar, o, registraron.get(o.id, set()), declararon.get(o.id, set())
+            )
+        elementos.append(OrdenConPagoManual(
+            orden=o, puede_conciliar=por_conciliar and concilia,
+            ejecucion=EjecucionManual(
+                id=e["id"], version=e["version"], creada_en=e["creada_en"],
+                resultado=e["resultado"], referencia=e["referencia"], pagos=de_la_ejecucion,
+                declaraciones=[PagoNoRealizado(**d, puede_confirmar=d["confirmable"] and confirma)
+                               for d in declaradas],
+            ),
+        ))  # fmt: skip
     return elementos
 
 
@@ -989,10 +1110,11 @@ def _pagos_manuales(
 )
 def listar_pagos_manuales(
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    conciliar: Annotated[Permiso, Depends(requiere(CONCILIAR, sin_gesto=True))],
     motor: MotorDep,
 ) -> ListaPagosManuales:
     with _lectura(permiso, motor) as c:
-        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))
+        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, conciliar, None))
 
 
 @router.get(
@@ -1003,16 +1125,17 @@ def listar_pagos_manuales(
 )
 def listar_pagos_manuales_revision(
     permiso: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True, sin_gesto=True))],
+    conciliar: Annotated[Permiso, Depends(requiere(CONCILIAR, sin_gesto=True))],
     motor: MotorDep,
 ) -> ListaPagosManuales:
     with _lectura(permiso, motor) as c:
-        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, None))
+        return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, conciliar, None))
 
 
 def _ejecutor(lectura: Permiso, permiso: Permiso, motor, orden_id: UUID) -> None:
     """Como al emitir: quien ejecuta lee la orden como quien prepara y la separación se evalúa con
     quienes aprobaron la versión vigente (A5). La base vuelve a exigir todo."""
-    detalle = _orden_con_versiones(lectura, motor, orden_id, revision=False)
+    detalle = _orden_con_versiones(lectura, motor, orden_id)
     vigente = next(v for v in detalle.versiones if v.numero == detalle.orden.version_vigente)
     permiso.verificar(Entidad(
         aprobado_por=tuple(vigente.aprobada_por),
@@ -1114,9 +1237,11 @@ def crear_comprobante_de_pago(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
-def _orden_con_pago(revision: Permiso, motor, orden_id: UUID) -> OrdenConPagoManual:
+def _orden_con_pago(
+    revision: Permiso, conciliar: Permiso, motor, orden_id: UUID
+) -> OrdenConPagoManual:
     with _lectura(revision, motor) as c:
-        elementos = _pagos_manuales(c, revision, orden_id)
+        elementos = _pagos_manuales(c, revision, conciliar, orden_id)
     if not elementos:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
     return elementos[0]
@@ -1140,7 +1265,7 @@ def conciliar_pago_manual(
     """Lee la orden con la revisión ya verificada y evalúa la separación con quien la preparó y
     con quien registró el pago. La base compara además con quien preparó cada versión, por la
     identidad guardada en cada acto."""
-    actual = _orden_con_pago(revision, motor, orden_id)
+    actual = _orden_con_pago(revision, permiso, motor, orden_id)
     pago = next((p for p in actual.ejecucion.pagos if p.id == pago_id), None)
     if pago is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
@@ -1206,7 +1331,7 @@ def confirmar_pago_no_realizado(
     motor: MotorDep,
 ) -> Response:
     """Quien declaró ocupa el lugar de quien ejecutó (`no_es_quien_ejecuto`)."""
-    actual = _orden_con_pago(revision, motor, orden_id)
+    actual = _orden_con_pago(revision, permiso, motor, orden_id)
     declarada = next((d for d in actual.ejecucion.declaraciones if d.id == declaracion_id), None)
     if declarada is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)

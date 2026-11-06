@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   aBytes,
   aTexto,
+  esDeEsteDispositivo,
   llaveDisponible,
   nombreDelDispositivo,
   opcionesDeAlta,
   opcionesDeVerificacion,
+  recordarLlave,
 } from "./llaveAcceso";
 
 describe("llave de acceso", () => {
@@ -40,6 +42,19 @@ describe("llave de acceso", () => {
     expect(nombreDelDispositivo("Mozilla/5.0 (Linux; Android 14)")).toBe("Teléfono Android");
     expect(nombreDelDispositivo("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)")).toBe("iPhone o iPad");
     expect(nombreDelDispositivo("otro")).toBe("Este dispositivo");
+  });
+
+  it("recuerda las llaves de este dispositivo, sin repetirlas", () => {
+    expect(esDeEsteDispositivo("una")).toBe(false);
+
+    recordarLlave("una");
+    recordarLlave("una");
+    recordarLlave("otra");
+
+    expect(esDeEsteDispositivo("una")).toBe(true);
+    expect(esDeEsteDispositivo("otra")).toBe(true);
+    expect(esDeEsteDispositivo("ninguna")).toBe(false);
+    window.localStorage.clear();
   });
 
   it("sin soporte del navegador no se ofrece", () => {

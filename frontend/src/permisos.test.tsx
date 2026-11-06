@@ -1,5 +1,5 @@
-import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { focusManager, onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { StrictMode } from "react";
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { accionesDeLasPoliticas } from "./accionesDePrueba";
 import { App } from "./App";
 import { CATEGORIAS_OPERATIVAS } from "./Documentos";
+import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { cumple, cumpleEnAlguno, Exige, REQUISITOS, type Requisito } from "./permisos";
 import { ContextoVersion } from "./version";
 
@@ -45,6 +46,7 @@ function backend(acciones: Acciones, extra: Record<string, Respuesta> = {}, lect
     if (camino === "/api/v1/auth/sesion") return Response.json({});
     if (camino === "/health") return error("servicio_no_disponible", 503);
     if (camino === "/api/v1/pagos-por-aclarar") return Response.json({ elementos: [] });
+    if (camino === "/api/v1/me/invitaciones") return Response.json({ elementos: [] });
     if (camino === "/api/v1/me/consorcios") return Response.json(EDIFICIOS.filter((e) => e.id in acciones));
     const [, consorcio, resto] = /^\/api\/v1\/consorcios\/([^/]+)\/(.+)$/.exec(camino) ?? [];
     if (resto === "mis-acciones") return Response.json({ acciones: acciones[consorcio ?? ""] });
@@ -182,9 +184,9 @@ describe("inicio por rol", () => {
   const CONTACTOS = "Contactos de emergencia";
   const DOCUMENTOS = "Documentos del edificio";
   const ORDENES = "Órdenes de pago";
-  const REVISAR = "Revisar órdenes de pago (Consejo)";
+  const REVISAR = "Revisar órdenes de pago";
   const PAGOS = "Pagos a realizar";
-  const CONCILIAR = "Conciliar pagos (Consejo)";
+  const CONCILIAR = "Conciliar pagos";
   const LIQUIDACION = "Liquidación (borrador)";
   const TODOS = [INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, ORDENES, REVISAR, PAGOS, CONCILIAR, LIQUIDACION];
 
@@ -257,6 +259,180 @@ describe("inicio por rol", () => {
     await waitFor(() => expect(caminos(simulado)).toContain("/api/v1/pagos-por-aclarar"));
     await new Promise((r) => setTimeout(r));
     expect(screen.queryByRole("link", { name: nombre })).toBeNull();
+  });
+});
+
+describe("si el inicio no pudo saber qué alcanza", () => {
+  const PADRON = { name: "Padrón del edificio" };
+  const ACCIONES = `/api/v1/consorcios/${C1}/mis-acciones`;
+  const SOLO_AZUL = () => Response.json(EDIFICIOS.slice(0, 1));
+
+  it.each<[string, Respuesta, string]>([
+    ["sin red", sinRed, SIN_CONEXION],
+    ["con un 503", () => error("servicio_no_disponible", 503), SERVICIO_NO_DISPONIBLE],
+    ["con un 500", () => error("error_interno", 500), SERVICIO_NO_DISPONIBLE],
+  ])("%s lo dice, y Reintentar trae las secciones", async (_, falla, mensaje) => {
+    let caido = true;
+    vi.stubGlobal(
+      "fetch",
+      backend({ [C1]: ["padron.ver", "contactos.ver"] }, { "/api/v1/me/consorcios": () => (caido ? falla() : SOLO_AZUL()) }),
+    );
+    abrirApp();
+
+    const aviso = await screen.findByRole("alert");
+    expect(aviso.textContent).toBe(`Puede que falten secciones. ${mensaje}`);
+    expect(screen.queryByRole("link", PADRON)).toBeNull();
+
+    caido = false;
+    fireEvent.click(within(aviso.parentElement!).getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByRole("link", PADRON)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("una falla solo en lo que alcanza en un edificio también se dice y se reintenta", async () => {
+    let caido = true;
+    vi.stubGlobal(
+      "fetch",
+      backend({ [C1]: [] }, {
+        [ACCIONES]: () => (caido ? error("error_interno", 500) : Response.json({ acciones: ["padron.ver"] })),
+      }),
+    );
+    abrirApp();
+    const aviso = await screen.findByRole("alert");
+
+    caido = false;
+    fireEvent.click(within(aviso.parentElement!).getByRole("button", { name: "Reintentar" }));
+
+    expect(await screen.findByRole("link", PADRON)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("control: con todo leído no hay aviso, aunque la persona no alcance nada", async () => {
+    const simulado = backend({ [C1]: [] });
+    vi.stubGlobal("fetch", simulado);
+    abrirApp();
+    await waitFor(() => expect(caminos(simulado)).toContain(ACCIONES));
+    await screen.findByRole("heading", INICIO);
+    await new Promise((r) => setTimeout(r));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("al volver la conexión lo consulta de nuevo, sin tocar nada", async () => {
+    let caido = true;
+    const simulado = backend(
+      { [C1]: ["padron.ver"] },
+      { "/api/v1/me/consorcios": () => (caido ? sinRed() : SOLO_AZUL()) },
+    );
+    vi.stubGlobal("fetch", simulado);
+    abrirApp();
+    await screen.findByRole("alert");
+    // Control: sin que vuelva la conexión no se repite sola.
+    expect(caminos(simulado).filter((c) => c === "/api/v1/me/consorcios")).toHaveLength(1);
+
+    caido = false;
+    act(() => {
+      onlineManager.setOnline(false);
+      onlineManager.setOnline(true);
+    });
+
+    expect(await screen.findByRole("link", PADRON)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("el edificio elegido", () => {
+  const AMBOS = ["padron.ver", "documentos.ver"];
+  const MARCA = { name: "Consorcio en Mano" };
+  const DOCUMENTOS = { name: "Documentos del edificio" };
+
+  async function elegirElVerde() {
+    fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });
+  }
+
+  async function pasarADocumentos() {
+    fireEvent.click(screen.getByRole("link", MARCA));
+    fireEvent.click(await screen.findByRole("link", DOCUMENTOS));
+    await screen.findByRole("heading", { level: 1, name: "Documentos del edificio" });
+  }
+
+  it("sigue elegido en la pantalla siguiente", async () => {
+    const simulado = backend({ [C1]: AMBOS, [C2]: AMBOS });
+    vi.stubGlobal("fetch", simulado);
+    abrirApp("/padron");
+    await elegirElVerde();
+
+    await pasarADocumentos();
+
+    const selector = (await screen.findByLabelText("Edificio")) as HTMLSelectElement;
+    expect(selector.value).toBe(C2);
+    await waitFor(() => expect(caminos(simulado)).toContain(`/api/v1/consorcios/${C2}/documentos`));
+    // Control: el primero no se pidió; sin el recuerdo sería el elegido.
+    expect(caminos(simulado)).not.toContain(`/api/v1/consorcios/${C1}/documentos`);
+  });
+
+  it("no queda en el dispositivo: otra carga de la página empieza por el primero", async () => {
+    vi.stubGlobal("fetch", backend({ [C1]: AMBOS, [C2]: AMBOS }));
+    abrirApp("/padron");
+    await elegirElVerde();
+    await waitFor(() => expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2));
+    expect(Object.values(localStorage).join()).not.toContain(C2);
+    expect(Object.values(sessionStorage).join()).not.toContain(C2);
+    cleanup();
+
+    abrirApp("/padron");
+
+    const selector = (await screen.findByLabelText("Edificio")) as HTMLSelectElement;
+    expect(selector.value).toBe(C1);
+  });
+
+  it("si la pantalla siguiente no sirve en ese edificio, usa uno que sirva", async () => {
+    const simulado = backend({ [C1]: AMBOS, [C2]: ["padron.ver"] });
+    vi.stubGlobal("fetch", simulado);
+    abrirApp("/padron");
+    await elegirElVerde();
+
+    await pasarADocumentos();
+
+    await waitFor(() => expect(caminos(simulado)).toContain(`/api/v1/consorcios/${C1}/documentos`));
+    expect(caminos(simulado)).not.toContain(`/api/v1/consorcios/${C2}/documentos`);
+  });
+
+  it("al salir de la cuenta se olvida: quien entra después empieza por el primero", async () => {
+    let adentro = true;
+    vi.stubGlobal(
+      "fetch",
+      backend({ [C1]: ["padron.ver"], [C2]: ["padron.ver"] }, {
+        "/api/v1/auth/sesion": () => (adentro ? Response.json({}) : error("no_autenticado", 401)),
+        "/api/v1/auth/sesiones": () => Response.json({ elementos: [] }),
+        "/api/v1/auth/totp": () => Response.json({ activo: false, llaves: 0 }),
+        "/api/v1/auth/contrasena": () => Response.json({ definida: false, cambiada_en: null }),
+        "/api/v1/privacidad/casos": () => Response.json({ elementos: [] }),
+        "/api/v1/auth/salir": () => {
+          adentro = false;
+          return new Response(null, { status: 204 });
+        },
+        "/api/v1/auth/codigo": () => {
+          adentro = true;
+          return Response.json({});
+        },
+      }),
+    );
+    abrirApp("/padron");
+    await elegirElVerde();
+    fireEvent.click(screen.getByRole("link", MARCA));
+    fireEvent.click(await screen.findByRole("link", { name: "Mi cuenta" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Entrar con un código" }));
+    const codigo = within(screen.getByRole("region", { name: "Entrar con un código" }));
+    fireEvent.change(codigo.getByLabelText("Correo"), { target: { value: "otra@ejemplo.com" } });
+    fireEvent.change(codigo.getByLabelText(/^Código de 6 números/), { target: { value: "042917" } });
+    fireEvent.submit(codigo.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
+    fireEvent.click(await screen.findByRole("link", { name: "Padrón del edificio" }));
+
+    const selector = (await screen.findByLabelText("Edificio")) as HTMLSelectElement;
+    expect(selector.value).toBe(C1);
   });
 });
 

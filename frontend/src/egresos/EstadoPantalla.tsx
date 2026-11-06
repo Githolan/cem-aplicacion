@@ -1,15 +1,14 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
 
-import { RUTA_ENTRAR } from "../enlace";
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
-import { type Aviso, TEXTO_SESION_VENCIDA } from "./comun";
-import type { PantallaConsorcio } from "./useConsorcio";
+import { EnlaceVolverAEntrar } from "../VolverAEntrar";
+import { type Aviso, conLaRedDeVuelta, TEXTO_SESION_VENCIDA } from "./comun";
+import { type PantallaConsorcio, useAlVolverLaRed } from "./useConsorcio";
 
 // Lo que las pantallas de egresos muestran cuando algo salió o no salió (regla de fricción del
 // 05-11-2026): el resultado en la misma pantalla y, si falló, una salida a mano para reintentar.
 
-/** El resultado de lo último. Con la sesión vencida para el acto, el camino para renovarla. */
+/** El resultado de lo último. Con la sesión vencida para el acto, el camino para renovarla y volver acá. */
 export function AvisoPantalla({ aviso }: { aviso: Aviso | null }) {
   if (aviso === null) return null;
   return (
@@ -18,9 +17,7 @@ export function AvisoPantalla({ aviso }: { aviso: Aviso | null }) {
       {aviso.texto === TEXTO_SESION_VENCIDA && (
         <>
           {" "}
-          <Link to={RUTA_ENTRAR} state={{ renovar: true }}>
-            Volver a entrar
-          </Link>
+          <EnlaceVolverAEntrar>Volver a entrar</EnlaceVolverAEntrar>
         </>
       )}
     </p>
@@ -43,8 +40,15 @@ export function Reintentar({ alReintentar, children }: PropsReintentar) {
   );
 }
 
-/** La lectura de la pantalla no llegó. El porqué va en el aviso, salvo que este guarde un «Listo». */
-export function FallaDeLectura({ alReintentar, children }: PropsReintentar) {
+type PropsFalla = PropsReintentar & { avisar: (cambio: (actual: Aviso | null) => Aviso | null) => void };
+
+/** La lectura de la pantalla no llegó. El porqué va en el aviso, salvo que este guarde un «Listo».
+ * Cuando vuelve la red se repite sola. */
+export function FallaDeLectura({ alReintentar, avisar, children }: PropsFalla) {
+  useAlVolverLaRed(true, () => {
+    alReintentar();
+    avisar(conLaRedDeVuelta);
+  });
   return (
     <div className="tarjeta">
       <p>No pudimos cargar los datos de esta pantalla.</p>
@@ -57,6 +61,7 @@ type PropsConsorcio = { pantalla: PantallaConsorcio; reintentar: () => void };
 
 /** La primera consulta, la de los edificios, no llegó. */
 export function ConsorcioSinServicio({ pantalla, reintentar }: PropsConsorcio) {
+  useAlVolverLaRed(pantalla.tipo === "sin_servicio", reintentar);
   if (pantalla.tipo !== "sin_servicio") return null;
   return (
     <>

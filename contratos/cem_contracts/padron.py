@@ -45,6 +45,11 @@ class FilaPadron(BaseModel):
             " concede ningún permiso."
         )
     )
+    confirmable_por_vos: bool = Field(
+        description="Si quien lee puede confirmar este vínculo: sin confirmar, con la facultad"
+        " sobre la unidad, y ni suyo ni registrado por esa cuenta (P4). Solo para mostrar: la ruta"
+        " vuelve a decidir."
+    )
 
 
 class Padron(BaseModel):

@@ -9,14 +9,15 @@ import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { RUTA_ENTRAR } from "./enlace";
-import { esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { ENTRAR_DE_NUEVO, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { SeccionLlave } from "./SeccionLlave";
+import { AvisoEntrarDeNuevo } from "./VolverAEntrar";
 
 // Página /cuenta/segundo-factor (TB-CEM-3): la persona da de alta una aplicación de
 // autenticación (QR o secreto a mano), la confirma con el primer código, guarda los diez
-// códigos de recuperación, que se muestran una sola vez, y puede verificar en esta sesión y
-// desactivarla. Desactivar pide haber verificado en los últimos 10 minutos; el backend lo exige
-// y, si falta, la página lo pide acá mismo y repite el pedido. Terminada una acción se sigue a
+// códigos de recuperación, que se muestran una sola vez, y puede desactivarla. Desactivar pide
+// haber verificado en los últimos 10 minutos; el backend lo exige y, si falta, la página lo pide
+// acá mismo y repite el pedido: nada se verifica por adelantado. Terminada una acción se sigue a
 // /cuenta, o a `state.volver` si se llegó desde otra pantalla. Los códigos de recuperación, los de
 // la aplicación y los de la llave, son la única pantalla que no se va sola: ninguna respuesta la
 // reemplaza hasta que la persona dice que los guardó. Diseño provisorio: el definitivo llega con G3.
@@ -72,12 +73,6 @@ const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
   hourCycle: "h23",
   timeZone: "America/Argentina/Buenos_Aires",
 });
-const FORMATO_HORA = new Intl.DateTimeFormat("es-AR", {
-  timeStyle: "short",
-  hourCycle: "h23",
-  timeZone: "America/Argentina/Buenos_Aires",
-});
-
 type Pantalla =
   | { tipo: "cargando" }
   | { tipo: "sin_sesion" }
@@ -157,7 +152,7 @@ export function SegundoFactor() {
     } else if (pantalla.tipo === "terminado") navegar(volver ?? RUTA_CUENTA, { state: { aviso: pantalla.aviso } });
   }, [pantalla, volver, navegar]);
 
-  /** El aviso para un código rechazado al confirmar o verificar. */
+  /** El aviso para un código rechazado al confirmar. */
   function avisoDeRechazo(status: number, cuerpo: unknown): Aviso {
     if (status === ESTADO_DEMASIADOS)
       return fallo("Hubo demasiados intentos. Esperá un rato y probá de nuevo.");
@@ -214,28 +209,6 @@ export function SegundoFactor() {
           pasarA({ tipo: "inactivo" });
           setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
         } else rechazar(response.status, error);
-      })
-      .catch(() => setAviso(fallo(SIN_CONEXION)))
-      .finally(() => setEnviando(false));
-  }
-
-  function verificar(evento: FormEvent<HTMLFormElement>) {
-    evento.preventDefault();
-    const limpio = codigoVerificacion(codigo);
-    if (!limpio) {
-      setAviso(fallo("Escribí los seis números de la aplicación o un código de recuperación."));
-      return;
-    }
-    setEnviando(true);
-    setAviso(null);
-    void api
-      .POST("/api/v1/auth/totp/verificar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
-      .then(({ data, error, response }) => {
-        if (data !== undefined) {
-          setCodigo("");
-          terminar(`Listo: verificado hasta las ${FORMATO_HORA.format(new Date(data.vale_hasta))}.`);
-        } else if (codigoDe(error) === CODIGO_SIN_ALTA) consultar();
-        else rechazar(response.status, error);
       })
       .catch(() => setAviso(fallo(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -377,29 +350,7 @@ export function SegundoFactor() {
             )}
             <dt>Códigos de recuperación sin usar</dt>
             <dd>{pantalla.estado.codigos_recuperacion_restantes}</dd>
-            <dt>Verificado en esta sesión</dt>
-            <dd>
-              {pantalla.estado.verificado_en
-                ? FORMATO_FECHA.format(new Date(pantalla.estado.verificado_en))
-                : "Todavía no"}
-            </dd>
           </dl>
-          <form className="formulario" onSubmit={verificar} noValidate>
-            <label htmlFor={`${id}-codigo`}>Código de la aplicación o de recuperación</label>
-            <input
-              id={`${id}-codigo`}
-              type="text"
-              autoComplete="one-time-code"
-              autoCapitalize="none"
-              spellCheck={false}
-              maxLength={13}
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-            />
-            <button type="submit" disabled={enviando}>
-              Verificar
-            </button>
-          </form>
           <h3>Desactivar</h3>
           <p>
             Borra la aplicación cargada y los códigos de recuperación. Te avisamos por correo.
@@ -424,7 +375,10 @@ export function SegundoFactor() {
             </button>
           </>
         )}
-        {aviso && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
+        {aviso?.texto === ENTRAR_DE_NUEVO && <AvisoEntrarDeNuevo />}
+        {aviso && aviso.texto !== ENTRAR_DE_NUEVO && (
+          <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>
+        )}
       </div>
     </>
   );

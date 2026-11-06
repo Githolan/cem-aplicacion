@@ -24,6 +24,9 @@ class Unidad(BaseModel):
 
     id: UUID
     designacion: str = Field(examples=["3° B"])
+    invitable: bool = Field(
+        description="Si la persona puede invitar a esta unidad. Solo para mostrar."
+    )
 
 
 class ListaUnidades(BaseModel):

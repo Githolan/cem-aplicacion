@@ -590,6 +590,7 @@
     "description": "El detalle autorizado. Quién la registró no sale: solo si fue quien lee (A15: no puede\nusarla para dar de alta ni para remover) o el equipo.",
     "properties": {
       "del_equipo": {
+        "description": "Si la cargó el equipo: no activa A15.",
         "title": "Del Equipo",
         "type": "boolean"
       },
@@ -612,6 +613,7 @@
         "type": "string"
       },
       "registrada_por_vos": {
+        "description": "Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir.",
         "title": "Registrada Por Vos",
         "type": "boolean"
       },
@@ -635,10 +637,10 @@
       "tipo",
       "fecha",
       "descripcion",
-      "referencia",
-      "sha256",
       "registrada_por_vos",
-      "del_equipo"
+      "del_equipo",
+      "referencia",
+      "sha256"
     ],
     "title": "DecisionDetalle",
     "type": "object"
@@ -742,6 +744,11 @@
     },
     "description": "Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella.",
     "properties": {
+      "del_equipo": {
+        "description": "Si la cargó el equipo: no activa A15.",
+        "title": "Del Equipo",
+        "type": "boolean"
+      },
       "descripcion": {
         "title": "Descripcion",
         "type": "string"
@@ -756,6 +763,11 @@
         "title": "Id",
         "type": "string"
       },
+      "registrada_por_vos": {
+        "description": "Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir.",
+        "title": "Registrada Por Vos",
+        "type": "boolean"
+      },
       "tipo": {
         "$ref": "#/$defs/TipoDecision"
       }
@@ -764,7 +776,9 @@
       "id",
       "tipo",
       "fecha",
-      "descripcion"
+      "descripcion",
+      "registrada_por_vos",
+      "del_equipo"
     ],
     "title": "DecisionResumen",
     "type": "object"
@@ -1163,6 +1177,11 @@
     },
     "description": "Un vínculo del padrón, con los datos mínimos de D6.",
     "properties": {
+      "confirmable_por_vos": {
+        "description": "Si quien lee puede confirmar este vínculo: sin confirmar, con la facultad sobre la unidad, y ni suyo ni registrado por esa cuenta (P4). Solo para mostrar: la ruta vuelve a decidir.",
+        "title": "Confirmable Por Vos",
+        "type": "boolean"
+      },
       "confirmado": {
         "title": "Confirmado",
         "type": "boolean"
@@ -1226,7 +1245,8 @@
       "vigente_desde",
       "vigente_hasta",
       "confirmado",
-      "iniciado"
+      "iniciado",
+      "confirmable_por_vos"
     ],
     "title": "FilaPadron",
     "type": "object"
@@ -2376,6 +2396,11 @@
       "DecisionResumen": {
         "description": "Una fila de la lista de decisiones (2b-4c): sin la referencia del acta ni su huella.",
         "properties": {
+          "del_equipo": {
+            "description": "Si la cargó el equipo: no activa A15.",
+            "title": "Del Equipo",
+            "type": "boolean"
+          },
           "descripcion": {
             "title": "Descripcion",
             "type": "string"
@@ -2390,6 +2415,11 @@
             "title": "Id",
             "type": "string"
           },
+          "registrada_por_vos": {
+            "description": "Si la registró quien lee, con esta cuenta u otra del mismo ser humano: no la usa para dar de alta ni para remover (A15). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Registrada Por Vos",
+            "type": "boolean"
+          },
           "tipo": {
             "$ref": "#/$defs/TipoDecision"
           }
@@ -2398,7 +2428,9 @@
           "id",
           "tipo",
           "fecha",
-          "descripcion"
+          "descripcion",
+          "registrada_por_vos",
+          "del_equipo"
         ],
         "title": "DecisionResumen",
         "type": "object"
@@ -2898,11 +2930,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "invitable": {
+            "description": "Si la persona puede invitar a esta unidad. Solo para mostrar.",
+            "title": "Invitable",
+            "type": "boolean"
           }
         },
         "required": [
           "id",
-          "designacion"
+          "designacion",
+          "invitable"
         ],
         "title": "Unidad",
         "type": "object"
@@ -2988,6 +3026,11 @@
         "title": "Creada En",
         "type": "string"
       },
+      "credencial_id": {
+        "description": "Identificador público de la credencial, en base64url: el que da el navegador.",
+        "title": "Credencial Id",
+        "type": "string"
+      },
       "id": {
         "format": "uuid",
         "title": "Id",
@@ -3012,6 +3055,7 @@
     },
     "required": [
       "id",
+      "credencial_id",
       "nombre",
       "creada_en",
       "ultimo_uso_en"
@@ -3146,6 +3190,11 @@
         "title": "Decision Id",
         "type": "string"
       },
+      "es_propio": {
+        "description": "Si el mandato es de la cuenta de quien lee: nadie registra su propia baja (A4, por cuenta). Solo para mostrar: la ruta vuelve a decidir.",
+        "title": "Es Propio",
+        "type": "boolean"
+      },
       "estado": {
         "$ref": "#/$defs/EstadoMandato"
       },
@@ -3249,7 +3298,8 @@
       "baja_decision_id",
       "instrumento_referencia",
       "motivo_fin",
-      "finalizado_en"
+      "finalizado_en",
+      "es_propio"
     ],
     "title": "MandatoDetalle",
     "type": "object"
@@ -3567,6 +3617,11 @@
       "FilaPadron": {
         "description": "Un vínculo del padrón, con los datos mínimos de D6.",
         "properties": {
+          "confirmable_por_vos": {
+            "description": "Si quien lee puede confirmar este vínculo: sin confirmar, con la facultad sobre la unidad, y ni suyo ni registrado por esa cuenta (P4). Solo para mostrar: la ruta vuelve a decidir.",
+            "title": "Confirmable Por Vos",
+            "type": "boolean"
+          },
           "confirmado": {
             "title": "Confirmado",
             "type": "boolean"
@@ -3630,7 +3685,8 @@
           "vigente_desde",
           "vigente_hasta",
           "confirmado",
-          "iniciado"
+          "iniciado",
+          "confirmable_por_vos"
         ],
         "title": "FilaPadron",
         "type": "object"
@@ -4059,11 +4115,17 @@
         "format": "uuid",
         "title": "Id",
         "type": "string"
+      },
+      "invitable": {
+        "description": "Si la persona puede invitar a esta unidad. Solo para mostrar.",
+        "title": "Invitable",
+        "type": "boolean"
       }
     },
     "required": [
       "id",
-      "designacion"
+      "designacion",
+      "invitable"
     ],
     "title": "Unidad",
     "type": "object"

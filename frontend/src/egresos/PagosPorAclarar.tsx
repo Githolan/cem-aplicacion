@@ -7,21 +7,24 @@ import { encabezadoCsrf } from "../csrf";
 import { RUTA_ENTRAR } from "../enlace";
 import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
   type Aviso,
   ENCABEZADO_IDEMPOTENCIA,
   importe,
+  mensajeDeActo,
   mensajeDeError,
   momento,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
+  soltarClaveSiCambio,
 } from "./comun";
 import { AvisoPantalla, FallaDeLectura } from "./EstadoPantalla";
 import { PedirCodigo } from "./PedirCodigo";
-import { exigirSesion, SinSesion, useEsperaAntivirus, useMontado } from "./useConsorcio";
+import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus, useMontado } from "./useConsorcio";
 
 // Página /egresos/por-aclarar (app 0067, P3 179): quien vio la cuenta en el acto de ejecución y
 // ya no ejecuta pagos en ese edificio (renunció o lo reemplazaron) declara que no transfirió.
@@ -70,12 +73,15 @@ export function PagosPorAclarar() {
   const [entrada, setEntrada] = useState(0);
   /** Lo que no se pudo actualizar con el formulario abierto: sigue a la vista con lo escrito. */
   const [fallaLista, setFallaLista] = useState<string | null>(null);
+  /** El antivirus agotó la espera: deja de mirar solo hasta que la persona lo pida. */
+  const [esperaAgotada, setEsperaAgotada] = useState(false);
   const conFormulario = useRef(false);
   const claveCarga = useRef<string | null>(null);
   const claveArchivo = useRef<string | null>(null);
   /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
   const sinArchivo = useRef<string | null>(null);
   const clave = useRef<string | null>(null);
+  const ultimoActo = useRef<string | null>(null);
   const montado = useMontado();
 
   useEffect(() => {
@@ -116,15 +122,19 @@ export function PagosPorAclarar() {
   const abierto = lectura.tipo === "ok" ? lectura.elementos.find((p) => p.orden_id === transfirio) : undefined;
   conFormulario.current = abierto !== undefined;
   useEsperaAntivirus(
-    abierto?.comprobante_estado === "en_cuarentena" && pendiente === null,
+    abierto?.comprobante_estado === "en_cuarentena" && !esperaAgotada && pendiente === null,
     () => setVuelta((v) => v + 1),
-    () => setFallaLista("El antivirus sigue revisando el comprobante. Tocá «Actualizar» en un rato."),
+    () => {
+      setEsperaAgotada(true);
+      setFallaLista("El antivirus sigue revisando el comprobante. Tocá «Actualizar» en un rato.");
+    },
   );
+  useAlVolverLaRed(fallaLista !== null, () => setVuelta((v) => v + 1));
 
   function declarar(p: PorAclarar, reintento = false) {
     const motivo = (motivos[p.orden_id] ?? "").trim();
     if (motivo === "" || !montado.current) return;
-    if (!reintento) clave.current = null;
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(["declarar", p.orden_id, p.version, motivo]));
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
@@ -140,6 +150,7 @@ export function PagosPorAclarar() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          clave.current = null;
           setAviso({ texto: "Listo: declaraste que no transferiste. Ahora lo confirma otro miembro del Consejo.", ok: true });
           setVuelta((v) => v + 1);
           return;
@@ -154,7 +165,7 @@ export function PagosPorAclarar() {
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
         setVuelta((v) => v + 1);
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
@@ -170,6 +181,7 @@ export function PagosPorAclarar() {
     setTransfirio(p.orden_id);
     setRegistro(REGISTRO_VACIO);
     setArchivo(null);
+    setEsperaAgotada(false);
     claveCarga.current = null;
     claveArchivo.current = null;
     sinArchivo.current = null;
@@ -181,15 +193,18 @@ export function PagosPorAclarar() {
       setPendiente({ acto, reintentar });
       return;
     }
-    setAviso({ texto: mensajeDeError(status, codigo), ok: false });
+    setAviso({ texto: mensajeDeActo(status, codigo), ok: false });
     setVuelta((v) => v + 1);
   }
 
   /** Crea el comprobante (si todavía no hay uno propio de la orden) y sube el archivo. */
-  async function subirComprobante(p: PorAclarar) {
-    if (archivo === null || !montado.current) return;
-    const problema = problemaDelArchivo(archivo);
+  async function subirComprobante(p: PorAclarar, elegido: File) {
+    if (!montado.current) return;
+    const problema = problemaDelArchivo(elegido);
     if (problema !== null) {
+      // Ese archivo no va a entrar: el campo queda vacío para elegir otro.
+      setArchivo(null);
+      setEntrada((n) => n + 1);
       setAviso({ texto: problema, ok: false });
       return;
     }
@@ -210,7 +225,7 @@ export function PagosPorAclarar() {
         if (creado.data === undefined) {
           const codigo = codigoDe(creado.error);
           if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
-          fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante(p));
+          fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante(p, elegido));
           return;
         }
         claveCarga.current = null;
@@ -220,13 +235,13 @@ export function PagosPorAclarar() {
       const subido = await api.POST(
         "/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante/{documento_id}/versiones",
         {
-          headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
+          headers: { ...encabezadoCsrf(), "Content-Type": elegido.type },
           params: {
             path: { ...ruta, documento_id: sinArchivo.current },
             header: { [ENCABEZADO_IDEMPOTENCIA]: claveArchivo.current },
           },
           // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
-          body: archivo as unknown as string,
+          body: elegido as unknown as string,
           bodySerializer: (cuerpo) => cuerpo,
         },
       );
@@ -234,7 +249,7 @@ export function PagosPorAclarar() {
       if (subido.data === undefined) {
         const codigo = codigoDe(subido.error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
-          fallo(subido.response.status, codigo, "subir el comprobante", () => void subirComprobante(p));
+          fallo(subido.response.status, codigo, "subir el comprobante", () => void subirComprobante(p, elegido));
           return;
         }
         if (renovarClave(subido.response.status, codigo)) claveArchivo.current = null;
@@ -246,6 +261,7 @@ export function PagosPorAclarar() {
       sinArchivo.current = null;
       setArchivo(null);
       setEntrada((n) => n + 1);
+      setEsperaAgotada(false);
       setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y esto se actualiza solo.", ok: true });
       setVuelta((v) => v + 1);
     } catch (e: unknown) {
@@ -264,7 +280,7 @@ export function PagosPorAclarar() {
       setAviso({ texto: "Escribí el importe tal como figura en el comprobante.", ok: false });
       return;
     }
-    if (!reintento) clave.current = null;
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(["registrar", p.orden_id, p.version, p.huella, p.comprobante_id, registro]));
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
@@ -289,6 +305,7 @@ export function PagosPorAclarar() {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) {
+          clave.current = null;
           setTransfirio(null);
           setAviso({ texto: "Listo: registraste el pago. Ahora lo concilia otro miembro del Consejo.", ok: true });
           setVuelta((v) => v + 1);
@@ -324,7 +341,7 @@ export function PagosPorAclarar() {
         />
       )}
       {pendiente === null && lectura.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pendiente === null && lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} />}
+      {pendiente === null && lectura.tipo === "sin_servicio" && <FallaDeLectura alReintentar={reintentarLectura} avisar={setAviso} />}
       {pendiente === null &&
         lectura.tipo === "ok" &&
         (lectura.elementos.length === 0 ? (
@@ -373,17 +390,30 @@ export function PagosPorAclarar() {
                       <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png"
                         disabled={enviando}
                         onChange={(e) => {
+                          const elegido = e.target.files?.[0] ?? null;
                           claveArchivo.current = null;
-                          setArchivo(e.target.files?.[0] ?? null);
+                          setArchivo(elegido);
+                          if (elegido !== null) void subirComprobante(p, elegido);
                         }} />
-                      <div className="acciones">
-                        <button type="button" disabled={enviando || archivo === null} onClick={() => void subirComprobante(p)}>
-                          Subir el comprobante
-                        </button>
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setVuelta((v) => v + 1)}>
-                          Actualizar
-                        </button>
-                      </div>
+                      {((archivo !== null && !enviando) || fallaLista !== null) && (
+                        <div className="acciones">
+                          {/* Sin esto, reintentar sería volver a elegir el mismo archivo, y el navegador no avisa. */}
+                          {archivo !== null && !enviando && (
+                            <button type="button" onClick={() => void subirComprobante(p, archivo)}>
+                              Reintentar la subida
+                            </button>
+                          )}
+                          {fallaLista !== null && (
+                            <button type="button" className="secundario" disabled={enviando}
+                              onClick={() => {
+                                setEsperaAgotada(false);
+                                setVuelta((v) => v + 1);
+                              }}>
+                              Actualizar
+                            </button>
+                          )}
+                        </div>
+                      )}
                       <label htmlFor={`${id}-numero`}>Número de operación</label>
                       <input id={`${id}-numero`} required maxLength={60} value={registro.numero} disabled={enviando}
                         onChange={(e) => cambiar("numero", e.target.value)} />
@@ -391,8 +421,8 @@ export function PagosPorAclarar() {
                       <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
                         onChange={(e) => cambiar("fecha", e.target.value)} />
                       <label htmlFor={`${id}-importe`}>Importe transferido (como figura en el comprobante)</label>
-                      <input id={`${id}-importe`} required inputMode="decimal" value={registro.importe} disabled={enviando}
-                        onChange={(e) => cambiar("importe", e.target.value)} />
+                      <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
+                        alCambiar={(texto) => cambiar("importe", texto)} />
                       <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
                       <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta}
                         disabled={enviando} onChange={(e) => cambiar("cuenta", e.target.value)} />

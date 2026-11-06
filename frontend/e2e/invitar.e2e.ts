@@ -17,7 +17,7 @@ const U2 = "44444444-4444-4444-8444-444444444444";
 const PENDIENTE = "55555555-5555-4555-8555-555555555555";
 const ACEPTADA = "66666666-6666-4666-8666-666666666666";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const UNIDADES = { elementos: [{ id: U1, designacion: "1° A" }, { id: U2, designacion: "2° B" }] };
+const UNIDADES = { elementos: [{ id: U1, designacion: "1° A", invitable: true }, { id: U2, designacion: "2° B", invitable: true }] };
 
 type Quien = "consejo" | "propietaria";
 
@@ -162,6 +162,8 @@ test.describe("invitar", () => {
 
     await invitar(page, "2° B", "Dora Ruiz", "dora@ejemplo.com");
     await expect(page.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeVisible();
+    // El resultado entra en la pantalla del teléfono, sin bajar por la lista para encontrarlo.
+    await expect(page.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeInViewport();
     await expect(page.getByText("Dora Ruiz, 2° B")).toBeVisible();
     expect(envios).toHaveLength(1);
     expect(envios[0]?.csrf).toBe(CSRF);
@@ -191,7 +193,7 @@ test.describe("invitar", () => {
     expect(errores.filter((e) => !e.includes("403"))).toEqual([]);
   });
 
-  test("con Enter en el correo, al terminar el envío el foco vuelve a ese campo", async ({ page, baseURL }) => {
+  test("con Enter en el correo, al terminar el envío el foco va al aviso del resultado", async ({ page, baseURL }) => {
     await simularApi(page, baseURL!, "consejo");
     await page.goto("/invitaciones");
     await page.getByLabel("Unidad", { exact: true }).selectOption({ label: "2° B" });
@@ -199,7 +201,7 @@ test.describe("invitar", () => {
     await page.getByLabel("Correo").fill("elsa@ejemplo.com");
     await page.getByLabel("Correo").press("Enter");
     await expect(page.getByText("Listo: le mandamos la invitación a Elsa Paz.")).toBeVisible();
-    await expect(page.getByLabel("Correo")).toBeFocused();
+    await expect(page.getByText("Listo: le mandamos la invitación a Elsa Paz.")).toBeFocused();
   });
 
   test("si durante el envío la persona lleva el foco a otro lado, no se lo saca", async ({ page, baseURL }) => {

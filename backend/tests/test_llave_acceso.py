@@ -18,6 +18,7 @@ import pytest
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from sqlalchemy import text
+from webauthn.helpers import bytes_to_base64url
 
 from app.identidad import segundo_factor as sf
 from tests.test_identidad import (  # noqa: F401  (`app` es un fixture)
@@ -238,7 +239,10 @@ def test_verificar_deja_la_sesion_verificada(app, motor_migrate):  # noqa: F811
     r = verificar(c, autenticador.firmar(opciones))
     assert r.status_code == 200, r.text
     assert verificada(motor_migrate, correo)
-    assert c.get(BASE).json()[0]["ultimo_uso_en"] is not None
+    fila = c.get(BASE).json()[0]
+    assert fila["ultimo_uso_en"] is not None
+    # Es el identificador que da el navegador: con él la pantalla reconoce este dispositivo.
+    assert fila["credencial_id"] == bytes_to_base64url(autenticador.credencial)
 
 
 def rechaza(c, motor_migrate, correo, respuesta) -> None:

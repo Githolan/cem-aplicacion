@@ -1,7 +1,7 @@
 import { type FormEvent, useId, useState } from "react";
 
 import { api } from "./api/cliente";
-import { useIrAlInicio } from "./sesion";
+import { useTerminarEntrada } from "./sesion";
 
 // Entrar con el código de seis dígitos del correo (documento 13, §10.3): para quien pidió la
 // entrada en un dispositivo y lee el correo en otro, donde el enlace no sirve (está ligado al
@@ -25,16 +25,16 @@ export function codigoValido(valor: string): boolean {
 }
 
 interface Props {
-  /** El correo ya escrito al pedir el enlace, para no volver a pedirlo. */
-  correoInicial?: string;
+  /** El correo es de /entrar: sigue escrito al cambiar de forma. */
+  correo: string;
+  alCambiarCorreo: (correo: string) => void;
   /** Lo que respondió el pedido del enlace. */
-  aviso?: string | null;
+  aviso: string | null;
 }
 
-export function EntrarConCodigo({ correoInicial = "", aviso = null }: Props) {
+export function EntrarConCodigo({ correo, alCambiarCorreo, aviso }: Props) {
   const id = useId();
-  const irAlInicio = useIrAlInicio();
-  const [correo, setCorreo] = useState(correoInicial);
+  const terminarEntrada = useTerminarEntrada();
   const [codigo, setCodigo] = useState("");
   const [estado, setEstado] = useState<Estado>("listo");
   const [formatoMal, setFormatoMal] = useState(false);
@@ -51,7 +51,7 @@ export function EntrarConCodigo({ correoInicial = "", aviso = null }: Props) {
     void api
       .POST("/api/v1/auth/codigo", { body: { correo: correo.trim(), codigo: limpio } })
       .then(({ error, response }) => {
-        if (error === undefined) irAlInicio("Entraste.");
+        if (error === undefined) terminarEntrada("Entraste.");
         else if (response.status === ESTADO_RECHAZADO) setEstado("rechazado");
         else if (response.status === ESTADO_DEMASIADOS) setEstado("demasiados");
         else setEstado("sin_servicio");
@@ -75,7 +75,7 @@ export function EntrarConCodigo({ correoInicial = "", aviso = null }: Props) {
           autoComplete="email"
           required
           value={correo}
-          onChange={(e) => setCorreo(e.target.value)}
+          onChange={(e) => alCambiarCorreo(e.target.value)}
         />
         <label htmlFor={`${id}-codigo`}>Código de {DIGITOS_CODIGO} números</label>
         <input

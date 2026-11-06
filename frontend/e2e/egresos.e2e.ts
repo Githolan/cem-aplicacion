@@ -31,7 +31,7 @@ const ORDEN_A = {
   actualizada_en: "2026-10-30T12:00:00Z", motivo_rechazo: null, importe_centavos: 12_000_000, moneda: "ARS",
   concepto: "SINTETICO: reparación del ascensor", proveedor_id: PROV_A, razon_social: RAZON_LARGA,
   condicion_beneficiario: "conocido", usa_fondo_reserva: false, aprobaciones_requeridas: 1, aprobaciones: 0,
-  franja: "sobre_umbral", alerta_fraccionamiento: true, aprobada_en: null, aprobacion_vence_en: null,
+  franja: "sobre_umbral", alerta_fraccionamiento: true, aprobada_en: null, aprobacion_vence_en: null, aprobada_por_vos: false,
 };
 
 const version = (cuentaDestino: string | null) => ({
@@ -58,7 +58,8 @@ function vigilarErrores(pagina: Page): string[] {
 }
 
 /** La API de egresos de dos edificios. `revisa` decide qué devuelve la revisión: la cuenta
- * completa (un consejero que no preparó) o nula (quien preparó). Anota cada lectura. */
+ * completa y las dos decisiones (un consejero que no preparó) o nada de eso (quien preparó). Anota
+ * cada lectura. */
 async function simularApi(pagina: Page, baseURL: string, revisa: "consejero" | "quien_preparo"): Promise<string[]> {
   const lecturas: string[] = [];
   await pagina.route("**/api/v1/**", async (ruta) => {
@@ -76,7 +77,14 @@ async function simularApi(pagina: Page, baseURL: string, revisa: "consejero" | "
       return ruta.fulfill({ json: { elementos: [proveedor(PROV_B, "Limpieza Bordó SINTETICO", "9876")] } });
     if (camino === `/api/v1/consorcios/${A}/ordenes-pago/revision`) return ruta.fulfill({ json: { elementos: [ORDEN_A] } });
     if (camino === `/api/v1/consorcios/${A}/ordenes-pago/${ORDEN}/revision`)
-      return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(revisa === "consejero" ? CUENTA : null)] } });
+      return ruta.fulfill({
+        json: {
+          orden: ORDEN_A,
+          versiones: [version(revisa === "consejero" ? CUENTA : null)],
+          puede_aprobar: revisa === "consejero",
+          puede_rechazar: revisa === "consejero",
+        },
+      });
     return ruta.abort();
   });
   await pagina.context().addCookies([
@@ -132,6 +140,8 @@ test.describe("egresos en un teléfono", () => {
     expect((await revisar.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await revisar.click();
     await expect(page.getByText(CUENTA)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toBeVisible();
     await entraEnElTelefono(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
@@ -143,6 +153,8 @@ test.describe("egresos en un teléfono", () => {
     await page.getByRole("button", { name: `Revisar la orden de ${RAZON_LARGA}` }).click();
     await expect(page.getByText(`…${CUENTA.slice(-4)}`)).toBeVisible();
     expect(await page.content()).not.toContain(CUENTA);
+    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toHaveCount(0);
     await entraEnElTelefono(page);
   });
 });
@@ -156,7 +168,7 @@ const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
 const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
 
 const ORDEN_APROBADA = { ...ORDEN_A, estado: "aprobada", aprobaciones: 1, aprobada_en: "2026-10-31T12:00:00Z",
-  aprobacion_vence_en: "2026-11-07T12:00:00Z" };
+  aprobacion_vence_en: "2099-11-07T12:00:00Z" };
 
 async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
   const pedidosHechos: string[] = [];
@@ -183,7 +195,7 @@ async function simularPagos(pagina: Page, baseURL: string): Promise<string[]> {
         importe_centavos: 12_000_000, moneda: "ARS", concepto: ORDEN_A.concepto, comprobante: "Factura A 0001-00000042",
         aprobada_en: "2026-10-31T12:00:00Z", aprobacion_vence_en: "2026-11-07T12:00:00Z" } });
     if (camino === `${c}/pagos-manuales/revision`)
-      return ruta.fulfill({ json: { elementos: [{ orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, ejecucion: {
+      return ruta.fulfill({ json: { elementos: [{ orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, puede_conciliar: true, ejecucion: {
         id: EJECUCION, version: 1, creada_en: "2026-10-31T12:30:00Z", resultado: null, referencia: null, declaraciones: [],
         pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
           importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO,
@@ -224,12 +236,31 @@ test.describe("pago manual en un teléfono", () => {
     expect(errores).toEqual([]);
   });
 
+  test("el importe abre el teclado numérico y al salir se ve con centavos", async ({ page, baseURL }) => {
+    await simularPagos(page, baseURL!);
+    await page.goto("/egresos/pagos");
+    await page.getByRole("button", { name: `Ejecutar pago manual de ${RAZON_LARGA}` }).click();
+    const campo = page.getByLabel(/^Importe transferido/);
+    await expect(campo).toHaveAttribute("inputmode", "decimal");
+    await campo.fill("120000");
+    await expect(campo).toHaveValue("120000");
+    await campo.blur();
+    await expect(campo).toHaveValue("120.000,00");
+    await campo.focus();
+    await expect(campo).toHaveValue("120000");
+    // Control: lo que no es un importe queda como se escribió.
+    await campo.fill("12,345,6");
+    await campo.blur();
+    await expect(campo).toHaveValue("12,345,6");
+  });
+
   test("la conciliación del Consejo muestra la evidencia sin la cuenta y entra en 360 px", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!);
     await page.goto("/egresos/conciliacion");
     await expect(page.getByText("0001234567")).toBeVisible();
     await expect(page.getByRole("link", { name: "Ver el comprobante" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Conforme" })).toBeVisible();
     expect(await page.content()).not.toContain(CUENTA);
     await entraEnElTelefono(page);
     await sinFaltasDeAccesibilidad(page);

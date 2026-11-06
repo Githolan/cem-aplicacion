@@ -193,9 +193,44 @@ describe("página /documentos", () => {
     );
     abrir();
     fireEvent.click((await screen.findAllByRole("link", { name: "Descargar" }))[0]!);
-    expect(await screen.findByText("Ese archivo ya no está disponible.")).toBeTruthy();
+    const aviso = await screen.findByText("Ese archivo ya no está disponible.");
+    // El aviso queda al final de la página: el foco lo lleva a la vista en un teléfono.
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(clic).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { level: 1, name: /Documentos/ })).toBeTruthy();
+  });
+
+  it("sin conexión al descargar, el aviso también toma el foco", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({ [`GET ${BASE}/${D1}/versiones/${V1}/descargar`]: () => Promise.reject(new TypeError("Failed to fetch")) }),
+    );
+    abrir();
+    fireEvent.click((await screen.findAllByRole("link", { name: "Descargar" }))[0]!);
+    const aviso = await screen.findByText(SIN_CONEXION);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+  });
+
+  it("control: una descarga buena no le deja el foco a un aviso que llegue después", async () => {
+    const clic = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const redireccion = Response.error();
+    Object.defineProperty(redireccion, "type", { value: "opaqueredirect" });
+    let caida = false;
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET ${BASE}/${D1}/versiones/${V1}/descargar`]: () => redireccion,
+        [`GET ${BASE}`]: () => (caida ? error("servicio_no_disponible", 503) : Response.json(LISTA)),
+      }),
+    );
+    abrir();
+    fireEvent.click((await screen.findAllByRole("link", { name: "Descargar" }))[0]!);
+    await waitFor(() => expect(clic).toHaveBeenCalledOnce());
+    caida = true;
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+    const aviso = await screen.findByText(/El servicio no está disponible/);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).not.toBe(aviso);
   });
 
   it("si el archivo está, navega a la descarga sin mostrar error", async () => {
@@ -278,6 +313,40 @@ describe("página /documentos", () => {
     expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
   });
 
+  it("con la lista caída, la carga sigue a la vista y el documento se carga igual", async () => {
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => Promise.reject(new TypeError("Failed to fetch")),
+      [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+      [`POST ${versiones(D3)}`]: () =>
+        Response.json(
+          { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+          { status: 201 },
+        ),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    const listo = await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/);
+    expect(listo.textContent).toMatch(/tocá «Actualizar»/);
+    expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
+  });
+
+  it("con la lista caída, lo escrito en la carga sigue al tocar «Actualizar»", async () => {
+    const simulado = conLista({ [`GET ${BASE}`]: () => Promise.reject(new TypeError("Failed to fetch")) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
+    escribir("Título", "Presupuesto de pintura");
+    const titulo = screen.getByLabelText("Título") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Actualizar" }));
+    await waitFor(() => expect(pedidos(simulado, "GET", BASE)).toHaveLength(2));
+    await screen.findByText("No pudimos mostrar la lista.");
+    // El mismo campo: el formulario no se desarmó mientras se consultaba.
+    expect(screen.getByLabelText("Título")).toBe(titulo);
+    expect(titulo.value).toBe("Presupuesto de pintura");
+  });
+
   it("«Actualizar» vuelve a pedir la lista", async () => {
     const simulado = conLista();
     vi.stubGlobal("fetch", simulado);
@@ -308,8 +377,9 @@ describe("página /documentos", () => {
     expect(screen.queryByRole("heading", { level: 4 })).toBeNull();
     expect(screen.queryByRole("button", { name: "Actualizar" })).toBeNull();
     expect(document.querySelector(".aviso-error")).toBeNull();
-    // El administrador externo solo carga (documento 08 §4): el formulario sigue disponible.
-    await completarNuevo();
+    // El administrador externo solo carga (documento 08 §4): el formulario ya está abierto.
+    expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
+    llenarNuevo(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     const listo = await screen.findByText(/^Listo: subimos el archivo de «Presupuesto de pintura»/);
     // Sin lista no hay botón «Actualizar», y el aviso no lo nombra.
@@ -371,7 +441,8 @@ describe("página /documentos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await completarNuevo();
+    await screen.findByLabelText("Categoría");
+    llenarNuevo(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
     expect(reintento.tagName).toBe("H3"); // bajo el h2 de la sección, sin saltar niveles
@@ -416,6 +487,9 @@ describe("página /documentos", () => {
     // El cuerpo es el archivo tal cual: ni JSON ni multipart.
     expect([...new Uint8Array(await (subida as Request).arrayBuffer())]).toEqual([...BYTES_PDF]);
     await waitFor(() => expect(pedidos(simulado, "GET", BASE)).toHaveLength(2));
+    // Con la lista a la vista el formulario se cierra: la pantalla siguiente es la lista actualizada.
+    expect(await screen.findByRole("button", { name: "Cargar un documento" })).toBeTruthy();
+    expect(screen.queryByLabelText("Título")).toBeNull();
   });
 
   it("un archivo de más de 20 MB o de otro tipo se rechaza antes de mandar nada", async () => {
@@ -746,10 +820,90 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
     const simulado = conAcciones("documentos.cargar");
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByRole("button", { name: "Cargar un documento" })).toBeTruthy();
+    expect(await screen.findByLabelText("Categoría")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 2, name: "Documentos" })).toBeNull();
     expect(screen.queryByText(/tu mandato te permite/)).toBeNull();
     expect(pedidos(simulado, "GET", BASE)).toHaveLength(0);
+  });
+
+  describe("quien solo carga", () => {
+    const subidaEnRevision = () =>
+      Response.json(
+        { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+        { status: 201 },
+      );
+    const soloCarga = (extra: Respuestas = {}) =>
+      conLista({
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+        ...extra,
+      });
+
+    it("encuentra el formulario abierto, sin el botón para abrirlo, sin «Cancelar» y sin que le muevan el foco", async () => {
+      vi.stubGlobal("fetch", soloCarga());
+      abrir();
+      await screen.findByLabelText("Categoría");
+      expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Cancelar" })).toBeNull();
+      expect(document.activeElement).toBe(document.body);
+      expect(screen.getByRole("button", { name: "Cargar el documento" })).toBeTruthy();
+    });
+
+    it("terminada la carga, el formulario queda abierto y vacío para el siguiente, con el aviso", async () => {
+      const simulado = soloCarga({ [`POST ${versiones(D3)}`]: subidaEnRevision });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByLabelText("Categoría");
+      const campoArchivo = screen.getByLabelText("Archivo");
+      llenarNuevo(pdf());
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      const aviso = await screen.findByText("Listo: subimos el archivo de «Presupuesto de pintura». Queda «En revisión» mientras lo analizamos.");
+      await waitFor(() => expect(document.activeElement).toBe(aviso));
+      expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("");
+      expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe("");
+      expect(screen.queryByText(/Elegido:/)).toBeNull();
+      // Un campo nuevo: el navegador no vacía solo el archivo que ya se eligió.
+      expect(screen.getByLabelText("Archivo")).not.toBe(campoArchivo);
+      // Control: sin lista a la vista no hay nada que volver a pedir.
+      expect(pedidos(simulado, "GET", BASE)).toHaveLength(0);
+      expect(screen.queryByRole("heading", { level: 2, name: "Documentos" })).toBeNull();
+
+      llenarNuevo(pdf("otro.pdf"));
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await waitFor(() => expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(2));
+      const [primera, segunda] = pedidos(simulado, "POST", BASE).map((p) => p.headers.get("Idempotency-Key"));
+      expect(segunda).not.toBe(primera);
+    });
+
+    it("si cancela el reintento del archivo, vuelve al formulario vacío y no repite el documento", async () => {
+      const simulado = soloCarga({ [`POST ${versiones(D3)}`]: () => error("error_interno", 500) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByLabelText("Categoría");
+      llenarNuevo(pdf());
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
+      const cancelar = screen.getByRole("button", { name: "Cancelar" }) as HTMLButtonElement;
+      await waitFor(() => expect(cancelar.disabled).toBe(false));
+      fireEvent.click(cancelar);
+      expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("");
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
+    });
+  });
+
+  it("control: solo con `documentos.ver` y la lista caída, la carga tampoco aparece", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conLista({
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.ver"),
+        [`GET ${BASE}`]: () => Promise.reject(new TypeError("Failed to fetch")),
+      }),
+    );
+    abrir();
+    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Cargar un documento" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
   });
 
   it("control: con la lectura negada y sin carga, un 403 lleva al inicio", async () => {

@@ -7,7 +7,8 @@ import { EntrarConContrasena } from "./EntrarConContrasena";
 import { EnlaceInstalar } from "./Instalar";
 import { PedirEnlace } from "./PedirEnlace";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
-import { useIrAlInicio, useSesion } from "./sesion";
+import { codigoDe, mensajeDeFallaConEnlace } from "./fallas";
+import { recordarOrigen, useCorreoDeSesion, useSesion, useTerminarEntrada } from "./sesion";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
 // fragmento (#token=…), que el navegador nunca manda al servidor: no queda en el registro de
@@ -16,15 +17,21 @@ import { useIrAlInicio, useSesion } from "./sesion";
 //
 // Antes de borrarlo de la URL lo guarda en sessionStorage (solo de esta pestaña; nunca viaja al
 // servidor), así una recarga o una actualización de la aplicación a mitad de camino no lo pierde.
-// Lo borra apenas termina el canje, salga bien o mal, y no usa uno guardado hace más que la
-// vigencia del enlace.
+// Lo borra cuando el canje termina o cuando el backend dice que no sirve, y no usa uno guardado
+// hace más que la vigencia del enlace. Una falla que no es del enlace (sin red, un 429, un 5xx) no
+// lo gasta: se queda para reintentar.
 //
 // Es el paso de Acceso donde se elige cómo entrar (decisión del propietario del 05-11-2026, §2):
-// primero el enlace por correo y, debajo, las otras formas, de a una por vez. Terminada la entrada
-// sigue sola al inicio. Con sesión abierta no hay nada que hacer acá y sigue también, salvo que la
-// persona venga a entrar de nuevo por seguridad (`state.renovar`).
+// primero el enlace por correo y, debajo, las otras formas, de a una por vez, con un solo correo
+// para las tres. Terminada la entrada sigue sola al inicio. Con sesión abierta no hay nada que hacer
+// acá y sigue también, salvo que la persona venga a entrar de nuevo por seguridad (`state.renovar`):
+// entonces el correo ya está escrito y al terminar vuelve a la pantalla de origen (`state.volver`).
 
 const CLAVE_GUARDADO = "cem.entrar.enlace";
+
+const ESTADO_ENLACE_INVALIDO = 401;
+// El token no tiene la forma del contrato (un enlace cortado): reintentar no lo arregla.
+const ESTADO_TOKEN_MAL_FORMADO = 422;
 
 interface Guardado {
   token: string;
@@ -32,9 +39,18 @@ interface Guardado {
   venceEn: number;
 }
 
-type Estado = "sin_enlace" | "entrando" | "rechazado";
+type Estado =
+  | { tipo: "sin_enlace" }
+  | { tipo: "entrando" }
+  | { tipo: "rechazado" }
+  | { tipo: "fallo"; mensaje: string };
 
 type Metodo = "enlace" | "codigo" | "contrasena";
+
+interface Llegada {
+  renovar?: boolean;
+  volver?: string;
+}
 
 const OTRAS_FORMAS: Record<Metodo, string> = {
   enlace: "Pedir el enlace por correo",
@@ -82,22 +98,35 @@ function leerToken(): Lectura {
 export function Entrar() {
   // En el inicializador: StrictMode monta dos veces y la segunda vez el fragmento ya no está.
   const [{ token, delFragmento }] = useState(leerToken);
-  const [estado, setEstado] = useState<Estado>(token ? "entrando" : "sin_enlace");
+  const [estado, setEstado] = useState<Estado>({ tipo: token ? "entrando" : "sin_enlace" });
   const [metodo, setMetodo] = useState<Metodo>("enlace");
-  const [pedido, setPedido] = useState<{ correo: string; mensaje: string } | null>(null);
+  const [escrito, setEscrito] = useState<string | null>(null);
+  const [avisoDelPedido, setAvisoDelPedido] = useState<string | null>(null);
   const canjeado = useRef(false);
   const saliendo = useRef(false);
   const formas = useRef<HTMLDivElement>(null);
   const eligio = useRef(false);
-  const irAlInicio = useIrAlInicio();
-  const { state: llegada } = useLocation();
-  const renovar = (llegada as { renovar?: boolean } | null)?.renovar === true;
+  const terminarEntrada = useTerminarEntrada();
+  const { state } = useLocation();
+  const llegada = state as Llegada | null;
+  const renovar = llegada?.renovar === true;
+  const volver = renovar && typeof llegada?.volver === "string" ? llegada.volver : null;
   const sesion = useSesion(token === null && !renovar);
+  const correoDeSesion = useCorreoDeSesion(volver !== null);
+  // Lo que escribió la persona manda: la respuesta de la sesión no le pisa nada.
+  const correo = escrito ?? correoDeSesion ?? "";
 
-  // Al cambiar de forma, el foco va al primer campo: lo de arriba ya no es lo que se eligió.
+  // Al cambiar de forma, el foco va al primer campo por completar: lo de arriba ya no es lo que se
+  // eligió, y con el correo ya escrito lo que falta es lo que sigue.
   useEffect(() => {
-    if (eligio.current) formas.current?.querySelector("input")?.focus();
+    if (!eligio.current) return;
+    const campos = Array.from<HTMLInputElement>(formas.current?.querySelectorAll("input") ?? []);
+    (campos.find((campo) => campo.value === "") ?? campos[0])?.focus();
   }, [metodo]);
+
+  useEffect(() => {
+    if (volver !== null) recordarOrigen(volver, Date.now());
+  }, [volver]);
 
   // Al recargar o irse, el navegador corta el canje en curso y fetch falla: ese canje no
   // terminó, así que el token se queda guardado para la página que viene.
@@ -116,6 +145,24 @@ export function Entrar() {
     };
   }, []);
 
+  function canjear(elToken: string) {
+    setEstado({ tipo: "entrando" });
+    void api.POST("/api/v1/auth/canje", { body: { token: elToken } }).then(
+      ({ error, response }) => {
+        if (error === undefined) {
+          olvidarToken();
+          terminarEntrada("Entraste.");
+        } else if (response.status === ESTADO_ENLACE_INVALIDO || response.status === ESTADO_TOKEN_MAL_FORMADO) {
+          olvidarToken();
+          setEstado({ tipo: "rechazado" });
+        } else setEstado({ tipo: "fallo", mensaje: mensajeDeFallaConEnlace(response.status, codigoDe(error)) });
+      },
+      () => {
+        if (!saliendo.current) setEstado({ tipo: "fallo", mensaje: mensajeDeFallaConEnlace(0, undefined) });
+      },
+    );
+  }
+
   useEffect(() => {
     if (!token || canjeado.current) return;
     canjeado.current = true;
@@ -123,24 +170,16 @@ export function Entrar() {
     // una captura de pantalla. Uno ya guardado conserva su vencimiento.
     if (delFragmento) guardarToken(token, Date.now());
     window.history.replaceState(window.history.state, "", RUTA_ENTRAR);
-    void api.POST("/api/v1/auth/canje", { body: { token } }).then(
-      ({ error }) => {
-        olvidarToken();
-        if (error === undefined) irAlInicio("Entraste.");
-        else setEstado("rechazado");
-      },
-      () => {
-        if (saliendo.current) return;
-        olvidarToken();
-        setEstado("rechazado");
-      },
-    );
-    // `irAlInicio` cambia en cada render; el canje sale una sola vez por `canjeado`.
+    canjear(token);
+    // `canjear` cambia en cada render; el canje sale una sola vez por `canjeado`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, delFragmento]);
 
+  /** Elegir otra forma deja atrás el enlace que falló: ni su error ni su token siguen. */
   function elegir(forma: Metodo) {
     eligio.current = true;
+    olvidarToken();
+    setEstado({ tipo: "sin_enlace" });
     setMetodo(forma);
   }
 
@@ -149,31 +188,42 @@ export function Entrar() {
   return (
     <>
       <h1>Entrar a Consorcio en Mano</h1>
-      <div role="status" aria-live="polite" className={estado === "sin_enlace" ? undefined : "tarjeta"}>
-        {estado === "entrando" && <p>Entrando…</p>}
-        {estado === "rechazado" && (
+      <div role="status" aria-live="polite" className={estado.tipo === "sin_enlace" ? undefined : "tarjeta"}>
+        {estado.tipo === "entrando" && <p>Entrando…</p>}
+        {estado.tipo === "rechazado" && (
           <p className="aviso-error">
             No pudimos hacerte entrar con este enlace. Puede haber vencido, haberse usado o
             haberse abierto en otro navegador. Pedí uno nuevo desde el mismo navegador donde lo
             vas a abrir.
           </p>
         )}
+        {estado.tipo === "fallo" && token !== null && (
+          <>
+            <p className="aviso-error">{estado.mensaje}</p>
+            <button type="button" onClick={() => canjear(token)}>
+              Reintentar
+            </button>
+          </>
+        )}
       </div>
-      {estado !== "entrando" && (
+      {estado.tipo !== "entrando" && (
         <>
           <div ref={formas}>
             {metodo === "enlace" && (
               <PedirEnlace
-                alPedir={(correo, mensaje) => {
-                  setPedido({ correo, mensaje });
+                correo={correo}
+                alCambiarCorreo={setEscrito}
+                alPedir={(pedido, mensaje) => {
+                  setEscrito(pedido);
+                  setAvisoDelPedido(mensaje);
                   elegir("codigo");
                 }}
               />
             )}
             {metodo === "codigo" && (
-              <EntrarConCodigo correoInicial={pedido?.correo} aviso={pedido?.mensaje ?? null} />
+              <EntrarConCodigo correo={correo} alCambiarCorreo={setEscrito} aviso={avisoDelPedido} />
             )}
-            {metodo === "contrasena" && <EntrarConContrasena />}
+            {metodo === "contrasena" && <EntrarConContrasena correo={correo} alCambiarCorreo={setEscrito} />}
           </div>
           <section aria-labelledby="titulo-otras-formas" className="tarjeta">
             <h2 id="titulo-otras-formas">Otras formas de entrar</h2>

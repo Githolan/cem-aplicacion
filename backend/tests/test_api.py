@@ -64,6 +64,18 @@ def test_unidades_del_propio_consorcio(datos):
 
 
 @pytest.mark.db
+def test_las_unidades_dicen_a_cuales_invita_quien_pregunta(datos):
+    """Un propietario invita solo a su unidad; control: la otra del mismo consorcio no se ofrece."""
+    r = cliente(url_rol("app"), datos.persona_a).get(
+        f"/api/v1/consorcios/{datos.consorcio_a}/unidades"
+    )
+    assert {u["designacion"]: u["invitable"] for u in r.json()["elementos"]} == {
+        "1° A": True,
+        "1° B": False,
+    }
+
+
+@pytest.mark.db
 def test_otro_consorcio_y_uno_inexistente_responden_igual(datos):
     c = cliente(url_rol("app"), datos.persona_a)
     ajeno = c.get(f"/api/v1/consorcios/{datos.consorcio_b}/unidades")

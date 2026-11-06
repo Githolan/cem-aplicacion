@@ -113,6 +113,11 @@
   text-underline-offset: 0.2em;
 }
 
+/* La marca es un enlace, pero sobre el fondo de la cabecera: --enlace no contrasta ahí. */
+.lectura-ampliada .cabecera .marca {
+  color: #ffffff;
+}
+
 .lectura-ampliada .tarjeta {
   margin-top: 2.5rem;
   padding: 1.25rem;

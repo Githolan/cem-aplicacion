@@ -537,6 +537,8 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
     vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
     abrir();
     expect((await screen.findByRole("link", { name: "Gestionar la lista" })).getAttribute("href")).toBe("/contactos/gestion");
+    // Si el enlace se ve, la persona alcanza la acción: no hace falta aclarar para quién es.
+    expect(screen.queryByText(/administración y Consejo/)).toBeNull();
   });
 
   it("control: sin `contactos.gestionar` la lista se ve y el enlace no", async () => {

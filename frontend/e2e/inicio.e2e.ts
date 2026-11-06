@@ -6,12 +6,14 @@ import {
   otroCliente,
   SHA_BACKEND,
   URL_SIN_BACKEND,
+  simularPuntero,
   simularSesion,
   sinFaltasDeAccesibilidad,
 } from "./entorno";
 
 const TITULO_INICIO = "Tu consorcio, en tu mano";
 const TITULO_ENTRAR = "Entrar a Consorcio en Mano";
+const ALTO_TACTIL_PX = 44;
 
 test.describe("inicio contra el cem-backend real", () => {
   // Un cupo propio de /api/v1/auth/: ver otroCliente en entorno.ts.
@@ -56,11 +58,61 @@ test.describe("inicio contra el cem-backend real", () => {
   });
 
   test("enlaza a /instalar", async ({ page }) => {
+    await simularPuntero(page, false);
     await simularSesion(page, "con_sesion");
     await page.goto("/");
-    await page.getByRole("link", { name: "Instalá la aplicación en tu teléfono" }).click();
+    await page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }).click();
     await expect(page).toHaveURL(/\/instalar$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalá Consorcio en Mano en tu teléfono");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalá Consorcio en Mano en este dispositivo");
+  });
+
+  test("control: en una computadora cuyo navegador no la ofrece, no enlaza a /instalar", async ({ page }) => {
+    await simularPuntero(page, true);
+    await simularSesion(page, "con_sesion");
+    await page.goto("/");
+
+    await expect(page.getByRole("link", { name: "Mi cuenta" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Instalá la aplicación/ })).toHaveCount(0);
+  });
+
+  test("la marca de la cabecera lleva al inicio y se puede tocar", async ({ page }) => {
+    await simularSesion(page, "con_sesion");
+    await page.goto("/una/ruta/que/no/existe");
+    const marca = page.getByRole("banner").getByRole("link", { name: "Consorcio en Mano" });
+
+    expect((await marca.boundingBox())?.height).toBeGreaterThanOrEqual(ALTO_TACTIL_PX);
+    await marca.click();
+
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
+  });
+
+  test("sin edificios dice cómo sumarse, y con una invitación la ofrece", async ({ page }) => {
+    let invitaciones: object[] = [];
+    await simularSesion(page, "con_sesion");
+    await page.context().route("**/api/v1/me/invitaciones", (ruta) => ruta.fulfill({ json: { elementos: invitaciones } }));
+    await page.goto("/");
+
+    await expect(page.getByText(/abrí el enlace de la invitación que te llegó por correo/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Invitaciones para vos" })).toHaveCount(0);
+
+    invitaciones = [
+      {
+        id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d",
+        consorcio: "Edificio Azul",
+        unidad: "1° A",
+        tipo: "inquilino",
+        nombre: "Ana Pérez",
+        invitada_por: "Beto",
+        vence_en: "2026-11-20T12:00:00Z",
+      },
+    ];
+    await page.reload();
+
+    const seccion = page.getByRole("region", { name: "Invitaciones para vos" });
+    await expect(seccion.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
+    await expect(page.getByText(/abrí el enlace de la invitación que te llegó por correo/)).toHaveCount(0);
+    await sinFaltasDeAccesibilidad(page);
   });
 
   test("una ruta desconocida cae en la SPA y muestra la página de no encontrada", async ({ page }) => {

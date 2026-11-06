@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, Navigate } from "react-router";
 
 import { RUTA_ENTRAR } from "./enlace";
-import { instalar, useInstalacion } from "./instalacion";
+import { enComputadora, instalar, useInstalacion } from "./instalacion";
 
 export const AVISO_INSTALADA =
   "Ya está instalada. Seguí acá, o abrila desde el ícono de tu pantalla de inicio la próxima vez.";
@@ -12,7 +12,10 @@ type Pedido = "quieto" | "instalando" | "fallo";
 // Página /instalar: el enlace que se comparte por WhatsApp o en un código QR en la cartelera. Es el
 // primer paso del recorrido de Acceso (decisión del propietario del 05-11-2026, §2): terminada la
 // instalación sigue sola a /entrar; si se cancela o falla, lo dice acá y se puede reintentar. El
-// navegador no siempre puede abrir la aplicación instalada: por eso sigue esta pestaña.
+// navegador no siempre puede abrir la aplicación instalada: por eso sigue esta pestaña. El evento
+// del navegador sirve una sola vez: Reintentar recarga para que lo vuelva a ofrecer, y si no lo
+// ofrece quedan los pasos del menú. En una computadora solo se instala con el botón: sin el evento,
+// los pasos son para el teléfono.
 export function Instalar() {
   const forma = useInstalacion();
   const [pedido, setPedido] = useState<Pedido>("quieto");
@@ -30,9 +33,12 @@ export function Instalar() {
     return <Navigate to={RUTA_ENTRAR} replace state={{ aviso: AVISO_INSTALADA }} />;
   }
 
+  // Después de tocar el botón el evento ya se gastó, pero sigue siendo la misma instalación.
+  const enEstaComputadora = enComputadora(forma) && (forma === "boton" || pedido !== "quieto");
+
   return (
     <>
-      <h1>Instalá Consorcio en Mano en tu teléfono</h1>
+      <h1>Instalá Consorcio en Mano {enEstaComputadora ? "en esta computadora" : "en este dispositivo"}</h1>
       <p>
         No hace falta ir a ninguna tienda. La aplicación queda con su ícono en la pantalla de
         inicio y se abre como cualquier otra.
@@ -44,6 +50,11 @@ export function Instalar() {
           {pedido === "instalando" && <p>Instalando…</p>}
           {pedido === "fallo" && (
             <p className="aviso-error">No se instaló. Probá de nuevo, o seguí sin instalar.</p>
+          )}
+          {pedido === "fallo" && forma !== "boton" && (
+            <button type="button" onClick={() => window.location.reload()}>
+              Reintentar
+            </button>
           )}
         </div>
         {forma === "boton" && (
@@ -67,7 +78,7 @@ export function Instalar() {
             </li>
           </ol>
         )}
-        {forma === "menu" && (
+        {forma === "menu" && pedido === "quieto" && (
           <ol className="pasos">
             <li>
               En Android, abrí este enlace en <strong>Chrome</strong>.
@@ -75,10 +86,6 @@ export function Instalar() {
             <li>
               Tocá el menú (los tres puntos) y elegí <strong>Instalar aplicación</strong> o{" "}
               <strong>Agregar a la pantalla principal</strong>.
-            </li>
-            <li>
-              En iPhone, abrilo en <strong>Safari</strong>, tocá <strong>Compartir</strong> y elegí{" "}
-              <strong>Agregar a inicio</strong>.
             </li>
           </ol>
         )}
@@ -91,13 +98,16 @@ export function Instalar() {
   );
 }
 
-// Enlace corto para la página de inicio; desaparece cuando la aplicación ya está instalada.
+// Enlace corto para la página de inicio; desaparece cuando la aplicación ya está instalada, y en
+// una computadora cuyo navegador no la ofrece, donde no hay nada que hacer.
 export function EnlaceInstalar() {
   const forma = useInstalacion();
   if (forma === "instalada" || forma === "recien_instalada") return null;
+  const computadora = enComputadora(forma);
+  if (computadora && forma !== "boton") return null;
   return (
     <p>
-      <Link to="/instalar">Instalá la aplicación en tu teléfono</Link>
+      <Link to="/instalar">Instalá la aplicación {computadora ? "en esta computadora" : "en este dispositivo"}</Link>
     </p>
   );
 }
