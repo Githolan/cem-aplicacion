@@ -36,6 +36,8 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     if (consorcio === "") return;
     let vigente = true;
     const { busqueda, filtro, saltar } = pedido;
+    // Si falla «Ver más», lo ya cargado queda y el mismo botón vuelve a pedir esa página.
+    const falla = (l: Lectura): Lectura => (saltar > 0 && l.tipo === "ok" ? l : { tipo: "sin_servicio" });
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/pagos/consulta", {
         params: {
@@ -57,7 +59,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           }));
         } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
-          setLectura({ tipo: "sin_servicio" });
+          setLectura(falla);
           setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
       })
@@ -65,7 +67,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
         else {
-          setLectura({ tipo: "sin_servicio" });
+          setLectura(falla);
           setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });

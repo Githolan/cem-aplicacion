@@ -49,6 +49,8 @@ export function useActo(aEntrar: () => void) {
       return;
     }
     setEnviando(false);
+    // La ficha ya se cerró: su respuesta no mueve la pantalla que se abrió después.
+    if (!montado.current) return;
     const { data, error, response } = respuesta;
     if (data !== undefined) {
       clave.current = null;

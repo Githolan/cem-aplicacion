@@ -1361,6 +1361,32 @@ describe("aprobar y rechazar", () => {
     expect(lugar()).toBe("/pagos");
   });
 
+  it("la respuesta de un acto de una ficha ya cerrada no mueve la que se abrió después", async () => {
+    ancho(true);
+    let soltar: (r: Response) => void = () => undefined;
+    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(APROBAR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [REVISION]: () => Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => new Promise<Response>((r) => (soltar = r)),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar esta versión"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    await act(async () => {
+      soltar(Response.json({ id: O1, version: 1 }, { status: 201 }));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(screen.queryByText("Listo: aprobaste la versión 1.")).toBeNull();
+  });
+
   it("si la orden cambió, la ficha muestra la versión nueva, lo dice y no traslada la aprobación", async () => {
     let actual = APROBAR;
     const api = abrirFicha(() => actual, {
@@ -1634,6 +1660,49 @@ describe("consultar pagos", () => {
     expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
     expect(pagina).toBe(1);
     sinBoton("Ver más");
+  });
+
+  it("si falla «Ver más», lo cargado queda y el reintento suma esa página", async () => {
+    let caido = true;
+    const api = backend({});
+    const saltos: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (pedido: Request) => {
+      const url = new URL(pedido.url);
+      if (url.pathname !== `${BASE}/pagos/consulta`) return api(pedido);
+      const saltar = url.searchParams.get("saltar") as string;
+      saltos.push(saltar);
+      if (saltar === "0") return Response.json({ elementos: [FILA], siguiente: 1 });
+      if (caido) return error("error_interno", 500);
+      return Response.json({ elementos: [{ ...FILA, orden_id: O2, proveedor: "Ascensores Ficticios SA" }], siguiente: null });
+    }));
+    abrir("/pagos/consulta");
+    fireEvent.click(await boton("Ver más"));
+    expect((await screen.findByRole("alert")).textContent).toContain("El servicio no está disponible");
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    sinBoton("Reintentar");
+    caido = false;
+    fireEvent.click(await boton("Ver más"));
+    expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(saltos.slice(-2)).toEqual(["1", "1"]);
+    sinBoton("Ver más");
+  });
+
+  it("si la red cae en «Ver más», también queda lo cargado", async () => {
+    const api = backend({});
+    vi.stubGlobal("fetch", vi.fn(async (pedido: Request) => {
+      const url = new URL(pedido.url);
+      if (url.pathname !== `${BASE}/pagos/consulta`) return api(pedido);
+      if (url.searchParams.get("saltar") === "0") return Response.json({ elementos: [FILA], siguiente: 1 });
+      throw new TypeError("sin red");
+    }));
+    abrir("/pagos/consulta");
+    fireEvent.click(await boton("Ver más"));
+    await screen.findByRole("alert");
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    sinBoton("Reintentar");
+    expect(await boton("Ver más")).toBeTruthy();
   });
 
   it("sin resultados lo dice", async () => {
