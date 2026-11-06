@@ -138,6 +138,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                     </span>
                     <span>{e.concepto}</span>
                     <span className="fila-pago__verbo">{TEXTO_SITUACION[e.situacion]}</span>
+                    {e.importe_pagado_centavos !== null && <span>Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</span>}
                     {e.numero_operacion !== null && <span>Operación {e.numero_operacion}</span>}
                   </Link>
                 </li>

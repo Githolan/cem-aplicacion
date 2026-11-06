@@ -24,6 +24,7 @@ acá, nunca un 500. Los importes van en centavos, enteros.
 """
 
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
@@ -680,6 +681,98 @@ class RegistroPagoManual(BaseModel):
     )
 
 
+class TipoDiferencia(StrEnum):
+    """Qué fue distinto de la orden. Lo deduce la base: otra moneda cuenta como otro importe."""
+
+    IMPORTE = "importe"
+    CUENTA = "cuenta"
+    AMBOS = "ambos"
+
+
+class ResolucionDiferencia(StrEnum):
+    PAGADA_POR_LO_REAL = "pagada_por_lo_real"
+    RECLAMO = "reclamo"
+
+
+class RegistroDiferenciaPago(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/diferencia`: lo que salió del banco, cuando no es lo
+    que se aprobó. La orden **no** queda pagada: lo resuelve el Consejo. Si todo coincide con la
+    orden, `sin_diferencia`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA)
+    numero_operacion: str = Field(
+        pattern=FORMATO_NUMERO_OPERACION, description="El número de operación del comprobante."
+    )
+    fecha_operacion: date
+    importe_real: Decimal = Field(
+        gt=0, max_digits=18, decimal_places=2, description="Lo que salió del banco, en pesos."
+    )
+    moneda: Moneda
+    cuenta_real: Cuenta = Field(description="Como figura en el comprobante.")
+    documento_id: UUID = Field(
+        description="El comprobante: cargado desde el pago de esta orden, con un archivo que pasó"
+        " el antivirus."
+    )
+    explicacion: _texto(1, 300) = Field(
+        description="Qué pasó, sin el número de una cuenta (`motivo_con_cuenta`)."
+    )
+
+
+class DiferenciaRegistrada(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    orden_id: UUID
+
+
+class ResolucionDiferenciaPago(BaseModel):
+    """`POST …/pago-manual/diferencia/{d}/resolucion`: otro ser humano del Consejo. Dar por pagado
+    lo real vale solo para otro importe en la moneda de la orden (`solo_reclamo`)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    resolucion: ResolucionDiferencia
+
+
+class DiferenciaPagoManual(BaseModel):
+    """Lo que se pagó de verdad, sin la cuenta completa."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    tipo: TipoDiferencia
+    importe_real: Decimal
+    moneda: str
+    cuenta_ultimos_digitos: str
+    importe_orden_centavos: int
+    moneda_orden: str
+    numero_operacion: str
+    fecha_operacion: date
+    documento_id: UUID
+    version_documento_id: UUID = Field(description="El archivo exacto que quedó como evidencia.")
+    explicacion: str
+    fuera_de_termino: bool
+    registrada_por: UUID
+    registrada_por_nombre: str
+    registrada_en: datetime
+    resolucion: ResolucionDiferencia | None
+    resuelta_por: UUID | None
+    resuelta_en: datetime | None
+    recuperada_en: datetime | None
+    falta_centavos: int | None = Field(
+        description="Cuánto faltó pagar, si fue de menos en la moneda de la orden."
+    )
+    sobra_centavos: int | None = Field(
+        description="Cuánto se pagó de más, si fue de más en la moneda de la orden."
+    )
+    se_puede_dar_por_pagada: bool = Field(
+        description="Si admite `pagada_por_lo_real`: la cuenta y la moneda son las de la orden."
+    )
+
+
 class PagoManualRegistrado(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -878,7 +971,10 @@ class PasoPago(StrEnum):
     """Nadie vio la cuenta y ya no se puede abrir (la aprobación venció, por ejemplo): la orden en
     ejecución no se renueva, y la salida es declarar que no se pagó."""
     RESOLVER_DIFERENCIA = "resolver_diferencia"
-    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
+    """Se pagó otra cosa, o hay un reclamo abierto: lo resuelve el Consejo (§7)."""
+    PREPARAR_FALTANTE = "preparar_faltante"
+    """Se dio por pagado menos de lo aprobado: quien prepara decide si hace otra orden por lo que
+    falta. No se crea sola."""
     ESPERA_APROBAR = "espera_aprobar"
     ESPERA_COMPROBANTE = "espera_comprobante"
     """Otra persona ya vio la cuenta: se espera su comprobante y no se ofrece pagar, para que la
@@ -887,7 +983,6 @@ class PasoPago(StrEnum):
     ESPERA_CONCILIAR = "espera_conciliar"
     ESPERA_CONFIRMAR = "espera_confirmar"
     ESPERA_RESOLVER = "espera_resolver"
-    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
     ESPERA_CORREGIR = "espera_corregir"
 
 
@@ -913,6 +1008,7 @@ GRUPO_DE_PASO = {
     PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
     PasoPago.VOLVER_A_PAGAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RECHAZADA: GrupoPago.PARA_PREPARAR,
+    PasoPago.PREPARAR_FALTANTE: GrupoPago.PARA_PREPARAR,
     PasoPago.APROBAR: GrupoPago.PARA_APROBAR,
     PasoPago.CONCILIAR: GrupoPago.PARA_CONCILIAR,
     PasoPago.CONFIRMAR_NO_PAGO: GrupoPago.PARA_CONFIRMAR,
@@ -950,9 +1046,7 @@ class SituacionPago(StrEnum):
     FALTA_CONCILIAR = "falta_conciliar"
     OBSERVADO = "observado"
     CON_DIFERENCIA = "con_diferencia"
-    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
     RECLAMO = "reclamo"
-    """Reservado para «Pagué otra cosa» (§7): todavía no hay datos que lo produzcan."""
     PAGADA = "pagada"
     NO_SE_PAGO = "no_se_pago"
 
@@ -1049,6 +1143,13 @@ class FichaPago(BaseModel):
     puede_corregir: bool
     puede_conciliar: bool
     puede_confirmar: bool
+    puede_resolver_diferencia: bool = Field(
+        description="Si puede resolver la diferencia sin resolver."
+    )
+    puede_recuperar: bool = Field(description="Si puede decir que se recuperó la plata reclamada.")
+    puede_preparar_faltante: bool = Field(
+        description="Si le corresponde preparar una orden por lo que faltó pagar."
+    )
     ejecucion: EjecucionManual | None = Field(
         description="La ejecución manual de la versión vigente, si tiene."
     )
@@ -1062,6 +1163,9 @@ class FichaPago(BaseModel):
     observacion_vigente: ObservacionVigente | None
     declaracion_vigente: PagoNoRealizado | None = Field(
         description="La última declaración de «no se pagó» que nadie superó ni confirmó."
+    )
+    diferencia_vigente: DiferenciaPagoManual | None = Field(
+        description="Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
     )
 
 
@@ -1077,8 +1181,12 @@ class ElementoConsultaPagos(BaseModel):
     moneda: str
     estado: EstadoOrdenPago
     situacion: SituacionPago
+    importe_pagado_centavos: int | None = Field(
+        description="Lo que el Consejo dio por pagado, si no es el importe de la orden."
+    )
     numero_operacion: str | None = Field(
-        description="El del último registro de la versión vigente, si tiene."
+        description="El de la diferencia o, sin ella, el del último registro de la versión vigente,"
+        " si tiene."
     )
     fecha_operacion: date | None
     actualizada_en: datetime

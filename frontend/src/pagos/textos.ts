@@ -17,6 +17,7 @@ export const VERBO: Record<Paso, string> = {
   renovar: "Renovar la aprobación",
   volver_a_pagar: "Volver a pagar",
   rechazada: "Ver el motivo",
+  preparar_faltante: "Preparar la orden por lo que falta",
   aprobar: "Aprobar o rechazar",
   conciliar: "Conciliar",
   confirmar_no_pago: "Confirmar",
@@ -82,6 +83,8 @@ export const AVISO_SIN_CUENTA =
   "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste, registrá el pago con los datos del comprobante (si fue después del vencimiento, queda marcado fuera de término y el Consejo lo concilia con un motivo); si no, declará que no se pagó.";
 export const AVISO_SIN_SALIDA =
   "Nadie vio la cuenta y ya no se puede abrir: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Declará que no se pagó y después se puede volver a pagar.";
+export const AVISO_DIFERENCIA_ESPERA = "No transfieras de nuevo hasta que el Consejo decida.";
+export const AVISO_OTRA_COSA = "La orden no queda pagada: lo resuelve el Consejo.";
 export const AVISO_RETOMAR = "Retomar deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nuevo.";
 export const AVISO_MODIFICAR =

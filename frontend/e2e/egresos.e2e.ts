@@ -143,7 +143,8 @@ const ANCHO_CON_CAMARA_PX = 480;
 const ACCIONES_EN_FALSO = {
   puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
   puede_reabrir_cuenta: false, puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false,
-  puede_declarar: false, puede_corregir: false, puede_conciliar: false, puede_confirmar: false,
+  puede_declarar: false, puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
+  puede_recuperar: false, puede_preparar_faltante: false,
 };
 const ORDEN_APROBADA = { ...ORDEN_A, estado: "aprobada", aprobaciones: 1, aprobada_en: "2026-10-31T12:00:00Z",
   aprobacion_vence_en: "2099-11-07T12:00:00Z" };
@@ -152,7 +153,8 @@ const EJECUCION_VACIA = { id: EJECUCION, version: 1, creada_en: "2026-10-31T12:3
 
 const fichaDe = (extra: object) => ({
   ...ACCIONES_EN_FALSO, orden: ORDEN_APROBADA, versiones: [version(null)], situacion: "para_pagar", paso: null, le_toca_a: null,
-  ejecucion: null, comprobante_actual: null, comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
+  ejecucion: null, comprobante_actual: null, comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null,
+  diferencia_vigente: null, ...extra,
 });
 const PARA_PAGAR = fichaDe({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
 const SUBIENDO = fichaDe({
@@ -174,6 +176,18 @@ const PARA_CONCILIAR = fichaDe({
     fuera_de_termino: false }] },
 });
 
+const PARA_RESOLVER = fichaDe({
+  orden: { ...ORDEN_APROBADA, estado: "en_verificacion" }, situacion: "con_diferencia", paso: "resolver_diferencia", le_toca_a: "vos",
+  puede_resolver_diferencia: true, comprobante_actual: EL_COMPROBANTE, ejecucion: EJECUCION_VACIA,
+  diferencia_vigente: {
+    id: "e7777777-7777-4777-8777-777777777777", tipo: "importe", importe_real: "98750.00", moneda: "ARS", cuenta_ultimos_digitos: CUENTA.slice(-4),
+    importe_orden_centavos: 12_000_000, moneda_orden: "ARS", numero_operacion: "0001234567", fecha_operacion: "2026-10-31", ...EL_COMPROBANTE,
+    explicacion: "SINTETICO: me equivoqué al escribir el importe", fuera_de_termino: false, registrada_por: ADM, registrada_por_nombre: "Marta Ficticia",
+    registrada_en: "2026-10-31T13:00:00Z", resolucion: null, resuelta_por: null, resuelta_en: null, recuperada_en: null,
+    falta_centavos: 2_125_000, sobra_centavos: null, se_puede_dar_por_pagada: true,
+  },
+});
+
 // Un PDF de verdad, con el texto en una fuente que no trae adentro, y un PNG de un píxel rojo.
 const PDF_SINTETICO = Buffer.from(
   `%PDF-1.4
@@ -192,7 +206,10 @@ const PNG_SINTETICO = Buffer.from(
   "base64",
 );
 
-const GRUPO_DE: Record<string, string> = { pagar: "para_pagar", aprobar: "para_aprobar", conciliar: "para_conciliar" };
+const GRUPO_DE: Record<string, string> = {
+  pagar: "para_pagar", aprobar: "para_aprobar", conciliar: "para_conciliar", resolver_diferencia: "para_resolver",
+  subir_comprobante: "para_pagar",
+};
 
 /** La API del circuito con una orden. La ficha cambia con el acto, como en el servidor. */
 async function simularPagos(
@@ -229,6 +246,8 @@ async function simularPagos(
       }, 500);
       return ruta.fulfill({ status: 201, json: { id: ARCHIVO, estado: "en_cuarentena", tipo: "image/png", tamano: 1, sha256: "a".repeat(64) } });
     }
+    if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/diferencia`)
+      return ruta.fulfill({ status: 201, json: { id: "e7777777-7777-4777-8777-777777777777", orden_id: ORDEN } });
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/emitir`)
       return ruta.fulfill({ json: { id: ORDEN, version: 1 } });
     if (pedido.method() === "POST" && camino === `${c}/ordenes-pago/${ORDEN}/pago-manual/cuenta`) {
@@ -372,6 +391,41 @@ test.describe("circuito de pagos", () => {
     await expect(page.getByText("0001234567")).toBeVisible();
     await expect(page.getByText(/Marta Ficticia/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Conforme" })).toBeVisible();
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    expect(errores).toEqual([]);
+  });
+
+  test("pagué otra cosa: lo que salió del banco, sin decir que quedó pagada", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    const pedidos = await simularPagos(page, baseURL!, CON_COMPROBANTE);
+    await abrirLaFicha(page);
+    await page.getByRole("button", { name: "Pagué otra cosa" }).click();
+    await page.getByLabel("Número de operación").fill("0001234567");
+    await page.getByLabel("Importe que salió del banco").fill("98750");
+    await page.getByLabel(/^CBU\/CVU de destino/).fill(CUENTA);
+    await page.getByLabel("Qué pasó").fill("SINTETICO: me equivoqué");
+    await expect(page.getByText("La orden no queda pagada: lo resuelve el Consejo.")).toBeVisible();
+    await sinDesbordar(page);
+    await sinFaltasDeAccesibilidad(page);
+    await page.getByRole("button", { name: "Registrar lo que pasó" }).click();
+    await expect.poll(() => pedidos.filter((p) => p.endsWith("/pago-manual/diferencia")).length).toBe(1);
+    expect(errores).toEqual([]);
+  });
+
+  test("resolver: se ve lo que salió del banco y qué se puede hacer", async ({ page, baseURL }) => {
+    const errores = vigilarErrores(page);
+    await simularPagos(page, baseURL!, PARA_RESOLVER);
+    await abrirLaFicha(page);
+    await expect(page.getByRole("table", { name: "La orden contra lo que salió del banco" })).toBeVisible();
+    await expect(page.getByText("SINTETICO: me equivoqué al escribir el importe")).toBeVisible();
+    const dar = page.getByRole("radio", { name: /Dar por pagados/ });
+    await expect(dar).toBeChecked();
+    await page.getByRole("radio", { name: /Reclamar la devolución/ }).check();
+    await expect(dar).not.toBeChecked();
+    expect((await page.getByText(/Reclamar la devolución/).boundingBox())?.height).toBeGreaterThan(0);
+    await expect(page.getByRole("button", { name: "Resolver" })).toBeVisible();
+    expect(await page.content()).not.toContain(CUENTA);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);

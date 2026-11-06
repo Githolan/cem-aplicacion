@@ -146,6 +146,11 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     end if;"
                 # Los pagos manuales (0055) citan las ejecuciones y los documentos: van antes.
                 "     if to_regclass('nucleo.pago_manual') is not null then"
+                "       if to_regclass('nucleo.diferencia_pago_manual') is not null then"
+                "         alter table nucleo.diferencia_pago_manual disable trigger user;"
+                "         delete from nucleo.diferencia_pago_manual;"
+                "         alter table nucleo.diferencia_pago_manual enable trigger user;"
+                "       end if;"
                 "       alter table nucleo.conciliacion_pago_manual disable trigger user;"
                 "       alter table nucleo.confirmacion_pago_no_realizado disable trigger user;"
                 "       alter table nucleo.declaracion_pago_no_realizado disable trigger user;"
