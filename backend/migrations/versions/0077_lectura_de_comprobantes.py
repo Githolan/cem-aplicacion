@@ -190,7 +190,7 @@ create function nucleo.lectura_acredita_cuenta(c uuid, ejecucion uuid, documento
     select exists (
       select 1 from nucleo.lectura_comprobante l
        where l.consorcio_id = c and l.ejecucion_id = ejecucion and l.documento_id = documento
-         and l.cuenta_coincide
+         and l.legible and l.cuenta_ultimos_digitos is not null and l.cuenta_coincide
          and l.version_documento_id = (
            select v.id from nucleo.version_documento v
             where v.consorcio_id = c and v.documento_id = documento and v.estado = 'disponible'

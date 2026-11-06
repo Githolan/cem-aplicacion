@@ -112,6 +112,11 @@ function DistintoDeLaOrden({ leida, version }: { leida: Lectura; version: Versio
           <strong>{importeLegible(version.importe_centavos, version.moneda)}</strong>.
         </p>
       )}
+      {leida.distinto_de_la_orden.includes("moneda") && (
+        <p>
+          El comprobante dice <strong>{leida.moneda}</strong> y la orden es en <strong>{version.moneda}</strong>.
+        </p>
+      )}
       {leida.distinto_de_la_orden.includes("cuenta") && (
         <p>
           El comprobante dice la cuenta <strong>{cuentaEnmascarada(ultimos)}</strong> y la orden es a la cuenta{" "}

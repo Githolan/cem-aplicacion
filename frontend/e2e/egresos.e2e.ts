@@ -179,7 +179,7 @@ const PARA_CONCILIAR = fichaDe({
 const LO_LEIDO = {
   version_documento_id: ARCHIVO, estado: "leida", importe_centavos: 12_000_000, moneda: "ARS", cuenta_ultimos_digitos: CUENTA.slice(-4),
   cuenta_coincide: true, titular_destino: RAZON_LARGA, numero_operacion: "0048213377", fecha: "2026-10-31", distinto_de_la_orden: [],
-  titular_distinto: false, distinto_de_lo_registrado: [],
+  titular_distinto: false, distinto_de_lo_registrado: [], coincide_con_lo_registrado: false,
 };
 const LEIDO_COINCIDE = { ...CON_COMPROBANTE, lectura_comprobante: LO_LEIDO };
 const LEIDO_DISTINTO = {

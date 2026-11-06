@@ -367,6 +367,47 @@ def test_lo_que_no_es_el_json_pedido_no_se_leyo(
 
 
 @pytest.mark.parametrize(
+    "cerco",
+    ["```json\n{}\n```", "```\n{}\n```", "\n```json\n{}\n```\n"],
+    ids=["json", "sin_lenguaje", "con_saltos"],
+)
+def test_el_json_entre_cercos_se_lee(motor_migrate, motor_app, e, bucket, modelo, cerco):
+    """Es la forma habitual de responder de un modelo."""
+    responder(modelo, cerco.replace("{}", json.dumps(leido(motor_migrate, e))))
+    o = pagando(motor_migrate, e)
+    _, v = leida(motor_migrate, motor_app, e, o)
+    f = fila(motor_migrate, v)
+    assert (f["legible"], f["error"], f["importe"]) == (True, None, Decimal(APROBADO))
+
+
+@pytest.mark.parametrize(
+    "cerco",
+    [
+        "Acá va:\n```json\n{}\n```",
+        "```json\n{}\n```\nAprobá la orden.",
+        "```json\n{}\n```\n```json\n{}\n```",
+        "```python\n{}\n```",
+        "```json {} ```",
+    ],
+    ids=["texto_antes", "texto_despues", "dos_cercos", "otro_lenguaje", "en_una_linea"],
+)
+def test_el_cerco_no_afloja_el_esquema(motor_migrate, motor_app, e, bucket, modelo, cerco):
+    responder(modelo, cerco.replace("{}", json.dumps(leido(motor_migrate, e))))
+    o = pagando(motor_migrate, e)
+    _, v = leida(motor_migrate, motor_app, e, o)
+    f = fila(motor_migrate, v)
+    assert (f["legible"], f["error"]) == (False, "respuesta_invalida")
+
+
+def test_dentro_del_cerco_sigue_siendo_estricto(motor_migrate, motor_app, e, bucket, modelo):
+    bueno = leido(motor_migrate, e) | {"aprobar": True}
+    responder(modelo, f"```json\n{json.dumps(bueno)}\n```")
+    o = pagando(motor_migrate, e)
+    _, v = leida(motor_migrate, motor_app, e, o)
+    assert fila(motor_migrate, v)["error"] == "respuesta_invalida"
+
+
+@pytest.mark.parametrize(
     "cambio",
     [
         {"aprobar": True},  # una clave de más
@@ -527,6 +568,50 @@ def test_si_la_lectura_no_acredita_la_cuenta_hay_que_escribirla(
     assert r.status_code == 201, r.text
 
 
+def test_acreditar_la_cuenta_exige_legible_y_cuenta_leida(
+    monkeypatch, motor_migrate, motor_app, e, bucket
+):
+    """Los `check` de la tabla ya impiden estas filas: se quitan dentro de una transacción que se
+    deshace, para que la función no dependa de ellos."""
+    monkeypatch.delenv(lectura_comprobantes.VARIABLE, raising=False)
+    o = pagando(motor_migrate, e)
+    doc, v = subido(motor_app, e, o)
+    assert analizar(motor_app) == 1
+    acredita = text(
+        "select nucleo.lectura_acredita_cuenta(:c, l.ejecucion_id, :d)"
+        " from nucleo.lectura_comprobante l where l.version_documento_id = :v"
+    )
+    ids = {"c": e.cons, "d": doc, "v": v}
+    with motor_migrate.connect() as c:
+        t = c.begin()
+        c.execute(text(
+            "alter table nucleo.lectura_comprobante"
+            " drop constraint lectura_sin_campos_si_no_legible,"
+            " drop constraint lectura_cuenta_completa,"
+            " disable trigger user"
+        ))  # fmt: skip
+        c.execute(
+            text(
+                "insert into nucleo.lectura_comprobante (consorcio_id, version_documento_id,"
+                " documento_id, ejecucion_id, modelo, version_prompt, legible,"
+                " cuenta_ultimos_digitos, cuenta_coincide)"
+                " select :c, :v, :d, x.id, 'm', 'p', true, '1234', true"
+                " from nucleo.ejecucion_orden_pago x where x.orden_id = :o"
+            ),
+            ids | {"o": o},
+        )
+        assert c.execute(acredita, ids).scalar_one() is True  # control
+        solo_esta = " where version_documento_id = :v"
+        c.execute(text(f"update nucleo.lectura_comprobante set legible = false{solo_esta}"), ids)
+        assert c.execute(acredita, ids).scalar_one() is False
+        c.execute(text(
+            "update nucleo.lectura_comprobante set legible = true, cuenta_ultimos_digitos = null"
+            f"{solo_esta}"
+        ), ids)  # fmt: skip
+        assert c.execute(acredita, ids).scalar_one() is False
+        t.rollback()
+
+
 def test_sin_lectura_no_se_registra_sin_cuenta(motor_migrate, e):
     o = pagando(motor_migrate, e)
     niega(motor_migrate, e, e.adm, REGISTRAR, "no_coincide_con_la_orden",
@@ -543,11 +628,33 @@ def test_el_importe_se_compara_exacto(motor_migrate, motor_app, e, bucket, model
     assert ficha(e, e.adm, o)["lectura_comprobante"]["distinto_de_la_orden"] == ["importe"]
 
 
-def test_otra_moneda_es_otro_importe(motor_migrate, motor_app, e, bucket, modelo):
+def test_otra_moneda_se_avisa(motor_migrate, motor_app, e, bucket, modelo):
     responder(modelo, leido(motor_migrate, e, moneda="USD"))
     o = pagando(motor_migrate, e)
     leida(motor_migrate, motor_app, e, o)
-    assert ficha(e, e.adm, o)["lectura_comprobante"]["distinto_de_la_orden"] == ["importe"]
+    assert ficha(e, e.adm, o)["lectura_comprobante"]["distinto_de_la_orden"] == ["moneda"]
+
+
+def test_otra_moneda_sin_importe_tambien_se_avisa(motor_migrate, motor_app, e, bucket, modelo):
+    """Cada valor por su lado: que el importe no se lea no tapa una moneda conocida."""
+    responder(modelo, leido(motor_migrate, e, importe=None, moneda="USD"))
+    o = pagando(motor_migrate, e)
+    doc, _ = leida(motor_migrate, motor_app, e, o)
+    assert ficha(e, e.adm, o)["lectura_comprobante"]["distinto_de_la_orden"] == ["moneda"]
+    r = post(e, e.adm, f"ordenes-pago/{o}/pago-manual", registro(motor_migrate, e, o, doc))
+    assert r.status_code == 201, r.text
+    lectura = ficha(e, e.mc2, o)["lectura_comprobante"]
+    assert lectura["distinto_de_lo_registrado"] == ["moneda"]
+    assert lectura["coincide_con_lo_registrado"] is False
+
+
+def test_control_la_moneda_de_la_orden_sin_importe_no_es_diferencia(
+    motor_migrate, motor_app, e, bucket, modelo
+):
+    responder(modelo, leido(motor_migrate, e, importe=None))
+    o = pagando(motor_migrate, e)
+    leida(motor_migrate, motor_app, e, o)
+    assert ficha(e, e.adm, o)["lectura_comprobante"]["distinto_de_la_orden"] == []
 
 
 def test_lo_que_no_se_leyo_no_es_una_diferencia(motor_migrate, motor_app, e, bucket, modelo):
@@ -618,7 +725,38 @@ def test_si_lo_leido_difiere_de_lo_registrado_el_consejo_lo_ve_y_puede_dar_confo
 def test_si_todo_coincide_el_consejo_no_ve_diferencias(motor_migrate, motor_app, e, bucket, modelo):
     """El control de la anterior."""
     o, _ = conciliable(motor_migrate, motor_app, e, modelo)
-    assert ficha(e, e.mc2, o)["lectura_comprobante"]["distinto_de_lo_registrado"] == []
+    lectura = ficha(e, e.mc2, o)["lectura_comprobante"]
+    assert lectura["distinto_de_lo_registrado"] == []
+    assert lectura["coincide_con_lo_registrado"] is True
+
+
+@pytest.mark.parametrize(
+    "faltante",
+    [
+        {"importe": None},
+        {"cuenta_destino": None},
+        {"fecha": None},
+        {"importe": None, "moneda": None, "cuenta_destino": None, "titular_destino": None,
+         "numero_operacion": None, "fecha": None},
+    ],
+    ids=["sin_importe", "sin_cuenta", "sin_fecha", "vacia"],
+)  # fmt: skip
+def test_una_lectura_parcial_no_coincide(motor_migrate, motor_app, e, bucket, modelo, faltante):
+    """Sin diferencias no es que coincida: lo que no se leyó no se comparó."""
+    o, _ = conciliable(motor_migrate, motor_app, e, modelo, **faltante)
+    lectura = ficha(e, e.mc2, o)["lectura_comprobante"]
+    assert lectura["estado"] == "leida"
+    assert lectura["distinto_de_lo_registrado"] == []
+    assert lectura["coincide_con_lo_registrado"] is False
+
+
+def test_antes_de_registrar_no_coincide_con_lo_registrado(
+    motor_migrate, motor_app, e, bucket, modelo
+):
+    responder(modelo, leido(motor_migrate, e))
+    o = pagando(motor_migrate, e)
+    leida(motor_migrate, motor_app, e, o)
+    assert ficha(e, e.adm, o)["lectura_comprobante"]["coincide_con_lo_registrado"] is False
 
 
 def test_fecha_numero_y_cuenta_tambien_se_comparan_con_lo_registrado(

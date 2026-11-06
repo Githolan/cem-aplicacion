@@ -1388,7 +1388,7 @@ describe("la lectura con IA del comprobante", () => {
     version_documento_id: ARCHIVO, estado: "leida", importe_centavos: 1_500_000, moneda: "ARS",
     cuenta_ultimos_digitos: CUENTA.slice(-4), cuenta_coincide: true, titular_destino: "Limpieza Ficticia S.R.L.",
     numero_operacion: "0048213377", fecha: "2026-11-05", distinto_de_la_orden: [], titular_distinto: false,
-    distinto_de_lo_registrado: [], ...extra,
+    distinto_de_lo_registrado: [], coincide_con_lo_registrado: false, ...extra,
   });
   const VACIA = {
     importe_centavos: null, moneda: null, cuenta_ultimos_digitos: null, cuenta_coincide: null, titular_destino: null,
@@ -1596,11 +1596,34 @@ describe("la lectura con IA del comprobante", () => {
   });
 
   it("control: si coincide lo dice y Conforme sigue siendo el principal", async () => {
-    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida() });
+    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ coincide_con_lo_registrado: true }) });
     expect(await screen.findByText("La lectura del comprobante coincide con lo registrado.")).toBeTruthy();
+    expect(screen.queryByText(/quedó incompleta/)).toBeNull();
     await boton("Conforme");
     expect(nombres()).toEqual(["Conforme", "Observar"]);
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("una lectura parcial o vacía no dice que coincida: dice que quedó incompleta", async () => {
+    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA }) });
+    expect(await screen.findByText("La lectura del comprobante quedó incompleta: compará los datos con el archivo.")).toBeTruthy();
+    expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
+    await boton("Conforme");
+    expect(nombres()).toEqual(["Conforme", "Observar"]);
+  });
+
+  it("una moneda distinta se avisa aunque el importe no se haya leído", async () => {
+    abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_lo_registrado: ["moneda"] }) });
+    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y registraron ARS.");
+    await boton("Conforme");
+    expect(nombres()).toEqual(["Observar", "Conforme"]);
+  });
+
+  it("antes de registrar, también: otra moneda sin importe pregunta qué pasó", async () => {
+    abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_la_orden: ["moneda"] }) });
+    expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y la orden es en ARS.");
+    sinBoton("Registrar el pago");
+    expect(await boton("Se leyó mal: corregir el dato")).toBeTruthy();
   });
 
   it("control: sin lectura no dice que coincida", async () => {

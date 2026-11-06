@@ -66,6 +66,7 @@ PEDIDO = "Copiá los datos del comprobante adjunto."
 SEPARADORES_CUENTA = " ./   -"
 """Los de `0060`. Una cuenta escrita con estos separadores sigue siendo una cuenta."""
 CON_CUENTA = re.compile(rf"(?<![0-9])[0-9](?:[{SEPARADORES_CUENTA}]?[0-9]){{21}}(?![0-9])")
+CERCO = re.compile(r"\s*```(?:json)?[ \t]*\n(.*)\n[ \t]*```\s*", re.DOTALL)
 FORMAS_SOCIETARIAS = frozenset(
     {"SA", "SAS", "SAU", "SRL", "SACI", "SAIC", "SACIF", "SCA", "SCS", "SH", "SOCIEDAD", "ANONIMA",
      "LIMITADA", "RESPONSABILIDAD", "DE"}
@@ -151,7 +152,7 @@ def leer(contenido: bytes, tipo: llm.TipoAdjunto) -> Lectura:
         log.warning("la lectura del comprobante falló: %s", e)
         return Lectura(modelo=None, legible=False, error="falla_del_modelo")
     try:
-        leido = LecturaDelModelo.model_validate_json(respuesta.texto)
+        leido = LecturaDelModelo.model_validate_json(sin_cerco(respuesta.texto))
     except ValidationError as e:
         # `e` lleva lo que respondió el modelo: solo se registra cuántos errores hubo.
         log.warning("la lectura del comprobante no validó: %s errores", e.error_count())
@@ -168,6 +169,13 @@ def leer(contenido: bytes, tipo: llm.TipoAdjunto) -> Lectura:
         numero=leido.numero_operacion,
         fecha=leido.fecha,
     )
+
+
+def sin_cerco(texto: str) -> str:
+    """El JSON, si el modelo lo rodeó con un cerco de Markdown, que es como suele responder. Saca
+    solo eso: lo que queda se valida igual de estricto, y un texto alrededor del cerco no pasa."""
+    cercado = CERCO.fullmatch(texto)
+    return texto if cercado is None else cercado[1]
 
 
 def titular_normalizado(titular: str) -> str:
@@ -200,19 +208,21 @@ class Leido(Protocol):
     fecha: date | None
 
 
-def _importe_distinto(leido: Leido, importe: Decimal, moneda: str) -> bool:
-    if leido.importe is None:
-        return False
-    return leido.importe != importe or leido.moneda not in (None, moneda)
+def _importe_y_moneda(leido: Leido, importe: Decimal, moneda: str) -> list[CampoComprobante]:
+    """Cada valor por su lado: una moneda leída se compara aunque el importe no se haya leído."""
+    campos = []
+    if leido.importe is not None and leido.importe != importe:
+        campos.append(CampoComprobante.IMPORTE)
+    if leido.moneda is not None and leido.moneda != moneda:
+        campos.append(CampoComprobante.MONEDA)
+    return campos
 
 
 def distinto_de_la_orden(
     leido: Leido, importe_centavos: int, moneda: str
 ) -> list[CampoComprobante]:
     """Importe exacto y cuenta dígito a dígito. La orden no tiene fecha ni número de operación."""
-    campos = []
-    if _importe_distinto(leido, Decimal(importe_centavos) / 100, moneda):
-        campos.append(CampoComprobante.IMPORTE)
+    campos = _importe_y_moneda(leido, Decimal(importe_centavos) / 100, moneda)
     if leido.cuenta_coincide is False:
         campos.append(CampoComprobante.CUENTA)
     return campos
@@ -233,9 +243,7 @@ def distinto_de_lo_registrado(
     misma_cuenta: bool,
 ) -> list[CampoComprobante]:
     """Importe y fecha exactos. `misma_cuenta` lo dice quien sabe qué cuenta se registró."""
-    campos = []
-    if _importe_distinto(leido, importe, moneda):
-        campos.append(CampoComprobante.IMPORTE)
+    campos = _importe_y_moneda(leido, importe, moneda)
     if not misma_cuenta:
         campos.append(CampoComprobante.CUENTA)
     if leido.numero_operacion is not None and (

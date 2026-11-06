@@ -33,6 +33,7 @@ import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
+  AVISO_LECTURA_INCOMPLETA,
   AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_NO_TRANSFIERAS,
   AVISO_RETOMAR,
@@ -88,6 +89,11 @@ function DistintoDeLoRegistrado({ lectura, registrado }: { lectura: LecturaCompr
         <p>
           El comprobante dice <strong>{importe(leido, lectura.moneda ?? registrado.moneda)}</strong> y registraron{" "}
           <strong>{importe(registrado.centavos, registrado.moneda)}</strong>.
+        </p>
+      )}
+      {campos.includes("moneda") && (
+        <p>
+          El comprobante dice <strong>{lectura.moneda}</strong> y registraron <strong>{registrado.moneda}</strong>.
         </p>
       )}
       {campos.includes("cuenta") && (
@@ -296,7 +302,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   // Lo ve quien decide sobre lo registrado. Si no coincide, Observar pasa a ser el botón principal.
   const decideElPago = (paso === "conciliar" || ficha.puede_resolver_diferencia) && registrado !== null && comprobanteLeido !== null;
   const lecturaDistinta = decideElPago && comprobanteLeido.distinto_de_lo_registrado.length > 0;
-  const lecturaIgual = decideElPago && comprobanteLeido.estado === "leida" && !lecturaDistinta;
+  const lecturaIgual = decideElPago && comprobanteLeido.coincide_con_lo_registrado;
+  // Sin diferencias no quiere decir que coincida: lo que no se leyó no se comparó.
+  const lecturaIncompleta = decideElPago && comprobanteLeido.estado === "leida" && !lecturaDistinta && !lecturaIgual;
 
   function escribir(cual: ConMotivo) {
     setMotivo("");
@@ -632,6 +640,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             <div className="tarjeta">
               {lecturaDistinta && <DistintoDeLoRegistrado lectura={comprobanteLeido} registrado={registrado} />}
               {lecturaIgual && <p className="aviso-ok">{AVISO_LECTURA_COINCIDE}</p>}
+              {lecturaIncompleta && <p role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
               {diferencia !== null && (
                 <>
                   <table className="comparar-pago">

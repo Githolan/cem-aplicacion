@@ -1699,6 +1699,10 @@ def _lectura_del_comprobante(
     if leido.estado == "sin_lectura":
         return None
     con_registro = registrado is not None and registrado.version_documento_id == version
+    distinto = _distinto_de_lo_registrado(leido, registrado) if con_registro else []
+    comparada = (
+        leido.importe is not None and leido.cuenta_coincide is not None and leido.fecha is not None
+    )
     return LecturaComprobante(
         version_documento_id=version, estado=EstadoLectura(leido.estado),
         importe_centavos=None if leido.importe is None else int(leido.importe * 100),
@@ -1709,9 +1713,8 @@ def _lectura_del_comprobante(
             leido, vigente.importe_centavos, vigente.moneda
         ),
         titular_distinto=lectura_comprobantes.titular_distinto(leido, vigente.razon_social),
-        distinto_de_lo_registrado=(
-            _distinto_de_lo_registrado(leido, registrado) if con_registro else []
-        ),
+        distinto_de_lo_registrado=distinto,
+        coincide_con_lo_registrado=con_registro and comparada and not distinto,
     )  # fmt: skip
 
 

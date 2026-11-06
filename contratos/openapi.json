@@ -315,6 +315,7 @@
         "description": "Un dato que se compara entre lo leído y la orden o lo registrado.",
         "enum": [
           "importe",
+          "moneda",
           "cuenta",
           "numero_operacion",
           "fecha"
@@ -4714,6 +4715,11 @@
       "LecturaComprobante": {
         "description": "Lo que la IA leyó de `comprobante_actual`. Propone, no decide: llena campos y avisa. La\ncomparación la hace el servidor. La cuenta leída no se guarda ni viaja: solo sus últimos dígitos\ny si coincide con la de la orden.",
         "properties": {
+          "coincide_con_lo_registrado": {
+            "description": "Si importe, cuenta y fecha se leyeron, se compararon con lo registrado con este archivo y nada difiere. Con una lectura parcial o vacía es falso.",
+            "title": "Coincide Con Lo Registrado",
+            "type": "boolean"
+          },
           "cuenta_coincide": {
             "anyOf": [
               {
@@ -4746,7 +4752,7 @@
             "type": "array"
           },
           "distinto_de_lo_registrado": {
-            "description": "Lo que se leyó y no es lo que se registró con este archivo. El Consejo lo ve al conciliar. Vacía si todavía no hay registro.",
+            "description": "Lo que se leyó y no es lo que se registró con este archivo. El Consejo lo ve al conciliar. Vacía si todavía no hay registro. Vacía no quiere decir que coincida: lo que no se leyó no se compara.",
             "items": {
               "$ref": "#/components/schemas/CampoComprobante"
             },
@@ -4835,7 +4841,8 @@
           "fecha",
           "distinto_de_la_orden",
           "titular_distinto",
-          "distinto_de_lo_registrado"
+          "distinto_de_lo_registrado",
+          "coincide_con_lo_registrado"
         ],
         "title": "LecturaComprobante",
         "type": "object"

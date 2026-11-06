@@ -90,7 +90,7 @@ No se usan las variables `ANTHROPIC_*`: son de Claude Code. La capa pasa clave y
 
 **Encendida**, `cem-trabajos` exige las cuatro `CEM_LLM_*`: si falta una no arranca, y el error nombra la variable sin mostrar valores. El diseño decía que sin la capa configurada se cargaba a mano: se cambió, para que una configuración incompleta falle al desplegar y no quede una lectura que nunca corre. Hoy `cem-trabajos` no tiene esas variables: hay que cargarlas antes de encender.
 
-Cuando el antivirus aprueba una versión de un comprobante de pago, el mismo trabajo encola `documentos.leer`. Es una sola llamada, sin herramientas y sin nada de la orden, con el archivo adjunto. La respuesta se valida contra un esquema estricto: si no valida o el proveedor falla, queda como no leído y la persona carga a mano. Mientras dura la llamada `cem-trabajos` no toma otro trabajo si el lote es 1: hasta 60 segundos por comprobante.
+Cuando el antivirus aprueba una versión de un comprobante de pago, el mismo trabajo encola `documentos.leer`. Es una sola llamada, sin herramientas y sin nada de la orden, con el archivo adjunto. La respuesta se valida contra un esquema estricto, sin más tolerancia que un cerco de Markdown alrededor del JSON: si no valida o el proveedor falla, queda como no leído y la persona carga a mano. Mientras dura la llamada `cem-trabajos` no toma otro trabajo si el lote es 1: hasta 60 segundos por comprobante.
 
 Lo que dice el archivo es dato: el resultado solo llena campos. Quien compara es el código: importe y fecha exactos, cuenta dígito a dígito y titular normalizado, que solo avisa. La cuenta leída no se guarda: `nucleo.lectura_comprobante` tiene sus últimos cuatro dígitos y si coincide con la de la orden.
 

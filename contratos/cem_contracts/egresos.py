@@ -1139,6 +1139,7 @@ class CampoComprobante(StrEnum):
     """Un dato que se compara entre lo leído y la orden o lo registrado."""
 
     IMPORTE = "importe"
+    MONEDA = "moneda"
     CUENTA = "cuenta"
     NUMERO_OPERACION = "numero_operacion"
     FECHA = "fecha"
@@ -1171,7 +1172,12 @@ class LecturaComprobante(BaseModel):
     )
     distinto_de_lo_registrado: list[CampoComprobante] = Field(
         description="Lo que se leyó y no es lo que se registró con este archivo. El Consejo lo ve"
-        " al conciliar. Vacía si todavía no hay registro."
+        " al conciliar. Vacía si todavía no hay registro. Vacía no quiere decir que coincida: lo"
+        " que no se leyó no se compara."
+    )
+    coincide_con_lo_registrado: bool = Field(
+        description="Si importe, cuenta y fecha se leyeron, se compararon con lo registrado con"
+        " este archivo y nada difiere. Con una lectura parcial o vacía es falso."
     )
 
 
