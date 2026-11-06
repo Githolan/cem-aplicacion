@@ -731,3 +731,20 @@ def test_0072_ida_y_vuelta(base_aparte):
     assert funciones() == 0
     command.upgrade(cfg, "0072")  # control: vuelve a subir limpio
     assert funciones() == 15
+
+
+def test_ver_la_cuenta_encadena_emitir_y_abrir(motor_migrate, e):
+    """Lo que hace la ficha con «Ver la cuenta para pagar». El gesto vale para las dos rutas."""
+    o = aprobada(motor_migrate, e)
+    f = ficha(e, e.adm, o)
+    assert (f["situacion"], f["paso"]) == ("para_pagar", "pagar")
+    vista = {"version": 1, "huella": f["versiones"][0]["huella"]}
+    # Control: sola, la cuenta no pasa de aprobada a en ejecución.
+    assert post(e, e.adm, f"ordenes-pago/{o}/pago-manual/cuenta", vista).status_code == 409
+    r = post(e, e.adm, f"ordenes-pago/{o}/emitir", vista)
+    assert r.status_code == 200, r.json()
+    r = post(e, e.adm, f"ordenes-pago/{o}/pago-manual/cuenta", vista)
+    assert r.status_code == 200, r.json()
+    assert (r.json()["cuenta_destino"], r.json()["version"]) == (CUENTA, 1)
+    assert r.json()["huella"] == vista["huella"]
+    assert paso(e, e.adm, o) == "subir_comprobante"

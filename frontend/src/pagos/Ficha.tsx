@@ -177,7 +177,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const ruta = { consorcio_id: consorcio, orden_id: orden };
   const pago = ejecucion?.pagos.at(-1);
   // La cuenta era de la versión que se abrió: de otra versión no se muestra.
-  const cuentaVista = cuenta?.version === v.numero && cuenta.huella === v.huella ? cuenta : null;
+  const cuentaVista = cuenta?.version === v.numero ? cuenta : null;
   const anterior = ficha.versiones.find((x) => x.numero === v.numero - 1);
   const enDecision = situacion === "borrador" || situacion === "en_revision";
   const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
