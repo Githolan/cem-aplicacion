@@ -64,7 +64,8 @@ VERSION_CAMBIOS = (SESION,)
 
 REGISTRO_CAMBIOS = (
     (
-        "       or regexp_replace(coalesce(cuenta, ''), '[^0-9]', '', 'g') <> e.cuenta_destino then\n",
+        "       or regexp_replace(coalesce(cuenta, ''), '[^0-9]', '', 'g')"
+        " <> e.cuenta_destino then\n",
         "       -- Sin cuenta, solo al corregir: el registro observado ya la acreditó (0073).\n"
         "       or ((anterior.id is null or cuenta is not null)\n"
         "           and regexp_replace(coalesce(cuenta, ''), '[^0-9]', '', 'g')\n"
@@ -128,7 +129,8 @@ create function {SUBIDO.split("(")[0]}(orden uuid, facultad text, actor uuid,
           on t.consorcio_id = d.consorcio_id and t.documento_id = d.id
        where o.consorcio_id = c and o.id = orden and d.estado = 'vigente'
          and d.categoria = '{CATEGORIA}' and v.subida_por = actor
-         {limite}and v.subida_en >= e.creada_en and (t.ejecucion_id is null or t.ejecucion_id = e.id)
+         {limite}and v.subida_en >= e.creada_en
+           and (t.ejecucion_id is null or t.ejecucion_id = e.id)
        order by {orden};
   end
   $$;

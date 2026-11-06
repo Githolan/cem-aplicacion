@@ -1,7 +1,8 @@
 """El comprobante en un paso, verlo en la pantalla y corregir con lo cargado (`0073`).
 
-Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §4, §8, §10 y §14, repositorio CEM. Contra servicios
-reales: PostgreSQL, el almacén S3 de pruebas y ClamAV. Datos SINTETICOS / NO REAL: ninguna cuenta
+Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §4, §8, §10 y §14, repositorio CEM. Contra
+servicios reales: PostgreSQL, el almacén S3 de pruebas y ClamAV. Datos SINTETICOS / NO REAL:
+ninguna cuenta
 es de un banco (prefijo 999) y no se mueve dinero. La escena de pagos es la de
 `test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia.
 """
@@ -426,8 +427,10 @@ def test_al_corregir_una_cuenta_escrita_se_compara_y_el_importe_siempre(motor_mi
     otra = "9" * 22
     r = post(e, e.adm, ruta, registro(motor_migrate, e, o, doc, cuenta_destino=otra))
     assert r.status_code == 422, r.text
-    r = post(e, e.adm, ruta,
-             registro(motor_migrate, e, o, doc, cuenta_destino=None, importe_centavos=IMPORTE + 1))  # fmt: skip
+    otro_importe = registro(
+        motor_migrate, e, o, doc, cuenta_destino=None, importe_centavos=IMPORTE + 1
+    )
+    r = post(e, e.adm, ruta, otro_importe)
     assert codigo(r) == (422, "no_coincide_con_la_orden"), r.text
     r = post(e, e.adm, ruta, registro(motor_migrate, e, o, doc, cuenta_destino=None))
     assert r.status_code == 201, r.text  # control

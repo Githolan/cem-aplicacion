@@ -92,6 +92,17 @@ server {
         try_files $uri =404;
     }
 
+    # El trabajador de pdf.js es un módulo `.mjs`, que `mime.types` no conoce: como
+    # application/octet-stream el navegador no lo carga y ningún PDF se dibuja.
+    location ~ ^/assets/[^/]+\.mjs$ {
+        include /etc/nginx/cem/cabeceras.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        types {
+            application/javascript mjs;
+        }
+        try_files $uri =404;
+    }
+
     # El service worker (con su extensión sw-entrar.js) y el manifiesto se revalidan siempre, si
     # no la versión nueva no llega.
     location ~ ^/(sw\.js|sw-entrar\.js|workbox-[^/]+\.js|manifest\.webmanifest)$ {
