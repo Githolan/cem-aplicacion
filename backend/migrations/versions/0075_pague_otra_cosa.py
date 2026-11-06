@@ -41,9 +41,12 @@ en un período (`pagada_despues_del_periodo`). Las órdenes sin diferencia no ca
 **Exportación económica (`0069`):** `exportar_pagos` suma `diferencia_pago`, con los últimos dígitos
 de la cuenta y la explicación sin cuentas.
 
-**Cotejo (`0074`):** `cotejo_pago` cita `pago_manual`, y una diferencia no es un registro: su
-transferencia todavía no se coteja. `pagos_del_cotejo` deja de ofrecer el registro observado que la
-diferencia reemplazó, porque no es lo que salió del banco.
+**Cotejo (`0074`):** la transferencia de una diferencia salió del banco, y sin cotejarla el extracto
+la mostraría como un débito sin registrar. `pagos_del_cotejo` la ofrece por su importe real, con el
+id de la diferencia, y deja de ofrecer el registro observado que reemplazó. `cotejo_pago` cita un
+registro o una diferencia, nunca los dos ni ninguno. Se coteja una vez que el Consejo la resolvió,
+como un pago conciliado, sea cual sea la resolución: lo reclamado, aunque vuelva, también salió.
+Por eso acá no se excluye la ejecución `fallida`.
 
 **Volver a pagar (§9).** `modificar_orden_pago` acepta desde `fallida` una versión sin cambios, que
 pasa otra vez por aprobación. Desde cualquier otro estado sigue dando `sin_cambios`.
@@ -84,6 +87,10 @@ MODIFICAR = (
 )
 EXPORTAR = "nucleo.exportar_pagos(uuid, uuid)"
 COTEJO = "nucleo.pagos_del_cotejo(uuid)"
+ANOTAR_COTEJO = "nucleo.anotar_cotejo(uuid, uuid, uuid, text, uuid, uuid, uuid)"
+IMPORTAR_EXTRACTO = (
+    "nucleo.importar_extracto(text, date, date, jsonb, text, text, text, text, uuid, text, uuid)"
+)
 
 IMPORTE_PAGADO = "nucleo.importe_pagado_ejecucion(c, e.id)"
 
@@ -741,7 +748,23 @@ EXPORTAR_CAMBIOS = (
         "       order by f.paso;\n"
         "    return query\n      select 'declaracion_no_pagado'::text,\n",
     ),
+    (
+        "             jsonb_build_object('id', t.id, 'pago_id', t.pago_id, 'origen', t.origen,\n",
+        "             jsonb_build_object('id', t.id, 'pago_id', t.pago_id,\n"
+        "                                'diferencia_id', t.diferencia_id, 'origen', t.origen,\n",
+    ),
 )
+
+TABLA_COTEJO = """
+alter table nucleo.cotejo_pago
+  alter column pago_id drop not null,
+  add column diferencia_id uuid,
+  add unique (consorcio_id, diferencia_id),
+  add foreign key (consorcio_id, diferencia_id)
+    references nucleo.diferencia_pago_manual (consorcio_id, id),
+  add constraint cotejo_de_un_pago_o_una_diferencia
+    check (num_nonnulls(pago_id, diferencia_id) = 1);
+"""
 
 COTEJO_CAMBIOS = (
     (
@@ -750,6 +773,48 @@ COTEJO_CAMBIOS = (
         "       -- Con una diferencia, el registro observado ya no es lo que salió del banco.\n"
         "       and not exists (select 1 from nucleo.diferencia_pago_manual f\n"
         "                        where f.ejecucion_id = e.id)\n",
+    ),
+    (
+        "                        where r.ejecucion_id = e.id and r.resultado = 'fallida')\n",
+        "                        where r.ejecucion_id = e.id and r.resultado = 'fallida')\n"
+        "    union all\n"
+        "    -- Lo que salió del banco de verdad. Lo reclamado también, aunque después vuelva.\n"
+        "    select f.id, f.orden_id, e.id, pv.razon_social, v.concepto, f.numero_operacion,\n"
+        "           f.fecha_operacion, nucleo.centavos_de(f.importe_real), f.moneda,\n"
+        "           f.resolucion is not null,\n"
+        "           exists (select 1 from nucleo.cotejo_pago t\n"
+        "                    where t.consorcio_id = c and t.diferencia_id = f.id)\n"
+        "      from nucleo.diferencia_pago_manual f\n"
+        "      join nucleo.ejecucion_orden_pago e\n"
+        "        on e.consorcio_id = f.consorcio_id and e.id = f.ejecucion_id\n"
+        "      join nucleo.orden_pago_version v\n"
+        "        on v.consorcio_id = e.consorcio_id and v.orden_id = e.orden_id"
+        " and v.numero = e.version\n"
+        "      join nucleo.proveedor_version pv\n"
+        "        on pv.consorcio_id = v.consorcio_id and pv.proveedor_id = v.proveedor_id\n"
+        "       and pv.numero = v.proveedor_version\n"
+        "     where f.consorcio_id = c\n",
+    ),
+)
+
+ANOTAR_COTEJO_CAMBIOS = (
+    (
+        "      (consorcio_id, pago_id, origen, movimiento_id, cotejado_por, identidad_cotejo)\n"
+        "    values (c, pago, origen_cotejo, movimiento, actor, identidad);\n",
+        "      (consorcio_id, pago_id, diferencia_id, origen, movimiento_id, cotejado_por,\n"
+        "       identidad_cotejo)\n"
+        "    select c, case when f.id is null then pago end, f.id, origen_cotejo, movimiento,\n"
+        "           actor, identidad\n"
+        "      from (select pago as id) x\n"
+        "      left join nucleo.diferencia_pago_manual f\n"
+        "        on f.consorcio_id = c and f.id = x.id;\n",
+    ),
+)
+
+IMPORTAR_EXTRACTO_CAMBIOS = (
+    (
+        "             m.hash_linea = any(nuevos), t.pago_id\n",
+        "             m.hash_linea = any(nuevos), coalesce(t.pago_id, t.diferencia_id)\n",
     ),
 )
 
@@ -763,6 +828,8 @@ REEMPLAZOS = (
     (MODIFICAR, MODIFICAR_CAMBIOS),
     (EXPORTAR, EXPORTAR_CAMBIOS),
     (COTEJO, COTEJO_CAMBIOS),
+    (ANOTAR_COTEJO, ANOTAR_COTEJO_CAMBIOS),
+    (IMPORTAR_EXTRACTO, IMPORTAR_EXTRACTO_CAMBIOS),
 )
 OTRAS_LECTURAS = ((ACCIONES, ACCIONES_CAMBIOS), (CONSULTA, CONSULTA_CAMBIOS))
 
@@ -814,6 +881,7 @@ def _hechos(*, al_reves: bool = False) -> None:
 
 def upgrade() -> None:
     op.execute(TABLA)
+    op.execute(TABLA_COTEJO)
     op.execute(FUNCIONES)
     for funcion in INTERNAS + RUTAS:
         op.execute(f"revoke all on function {funcion} from public")
@@ -835,5 +903,7 @@ def downgrade() -> None:
         op.execute(_definicion(funcion, cambios, al_reves=True))
     for funcion in RUTAS + INTERNAS:
         op.execute(f"drop function {funcion}")
+    op.execute("alter table nucleo.cotejo_pago drop column diferencia_id")
+    op.execute("alter table nucleo.cotejo_pago alter column pago_id set not null")
     op.execute("drop table nucleo.diferencia_pago_manual")
     op.execute("drop function nucleo.negar_cambio_diferencia_pago()")

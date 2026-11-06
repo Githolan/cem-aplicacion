@@ -19,6 +19,7 @@ import {
 } from "../egresos/comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { MONEDAS } from "./FormularioOrden";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_OTRA_COSA } from "./textos";
 import type { ActoEnCurso } from "./useActo";
 import { useUrlDelArchivo, VisorComprobante } from "./VisorComprobante";
@@ -41,16 +42,17 @@ type Comprobante = components["schemas"]["ComprobanteActual"];
 type Subido = components["schemas"]["ComprobanteSubido"];
 type Version = components["schemas"]["VersionOrdenPago"];
 type Pago = components["schemas"]["PagoManual"];
-type Registro = { numero: string; fecha: string; importe: string; cuenta: string; explicacion: string };
+type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
 const hoy = () => new Date().toLocaleDateString("en-CA");
 
-function datosIniciales(corregido: Pago | undefined): Registro {
-  if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", cuenta: "", explicacion: "" };
+function datosIniciales(corregido: Pago | undefined, moneda: string): Registro {
+  if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", moneda, cuenta: "", explicacion: "" };
   return {
     numero: corregido.numero_operacion,
     fecha: corregido.fecha_operacion,
     importe: aTexto(corregido.importe_centavos),
+    moneda,
     cuenta: "",
     explicacion: "",
   };
@@ -81,7 +83,7 @@ export function RegistroPago(props: Props) {
   const id = useId();
   const { enviando, setEnviando, setAviso, montado } = acto;
   const corrige = corregido !== undefined;
-  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido));
+  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido, version.moneda));
   const [otraCosa, setOtraCosa] = useState(false);
   /** Lo elegido en este dispositivo: se ve enseguida, y el reintento no pide elegirlo de nuevo. */
   const [elegido, setElegido] = useState<File | null>(null);
@@ -228,7 +230,7 @@ export function RegistroPago(props: Props) {
             numero_operacion: registro.numero.trim(),
             fecha_operacion: registro.fecha,
             importe_real: aDecimal(centavos),
-            moneda: version.moneda,
+            moneda: registro.moneda,
             cuenta_real: registro.cuenta.replace(/\D/g, ""),
             documento_id: documento,
             explicacion: registro.explicacion.trim(),
@@ -310,6 +312,20 @@ export function RegistroPago(props: Props) {
           <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
           <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
             alCambiar={(texto) => cambiar("importe", texto)} />
+          {otraCosa && (
+            <>
+              <label htmlFor={`${id}-moneda`}>Moneda que salió del banco</label>
+              <input id={`${id}-moneda`} required list={`${id}-monedas`} pattern="[A-Z]{3}" maxLength={3} autoCapitalize="characters"
+                aria-describedby={`${id}-moneda-ayuda`} value={registro.moneda} disabled={enviando}
+                onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
+              <datalist id={`${id}-monedas`}>
+                {MONEDAS.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
+            </>
+          )}
           {corrige && !otraCosa ? (
             <p>
               Cuenta de destino: {cuentaEnmascarada(version.cuenta_ultimos_digitos)}, la que ya registraste. Si la plata fue a otra

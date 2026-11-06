@@ -27,6 +27,7 @@ from tests.test_circuito_pagos_0072 import (
     paso,
     segundo_ejecutor,
 )
+from tests.test_cotejo_0074 import extracto, linea, pendientes, subio, tildar
 from tests.test_egresos_1a import _hoy, aprobada, enviada
 from tests.test_liquidacion_0057 import (  # noqa: F401  (`esquema` es un fixture)
     AGREGAR,
@@ -62,6 +63,7 @@ from tests.test_pago_manual_0055 import (
     VER,
     acciones,
     comprobante,
+    con_ejecutar,
     emitida,
     evidencia,
     registrada,
@@ -292,6 +294,139 @@ def test_el_cotejo_no_ofrece_el_registro_que_la_diferencia_reemplazo(motor_migra
     assert p in en_el_cotejo()  # control: sin la diferencia, figura
     llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos(motor_migrate, e, o))
     assert p not in en_el_cotejo()
+
+
+# Cotejo: la transferencia de una diferencia ----------------------------------------------------
+
+
+def linea_de(motor_migrate, d, **cambios) -> str:
+    """El débito que dejó la transferencia en el extracto: el importe real, no el aprobado."""
+    f = fila_de(motor_migrate, d)
+    centavos = int(f["importe_real"] * 100)
+    datos = {"fecha": f["fecha_operacion"], "importe": f"-{centavos // 100},{centavos % 100:02d}",
+             "referencia": f["numero_operacion"]} | cambios  # fmt: skip
+    return linea(**datos)
+
+
+def cotejo_de(motor_migrate, d) -> dict | None:
+    with motor_migrate.connect() as c:
+        fila_cotejo = c.execute(
+            text("select * from nucleo.cotejo_pago where diferencia_id = :d"), {"d": d}
+        ).mappings().one_or_none()  # fmt: skip
+    return None if fila_cotejo is None else dict(fila_cotejo)
+
+
+def test_el_extracto_reconoce_la_transferencia_de_una_diferencia(motor_migrate, e):
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o)
+    cuerpo = extracto(linea_de(motor_migrate, d))
+    # Sin resolver espera, como un pago sin conciliar: tampoco es un débito sin registrar.
+    r = subio(e, e.mc1, cuerpo)
+    assert (r["esperan_conciliar"], r["cotejados"], r["total_banco_no_aca"]) == (1, 0, 0)
+    assert cotejo_de(motor_migrate, d) is None
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
+    antes = orden(motor_migrate, o)
+    r = subio(e, e.mc1, cuerpo)
+    assert (r["cotejados"], r["total_banco_no_aca"], r["aca_no_banco"]) == (1, 0, [])
+    atado = cotejo_de(motor_migrate, d)
+    assert (atado["origen"], atado["pago_id"]) == ("extracto", None)
+    assert atado["movimiento_id"] is not None and atado["cotejado_por"] == e.mc1
+    assert orden(motor_migrate, o) == antes
+    # Reimportar no la vuelve a contar ni la devuelve como débito sin registrar.
+    r = subio(e, e.mc1, cuerpo)
+    assert (r["cotejados"], r["ya_cotejados"], r["total_banco_no_aca"]) == (0, 1, 0)
+
+
+def test_un_debito_por_lo_aprobado_no_es_el_de_la_diferencia(motor_migrate, e):
+    """Control del anterior: el extracto sí ve un débito sin registrar, y compara con lo real."""
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o)
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
+    aprobado = f"-{IMPORTE // 100},{IMPORTE % 100:02d}"
+    r = subio(e, e.mc1, extracto(linea_de(motor_migrate, d, importe=aprobado)))
+    assert (r["cotejados"], r["total_banco_no_aca"]) == (0, 1)
+    assert [x["pago_id"] for x in r["aca_no_banco"]] == [str(d)]
+    assert r["aca_no_banco"][0]["importe_centavos"] == int(REAL_DE_MENOS * 100)
+    assert cotejo_de(motor_migrate, d) is None
+
+
+@pytest.mark.parametrize("recuperada", [False, True])
+def test_lo_reclamado_igual_salio_del_banco(motor_migrate, e, recuperada):
+    """También con la orden fallida: la plata volvió después, pero el débito está."""
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o, cuenta=OTRA_CUENTA)
+    resuelta(motor_migrate, e, o, d, "reclamo")
+    if recuperada:
+        llamar(motor_migrate, e, e.mc2, RECUPERAR, orden=o, diferencia=d)
+        assert orden(motor_migrate, o)["estado"] == "fallida"
+    r = subio(e, e.mc1, extracto(linea_de(motor_migrate, d)))
+    assert (r["cotejados"], r["total_banco_no_aca"]) == (1, 0)
+
+
+def test_a_mano_se_tilda_una_sola_vez_y_con_lo_real(motor_migrate, e):
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o)
+    assert pendientes(e, e.mc1)["elementos"] == []  # sin resolver, todavía no
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
+    [pendiente] = pendientes(e, e.mc1)["elementos"]
+    assert pendiente["pago_id"] == str(d)
+    assert pendiente["importe_centavos"] == int(REAL_DE_MENOS * 100)
+    assert pendiente["puede_cotejar"] is True
+    assert tildar(e, e.mc1, d).json() == {"cotejados": 1}
+    assert tildar(e, e.mc1, d).json() == {"cotejados": 0}
+    assert cotejo_de(motor_migrate, d)["origen"] == "manual"
+    assert pendientes(e, e.mc1)["elementos"] == []
+
+
+def test_quien_registro_la_diferencia_no_la_coteja(motor_migrate, e):
+    o = emitida(motor_migrate, e)
+    con_ejecutar(motor_migrate, e, e.mc2)
+    d = con_diferencia(motor_migrate, e, o, quien=e.mc2)
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real", quien=e.mc1)
+    assert pendientes(e, e.mc2)["elementos"][0]["puede_cotejar"] is False
+    assert codigo(tildar(e, e.mc2, d)) == (403, "no_es_quien_ejecuto")
+    assert cotejo_de(motor_migrate, d) is None
+    assert pendientes(e, e.mc1)["elementos"][0]["puede_cotejar"] is True  # control
+    assert tildar(e, e.mc1, d).status_code == 200
+
+
+def test_quien_preparo_no_coteja_la_diferencia(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o)
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
+    assert tildar(e, otra, d).status_code == 403
+    assert cotejo_de(motor_migrate, d) is None
+
+
+def test_la_diferencia_de_otro_consorcio_no_se_coteja(motor_migrate, motor_app, e):
+    o = emitida(motor_migrate, e)
+    d = con_diferencia(motor_migrate, e, o)
+    resuelta(motor_migrate, e, o, d, "pagada_por_lo_real")
+    otra = escena_economica(motor_migrate, motor_app)
+    assert pendientes(otra, otra.mc1)["elementos"] == []
+    assert codigo(tildar(otra, otra.mc1, d)) == (404, "no_encontrado")
+    assert cotejo_de(motor_migrate, d) is None
+    assert [x["pago_id"] for x in pendientes(e, e.mc1)["elementos"]] == [str(d)]  # control
+
+
+@pytest.mark.parametrize("con_pago", [True, False])
+def test_un_cotejo_es_de_un_pago_o_de_una_diferencia(motor_migrate, e, con_pago):
+    """Sin pasar por la función, con el dueño de la tabla: lo niega la base."""
+    o = emitida(motor_migrate, e)
+    p = registrada(motor_migrate, e, o)
+    observada(motor_migrate, e, o, p)
+    d = llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos(motor_migrate, e, o))
+    insertar = text(
+        "insert into nucleo.cotejo_pago (consorcio_id, pago_id, diferencia_id, origen,"
+        " cotejado_por, identidad_cotejo) select consorcio_id, :p, :d, 'manual', registrada_por,"
+        " identidad_registro from nucleo.diferencia_pago_manual where id = :d0"
+    )
+    with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
+        c.execute(insertar, {"p": p if con_pago else None, "d": d if con_pago else None, "d0": d})
+    assert error.value.orig.diag.constraint_name == "cotejo_de_un_pago_o_una_diferencia"
+    with motor_migrate.begin() as c:  # control: la misma sentencia pasa con una sola cosa
+        c.execute(insertar, {"p": None, "d": d, "d0": d})
 
 
 def test_una_declaracion_anterior_queda_superada(motor_migrate, e):

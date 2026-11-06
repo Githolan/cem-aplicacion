@@ -34,7 +34,7 @@ type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
-const MONEDAS = ["ARS", "USD"] as const;
+export const MONEDAS = ["ARS", "USD"] as const;
 /** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
 const SE_CORRIGE_EN_EL_FORMULARIO = new Set(["sin_cambios", "proveedor_inactivo"]);
 

@@ -6781,7 +6781,7 @@
         "type": "object"
       },
       "PagoPorCotejar": {
-        "description": "Un pago conciliado conforme que falta cotejar. Sin la cuenta.",
+        "description": "Lo que salió del banco y falta cotejar: un pago conciliado conforme o una diferencia ya\nresuelta, por su importe real. Sin la cuenta.",
         "properties": {
           "concepto": {
             "title": "Concepto",
@@ -6810,6 +6810,7 @@
             "type": "string"
           },
           "pago_id": {
+            "description": "El id del registro o de la diferencia.",
             "format": "uuid",
             "title": "Pago Id",
             "type": "string"

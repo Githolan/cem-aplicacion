@@ -934,6 +934,23 @@ describe("registrar y corregir", () => {
     });
   });
 
+  it("pagué otra cosa en otra moneda lleva la moneda que se escribió, no la de la orden", async () => {
+    const api = abrirFicha(LISTO, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Pagué otra cosa"));
+    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    expect(moneda.value).toBe("ARS");
+    fireEvent.change(moneda, { target: { value: "usd" } });
+    expect(moneda.value).toBe("USD");
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Salió en dólares" } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    await screen.findByText(/La orden no queda pagada/);
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)[0])).toMatchObject({ moneda: "USD" });
+  });
+
   it("pagué otra cosa con los mismos datos lo dice y deja lo escrito", async () => {
     abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => error("sin_diferencia", 422),

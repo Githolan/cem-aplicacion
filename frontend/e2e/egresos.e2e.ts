@@ -403,6 +403,7 @@ test.describe("circuito de pagos", () => {
     await page.getByRole("button", { name: "Pagué otra cosa" }).click();
     await page.getByLabel("Número de operación").fill("0001234567");
     await page.getByLabel("Importe que salió del banco").fill("98750");
+    await page.getByLabel("Moneda que salió del banco").fill("USD");
     await page.getByLabel(/^CBU\/CVU de destino/).fill(CUENTA);
     await page.getByLabel("Qué pasó").fill("SINTETICO: me equivoqué");
     await expect(page.getByText("La orden no queda pagada: lo resuelve el Consejo.")).toBeVisible();
