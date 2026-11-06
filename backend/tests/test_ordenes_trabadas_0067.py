@@ -23,6 +23,7 @@ from tests.test_orden_pago_neutra import llamar, niega, nueva_sesion, orden
 from tests.test_pago_manual_0055 import (
     CONCILIAR,
     CONFIRMAR,
+    CUENTA,
     DECLARAR,
     REGISTRAR,
     emitida,
@@ -181,7 +182,7 @@ def test_por_aclarar_lista_a_quien_vio_la_cuenta_y_ya_no_ejecuta(motor_migrate, 
     dar_de_baja(motor_migrate, motor_app, e, e.adm)
     [fila] = por_aclarar(motor_migrate, e, e.adm)
     assert (fila["consorcio_id"], fila["orden_id"], fila["version"]) == (e.cons, o, 1)
-    assert "cuenta" not in fila and all("999" not in str(v) for v in fila.values())
+    assert "cuenta" not in fila and all(CUENTA not in str(v) for v in fila.values())
     assert por_aclarar(motor_migrate, e, e.mc2) == []  # control: no vio la cuenta
     llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo=MOTIVO)
     assert por_aclarar(motor_migrate, e, e.adm) == []  # ya declaró

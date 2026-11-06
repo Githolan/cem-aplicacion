@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app import llm
 from app.config import Config
 from app.limite import LIMITE_API, LIMITE_AUTENTICACION_IP, LimiteDeTasa
 from app.main import crear_app
@@ -92,6 +93,8 @@ def arrancar(confiables: str | None) -> subprocess.Popen:
     entorno = {k: v for k, v in os.environ.items() if not k.startswith(("CEM_", "FORWARDED_"))}
     entorno["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{entorno['PATH']}"
     entorno["CEM_REDIS_URL"] = REDIS_URL
+    # El arranque real las exige; esta prueba no llama al modelo.
+    entorno.update({nombre: "sin-uso-en-esta-prueba" for nombre in llm.VARIABLES})
     if confiables is not None:
         entorno["FORWARDED_ALLOW_IPS"] = confiables
     return subprocess.Popen(

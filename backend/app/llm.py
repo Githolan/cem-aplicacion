@@ -5,18 +5,28 @@ proveedor. Se llama solo desde el backend; la clave nunca llega al frontend. Cam
 es cambiar las cuatro variables `CEM_LLM_*`, sin tocar código.
 """
 
+import base64
 import os
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 VARIABLES = ("CEM_LLM_PROVIDER", "CEM_LLM_API_KEY", "CEM_LLM_BASE_URL", "CEM_LLM_MODEL")
 PROVEEDORES_ANTHROPIC = frozenset({"anthropic", "zai"})
 """Hablan el protocolo de Anthropic. Cualquier otro se trata como compatible con OpenAI."""
 
 
+@dataclass(frozen=True)
+class Adjunto:
+    """Un PDF o una imagen que acompaña al texto del mensaje."""
+
+    tipo: Literal["application/pdf", "image/jpeg", "image/png"]
+    datos: bytes
+
+
 class Mensaje(TypedDict):
     role: Literal["system", "user", "assistant"]
     content: str
+    adjuntos: NotRequired[list[Adjunto]]
 
 
 @dataclass(frozen=True)
@@ -52,6 +62,38 @@ def complete(messages: list[Mensaje], opts: Opciones) -> Respuesta:
     return respuesta
 
 
+def _base64(adjunto: Adjunto) -> str:
+    return base64.b64encode(adjunto.datos).decode("ascii")
+
+
+def _mensaje_anthropic(mensaje: Mensaje) -> dict:
+    if not mensaje.get("adjuntos"):
+        return {"role": mensaje["role"], "content": mensaje["content"]}
+    bloques = [
+        {
+            "type": "document" if a.tipo == "application/pdf" else "image",
+            "source": {"type": "base64", "media_type": a.tipo, "data": _base64(a)},
+        }
+        for a in mensaje["adjuntos"]
+    ]
+    texto = {"type": "text", "text": mensaje["content"]}
+    return {"role": mensaje["role"], "content": [*bloques, texto]}
+
+
+def _mensaje_openai(mensaje: Mensaje) -> dict:
+    if not mensaje.get("adjuntos"):
+        return {"role": mensaje["role"], "content": mensaje["content"]}
+    bloques = []
+    for a in mensaje["adjuntos"]:
+        url = f"data:{a.tipo};base64,{_base64(a)}"
+        if a.tipo == "application/pdf":
+            bloques.append({"type": "file", "file": {"filename": "adjunto.pdf", "file_data": url}})
+        else:
+            bloques.append({"type": "image_url", "image_url": {"url": url}})
+    texto = {"type": "text", "text": mensaje["content"]}
+    return {"role": mensaje["role"], "content": [texto, *bloques]}
+
+
 def _con_anthropic(messages: list[Mensaje], opts: Opciones, variables: dict[str, str]) -> Respuesta:
     from anthropic import Anthropic
 
@@ -66,7 +108,7 @@ def _con_anthropic(messages: list[Mensaje], opts: Opciones, variables: dict[str,
     respuesta = cliente.messages.create(
         model=variables["CEM_LLM_MODEL"],
         max_tokens=opts.max_tokens,
-        messages=[m for m in messages if m["role"] != "system"],
+        messages=[_mensaje_anthropic(m) for m in messages if m["role"] != "system"],
         **extra,
     )
     texto = "".join(bloque.text for bloque in respuesta.content if bloque.type == "text")
@@ -84,6 +126,6 @@ def _con_openai(messages: list[Mensaje], opts: Opciones, variables: dict[str, st
     respuesta = cliente.chat.completions.create(
         model=variables["CEM_LLM_MODEL"],
         max_tokens=opts.max_tokens,
-        messages=messages,
+        messages=[_mensaje_openai(m) for m in messages],
     )
     return Respuesta(texto=respuesta.choices[0].message.content or "", modelo=respuesta.model)

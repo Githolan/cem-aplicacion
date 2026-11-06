@@ -134,6 +134,39 @@ def test_las_variables_de_claude_code_no_desvian_la_llamada(
     assert proveedor.pedidos[0][1]["authorization"] == f"Bearer {CLAVE}"
 
 
+@pytest.mark.parametrize(
+    ("tipo", "bloque"),
+    [("application/pdf", "document"), ("image/png", "image"), ("image/jpeg", "image")],
+)
+def test_anthropic_recibe_el_adjunto_en_base64(
+    monkeypatch: pytest.MonkeyPatch, proveedor: Proveedor, tipo: str, bloque: str
+) -> None:
+    configurar(monkeypatch, "anthropic", proveedor)
+    adjunto = llm.Adjunto(tipo=tipo, datos=b"contenido")
+    llm.complete([{"role": "user", "content": "leer", "adjuntos": [adjunto]}], OPCIONES)
+    primero, texto = proveedor.pedidos[0][2]["messages"][0]["content"]
+    assert primero == {
+        "type": bloque,
+        "source": {"type": "base64", "media_type": tipo, "data": "Y29udGVuaWRv"},
+    }
+    assert texto == {"type": "text", "text": "leer"}
+
+
+def test_openai_recibe_imagen_y_pdf_en_su_formato(
+    monkeypatch: pytest.MonkeyPatch, proveedor: Proveedor
+) -> None:
+    configurar(monkeypatch, "openrouter", proveedor)
+    adjuntos = [
+        llm.Adjunto(tipo="image/png", datos=b"contenido"),
+        llm.Adjunto(tipo="application/pdf", datos=b"contenido"),
+    ]
+    llm.complete([{"role": "user", "content": "leer", "adjuntos": adjuntos}], OPCIONES)
+    texto, imagen, pdf = proveedor.pedidos[0][2]["messages"][0]["content"]
+    assert texto == {"type": "text", "text": "leer"}
+    assert imagen["image_url"]["url"] == "data:image/png;base64,Y29udGVuaWRv"
+    assert pdf["file"]["file_data"] == "data:application/pdf;base64,Y29udGVuaWRv"
+
+
 def test_una_respuesta_sin_texto_es_un_error(
     monkeypatch: pytest.MonkeyPatch, proveedor: Proveedor
 ) -> None:
