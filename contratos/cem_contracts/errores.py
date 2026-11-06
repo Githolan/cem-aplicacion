@@ -256,6 +256,8 @@ class CodigoError(StrEnum):
     EXTRACTO_INVALIDO = "extracto_invalido"
     """El archivo no se puede leer como un CSV de un extracto: codificación, separador, encabezados
     con forma de fórmula o demasiadas líneas."""
+    EXTRACTO_DEMASIADAS_LINEAS = "extracto_demasiadas_lineas"
+    """El extracto pasa del máximo de líneas."""
     EXTRACTO_SIN_MOVIMIENTOS = "extracto_sin_movimientos"
     """Con esas columnas no se pudo leer ninguna línea del extracto."""
     COLUMNAS_NO_ENCONTRADAS = "columnas_no_encontradas"

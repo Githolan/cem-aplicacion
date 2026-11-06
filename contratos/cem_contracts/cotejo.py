@@ -77,6 +77,7 @@ class ListaCotejo(BaseModel):
         description="El `despues` de la página siguiente; sin él, no hay más."
     )
     tope_bytes: int = Field(description="El tamaño máximo de un extracto.")
+    maximo_pagos: int = Field(description="Cuántos pagos entran en un pedido de cotejar a mano.")
 
 
 class PagosACotejar(BaseModel):

@@ -20,6 +20,8 @@ otro separador del mismo extracto dan la misma clave. Lleva la cantidad de veces
 datos ya aparecieron en el archivo: dos débitos iguales en un día son dos movimientos, y reimportar
 da las mismas dos claves.
 
+**El separador** es el que da una tabla: un encabezado de nombres con una columna de fechas debajo.
+
 **Comparar.** Por número de operación; una línea sin número, por importe y fecha. Con un número que
 coincide y otro importe no hay coincidencia: se muestran los dos lados. Por importe y fecha solo se
 empareja cuando no hay duda: tantas líneas como pagos iguales. Si no, se miran. Nada se aproxima:
@@ -76,6 +78,10 @@ class ExtractoInvalido(ValueError):
     """El archivo no se puede leer como un CSV de un extracto."""
 
 
+class DemasiadasLineas(ExtractoInvalido):
+    """El archivo pasa del máximo de líneas."""
+
+
 class ColumnasNoEncontradas(ValueError):
     """El archivo no tiene alguna de las columnas pedidas."""
 
@@ -127,27 +133,47 @@ def _filas(texto: str, separador: str) -> list[tuple[int, list[str]]]:
         raise ExtractoInvalido("no es un CSV") from e
 
 
-def _ancho(filas: list[tuple[int, list[str]]]) -> tuple[int, int]:
-    """La mayor cantidad de columnas que se repite, y en cuántas líneas: encabezado y datos la
-    comparten; el título y los datos de la cuenta que los bancos ponen arriba, no."""
-    return max(((c, v) for c, v in Counter(len(f) for _, f in filas).items() if v > 1),
-               default=(0, 0))  # fmt: skip
+def _es_tabla(filas: list[list[str]]) -> bool:
+    """Si el primero es un encabezado de verdad, con solo nombres, y debajo hay una columna de
+    fechas. Más columnas no dice nada: las comas de una descripción también las dan."""
+    encabezado, *datos = filas
+    if any(leer_fecha(c) is not None or leer_importe(c) is not None for c in encabezado):
+        return False
+    vistos = datos[:LINEAS_PARA_SEPARADOR]
+    return any(
+        sum(leer_fecha(f[i]) is not None for f in vistos) * 2 > len(vistos)
+        for i in range(len(encabezado))
+    )
+
+
+def _estructura(filas: list[tuple[int, list[str]]]) -> tuple[bool, int, int]:
+    """Si hay una tabla, cuántas líneas la forman y de cuántas columnas. Encabezado y datos
+    comparten el ancho; el título y los datos de la cuenta que los bancos ponen arriba, no. Sin
+    nada que se reconozca como tabla, gana el ancho con más líneas."""
+    por_ancho = defaultdict(list)
+    for _, fila in filas:
+        por_ancho[len(fila)].append(fila)
+    return max(
+        ((_es_tabla(v), len(v), c) for c, v in por_ancho.items()
+         if c >= MINIMO_COLUMNAS and len(v) > 1),
+        default=(False, 0, 0),
+    )  # fmt: skip
 
 
 def _separador(texto: str) -> str:
-    """El que da más columnas repetidas."""
+    """El que da la mejor estructura."""
     inicio = "\n".join(texto.splitlines()[:LINEAS_PARA_SEPARADOR])
     candidatos = []
     for separador in SEPARADORES:
         try:
-            columnas, veces = _ancho(_filas(inicio, separador))
+            estructura = _estructura(_filas(inicio, separador))
         except ExtractoInvalido:
             continue
-        if columnas >= MINIMO_COLUMNAS:
-            candidatos.append((columnas, veces, separador))
+        if estructura[2] > 0:
+            candidatos.append((*estructura, separador))
     if not candidatos:
         raise ExtractoInvalido("no tiene columnas")
-    return max(candidatos, key=lambda c: c[:2])[2]
+    return max(candidatos, key=lambda c: c[:3])[3]
 
 
 def _nombres(encabezado: list[str]) -> list[str]:
@@ -171,8 +197,8 @@ def leer_tabla(cuerpo: bytes, maximo_lineas: int) -> Tabla:
     texto = _decodificar(cuerpo)
     filas = _filas(texto, _separador(texto))
     if len(filas) > maximo_lineas:
-        raise ExtractoInvalido("tiene demasiadas líneas")
-    columnas = _ancho(filas)[0]
+        raise DemasiadasLineas("tiene demasiadas líneas")
+    columnas = _estructura(filas)[2]
     if columnas > MAXIMO_COLUMNAS:
         raise ExtractoInvalido("tiene demasiadas columnas")
     inicio = next(i for i, (_, f) in enumerate(filas) if len(f) == columnas)

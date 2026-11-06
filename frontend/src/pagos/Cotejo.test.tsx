@@ -41,8 +41,10 @@ function elemento(id: string, extra: Partial<Elemento> = {}): Elemento {
   };
 }
 
-const lista = (elementos: Elemento[], siguiente: string | null = null) => () =>
-  Response.json({ elementos, siguiente, tope_bytes: TOPE });
+const MAXIMO_PAGOS = 100;
+
+const lista = (elementos: Elemento[], siguiente: string | null = null, maximo_pagos = MAXIMO_PAGOS) => () =>
+  Response.json({ elementos, siguiente, tope_bytes: TOPE, maximo_pagos });
 
 const VISTA_NUEVA: Vista = {
   columnas: ["Fecha valor", "Detalle", "Debito", "Referencia"], muestra: ["05/11/2026", "x", "-1,00", "0048213377"],
@@ -183,6 +185,27 @@ describe("a mano", () => {
     abrir();
     await screen.findByText(/Lo coteja otra persona del Consejo/);
     expect(screen.queryByRole("button", { name: "Guardar lo tildado" })).toBeNull();
+  });
+
+  it("no deja tildar más de lo que entra en un pedido y dice por qué", async () => {
+    const simulado = backend({
+      [LISTA]: lista([elemento(P1), elemento(P2), elemento(P3)], null, 2),
+      [TILDAR]: () => Response.json({ cotejados: 2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const [uno, dos, tres] = (await screen.findAllByRole("checkbox")) as [HTMLInputElement, HTMLInputElement, HTMLInputElement];
+    fireEvent.click(uno);
+    expect(tres.disabled).toBe(false);
+    expect(screen.queryByText(/Se guardan hasta 2/)).toBeNull();
+    fireEvent.click(dos);
+    expect(tres.disabled).toBe(true);
+    expect(uno.disabled).toBe(false); // lo tildado se puede destildar
+    expect(screen.getByText("Se guardan hasta 2 por vez: guardá estos y seguí con los demás.")).toBeTruthy();
+    fireEvent.click(tres);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    await screen.findByText(/Listo/);
+    expect(await pedidos(simulado, TILDAR)[0]?.clone().json()).toEqual({ pagos: [P1, P2] });
   });
 
   it("sin nada para cotejar, lo dice", async () => {
@@ -415,8 +438,15 @@ describe("con el extracto", () => {
     expect(((await screen.findByLabelText(/Elegir el archivo/)) as HTMLInputElement).disabled).toBe(false);
   });
 
+  it("un archivo con demasiadas líneas lo dice así", async () => {
+    vi.stubGlobal("fetch", backend({ [VISTA]: () => error("extracto_demasiadas_lineas", 422) }));
+    abrir();
+    await subir();
+    expect((await screen.findByRole("alert")).textContent).toContain("demasiadas líneas");
+  });
+
   it("un archivo que pasa del tope no sale del navegador", async () => {
-    const simulado = backend({ [LISTA]: () => Response.json({ elementos: [], siguiente: null, tope_bytes: 3 }) });
+    const simulado = backend({ [LISTA]: () => Response.json({ elementos: [], siguiente: null, tope_bytes: 3, maximo_pagos: MAXIMO_PAGOS }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText("No falta cotejar ningún pago.");

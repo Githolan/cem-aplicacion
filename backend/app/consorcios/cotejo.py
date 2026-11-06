@@ -23,6 +23,7 @@ from cem_contracts.cotejo import (
     LIMITE_COTEJO_POR_DEFECTO,
     MAXIMO_FILAS_NO_LEIDAS,
     MAXIMO_FILAS_RESULTADO,
+    MAXIMO_PAGOS_POR_COTEJO,
     ColumnasExtracto,
     ListaCotejo,
     MovimientoSinRegistrar,
@@ -120,6 +121,7 @@ def listar_cotejo(
         elementos=pagina,
         siguiente=pagina[-1].pago_id if len(filas) > limite else None,
         tope_bytes=request.app.state.config.cotejo_tope_bytes,
+        maximo_pagos=MAXIMO_PAGOS_POR_COTEJO,
     )
 
 
@@ -197,6 +199,11 @@ class _Turno:
 def _tabla(cuerpo: bytes, request: Request) -> extracto.Tabla:
     try:
         return extracto.leer_tabla(cuerpo, request.app.state.config.cotejo_maximo_lineas)
+    except extracto.DemasiadasLineas as e:
+        raise ErrorApi(
+            422, CodigoError.EXTRACTO_DEMASIADAS_LINEAS,
+            "El archivo tiene demasiadas líneas: bajá del banco un período más corto.",
+        ) from e  # fmt: skip
     except extracto.ExtractoInvalido as e:
         raise ErrorApi(
             422, CodigoError.EXTRACTO_INVALIDO,
@@ -371,33 +378,31 @@ async def subir_extracto(
     tope = request.app.state.config.cotejo_tope_bytes
 
     def procesar(cuerpo: bytes) -> Response:
-        tabla = _tabla(cuerpo, request)
-        columnas = elegidas
-        if columnas is None:
-            with _lectura(permiso, motor) as c:
-                columnas = _columnas_guardadas(c, permiso)
-        if columnas is None:
-            raise ErrorApi(
-                409, CodigoError.COLUMNAS_SIN_ELEGIR, "Falta elegir qué columna es cada dato."
-            )
-        try:
-            lectura = extracto.leer_movimientos(tabla, columnas)
-        except extracto.ColumnasNoEncontradas as e:
-            raise ErrorApi(
-                422, CodigoError.COLUMNAS_NO_ENCONTRADAS,
-                "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
-            ) from e  # fmt: skip
-        if lectura is None:
-            raise ErrorApi(
-                422, CodigoError.EXTRACTO_SIN_MOVIMIENTOS,
-                "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
-            )  # fmt: skip
-        suma = extracto.hash_archivo(cuerpo)
-        pedido = pedido_con_cuerpo(request, clave, cuerpo)
-
+        # Todo adentro del efecto: un reintento recibe la respuesta guardada, aunque mientras tanto
+        # hayan cambiado las columnas del edificio o el máximo de líneas.
         def efecto(conn: Connection) -> tuple[int, ResultadoCotejo]:
+            tabla = _tabla(cuerpo, request)
+            columnas = elegidas or _columnas_guardadas(conn, permiso)
+            if columnas is None:
+                raise ErrorApi(
+                    409, CodigoError.COLUMNAS_SIN_ELEGIR, "Falta elegir qué columna es cada dato."
+                )
+            try:
+                lectura = extracto.leer_movimientos(tabla, columnas)
+            except extracto.ColumnasNoEncontradas as e:
+                raise ErrorApi(
+                    422, CodigoError.COLUMNAS_NO_ENCONTRADAS,
+                    "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
+                ) from e  # fmt: skip
+            if lectura is None:
+                raise ErrorApi(
+                    422, CodigoError.EXTRACTO_SIN_MOVIMIENTOS,
+                    "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
+                )  # fmt: skip
+            suma = extracto.hash_archivo(cuerpo)
             return 200, _comparar_y_cotejar(conn, permiso, lectura, columnas, suma)
 
+        pedido = pedido_con_cuerpo(request, clave, cuerpo)
         return responder_una_vez(motor, permiso.ctx, pedido, efecto)
 
     async with _Turno():

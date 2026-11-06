@@ -125,6 +125,32 @@ def test_el_punto_y_coma_le_gana_a_la_coma_decimal():
     assert tabla.columnas == ["Fecha", "Importe", "Ref"]
 
 
+def test_las_comas_de_una_descripcion_no_le_ganan_al_separador():
+    """Codex en #211: por comas hay más columnas repetidas, pero no son una tabla: la primera línea
+    de datos quedaría de encabezado."""
+    cuerpo = (
+        "Fecha;Descripcion;Importe;Referencia\n"
+        "05/11/2026;Pago a, b, c, d, e;-1,00;0048\n"
+        "06/11/2026;Pago f, g, h, i, j;-2,00;0049\n"
+        "07/11/2026;Pago sin comas;-3,00;0050\n"
+    )
+    tabla = leer_tabla(cuerpo.encode(), MAXIMO)
+    assert tabla.columnas == ["Fecha", "Descripcion", "Importe", "Referencia"]
+    assert len(tabla.filas) == 3
+
+
+def test_sin_fechas_que_se_lean_gana_la_estructura_de_mas_lineas():
+    cuerpo = (
+        "Dia;Descripcion;Importe\n5 nov;a, b, c, d;-1,00\n6 nov;e, f, g, h;-2,00\n7 nov;i;-3,00\n"
+    )
+    assert leer_tabla(cuerpo.encode(), MAXIMO).columnas == ["Dia", "Descripcion", "Importe"]
+
+
+def test_un_archivo_con_comas_sigue_separando_por_comas():
+    cuerpo = b'Fecha,Detalle,Importe\n05/11/2026,"a; b; c; d",-1.00\n06/11/2026,x,-2.00\n'
+    assert leer_tabla(cuerpo, MAXIMO).columnas == ["Fecha", "Detalle", "Importe"]
+
+
 def test_saltea_el_titulo_y_los_datos_de_la_cuenta():
     cuerpo = (b"Banco SINTETICO\nCuenta;999\nSaldo;1\nPeriodo;Oct\n\n"
               b"Fecha;Detalle;Importe;Ref\n05/11/2026;x;-1,00;0048\n")  # fmt: skip
@@ -158,7 +184,7 @@ def test_archivos_que_no_son_un_extracto(cuerpo):
 
 def test_demasiadas_lineas():
     cuerpo = b"Fecha;Importe\n" + b"05/11/2026;-1,00\n" * 11
-    with pytest.raises(ExtractoInvalido):
+    with pytest.raises(extracto.DemasiadasLineas):
         leer_tabla(cuerpo, 10)
     assert leer_tabla(cuerpo, 12).columnas == ["Fecha", "Importe"]  # control
 

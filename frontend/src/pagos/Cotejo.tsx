@@ -68,6 +68,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   const [despues, setDespues] = useState<string | null>(null);
   const [vuelta, setVuelta] = useState(0);
   const [tope, setTope] = useState<number | null>(null);
+  const [maximo, setMaximo] = useState<number | null>(null);
   const [tildados, setTildados] = useState<ReadonlySet<string>>(new Set());
   const [extracto, setExtracto] = useState<Extracto>({ tipo: "sin_archivo" });
   const [entrada, setEntrada] = useState(0);
@@ -90,6 +91,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
         if (data !== undefined) {
           setAvisoLectura(sinLaFalla);
           setTope(data.tope_bytes);
+          setMaximo(data.maximo_pagos);
           setLectura((l) => ({
             tipo: "ok",
             // Una página más se suma a lo que ya se ve; volver a empezar la reemplaza.
@@ -213,7 +215,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   function alternar(id: string) {
     setTildados((t) => {
       const nuevos = new Set(t);
-      if (!nuevos.delete(id)) nuevos.add(id);
+      if (!nuevos.delete(id) && (maximo === null || t.size < maximo)) nuevos.add(id);
       return nuevos;
     });
   }
@@ -290,6 +292,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
               <ATildar
                 elementos={lectura.elementos}
                 tildados={tildados}
+                maximo={maximo}
                 enviando={enviando}
                 alternar={alternar}
                 alGuardar={guardarTildados}
@@ -512,12 +515,15 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
 type PropsTildar = {
   elementos: Elemento[];
   tildados: ReadonlySet<string>;
+  /** Cuántos entran en un pedido: más, la API los rechaza. */
+  maximo: number | null;
   enviando: boolean;
   alternar: (id: string) => void;
   alGuardar: () => void;
 };
 
-function ATildar({ elementos, tildados, enviando, alternar, alGuardar }: PropsTildar) {
+function ATildar({ elementos, tildados, maximo, enviando, alternar, alGuardar }: PropsTildar) {
+  const lleno = maximo !== null && tildados.size >= maximo;
   const hayQuienPuede = elementos.some((e) => e.puede_cotejar);
   function enviar(evento: FormEvent) {
     evento.preventDefault();
@@ -540,7 +546,7 @@ function ATildar({ elementos, tildados, enviando, alternar, alGuardar }: PropsTi
             <li key={e.pago_id}>
               {e.puede_cotejar ? (
                 <label className="tilde-pago">
-                  <input type="checkbox" checked={tildados.has(e.pago_id)} disabled={enviando} onChange={() => alternar(e.pago_id)} />
+                  <input type="checkbox" checked={tildados.has(e.pago_id)} disabled={enviando || (lleno && !tildados.has(e.pago_id))} onChange={() => alternar(e.pago_id)} />
                   <span className="tilde-pago__datos">{fila}</span>
                 </label>
               ) : (
@@ -555,6 +561,7 @@ function ATildar({ elementos, tildados, enviando, alternar, alGuardar }: PropsTi
           );
         })}
       </ul>
+      {lleno && <p role="status">Se guardan hasta {maximo} por vez: guardá estos y seguí con los demás.</p>}
       {hayQuienPuede && (
         <div className="formulario">
           <button type="submit" disabled={enviando || tildados.size === 0}>

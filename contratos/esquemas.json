@@ -979,6 +979,7 @@
           "orden_no_liquidable",
           "sin_esquema",
           "extracto_invalido",
+          "extracto_demasiadas_lineas",
           "extracto_sin_movimientos",
           "columnas_no_encontradas",
           "columnas_sin_elegir",

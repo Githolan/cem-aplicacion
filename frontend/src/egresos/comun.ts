@@ -233,6 +233,7 @@ const MENSAJES: Record<string, string> = {
   conciliacion_repetida: "Ese pago ya está conciliado.",
   pago_sin_conciliar: "Ese pago todavía no está conciliado: se coteja después de conciliarlo.",
   extracto_invalido: "No pudimos leer el archivo como un extracto en CSV: revisá que sea el que bajaste del banco.",
+  extracto_demasiadas_lineas: "El archivo tiene demasiadas líneas: bajá del banco un período más corto.",
   extracto_sin_movimientos: "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
   columnas_no_encontradas: "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
   columnas_sin_elegir: "Falta elegir qué columna es cada dato.",

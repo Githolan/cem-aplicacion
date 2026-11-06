@@ -48,7 +48,7 @@ async function simularCotejo(pagina: Page, baseURL: string): Promise<Pedidos> {
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
     if (camino === `${c}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "GET")
-      return ruta.fulfill({ json: { elementos: pendientes, siguiente: null, tope_bytes: 20 * 1024 * 1024 } });
+      return ruta.fulfill({ json: { elementos: pendientes, siguiente: null, tope_bytes: 20 * 1024 * 1024, maximo_pagos: 100 } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "POST") {
       pedidos.tildes.push(pedido.postDataJSON());
       pendientes = pendientes.filter((p) => p.pago_id !== P1);

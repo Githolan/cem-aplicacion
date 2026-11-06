@@ -629,6 +629,7 @@
           "orden_no_liquidable",
           "sin_esquema",
           "extracto_invalido",
+          "extracto_demasiadas_lineas",
           "extracto_sin_movimientos",
           "columnas_no_encontradas",
           "columnas_sin_elegir",
@@ -4691,6 +4692,11 @@
             "title": "Elementos",
             "type": "array"
           },
+          "maximo_pagos": {
+            "description": "Cuántos pagos entran en un pedido de cotejar a mano.",
+            "title": "Maximo Pagos",
+            "type": "integer"
+          },
           "siguiente": {
             "anyOf": [
               {
@@ -4713,7 +4719,8 @@
         "required": [
           "elementos",
           "siguiente",
-          "tope_bytes"
+          "tope_bytes",
+          "maximo_pagos"
         ],
         "title": "ListaCotejo",
         "type": "object"

@@ -443,6 +443,22 @@ def test_un_reintento_con_la_misma_clave_repite_la_respuesta(motor_migrate, e):
     assert segundo.json()["cotejados"] == 1
 
 
+def test_un_reintento_repite_la_respuesta_aunque_las_columnas_hayan_cambiado(motor_migrate, e):
+    """Codex en #211: el reintento de lo que ya salió bien no depende de lo guardado después."""
+    _, p = pagado(motor_migrate, e)
+    cuerpo = extracto(linea_del_pago(motor_migrate, p))
+    subio(e, e.mc1, extracto(linea(date.today(), "-1,00")))  # deja las columnas guardadas
+    clave = clave_idempotencia()
+    primero = subir(e, e.mc1, cuerpo, None, clave=clave)
+    assert primero.status_code == 200 and primero.json()["cotejados"] == 1
+    otras = {"fecha": "Dia", "importe": "Debito", "signo": "sin_signo"}
+    subio(e, e.mc2, b"Dia;Debito;Comprobante\n05/11/2026;100,00;0048213377\n", otras)
+    segundo = subir(e, e.mc1, cuerpo, None, clave=clave)
+    assert segundo.status_code == 200 and segundo.json() == primero.json()
+    # Control: con otra clave es otro pedido, y ese sí mira las columnas de ahora.
+    assert codigo(subir(e, e.mc1, cuerpo, None)) == (422, "columnas_no_encontradas")
+
+
 # Columnas --------------------------------------------------------------------------------------
 
 
@@ -505,6 +521,28 @@ def test_el_tope_sale_de_la_configuracion(e):
         r = c.post(url(e, "pagos/cotejo/extracto"), content=cuerpo, params=COLUMNAS,
                    headers=clave_idempotencia() | {"Content-Type": "text/csv"})  # fmt: skip
         assert r.status_code == 200, r.json()
+
+
+def test_demasiadas_lineas_se_dice_aparte(e):
+    cuerpo = extracto(*[linea(date.today(), "-1,00", f"00482{i:05d}") for i in range(3)])
+    app = crear_app(Config(url_rol("app"), "0.1.0", "sha-imagen", "sha-contratos",
+                           redis_url="memory://", origen_publico="https://cem.ejemplo.com",
+                           cotejo_maximo_lineas=2))  # fmt: skip
+    app.dependency_overrides[obtener_identidad] = lambda: Identidad(e.mc1, e.sesion[e.mc1])
+    with TestClient(app, client=IP) as c:
+        r = c.post(url(e, "pagos/cotejo/columnas"), content=cuerpo,
+                   headers={"Content-Type": "text/csv"})  # fmt: skip
+    assert codigo(r) == (422, "extracto_demasiadas_lineas")
+    assert vista(e, e.mc1, cuerpo).status_code == 200  # control
+
+
+def test_la_lista_dice_cuantos_pagos_entran_en_un_pedido(motor_migrate, e):
+    maximo = pendientes(e, e.mc1)["maximo_pagos"]
+    _, p = pagado(motor_migrate, e)
+    r = post(e, e.mc1, "pagos/cotejo", {"pagos": [str(p)] + [str(uuid4()) for _ in range(maximo)]})
+    assert r.status_code == 422
+    assert cotejo(motor_migrate, p) is None
+    assert tildar(e, e.mc1, p).status_code == 200  # control
 
 
 def test_solo_se_acepta_un_csv(e):
