@@ -76,6 +76,8 @@ SUBRED=$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' "$RED")
 docker run -d --name "$REDIS" --network "$RED" --network-alias "$ALIAS_REDIS" "$IMAGEN_REDIS" >/dev/null
 docker run -d --name "$BACKEND" --network "$RED" --network-alias "$ALIAS_BACKEND" \
   -e CEM_REDIS_URL="redis://$ALIAS_REDIS:6379/0" \
+  -e CEM_LLM_PROVIDER=anthropic -e CEM_LLM_API_KEY=sin-uso-en-e2e \
+  -e CEM_LLM_BASE_URL=http://sin-uso-en-e2e -e CEM_LLM_MODEL=sin-uso-en-e2e \
   -e FORWARDED_ALLOW_IPS="$SUBRED" \
   -e CEM_SHA_IMAGEN="$SHA" \
   "$IMAGEN_BACKEND" >/dev/null

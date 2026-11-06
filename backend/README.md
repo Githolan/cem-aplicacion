@@ -55,6 +55,25 @@ Las pruebas `db` crean y borran la base `cem_prueba`, aplican la migración (ida
 
 Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.py`; si es intencional se regenera con `python -m scripts.exportar_openapi` y la diferencia se revisa en el PR.
 
+## Modelo de lenguaje
+
+`app/llm.py` es la única capa que habla con un modelo: el resto de la aplicación llama a `complete(messages, opts)` y ningún otro módulo importa el SDK de un proveedor. La llamada sale solo del backend; la clave nunca llega al frontend.
+
+| Variable | Qué es |
+|---|---|
+| `CEM_LLM_PROVIDER` | `anthropic` o `zai` usan el SDK de Anthropic; `openrouter` u otro compatible con OpenAI, el cliente de OpenAI |
+| `CEM_LLM_API_KEY` | Clave del proveedor |
+| `CEM_LLM_BASE_URL` | Dirección de su API |
+| `CEM_LLM_MODEL` | Modelo que se pide |
+
+**Cambiar de proveedor** es cambiar estas cuatro variables, sin tocar código. Si falta una, `cem-backend` no arranca y el error nombra la variable, sin mostrar valores.
+
+**En Coolify** se cargan como variables secretas de `cem-backend`, un juego por entorno: uno en `consorcio-en-mano-staging` y otro en `consorcio-en-mano`. Hay que cargarlas antes de desplegar: sin ellas el contenedor nuevo no arranca y Coolify conserva la versión anterior.
+
+**Para probar** una llamada corta, con las variables en el proceso: `python -m scripts.probar_llm`. Muestra solo el texto y el modelo. `.env.example` lista los nombres; `.env` no se versiona ni entra en la imagen.
+
+No se usan las variables `ANTHROPIC_*`: son de Claude Code. La capa pasa clave y dirección de forma explícita, así que tampoco las lee si están definidas.
+
 ## Pendiente
 
 De `identidad`: revocaciones en Redis (hoy cada petición valida en la base, así que una revocación corta el pedido siguiente), segundo factor obligatorio y 12 h para roles de dinero, y passkeys; el código por WhatsApp (con opt-in) espera a la integración de WhatsApp. Además: partición mensual de auditoría por el planificador. Producción usa PostgreSQL 18 y Python 3.12; la migración también corre en PostgreSQL 16.
