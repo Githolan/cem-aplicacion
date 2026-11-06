@@ -78,15 +78,18 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
   const [fallaComprobantes, setFallaComprobantes] = useState<string | null>(null);
   /** Cambia para vaciar el campo del archivo después de subirlo. */
   const [entrada, setEntrada] = useState(0);
+  /** La última lectura pedida: se miran solas y a mano, y una vieja no pisa a una nueva. */
+  const ultimaLectura = useRef(0);
 
   /** Lee los comprobantes: una falla no se lleva lo escrito. */
   async function leerComprobantes() {
+    const lectura = ++ultimaLectura.current;
     try {
       const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/documentos", {
         params: { path: { consorcio_id: consorcio } },
       });
       exigirSesion(response);
-      if (!montado.current) return;
+      if (!montado.current || lectura !== ultimaLectura.current) return;
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO)
@@ -111,7 +114,7 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
       }
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
-      else setFallaComprobantes(`${FALLA_COMPROBANTES} ${SIN_CONEXION}`);
+      else if (lectura === ultimaLectura.current) setFallaComprobantes(`${FALLA_COMPROBANTES} ${SIN_CONEXION}`);
     }
   }
 

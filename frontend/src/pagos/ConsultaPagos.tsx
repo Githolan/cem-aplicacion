@@ -76,9 +76,15 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     };
   }, [consorcio, pedido, vuelta, aEntrar, aInicio]);
 
+  /** Otra consulta empieza de cero: lo cargado y su «Ver más» eran de la anterior. */
+  function consultar(cambio: Partial<Pedido>) {
+    setLectura({ tipo: "cargando" });
+    setPedido((p) => ({ ...p, ...cambio, saltar: 0 }));
+  }
+
   function buscar(evento: FormEvent) {
     evento.preventDefault();
-    setPedido((p) => ({ ...p, busqueda: escrito.trim(), saltar: 0 }));
+    consultar({ busqueda: escrito.trim() });
   }
 
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
@@ -104,7 +110,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           <div className="filtros-pago" role="group" aria-label="Filtrar">
             {FILTROS.map((f) => (
               <button key={f.valor} type="button" className="secundario" aria-pressed={pedido.filtro === f.valor}
-                onClick={() => setPedido((p) => ({ ...p, filtro: f.valor, saltar: 0 }))}>
+                onClick={() => consultar({ filtro: f.valor })}>
                 {f.texto}
               </button>
             ))}

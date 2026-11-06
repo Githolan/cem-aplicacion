@@ -10,10 +10,9 @@ import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { Bandeja } from "./Bandeja";
-import { Ficha } from "./Ficha";
+import { Ficha, type Seguir } from "./Ficha";
 import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
-import type { Paso } from "./textos";
 
 // `/pagos` y `/pagos/:orden`: una bandeja y una ficha (§1). En PC la ficha se abre al lado de la
 // bandeja, con la primera orden si no se eligió otra; en tablet y teléfono, aparte (§15).
@@ -50,6 +49,9 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   const [vuelta, setVuelta] = useState(0);
   /** Cambia al terminar un acto: la ficha de al lado, aunque sea la misma orden, se lee de nuevo. */
   const [acto, setActo] = useState(0);
+  /** La orden que se abrió sola en PC. Queda fija: la bandeja se reordena al releerse (emitir mueve
+   * `actualizada_en`) y cambiar de ficha perdería la cuenta recién abierta. Se suelta al terminar. */
+  const [primera, setPrimera] = useState<string | null>(null);
 
   useEffect(() => {
     if (consorcio === "" || !veBandeja) return;
@@ -62,6 +64,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         const codigo = codigoDe(error);
         if (data !== undefined) {
           setLectura({ tipo: "ok", elementos: data.elementos });
+          setPrimera((p) => p ?? data.elementos[0]?.orden_id ?? null);
           setAviso(sinLaFalla);
         } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
@@ -85,22 +88,25 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   const alCambiar = useCallback(() => setVuelta((v) => v + 1), []);
 
   const terminar = useCallback(
-    (texto: string, seguirCon?: Paso) => {
+    (texto: string, seguir?: Seguir) => {
       const irA = (destino: string) => {
         navegar(destino, { state: { aviso: texto, consorcio } });
+        setPrimera(null);
         setVuelta((v) => v + 1);
         setActo((a) => a + 1);
       };
-      if (seguirCon === undefined) return irA(RUTA_PAGOS);
+      if (seguir === undefined) return irA(RUTA_PAGOS);
+      // Si mientras tanto se abrió otra ficha, esa queda; la bandeja igual cambió.
+      const irSiSigue = (destino: string) => (seguir.abierta.current ? irA(destino) : setVuelta((v) => v + 1));
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/pagos/bandeja", { params: { path: { consorcio_id: consorcio } } })
         .then(({ data, response }) => {
           exigirSesion(response);
           // Sin la lista va a la bandeja, que dice qué pasó al leerla.
-          const siguiente = data?.elementos.find((e) => e.paso === seguirCon);
-          irA(siguiente === undefined ? RUTA_PAGOS : rutaFicha(siguiente.orden_id));
+          const siguiente = data?.elementos.find((e) => e.paso === seguir.paso);
+          irSiSigue(siguiente === undefined ? RUTA_PAGOS : rutaFicha(siguiente.orden_id));
         })
-        .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : irA(RUTA_PAGOS)));
+        .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : irSiSigue(RUTA_PAGOS)));
     },
     [aEntrar, consorcio, navegar],
   );
@@ -110,8 +116,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     if (orden !== null) navegar(RUTA_PAGOS);
   }
 
-  const elementos = lectura.tipo === "ok" ? lectura.elementos : [];
-  const abierta = orden ?? (alLado ? (elementos[0]?.orden_id ?? null) : null);
+  const abierta = orden ?? (alLado ? primera : null);
   const conFicha = abierta !== null && consorcio !== "";
   const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
 
