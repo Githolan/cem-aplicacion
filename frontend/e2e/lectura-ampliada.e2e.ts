@@ -451,6 +451,8 @@ async function simular(pagina: Page, api: Respuestas): Promise<string[]> {
     const camino = new URL(pedido.url()).pathname;
     const clave = `${pedido.method()} ${camino}`;
     if (clave in api) return ruta.fulfill({ json: api[clave] });
+    // La navegación pregunta los edificios también en las pantallas que no los usan.
+    if (clave === "GET /api/v1/me/consorcios") return ruta.fulfill({ json: [] });
     const permisos = simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     imprevistos.push(clave);

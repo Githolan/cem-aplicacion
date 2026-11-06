@@ -1007,3 +1007,9 @@ def test_0077_ida_y_vuelta(base_aparte):
         )).scalar_one()  # fmt: skip
     assert "alerta" not in definicion
     command.upgrade(cfg, "0077")
+
+
+def test_el_pedido_deja_lugar_para_que_el_modelo_piense_y_responda():
+    """Con 512 el modelo real se cortaba pensando y devolvía una respuesta sin texto (medido en
+    staging el 06-11-2026): una lectura legible usó unas 1000 fichas."""
+    assert lectura_comprobantes.MAX_TOKENS >= 4096

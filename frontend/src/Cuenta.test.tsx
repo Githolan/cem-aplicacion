@@ -849,7 +849,8 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     const estado = estadoDePantalla();
     expect(estado.textContent).toBe("Consultando…");
     // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
-    await waitFor(() => expect(retenido).toHaveBeenCalledTimes(5)); // las cuatro y la versión
+    // Las cuatro, la versión y lo que pide la navegación.
+    await waitFor(() => expect(retenido.mock.calls.length).toBeGreaterThanOrEqual(5));
     expect(screen.queryByText("Ana Pérez")).toBeNull();
     soltar();
 

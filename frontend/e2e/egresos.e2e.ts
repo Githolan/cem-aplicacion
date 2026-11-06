@@ -138,7 +138,6 @@ const PAGO = "f8888888-8888-4888-8888-888888888888";
 const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
 const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
 const ANCHO_PC_PX = 1025;
-const ANCHO_PESTANAS_PX = 768;
 const ANCHO_CON_CAMARA_PX = 480;
 const ACCIONES_EN_FALSO = {
   puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
@@ -328,15 +327,17 @@ test.describe("circuito de pagos", () => {
     expect(errores).toEqual([]);
   });
 
-  test("las pestañas se ven solo en un ancho de teléfono", async ({ page, baseURL }) => {
+  test("la navegación tiene Pagos en todo ancho, y lo de administración solo en la PC", async ({ page, baseURL }) => {
     await simularPagos(page, baseURL!, PARA_PAGAR);
     await page.goto("/pagos");
-    const pestana = page.getByRole("navigation", { name: "Secciones" }).getByRole("link", { name: "Pagos" });
+    const navegacion = page.getByRole("navigation", { name: "Secciones" });
+    const pestana = navegacion.getByRole("link", { name: "Pagos" });
     await expect(page.getByRole("heading", { level: 1, name: "Pagos" })).toBeVisible();
-    if (anchoDe(page) <= ANCHO_PESTANAS_PX) {
-      await expect(pestana).toBeVisible();
-      expect((await pestana.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-    } else await expect(pestana).toBeHidden();
+    await expect(pestana).toBeVisible();
+    expect((await pestana.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    const proveedores = navegacion.locator(`a[href="/egresos/proveedores"]`);
+    if (anchoDe(page) >= ANCHO_PC_PX) await expect(proveedores).toBeVisible();
+    else await expect(proveedores).toBeHidden();
   });
 
   test("la cuenta completa aparece solo en el acto de ejecución, con emitir y ver en un toque", async ({ page, baseURL }) => {

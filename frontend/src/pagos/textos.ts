@@ -58,6 +58,22 @@ export const TEXTO_SITUACION: Record<Situacion, string> = {
   no_se_pago: "No se pagó",
 };
 
+/** El color que acompaña a la palabra de cada situación. */
+export const TONO_SITUACION: Record<Situacion, "pendiente" | "bien" | "mal" | "neutro"> = {
+  borrador: "pendiente",
+  en_revision: "pendiente",
+  rechazada: "mal",
+  para_pagar: "bien",
+  pagando: "pendiente",
+  no_pago_declarado: "pendiente",
+  falta_conciliar: "pendiente",
+  observado: "pendiente",
+  con_diferencia: "pendiente",
+  reclamo: "mal",
+  pagada: "bien",
+  no_se_pago: "neutro",
+};
+
 export const TEXTO_LE_TOCA_A: Record<LeTocaA, string> = {
   vos: "Te toca a vos.",
   consejo: "Le toca al Consejo.",

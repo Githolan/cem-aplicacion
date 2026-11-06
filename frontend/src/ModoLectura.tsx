@@ -23,7 +23,7 @@ export function ModoLectura() {
         <span className="marca-modo-lectura" aria-hidden="true">
           {activa ? "✓" : "Aa"}
         </span>
-        {NOMBRE_MODO_LECTURA}
+        <span className="solo-lector">{NOMBRE_MODO_LECTURA}</span>
       </button>
       {/* aria-live sin role="status": el estado de cada página sigue siendo el único "status". */}
       <p aria-live="polite" className="aviso-modo-lectura">

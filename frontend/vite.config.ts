@@ -33,7 +33,7 @@ export default defineConfig({
       includeAssets: ["icono.svg"],
       manifest: manifiesto,
       workbox: {
-        globPatterns: ["**/*.{js,css,html,svg,png,webmanifest}"],
+        globPatterns: ["**/*.{js,css,html,svg,png,webmanifest,woff2}"],
         // La extensión se carga con importScripts; no hace falta además en la precaché.
         // pdf.js se baja recién al ver un comprobante, y eso pide conexión igual.
         globIgnores: [ARCHIVO_SW_ENTRAR, "assets/pdf-*.js"],

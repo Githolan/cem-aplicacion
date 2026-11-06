@@ -16,6 +16,7 @@
     "e2e": "pnpm generar && sh scripts/probar-extremo-a-extremo.sh"
   },
   "dependencies": {
+    "@fontsource/plus-jakarta-sans": "5.2.8",
     "@tanstack/react-query": "5.104.2",
     "openapi-fetch": "0.17.0",
     "pdfjs-dist": "4.10.38",

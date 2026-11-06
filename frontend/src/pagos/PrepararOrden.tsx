@@ -7,7 +7,6 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { useConsorcio } from "../egresos/useConsorcio";
 import { REQUISITOS } from "../permisos";
 import { FormularioOrden, type OrdenInicial } from "./FormularioOrden";
-import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
@@ -65,7 +64,6 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
             alCancelar={() => navegar(RUTA_PAGOS, { state: { consorcio } })} />
         </div>
       )}
-      <Pestanas />
     </>
   );
 }

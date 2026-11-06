@@ -36,8 +36,9 @@ ENCENDIDA = "encendida"
 
 VERSION_PROMPT = "comprobante-2026-11-06"
 """Se guarda con cada lectura: cambiar el texto de abajo pide cambiar esto."""
-MAX_TOKENS = 512
-"""Un objeto con siete campos cortos."""
+MAX_TOKENS = 8192
+"""Siete campos cortos, más lo que el modelo piensa antes: medido en staging, unas 1000 fichas para
+un comprobante legible. Con 512 se cortaba pensando y no llegaba a responder."""
 ESPERA_S = 60.0
 """Muy por debajo del plazo de cinco minutos de un trabajo, con el tiempo de bajar el archivo."""
 

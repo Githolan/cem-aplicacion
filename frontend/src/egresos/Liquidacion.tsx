@@ -441,7 +441,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   ) : simulacion.unidades.length === 0 || moneda === null ? (
                     <p>Sin gastos no hay nada que repartir.</p>
                   ) : (
-                    <div className="tabla-desplazable">
+                    <div className="tabla-desplazable tabla-tarjetas">
                       <table>
                         <caption>
                           Total {importe(simulacion.total_centavos, moneda)}, repartido por unidad
@@ -462,9 +462,9 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                             <tr key={u.unidad_id}>
                               <th scope="row">{u.designacion}</th>
                               {grupos.map((g) => (
-                                <td key={g}>{importe(u.por_grupo[g] ?? 0, moneda)}</td>
+                                <td key={g} data-etiqueta={g}>{importe(u.por_grupo[g] ?? 0, moneda)}</td>
                               ))}
-                              <td>{importe(u.total_centavos, moneda)}</td>
+                              <td data-etiqueta="Total">{importe(u.total_centavos, moneda)}</td>
                             </tr>
                           ))}
                         </tbody>

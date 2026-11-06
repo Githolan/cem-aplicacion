@@ -43,6 +43,7 @@ import {
   type Paso,
   TEXTO_LE_TOCA_A,
   TEXTO_SITUACION,
+  TONO_SITUACION,
 } from "./textos";
 import { useActo } from "./useActo";
 import { VisorComprobante } from "./VisorComprobante";
@@ -567,13 +568,17 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
       {/* Mientras se pide el código, lo escrito sigue montado: el reintento no lo pierde. */}
       <div hidden={pendiente !== null}>
         <section className="ficha-pago" aria-labelledby={`${id}-titulo`}>
-          <p className="etiqueta-situacion">{TEXTO_SITUACION[situacion]}</p>
+          <div className="ficha-pago__resumen">
+          <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
+            {TEXTO_SITUACION[situacion]}
+          </p>
           <Titulo id={`${id}-titulo`}>{v.razon_social}</Titulo>
           <div className="fila-importe">
             <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
             {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
           </div>
           <p>{v.concepto}</p>
+          </div>
 
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-error" role="note">

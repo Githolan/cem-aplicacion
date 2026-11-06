@@ -11,7 +11,6 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { Bandeja } from "./Bandeja";
 import { Ficha, type Seguir } from "./Ficha";
-import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 
@@ -144,7 +143,6 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
             aEntrar={aEntrar} aInicio={aInicio} terminar={terminar} alCambiar={alCambiar} />
         </div>
       )}
-      <Pestanas />
     </div>
   );
 }
