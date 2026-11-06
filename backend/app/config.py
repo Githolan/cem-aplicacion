@@ -6,6 +6,10 @@ Ningún secreto vive en el repositorio (documento 13, §15.4).
 import os
 from dataclasses import dataclass
 
+PAGOS_DIAS_BANDEJA = 7
+"""Decisión por defecto del rediseño del circuito de pagos (§15). `CEM_PAGOS_DIAS_BANDEJA` la
+cambia."""
+
 
 @dataclass(frozen=True)
 class Config:
@@ -28,6 +32,19 @@ class Config:
     cada entorno, solo en `cem-backend`. Nunca en la base: con ella sola un código no se puede
     probar. Mal escrita impide el arranque; sin ella, pedir la entrada y canjear un código dan
     503."""
+    pagos_dias_bandeja: int = PAGOS_DIAS_BANDEJA
+    """Cuántos días queda lo rechazado en la bandeja de pagos antes de pasar a la consulta."""
+
+
+def _dias(variable: str, por_defecto: int) -> int:
+    """Un valor mal escrito impide el arranque: no se reemplaza en silencio por el de omisión."""
+    valor = os.environ.get(variable)
+    if valor is None:
+        return por_defecto
+    dias = int(valor)
+    if dias < 0:
+        raise ValueError(f"{variable} no puede ser negativa")
+    return dias
 
 
 def cargar() -> Config:
@@ -41,4 +58,5 @@ def cargar() -> Config:
         access_aud=os.environ.get("CEM_ACCESS_AUD", ""),
         origen_publico=os.environ.get("CEM_ORIGEN_PUBLICO", ""),
         codigo_clave=os.environ.get("CEM_CODIGO_CLAVE", ""),
+        pagos_dias_bandeja=_dias("CEM_PAGOS_DIAS_BANDEJA", PAGOS_DIAS_BANDEJA),
     )
