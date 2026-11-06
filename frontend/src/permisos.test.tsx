@@ -4,7 +4,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accionesDeLasPoliticas } from "./accionesDePrueba";
 import { App } from "./App";
@@ -99,6 +99,11 @@ function abrirExige(requisito: Requisito) {
 const PROTEGIDA = { level: 1, name: "La protegida" };
 const EL_INICIO = { level: 1, name: "El inicio" };
 
+// jsdom no trae matchMedia: `/pagos` pregunta el ancho, y acá es el de un teléfono.
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: () => undefined, removeEventListener: () => undefined }));
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -183,19 +188,16 @@ describe("inicio por rol", () => {
   const PADRON = "Padrón del edificio";
   const CONTACTOS = "Contactos de emergencia";
   const DOCUMENTOS = "Documentos del edificio";
-  const ORDENES = "Órdenes de pago";
-  const REVISAR = "Revisar órdenes de pago";
-  const PAGOS = "Pagos a realizar";
-  const CONCILIAR = "Conciliar pagos";
+  const PAGOS = "Pagos";
   const LIQUIDACION = "Liquidación (borrador)";
-  const TODOS = [INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, ORDENES, REVISAR, PAGOS, CONCILIAR, LIQUIDACION];
+  const TODOS = [INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS, LIQUIDACION];
 
   async function enlaces() {
     await screen.findByRole("link", { name: MI_CUENTA });
     await screen.findByRole("link", { name: CONTACTOS });
     await screen.findByRole("heading", INICIO);
     await new Promise((r) => setTimeout(r));
-    return TODOS.filter((t) => screen.queryByRole("link", { name: t }) !== null);
+    return TODOS.filter((t) => screen.queryAllByRole("link", { name: t }).length > 0);
   }
 
   const VECINO = ["consorcios.mis", "consorcios.mis_acciones", "contactos.ver", "padron.ver_propio", "unidades.listar"];
@@ -219,19 +221,19 @@ describe("inicio por rol", () => {
   it("el Consejo ve lo que fiscaliza y no lo de la administración", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: CONSEJO }));
     abrirApp();
-    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, REVISAR, CONCILIAR]);
+    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS]);
   });
 
   it("la administración ve lo que opera y no lo del Consejo", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: ADMINISTRADOR }));
     abrirApp();
-    expect(await enlaces()).toEqual([INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, ORDENES, PAGOS, LIQUIDACION]);
+    expect(await enlaces()).toEqual([INVITAR, MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS, LIQUIDACION]);
   });
 
   it("los enlaces son la suma de los edificios: Consejo en uno, vecino en otro", async () => {
     vi.stubGlobal("fetch", backend({ [C1]: VECINO, [C2]: CONSEJO }));
     abrirApp();
-    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, REVISAR, CONCILIAR]);
+    expect(await enlaces()).toEqual([MANDATOS, PADRON, CONTACTOS, DOCUMENTOS, PAGOS]);
   });
 
   it.each<[string, Record<string, Respuesta>]>([
@@ -473,7 +475,7 @@ describe("los códigos existen en la política", () => {
   it("cada código de cada `puede(...)` es una acción de la política", () => {
     const codigos = codigosDePuede();
     // Control: la búsqueda encuentra los que sabemos que están, en cada forma de usarlos.
-    for (const conocido of ["egresos.ejecutar_pago", "padron.confirmar_vinculo", "documentos.cargar_operativos", "invitaciones.revocar"])
+    for (const conocido of ["egresos.preparar_orden", "padron.confirmar_vinculo", "documentos.cargar_operativos", "invitaciones.revocar"])
       expect(codigos).toContain(conocido);
     expect(desconocidos(codigos)).toEqual([]);
   });
@@ -497,23 +499,15 @@ const PANTALLAS: [string, string, string, string][] = [
   ["/contactos/gestion", "contactos.gestionar", "contactos/gestion", "Gestionar los contactos de emergencia"],
   ["/documentos", "documentos.ver", "documentos", "Documentos del edificio"],
   ["/egresos/proveedores", "egresos.preparar_orden", "proveedores", "Proveedores"],
-  ["/egresos/ordenes", "egresos.preparar_orden", "ordenes-pago", "Órdenes de pago"],
-  ["/egresos/revision", "egresos.revisar_orden", "ordenes-pago/revision", "Revisión de órdenes de pago"],
-  ["/egresos/conciliacion", "egresos.revisar_orden", "pagos-manuales/revision", "Conciliación de pagos"],
+  ["/pagos", "egresos.preparar_orden", "pagos/bandeja", "Pagos"],
+  ["/pagos/nueva", "egresos.preparar_orden", "proveedores", "Preparar una orden"],
+  ["/pagos/consulta", "egresos.revisar_orden", "pagos/consulta", "Consultar pagos"],
   ["/liquidacion", "liquidacion.preparar", "liquidaciones", "Liquidación"],
 ];
 
-// Las pagos piden dos acciones juntas.
-const PAGOS: [string, readonly string[], string, string] = [
-  "/egresos/pagos",
-  ["egresos.preparar_orden", "egresos.ejecutar_pago"],
-  "pagos-manuales",
-  "Pagos a realizar",
-];
-const CON_ACCIONES: [string, readonly string[], string, string][] = [
-  ...PANTALLAS.map(([ruta, accion, lectura, titulo]) => [ruta, [accion], lectura, titulo] as [string, string[], string, string]),
-  PAGOS,
-];
+const CON_ACCIONES: [string, readonly string[], string, string][] = PANTALLAS.map(
+  ([ruta, accion, lectura, titulo]) => [ruta, [accion], lectura, titulo],
+);
 
 describe("el selector de edificio", () => {
   it.each(CON_ACCIONES)("%s no ofrece ni consulta el edificio donde no sirve", async (ruta, acciones, lectura, titulo) => {
@@ -594,9 +588,9 @@ describe("si no se sabe qué alcanza", () => {
   it("la pantalla que se monta no repite la consulta que acaba de fallar", async () => {
     const simulado = conAccionesCaidas();
     vi.stubGlobal("fetch", simulado);
-    abrirApp("/egresos/ordenes"); // su pantalla mira `usePuede`: la misma consulta, en un componente nuevo
-    await screen.findByRole("heading", { level: 1, name: "Órdenes de pago" });
-    await waitFor(() => expect(caminos(simulado)).toContain(`/api/v1/consorcios/${C1}/ordenes-pago`));
+    abrirApp("/pagos"); // su pantalla mira `usePuede`: la misma consulta, en un componente nuevo
+    await screen.findByRole("heading", { level: 1, name: "Pagos" });
+    await waitFor(() => expect(caminos(simulado)).toContain(`/api/v1/consorcios/${C1}/pagos/bandeja`));
     await new Promise((r) => setTimeout(r, 60));
     expect(veces(simulado, ACCIONES)).toBe(1);
   });

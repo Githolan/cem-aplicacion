@@ -383,3 +383,162 @@ button:focus-visible {
 .tabla-desplazable th[scope="col"]:first-child {
   text-align: left;
 }
+
+/* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
+main:has(.circuito-pagos--al-lado) {
+  max-width: 80rem;
+}
+
+.circuito-pagos--al-lado {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+.titulo-grupo {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.cantidad {
+  font-weight: 400;
+}
+
+.filas-pago {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fila-pago {
+  display: grid;
+  gap: 0.125rem;
+  min-height: 44px;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--tarjeta);
+  color: var(--texto);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.fila-pago[aria-current="true"] {
+  outline: 2px solid var(--azul);
+}
+
+.fila-pago:focus-visible {
+  outline: 3px solid #f2a900;
+  outline-offset: 2px;
+}
+
+.fila-pago__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 0.75rem;
+}
+
+.fila-pago__importe {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fila-pago__verbo {
+  color: var(--azul);
+  font-weight: 600;
+}
+
+.salidas-pago,
+.filtros-pago {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.filtros-pago button {
+  border: 1px solid var(--azul);
+  background: transparent;
+  color: var(--azul);
+}
+
+.filtros-pago button[aria-pressed="true"] {
+  background: var(--azul);
+  color: #ffffff;
+}
+
+.ficha-pago h1,
+.ficha-pago h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ficha-pago .tarjeta {
+  margin-top: 1rem;
+}
+
+.etiqueta-situacion {
+  margin: 0;
+  font-weight: 600;
+  color: var(--azul);
+}
+
+.importe-ficha {
+  margin: 0.25rem 0;
+  font-size: clamp(1.5rem, 1.3rem + 1vw, 2rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ficha-pago code {
+  overflow-wrap: anywhere;
+}
+
+/* Las pestañas: solo en un ancho de teléfono (hasta 768 px = 48em). */
+.pestanas {
+  display: none;
+}
+
+@media (max-width: 48em) {
+  main:has(.pestanas) {
+    padding-bottom: 6rem;
+  }
+
+  body:has(.pestanas) .aviso-version {
+    bottom: 4.5rem;
+  }
+
+  .pestanas {
+    position: fixed;
+    inset: auto 0 0;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    background: var(--fondo);
+    border-top: 1px solid #c9d2dd;
+  }
+
+  .pestanas a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0.5rem;
+    color: var(--azul);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .pestanas a.active {
+    background: var(--azul);
+    color: #ffffff;
+  }
+
+  .pestanas a:focus-visible {
+    outline: 3px solid #f2a900;
+    outline-offset: -3px;
+  }
+}

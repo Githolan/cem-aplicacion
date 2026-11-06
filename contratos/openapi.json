@@ -3136,8 +3136,18 @@
             "title": "Puede Enviar",
             "type": "boolean"
           },
+          "puede_modificar": {
+            "description": "Si puede guardar una versión nueva de la orden.",
+            "title": "Puede Modificar",
+            "type": "boolean"
+          },
           "puede_pagar": {
             "title": "Puede Pagar",
+            "type": "boolean"
+          },
+          "puede_reabrir_cuenta": {
+            "description": "Si puede abrir otra vez una cuenta ya vista. Con una declaración vigente es «Retomar el pago», y abrirla deja sin efecto lo declarado.",
+            "title": "Puede Reabrir Cuenta",
             "type": "boolean"
           },
           "puede_rechazar": {
@@ -3178,6 +3188,8 @@
           "puede_rechazar",
           "puede_renovar",
           "puede_pagar",
+          "puede_reabrir_cuenta",
+          "puede_modificar",
           "puede_subir_comprobante",
           "puede_registrar",
           "puede_declarar",

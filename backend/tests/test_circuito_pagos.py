@@ -4,6 +4,7 @@ Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §2 y §3. Cada caso lleva su 
 el dato que lo decide da otra cosa. Contra PostgreSQL real: `test_circuito_pagos_0072.py`.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -24,6 +25,7 @@ from cem_contracts.egresos import (
 
 from app.config import PAGOS_DIAS_BANDEJA, cargar
 from app.consorcios.circuito_pagos import (
+    MODIFICABLES,
     SIN_ACCIONES,
     SITUACION_POR_ESTADO,
     AccionesOrden,
@@ -32,6 +34,7 @@ from app.consorcios.circuito_pagos import (
     le_toca_a,
     ofrece_pagar,
     paso_de,
+    reabre_cuenta,
     situacion_de,
 )
 
@@ -289,3 +292,31 @@ def test_un_valor_mal_escrito_impide_el_arranque(monkeypatch, valor):
     monkeypatch.setenv("CEM_PAGOS_DIAS_BANDEJA", valor)
     with pytest.raises(ValueError):
         cargar()
+
+
+# La ficha: reabrir la cuenta y modificar -------------------------------------------------------
+
+
+def test_reabre_la_cuenta_quien_la_vio_y_todavia_se_puede_abrir():
+    vio = AccionesOrden(cuenta_vista=True, puede_pagar=True, puede_registrar=True)
+    assert reabre_cuenta(S.PAGANDO, vio) is True
+    # Controles: otro ejecutor, y quien la vio con la aprobación vencida.
+    assert reabre_cuenta(S.PAGANDO, replace(vio, puede_registrar=False)) is False
+    assert reabre_cuenta(S.PAGANDO, replace(vio, puede_pagar=False)) is False
+
+
+def test_un_registro_observado_se_corrige_sin_reabrir_la_cuenta():
+    a = AccionesOrden(cuenta_vista=True, puede_pagar=True, puede_registrar=True)
+    assert reabre_cuenta(S.OBSERVADO, a) is False
+
+
+def test_retomar_no_abre_la_cuenta_si_otra_persona_la_vio_sin_declarar():
+    base = AccionesOrden(declaracion_vigente=True, puede_pagar=True)
+    assert reabre_cuenta(S.NO_PAGO_DECLARADO, base) is False
+    assert reabre_cuenta(S.NO_PAGO_DECLARADO, replace(base, declaracion_confirmable=True)) is True
+    assert reabre_cuenta(S.NO_PAGO_DECLARADO, replace(base, falta_que_declares=True)) is True
+
+
+def test_se_modifica_lo_que_acepta_la_base():
+    assert {E.BORRADOR, E.EN_REVISION, E.APROBADA, E.FALLIDA} == MODIFICABLES
+    assert E.EN_EJECUCION not in MODIFICABLES  # control
