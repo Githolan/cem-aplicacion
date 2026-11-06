@@ -33,7 +33,7 @@ from typing import Annotated
 from uuid import UUID
 
 import anyio
-from cem_contracts.documentos import DocumentoId, VersionCargada
+from cem_contracts.documentos import DocumentoId, EstadoVersion, VersionCargada
 from cem_contracts.egresos import (
     LARGO_MAXIMO_BUSQUEDA_PAGOS,
     LIMITE_CONSULTA_PAGOS_MAXIMO,
@@ -45,6 +45,7 @@ from cem_contracts.egresos import (
     AprobacionRegistrada,
     BandejaPagos,
     ComprobanteActual,
+    ComprobanteSubido,
     ComprobantePagoNuevo,
     ConciliacionPagoManual,
     Confirmacion,
@@ -1247,15 +1248,16 @@ def registrar_pago_manual(
 def crear_comprobante_de_pago(
     orden_id: UUID,
     nuevo: ComprobantePagoNuevo,
-    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
-    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR, sin_gesto=True))],
     cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
     """El documento del comprobante, con la orden que respalda (`0063`); el archivo se sube
     después a `…/documentos/{id}/versiones`. Lo crea quien vio la cuenta en el acto de ejecución
-    (`no_es_quien_ejecuto`); la base lo vuelve a exigir."""
+    (`no_es_quien_ejecuto`); la base lo vuelve a exigir. Sin gesto (`0073`): no mueve dinero, y la
+    atadura ocurre al registrar, que sí lo pide."""
     cargar.verificar(Entidad())
     _ejecutor(lectura, permiso, motor, orden_id)
 
@@ -1442,27 +1444,48 @@ def _ejecucion_vigente(
     )  # fmt: skip
 
 
-def _comprobante_actual(
-    c: Connection, lector: Permiso, orden_id: UUID, ultimo: PagoManual | None, observado: bool
-) -> ComprobanteActual | None:
-    """El del registro vigente; sin él, lo último que subió quien mira y, si no subió nada, el del
-    registro observado."""
+def _el_registrado(c: Connection, ver: Permiso, ultimo: PagoManual) -> ComprobanteActual | None:
+    """El archivo del registro, si quien mira lo puede abrir: el mismo control que `…/contenido`.
+    A quien preparó la orden, por ejemplo, no se le ofrece lo que después le daría 404."""
+    if not ver.decidir(Entidad()).permitido:
+        return None
+    ids = {"documento_id": ultimo.documento_id, "version_documento_id": ultimo.version_documento_id}
+    fila = c.execute(
+        text("select 1 from nucleo.version_para_descargar(:documento_id, :version_documento_id)"),
+        ids,
+    ).first()  # fmt: skip
+    return None if fila is None else ComprobanteActual(**ids)
+
+
+def _comprobantes(
+    c: Connection,
+    lector: Permiso,
+    ver: Permiso,
+    orden_id: UUID,
+    ultimo: PagoManual | None,
+    observado: bool,
+) -> tuple[ComprobanteActual | None, ComprobanteSubido | None]:
+    """El actual es el del registro vigente; sin él, lo último que subió quien mira y pasó el
+    antivirus y, si no subió nada, el del registro observado. Subir de nuevo reemplaza: cuenta el
+    orden en que se subieron, no en el que terminó el antivirus. Lo subido, si todavía no pasó."""
     if ultimo is not None and not observado:
-        return ComprobanteActual(
-            documento_id=ultimo.documento_id, version_documento_id=ultimo.version_documento_id
-        )
-    subido = _ejecutar(
+        return _el_registrado(c, ver, ultimo), None
+    subidas = _ejecutar(
         c, lector,
         "select * from nucleo.comprobante_subido_lectura(:o, :f, :actor, 'api', :sesion)",
         {"o": orden_id, "f": LEE_COMO[lector.accion]},
-    ).mappings().one_or_none()  # fmt: skip
-    if subido is not None:
-        return ComprobanteActual(**subido)
-    if ultimo is None:
-        return None
-    return ComprobanteActual(
-        documento_id=ultimo.documento_id, version_documento_id=ultimo.version_documento_id
-    )
+    ).mappings().all()  # fmt: skip
+    disponible = next((s for s in subidas if s["estado"] == EstadoVersion.DISPONIBLE), None)
+    if disponible is not None:
+        actual = ComprobanteActual(
+            documento_id=disponible["documento_id"],
+            version_documento_id=disponible["version_documento_id"],
+        )
+    else:
+        actual = None if ultimo is None else _el_registrado(c, ver, ultimo)
+    if not subidas or subidas[0] is disponible:
+        return actual, None
+    return actual, ComprobanteSubido(**subidas[0])
 
 
 @router.get(
@@ -1537,7 +1560,13 @@ def consulta_pagos(
     " sin la cuenta",
     responses=RESPUESTAS_LECTURA | {404: {"description": "No existe en este consorcio."}},
 )
-def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: MotorDep) -> FichaPago:
+def ficha_pago(
+    orden_id: UUID,
+    preparar: Preparar,
+    revisar: Revisar,
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    motor: MotorDep,
+) -> FichaPago:
     lector = _lector(preparar, revisar)
     prepara = lector.accion == PREPARAR
     with _lectura(lector, _una_foto(motor)) as c:
@@ -1546,7 +1575,7 @@ def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: Moto
         a = _acciones(c, lector, orden_id).get(orden_id, circuito_pagos.SIN_ACCIONES)
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
-        comprobante = _comprobante_actual(c, lector, orden_id, ultimo, a.pago_observado)
+        comprobante, subido = _comprobantes(c, lector, ver, orden_id, ultimo, a.pago_observado)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     observacion = None
@@ -1569,7 +1598,7 @@ def ficha_pago(orden_id: UUID, preparar: Preparar, revisar: Revisar, motor: Moto
         puede_declarar=a.puede_declarar,
         puede_corregir=a.puede_corregir, puede_conciliar=a.puede_conciliar,
         puede_confirmar=a.puede_confirmar, ejecucion=ejecucion, comprobante_actual=comprobante,
-        observacion_vigente=observacion,
+        comprobante_subido=subido, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
     )  # fmt: skip
 

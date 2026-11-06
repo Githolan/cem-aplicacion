@@ -67,6 +67,18 @@ server {
         include /etc/nginx/cem/proxy.conf;
     }
 
+    # Ver un comprobante en la pantalla (repositorio CEM, Rediseno_Circuito_Pagos_2026-11-06.md, §4):
+    # es un archivo que subió una persona, y su CSP (`sandbox`) la pone el backend. Con las de
+    # `cabeceras.conf` la respuesta llevaría dos CSP y dos `nosniff`. Sin `add_header` acá, además,
+    # heredaría las del `server`.
+    location ~ ^/api/v1/consorcios/[^/]+/documentos/[^/]+/versiones/[^/]+/contenido$ {
+        proxy_hide_header X-Content-Type-Options;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        include /etc/nginx/cem/proxy.conf;
+    }
+
     location = /health {
         include /etc/nginx/cem/cabeceras.conf;
         include /etc/nginx/cem/proxy.conf;

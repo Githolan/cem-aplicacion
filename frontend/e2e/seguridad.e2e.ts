@@ -14,6 +14,7 @@ const DIRECTIVAS_CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
+  "img-src 'self' data: blob:",
   "object-src 'none'",
   "base-uri 'self'",
   "frame-ancestors 'none'",
@@ -36,6 +37,19 @@ test.describe("cabeceras de seguridad del nginx de la imagen", () => {
       for (const directiva of DIRECTIVAS_CSP) expect(csp, `CSP en ${ruta}`).toContain(directiva);
       expect(cabeceras["server"], ruta).toBe("nginx");
     }
+  });
+
+  test("el contenido de un archivo no suma las cabeceras de la aplicación a las del backend", async ({ request }) => {
+    const id = "00000000-0000-4000-8000-000000000000";
+    const respuesta = await request.get(`/api/v1/consorcios/${id}/documentos/${id}/versiones/${id}/contenido`);
+    expect(respuesta.status()).toBe(401);
+    const cabeceras = respuesta.headersArray().map((c) => c.name.toLowerCase());
+    expect(cabeceras.filter((c) => c === "x-content-type-options")).toHaveLength(1);
+    expect(cabeceras.filter((c) => c === "x-frame-options")).toHaveLength(1);
+    expect(cabeceras).not.toContain("content-security-policy");
+    // Control: el resto de la API sí lleva la CSP de la aplicación.
+    const otra = await request.get(`/api/v1/consorcios/${id}/documentos`);
+    expect(otra.headers()["content-security-policy"]).toContain("default-src 'self'");
   });
 
   test("la página carga sin errores ni violaciones de la CSP", async ({ page }) => {

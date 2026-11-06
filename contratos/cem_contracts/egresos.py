@@ -37,7 +37,7 @@ from pydantic import (
     model_validator,
 )
 
-from cem_contracts.documentos import Titulo
+from cem_contracts.documentos import EstadoVersion, Titulo
 
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
 """El tope de `bigint` en la base."""
@@ -668,7 +668,12 @@ class RegistroPagoManual(BaseModel):
     fecha_operacion: date
     importe_centavos: Importe
     moneda: Moneda
-    cuenta_destino: Cuenta
+    cuenta_destino: Cuenta | None = Field(
+        default=None,
+        description="Como figura en el comprobante. Nula solo al corregir un registro observado:"
+        " sigue la que ese registro ya acreditó, y la base la niega en un registro nuevo"
+        " (`no_coincide_con_la_orden`). Así corregir no pide la cuenta otra vez.",
+    )
     documento_id: UUID = Field(
         description="El comprobante: cargado desde el pago de esta orden"
         " (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus."
@@ -742,6 +747,7 @@ class PagoManual(BaseModel):
     documento_id: UUID
     version_documento_id: UUID = Field(description="El archivo exacto que quedó como evidencia.")
     registrado_por: UUID
+    registrado_por_nombre: str
     registrado_en: datetime
     conciliacion: ResultadoConciliacion | None
     motivo_conciliacion: str | None
@@ -985,12 +991,23 @@ class BandejaPagos(BaseModel):
 
 class ComprobanteActual(BaseModel):
     """El archivo que corresponde mostrar: el del registro vigente o, sin él, el último que quien
-    mira subió para esta ejecución y pasó el antivirus."""
+    mira subió para esta ejecución y pasó el antivirus. Se abre con `…/contenido`."""
 
     model_config = ConfigDict(frozen=True)
 
     documento_id: UUID
     version_documento_id: UUID
+
+
+class ComprobanteSubido(BaseModel):
+    """Lo último que quien mira subió para esta ejecución, mientras no es el actual: lo revisa el
+    antivirus o lo rechazó."""
+
+    model_config = ConfigDict(frozen=True)
+
+    documento_id: UUID
+    version_documento_id: UUID
+    estado: EstadoVersion
 
 
 class ObservacionVigente(BaseModel):
@@ -1035,7 +1052,13 @@ class FichaPago(BaseModel):
     ejecucion: EjecucionManual | None = Field(
         description="La ejecución manual de la versión vigente, si tiene."
     )
-    comprobante_actual: ComprobanteActual | None
+    comprobante_actual: ComprobanteActual | None = Field(
+        description="Nulo si no hay o si quien mira no puede ver ese archivo."
+    )
+    comprobante_subido: ComprobanteSubido | None = Field(
+        description="Nulo si no subió nada, si lo último ya es el actual o si hay un registro"
+        " vigente."
+    )
     observacion_vigente: ObservacionVigente | None
     declaracion_vigente: PagoNoRealizado | None = Field(
         description="La última declaración de «no se pagó» que nadie superó ni confirmó."

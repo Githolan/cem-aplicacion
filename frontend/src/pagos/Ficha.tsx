@@ -1,4 +1,4 @@
-import { type FormEvent, type MouseEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "../api/cliente";
@@ -11,9 +11,9 @@ import {
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
+  importeParaCopiar,
   mensajeDeError,
   momento,
-  SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
   sinPisarLoHecho,
   TEXTO_ALERTA_FRACCIONAMIENTO,
@@ -24,6 +24,7 @@ import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { BotonCopiar } from "./BotonCopiar";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
@@ -33,26 +34,25 @@ import {
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
   AVISO_VER_LA_CUENTA,
-  AVISO_VERIFICAR_CUENTA,
   type Paso,
   TEXTO_LE_TOCA_A,
   TEXTO_SITUACION,
 } from "./textos";
 import { useActo } from "./useActo";
+import { VisorComprobante } from "./VisorComprobante";
 
 // La ficha de una orden, una sola para todos los estados (§3). No deduce nada: lo que dice sale de
 // `situacion`, y lo que ofrece, de `paso` y `puede_*`, que el servidor saca de las reglas de la
 // base. Revisar no es una pantalla más: la ficha muestra los datos y el botón principal confirma.
 //
 // La cuenta completa no viaja con la ficha. Llega con el acto de ejecución o, a quien decide la
-// orden, con `ordenes-pago/{id}/revision`, porque es lo que aprueba: quien preparó no la recibe (la
-// revisión la manda nula). Vive en el estado de esta ficha y se va al cerrarla o cuando la orden
-// cambia de versión. Sin ver la cuenta no se aprueba.
+// orden o concilia su pago, con `ordenes-pago/{id}/revision`, porque es lo que aprueba y lo que
+// compara: quien preparó no la recibe (la revisión la manda nula). Vive en el estado de esta ficha y
+// se va al cerrarla o cuando la orden cambia de versión. Sin ver la cuenta no se aprueba.
 
 type FichaPago = components["schemas"]["FichaPago"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
-type Pago = components["schemas"]["PagoManual"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
 type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
@@ -78,10 +78,6 @@ export function cambiosDeVersion(v: Version, anterior: Version): string[] {
   return cambios;
 }
 
-function descarga(consorcio: string, pago: Pago): string {
-  return `/api/v1/consorcios/${consorcio}/documentos/${pago.documento_id}/versiones/${pago.version_documento_id}/descargar`;
-}
-
 type Props = {
   consorcio: string;
   orden: string;
@@ -99,6 +95,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const id = useId();
   const acto = useActo(aEntrar);
   const { enviando, aviso, setAviso, pendiente, setPendiente } = acto;
+  /** Lo que dijo la última lectura que falló: se va cuando una lectura sale bien. */
+  const fallaDeLectura = useRef<string | null>(null);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [cuenta, setCuenta] = useState<Cuenta | null>(null);
@@ -111,7 +109,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [faltaCuenta, setFaltaCuenta] = useState(false);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
-  const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar);
+  const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
   const versionLeida = leida?.orden.version_vigente;
 
   useEffect(() => {
@@ -155,14 +153,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
         exigirSesion(response);
         if (!vigente) return;
         const codigo = codigoDe(error);
-        if (data !== undefined) setLectura({ tipo: "ok", ficha: data });
-        else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
+        if (data !== undefined) {
+          setLectura({ tipo: "ok", ficha: data });
+          const falla = fallaDeLectura.current;
+          fallaDeLectura.current = null;
+          if (falla !== null) setAviso((a) => (a?.texto === falla ? null : a));
+        } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         // Una dirección que no es de una orden responde 422: tampoco está en este edificio.
         else if (response.status === ESTADO.noEncontrado || response.status === ESTADO.invalido) setLectura({ tipo: "no_esta" });
         else {
           // Con la ficha a la vista, lo que se escribió queda: solo se dice qué pasó.
           setLectura((l) => (l.tipo === "ok" ? l : { tipo: "sin_servicio" }));
-          setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
+          fallaDeLectura.current = mensajeDeError(response.status, codigo);
+          setAviso(sinPisarLoHecho(fallaDeLectura.current));
         }
       })
       .catch((e: unknown) => {
@@ -170,6 +173,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
         if (e instanceof SinSesion) aEntrar();
         else {
           setLectura((l) => (l.tipo === "ok" ? l : { tipo: "sin_servicio" }));
+          fallaDeLectura.current = SIN_CONEXION;
           setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
@@ -224,6 +228,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const enDecision = situacion === "borrador" || situacion === "en_revision";
   const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
   const declara = ficha.puede_declarar && SE_DECLARA.has(paso);
+  const conVisor = ficha.comprobante_actual !== null && !registra;
 
   function escribir(cual: ConMotivo) {
     setMotivo("");
@@ -383,34 +388,6 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
-  /** Antes de dejar la pantalla pregunta si el comprobante se puede bajar: la descarga es un 302 a
-   * una URL firmada de otro origen, que un `fetch` no puede seguir (CSP `connect-src 'self'`). Con
-   * `redirect: "manual"` el 302 no se sigue, y un error llega con su cuerpo para decirlo acá en
-   * lugar de mostrar el JSON. Si está, recién entonces navega; el archivo viene como adjunto. */
-  function verComprobante(evento: MouseEvent<HTMLAnchorElement>, p: Pago) {
-    evento.preventDefault();
-    setAviso(null);
-    void api
-      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
-        params: { path: { consorcio_id: consorcio, documento_id: p.documento_id, version_id: p.version_documento_id } },
-        redirect: "manual",
-      })
-      .then(({ error, response }) => {
-        exigirSesion(response);
-        if (response.type === "opaqueredirect") {
-          const enlace = document.createElement("a");
-          enlace.href = descarga(consorcio, p);
-          enlace.click();
-          return;
-        }
-        const codigo = codigoDe(error);
-        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
-          setPendiente({ acto: "ver el comprobante", reintentar: () => verComprobante(evento, p) });
-        else setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
-      })
-      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
-  }
-
   function enviarMotivo(evento: FormEvent) {
     evento.preventDefault();
     const texto = motivo.trim();
@@ -457,7 +434,10 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
         <section className="ficha-pago" aria-labelledby={`${id}-titulo`}>
           <p className="etiqueta-situacion">{TEXTO_SITUACION[situacion]}</p>
           <Titulo id={`${id}-titulo`}>{v.razon_social}</Titulo>
-          <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
+          <div className="fila-importe">
+            <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
+            {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
+          </div>
           <p>{v.concepto}</p>
 
           {enDecision && v.alerta_fraccionamiento && (
@@ -488,22 +468,54 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           {cuentaVista !== null && (
             <div className="tarjeta">
               <Subtitulo>Transferí desde tu banco</Subtitulo>
-              <p className="aviso-error" role="note">
-                {AVISO_VERIFICAR_CUENTA}
-              </p>
               <dl className="detalles">
                 <dt>CBU/CVU</dt>
                 <dd>
                   <code>{cuentaVista.cuenta_destino}</code>
+                  <BotonCopiar valor={cuentaVista.cuenta_destino.replace(/\s/g, "")} nombre="el CBU" />
                 </dd>
+                <dt>CUIT del titular</dt>
+                <dd>{v.cuit ?? "Sin CUIT"}</dd>
                 <dt>Pagar antes de</dt>
                 <dd>{momento(cuentaVista.aprobacion_vence_en)}</dd>
               </dl>
+              <p className="aviso-error" role="note">
+                Antes de confirmar en tu banco, mirá que el titular sea <strong>{v.razon_social}</strong>
+              </p>
             </div>
           )}
 
           {!estaModificando && (
+            <div className={conVisor ? "comprobante-y-datos" : undefined}>
+            {conVisor && ficha.comprobante_actual !== null && (
+              <VisorComprobante key={ficha.comprobante_actual.version_documento_id} consorcio={consorcio}
+                documento={ficha.comprobante_actual.documento_id} version={ficha.comprobante_actual.version_documento_id} aEntrar={aEntrar} />
+            )}
             <div className="tarjeta">
+              {paso === "conciliar" && pago !== undefined && (
+                <table className="comparar-pago">
+                  <caption>La orden contra lo registrado</caption>
+                  <thead>
+                    <tr>
+                      <td />
+                      <th scope="col">Orden</th>
+                      <th scope="col">Registrado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <th scope="row">Importe</th>
+                      <td>{importe(v.importe_centavos, v.moneda)}</td>
+                      <td>{importe(pago.importe_centavos, pago.moneda)}</td>
+                    </tr>
+                    <tr>
+                      <th scope="row">Cuenta</th>
+                      <td>{cuentaDecidida?.cuenta ?? cuentaEnmascarada(v.cuenta_ultimos_digitos)}</td>
+                      <td>La misma: el registro no se acepta con otra</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
               <dl className="detalles">
                 {enDecision && (
                   <>
@@ -539,10 +551,16 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     <dd>{pago.numero_operacion}</dd>
                     <dt>Fecha de la transferencia</dt>
                     <dd>{pago.fecha_operacion}</dd>
-                    <dt>Importe registrado</dt>
-                    <dd>{importe(pago.importe_centavos, pago.moneda)}</dd>
-                    <dt>Registrado</dt>
-                    <dd>{momento(pago.registrado_en)}</dd>
+                    {paso !== "conciliar" && (
+                      <>
+                        <dt>Importe registrado</dt>
+                        <dd>{importe(pago.importe_centavos, pago.moneda)}</dd>
+                      </>
+                    )}
+                    <dt>Registró</dt>
+                    <dd>
+                      {pago.registrado_por_nombre}, {momento(pago.registrado_en)}
+                    </dd>
                   </>
                 )}
                 {pago?.fuera_de_termino === true && (
@@ -551,16 +569,6 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     <dd>
                       Se transfirió después de que venció la aprobación.
                       {ficha.puede_conciliar && " Para darlo por conforme, escribí por qué lo aceptás."}
-                    </dd>
-                  </>
-                )}
-                {paso === "conciliar" && pago !== undefined && (
-                  <>
-                    <dt>Comprobante de la transferencia</dt>
-                    <dd>
-                      <a href={descarga(consorcio, pago)} onClick={(e) => verComprobante(e, pago)}>
-                        Ver el comprobante
-                      </a>
                     </dd>
                   </>
                 )}
@@ -584,8 +592,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
               <div hidden={motivoAbierto !== null}>
                   {registra && (
-                    <RegistroPago consorcio={consorcio} orden={orden} version={v} corrige={paso === "corregir"} subtitulo={Subtitulo} acto={acto} aEntrar={aEntrar}
-                      alRegistrar={(texto) => terminar(texto)}
+                    <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
+                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} subtitulo={Subtitulo} acto={acto} aEntrar={aEntrar}
+                      alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
                         releer();
                         alCambiar();
@@ -691,6 +700,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 </p>
               )}
             </div>
+            </div>
           )}
 
           {estaModificando && (
@@ -748,7 +758,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 <ol className="versiones">
                   {ejecucion.pagos.slice(0, -1).map((p) => (
                     <li key={p.id}>
-                      Operación {p.numero_operacion}, {p.fecha_operacion}: {importe(p.importe_centavos, p.moneda)}
+                      Operación {p.numero_operacion}, {p.fecha_operacion}: {importe(p.importe_centavos, p.moneda)}. Lo registró{" "}
+                      {p.registrado_por_nombre}, {momento(p.registrado_en)}
                       {p.motivo_conciliacion !== null && `. Observado: ${p.motivo_conciliacion}`}
                     </li>
                   ))}

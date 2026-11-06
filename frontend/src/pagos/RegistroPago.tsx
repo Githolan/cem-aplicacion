@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
@@ -7,141 +7,97 @@ import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documen
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
   aCentavos,
+  aTexto,
   cambioLaOrden,
   cambioLoVisto,
+  cuentaEnmascarada,
   ENCABEZADO_IDEMPOTENCIA,
   LARGO_TITULO,
   mensajeDeActo,
-  mensajeDeError,
   renovarClave,
-  SEGUNDO_FACTOR_REQUERIDO,
 } from "../egresos/comun";
-import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO } from "./textos";
 import type { ActoEnCurso } from "./useActo";
+import { useUrlDelArchivo, VisorComprobante } from "./VisorComprobante";
+import { ZonaComprobante } from "./ZonaComprobante";
 
-// Registrar el pago o corregir un registro observado, con su comprobante. Registrar no es pagar: la
-// orden queda pagada recién con la conciliación. El comprobante funciona como antes del rediseño,
-// con su lista; un solo paso llega en la fase 3 (§4).
+// Registrar el pago o corregir un registro observado, con el comprobante al lado. Registrar no es
+// pagar: la orden queda pagada recién con la conciliación.
 //
-// Corregir no pide la cuenta otra vez: `registrar_pago_manual` exige haberla visto en esta
-// ejecución, no una apertura nueva (§8). Los datos se escriben del comprobante, nunca de la orden.
+// El comprobante va en un paso (§4): elegir el archivo dispara todo y la ficha dice en qué va. No hay
+// lista: vale `comprobante_actual`, y volver a subir lo reemplaza. La lectura del antivirus la hace
+// la ficha, que se vuelve a leer sola, y sobrevive a salir y volver.
+//
+// Los datos se escriben del comprobante, nunca de la orden: si no, la comparación no vale. Corregir
+// abre con lo registrado, y no pide la cuenta (§8): ni una apertura nueva, ni escribirla otra vez.
 
-type DocumentoEnLista = components["schemas"]["DocumentoEnLista"];
+type Comprobante = components["schemas"]["ComprobanteActual"];
+type Subido = components["schemas"]["ComprobanteSubido"];
 type Version = components["schemas"]["VersionOrdenPago"];
-type Registro = { numero: string; fecha: string; importe: string; cuenta: string; documento: string };
+type Pago = components["schemas"]["PagoManual"];
+type Registro = { numero: string; fecha: string; importe: string; cuenta: string };
 
-const FALLA_COMPROBANTES = "No pudimos actualizar los comprobantes.";
 const hoy = () => new Date().toLocaleDateString("en-CA");
 
-/** Los comprobantes que pueden respaldar el pago de esa orden: cargados desde su pago (app 0063) y con un archivo que pasó el antivirus. */
-export function comprobantesDisponibles(documentos: DocumentoEnLista[], orden: string): DocumentoEnLista[] {
-  return documentos.filter((d) => d.orden_pago_id === orden && d.versiones.some((v) => v.estado === "disponible"));
-}
-
-/** Cuántos comprobantes de esa orden espera revisar el antivirus. */
-export function comprobantesEnRevision(documentos: DocumentoEnLista[], orden: string): number {
-  return documentos.filter(
-    (d) => d.orden_pago_id === orden && !d.versiones.some((v) => v.estado === "disponible") && d.versiones.some((v) => v.estado === "en_cuarentena"),
-  ).length;
+function datosIniciales(corregido: Pago | undefined): Registro {
+  if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", cuenta: "" };
+  return {
+    numero: corregido.numero_operacion,
+    fecha: corregido.fecha_operacion,
+    importe: aTexto(corregido.importe_centavos),
+    cuenta: "",
+  };
 }
 
 type Props = {
   consorcio: string;
   orden: string;
   version: Version;
-  corrige: boolean;
+  /** El registro observado que se corrige; sin él, es un registro nuevo. */
+  corregido: Pago | undefined;
+  comprobante: Comprobante | null;
+  subido: Subido | null;
   subtitulo: "h2" | "h3";
   acto: ActoEnCurso;
   aEntrar: () => void;
   alRegistrar: (texto: string) => void;
+  /** Vuelve a leer la ficha, para ver en qué va el antivirus. */
+  releer: () => void;
   /** Otra persona cambió la orden: lo escrito queda sobre lo que se vuelva a leer. */
   alCambiarLaOrden: () => void;
 };
 
-export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Subtitulo, acto, aEntrar, alRegistrar, alCambiarLaOrden }: Props) {
+export function RegistroPago(props: Props) {
+  const { consorcio, orden, version, corregido, comprobante, subido, subtitulo: Subtitulo, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
   const id = useId();
-  const { enviando, setEnviando, setAviso, setPendiente, pendiente, montado } = acto;
-  const [registro, setRegistro] = useState<Registro>({ numero: "", fecha: hoy(), importe: "", cuenta: "", documento: "" });
-  const [comprobantes, setComprobantes] = useState<DocumentoEnLista[]>([]);
-  const [archivo, setArchivo] = useState<File | null>(null);
+  const { enviando, setEnviando, setAviso, montado } = acto;
+  const corrige = corregido !== undefined;
+  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido));
+  /** Lo elegido en este dispositivo: se ve enseguida, y el reintento no pide elegirlo de nuevo. */
+  const [elegido, setElegido] = useState<File | null>(null);
+  const [subiendo, setSubiendo] = useState(false);
+  const [noSubio, setNoSubio] = useState(false);
+  /** El comprobante recién subido, hasta que la ficha diga en qué quedó. */
+  const [esperado, setEsperado] = useState<string | null>(null);
   const claveCarga = useRef<string | null>(null);
   const claveArchivo = useRef<string | null>(null);
   /** El comprobante ya creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
   const sinArchivo = useRef<string | null>(null);
-  /** El comprobante recién subido: se elige solo apenas pasa el antivirus. */
-  const recienSubido = useRef<string | null>(null);
-  const [esperandoAntivirus, setEsperandoAntivirus] = useState(false);
-  /** El antivirus agotó la espera: deja de mirar solo hasta que la persona lo pida. */
-  const [esperaAgotada, setEsperaAgotada] = useState(false);
-  /** Lo que no se pudo actualizar de los comprobantes: el formulario sigue y lo dice. */
-  const [fallaComprobantes, setFallaComprobantes] = useState<string | null>(null);
-  /** Cambia para vaciar el campo del archivo después de subirlo. */
-  const [entrada, setEntrada] = useState(0);
 
-  /** Lee los comprobantes: una falla no se lleva lo escrito. */
-  async function leerComprobantes() {
-    try {
-      const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/documentos", {
-        params: { path: { consorcio_id: consorcio } },
-      });
-      exigirSesion(response);
-      if (!montado.current) return;
-      if (data === undefined) {
-        const codigo = codigoDe(error);
-        if (codigo === SEGUNDO_FACTOR_REQUERIDO)
-          setPendiente({ acto: "ver los comprobantes", reintentar: () => void leerComprobantes() });
-        else setFallaComprobantes(`${FALLA_COMPROBANTES} ${mensajeDeError(response.status, codigo)}`);
-        return;
-      }
-      const deOrdenes = data.documentos.filter((d) => d.orden_pago_id != null);
-      setFallaComprobantes(null);
-      setComprobantes(deOrdenes);
-      const nuevo = deOrdenes.find((d) => d.id === recienSubido.current);
-      if (nuevo === undefined) return;
-      if (nuevo.versiones.some((v) => v.estado === "disponible")) {
-        recienSubido.current = null;
-        setEsperandoAntivirus(false);
-        setRegistro((r) => ({ ...r, documento: nuevo.id }));
-        setAviso({ texto: "Listo: el comprobante pasó el antivirus y ya quedó elegido.", ok: true });
-      } else if (!nuevo.versiones.some((v) => v.estado === "en_cuarentena")) {
-        recienSubido.current = null;
-        setEsperandoAntivirus(false);
-        setAviso({ texto: "El antivirus rechazó el archivo: subí otro.", ok: false });
-      }
-    } catch (e: unknown) {
-      if (e instanceof SinSesion) aEntrar();
-      else setFallaComprobantes(`${FALLA_COMPROBANTES} ${SIN_CONEXION}`);
-    }
-  }
+  const llego = esperado !== null && comprobante?.documento_id === esperado;
+  const rechazado = subido?.estado === "rechazado" && (esperado === null || subido.documento_id === esperado);
+  const revisando = !rechazado && !llego && (esperado !== null || subido?.estado === "en_cuarentena");
+  const antivirusTarda = useConsultaDelAntivirus(revisando, releer);
+  const enCurso = subiendo || revisando || noSubio;
+  const imagenLocal = useUrlDelArchivo(enCurso && elegido !== null && elegido.type !== "application/pdf" ? elegido : null);
 
-  const leer = useRef(leerComprobantes);
-  leer.current = leerComprobantes;
-  useEffect(() => {
-    void leer.current();
-  }, []);
-
-  // Mientras un comprobante espera al antivirus, se mira solo: no hace falta un botón.
-  const enRevision = comprobantesEnRevision(comprobantes, orden);
-  useEsperaAntivirus((esperandoAntivirus || enRevision > 0) && !esperaAgotada && pendiente === null, () => void leerComprobantes(), () => {
-    setEsperandoAntivirus(false);
-    setEsperaAgotada(true);
-    setFallaComprobantes("El antivirus sigue revisando el comprobante. Tocá «Actualizar comprobantes» en un rato.");
-  });
-  useAlVolverLaRed(fallaComprobantes !== null, () => void leerComprobantes());
-
-  /** Carga el comprobante desde el pago (app 0063): el documento nace visible solo para quien lo sube y el Consejo; después va el archivo. */
-  async function subirComprobante(elegido: File) {
+  async function subir(archivo: File) {
     if (!montado.current) return;
-    const problema = problemaDelArchivo(elegido);
-    if (problema !== null) {
-      // Ese archivo no va a entrar: el campo queda vacío para elegir otro.
-      setArchivo(null);
-      setEntrada((n) => n + 1);
-      setAviso({ texto: problema, ok: false });
-      return;
-    }
+    setSubiendo(true);
     setEnviando(true);
+    setNoSubio(false);
     setAviso(null);
     try {
       // Si un intento anterior creó el documento y el archivo no entró, se reintenta solo el archivo.
@@ -155,11 +111,8 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
         exigirSesion(creado.response);
         if (creado.data === undefined) {
           const codigo = codigoDe(creado.error);
-          if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
-            setPendiente({ acto: "cargar el comprobante", reintentar: () => void subirComprobante(elegido) });
-            return;
-          }
           if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
+          setNoSubio(true);
           setAviso({ texto: mensajeDeActo(creado.response.status, codigo), ok: false });
           if (cambioLaOrden(codigo) || cambioLoVisto(creado.response.status, codigo)) alCambiarLaOrden();
           return;
@@ -168,42 +121,54 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
         sinArchivo.current = creado.data.id;
       }
       claveArchivo.current ??= crypto.randomUUID();
-      const subido = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
-        headers: { ...encabezadoCsrf(), "Content-Type": elegido.type },
+      const subida = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
+        headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
         params: {
           path: { consorcio_id: consorcio, documento_id: sinArchivo.current },
           header: { [ENCABEZADO_IDEMPOTENCIA]: claveArchivo.current },
         },
         // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
-        body: elegido as unknown as string,
+        body: archivo as unknown as string,
         bodySerializer: (cuerpo) => cuerpo,
       });
-      exigirSesion(subido.response);
-      if (subido.data === undefined) {
-        const codigo = codigoDe(subido.error);
-        if (renovarClave(subido.response.status, codigo)) claveArchivo.current = null;
-        const texto = mensajeDeCarga(subido.response.status, codigo, "subir", [], subido.response.headers.has("Retry-After"));
+      exigirSesion(subida.response);
+      if (subida.data === undefined) {
+        const codigo = codigoDe(subida.error);
+        if (renovarClave(subida.response.status, codigo)) claveArchivo.current = null;
+        const texto = mensajeDeCarga(subida.response.status, codigo, "subir", [], subida.response.headers.has("Retry-After"));
+        setNoSubio(true);
         setAviso({ texto: `El archivo no se subió. ${texto}`, ok: false });
         return;
       }
       claveArchivo.current = null;
-      recienSubido.current = sinArchivo.current;
+      setEsperado(sinArchivo.current);
       sinArchivo.current = null;
-      setArchivo(null);
-      setEntrada((n) => n + 1);
-      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y queda elegido solo.", ok: true });
-      setEsperaAgotada(false);
-      setEsperandoAntivirus(true);
-      void leerComprobantes();
+      releer();
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
-      else setAviso({ texto: SIN_CONEXION, ok: false });
+      else {
+        setNoSubio(true);
+        setAviso({ texto: SIN_CONEXION, ok: false });
+      }
     } finally {
+      setSubiendo(false);
       setEnviando(false);
     }
   }
 
-  function registrar(evento: FormEvent) {
+  function elegir(archivo: File) {
+    const problema = problemaDelArchivo(archivo);
+    if (problema !== null) {
+      setAviso({ texto: problema, ok: false });
+      return;
+    }
+    // Otro archivo es otro pedido: si el anterior no entró, sirve su documento, no su clave.
+    claveArchivo.current = null;
+    setElegido(archivo);
+    void subir(archivo);
+  }
+
+  function registrar(evento: FormEvent, documento: string) {
     evento.preventDefault();
     const centavos = aCentavos(registro.importe);
     if (centavos === null) {
@@ -211,7 +176,7 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
       return;
     }
     void acto.hacer({
-      quePide: ["registrar", orden, version.numero, version.huella, registro],
+      quePide: ["registrar", orden, version.numero, version.huella, registro, documento],
       nombre: "registrar el pago",
       pedir: (clave) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual", {
@@ -224,8 +189,8 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
             fecha_operacion: registro.fecha,
             importe_centavos: centavos,
             moneda: version.moneda,
-            cuenta_destino: registro.cuenta.replace(/\D/g, ""),
-            documento_id: registro.documento,
+            ...(corrige ? {} : { cuenta_destino: registro.cuenta.replace(/\D/g, "") }),
+            documento_id: documento,
           },
         }),
       alTerminar: () => alRegistrar("Listo: registraste el pago. Falta que otro miembro del Consejo lo concilie."),
@@ -239,74 +204,82 @@ export function RegistroPago({ consorcio, orden, version, corrige, subtitulo: Su
     setRegistro((r) => ({ ...r, [campo]: valor }));
   }
 
+  const conDatos = comprobante !== null && !enCurso;
+
   return (
-    <form className="formulario" onSubmit={registrar}>
-      <Subtitulo>{corrige ? "Corregir el registro" : "Después de transferir, registrá la evidencia"}</Subtitulo>
-      <p>Registrar no es pagar: la orden queda pagada recién cuando otro miembro del Consejo lo concilia.</p>
-      <label htmlFor={`${id}-numero`}>Número de operación</label>
-      <input id={`${id}-numero`} required maxLength={60} value={registro.numero} disabled={enviando}
-        onChange={(e) => cambiar("numero", e.target.value)} />
-      <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
-      <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
-        onChange={(e) => cambiar("fecha", e.target.value)} />
-      <label htmlFor={`${id}-importe`}>Importe transferido (como figura en el comprobante)</label>
-      <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
-        alCambiar={(texto) => cambiar("importe", texto)} />
-      <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
-      <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
-        onChange={(e) => cambiar("cuenta", e.target.value)} />
-      <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
-      <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png" disabled={enviando}
-        onChange={(e) => {
-          const elegido = e.target.files?.[0] ?? null;
-          claveArchivo.current = null;
-          setArchivo(elegido);
-          if (elegido !== null) void subirComprobante(elegido);
-        }} />
-      {/* Sin esto, reintentar sería volver a elegir el mismo archivo, y el navegador no avisa. */}
-      {archivo !== null && !enviando && (
-        <div className="acciones">
-          <button type="button" onClick={() => void subirComprobante(archivo)}>
-            Reintentar la subida
-          </button>
-        </div>
-      )}
-      <p>
-        Desde que lo subís lo ven solo vos y el Consejo, salvo quien preparó la orden. Aparece en la lista cuando el
-        antivirus lo aprueba.
-        {enRevision > 0 && ` En revisión: ${enRevision}.`}
-      </p>
-      {fallaComprobantes !== null && (
-        <>
+    <div className="comprobante-y-datos">
+      <section aria-label="Comprobante">
+        {enCurso && elegido !== null && imagenLocal !== null && (
+          <div className="visor-comprobante">
+            <img src={imagenLocal} alt={`Vista previa de ${elegido.name}`} />
+          </div>
+        )}
+        {enCurso && elegido !== null && imagenLocal === null && <p className="archivo-elegido">{elegido.name}</p>}
+        {!enCurso && comprobante !== null && (
+          <VisorComprobante key={comprobante.version_documento_id} consorcio={consorcio} documento={comprobante.documento_id}
+            version={comprobante.version_documento_id} aEntrar={aEntrar} />
+        )}
+        {(subiendo || revisando) && (
+          <div role="status">
+            <Subtitulo>Estamos revisando el comprobante</Subtitulo>
+            <ol className="avance-comprobante">
+              <li aria-current={subiendo ? "step" : undefined}>{subiendo ? "Subiendo el archivo…" : "Subido"}</li>
+              <li aria-current={revisando ? "step" : undefined}>{revisando ? "El antivirus lo está revisando…" : "Antivirus"}</li>
+            </ol>
+            {antivirusTarda && <p>{AVISO_ANTIVIRUS_TARDA}</p>}
+          </div>
+        )}
+        {rechazado && !enCurso && (
           <p className="aviso-error" role="alert">
-            {fallaComprobantes}
+            {AVISO_ARCHIVO_RECHAZADO}
           </p>
-          <div className="acciones">
-            <button type="button" className="secundario" disabled={enviando}
-              onClick={() => {
-                setEsperaAgotada(false);
-                void leerComprobantes();
-              }}>
-              Actualizar comprobantes
+        )}
+        {noSubio && elegido !== null && !subiendo && (
+          <div className="zona-comprobante">
+            <button type="button" disabled={enviando} onClick={() => void subir(elegido)}>
+              Reintentar
+            </button>
+            <button type="button" className="secundario" disabled={enviando} onClick={() => setNoSubio(false)}>
+              Elegir otro archivo
             </button>
           </div>
-        </>
+        )}
+        {!enCurso && <ZonaComprobante deshabilitada={enviando} reemplaza={comprobante !== null} alElegir={elegir} />}
+      </section>
+
+      {conDatos && (
+        <form className="formulario" onSubmit={(e) => registrar(e, comprobante.documento_id)}>
+          <Subtitulo>{corrige ? "Corregir el registro" : "Registrar el pago"}</Subtitulo>
+          <p>{corrige ? "Cambiá lo que está mal. Queda registrado qué cambió y quién lo cambió." : "Escribí los datos como figuran en el comprobante."}</p>
+          <label htmlFor={`${id}-numero`}>Número de operación</label>
+          <input id={`${id}-numero`} required maxLength={60} value={registro.numero} disabled={enviando}
+            onChange={(e) => cambiar("numero", e.target.value)} />
+          <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
+          <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
+            onChange={(e) => cambiar("fecha", e.target.value)} />
+          <label htmlFor={`${id}-importe`}>Importe transferido (como figura en el comprobante)</label>
+          <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
+            alCambiar={(texto) => cambiar("importe", texto)} />
+          {corrige ? (
+            <p>
+              Cuenta de destino: {cuentaEnmascarada(version.cuenta_ultimos_digitos)}, la que ya registraste. Si la plata fue a otra
+              cuenta, no la corrijas acá: avisale al Consejo.
+            </p>
+          ) : (
+            <>
+              <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
+              <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta} disabled={enviando}
+                onChange={(e) => cambiar("cuenta", e.target.value)} />
+            </>
+          )}
+          <div className="acciones">
+            <button type="submit" disabled={enviando}>
+              {corrige ? "Guardar la corrección" : "Registrar el pago"}
+            </button>
+          </div>
+          <p>Queda pagada cuando otro miembro del Consejo lo concilie.</p>
+        </form>
       )}
-      <label htmlFor={`${id}-comprobante`}>Comprobante de la transferencia</label>
-      <select id={`${id}-comprobante`} required value={registro.documento} disabled={enviando}
-        onChange={(e) => cambiar("documento", e.target.value)}>
-        <option value="">Elegí el comprobante</option>
-        {comprobantesDisponibles(comprobantes, orden).map((d) => (
-          <option key={d.id} value={d.id}>
-            {d.titulo} ({d.fecha})
-          </option>
-        ))}
-      </select>
-      <div className="acciones">
-        <button type="submit" disabled={enviando || registro.documento === ""}>
-          {corrige ? "Guardar la corrección" : "Registrar el pago"}
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }

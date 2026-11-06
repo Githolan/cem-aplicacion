@@ -776,7 +776,7 @@
         "type": "object"
       },
       "ComprobanteActual": {
-        "description": "El archivo que corresponde mostrar: el del registro vigente o, sin él, el último que quien\nmira subió para esta ejecución y pasó el antivirus.",
+        "description": "El archivo que corresponde mostrar: el del registro vigente o, sin él, el último que quien\nmira subió para esta ejecución y pasó el antivirus. Se abre con `…/contenido`.",
         "properties": {
           "documento_id": {
             "format": "uuid",
@@ -817,6 +817,31 @@
           "fecha"
         ],
         "title": "ComprobantePagoNuevo",
+        "type": "object"
+      },
+      "ComprobanteSubido": {
+        "description": "Lo último que quien mira subió para esta ejecución, mientras no es el actual: lo revisa el\nantivirus o lo rechazó.",
+        "properties": {
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_documento_id",
+          "estado"
+        ],
+        "title": "ComprobanteSubido",
         "type": "object"
       },
       "ConciliacionPagoManual": {
@@ -3054,7 +3079,19 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Nulo si no hay o si quien mira no puede ver ese archivo."
+          },
+          "comprobante_subido": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComprobanteSubido"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nulo si no subió nada, si lo último ya es el actual o si hay un registro vigente."
           },
           "declaracion_vigente": {
             "anyOf": [
@@ -3198,6 +3235,7 @@
           "puede_confirmar",
           "ejecucion",
           "comprobante_actual",
+          "comprobante_subido",
           "observacion_vigente",
           "declaracion_vigente"
         ],
@@ -6146,6 +6184,10 @@
             "title": "Registrado Por",
             "type": "string"
           },
+          "registrado_por_nombre": {
+            "title": "Registrado Por Nombre",
+            "type": "string"
+          },
           "version_documento_id": {
             "description": "El archivo exacto que quedó como evidencia.",
             "format": "uuid",
@@ -6163,6 +6205,7 @@
           "documento_id",
           "version_documento_id",
           "registrado_por",
+          "registrado_por_nombre",
           "registrado_en",
           "conciliacion",
           "motivo_conciliacion",
@@ -6893,10 +6936,18 @@
         "description": "`POST …/ordenes-pago/{id}/pago-manual`: la evidencia de una transferencia ya hecha. No da la\norden por pagada: queda pendiente de conciliación (En verificación).",
         "properties": {
           "cuenta_destino": {
-            "description": "CBU o CVU de 22 dígitos. El alias no se admite.",
-            "pattern": "^[0-9]{22}$",
-            "title": "Cuenta Destino",
-            "type": "string"
+            "anyOf": [
+              {
+                "description": "CBU o CVU de 22 dígitos. El alias no se admite.",
+                "pattern": "^[0-9]{22}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Como figura en el comprobante. Nula solo al corregir un registro observado: sigue la que ese registro ya acreditó, y la base la niega en un registro nuevo (`no_coincide_con_la_orden`). Así corregir no pide la cuenta otra vez.",
+            "title": "Cuenta Destino"
           },
           "documento_id": {
             "description": "El comprobante: cargado desde el pago de esta orden (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus.",
@@ -6949,7 +7000,6 @@
           "fecha_operacion",
           "importe_centavos",
           "moneda",
-          "cuenta_destino",
           "documento_id"
         ],
         "title": "RegistroPagoManual",
@@ -10710,6 +10760,94 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/contenido": {
+      "get": {
+        "operationId": "contenido_de_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones__version_id__contenido_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/jpeg": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "El archivo, con `inline`, `nosniff` y una CSP que no deja ejecutar nada."
+          },
+          "403": {
+            "description": "Sin `documentos.ver` en el consorcio."
+          },
+          "404": {
+            "description": "La versión o el documento no existen en este consorcio; su categoría es restringida y la persona no tiene la facultad `documentos.ver`; o respalda un pago manual, la persona no subió esa versión y no es del Consejo (`egresos.aprobar_orden`) o preparó esa orden."
+          },
+          "409": {
+            "description": "La versión está en cuarentena o fue rechazada (solo a quien la subió; a otros, 404)."
+          },
+          "410": {
+            "description": "El archivo ya no está en el almacén (staging, a los 30 días)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ver una versión disponible en la pantalla: el archivo por el mismo origen",
+        "tags": [
+          "documentos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar": {
       "get": {
         "operationId": "descargar_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones__version_id__descargar_get",
@@ -12793,7 +12931,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/comprobante": {
       "post": {
-        "description": "El documento del comprobante, con la orden que respalda (`0063`); el archivo se sube\ndespués a `…/documentos/{id}/versiones`. Lo crea quien vio la cuenta en el acto de ejecución\n(`no_es_quien_ejecuto`); la base lo vuelve a exigir.",
+        "description": "El documento del comprobante, con la orden que respalda (`0063`); el archivo se sube\ndespués a `…/documentos/{id}/versiones`. Lo crea quien vio la cuenta en el acto de ejecución\n(`no_es_quien_ejecuto`); la base lo vuelve a exigir. Sin gesto (`0073`): no mueve dinero, y la\natadura ocurre al registrar, que sí lo pide.",
         "operationId": "crear_comprobante_de_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_comprobante_post",
         "parameters": [
           {

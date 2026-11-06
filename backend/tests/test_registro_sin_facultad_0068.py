@@ -144,9 +144,11 @@ def test_sin_la_facultad_cargar_y_registrar_exigen_r10(
     datos = comprobante_sin_facultad(motor_migrate, e, o)
     vieja = nueva_sesion(motor_migrate, e.adm, horas_atras=horas_atras,
                          totp_min_atras=totp_min_atras)  # fmt: skip
-    niega(motor_migrate, e, e.adm, CREAR, motivo, sesion=vieja, orden=o, titulo=TITULO)
-    niega(motor_migrate, e, e.adm, VERSION, motivo, sesion=vieja, orden=o,
-          documento=datos["documento"])  # fmt: skip
+    # Subir ya no pide el gesto (`0073`): la sesión de 12 horas, sí.
+    if motivo == "requiere_sesion_reciente":
+        niega(motor_migrate, e, e.adm, CREAR, motivo, sesion=vieja, orden=o, titulo=TITULO)
+        niega(motor_migrate, e, e.adm, VERSION, motivo, sesion=vieja, orden=o,
+              documento=datos["documento"])  # fmt: skip
     niega(motor_migrate, e, e.adm, REGISTRAR, motivo, sesion=vieja,
           **evidencia(motor_migrate, e, o, documento=datos["documento"]))  # fmt: skip
     llamar(

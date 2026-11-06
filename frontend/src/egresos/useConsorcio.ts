@@ -44,6 +44,28 @@ export function useEsperaAntivirus(activa: boolean, mirar: () => void, alAgotar:
   }, [activa]);
 }
 
+/** Mientras `activa`, llama a `mirar` cada tanto y no se rinde: el antivirus puede tardar. Devuelve si
+ * ya pasó el tiempo de la espera, para avisar que se puede salir. */
+export function useConsultaDelAntivirus(activa: boolean, mirar: () => void): boolean {
+  const [tarda, setTarda] = useState(false);
+  const ultima = useRef(mirar);
+  ultima.current = mirar;
+  useEffect(() => {
+    if (!activa) return;
+    let vueltas = 0;
+    const temporizador = setInterval(() => {
+      vueltas += 1;
+      if (vueltas >= VUELTAS_ANTIVIRUS) setTarda(true);
+      ultima.current();
+    }, ESPERA_ANTIVIRUS_MS);
+    return () => {
+      clearInterval(temporizador);
+      setTarda(false);
+    };
+  }, [activa]);
+  return tarda;
+}
+
 /** Mientras `activa`, repite `leer` cuando el navegador avisa que volvió la red. Solo para lecturas:
  * un pedido que escribe sigue esperando el toque de la persona. */
 export function useAlVolverLaRed(activa: boolean, leer: () => void) {

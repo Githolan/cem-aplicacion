@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { api } from "../api/cliente";
@@ -14,26 +14,13 @@ import { Ficha } from "./Ficha";
 import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import type { Paso } from "./textos";
+import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 
 // `/pagos` y `/pagos/:orden`: una bandeja y una ficha (§1). En PC la ficha se abre al lado de la
 // bandeja, con la primera orden si no se eligió otra; en tablet y teléfono, aparte (§15).
 
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[] };
-
-/** Desde 1025 px (documento de reglas, «Desktop»). */
-const CONSULTA_AL_LADO = "(min-width: 64.0625em)";
-
-function useAlLado(): boolean {
-  return useSyncExternalStore(
-    (avisar) => {
-      const consulta = window.matchMedia(CONSULTA_AL_LADO);
-      consulta.addEventListener("change", avisar);
-      return () => consulta.removeEventListener("change", avisar);
-    },
-    () => window.matchMedia(CONSULTA_AL_LADO).matches,
-  );
-}
 
 export function CircuitoPagos() {
   const elegido = useConsorcio(REQUISITOS.pagos);
@@ -43,7 +30,7 @@ export function CircuitoPagos() {
 function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar }: ReturnType<typeof useConsorcio>) {
   const { orden = null } = useParams();
   const navegar = useNavigate();
-  const alLado = useAlLado();
+  const alLado = useAncho(CONSULTA_AL_LADO);
   const veBandeja = alLado || orden === null;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [aviso, setAviso] = useState<Aviso | null>(null);
