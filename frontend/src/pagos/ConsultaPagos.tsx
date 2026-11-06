@@ -36,6 +36,8 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     if (consorcio === "") return;
     let vigente = true;
     const { busqueda, filtro, saltar } = pedido;
+    // Si falla «Ver más», lo ya cargado queda y el mismo botón vuelve a pedir esa página.
+    const falla = (l: Lectura): Lectura => (saltar > 0 && l.tipo === "ok" ? l : { tipo: "sin_servicio" });
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/pagos/consulta", {
         params: {
@@ -57,7 +59,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           }));
         } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
         else {
-          setLectura({ tipo: "sin_servicio" });
+          setLectura(falla);
           setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigo)));
         }
       })
@@ -65,7 +67,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         if (!vigente) return;
         if (e instanceof SinSesion) aEntrar();
         else {
-          setLectura({ tipo: "sin_servicio" });
+          setLectura(falla);
           setAviso(sinPisarLoHecho(SIN_CONEXION));
         }
       });
@@ -74,9 +76,15 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     };
   }, [consorcio, pedido, vuelta, aEntrar, aInicio]);
 
+  /** Otra consulta empieza de cero: lo cargado y su «Ver más» eran de la anterior. */
+  function consultar(cambio: Partial<Pedido>) {
+    setLectura({ tipo: "cargando" });
+    setPedido((p) => ({ ...p, ...cambio, saltar: 0 }));
+  }
+
   function buscar(evento: FormEvent) {
     evento.preventDefault();
-    setPedido((p) => ({ ...p, busqueda: escrito.trim(), saltar: 0 }));
+    consultar({ busqueda: escrito.trim() });
   }
 
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
@@ -102,7 +110,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           <div className="filtros-pago" role="group" aria-label="Filtrar">
             {FILTROS.map((f) => (
               <button key={f.valor} type="button" className="secundario" aria-pressed={pedido.filtro === f.valor}
-                onClick={() => setPedido((p) => ({ ...p, filtro: f.valor, saltar: 0 }))}>
+                onClick={() => consultar({ filtro: f.valor })}>
                 {f.texto}
               </button>
             ))}

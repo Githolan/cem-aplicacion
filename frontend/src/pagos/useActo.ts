@@ -24,7 +24,8 @@ export type Acto<T> = {
 
 export type Pendiente = { acto: string; reintentar: () => void };
 
-export function useActo(aEntrar: () => void) {
+/** `alDescartar`: el acto salió bien pero su pantalla ya se cerró, y nada más se entera. */
+export function useActo(aEntrar: () => void, alDescartar?: () => void) {
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
@@ -49,7 +50,12 @@ export function useActo(aEntrar: () => void) {
       return;
     }
     setEnviando(false);
+    // La ficha ya se cerró: su respuesta no mueve la pantalla que se abrió después.
     const { data, error, response } = respuesta;
+    if (!montado.current) {
+      if (data !== undefined) alDescartar?.();
+      return;
+    }
     if (data !== undefined) {
       clave.current = null;
       acto.alTerminar(data);

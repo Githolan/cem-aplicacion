@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "../api/cliente";
@@ -78,6 +78,9 @@ export function cambiosDeVersion(v: Version, anterior: Version): string[] {
   return cambios;
 }
 
+/** A qué paso se sigue, y si la ficha que lo pide sigue abierta cuando llega la bandeja. */
+export type Seguir = { paso: Paso; abierta: RefObject<boolean> };
+
 type Props = {
   consorcio: string;
   orden: string;
@@ -85,16 +88,16 @@ type Props = {
   titulo: "h1" | "h2";
   aEntrar: () => void;
   aInicio: () => void;
-  /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguirCon`, al próximo de ese paso. */
-  terminar: (texto: string, seguirCon?: Paso) => void;
+  /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguir`, al próximo de ese paso. */
+  terminar: (texto: string, seguir?: Seguir) => void;
   /** Algo cambió sin dejar la ficha: la bandeja de al lado se vuelve a leer. */
   alCambiar: () => void;
 };
 
 export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, terminar, alCambiar }: Props) {
   const id = useId();
-  const acto = useActo(aEntrar);
-  const { enviando, aviso, setAviso, pendiente, setPendiente } = acto;
+  const acto = useActo(aEntrar, alCambiar);
+  const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
   /** Lo que dijo la última lectura que falló: se va cuando una lectura sale bien. */
   const fallaDeLectura = useRef<string | null>(null);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
@@ -124,8 +127,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
         exigirSesion(response);
         if (!vigente) return;
         const version = data?.versiones.find((x) => x.numero === data.orden.version_vigente);
-        if (version !== undefined) setDecision({ version: version.numero, cuenta: version.cuenta_destino });
-        else {
+        if (version !== undefined) {
+          setDecision({ version: version.numero, cuenta: version.cuenta_destino });
+          // La orden cambió entre las dos lecturas: la cuenta es de una versión que esta ficha no muestra.
+          if (version.numero !== versionLeida) setVuelta((n) => n + 1);
+        } else {
           setFaltaCuenta(true);
           setAviso(sinPisarLoHecho(mensajeDeError(response.status, codigoDe(error))));
         }
@@ -270,6 +276,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
         }),
       alTerminar: () => {
         releer();
+        alCambiar();
         abrirCuenta();
       },
       alFallar: siCambio,
@@ -368,7 +375,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           resultado === "conforme"
             ? "Listo: conciliaste el pago. La orden quedó pagada."
             : "Listo: observaste el pago. Quien lo registró tiene que corregirlo.",
-          "conciliar",
+          { paso: "conciliar", abierta: montado },
         ),
       alFallar: siCambio,
     });

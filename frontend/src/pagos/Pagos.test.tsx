@@ -432,6 +432,123 @@ describe("el ancho de la pantalla", () => {
     expect(container.querySelector(".circuito-pagos--al-lado")).not.toBeNull();
   });
 
+  it("en PC la orden abierta sola queda fija aunque la bandeja se reordene, y la cuenta sigue a la vista", async () => {
+    ancho(true);
+    let actual = PAGAR;
+    let reordenada = false;
+    const OTRA = elemento("pagar", "para_pagar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        reordenada ? bandejaCon(OTRA, elemento("subir_comprobante", "para_pagar"))() : bandejaCon(elemento("pagar", "para_pagar"), OTRA)(),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(actual),
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => {
+        actual = { ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() };
+        reordenada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => {
+        actual = SUBIR;
+        return Response.json(CUENTA_DEL_ACTO);
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos");
+    fireEvent.click(await boton("Ver la cuenta para pagar"));
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole("link", { name: /Pagar|Subir|comprobante/i })[0]?.textContent).toContain("Ascensores"));
+    expect(screen.getByText(CUENTA)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+  });
+
+  it("control: en PC, al terminar el acto se suelta y se abre la primera de la bandeja nueva", async () => {
+    ancho(true);
+    let terminado = false;
+    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (terminado ? bandejaCon(elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })) : bandejaCon(elemento("aprobar", "para_aprobar")))(),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(APROBAR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [REVISION]: () => Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => {
+        terminado = true;
+        return Response.json({ id: O1, version: 1 }, { status: 201 });
+      },
+    }));
+    abrir("/pagos");
+    const aprobar = (await boton("Aprobar esta versión")) as HTMLButtonElement;
+    await waitFor(() => expect(aprobar.disabled).toBe(false));
+    fireEvent.click(aprobar);
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+  });
+
+  it("si mientras se busca el pago siguiente se abrió otra orden, esa queda y la bandeja se relee", async () => {
+    ancho(true);
+    let colgar = false;
+    const colgadas: ((r: Response) => void)[] = [];
+    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    const lista = bandejaCon(elemento("conciliar", "para_conciliar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" }));
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () => (colgar ? new Promise<Response>((r) => colgadas.push(r)) : lista()),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(CONCILIAR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () => {
+        colgar = true;
+        return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
+    fireEvent.click(await boton("Conforme"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`)).toHaveLength(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
+    colgar = false;
+    await act(async () => {
+      for (const soltar of colgadas) soltar(lista());
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(screen.queryByText("Listo: conciliaste el pago. La orden quedó pagada.")).toBeNull();
+    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
+  });
+
+  it("la subida que termina con la ficha ya cerrada no mueve la que se abrió después", async () => {
+    ancho(true);
+    let soltar: (r: Response) => void = () => undefined;
+    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    const ARCHIVO_NUEVO = `${BASE}/documentos/${NUEVO}/versiones`;
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("subir_comprobante", "para_pagar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(SUBIR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/comprobante`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+      [`POST ${ARCHIVO_NUEVO}`]: () => new Promise<Response>((r) => (soltar = r)),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
+    fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), {
+      target: { files: [new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(pedidos(api, "POST", ARCHIVO_NUEVO)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" });
+    const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
+    await act(async () => {
+      soltar(Response.json({ id: ARCHIVO, documento_id: NUEVO, estado: "en_cuarentena" }, { status: 202 }));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(screen.getByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
+  });
+
   it("control: en tablet y teléfono la bandeja no abre ninguna ficha", async () => {
     const api = backend(CON_UNA);
     vi.stubGlobal("fetch", api);
@@ -563,6 +680,27 @@ describe("pagar", () => {
     });
     return api;
   }
+
+  it("si emitir pasa y la cuenta no, la bandeja igual se relee: la orden ya cambió", async () => {
+    ancho(true);
+    let actual = PAGAR;
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("pagar", "para_pagar")),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(actual),
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => {
+        actual = { ...PAGAR, orden: orden({ estado: "en_ejecucion" }), situacion: "pagando", ejecucion: ejecucion() };
+        return Response.json({ id: O1, version: 1 });
+      },
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => error("error_interno", 500),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
+    const verla = await boton("Ver la cuenta para pagar");
+    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
+    fireEvent.click(verla);
+    await screen.findByRole("alert");
+    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
+  });
 
   it("la cuenta no está antes del acto y el botón avisa qué deja registrado", async () => {
     circuito();
@@ -933,6 +1071,26 @@ describe("el comprobante en un paso", () => {
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA * 3));
     expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
+  });
+
+  it("una consulta vieja del antivirus no pisa la nueva", async () => {
+    conEsperaManual();
+    const colgadas: ((r: Response) => void)[] = [];
+    let responder = (): Response | Promise<Response> => Response.json(EN_REVISION);
+    abrirFicha(EN_REVISION, { [`GET ${BASE}/pagos/${O1}`]: () => responder() });
+    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    responder = () => new Promise<Response>((r) => colgadas.push(r));
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    await waitFor(() => expect(colgadas).toHaveLength(1));
+    responder = () => Response.json(APROBADO);
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await screen.findByLabelText("Número de operación")).toBeTruthy();
+    await act(async () => {
+      (colgadas[0] as (r: Response) => void)(Response.json(EN_REVISION));
+      await Promise.resolve();
+    });
+    expect(screen.getByLabelText("Número de operación")).toBeTruthy();
+    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
   });
 
   it("registra con el comprobante actual: el documento no se elige", async () => {
@@ -1509,6 +1667,44 @@ describe("aprobar y rechazar", () => {
     expect(lugar()).toBe("/pagos");
   });
 
+  it("la respuesta de un acto de una ficha ya cerrada no mueve la que se abrió después", async () => {
+    ancho(true);
+    let soltar: (r: Response) => void = () => undefined;
+    const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(APROBAR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [REVISION]: () => Response.json({ orden: APROBAR.orden, versiones: APROBAR.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+      [`POST ${BASE}/ordenes-pago/${O1}/aprobaciones`]: () => new Promise<Response>((r) => (soltar = r)),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(`/pagos/${O1}`);
+    await listoParaAprobar();
+    fireEvent.click(await boton("Aprobar esta versión"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
+    await act(async () => {
+      soltar(Response.json({ id: O1, version: 1 }, { status: 201 }));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(screen.queryByText("Listo: aprobaste la versión 1.")).toBeNull();
+    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
+  });
+
+  it("si la orden cambió entre la ficha y la revisión, la ficha se relee y deja aprobar", async () => {
+    let lecturas = 0;
+    const V2 = { ...APROBAR, orden: orden({ estado: "en_revision", version_vigente: 2 }), versiones: [version({ aprobada_por: [] }), version({ numero: 2, huella: H2, aprobada_por: [] })] };
+    abrirFicha(() => (lecturas++ < 2 ? APROBAR : V2), {
+      [REVISION]: () => Response.json({ orden: V2.orden, versiones: V2.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+    });
+    await listoParaAprobar();
+    expect(lecturas).toBeGreaterThan(2);
+  });
+
   it("si la orden cambió, la ficha muestra la versión nueva, lo dice y no traslada la aprobación", async () => {
     let actual = APROBAR;
     const api = abrirFicha(() => actual, {
@@ -1845,6 +2041,72 @@ describe("consultar pagos", () => {
     expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
     expect(pagina).toBe(1);
     sinBoton("Ver más");
+  });
+
+  it("si falla «Ver más», lo cargado queda y el reintento suma esa página", async () => {
+    let caido = true;
+    const api = backend({});
+    const saltos: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (pedido: Request) => {
+      const url = new URL(pedido.url);
+      if (url.pathname !== `${BASE}/pagos/consulta`) return api(pedido);
+      const saltar = url.searchParams.get("saltar") as string;
+      saltos.push(saltar);
+      if (saltar === "0") return Response.json({ elementos: [FILA], siguiente: 1 });
+      if (caido) return error("error_interno", 500);
+      return Response.json({ elementos: [{ ...FILA, orden_id: O2, proveedor: "Ascensores Ficticios SA" }], siguiente: null });
+    }));
+    abrir("/pagos/consulta");
+    fireEvent.click(await boton("Ver más"));
+    expect((await screen.findByRole("alert")).textContent).toContain("El servicio no está disponible");
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    sinBoton("Reintentar");
+    caido = false;
+    fireEvent.click(await boton("Ver más"));
+    expect(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(saltos.slice(-2)).toEqual(["1", "1"]);
+    sinBoton("Ver más");
+  });
+
+  it("otra consulta saca lo cargado y su «Ver más»: no se mezclan resultados", async () => {
+    let soltar: (r: Response) => void = () => undefined;
+    const api = backend({});
+    vi.stubGlobal("fetch", vi.fn(async (pedido: Request) => {
+      const url = new URL(pedido.url);
+      if (url.pathname !== `${BASE}/pagos/consulta`) return api(pedido);
+      if (url.searchParams.get("filtro") === "todos") return Response.json({ elementos: [FILA], siguiente: 1 });
+      return new Promise<Response>((r) => (soltar = r));
+    }));
+    abrir("/pagos/consulta");
+    await boton("Ver más");
+    fireEvent.click(await boton("No se pagaron"));
+    expect(await screen.findByText("Cargando los pagos…")).toBeTruthy();
+    sinBoton("Ver más");
+    expect(screen.queryByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeNull();
+    await act(async () => {
+      soltar(Response.json({ elementos: [{ ...FILA, orden_id: O2, proveedor: "Ascensores Ficticios SA" }], siguiente: null }));
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.getByRole("link", { name: /Ascensores Ficticios SA/ })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeNull();
+  });
+
+  it("si la red cae en «Ver más», también queda lo cargado", async () => {
+    const api = backend({});
+    vi.stubGlobal("fetch", vi.fn(async (pedido: Request) => {
+      const url = new URL(pedido.url);
+      if (url.pathname !== `${BASE}/pagos/consulta`) return api(pedido);
+      if (url.searchParams.get("saltar") === "0") return Response.json({ elementos: [FILA], siguiente: 1 });
+      throw new TypeError("sin red");
+    }));
+    abrir("/pagos/consulta");
+    fireEvent.click(await boton("Ver más"));
+    await screen.findByRole("alert");
+    expect(screen.getByRole("link", { name: /Limpieza Ficticia SRL/ })).toBeTruthy();
+    sinBoton("Reintentar");
+    expect(await boton("Ver más")).toBeTruthy();
   });
 
   it("sin resultados lo dice", async () => {
