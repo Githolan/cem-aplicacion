@@ -6,9 +6,13 @@ Ningún secreto vive en el repositorio (documento 13, §15.4).
 import os
 from dataclasses import dataclass
 
+from cem_contracts.documentos import TOPE_BYTES
+
 PAGOS_DIAS_BANDEJA = 7
 """Decisión por defecto del rediseño del circuito de pagos (§15). `CEM_PAGOS_DIAS_BANDEJA` la
 cambia."""
+COTEJO_MAXIMO_LINEAS = 50_000
+"""Más que el extracto de varios años de un edificio."""
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,11 @@ class Config:
     503."""
     pagos_dias_bandeja: int = PAGOS_DIAS_BANDEJA
     """Cuántos días queda lo rechazado en la bandeja de pagos antes de pasar a la consulta."""
+    cotejo_tope_bytes: int = TOPE_BYTES
+    """Tamaño máximo de un extracto. nginx deja pasar hasta 21 MB en esas rutas
+    (`cem-frontend.conf.template`): más que eso pide cambiarlo también ahí."""
+    cotejo_maximo_lineas: int = COTEJO_MAXIMO_LINEAS
+    """Líneas máximas de un extracto."""
 
 
 def _dias(variable: str, por_defecto: int) -> int:
@@ -45,6 +54,14 @@ def _dias(variable: str, por_defecto: int) -> int:
     if dias < 0:
         raise ValueError(f"{variable} no puede ser negativa")
     return dias
+
+
+def _positivo(variable: str, por_defecto: int) -> int:
+    """Un valor mal escrito impide el arranque, como en `_dias`."""
+    valor = int(os.environ.get(variable, por_defecto))
+    if valor <= 0:
+        raise ValueError(f"{variable} tiene que ser positiva")
+    return valor
 
 
 def cargar() -> Config:
@@ -59,4 +76,6 @@ def cargar() -> Config:
         origen_publico=os.environ.get("CEM_ORIGEN_PUBLICO", ""),
         codigo_clave=os.environ.get("CEM_CODIGO_CLAVE", ""),
         pagos_dias_bandeja=_dias("CEM_PAGOS_DIAS_BANDEJA", PAGOS_DIAS_BANDEJA),
+        cotejo_tope_bytes=_positivo("CEM_COTEJO_TOPE_BYTES", TOPE_BYTES),
+        cotejo_maximo_lineas=_positivo("CEM_COTEJO_MAXIMO_LINEAS", COTEJO_MAXIMO_LINEAS),
     )

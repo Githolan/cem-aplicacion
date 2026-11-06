@@ -253,6 +253,21 @@ class CodigoError(StrEnum):
     moneda que los gastos del borrador."""
     SIN_ESQUEMA = "sin_esquema"
     """El grupo de gasto no tiene un esquema de coeficientes vigente en el período."""
+    EXTRACTO_INVALIDO = "extracto_invalido"
+    """El archivo no se puede leer como un CSV de un extracto: codificación, separador, encabezados
+    con forma de fórmula o demasiadas líneas."""
+    EXTRACTO_DEMASIADAS_LINEAS = "extracto_demasiadas_lineas"
+    """El extracto pasa del máximo de líneas."""
+    EXTRACTO_SIN_MOVIMIENTOS = "extracto_sin_movimientos"
+    """Con esas columnas no se pudo leer ninguna línea del extracto."""
+    COLUMNAS_NO_ENCONTRADAS = "columnas_no_encontradas"
+    """El extracto no tiene las columnas elegidas."""
+    COLUMNAS_SIN_ELEGIR = "columnas_sin_elegir"
+    """Este edificio todavía no eligió qué columna es cada dato del extracto."""
+    PAGO_SIN_CONCILIAR = "pago_sin_conciliar"
+    """Se coteja un pago ya conciliado conforme: este todavía no lo está."""
+    MOVIMIENTO_NO_COINCIDE = "movimiento_no_coincide"
+    """El movimiento del extracto no tiene el importe y el número o la fecha del pago."""
 
 
 class Error(BaseModel):

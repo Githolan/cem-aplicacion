@@ -5,7 +5,7 @@ import type { components } from "../api/tipos";
 import { importe } from "../egresos/comun";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { usePuede } from "../permisos";
-import { RUTA_CONSULTA, RUTA_NUEVA, rutaFicha } from "./rutas";
+import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, rutaFicha } from "./rutas";
 import { type Grupo, TEXTO_LE_TOCA_A, TITULO_GRUPO, VERBO } from "./textos";
 
 // Lo que esta persona tiene que hacer ahora, agrupado por el próximo paso (§2). La arma el servidor:
@@ -53,6 +53,7 @@ type Props = { elementos: Elemento[]; consorcio: string; abierta: string | null 
 export function Bandeja({ elementos, consorcio, abierta }: Props) {
   const puede = usePuede(consorcio);
   const prepara = puede("egresos.preparar_orden");
+  const coteja = puede("egresos.conciliar_pago");
   const grupos = [...new Set(elementos.map((e) => e.grupo))].filter((g) => g !== "esperando");
   const esperando = elementos.filter((e) => e.grupo === "esperando");
   return (
@@ -82,6 +83,11 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
         <Link to={RUTA_CONSULTA} state={{ consorcio }} className="enlace-boton">
           Consultar pagos
         </Link>
+        {coteja && (
+          <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton">
+            Cotejar con el banco
+          </Link>
+        )}
         {prepara && (
           <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton">
             Proveedores
