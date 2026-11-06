@@ -34,7 +34,7 @@ type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
-const MONEDAS = ["ARS", "USD"] as const;
+export const MONEDAS = ["ARS", "USD"] as const;
 /** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
 const SE_CORRIGE_EN_EL_FORMULARIO = new Set(["sin_cambios", "proveedor_inactivo"]);
 
@@ -83,6 +83,9 @@ function datosDe(v: Version, contratos: Contrato[]): Datos {
   };
 }
 
+/** Con qué abre una orden nueva. */
+export type OrdenInicial = { proveedor?: string; importe?: string; moneda?: string; concepto?: string };
+
 type Modificar = {
   orden: string;
   version: Version;
@@ -97,15 +100,15 @@ type Props = {
   aInicio: () => void;
   /** Sin esto, prepara una orden nueva. */
   modificar?: Modificar;
-  /** El proveedor con el que abre una orden nueva, si sigue activo. */
-  proveedorInicial?: string | null;
+  /** Con qué abre una orden nueva; el proveedor, si sigue activo. */
+  inicial?: OrdenInicial;
   alGuardar: (orden: string, texto: string) => void;
   alCancelar: () => void;
   /** La orden cambió: la ficha la vuelve a leer y el formulario sigue sobre lo nuevo. */
   alCambiarLaOrden?: () => void;
 };
 
-export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, proveedorInicial = null, alGuardar, alCancelar, alCambiarLaOrden }: Props) {
+export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, inicial, alGuardar, alCancelar, alCambiarLaOrden }: Props) {
   const id = useId();
   const { enviando, setAviso } = acto;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
@@ -158,8 +161,14 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     if (versionVista === undefined) {
       setDatos((d) => {
         if (d !== null) return d;
-        const inicial = lectura.proveedores.find((p) => p.id === proveedorInicial && p.estado === "activo");
-        return datosVacios((inicial ?? lectura.proveedores.find((p) => p.estado === "activo"))?.id ?? "");
+        const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor && p.estado === "activo");
+        const { importe: importeInicial, moneda, concepto } = inicial ?? {};
+        return {
+          ...datosVacios((elegido ?? lectura.proveedores.find((p) => p.estado === "activo"))?.id ?? ""),
+          ...(importeInicial === undefined ? {} : { importe: importeInicial }),
+          ...(moneda === undefined ? {} : { moneda }),
+          ...(concepto === undefined ? {} : { concepto }),
+        };
       });
       return;
     }
@@ -170,7 +179,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     setDatos((d) => (d === null || antes === null ? nuevos : sobreLoNuevo(d, antes, nuevos)));
     if (antes === null && versionVista.contrato_id !== null && nuevos.contrato === "")
       setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
-  }, [lectura, versionVista, proveedorInicial, setAviso]);
+  }, [lectura, versionVista, inicial, setAviso]);
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     setConfirmar(false);

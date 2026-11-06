@@ -152,6 +152,11 @@ export function importeParaCopiar(centavos: number): string {
   return `${Math.trunc(centavos / 100)},${String(centavos % 100).padStart(2, "0")}`;
 }
 
+/** Centavos al importe decimal de la API («1234.50»): sin pasar por un número con decimales. */
+export function aDecimal(centavos: number): string {
+  return `${Math.trunc(centavos / 100)}.${String(centavos % 100).padStart(2, "0")}`;
+}
+
 /** Centavos a lo que se escribe en el campo («1234,50»). */
 export function aTexto(centavos: number): string {
   const enteros = Math.trunc(centavos / 100);
@@ -225,7 +230,10 @@ const MENSAJES: Record<string, string> = {
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
   numero_operacion_invalido: "El número de operación no es válido: copialo tal como figura en el comprobante.",
-  no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante.",
+  no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante o usá «Pagué otra cosa».",
+  sin_diferencia: "Lo que escribiste es lo mismo que la orden: registrá el pago, no una diferencia.",
+  diferencia_ya_resuelta: "El Consejo ya resolvió esa diferencia.",
+  solo_reclamo: "Un pago a otra cuenta o en otra moneda no se da por pagado: solo se puede reclamar.",
   fecha_operacion_invalida: "La fecha no puede ser anterior a la emisión ni futura.",
   comprobante_invalido: "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta para pagar, seguir en «Facturas y comprobantes» y su archivo tiene que haber pasado el antivirus.",
   comprobante_de_otra_orden: "Ese comprobante ya respalda otro pago.",

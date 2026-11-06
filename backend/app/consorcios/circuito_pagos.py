@@ -47,6 +47,9 @@ class HechosPago:
     declaracion_vigente: bool = False
     declaracion_confirmable: bool = False
     cuenta_vista: bool = False
+    diferencia_sin_resolver: bool = False
+    reclamo_abierto: bool = False
+    pagada_de_menos: bool = False
 
 
 @dataclass(frozen=True)
@@ -65,10 +68,15 @@ class AccionesOrden(HechosPago):
     puede_confirmar: bool = False
     falta_que_declares: bool = False
     pago_sin_salida: bool = False
+    puede_resolver_diferencia: bool = False
 
 
 SIN_ACCIONES = AccionesOrden()
-"""La función de la base lee solo las órdenes en curso: las demás no admiten estas acciones."""
+"""La función de la base lee solo las órdenes en curso y las pagadas de menos: las demás no admiten
+estas acciones."""
+
+SE_VAN_SOLOS = {PasoPago.RECHAZADA, PasoPago.PREPARAR_FALTANTE}
+"""Órdenes cerradas: nada las saca de la bandeja, así que quedan `CEM_PAGOS_DIAS_BANDEJA` días."""
 
 MODIFICABLES = {
     EstadoOrdenPago.BORRADOR,
@@ -90,9 +98,14 @@ SITUACION_POR_ESTADO = {
 
 
 def situacion_de(estado: EstadoOrdenPago, hechos: HechosPago) -> SituacionPago:
-    """§3. Las que dependen de «Pagué otra cosa» todavía no tienen datos que las produzcan."""
+    """§3. Una diferencia manda: lo que pasó de verdad ya se dijo, y un registro observado o una
+    declaración anteriores quedaron atrás."""
     if estado in SITUACION_POR_ESTADO:
         return SITUACION_POR_ESTADO[estado]
+    if hechos.diferencia_sin_resolver:
+        return SituacionPago.CON_DIFERENCIA
+    if hechos.reclamo_abierto:
+        return SituacionPago.RECLAMO
     if hechos.declaracion_vigente:
         return SituacionPago.NO_PAGO_DECLARADO
     if hechos.pago_sin_conciliar:
@@ -157,9 +170,13 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
         case SituacionPago.NO_SE_PAGO:
             return PasoPago.VOLVER_A_PAGAR if prepara else None
         case SituacionPago.PAGADA:
-            return None
+            return PasoPago.PREPARAR_FALTANTE if prepara and a.pagada_de_menos else None
         case SituacionPago.CON_DIFERENCIA | SituacionPago.RECLAMO:
-            raise ValueError(f"situación sin datos que la produzcan: {situacion}")
+            return (
+                PasoPago.RESOLVER_DIFERENCIA
+                if a.puede_resolver_diferencia
+                else PasoPago.ESPERA_RESOLVER
+            )
 
 
 def le_toca_a(paso: PasoPago, hechos: HechosPago) -> LeTocaA:
@@ -187,16 +204,16 @@ def bandeja(
     ordenes: list[OrdenPago],
     acciones: dict,
     prepara: bool,
-    rechazadas_desde: datetime,
+    cerradas_desde: datetime,
 ) -> list[ElementoBandejaPagos]:
     """Lo que quien pide tiene que ver ahora, por grupo y de lo más viejo a lo más nuevo. Lo
-    rechazado antes de `rechazadas_desde` queda solo en la consulta."""
+    rechazado o lo pagado de menos antes de `cerradas_desde` queda solo en la consulta."""
     grupos = list(GrupoPago)
     filas = []
     for o in ordenes:
         a = acciones.get(o.id, SIN_ACCIONES)
         paso = paso_de(situacion_de(o.estado, a), a, prepara)
-        if paso is None or (paso == PasoPago.RECHAZADA and o.actualizada_en < rechazadas_desde):
+        if paso is None or (paso in SE_VAN_SOLOS and o.actualizada_en < cerradas_desde):
             continue
         grupo = GRUPO_DE_PASO[paso]
         filas.append((grupos.index(grupo), o.actualizada_en, ElementoBandejaPagos(

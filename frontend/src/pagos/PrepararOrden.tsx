@@ -6,29 +6,33 @@ import { AvisoPantalla, ConsorcioSinServicio } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { useConsorcio } from "../egresos/useConsorcio";
 import { REQUISITOS } from "../permisos";
-import { FormularioOrden } from "./FormularioOrden";
+import { FormularioOrden, type OrdenInicial } from "./FormularioOrden";
 import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
 // `/pagos/nueva`: preparar una orden. Al guardar sigue a su ficha, donde está el paso que falta.
 
-/** El proveedor recién dado de alta con el que se vuelve a preparar la orden (`state.proveedor`). */
-function proveedorDe(estado: unknown): string | null {
-  if (typeof estado !== "object" || estado === null || !("proveedor" in estado)) return null;
-  return typeof estado.proveedor === "string" ? estado.proveedor : null;
+/** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella. */
+function inicialDe(estado: unknown): OrdenInicial {
+  if (typeof estado !== "object" || estado === null) return {};
+  const texto = (campo: string) => {
+    const valor = (estado as Record<string, unknown>)[campo];
+    return typeof valor === "string" ? valor : undefined;
+  };
+  return { proveedor: texto("proveedor"), importe: texto("importe"), moneda: texto("moneda"), concepto: texto("concepto") };
 }
 
 export function PrepararOrden() {
   const elegido = useConsorcio(REQUISITOS.ordenes);
   // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve.
-  const proveedor = useRef(proveedorDe(useLocation().state));
-  return <PrepararEnElEdificio key={elegido.consorcio} {...elegido} proveedor={proveedor.current} />;
+  const inicial = useRef(inicialDe(useLocation().state));
+  return <PrepararEnElEdificio key={elegido.consorcio} {...elegido} inicial={inicial.current} />;
 }
 
-type Props = ReturnType<typeof useConsorcio> & { proveedor: string | null };
+type Props = ReturnType<typeof useConsorcio> & { inicial: OrdenInicial };
 
-function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, proveedor }: Props) {
+function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, inicial }: Props) {
   const navegar = useNavigate();
   const acto = useActo(aEntrar);
   const { aviso, pendiente, setPendiente, enviando } = acto;
@@ -56,7 +60,7 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
       )}
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <div hidden={pendiente !== null}>
-          <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio} proveedorInicial={proveedor}
+          <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio} inicial={inicial}
             alGuardar={(orden, texto) => navegar(rutaFicha(orden), { state: { aviso: texto, consorcio } })}
             alCancelar={() => navegar(RUTA_PAGOS, { state: { consorcio } })} />
         </div>

@@ -38,6 +38,7 @@ const ARCHIVO = "88888888-8888-4888-8888-888888888888";
 const DECL = "99999999-9999-4999-8999-999999999999";
 const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const K1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const DIF = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const CUENTA = "9990003100000000001234";
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
@@ -52,6 +53,7 @@ type Ficha = components["schemas"]["FichaPago"];
 type Orden = components["schemas"]["OrdenPago"];
 type Version = components["schemas"]["VersionOrdenPago"];
 type Pago = components["schemas"]["PagoManual"];
+type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
@@ -102,10 +104,27 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false,
     puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
-    puede_corregir: false, puede_conciliar: false, puede_confirmar: false, ejecucion: null, comprobante_actual: null,
-    comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, ...extra,
+    puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
+    puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
+    comprobante_subido: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null, ...extra,
   };
 }
+
+function diferencia(extra: Partial<Diferencia> = {}): Diferencia {
+  return {
+    id: DIF, tipo: "importe", importe_real: "12500.00", moneda: "ARS", cuenta_ultimos_digitos: CUENTA.slice(-4),
+    importe_orden_centavos: 1_500_000, moneda_orden: "ARS", numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
+    documento_id: DOC, version_documento_id: ARCHIVO, explicacion: "Me equivoqué al escribirlo", fuera_de_termino: false,
+    registrada_por: PERSONA, registrada_por_nombre: "Marta Ficticia", registrada_en: "2026-10-31T13:00:00Z", resolucion: null,
+    resuelta_por: null, resuelta_en: null, recuperada_en: null, falta_centavos: 250_000, sobra_centavos: null,
+    se_puede_dar_por_pagada: true, ...extra,
+  };
+}
+
+const RESOLVER = {
+  orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "resolver_diferencia", le_toca_a: "vos",
+  puede_resolver_diferencia: true, ejecucion: ejecucion(), diferencia_vigente: diferencia(),
+} as const;
 
 const PAGAR = ficha({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
 const SUBIR = ficha({
@@ -899,6 +918,119 @@ describe("registrar y corregir", () => {
     expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
   });
 
+  it("pagué otra cosa: lleva lo que salió del banco, y no dice que quedó pagada", async () => {
+    const api = abrirFicha(LISTO, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "12.500,50" } });
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: " Me equivoqué " } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    expect(await screen.findByText(/La orden no queda pagada/)).toBeTruthy();
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)[0])).toMatchObject({
+      version: 1, huella: H1, importe_real: "12500.50", moneda: "ARS", cuenta_real: CUENTA, documento_id: DOC, explicacion: "Me equivoqué",
+    });
+  });
+
+  it("pagué otra cosa en otra moneda lleva la moneda que se escribió, no la de la orden", async () => {
+    const api = abrirFicha(LISTO, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => Response.json({ id: DIF, orden_id: O1 }, { status: 201 }),
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Pagué otra cosa"));
+    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    expect(moneda.value).toBe("ARS");
+    fireEvent.change(moneda, { target: { value: "usd" } });
+    expect(moneda.value).toBe("USD");
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Salió en dólares" } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    await screen.findByText(/La orden no queda pagada/);
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`)[0])).toMatchObject({ moneda: "USD" });
+  });
+
+  it("pagué otra cosa con los mismos datos lo dice y deja lo escrito", async () => {
+    abrirFicha(LISTO, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/diferencia`]: () => error("sin_diferencia", 422),
+    });
+    await screen.findByLabelText("Número de operación");
+    escribirRegistro();
+    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Nada" } });
+    fireEvent.click(await boton("Registrar lo que pasó"));
+    expect((await screen.findByRole("alert")).textContent).toContain("es lo mismo que la orden");
+    expect((screen.getByLabelText("Qué pasó") as HTMLTextAreaElement).value).toBe("Nada");
+  });
+
+  it("sin poder registrar no ofrece pagué otra cosa", async () => {
+    abrirFicha({ ...LISTO, puede_registrar: false });
+    await screen.findByLabelText("Número de operación");
+    expect(screen.queryByRole("button", { name: "Pagué otra cosa" })).toBeNull();
+  });
+
+  it("al corregir, pagué otra cosa pide la cuenta del comprobante", async () => {
+    abrirFicha(CORREGIR);
+    await screen.findByLabelText("Número de operación");
+    expect(screen.queryByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeNull();
+    fireEvent.click(await boton("Pagué otra cosa"));
+    expect(screen.getByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeTruthy();
+  });
+
+  describe("resolver lo que se pagó", () => {
+    const CAMINO = `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia/${DIF}`;
+
+    it("de menos ofrece dar por pagado lo real y dice lo que falta", async () => {
+      const api = abrirFicha(ficha(RESOLVER), {
+        [`POST ${CAMINO}/resolucion`]: () => Response.json({ orden_id: O1, estado: "pagada" }),
+      });
+      await screen.findByText("La orden contra lo que salió del banco");
+      expect(screen.getByRole("radio", { name: /Dar por pagados .*12\.500,00 y preparar otra orden por .*2\.500,00/ })).toBeTruthy();
+      fireEvent.click(await boton("Resolver"));
+      expect(await screen.findByText(/quedó pagada por lo que salió del banco/)).toBeTruthy();
+      expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "pagada_por_lo_real" });
+    });
+
+    it("otra cuenta solo ofrece reclamar, enmascarada", async () => {
+      const api = abrirFicha(ficha({
+        ...RESOLVER,
+        diferencia_vigente: diferencia({ tipo: "cuenta", cuenta_ultimos_digitos: "9044", importe_real: "15000.00", falta_centavos: null, se_puede_dar_por_pagada: false }),
+      }), { [`POST ${CAMINO}/resolucion`]: () => Response.json({ orden_id: O1, estado: "en_verificacion" }) });
+      expect(await screen.findByText("…9044")).toBeTruthy();
+      expect(screen.queryByRole("radio", { name: /Dar por pagados/ })).toBeNull();
+      fireEvent.click(await boton("Resolver"));
+      expect(await screen.findByText(/queda abierta hasta recuperar/)).toBeTruthy();
+      expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "reclamo" });
+    });
+
+    it("a quien espera le dice que no transfiera, sin botones de resolver", async () => {
+      abrirFicha(ficha({ ...RESOLVER, paso: "espera_resolver", le_toca_a: "consejo", puede_resolver_diferencia: false }));
+      expect(await screen.findByText(/No transfieras de nuevo/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Resolver" })).toBeNull();
+    });
+
+    it("con el reclamo abierto se dice que volvió la plata", async () => {
+      const api = abrirFicha(ficha({
+        ...RESOLVER, situacion: "reclamo", puede_resolver_diferencia: false, puede_recuperar: true,
+        diferencia_vigente: diferencia({ resolucion: "reclamo", resuelta_en: "2026-11-01T12:00:00Z" }),
+      }), { [`POST ${CAMINO}/recuperada`]: () => Response.json({ orden_id: O1, estado: "fallida" }) });
+      expect(await screen.findByText("Reclamo abierto")).toBeTruthy();
+      fireEvent.click(await boton("Ya recuperamos la plata"));
+      expect(await screen.findByText(/se puede volver a pagar/)).toBeTruthy();
+      expect(pedidos(api, "POST", `${CAMINO}/recuperada`)).toHaveLength(1);
+    });
+
+    it("pagada de menos lleva a preparar lo que falta, sin crear nada", async () => {
+      abrirFicha(ficha({
+        orden: orden({ estado: "pagada" }), situacion: "pagada", paso: "preparar_faltante", le_toca_a: "vos", puede_preparar_faltante: true,
+        ejecucion: ejecucion(), diferencia_vigente: diferencia({ resolucion: "pagada_por_lo_real", resuelta_en: "2026-11-01T12:00:00Z" }),
+      }));
+      expect(await screen.findByRole("link", { name: "Preparar la orden por lo que falta" })).toBeTruthy();
+      expect(screen.getByText("Falta pagar")).toBeTruthy();
+    });
+  });
+
   it("con otra operación ya usada sigue en la ficha", async () => {
     abrirFicha(LISTO, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => error("operacion_de_otra_orden", 409),
@@ -1501,9 +1633,32 @@ describe("preparar, enviar y renovar", () => {
 
     it("volver a pagar abre el formulario con los datos de la orden", async () => {
       abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), LECTURAS);
-      expect(screen.queryByRole("button", { name: "Modificar" })).toBeNull();
-      fireEvent.click(await boton("Volver a pagar"));
+      fireEvent.click(await boton("Modificar"));
       expect(((await screen.findByLabelText("Concepto")) as HTMLInputElement).value).toBe("Limpieza de octubre");
+    });
+
+    it("volver a pagar manda los mismos datos, sin abrir el formulario", async () => {
+      const api = abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), {
+        ...LECTURAS,
+        [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }),
+      });
+      fireEvent.click(await boton("Volver a pagar"));
+      expect(await screen.findByText(/pasa otra vez por aprobación/)).toBeTruthy();
+      expect(screen.queryByLabelText("Concepto")).toBeNull();
+      expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[0])).toEqual({
+        version_esperada: 1, importe_centavos: 1_500_000, moneda: "ARS", concepto: "Limpieza de octubre", proveedor_id: P1,
+        comprobante: "Factura B 0001-00000001", usa_fondo_reserva: false, contrato_id: null,
+      });
+    });
+
+    it("si el contrato ya no rige, volver a pagar lo dice y queda Modificar", async () => {
+      abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), {
+        ...LECTURAS,
+        [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("contrato_no_aplica", 422),
+      });
+      fireEvent.click(await boton("Volver a pagar"));
+      expect((await screen.findByRole("alert")).textContent).toContain("no cubre esta orden");
+      expect(await boton("Modificar")).toBeTruthy();
     });
 
     it("un contrato que ya no rige se quita del formulario y se avisa", async () => {

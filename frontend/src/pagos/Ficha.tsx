@@ -8,6 +8,8 @@ import {
   cambioLaOrden,
   cambioLoVisto,
   cuentaEnmascarada,
+  aCentavos,
+  aTexto,
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
@@ -29,6 +31,7 @@ import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
 import {
+  AVISO_DIFERENCIA_ESPERA,
   AVISO_NO_TRANSFIERAS,
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
@@ -56,9 +59,18 @@ type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
 type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
+type Diferencia = components["schemas"]["DiferenciaPagoManual"];
+type Resolucion = components["schemas"]["ResolucionDiferencia"];
 
 /** Los pasos en que quien puede declarar tiene a mano «No se pudo pagar». */
 const SE_DECLARA = new Set<Paso | null>(["subir_comprobante", "corregir", "declarar_no_pago", "espera_comprobante"]);
+
+/** El importe de la API en centavos: es decimal y siempre positivo. */
+function centavosReales(d: Diferencia): number {
+  const centavos = aCentavos(d.importe_real);
+  if (centavos === null) throw new Error(`la diferencia ${d.id} trae un importe que no se entiende`);
+  return centavos;
+}
 
 function vigenteDe(f: FichaPago): Version {
   const v = f.versiones.find((x) => x.numero === f.orden.version_vigente);
@@ -110,6 +122,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [decision, setDecision] = useState<{ version: number; cuenta: string | null } | null>(null);
   const [vueltaDecision, setVueltaDecision] = useState(0);
   const [faltaCuenta, setFaltaCuenta] = useState(false);
+  /** Lo que eligió quien resuelve; sin elegir, lo primero que se ofrece. */
+  const [resolucion, setResolucion] = useState<Resolucion | null>(null);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
@@ -223,7 +237,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     );
 
   const { ficha } = lectura;
-  const { situacion, paso, ejecucion, declaracion_vigente: declaracion, observacion_vigente: observacion } = ficha;
+  const { situacion, paso, ejecucion, declaracion_vigente: declaracion, observacion_vigente: observacion, diferencia_vigente: diferencia } = ficha;
   const v = vigenteDe(ficha);
   const ruta = { consorcio_id: consorcio, orden_id: orden };
   const pago = ejecucion?.pagos.at(-1);
@@ -395,6 +409,62 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
+  function resolver(d: Diferencia, elegida: Resolucion) {
+    void acto.hacer({
+      quePide: ["resolver", orden, d.id, elegida],
+      nombre: "resolver el pago",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/resolucion", {
+          headers: encabezadoCsrf(),
+          params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { resolucion: elegida },
+        }),
+      alTerminar: () =>
+        terminar(elegida === "reclamo" ? "Listo: la orden queda abierta hasta recuperar la plata." : "Listo: la orden quedó pagada por lo que salió del banco."),
+      alFallar: siCambio,
+    });
+  }
+
+  function recuperar(d: Diferencia) {
+    void acto.hacer({
+      quePide: ["recuperar", orden, d.id],
+      nombre: "decir que se recuperó la plata",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/recuperada", {
+          headers: encabezadoCsrf(),
+          params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+        }),
+      alTerminar: () => terminar("Listo: la orden quedó como no pagada, y se puede volver a pagar."),
+      alFallar: siCambio,
+    });
+  }
+
+  /** Los mismos datos: la versión nueva pasa otra vez por aprobación (§9). Para cambiar algo está
+   * «Modificar». */
+  function volverAPagar() {
+    void acto.hacer({
+      quePide: ["volver-a-pagar", orden, v.numero],
+      nombre: "volver a pagar",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/versiones", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: {
+            version_esperada: v.numero,
+            importe_centavos: v.importe_centavos,
+            moneda: v.moneda,
+            concepto: v.concepto,
+            proveedor_id: v.proveedor_id,
+            comprobante: v.comprobante,
+            usa_fondo_reserva: v.usa_fondo_reserva,
+            contrato_id: v.contrato_id,
+          },
+        }),
+      alTerminar: () => terminar("Listo: la orden tiene una versión nueva, con los mismos datos, y pasa otra vez por aprobación."),
+      alFallar: siCambio,
+    });
+  }
+
   function enviarMotivo(evento: FormEvent) {
     evento.preventDefault();
     const texto = motivo.trim();
@@ -419,6 +489,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   };
 
   const estaModificando = modificando && ficha.puede_modificar;
+  const elegida: Resolucion = diferencia?.se_puede_dar_por_pagada ? (resolucion ?? "pagada_por_lo_real") : "reclamo";
   const Subtitulo = Titulo === "h1" ? "h2" : "h3";
 
   return (
@@ -458,7 +529,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               <strong>Motivo del rechazo:</strong> {ficha.orden.motivo_rechazo}
             </p>
           )}
-          {situacion === "no_se_pago" && <p>El Consejo confirmó que no se pagó. Para volver a pagarla, pasa otra vez por aprobación.</p>}
+          {situacion === "no_se_pago" && (
+            <p>
+              {diferencia?.recuperada_en == null ? "El Consejo confirmó que no se pagó." : "Se recuperó la plata."} Para volver a pagarla, pasa otra vez por
+              aprobación.
+            </p>
+          )}
           {observacion !== null && (
             <p className="aviso-error" role="note">
               El Consejo observó el pago: «{observacion.motivo}». {AVISO_NO_TRANSFIERAS}
@@ -467,6 +543,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           {declaracion !== null && (
             <p role="note">
               Se declaró que no se pagó el {momento(declaracion.declarado_en)}: {declaracion.motivo}. No pagues esta orden mientras tanto.
+            </p>
+          )}
+          {paso === "espera_resolver" && (
+            <p className="aviso-error" role="note">
+              {AVISO_DIFERENCIA_ESPERA}
             </p>
           )}
           {paso === "espera_comprobante" && <p role="note">Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.</p>}
@@ -499,6 +580,62 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 documento={ficha.comprobante_actual.documento_id} version={ficha.comprobante_actual.version_documento_id} aEntrar={aEntrar} />
             )}
             <div className="tarjeta">
+              {diferencia !== null && (
+                <>
+                  <table className="comparar-pago">
+                    <caption>La orden contra lo que salió del banco</caption>
+                    <thead>
+                      <tr>
+                        <td />
+                        <th scope="col">Orden</th>
+                        <th scope="col">Salió</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <th scope="row">Importe</th>
+                        <td>{importe(diferencia.importe_orden_centavos, diferencia.moneda_orden)}</td>
+                        <td>{importe(centavosReales(diferencia), diferencia.moneda)}</td>
+                      </tr>
+                      <tr>
+                        <th scope="row">Cuenta</th>
+                        <td>{cuentaEnmascarada(v.cuenta_ultimos_digitos)}</td>
+                        <td>{diferencia.tipo === "importe" ? "La misma" : cuentaEnmascarada(diferencia.cuenta_ultimos_digitos)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <dl className="detalles">
+                    {diferencia.falta_centavos !== null && (
+                      <>
+                        <dt>Falta pagar</dt>
+                        <dd>{importe(diferencia.falta_centavos, diferencia.moneda)}</dd>
+                      </>
+                    )}
+                    {diferencia.sobra_centavos !== null && (
+                      <>
+                        <dt>Se pagó de más</dt>
+                        <dd>{importe(diferencia.sobra_centavos, diferencia.moneda)}</dd>
+                      </>
+                    )}
+                    <dt>Qué dijo quien pagó</dt>
+                    <dd>{diferencia.explicacion}</dd>
+                    <dt>Número de operación</dt>
+                    <dd>{diferencia.numero_operacion}</dd>
+                    <dt>Fecha de la transferencia</dt>
+                    <dd>{diferencia.fecha_operacion}</dd>
+                    <dt>Registró</dt>
+                    <dd>
+                      {diferencia.registrada_por_nombre}, {momento(diferencia.registrada_en)}
+                    </dd>
+                    {diferencia.resuelta_en !== null && (
+                      <>
+                        <dt>{diferencia.resolucion === "reclamo" ? "Reclamo desde" : "Se dio por pagado"}</dt>
+                        <dd>{momento(diferencia.resuelta_en)}</dd>
+                      </>
+                    )}
+                  </dl>
+                </>
+              )}
               {paso === "conciliar" && pago !== undefined && (
                 <table className="comparar-pago">
                   <caption>La orden contra lo registrado</caption>
@@ -552,7 +689,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     <dd>{momento(ficha.orden.aprobacion_vence_en)}</dd>
                   </>
                 )}
-                {pago !== undefined && (
+                {pago !== undefined && diferencia === null && (
                   <>
                     <dt>Número de operación</dt>
                     <dd>{pago.numero_operacion}</dd>
@@ -600,15 +737,46 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               <div hidden={motivoAbierto !== null}>
                   {registra && (
                     <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
-                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} subtitulo={Subtitulo} acto={acto} aEntrar={aEntrar}
+                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} subtitulo={Subtitulo}
+                      puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
                         releer();
                         alCambiar();
                       }} />
                   )}
+                  {ficha.puede_resolver_diferencia && diferencia !== null && (
+                    <fieldset className="formulario">
+                      <legend>Qué hacemos</legend>
+                      {diferencia.se_puede_dar_por_pagada && (
+                        <label className="opcion-formulario">
+                          <input type="radio" name={`${id}-resolucion`} checked={elegida === "pagada_por_lo_real"} disabled={enviando}
+                            onChange={() => setResolucion("pagada_por_lo_real")} />
+                          <span>
+                            {`Dar por pagados ${importe(centavosReales(diferencia), diferencia.moneda)}`}
+                            {diferencia.falta_centavos !== null && ` y preparar otra orden por ${importe(diferencia.falta_centavos, diferencia.moneda)}`}
+                          </span>
+                        </label>
+                      )}
+                      <label className="opcion-formulario">
+                        <input type="radio" name={`${id}-resolucion`} checked={elegida === "reclamo"} disabled={enviando}
+                          onChange={() => setResolucion("reclamo")} />
+                        <span>Reclamar la devolución: la orden queda abierta hasta recuperar la plata</span>
+                      </label>
+                      <div className="acciones">
+                        <button type="button" disabled={enviando} onClick={() => resolver(diferencia, elegida)}>
+                          Resolver
+                        </button>
+                      </div>
+                    </fieldset>
+                  )}
                   <div className="formulario">
                     <div className="acciones">
+                      {ficha.puede_recuperar && diferencia !== null && (
+                        <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
+                          Ya recuperamos la plata
+                        </button>
+                      )}
                       {paso === "enviar" && ficha.puede_enviar && (
                         <button type="button" disabled={enviando} onClick={enviar}>
                           Enviar a aprobar
@@ -620,7 +788,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         </button>
                       )}
                       {paso === "volver_a_pagar" && ficha.puede_modificar && (
-                        <button type="button" disabled={enviando} onClick={() => setModificando(true)}>
+                        <button type="button" disabled={enviando} onClick={volverAPagar}>
                           Volver a pagar
                         </button>
                       )}
@@ -676,7 +844,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                           No se pudo pagar
                         </button>
                       )}
-                      {ficha.puede_modificar && paso !== "volver_a_pagar" && (
+                      {ficha.puede_modificar && (
                         <button type="button" className="secundario" disabled={enviando} onClick={() => setModificando(true)}>
                           Modificar
                         </button>
@@ -698,6 +866,14 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     </button>
                   </div>
                 </form>
+              )}
+              {ficha.puede_preparar_faltante && diferencia?.falta_centavos != null && (
+                <p>
+                  <Link to={RUTA_NUEVA}
+                    state={{ consorcio, proveedor: v.proveedor_id, importe: aTexto(diferencia.falta_centavos), moneda: v.moneda, concepto: `Lo que faltó de: ${v.concepto}` }}>
+                    Preparar la orden por lo que falta
+                  </Link>
+                </p>
               )}
               {paso === "rechazada" && (
                 <p>

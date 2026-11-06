@@ -66,6 +66,7 @@ from tests.test_orden_pago_neutra import (
 )
 from tests.test_pago_manual_0055 import CONFIRMAR, DECLARAR, emitida, ver
 from tests.test_pago_manual_0055 import acta as acta_de_la_escena
+from tests.test_pague_otra_cosa_0075 import con_diferencia, resuelta
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (`base_aparte` es un fixture)
 from tests.test_vinculo_fin_0020 import finalizar
 
@@ -138,10 +139,17 @@ CLAVES_POR_ENTIDAD = {
              "registrado_por_nombre", "registrado_en", "fuera_de_termino", "sin_facultad"},
     "conciliacion": {"id", "pago_id", "resultado", "motivo", "conciliado_por_nombre",
                      "conciliado_en"},
+    "diferencia_pago": {"id", "orden_id", "ejecucion_id", "tipo", "importe_real", "moneda",
+                        "cuenta_ultimos_digitos", "numero_operacion", "fecha_operacion",
+                        "documento_id", "version_documento_id", "explicacion",
+                        "fuera_de_termino", "registrada_por_nombre", "registrada_en",
+                        "resolucion", "resuelta_por_nombre", "resuelta_en",
+                        "recuperada_por_nombre", "recuperada_en"},
     "declaracion_no_pagado": {"id", "ejecucion_id", "motivo", "declarado_por_nombre",
                               "declarado_en", "sin_facultad"},
     "confirmacion_no_pagado": {"id", "declaracion_id", "confirmado_por_nombre", "confirmado_en"},
-    "cotejo": {"id", "pago_id", "origen", "movimiento_id", "cotejado_por_nombre", "cotejado_en"},
+    "cotejo": {"id", "pago_id", "diferencia_id", "origen", "movimiento_id",
+               "cotejado_por_nombre", "cotejado_en"},
     "importacion_extracto": {"id", "hash_archivo", "desde", "hasta", "importado_por_nombre",
                              "importado_en"},
     "movimiento_extracto": {"id", "importacion_id", "hash_linea", "fecha", "importe_centavos",
@@ -1261,6 +1269,7 @@ TABLA_DE_LA_ENTIDAD = {
     "comprobante": "nucleo.comprobante_pago_manual",
     "pago": "nucleo.pago_manual",
     "conciliacion": "nucleo.conciliacion_pago_manual",
+    "diferencia_pago": "nucleo.diferencia_pago_manual",
     "declaracion_no_pagado": "nucleo.declaracion_pago_no_realizado",
     "confirmacion_no_pagado": "nucleo.confirmacion_pago_no_realizado",
     "cotejo": "nucleo.cotejo_pago",
@@ -1351,6 +1360,9 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
                          motivo="SINTETICO: el banco la rechazó")  # fmt: skip
     llamar(motor_migrate, s, s.mc1, CONFIRMAR, orden=no_pagada, declaracion=declaracion)
+    a_otra_cuenta = emitida(motor_migrate, s)
+    diferencia = con_diferencia(motor_migrate, s, a_otra_cuenta, cuenta=cbu_sintetico(50))
+    resuelta(motor_migrate, s, a_otra_cuenta, diferencia, "reclamo")
     liquidacion = borrador(motor_migrate, s)
     gastos = [
         llamar(motor_migrate, s, s.adm, AGREGAR, liquidacion=liquidacion, orden=o,
@@ -1397,7 +1409,7 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
         for fila in datos[entidad]:
             assert set(fila) == CLAVES_POR_ENTIDAD[entidad], entidad
     # La historia va entera, no solo lo vigente.
-    assert len(datos["orden"]) == 5
+    assert len(datos["orden"]) == 6
     assert str(e["en_borrador"]) in {o["id"] for o in datos["orden"]}
     assert {v["version"] for v in datos["proveedor_version"]
             if v["proveedor_id"] == str(e["s"].proveedor)} == {1, 2}  # fmt: skip
@@ -1417,6 +1429,10 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
     assert None not in {o["preparada_por_nombre"] for o in datos["orden"]}
     assert None not in {a["aprobada_por_nombre"] for a in datos["orden_aprobacion"]}
     assert None not in {p["registrado_por_nombre"] for p in datos["pago"]}
+    [diferencia] = datos["diferencia_pago"]
+    assert (diferencia["tipo"], diferencia["resolucion"]) == ("ambos", "reclamo")
+    assert diferencia["cuenta_ultimos_digitos"] == cbu_sintetico(50)[-4:]
+    assert None not in (diferencia["registrada_por_nombre"], diferencia["resuelta_por_nombre"])
 
 
 def test_el_nombre_sale_solo_con_el_criterio_del_paquete(economico, motor_migrate):
@@ -1520,6 +1536,12 @@ _COLUMNAS_DE_PERSONA = {
     "nucleo.apertura_cuenta_pago_manual": ("abierta_por", "identidad_abrio"),
     "nucleo.pago_manual": ("registrado_por", "identidad_registro"),
     "nucleo.conciliacion_pago_manual": ("conciliado_por", "identidad_concilio"),
+    "nucleo.diferencia_pago_manual": (
+        "registrada_por",
+        "identidad_registro",
+        "resuelta_por",
+        "identidad_resolvio",
+    ),
     "nucleo.declaracion_pago_no_realizado": ("declarado_por", "identidad_declaro"),
     "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
     "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo"),
