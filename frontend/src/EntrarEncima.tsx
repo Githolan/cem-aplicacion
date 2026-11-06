@@ -60,7 +60,7 @@ function HojaEntrar({ correo }: { correo: string }) {
   }
 
   return (
-    <Hoja titulo="Tu sesión venció">
+    <Hoja titulo="Tu sesión venció" encima>
       <p>Entrá de nuevo para seguir. Lo que escribiste queda acá.</p>
       <FormasDeEntrar correo={escrito ?? correo} alCambiarCorreo={setEscrito} alEntrar={seguir} />
       {falla !== null && (

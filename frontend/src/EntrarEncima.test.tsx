@@ -9,7 +9,10 @@ import { type Copia, guardarCopia, leerCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { EntrarEncima } from "./EntrarEncima";
 import { ENCABEZADO_IDEMPOTENCIA } from "./egresos/comun";
+import { PedirCodigo } from "./egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "./egresos/useConsorcio";
+import { recordarLlave } from "./llaveAcceso";
+import { recordarMetodo } from "./metodoConfirmar";
 import { activarEntrarEncima, pidiendoEntrar, salidas, useAEntrar } from "./sesionEncima";
 
 const PERSONA = "99999999-9999-4999-8999-999999999999";
@@ -121,6 +124,49 @@ describe("entrar encima", () => {
     apagar();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("si la sesión vence confirmando con la llave, la hoja de entrar sigue arriba y se puede usar", async () => {
+    const bytes = () => Uint8Array.from([1, 2, 3]).buffer;
+    const credencial = {
+      id: "AQID",
+      rawId: bytes(),
+      type: "public-key",
+      getClientExtensionResults: () => ({}),
+      response: { clientDataJSON: bytes(), authenticatorData: bytes(), signature: bytes(), userHandle: null },
+    };
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", { value: { get: async () => credencial }, configurable: true });
+    window.localStorage.clear();
+    recordarLlave("AQID");
+    recordarMetodo("llave");
+    const { estado } = backend({
+      "GET /api/v1/auth/totp": () =>
+        Response.json({ activo: true, llaves: 1, codigos_recuperacion_restantes: 5, verificado_en: null }),
+      "GET /api/v1/auth/llave": () =>
+        Response.json([{ id: "1", nombre: "Mi PC", credencial_id: "AQID", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null }]),
+      "POST /api/v1/auth/llave/verificar/opciones": () =>
+        Response.json({ opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } }),
+      "POST /api/v1/auth/llave/verificar": () => error("no_autenticado", 401),
+      "POST /api/v1/auth/codigo": () => {
+        estado.sesion = NUEVA;
+        return Response.json({ persona_id: PERSONA });
+      },
+    });
+    await montar();
+    render(<PedirCodigo acto="aprobar la orden" alVerificar={vi.fn()} alCancelar={vi.fn()} />);
+
+    const entrar = (await screen.findByRole("heading", { name: HOJA })).closest<HTMLElement>(".hoja-fondo")!;
+    const fallo = (await screen.findByRole("heading", { name: "No se pudo confirmar" })).closest<HTMLElement>(".hoja-fondo")!;
+    expect(entrar.inert).toBeFalsy();
+    expect(fallo.inert).toBe(true);
+    expect(entrar.contains(document.activeElement)).toBe(true);
+
+    await entrarConCodigo();
+    await screen.findByText("Seguís donde estabas.");
+    expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
+    expect(fallo.inert).toBeFalsy();
+    expect(fallo.contains(document.activeElement)).toBe(true);
   });
 
   it("una lectura con la sesión vencida espera en la hoja y se repite sola al entrar, sin perder lo escrito", async () => {

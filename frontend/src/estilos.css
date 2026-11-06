@@ -789,6 +789,10 @@ fieldset.formulario legend {
   overscroll-behavior: contain;
 }
 
+.hoja-fondo-encima {
+  z-index: 31;
+}
+
 .hoja {
   width: 100%;
   max-height: 100dvh;

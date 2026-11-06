@@ -166,6 +166,56 @@ test.describe("confirmar directo", () => {
   });
 });
 
+test.describe("hojas superpuestas", () => {
+  test("si la sesión vence confirmando con la llave, entrar queda arriba y al terminar sigue la confirmación", async ({ page, baseURL }) => {
+    const falta = { status: 403, json: { codigo: "segundo_factor_requerido", mensaje: "x", id_correlacion: "c" } };
+    await simularApi(page, baseURL!, () => falta);
+    await page.addInitScript(() => {
+      window.localStorage.setItem("cem.confirmar.ultimo-metodo", "llave");
+      window.localStorage.setItem("cem.llaves-de-este-dispositivo", JSON.stringify(["AQID"]));
+      const bytes = () => Uint8Array.from([1, 2, 3]).buffer;
+      const credencial = {
+        id: "AQID",
+        rawId: bytes(),
+        type: "public-key",
+        getClientExtensionResults: () => ({}),
+        response: { clientDataJSON: bytes(), authenticatorData: bytes(), signature: bytes(), userHandle: null },
+      };
+      Object.defineProperty(navigator, "credentials", { value: { get: async () => credencial } });
+    });
+    await page.route("**/api/v1/auth/totp", (ruta) =>
+      ruta.fulfill({ json: { activo: true, llaves: 1, codigos_recuperacion_restantes: 5, verificado_en: null } }),
+    );
+    await page.route("**/api/v1/auth/llave", (ruta) =>
+      ruta.fulfill({ json: [{ id: "1", nombre: "Mi PC", credencial_id: "AQID", creada_en: "2026-11-04T10:00:00Z", ultimo_uso_en: null }] }),
+    );
+    await page.route("**/api/v1/auth/llave/verificar/opciones", (ruta) =>
+      ruta.fulfill({ json: { opciones: { challenge: "AAEC", allowCredentials: [{ id: "AwQF", type: "public-key" }] } } }),
+    );
+    await page.route("**/api/v1/auth/llave/verificar", (ruta) =>
+      ruta.fulfill({ status: 401, json: { codigo: "no_autenticado", mensaje: "x", id_correlacion: "c" } }),
+    );
+    await completarAlta(page);
+    await guardar(page);
+
+    const entrar = page.getByRole("dialog", { name: "Tu sesión venció" });
+    await expect(entrar).toBeVisible();
+    const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
+    // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
+    await entrar.getByRole("button", { name: "Entrar con un código" }).click();
+    await entrar.getByLabel(/Código de/).fill("042917");
+    await sinFaltasDeAccesibilidad(page);
+    await entrar.getByRole("button", { name: "Entrar con el código" }).click();
+
+    await expect(page.getByText("Seguís donde estabas.")).toBeVisible();
+    await expect(entrar).toHaveCount(0);
+    await expect(fallo).toBeVisible();
+    await fallo.getByRole("button", { name: "Cancelar" }).click();
+    await expect(fallo).toHaveCount(0);
+    await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
+  });
+});
+
 test.describe("datos del proveedor", () => {
   test("el CUIT es obligatorio: sin él el formulario no sale", async ({ page, baseURL }) => {
     const estado = await simularApi(page, baseURL!, () => creado);
