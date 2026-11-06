@@ -434,12 +434,15 @@ def test_fraccionar_bajo_el_umbral_genera_una_alerta_sin_bloquear(motor_migrate,
     conocido(motor_migrate, e)
     umbral(motor_app, e.cons, IMPORTE * 3)
     alertas = []
+    estados = []
     for _ in range(3):
         o = enviada(motor_migrate, e)
-        assert orden(motor_migrate, o)["estado"] == "aprobada"  # no se bloquea
+        estados.append(orden(motor_migrate, o)["estado"])
         alertas.append(versiones(motor_migrate, o)[0]["alerta_fraccionamiento"])
     # La anterior aprobada (conocido) más estas: 2, 3 y 4 veces el importe contra 3 veces.
     assert alertas == [False, False, True]
+    # No se bloquea: se envía igual y la decide el Consejo (`0077`).
+    assert estados == ["aprobada", "aprobada", "en_revision"]
     # Control: otro proveedor no suma.
     aprobada(motor_migrate, e, proveedor=e.otro)
     o = enviada(motor_migrate, e, proveedor=e.otro)

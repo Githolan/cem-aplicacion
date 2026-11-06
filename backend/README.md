@@ -65,7 +65,7 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 
 ## Modelo de lenguaje
 
-`app/llm.py` es la única capa que habla con un modelo: el resto de la aplicación llama a `complete(messages, opts)` y ningún otro módulo importa el SDK de un proveedor. La llamada sale solo del backend; la clave nunca llega al frontend.
+`app/llm.py` es la única capa que habla con un modelo: el resto de la aplicación llama a `complete(messages, opts)` y ningún otro módulo importa el SDK de un proveedor. La llamada sale solo del backend; la clave nunca llega al frontend. La capa no reintenta: lo que el proveedor no resuelve sale como `ErrorDeModelo`.
 
 | Variable | Qué es |
 |---|---|
@@ -74,13 +74,27 @@ Un cambio de la API que modifique el OpenAPI hace fallar `test_contrato_openapi.
 | `CEM_LLM_BASE_URL` | Dirección de su API |
 | `CEM_LLM_MODEL` | Modelo que se pide |
 
-**Cambiar de proveedor** es cambiar estas cuatro variables, sin tocar código. Si falta una, `cem-backend` no arranca y el error nombra la variable, sin mostrar valores.
+**Cambiar de proveedor** es cambiar estas cuatro variables, sin tocar código. Si falta una, `cem-backend` no arranca y el error nombra la variable, sin mostrar valores. `cem-trabajos` las pide solo con la lectura de comprobantes encendida.
 
 **En Coolify** se cargan como variables secretas de `cem-backend`, un juego por entorno: uno en `consorcio-en-mano-staging` y otro en `consorcio-en-mano`. Hay que cargarlas antes de desplegar: sin ellas el contenedor nuevo no arranca y Coolify conserva la versión anterior.
 
 **Para probar** una llamada corta, con las variables en el proceso: `python -m scripts.probar_llm`. Muestra solo el texto y el modelo. `.env.example` lista los nombres; `.env` no se versiona ni entra en la imagen.
 
 No se usan las variables `ANTHROPIC_*`: son de Claude Code. La capa pasa clave y dirección de forma explícita, así que tampoco las lee si están definidas.
+
+## Lectura del comprobante con IA
+
+`CEM_LECTURA_COMPROBANTES` enciende la lectura: `apagada` (o sin la variable) o `encendida`. Otro valor impide el arranque. Se carga **solo en `cem-trabajos`**, que es el proceso que llama a la capa; `cem-backend` sabe en qué va cada lectura por la cola y no necesita la variable.
+
+**Apagada**, no se encola nada y no sale ninguna llamada: la persona escribe los datos a mano. `cem-trabajos` no pide las `CEM_LLM_*`.
+
+**Encendida**, `cem-trabajos` exige las cuatro `CEM_LLM_*`: si falta una no arranca, y el error nombra la variable sin mostrar valores. El diseño decía que sin la capa configurada se cargaba a mano: se cambió, para que una configuración incompleta falle al desplegar y no quede una lectura que nunca corre. Hoy `cem-trabajos` no tiene esas variables: hay que cargarlas antes de encender.
+
+Cuando el antivirus aprueba una versión de un comprobante de pago, el mismo trabajo encola `documentos.leer`. Es una sola llamada, sin herramientas y sin nada de la orden, con el archivo adjunto. La respuesta se valida contra un esquema estricto: si no valida o el proveedor falla, queda como no leído y la persona carga a mano. Mientras dura la llamada `cem-trabajos` no toma otro trabajo si el lote es 1: hasta 60 segundos por comprobante.
+
+Lo que dice el archivo es dato: el resultado solo llena campos. Quien compara es el código: importe y fecha exactos, cuenta dígito a dígito y titular normalizado, que solo avisa. La cuenta leída no se guarda: `nucleo.lectura_comprobante` tiene sus últimos cuatro dígitos y si coincide con la de la orden.
+
+**Antes de encender** (decisión §12): nombrar al proveedor como encargado en el acuerdo de tratamiento, revisar la transferencia internacional y la retención, y correr el ensayo. Se cambia `VERSION_PROMPT` en `app/consorcios/lectura_comprobantes.py` cada vez que se cambia el texto del prompt.
 
 ## Pendiente
 

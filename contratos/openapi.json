@@ -311,6 +311,17 @@
         "title": "CambioEvento",
         "type": "object"
       },
+      "CampoComprobante": {
+        "description": "Un dato que se compara entre lo leído y la orden o lo registrado.",
+        "enum": [
+          "importe",
+          "cuenta",
+          "numero_operacion",
+          "fecha"
+        ],
+        "title": "CampoComprobante",
+        "type": "string"
+      },
       "CandidatoMandato": {
         "description": "Una persona a la que se le puede dar un mandato de Consejo o de administración.",
         "properties": {
@@ -3128,6 +3139,16 @@
         "title": "EstadoInvitacionMandato",
         "type": "string"
       },
+      "EstadoLectura": {
+        "description": "En qué quedó la lectura con IA del comprobante.",
+        "enum": [
+          "leyendo",
+          "leida",
+          "no_leida"
+        ],
+        "title": "EstadoLectura",
+        "type": "string"
+      },
       "EstadoMandato": {
         "description": "Para leer, contra el hoy del consorcio (A1: `vigente_hasta` exclusivo).",
         "enum": [
@@ -3398,6 +3419,17 @@
               }
             ]
           },
+          "lectura_comprobante": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LecturaComprobante"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La de `comprobante_actual`. Nula si la lectura no corrió para ese archivo: con la lectura apagada, siempre."
+          },
           "observacion_vigente": {
             "anyOf": [
               {
@@ -3527,6 +3559,7 @@
           "ejecucion",
           "comprobante_actual",
           "comprobante_subido",
+          "lectura_comprobante",
           "observacion_vigente",
           "declaracion_vigente",
           "diferencia_vigente"
@@ -4677,6 +4710,135 @@
         ],
         "title": "LeTocaA",
         "type": "string"
+      },
+      "LecturaComprobante": {
+        "description": "Lo que la IA leyó de `comprobante_actual`. Propone, no decide: llena campos y avisa. La\ncomparación la hace el servidor. La cuenta leída no se guarda ni viaja: solo sus últimos dígitos\ny si coincide con la de la orden.",
+        "properties": {
+          "cuenta_coincide": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si la cuenta leída es, dígito a dígito, la de la orden. Nula si no se leyó.",
+            "title": "Cuenta Coincide"
+          },
+          "cuenta_ultimos_digitos": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuenta Ultimos Digitos"
+          },
+          "distinto_de_la_orden": {
+            "description": "Lo que se leyó y no es lo de la orden. Lo que no se leyó no cuenta.",
+            "items": {
+              "$ref": "#/components/schemas/CampoComprobante"
+            },
+            "title": "Distinto De La Orden",
+            "type": "array"
+          },
+          "distinto_de_lo_registrado": {
+            "description": "Lo que se leyó y no es lo que se registró con este archivo. El Consejo lo ve al conciliar. Vacía si todavía no hay registro.",
+            "items": {
+              "$ref": "#/components/schemas/CampoComprobante"
+            },
+            "title": "Distinto De Lo Registrado",
+            "type": "array"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoLectura"
+          },
+          "fecha": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fecha"
+          },
+          "importe_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Importe Centavos"
+          },
+          "moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moneda"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          },
+          "titular_destino": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Titular Destino"
+          },
+          "titular_distinto": {
+            "description": "Si el titular leído no es el de la orden, una vez normalizados. Solo avisa: una razón social se escribe de varias maneras.",
+            "title": "Titular Distinto",
+            "type": "boolean"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version_documento_id",
+          "estado",
+          "importe_centavos",
+          "moneda",
+          "cuenta_ultimos_digitos",
+          "cuenta_coincide",
+          "titular_destino",
+          "numero_operacion",
+          "fecha",
+          "distinto_de_la_orden",
+          "titular_distinto",
+          "distinto_de_lo_registrado"
+        ],
+        "title": "LecturaComprobante",
+        "type": "object"
       },
       "Liquidacion": {
         "properties": {
@@ -7489,7 +7651,7 @@
                 "type": "null"
               }
             ],
-            "description": "Como figura en el comprobante. Nula solo al corregir un registro observado: sigue la que ese registro ya acreditó, y la base la niega en un registro nuevo (`no_coincide_con_la_orden`). Así corregir no pide la cuenta otra vez.",
+            "description": "Como figura en el comprobante. Nula al corregir un registro observado, porque sigue la que ese registro ya acreditó, o si la lectura del archivo dio que coincide con la orden. En cualquier otro registro nuevo la base la niega (`no_coincide_con_la_orden`).",
             "title": "Cuenta Destino"
           },
           "documento_id": {

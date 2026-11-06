@@ -29,6 +29,7 @@ nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
@@ -44,6 +45,7 @@ from cem_contracts.egresos import (
     Aprobacion,
     AprobacionRegistrada,
     BandejaPagos,
+    CampoComprobante,
     ComprobanteActual,
     ComprobantePagoNuevo,
     ComprobanteSubido,
@@ -65,9 +67,11 @@ from cem_contracts.egresos import (
     ElementoConsultaPagos,
     Emision,
     EnvioARevision,
+    EstadoLectura,
     EstadoOrdenPago,
     FichaPago,
     FiltroConsultaPagos,
+    LecturaComprobante,
     ListaContratos,
     ListaContratosRevision,
     ListaOrdenesPago,
@@ -99,6 +103,7 @@ from cem_contracts.egresos import (
     RegistroPagoManual,
     Renovacion,
     ResolucionDiferenciaPago,
+    TipoDiferencia,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
     VersionProveedor,
@@ -112,7 +117,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
-from app.consorcios import circuito_pagos
+from app.consorcios import circuito_pagos, lectura_comprobantes
 from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
 from app.consorcios.padron import Discrepancia
 from app.contexto import Contexto, IdentidadDep, MotorDep
@@ -1642,6 +1647,69 @@ def _comprobantes(
     return actual, ComprobanteSubido(**subidas[0])
 
 
+def _misma_cuenta(leido, registrado: PagoManual | DiferenciaPagoManual) -> bool:
+    """Si lo leído no contradice la cuenta del registro. Un registro normal es a la cuenta de la
+    orden, y una diferencia de importe también. Si la diferencia dice otra cuenta, la base no guarda
+    la leída: se comparan los últimos dígitos, y no tiene que ser la de la orden."""
+    if leido.cuenta_coincide is None:
+        return True
+    if isinstance(registrado, PagoManual) or registrado.tipo == TipoDiferencia.IMPORTE:
+        return leido.cuenta_coincide
+    return (
+        not leido.cuenta_coincide
+        and leido.cuenta_ultimos_digitos == registrado.cuenta_ultimos_digitos
+    )
+
+
+def _distinto_de_lo_registrado(
+    leido, registrado: PagoManual | DiferenciaPagoManual
+) -> list[CampoComprobante]:
+    importe = (
+        registrado.importe_real
+        if isinstance(registrado, DiferenciaPagoManual)
+        else Decimal(registrado.importe_centavos) / 100
+    )
+    return lectura_comprobantes.distinto_de_lo_registrado(
+        leido, importe, registrado.moneda, registrado.numero_operacion,
+        registrado.fecha_operacion, _misma_cuenta(leido, registrado),
+    )  # fmt: skip
+
+
+def _lectura_del_comprobante(
+    c: Connection,
+    lector: Permiso,
+    comprobante: ComprobanteActual | None,
+    vigente: VersionOrdenPago,
+    registrado: PagoManual | DiferenciaPagoManual | None,
+) -> LecturaComprobante | None:
+    """Solo del archivo que quien mira puede abrir: a quien no lo ve no se le dice qué dice."""
+    if comprobante is None:
+        return None
+    version = comprobante.version_documento_id
+    leido = _ejecutar(
+        c, lector,
+        "select * from nucleo.lectura_comprobante_lectura(:v, :f, :actor, 'api', :sesion)",
+        {"v": version, "f": LEE_COMO[lector.accion]},
+    ).one()  # fmt: skip
+    if leido.estado == "sin_lectura":
+        return None
+    con_registro = registrado is not None and registrado.version_documento_id == version
+    return LecturaComprobante(
+        version_documento_id=version, estado=EstadoLectura(leido.estado),
+        importe_centavos=None if leido.importe is None else int(leido.importe * 100),
+        moneda=leido.moneda, cuenta_ultimos_digitos=leido.cuenta_ultimos_digitos,
+        cuenta_coincide=leido.cuenta_coincide, titular_destino=leido.titular_destino,
+        numero_operacion=leido.numero_operacion, fecha=leido.fecha,
+        distinto_de_la_orden=lectura_comprobantes.distinto_de_la_orden(
+            leido, vigente.importe_centavos, vigente.moneda
+        ),
+        titular_distinto=lectura_comprobantes.titular_distinto(leido, vigente.razon_social),
+        distinto_de_lo_registrado=(
+            _distinto_de_lo_registrado(leido, registrado) if con_registro else []
+        ),
+    )  # fmt: skip
+
+
 @router.get(
     "/consorcios/{consorcio_id}/pagos/bandeja",
     response_model=BandejaPagos,
@@ -1736,6 +1804,8 @@ def ficha_pago(
         comprobante, subido = _comprobantes(
             c, lector, ver, orden_id, diferencia or ultimo, a.pago_observado and diferencia is None
         )
+        vigente = next(x for x in detalle.versiones if x.numero == orden.version_vigente)
+        lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     observacion = None
@@ -1762,7 +1832,7 @@ def ficha_pago(
         puede_recuperar=a.puede_resolver_diferencia and a.reclamo_abierto,
         puede_preparar_faltante=paso == PasoPago.PREPARAR_FALTANTE,
         ejecucion=ejecucion, comprobante_actual=comprobante,
-        comprobante_subido=subido, observacion_vigente=observacion,
+        comprobante_subido=subido, lectura_comprobante=lectura, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
         diferencia_vigente=diferencia,
     )  # fmt: skip

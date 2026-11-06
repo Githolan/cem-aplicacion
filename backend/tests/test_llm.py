@@ -49,6 +49,9 @@ RESPUESTAS = {
 class Proveedor(ThreadingHTTPServer):
     pedidos: list[tuple[str, dict[str, str], dict]]
     sin_texto = False
+    texto: str | None = None
+    """Lo que responde el modelo, si no es lo de `RESPUESTAS`."""
+    estado = 200
 
 
 class Atencion(BaseHTTPRequestHandler):
@@ -61,8 +64,10 @@ class Atencion(BaseHTTPRequestHandler):
         respuesta = dict(RESPUESTAS[self.path])
         if self.server.sin_texto:
             respuesta["content"] = []
+        if self.server.texto is not None:
+            respuesta["content"] = [{"type": "text", "text": self.server.texto}]
         datos = json.dumps(respuesta).encode()
-        self.send_response(200)
+        self.send_response(self.server.estado)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(datos)))
         self.end_headers()
@@ -174,6 +179,19 @@ def test_una_respuesta_sin_texto_es_un_error(
     proveedor.sin_texto = True
     with pytest.raises(RuntimeError, match="sin texto"):
         llm.complete([{"role": "user", "content": "hola"}], OPCIONES)
+
+
+@pytest.mark.parametrize("nombre", ["anthropic", "openrouter"])
+def test_una_falla_del_proveedor_es_un_solo_pedido_y_no_muestra_la_clave(
+    monkeypatch: pytest.MonkeyPatch, proveedor: Proveedor, nombre: str
+) -> None:
+    """Los SDK reintentan solos: quien llama pidió una llamada."""
+    configurar(monkeypatch, nombre, proveedor)
+    proveedor.estado = 500
+    with pytest.raises(llm.ErrorDeModelo) as error:
+        llm.complete([{"role": "user", "content": "hola"}], OPCIONES)
+    assert len(proveedor.pedidos) == 1
+    assert CLAVE not in str(error.value)
 
 
 @pytest.mark.parametrize("faltante", llm.VARIABLES)
