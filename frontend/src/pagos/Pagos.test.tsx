@@ -2583,22 +2583,24 @@ describe("rutas y navegación", () => {
     await waitFor(() => expect(lugar()).toBe("/pagos/por-aclarar"));
   });
 
-  it("el inicio tiene una sola entrada «Pagos» en la lista y la pestaña", async () => {
+  it("el inicio tiene una sola entrada «Pagos» en la lista y la navegación", async () => {
     vi.stubGlobal("fetch", backend(INICIO));
     abrir("/");
     const pestanas = await screen.findByRole("navigation", { name: "Secciones" });
-    expect(within(pestanas).getByRole("link", { name: "Pagos" }).getAttribute("href")).toBe("/pagos");
+    expect((await within(pestanas).findByRole("link", { name: "Pagos" })).getAttribute("href")).toBe("/pagos");
     expect(screen.getAllByRole("link", { name: "Pagos" })).toHaveLength(2);
     for (const vieja of ["Órdenes de pago", "Revisar órdenes de pago", "Pagos a realizar", "Conciliar pagos"])
       expect(screen.queryByRole("link", { name: vieja })).toBeNull();
   });
 
-  it("control: quien no tiene que ver con pagos no recibe la entrada ni la pestaña", async () => {
+  it("control: quien no tiene que ver con pagos no recibe la entrada ni en la navegación", async () => {
     vi.stubGlobal("fetch", backend({ ...INICIO, [`GET ${BASE}/mis-acciones`]: alcanza("contactos.ver") }));
     abrir("/");
     await screen.findByRole("link", { name: "Contactos de emergencia" });
     expect(screen.queryByRole("link", { name: "Pagos" })).toBeNull();
-    expect(screen.queryByRole("navigation", { name: "Secciones" })).toBeNull();
+    const navegacion = screen.getByRole("navigation", { name: "Secciones" });
+    expect(await within(navegacion).findByRole("link", { name: "Contactos" })).toBeTruthy();
+    expect(within(navegacion).queryByRole("link", { name: "Proveedores" })).toBeNull();
   });
 
   it("una dirección abierta a mano sin permiso lleva al inicio", async () => {

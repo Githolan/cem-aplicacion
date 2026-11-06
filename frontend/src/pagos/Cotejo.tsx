@@ -11,7 +11,6 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
-import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
@@ -316,7 +315,6 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           </section>
         </div>
       )}
-      <Pestanas />
     </>
   );
 }

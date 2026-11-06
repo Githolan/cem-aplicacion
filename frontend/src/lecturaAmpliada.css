@@ -1,10 +1,10 @@
 /* Modo lectura ampliada (RF53; documento 08, §13.4; documento 13, §14.1). Se activa con la clase
-   lectura-ampliada en <html> (src/lecturaAmpliada.ts). Redefine los colores de estilos.css, así
-   que las reglas de cada página lo siguen sin tocarlas. Contrastes (texto sobre fondo), todos AAA:
-   claro #000/#fff 21:1, #0b3a6f/#fff 11.4:1, #0f5223/#fff 9.3:1, #8a0f12/#fff 9.7:1;
-   oscuro #fff/#000 21:1, #9cc9ff/#000 12.2:1, #7fe08f/#000 13:1, #ff9b9b/#000 10.4:1. */
+   lectura-ampliada en <html> (src/lecturaAmpliada.ts). Redefine los tokens de tokens.css, así que
+   las reglas de cada página lo siguen sin tocarlas. Contrastes (texto sobre fondo), todos AAA:
+   claro #000/#fff 21:1, #0033cc/#fff 10.5:1, #0f5223/#fff 9.3:1, #8a0f12/#fff 9.7:1;
+   oscuro #fff/#000 21:1, #9dbbff/#000 11.6:1, #7fe08f/#000 13:1, #ff9b9b/#000 10.4:1. */
 
-/* El botón de la cabecera, en los dos modos. */
+/* El botón de la cabecera: un círculo «Aa», o «✓» con el modo prendido. */
 .cabecera {
   flex-wrap: wrap;
 }
@@ -19,16 +19,19 @@
 .boton-modo-lectura {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  max-width: 100%;
-  border: 2px solid #ffffff;
-  background: #ffffff;
-  color: var(--azul);
-  text-align: left;
+  justify-content: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+  color: var(--ink);
 }
 
 .marca-modo-lectura {
-  font-weight: 700;
+  font-weight: 800;
 }
 
 /* Vacío no ocupa lugar; queda en el DOM para que el lector de pantalla anuncie el aviso. */
@@ -44,17 +47,35 @@
 
 /* Modo activo: base de 20 px (125 % de la normal en todo el rango del clamp). */
 :root.lectura-ampliada {
-  --azul: #0b3a6f;
-  --texto: #000000;
-  --fondo: #ffffff;
-  --tarjeta: #ffffff;
-  --ok: #0f5223;
-  --error: #8a0f12;
-  --enlace: #0b3a6f;
-  --sobre-azul: #ffffff;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #ffffff;
+  --ink: #000000;
+  --ink-soft: #000000;
+  --ink-muted: #000000;
+  --on-hero: #ffffff;
+  --on-hero-muted: #ffffff;
+  --accent: #0033cc;
+  --on-accent: #ffffff;
+  --accent-tint: #ffffff;
+  --pending-bg: #ffffff;
+  --pending-text: #000000;
+  --success-bg: #ffffff;
+  --success-text: #0f5223;
+  --danger-bg: #ffffff;
+  --danger-text: #8a0f12;
+  --border: #000000;
+  --border-input: #000000;
+  --divider: #000000;
+  --step-todo: #000000;
+  --shadow-soft: none;
+  --shadow-card: none;
+  --shadow-hero: none;
+  --shadow-button: none;
+  --shadow-bar: none;
   --foco: #000000;
-  --foco-cabecera: #ffffff;
-  --cabecera-fondo: #0b3a6f;
+  --tap-min: 3.25rem;
+  --tap-primary: 3.75rem;
   font-size: clamp(1.25rem, 1.1875rem + 0.375vw, 1.40625rem);
   line-height: 1.6;
   word-spacing: 0.08em;
@@ -62,38 +83,45 @@
 
 @media (prefers-color-scheme: dark) {
   :root.lectura-ampliada {
-    --azul: #9cc9ff;
-    --texto: #ffffff;
-    --fondo: #000000;
-    --tarjeta: #000000;
-    --ok: #7fe08f;
-    --error: #ff9b9b;
-    --enlace: #9cc9ff;
-    --sobre-azul: #000000;
+    --surface: #000000;
+    --surface-raised: #000000;
+    --surface-sunken: #000000;
+    --ink: #ffffff;
+    --ink-soft: #ffffff;
+    --ink-muted: #ffffff;
+    --on-hero: #000000;
+    --on-hero-muted: #000000;
+    --accent: #9dbbff;
+    --on-accent: #000000;
+    --accent-tint: #000000;
+    --pending-bg: #000000;
+    --pending-text: #ffffff;
+    --success-bg: #000000;
+    --success-text: #7fe08f;
+    --danger-bg: #000000;
+    --danger-text: #ff9b9b;
+    --border: #ffffff;
+    --border-input: #ffffff;
+    --divider: #ffffff;
+    --step-todo: #ffffff;
     --foco: #ffd166;
-    --foco-cabecera: #ffd166;
-    --cabecera-fondo: #000000;
     color-scheme: dark;
   }
 }
 
-/* Cabecera: blanco sobre azul oscuro (claro) o sobre negro con un filete (oscuro). */
+/* Nada decorativo: sin logo, sin fondos teñidos ni esquinas redondeadas. */
 .lectura-ampliada .cabecera {
-  padding: 1rem;
-  border-bottom: 2px solid var(--texto);
-  background: var(--cabecera-fondo);
-  color: #ffffff;
+  padding: var(--space-4);
+  border-bottom: 2px solid var(--ink);
 }
 
-/* Nada decorativo: sin logo, sin fondos teñidos ni esquinas redondeadas. */
 .lectura-ampliada .cabecera img {
   display: none;
 }
 
 .lectura-ampliada .boton-modo-lectura {
-  border-color: #ffffff;
-  background: #ffffff;
-  color: #000000;
+  border: 2px solid var(--ink);
+  color: var(--ink);
 }
 
 .lectura-ampliada main {
@@ -108,31 +136,62 @@
 .lectura-ampliada a {
   display: inline-block;
   padding-block: 0.375rem;
-  color: var(--enlace);
+  color: var(--accent);
   text-decoration-thickness: 0.12em;
   text-underline-offset: 0.2em;
 }
 
-/* La marca es un enlace, pero sobre el fondo de la cabecera: --enlace no contrasta ahí. */
-.lectura-ampliada .cabecera .marca {
-  color: #ffffff;
+.lectura-ampliada .navegacion {
+  border-color: var(--ink);
+}
+
+.lectura-ampliada .navegacion__item {
+  padding-block: 0;
+  color: var(--ink);
+  font-size: 0.75rem;
+}
+
+.lectura-ampliada .navegacion__item.active {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.lectura-ampliada .filas-inicio {
+  border: 2px solid var(--ink);
+  border-radius: 0;
+}
+
+.lectura-ampliada .fila-inicio__icono {
+  display: none;
+}
+
+.lectura-ampliada .fila-inicio {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.lectura-ampliada .aviso-ok,
+.lectura-ampliada .aviso-error,
+.lectura-ampliada [data-tono] {
+  border: 2px solid currentcolor;
+  border-radius: 0;
 }
 
 .lectura-ampliada .tarjeta {
   margin-top: 2.5rem;
   padding: 1.25rem;
-  border: 2px solid var(--texto);
+  border: 2px solid var(--ink);
   border-radius: 0;
-  background: var(--tarjeta);
+  background: var(--surface-raised);
 }
 
 .lectura-ampliada button {
   min-height: 3rem;
   min-width: 3rem;
   padding: 0.75rem 1.25rem;
-  border: 2px solid var(--azul);
+  border: 2px solid var(--accent);
   border-radius: 0.25rem;
-  color: var(--sobre-azul);
+  color: var(--on-accent);
 }
 
 .lectura-ampliada :focus-visible,
@@ -142,18 +201,13 @@
   outline-offset: 3px;
 }
 
-.lectura-ampliada .cabecera :focus-visible,
-.lectura-ampliada .cabecera button:focus-visible {
-  outline-color: var(--foco-cabecera);
-}
-
 .lectura-ampliada .aviso-version {
-  background: var(--texto);
-  color: var(--fondo);
+  background: var(--ink);
+  color: var(--surface);
 }
 
 .lectura-ampliada .aviso-version button {
-  border-color: var(--fondo);
+  border-color: var(--surface);
 }
 
 /* Una sola columna: los pares título/valor y la grilla de códigos quedan uno abajo del otro. */
@@ -181,13 +235,13 @@
 
 .lectura-ampliada .formulario input {
   min-height: 3rem;
-  border: 2px solid var(--texto);
+  border: 2px solid var(--ink);
   border-radius: 0.25rem;
-  background: var(--fondo);
-  color: var(--texto);
+  background: var(--surface);
+  color: var(--ink);
 }
 
 /* El pie gris no llega al contraste sobre el negro del modo oscuro. */
 .lectura-ampliada .pie-version {
-  color: var(--texto);
+  color: var(--ink);
 }

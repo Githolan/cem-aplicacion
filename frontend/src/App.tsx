@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes } from "react-router";
 
@@ -18,6 +18,7 @@ import { AvisoServicio, PuntoServicio } from "./EstadoServicio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
+import { Icono, type NombreIcono } from "./Iconos";
 import { EnlaceInstalar, Instalar } from "./Instalar";
 import { Invitacion } from "./Invitacion";
 import { InvitacionesPropias, useMisInvitaciones } from "./InvitacionesPropias";
@@ -25,25 +26,116 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
+import { Navegacion, useHayNavegacion } from "./Navegacion";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
 import { Cotejo } from "./pagos/Cotejo";
-import { Pestanas } from "./pagos/Pestanas";
 import { PrepararOrden } from "./pagos/PrepararOrden";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
-const ENLACES_DE_INICIO: readonly { ruta: string; texto: string; requisito: Requisito }[] = [
-  { ruta: RUTA_INVITACIONES, texto: "Invitar a una persona", requisito: REQUISITOS.invitaciones },
-  { ruta: RUTA_MANDATOS, texto: "Mandatos y decisiones", requisito: REQUISITOS.mandatos },
-  { ruta: RUTA_PADRON, texto: "Padrón del edificio", requisito: REQUISITOS.padron },
-  { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", requisito: REQUISITOS.contactos },
-  { ruta: RUTA_DOCUMENTOS, texto: "Documentos del edificio", requisito: REQUISITOS.documentos },
-  { ruta: RUTA_PAGOS, texto: "Pagos", requisito: REQUISITOS.pagos },
-  { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", requisito: REQUISITOS.liquidacion },
+interface EnlaceDeInicio {
+  ruta: string;
+  texto: string;
+  detalle?: string;
+  icono: NombreIcono;
+  requisito: Requisito;
+}
+
+const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeInicio[] }[] = [
+  {
+    titulo: "Personas y mandatos",
+    enlaces: [
+      {
+        ruta: RUTA_INVITACIONES,
+        texto: "Invitar a una persona",
+        detalle: "Invitación de un solo uso a una unidad",
+        icono: "invitar",
+        requisito: REQUISITOS.invitaciones,
+      },
+      {
+        ruta: RUTA_MANDATOS,
+        texto: "Mandatos y decisiones",
+        detalle: "Quién administra y qué se decidió",
+        icono: "balanza",
+        requisito: REQUISITOS.mandatos,
+      },
+      {
+        ruta: RUTA_PADRON,
+        texto: "Padrón del edificio",
+        detalle: "Confirmar o finalizar vínculos",
+        icono: "personas",
+        requisito: REQUISITOS.padron,
+      },
+    ],
+  },
+  {
+    titulo: "Edificio",
+    enlaces: [
+      {
+        ruta: RUTA_CONTACTOS,
+        texto: "Contactos de emergencia",
+        detalle: "Lista de emergencia del edificio",
+        icono: "telefono",
+        requisito: REQUISITOS.contactos,
+      },
+      {
+        ruta: RUTA_DOCUMENTOS,
+        texto: "Documentos del edificio",
+        detalle: "Cargar y consultar documentos",
+        icono: "carpeta",
+        requisito: REQUISITOS.documentos,
+      },
+    ],
+  },
+  {
+    titulo: "Dinero",
+    enlaces: [
+      { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
+      {
+        ruta: RUTA_LIQUIDACION,
+        texto: "Liquidación (borrador)",
+        detalle: "Simular el reparto por período",
+        icono: "calculadora",
+        requisito: REQUISITOS.liquidacion,
+      },
+    ],
+  },
 ];
+
+const ENLACES_DE_INICIO = GRUPOS_DE_INICIO.flatMap((g) => g.enlaces);
+
+// El nombre del enlace es solo su título: el detalle lo acompaña como descripción.
+function FilaDeInicio({ enlace }: { enlace: Pick<EnlaceDeInicio, "ruta" | "texto" | "detalle" | "icono"> }) {
+  const id = useId();
+  return (
+    <li>
+      <Link
+        to={enlace.ruta}
+        className="fila-inicio"
+        aria-labelledby={`${id}-titulo`}
+        aria-describedby={enlace.detalle === undefined ? undefined : `${id}-detalle`}
+      >
+        <span className="fila-inicio__icono">
+          <Icono nombre={enlace.icono} />
+        </span>
+        <span className="fila-inicio__texto">
+          <span id={`${id}-titulo`} className="fila-inicio__titulo">
+            {enlace.texto}
+          </span>
+          {enlace.detalle !== undefined && (
+            <span id={`${id}-detalle`} className="fila-inicio__detalle">
+              {enlace.detalle}
+            </span>
+          )}
+        </span>
+        <Icono nombre="flecha" className="fila-inicio__flecha" />
+      </Link>
+    </li>
+  );
+}
 
 /** Las pantallas que reemplazó el circuito de pagos: un enlace viejo sigue llegando. */
 const RUTAS_VIEJAS: readonly (readonly [string, string])[] = [
@@ -106,21 +198,33 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
-      <p>
-        <Link to={RUTA_CUENTA}>Mi cuenta</Link>
-      </p>
-      {enlaces.map((e) => (
-        <p key={e.ruta}>
-          <Link to={e.ruta}>{e.texto}</Link>
-        </p>
-      ))}
-      {porAclarar.data === true && (
-        <p>
-          <Link to={RUTA_POR_ACLARAR}>Pagos para aclarar (si dejaste de administrar)</Link>
-        </p>
-      )}
+      <div className="grupos-inicio">
+        {GRUPOS_DE_INICIO.map((g) => {
+          const propios = g.enlaces.filter((e) => enlaces.includes(e));
+          const aclarar = g.titulo === "Dinero" && porAclarar.data === true;
+          if (propios.length === 0 && !aclarar) return null;
+          return (
+            <section key={g.titulo} aria-label={g.titulo}>
+              <h2 className="titulo-seccion">{g.titulo}</h2>
+              <ul className="filas-inicio">
+                {propios.map((e) => (
+                  <FilaDeInicio key={e.ruta} enlace={e} />
+                ))}
+                {aclarar && (
+                  <FilaDeInicio
+                    enlace={{
+                      ruta: RUTA_POR_ACLARAR,
+                      texto: "Pagos para aclarar (si dejaste de administrar)",
+                      icono: "billetera",
+                    }}
+                  />
+                )}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
       <EnlaceInstalar />
-      <Pestanas />
     </>
   );
 }
@@ -157,8 +261,11 @@ function NoEncontrada() {
 
 export function App() {
   const [barra, setBarra] = useState<HTMLElement | null>(null);
+  const hayNavegacion = useHayNavegacion();
   return (
-    <>
+    <div className={hayNavegacion ? "aplicacion aplicacion--con-navegacion" : "aplicacion"}>
+      {hayNavegacion && <Navegacion />}
+      <div className="aplicacion__columna">
       <header className="cabecera">
         <Link to={RUTA_INICIO} className="marca">
           <img src="/icono.svg" alt="" width="40" height="40" />
@@ -203,6 +310,7 @@ export function App() {
           <Route path="*" element={<NoEncontrada />} />
         </Routes>
       </main>
-    </>
+      </div>
+    </div>
   );
 }

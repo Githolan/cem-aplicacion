@@ -1,0 +1,53 @@
+/* Dirección B: el único lugar con colores, radios, sombras y espaciado. `lecturaAmpliada.css`
+   redefine estos mismos nombres para su modo. */
+:root {
+  --surface: #f3f4f6;
+  --surface-raised: #ffffff;
+  --surface-sunken: #e4e7ec;
+  --surface-hero: var(--ink);
+  --ink: #0b1220;
+  --ink-soft: #3b4452;
+  --ink-muted: #5b6472;
+  --on-hero: #ffffff;
+  --on-hero-muted: #c3cad5;
+  --accent: #2457f5;
+  --on-accent: #ffffff;
+  --accent-tint: #e8eeff;
+  --accent-on-dark: #a9bcff;
+  --pending-bg: #fde7c8;
+  --pending-text: #6b3a05;
+  --success-bg: #d9f2e3;
+  --success-text: #14532f;
+  --danger-bg: #f8e0dd;
+  --danger-text: #8c1f17;
+  --border: #dde1e7;
+  --border-input: #7a8494;
+  --divider: #eef0f3;
+  --disabled: #8a93a1;
+  --step-todo: #c4cad4;
+  --scrim: rgb(11 18 32 / 56%);
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --tap-min: 2.75rem;
+  --tap-primary: 3.25rem;
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --radius-pill: 999px;
+  --shadow-soft: 0 1px 2px rgb(11 18 32 / 8%);
+  --shadow-card: 0 1px 2px rgb(11 18 32 / 4%), 0 4px 12px rgb(11 18 32 / 6%);
+  --shadow-hero: 0 8px 24px rgb(11 18 32 / 16%);
+  --shadow-button: 0 4px 12px rgb(36 87 245 / 24%);
+  --shadow-bar: 0 -4px 16px rgb(11 18 32 / 6%);
+  --font-sans: "Plus Jakarta Sans", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Menlo, monospace;
+  --ancho-riel: 6rem;
+  --ancho-barra-lateral: 16.5rem;
+  --alto-pestanas: 4.5rem;
+}

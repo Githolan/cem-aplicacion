@@ -9,9 +9,8 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
-import { Pestanas } from "./Pestanas";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
-import { FILTROS, type Filtro, TEXTO_SITUACION } from "./textos";
+import { FILTROS, type Filtro, TEXTO_SITUACION, TONO_SITUACION } from "./textos";
 
 // `/pagos/consulta`: lo cerrado y lo que se busca (§11). Abre la misma ficha.
 
@@ -137,7 +136,9 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                       <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
                     </span>
                     <span>{e.concepto}</span>
-                    <span className="fila-pago__verbo">{TEXTO_SITUACION[e.situacion]}</span>
+                    <span className="fila-pago__verbo" data-tono={TONO_SITUACION[e.situacion]}>
+                      {TEXTO_SITUACION[e.situacion]}
+                    </span>
                     {e.importe_pagado_centavos !== null && <span>Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</span>}
                     {e.numero_operacion !== null && <span>Operación {e.numero_operacion}</span>}
                   </Link>
@@ -155,7 +156,6 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           )}
         </>
       )}
-      <Pestanas />
     </>
   );
 }

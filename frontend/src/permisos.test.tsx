@@ -306,7 +306,7 @@ describe("si el inicio no pudo saber qué alcanza", () => {
     caido = false;
     fireEvent.click(within(aviso.parentElement!).getByRole("button", { name: "Reintentar" }));
 
-    expect(await screen.findByRole("link", PADRON)).toBeTruthy();
+    expect(await within(screen.getByRole("main")).findByRole("link", PADRON)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
