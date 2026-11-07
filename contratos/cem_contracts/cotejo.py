@@ -5,12 +5,12 @@ que un pago ya conciliado salió del banco: no cambia la orden y no mueve dinero
 se guardan la fecha, el importe y el número de cada débito.
 """
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 LIMITE_COTEJO_POR_DEFECTO = 50
 LIMITE_COTEJO_MAXIMO = 100
@@ -19,12 +19,17 @@ MAXIMO_PAGOS_POR_COTEJO = LIMITE_COTEJO_MAXIMO
 MAXIMO_FILAS_RESULTADO = 200
 """Lo que se lista de cada lado del resultado: el total va aparte."""
 MAXIMO_FILAS_NO_LEIDAS = 20
+MONEDA_SUGERIDA = "ARS"
+"""La de un extracto mientras nadie elija otra: el archivo no la dice."""
+FORMATO_MONEDA = r"^[A-Z]{3}$"
 LARGO_MAXIMO_COLUMNA = 80
+LARGO_MAXIMO_MOTIVO = 300
 FORMATO_COLUMNA = r"^[^\x00-\x1f\x7f=+@-][^\x00-\x1f\x7f]{0,79}$"
 """El nombre de una columna, como viene en el archivo. Empieza sin los caracteres con que una
 planilla arma una fórmula: un encabezado así no se guarda."""
 
 NombreColumna = Annotated[str, Field(pattern=FORMATO_COLUMNA, max_length=LARGO_MAXIMO_COLUMNA)]
+MonedaExtracto = Annotated[str, Field(pattern=FORMATO_MONEDA, examples=[MONEDA_SUGERIDA])]
 
 
 class SignoExtracto(StrEnum):
@@ -47,6 +52,10 @@ class ColumnasExtracto(BaseModel):
         default=None, description="Sin ella se compara por importe y fecha."
     )
     signo: SignoExtracto
+    moneda: MonedaExtracto = Field(
+        default=MONEDA_SUGERIDA,
+        description="El archivo no la dice: un débito solo coincide con un pago en su moneda.",
+    )
 
 
 class PagoPorCotejar(BaseModel):
@@ -79,6 +88,42 @@ class ListaCotejo(BaseModel):
     )
     tope_bytes: int = Field(description="El tamaño máximo de un extracto.")
     maximo_pagos: int = Field(description="Cuántos pagos entran en un pedido de cotejar a mano.")
+    moneda_extracto: str = Field(description="La guardada del edificio, o la sugerida si no hay.")
+
+
+class PagoCotejado(PagoPorCotejar):
+    """Un cotejo vigente. `puede_cotejar` dice también si quien pide puede anularlo: las reglas son
+    las mismas."""
+
+    origen: str = Field(description="`manual` o `extracto`.")
+    cotejado_en: datetime
+
+
+class ListaCotejados(BaseModel):
+    """`GET …/pagos/cotejo/cotejados`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[PagoCotejado]
+    siguiente: UUID | None = Field(
+        description="El `despues` de la página siguiente; sin él, no hay más."
+    )
+
+
+class AnulacionCotejo(BaseModel):
+    """`POST …/pagos/cotejo/{pago_id}/anulacion`: el cotejo no se borra, queda con su motivo."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MAXIMO_MOTIVO)
+    ]
+
+
+class CotejoAnulado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    pago_id: UUID
 
 
 class PagosACotejar(BaseModel):
@@ -109,12 +154,13 @@ class VistaExtracto(BaseModel):
 
 
 class MovimientoSinRegistrar(BaseModel):
-    """Un débito del banco sin pago en Consorcio en Mano. El extracto no dice la moneda."""
+    """Un débito del banco sin pago en Consorcio en Mano, en la moneda elegida para el extracto."""
 
     model_config = ConfigDict(frozen=True)
 
     fecha: date
     importe_centavos: int
+    moneda: str
     numero_operacion: str | None
 
 
@@ -135,6 +181,9 @@ class ResultadoCotejo(BaseModel):
     esperan_conciliar: int = Field(description="Coinciden con un pago que falta conciliar.")
     para_otra_persona: int = Field(
         description="Coinciden con un pago que quien subió el extracto no puede cotejar."
+    )
+    anulados: int = Field(
+        description="Coinciden con un pago cuyo cotejo se anuló: no vuelven solos, se tildan a mano."
     )
     lineas_no_leidas: int
     filas_no_leidas: list[int] = Field(

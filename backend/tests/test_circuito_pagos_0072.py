@@ -45,6 +45,7 @@ from tests.test_pago_manual_0055 import (
     emitida,
     evidencia,
     registrada,
+    segunda_apertura,
     ver,
 )
 from tests.test_rutas_egresos import codigo, get, post
@@ -54,7 +55,10 @@ pytestmark = pytest.mark.db
 # `base_aparte` es un fixture importado: el parámetro con su nombre no lo redefine.
 # ruff: noqa: F811
 
-ACCIONES = "select * from nucleo.acciones_de_ordenes_lectura(:orden, :actor, :origen, :sesion)"
+ACCIONES = (
+    "select * from nucleo.acciones_de_ordenes_lectura(:orden, :actor, :origen, :sesion,"
+    " interval '24 hours')"
+)
 
 
 @pytest.fixture
@@ -248,7 +252,7 @@ def test_subir_comprobante_lo_ve_quien_vio_la_cuenta(motor_migrate, motor_app, e
 
 
 def test_con_la_cuenta_ya_vista_otro_ejecutor_no_recibe_pagar(motor_migrate, motor_app, e):
-    """Para que la misma orden no se transfiera dos veces. La base se lo aceptaría."""
+    """Para que la misma orden no se transfiera dos veces. La base tampoco se lo acepta (`0078`)."""
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     o = emitida(motor_migrate, e)
     # Control: mientras nadie la vio, los dos pueden.
@@ -331,8 +335,8 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_conciliar_y_si_igual_pide_403(m
     """§14: el hueco de `test_hueco_conocido_quien_vio_la_cuenta_sin_registrar`, cerrado."""
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
-    ver(motor_migrate, e, e.mc2, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     assert paso(e, e.mc2, o) == "espera_conciliar"
     assert ficha(e, e.mc2, o)["puede_conciliar"] is False
     conciliacion = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
@@ -356,8 +360,8 @@ def test_otra_cuenta_de_quien_vio_la_cuenta_tampoco_concilia(motor_migrate, moto
     con_ejecutar(motor_migrate, e, e.mc2)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
     o = emitida(motor_migrate, e)
-    ver(motor_migrate, e, e.mc2, o)
     registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     assert paso(e, otra, o) == "espera_conciliar"
     assert paso(e, e.mc1, o) == "conciliar"  # control
 
@@ -368,8 +372,8 @@ def test_otra_cuenta_de_quien_vio_la_cuenta_tampoco_concilia(motor_migrate, moto
 def test_corregir_lo_ve_quien_registro(motor_migrate, motor_app, e):
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     o = emitida(motor_migrate, e)
-    ver(motor_migrate, e, x, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, x, o)
     observada(motor_migrate, e, o, p)
     assert fila(e, e.adm, o)["grupo"] == "para_corregir"
     assert paso(e, e.adm, o) == "corregir"
@@ -450,7 +454,7 @@ def test_si_falta_una_declaracion_la_ficha_dice_a_quien_le_toca(motor_migrate, m
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     d = declarada(motor_migrate, e, e.adm, o)
     # Falta x: el Consejo espera y la confirmación se niega. Se ve igual: no desaparece.
     y = fila(e, e.mc2, o)
@@ -488,7 +492,7 @@ def test_lo_que_dice_confirmable_coincide_con_la_lectura_que_ya_existia(
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     o = emitida(motor_migrate, e)
     ver(motor_migrate, e, e.adm, o)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     declarada(motor_migrate, e, e.adm, o)
 
     def las_dos() -> tuple[bool, bool]:
@@ -682,7 +686,7 @@ def test_cem_app_no_ejecuta_las_internas(motor_migrate):
             assert permiso is False, f
         rutas = c.execute(
             text("select has_function_privilege('cem_app', cast(:f as regprocedure), 'EXECUTE')"),
-            {"f": "nucleo.acciones_de_ordenes_lectura(uuid, uuid, text, uuid)"},
+            {"f": "nucleo.acciones_de_ordenes_lectura(uuid, uuid, text, uuid, interval)"},
         ).scalar_one()  # fmt: skip
     assert rutas is True  # control
 

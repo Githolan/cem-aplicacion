@@ -67,6 +67,7 @@ from tests.test_pago_manual_0055 import (
     emitida,
     evidencia,
     registrada,
+    segunda_apertura,
     ver,
 )
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
@@ -557,8 +558,8 @@ def test_separacion_de_quien_resuelve(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, x)
-    ver(motor_migrate, e, x, o)
     d = con_diferencia(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, x, o)
     pedido = {"orden": o, "diferencia": d, "resolucion": "reclamo"}
     niega(motor_migrate, e, e.adm, RESOLVER, "42501", **pedido)  # registró y no aprueba
     niega(motor_migrate, e, x, RESOLVER, "no_es_quien_ejecuto", **pedido)
@@ -570,8 +571,8 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_resolver_y_da_403(motor_migrate
     """§14: un miembro del Consejo que también ejecuta y solo vio la cuenta."""
     o = emitida(motor_migrate, e)
     x = segundo_ejecutor(motor_migrate, motor_app, e)
-    ver(motor_migrate, e, x, o)
     d = con_diferencia(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, x, o)
     f = ficha(e, x, o)
     assert (f["paso"], f["puede_resolver_diferencia"]) == ("espera_resolver", False)
     assert ficha(e, e.mc1, o)["puede_resolver_diferencia"]  # control: mc1 no la vio
@@ -770,7 +771,7 @@ def test_la_lectura_de_otro_consorcio_no_la_trae(motor_migrate, motor_app, e):
 def test_las_funciones_las_ejecuta_solo_cem_app(motor_migrate):
     rutas = (
         "nucleo.registrar_diferencia_pago_manual(uuid, integer, bytea, text, date, numeric, text,"
-        " text, uuid, text, uuid, text, uuid)",
+        " text, uuid, text, uuid, text, uuid, uuid)",
         "nucleo.resolver_diferencia_pago_manual(uuid, uuid, text, uuid, text, uuid)",
         "nucleo.recuperar_diferencia_pago_manual(uuid, uuid, uuid, text, uuid)",
         "nucleo.diferencias_pago_manual_lectura(uuid, text, uuid, text, uuid)",

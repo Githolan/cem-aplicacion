@@ -4,7 +4,7 @@ import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { useIrAlInicio } from "./sesion";
+import { useIrTrasEntrar } from "./sesion";
 
 // Entrar con correo y contraseña (documento 13, §10.3: el método de administradores, consejeros
 // y operadores). Si la persona tiene segundo factor, la contraseña no abre la sesión: el backend
@@ -50,8 +50,8 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
   const id = useId();
   const [contrasena, setContrasena] = useState("");
   const [codigo, setCodigo] = useState("");
-  const irAlInicio = useIrAlInicio();
-  const terminarEntrada = alEntrar ?? irAlInicio;
+  const irTrasEntrar = useIrTrasEntrar();
+  const terminarEntrada = alEntrar ?? irTrasEntrar;
   const [falla, setFalla] = useState(SIN_CONEXION);
   const [paso, setPaso] = useState<Paso>({ tipo: "contrasena" });
   const [estado, setEstado] = useState<Estado>("listo");

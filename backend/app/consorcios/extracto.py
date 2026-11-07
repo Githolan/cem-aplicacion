@@ -38,7 +38,12 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
-from cem_contracts.cotejo import FORMATO_COLUMNA, ColumnasExtracto, SignoExtracto
+from cem_contracts.cotejo import (
+    FORMATO_COLUMNA,
+    MONEDA_SUGERIDA,
+    ColumnasExtracto,
+    SignoExtracto,
+)
 
 BOMS_UTF16 = (b"\xff\xfe", b"\xfe\xff")
 CODIFICACIONES = ("utf-8-sig", "cp1252")
@@ -64,7 +69,7 @@ FECHAS = (
     (re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", re.ASCII), "amd"),
 )
 HORA = re.compile(r"[ T]\d{1,2}:\d{2}(:\d{2})?.*$")
-SIN_DECORADO = re.compile(r"^(?:\$|ARS)\s*|\s*(?:\$|ARS)$")
+SIN_DECORADO = re.compile(r"^(?:U\$S|US\$|USD|\$|ARS)\s*|\s*(?:U\$S|US\$|USD|\$|ARS)$")
 IMPORTE_SIN_MILES = re.compile(r"^(\d{1,16})(?:[.,](\d{1,2}))?$", re.ASCII)
 IMPORTE_MILES_PUNTO = re.compile(r"^(\d{1,3}(?:\.\d{3}){1,4})(?:,(\d{1,2}))?$", re.ASCII)
 IMPORTE_MILES_COMA = re.compile(r"^(\d{1,3}(?:,\d{3}){1,4})(?:\.(\d{1,2}))?$", re.ASCII)
@@ -99,6 +104,7 @@ class Movimiento:
     fecha: date
     importe_centavos: int
     numero_operacion: str | None
+    moneda: str
 
 
 @dataclass(frozen=True)
@@ -291,8 +297,11 @@ def hash_archivo(cuerpo: bytes) -> str:
     return hashlib.sha256(cuerpo).hexdigest()
 
 
-def _hash(fecha: date, centavos: int, numero: str | None, vez: int) -> str:
+def _hash(fecha: date, centavos: int, numero: str | None, vez: int, moneda: str) -> str:
+    """La moneda sugerida no entra: las líneas guardadas antes de `0085` conservan su clave."""
     texto = f"{fecha.isoformat()}|{centavos}|{numero or ''}|{vez}"
+    if moneda != MONEDA_SUGERIDA:
+        texto += f"|{moneda}"
     return hashlib.sha256(texto.encode()).hexdigest()
 
 
@@ -350,7 +359,8 @@ def leer_movimientos(tabla: Tabla, columnas: ColumnasExtracto) -> Lectura | None
         centavos = int(debito * CENTAVOS_POR_PESO)
         numero = None if numero_en is None else leer_numero(fila[numero_en])
         clave = (fecha, centavos, numero)
-        movimientos.append(Movimiento(_hash(*clave, veces[clave]), fecha, centavos, numero))
+        hash_linea = _hash(*clave, veces[clave], columnas.moneda)
+        movimientos.append(Movimiento(hash_linea, fecha, centavos, numero, columnas.moneda))
         veces[clave] += 1
     if not fechas:
         return None
@@ -365,6 +375,7 @@ class MovimientoGuardado:
     id: UUID
     fecha: date
     importe_centavos: int
+    moneda: str
     numero_operacion: str | None
     pago_id: UUID | None
     """El pago que ya tiene por un extracto anterior."""
@@ -376,8 +387,11 @@ class PagoComparable:
     numero_operacion: str
     fecha_operacion: date
     importe_centavos: int
+    moneda: str
     conforme: bool
     cotejado: bool
+    anulado: bool
+    """Alguien anuló un cotejo suyo (`0083`): ya no se tilda solo."""
     puede_cotejar: bool
 
 
@@ -411,7 +425,7 @@ def comparar(
         p = por_numero.get(m.numero_operacion)
         if p is None or p.pago_id in usados:
             sin_pago.append(m)
-        elif p.importe_centavos != m.importe_centavos:
+        elif p.importe_centavos != m.importe_centavos or p.moneda != m.moneda:
             discutidos.add(p.pago_id)
             sin_pago.append(m)
         else:
@@ -420,11 +434,11 @@ def comparar(
 
     lineas = defaultdict(list)
     for m in sin_numero:
-        lineas[m.fecha, m.importe_centavos].append(m)
+        lineas[m.fecha, m.importe_centavos, m.moneda].append(m)
     candidatos = defaultdict(list)
     for p in por_id.values():
         if p.pago_id not in usados and p.pago_id not in discutidos:
-            candidatos[p.fecha_operacion, p.importe_centavos].append(p)
+            candidatos[p.fecha_operacion, p.importe_centavos, p.moneda].append(p)
     for clave, iguales in lineas.items():
         pagos_iguales = candidatos.get(clave, [])
         if len(iguales) == len(pagos_iguales):

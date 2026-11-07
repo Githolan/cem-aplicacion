@@ -73,7 +73,8 @@ const VACIO: Datos = {
 };
 
 type Cambio = { modo: "cambio"; proveedor: Proveedor };
-type Formulario = { modo: "alta" } | Cambio;
+type CargaCuit = { modo: "cuit"; proveedor: Proveedor };
+type Formulario = { modo: "alta" } | Cambio | CargaCuit;
 type Pendiente = { acto: string; reintentar: () => void };
 
 const opcional = (v: string) => (v.trim() === "" ? null : v.trim());
@@ -287,7 +288,13 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setEnviando(true);
     setAviso(null);
     const pedido =
-      f.modo === "alta"
+      f.modo === "cuit"
+        ? api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/cuit", {
+            headers: encabezadoCsrf(),
+            params: { path: { consorcio_id: consorcio, proveedor_id: f.proveedor.id }, header: encabezado },
+            body: { cuit: datos.cuit.trim(), version_esperada: f.proveedor.version },
+          })
+        : f.modo === "alta"
         ? api.POST("/api/v1/consorcios/{consorcio_id}/proveedores", {
             headers: encabezadoCsrf(),
             params: { path: { consorcio_id: consorcio }, header: encabezado },
@@ -309,7 +316,12 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         exigirSesion(response);
         if (data !== undefined) {
           cerrar();
-          const hecho = f.modo === "alta" ? "Listo: dimos de alta el proveedor." : `Listo: el proveedor quedó en la versión ${data.version}.`;
+          const hecho =
+            f.modo === "alta"
+              ? "Listo: dimos de alta el proveedor."
+              : f.modo === "cuit"
+                ? `Listo: cargaste el CUIT y el proveedor quedó en la versión ${data.version}. Una orden ya aprobada hay que modificarla.`
+                : `Listo: el proveedor quedó en la versión ${data.version}.`;
           if (f.modo === "alta" && vuelveAPreparar) {
             navegar(RUTA_NUEVA, { state: { consorcio, proveedor: data.id, aviso: hecho } });
             return;
@@ -453,6 +465,11 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   <button type="button" onClick={() => abrir({ modo: "cambio", proveedor: ficha.proveedor })}>
                     Cambiar los datos
                   </button>
+                  {ficha.proveedor.cuit === null && (
+                    <button type="button" onClick={() => abrir({ modo: "cuit", proveedor: ficha.proveedor })}>
+                      Cargar el CUIT
+                    </button>
+                  )}
                   <button type="button" className="secundario" onClick={() => setFicha(null)}>
                     Volver a la lista
                   </button>
@@ -461,7 +478,25 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             </section>
           )}
 
-          {formulario !== null && (
+          {formulario?.modo === "cuit" && (
+            <form className="formulario tarjeta" onSubmit={enviar} aria-labelledby={`${id}-form`}>
+              <h2 id={`${id}-form`}>Cargar el CUIT de {formulario.proveedor.razon_social}</h2>
+              <p>Se carga una sola vez y después no cambia: revisalo antes de guardar. Deja una versión nueva del proveedor.</p>
+              <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
+              <input id={`${id}-cuit`} inputMode="numeric" required pattern={CUIT} value={datos.cuit} disabled={enviando}
+                onChange={(e) => cambiar("cuit", e.target.value)} />
+              <div className="acciones">
+                <button type="submit" disabled={enviando}>
+                  Guardar el CUIT
+                </button>
+                <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          )}
+
+          {formulario !== null && formulario.modo !== "cuit" && (
             <form className="formulario tarjeta" onSubmit={enviar} aria-labelledby={`${id}-form`}>
               <h2 id={`${id}-form`}>
                 {formulario.modo === "alta" ? "Alta de un proveedor" : `Cambiar ${formulario.proveedor.razon_social}`}

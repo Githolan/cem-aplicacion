@@ -24,10 +24,16 @@ from cem_contracts.cotejo import (
     MAXIMO_FILAS_NO_LEIDAS,
     MAXIMO_FILAS_RESULTADO,
     MAXIMO_PAGOS_POR_COTEJO,
+    MONEDA_SUGERIDA,
+    AnulacionCotejo,
     ColumnasExtracto,
+    CotejoAnulado,
+    ListaCotejados,
     ListaCotejo,
+    MonedaExtracto,
     MovimientoSinRegistrar,
     NombreColumna,
+    PagoCotejado,
     PagoPorCotejar,
     PagosACotejar,
     PagosCotejados,
@@ -116,12 +122,14 @@ def listar_cotejo(
             "select * from nucleo.cotejo_lectura(:d, :l, :actor, 'api', :sesion)",
             {"d": despues, "l": limite + 1},
         ).mappings().all()  # fmt: skip
+        guardadas = _columnas_guardadas(c, permiso)
     pagina = [_pago(f) for f in filas[:limite]]
     return ListaCotejo(
         elementos=pagina,
         siguiente=pagina[-1].pago_id if len(filas) > limite else None,
         tope_bytes=request.app.state.config.cotejo_tope_bytes,
         maximo_pagos=MAXIMO_PAGOS_POR_COTEJO,
+        moneda_extracto=MONEDA_SUGERIDA if guardadas is None else guardadas.moneda,
     )
 
 
@@ -141,6 +149,55 @@ def cotejar_a_mano(
             {"p": list(pedido.pagos)}, ERRORES,
         ).scalar_one()  # fmt: skip
         return 200, PagosCotejados(cotejados=hechos)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/cotejo/cotejados",
+    response_model=ListaCotejados,
+    summary="Lo cotejado y vigente, para deshacer un cotejo. Sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_cotejados(
+    permiso: Leer,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
+) -> ListaCotejados:
+    with _lectura(permiso, motor) as c:
+        filas = _ejecutar(
+            c, permiso,
+            "select * from nucleo.cotejados_lectura(:d, :l, :actor, 'api', :sesion)",
+            {"d": despues, "l": limite + 1},
+        ).mappings().all()  # fmt: skip
+    pagina = [PagoCotejado(**f) for f in filas[:limite]]
+    return ListaCotejados(
+        elementos=pagina, siguiente=pagina[-1].pago_id if len(filas) > limite else None
+    )
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/cotejo/{pago_id}/anulacion",
+    response_model=CotejoAnulado,
+    summary="Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a"
+    " tildarse solo. No cambia la orden",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def anular_cotejo(
+    pago_id: UUID,
+    anulacion: AnulacionCotejo,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, CotejoAnulado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.anular_cotejo(:p, :motivo, :actor, 'api', :sesion)",
+            {"p": pago_id, "motivo": anulacion.motivo}, ERRORES,
+        )  # fmt: skip
+        return 200, CotejoAnulado(pago_id=pago_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -220,7 +277,7 @@ def _columnas_guardadas(c: Connection, permiso: Permiso) -> ColumnasExtracto | N
         return None
     return ColumnasExtracto(
         fecha=fila["columna_fecha"], importe=fila["columna_importe"],
-        numero_operacion=fila["columna_numero"], signo=fila["signo"],
+        numero_operacion=fila["columna_numero"], signo=fila["signo"], moneda=fila["moneda"],
     )  # fmt: skip
 
 
@@ -264,7 +321,7 @@ def _comparar_y_cotejar(
     guardados = _ejecutar(
         conn, permiso,
         "select * from nucleo.importar_extracto(:a, :d, :h, cast(:m as jsonb), :cf, :ci, :cn, :s,"
-        " :actor, 'api', :sesion)",
+        " :actor, 'api', :sesion, :moneda)",
         {
             "a": hash_archivo, "d": lectura.desde, "h": lectura.hasta,
             "m": json.dumps([{
@@ -272,7 +329,7 @@ def _comparar_y_cotejar(
                 "importe_centavos": m.importe_centavos, "numero_operacion": m.numero_operacion,
             } for m in lectura.movimientos]),
             "cf": columnas.fecha, "ci": columnas.importe, "cn": columnas.numero_operacion,
-            "s": columnas.signo.value,
+            "s": columnas.signo.value, "moneda": columnas.moneda,
         },
     ).mappings().all()  # fmt: skip
     movimientos = [
@@ -280,6 +337,7 @@ def _comparar_y_cotejar(
             id=g["movimiento_id"],
             fecha=g["fecha"],
             importe_centavos=g["importe_centavos"],
+            moneda=g["moneda"],
             numero_operacion=g["numero_operacion"],
             pago_id=g["pago_id"],
         )  # fmt: skip
@@ -297,7 +355,7 @@ def _comparar_y_cotejar(
     a_cotejar = [
         {"movimiento": str(m.id), "pago": str(p.pago_id)}
         for m, p in comparacion.pares
-        if p.conforme and not p.cotejado and p.puede_cotejar
+        if p.conforme and not p.cotejado and not p.anulado and p.puede_cotejar
     ]
     cotejados = 0
     if a_cotejar:
@@ -317,8 +375,10 @@ def _comparar_y_cotejar(
         ya_cotejados=comparacion.ya_atados + sum(1 for p in pagos if p.cotejado),
         esperan_conciliar=sum(1 for p in pagos if not p.conforme),
         para_otra_persona=sum(
-            1 for p in pagos if p.conforme and not p.cotejado and not p.puede_cotejar
+            1 for p in pagos
+            if p.conforme and not p.cotejado and not p.anulado and not p.puede_cotejar
         ),
+        anulados=sum(1 for p in pagos if p.conforme and not p.cotejado and p.anulado),
         lineas_no_leidas=len(lectura.filas_no_leidas),
         filas_no_leidas=lectura.filas_no_leidas[:MAXIMO_FILAS_NO_LEIDAS],
         aca_no_banco=[
@@ -328,7 +388,7 @@ def _comparar_y_cotejar(
         total_aca_no_banco=len(comparacion.sin_movimiento),
         banco_no_aca=[
             MovimientoSinRegistrar(
-                fecha=m.fecha, importe_centavos=m.importe_centavos,
+                fecha=m.fecha, importe_centavos=m.importe_centavos, moneda=m.moneda,
                 numero_operacion=m.numero_operacion,
             )  # fmt: skip
             for m in comparacion.sin_pago[:MAXIMO_FILAS_RESULTADO]
@@ -373,6 +433,7 @@ async def subir_extracto(
     importe: NombreColumna | None = None,
     numero_operacion: NombreColumna | None = None,
     signo: SignoExtracto | None = None,
+    moneda: MonedaExtracto | None = None,
 ) -> Response:
     elegidas = _columnas_elegidas(fecha, importe, numero_operacion, signo)
     tope = request.app.state.config.cotejo_tope_bytes
@@ -387,6 +448,8 @@ async def subir_extracto(
                 raise ErrorApi(
                     409, CodigoError.COLUMNAS_SIN_ELEGIR, "Falta elegir qué columna es cada dato."
                 )
+            if moneda is not None:
+                columnas = columnas.model_copy(update={"moneda": moneda})
             try:
                 lectura = extracto.leer_movimientos(tabla, columnas)
             except extracto.ColumnasNoEncontradas as e:

@@ -6,7 +6,7 @@ import { importe } from "../egresos/comun";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { usePuede } from "../permisos";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, rutaFicha } from "./rutas";
-import { type Grupo, TEXTO_LE_TOCA_A, TITULO_GRUPO, VERBO } from "./textos";
+import { AVISO_LECTURA_DISPUTADA, type Grupo, TEXTO_LE_TOCA_A, TITULO_GRUPO, VERBO } from "./textos";
 
 // Lo que esta persona tiene que hacer ahora, agrupado por el próximo paso (§2). La arma el servidor:
 // una fila aparece solo si la base va a aceptar la acción, y ya viene en el orden en que se muestra.
@@ -27,6 +27,7 @@ function Fila({ e, consorcio, abierta }: PropsFila) {
         <span>{e.concepto}</span>
         <span className="fila-pago__verbo">{VERBO[e.paso]}</span>
         {e.grupo === "esperando" && <span>{TEXTO_LE_TOCA_A[e.le_toca_a]}</span>}
+        {e.lectura_disputada && <span>{AVISO_LECTURA_DISPUTADA}</span>}
       </Link>
     </li>
   );

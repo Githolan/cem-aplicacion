@@ -2,7 +2,7 @@ import { type FormEvent, useId, useState } from "react";
 
 import { api } from "./api/cliente";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { useIrAlInicio } from "./sesion";
+import { useIrTrasEntrar } from "./sesion";
 
 // Entrar con el código de seis dígitos del correo (documento 13, §10.3): para quien pidió la
 // entrada en un dispositivo y lee el correo en otro, donde el enlace no sirve (está ligado al
@@ -37,8 +37,8 @@ interface Props {
 
 export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Props) {
   const id = useId();
-  const irAlInicio = useIrAlInicio();
-  const terminarEntrada = alEntrar ?? irAlInicio;
+  const irTrasEntrar = useIrTrasEntrar();
+  const terminarEntrada = alEntrar ?? irTrasEntrar;
   const [falla, setFalla] = useState(SIN_CONEXION);
   const [codigo, setCodigo] = useState("");
   const [estado, setEstado] = useState<Estado>("listo");

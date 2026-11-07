@@ -136,25 +136,31 @@ CLAVES_POR_ENTIDAD = {
     "comprobante": {"documento_id", "ejecucion_id", "atado_en"},
     "pago": {"id", "ejecucion_id", "corrige_a", "numero_operacion", "fecha_operacion",
              "importe_centavos", "moneda", "documento_id", "version_documento_id",
-             "registrado_por_nombre", "registrado_en", "fuera_de_termino", "sin_facultad"},
+             "registrado_por_nombre", "registrado_en", "fuera_de_termino", "sin_facultad",
+             "lectura_disputada"},
     "conciliacion": {"id", "pago_id", "resultado", "motivo", "conciliado_por_nombre",
                      "conciliado_en"},
     "diferencia_pago": {"id", "orden_id", "ejecucion_id", "tipo", "importe_real", "moneda",
                         "cuenta_ultimos_digitos", "numero_operacion", "fecha_operacion",
                         "documento_id", "version_documento_id", "explicacion",
-                        "fuera_de_termino", "registrada_por_nombre", "registrada_en",
+                        "fuera_de_termino", "sin_facultad", "corrige_a",
+                        "registrada_por_nombre",
+                        "registrada_en",
                         "resolucion", "resuelta_por_nombre", "resuelta_en",
-                        "recuperada_por_nombre", "recuperada_en"},
+                        "recuperada_por_nombre", "recuperada_en", "cerrada_por_nombre",
+                        "cerrada_en", "motivo_cierre"},
     "declaracion_no_pagado": {"id", "ejecucion_id", "motivo", "declarado_por_nombre",
                               "declarado_en", "sin_facultad"},
     "confirmacion_no_pagado": {"id", "declaracion_id", "confirmado_por_nombre", "confirmado_en"},
+    "toma_pago": {"id", "ejecucion_id", "tomado_por_nombre", "tomada_en"},
     "cotejo": {"id", "pago_id", "diferencia_id", "origen", "movimiento_id",
-               "cotejado_por_nombre", "cotejado_en"},
+               "cotejado_por_nombre", "cotejado_en", "anulado_por_nombre", "anulado_en",
+               "motivo_anulacion"},
     "importacion_extracto": {"id", "hash_archivo", "desde", "hasta", "importado_por_nombre",
                              "importado_en"},
     "movimiento_extracto": {"id", "importacion_id", "hash_linea", "fecha", "importe_centavos",
-                            "numero_operacion"},
-    "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo",
+                            "moneda", "numero_operacion"},
+    "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo", "moneda",
                           "guardadas_por_nombre", "guardadas_en"},
     "lectura_comprobante": {"id", "version_documento_id", "documento_id", "ejecucion_id", "modelo",
                             "version_prompt", "legible", "error", "importe", "moneda",
@@ -1274,6 +1280,7 @@ TABLA_DE_LA_ENTIDAD = {
     "pago": "nucleo.pago_manual",
     "conciliacion": "nucleo.conciliacion_pago_manual",
     "diferencia_pago": "nucleo.diferencia_pago_manual",
+    "toma_pago": "nucleo.toma_pago_manual",
     "declaracion_no_pagado": "nucleo.declaracion_pago_no_realizado",
     "confirmacion_no_pagado": "nucleo.confirmacion_pago_no_realizado",
     "cotejo": "nucleo.cotejo_pago",
@@ -1289,7 +1296,7 @@ COTEJAR = "select nucleo.cotejar_pagos(cast(:pagos as uuid[]), :actor, :origen, 
 IMPORTAR = (
     "select movimiento_id from nucleo.importar_extracto(:archivo, :desde, :hasta,"
     " cast(:movimientos as jsonb), 'Fecha', 'Importe', 'Referencia', 'con_signo', :actor, :origen,"
-    " :sesion)"
+    " :sesion, 'ARS')"
 )
 COTEJAR_EXTRACTO = (
     "select nucleo.cotejar_por_extracto(cast(:pares as jsonb), :actor, :origen, :sesion)"
@@ -1385,6 +1392,13 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     a_otra_cuenta = emitida(motor_migrate, s)
     diferencia = con_diferencia(motor_migrate, s, a_otra_cuenta, cuenta=cbu_sintetico(50))
     resuelta(motor_migrate, s, a_otra_cuenta, diferencia, "reclamo")
+    with motor_migrate.begin() as c:  # esperar el plazo para tomar el pago no entra en la escena
+        c.execute(text(
+            "insert into nucleo.toma_pago_manual (consorcio_id, ejecucion_id, tomado_por,"
+            " identidad_tomo)"
+            " select e.consorcio_id, e.id, :q, nucleo.identidad_humana_de(e.consorcio_id, :q)"
+            "   from nucleo.ejecucion_orden_pago e where e.orden_id = :o"
+        ), {"q": s.mc1, "o": no_pagada})  # fmt: skip
     liquidacion = borrador(motor_migrate, s)
     gastos = [
         llamar(motor_migrate, s, s.adm, AGREGAR, liquidacion=liquidacion, orden=o,
@@ -1566,10 +1580,13 @@ _COLUMNAS_DE_PERSONA = {
         "identidad_registro",
         "resuelta_por",
         "identidad_resolvio",
+        "cerrada_por",
+        "identidad_cerro",
     ),
+    "nucleo.toma_pago_manual": ("tomado_por", "identidad_tomo"),
     "nucleo.declaracion_pago_no_realizado": ("declarado_por", "identidad_declaro"),
     "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
-    "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo"),
+    "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo", "anulado_por", "identidad_anulo"),
     "nucleo.importacion_extracto": ("importado_por", "identidad_importo"),
     "nucleo.columnas_extracto": ("guardadas_por",),
     "nucleo.liquidacion": ("preparada_por", "identidad_preparo"),

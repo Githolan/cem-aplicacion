@@ -70,7 +70,7 @@ PARTES: dict[str, tuple[str, ...]] = {
     "ordenes_pago": ("orden", "orden_version", "orden_aprobacion", "orden_transicion", "umbral",
                      "aprobaciones_configuradas"),
     "pagos": ("ejecucion", "ejecucion_resultado", "apertura_cuenta", "comprobante", "pago",
-              "conciliacion", "diferencia_pago", "declaracion_no_pagado",
+              "conciliacion", "toma_pago", "diferencia_pago", "declaracion_no_pagado",
               "confirmacion_no_pagado", "cotejo", "importacion_extracto",
               "movimiento_extracto", "columnas_extracto", "lectura_comprobante"),
     "liquidaciones": ("liquidacion", "gasto", "gasto_quitado"),

@@ -26,7 +26,7 @@ acá, nunca un 500. Los importes van en centavos, enteros.
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -201,6 +201,16 @@ class ProveedorNuevo(DatosProveedor):
     """`POST …/proveedores`. Queda `activo` en su versión 1."""
 
     cuit: str = Field(pattern=FORMATO_CUIT, description="Obligatorio y único en el consorcio.")
+
+
+class CargaCuitProveedor(BaseModel):
+    """`POST …/proveedores/{id}/cuit`: un proveedor de antes de que el CUIT fuera obligatorio. Se
+    carga una sola vez y deja una versión nueva con los mismos datos: la huella incluye el CUIT."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cuit: str = Field(pattern=FORMATO_CUIT)
+    version_esperada: int = Field(ge=1)
 
 
 class ProveedorVersionNueva(DatosProveedor):
@@ -697,10 +707,44 @@ class RegistroPagoManual(BaseModel):
         " la orden. En cualquier otro registro nuevo la base la niega"
         " (`no_coincide_con_la_orden`).",
     )
+    lectura_mal: bool = Field(
+        default=False,
+        description="La persona eligió «Se leyó mal»: el Consejo lo ve al conciliar. Sin una lectura"
+        " de ese comprobante se niega.",
+    )
     documento_id: UUID = Field(
         description="El comprobante: cargado desde el pago de esta orden"
         " (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus."
     )
+
+
+class TomaPagoManual(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.
+    Suelta a esa persona; abrir la cuenta sigue siendo otro acto."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA)
+    no_se_transfirio: Literal[True] = Field(
+        description="Quien toma el pago confirmó antes que la plata no salió."
+    )
+
+
+class TomaRegistrada(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    orden_id: UUID
+
+
+class TomaVigente(BaseModel):
+    """La última vez que alguien tomó el pago de esta ejecución."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tomado_por_nombre: str
+    tomada_en: datetime
 
 
 class TipoDiferencia(StrEnum):
@@ -750,6 +794,15 @@ class DiferenciaRegistrada(BaseModel):
     orden_id: UUID
 
 
+class CierreReclamo(BaseModel):
+    """`POST …/pago-manual/diferencia/{d}/cierre`: la plata reclamada no vuelve. Otro ser humano del
+    Consejo cierra el reclamo: la orden queda Fallida y la diferencia, en la historia."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: _texto(1, 300)
+
+
 class ResolucionDiferenciaPago(BaseModel):
     """`POST …/pago-manual/diferencia/{d}/resolucion`: otro ser humano del Consejo. Dar por pagado
     lo real vale solo para otro importe en la moneda de la orden (`solo_reclamo`)."""
@@ -784,6 +837,9 @@ class DiferenciaPagoManual(BaseModel):
     resuelta_por: UUID | None
     resuelta_en: datetime | None
     recuperada_en: datetime | None
+    corrige_a: UUID | None = Field(description="La diferencia que esta fila corrigió, si corrigió una.")
+    cerrada_en: datetime | None = Field(description="Si el reclamo se cerró sin recuperar la plata.")
+    motivo_cierre: str | None
     falta_centavos: int | None = Field(
         description="Cuánto faltó pagar, si fue de menos en la moneda de la orden."
     )
@@ -868,6 +924,9 @@ class PagoManual(BaseModel):
     motivo_conciliacion: str | None
     conciliado_por: UUID | None
     conciliado_en: datetime | None
+    lectura_disputada: bool = Field(
+        description="Quien registró dijo que la lectura del comprobante estaba mal (`0087`)."
+    )
     fuera_de_termino: bool = Field(
         description="Transferido después de que venció la aprobación (`0067`): el Consejo lo"
         " concilia con un motivo escrito, también para darlo por conforme."
@@ -980,10 +1039,14 @@ class PasoPago(StrEnum):
     acción; los `espera_*` son de quien la ve y no le toca."""
 
     PAGAR = "pagar"
+    TOMAR_PAGO = "tomar_pago"
+    """Otra persona vio la cuenta y pasó el plazo sin que dijera nada: se puede tomar el pago."""
     SUBIR_COMPROBANTE = "subir_comprobante"
     CORREGIR = "corregir"
     ENVIAR = "enviar"
     RENOVAR = "renovar"
+    MODIFICAR = "modificar"
+    """Aprobada, y el proveedor cambió: no se puede pagar hasta modificarla (`proveedor_cambiado`)."""
     VOLVER_A_PAGAR = "volver_a_pagar"
     RECHAZADA = "rechazada"
     APROBAR = "aprobar"
@@ -1023,11 +1086,13 @@ class GrupoPago(StrEnum):
 
 GRUPO_DE_PASO = {
     PasoPago.PAGAR: GrupoPago.PARA_PAGAR,
+    PasoPago.TOMAR_PAGO: GrupoPago.PARA_PAGAR,
     PasoPago.SUBIR_COMPROBANTE: GrupoPago.PARA_PAGAR,
     PasoPago.DECLARAR_NO_PAGO: GrupoPago.PARA_PAGAR,
     PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
     PasoPago.ENVIAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
+    PasoPago.MODIFICAR: GrupoPago.PARA_PREPARAR,
     PasoPago.VOLVER_A_PAGAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RECHAZADA: GrupoPago.PARA_PREPARAR,
     PasoPago.PREPARAR_FALTANTE: GrupoPago.PARA_PREPARAR,
@@ -1094,6 +1159,9 @@ class ElementoBandejaPagos(BaseModel):
     paso: PasoPago
     grupo: GrupoPago
     le_toca_a: LeTocaA
+    lectura_disputada: bool = Field(
+        description="Al conciliar: quien registró dijo que la lectura estaba mal."
+    )
 
 
 class BandejaPagos(BaseModel):
@@ -1213,6 +1281,12 @@ class FichaPago(BaseModel):
         description="Si puede abrir otra vez una cuenta ya vista. Con una declaración vigente es"
         " «Retomar el pago», y abrirla deja sin efecto lo declarado."
     )
+    puede_tomar: bool = Field(
+        description="Si puede tomar el pago de quien vio la cuenta: pasó el plazo y no dijo nada."
+    )
+    tomar_desde: datetime | None = Field(
+        description="Desde cuándo se puede tomar el pago, si espera a otra persona."
+    )
     puede_modificar: bool = Field(description="Si puede guardar una versión nueva de la orden.")
     puede_subir_comprobante: bool
     puede_registrar: bool
@@ -1223,7 +1297,13 @@ class FichaPago(BaseModel):
     puede_resolver_diferencia: bool = Field(
         description="Si puede resolver la diferencia sin resolver."
     )
-    puede_recuperar: bool = Field(description="Si puede decir que se recuperó la plata reclamada.")
+    puede_recuperar: bool = Field(
+        description="Si puede decir que se recuperó la plata reclamada o cerrar el reclamo sin"
+        " recuperarla."
+    )
+    puede_corregir_diferencia: bool = Field(
+        description="Si registró la diferencia vigente y el Consejo todavía no la resolvió."
+    )
     puede_preparar_faltante: bool = Field(
         description="Si le corresponde preparar una orden por lo que faltó pagar."
     )
@@ -1247,6 +1327,12 @@ class FichaPago(BaseModel):
     )
     diferencia_vigente: DiferenciaPagoManual | None = Field(
         description="Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
+    )
+    diferencias_anteriores: list[DiferenciaPagoManual] = Field(
+        description="Lo que `diferencia_vigente` corrigió, de lo más viejo a lo más nuevo."
+    )
+    toma_vigente: TomaVigente | None = Field(
+        description="Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."
     )
 
 

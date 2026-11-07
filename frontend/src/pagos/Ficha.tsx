@@ -34,11 +34,16 @@ import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
+  AVISO_LECTURA_DISPUTADA,
   AVISO_LO_DECIDE_EL_CONSEJO,
+  AVISO_POR_EL_CONSEJO,
+  AVISO_POR_FRANJA,
   AVISO_NO_TRANSFIERAS,
+  AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
+  AVISO_TOMAR,
   AVISO_VER_LA_CUENTA,
   type Paso,
   TEXTO_LE_TOCA_A,
@@ -62,7 +67,7 @@ type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
-type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
+type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
 type LecturaComprobante = components["schemas"]["LecturaComprobante"];
@@ -168,6 +173,10 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [faltaCuenta, setFaltaCuenta] = useState(false);
   /** Lo que eligió quien resuelve; sin elegir, lo primero que se ofrece. */
   const [resolucion, setResolucion] = useState<Resolucion | null>(null);
+  /** Pidió tomar el pago: falta que confirme que no se transfirió. */
+  const [confirmaToma, setConfirmaToma] = useState(false);
+  /** Pidió corregir la diferencia que registró. */
+  const [corrigeDiferencia, setCorrigeDiferencia] = useState(false);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
@@ -497,7 +506,44 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
-  /** Los mismos datos: la versión nueva pasa otra vez por aprobación (§9). Para cambiar algo está
+  function cerrarReclamo(d: Diferencia, texto: string) {
+    void acto.hacer({
+      quePide: ["cerrar-reclamo", orden, d.id, texto],
+      nombre: "cerrar el reclamo",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/cierre", {
+          headers: encabezadoCsrf(),
+          params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { motivo: texto },
+        }),
+      alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
+      alFallar: siCambio,
+    });
+  }
+
+  /** No da la cuenta: suelta a quien la vio. La ficha que vuelve dice qué sigue. */
+  function tomar() {
+    void acto.hacer({
+      quePide: ["tomar", orden, v.numero, v.huella],
+      nombre: "tomar el pago",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version: v.numero, huella: v.huella, no_se_transfirio: true },
+        }),
+      alTerminar: () => {
+        setConfirmaToma(false);
+        setAviso({ texto: "Listo: tomaste el pago.", ok: true });
+        releer();
+        alCambiar();
+      },
+      alFallar: siCambio,
+    });
+  }
+
+  /** Los mismos datos: la versión nueva pasa otra vez por aprobación, por su franja si fue simple
+   * y por el Consejo si hubo una diferencia (decisión 11, desvío de §9). Para cambiar algo está
    * «Modificar». */
   function volverAPagar() {
     void acto.hacer({
@@ -518,7 +564,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             contrato_id: v.contrato_id,
           },
         }),
-      alTerminar: () => terminar("Listo: la orden tiene una versión nueva, con los mismos datos, y pasa otra vez por aprobación."),
+      alTerminar: () => terminar(`Listo: la orden tiene una versión nueva, con los mismos datos. ${diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}`),
       alFallar: siCambio,
     });
   }
@@ -529,6 +575,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     if (texto === "") return;
     if (conMotivo === "rechazar") rechazar(texto);
     else if (conMotivo === "declarar") declarar(texto);
+    else if (conMotivo === "cerrar") {
+      if (diferencia !== null) cerrarReclamo(diferencia, texto);
+    }
     else if (pago !== undefined) conciliar(pago.id, conMotivo === "observar" ? "observado" : "conforme", texto);
   }
 
@@ -536,6 +585,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const motivoAbierto =
     (conMotivo === "rechazar" && ficha.puede_rechazar) ||
     (conMotivo === "declarar" && declara) ||
+    (conMotivo === "cerrar" && ficha.puede_recuperar) ||
     ((conMotivo === "conforme" || conMotivo === "observar") && ficha.puede_conciliar)
       ? conMotivo
       : null;
@@ -544,6 +594,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     declarar: { etiqueta: "Por qué no se pagó", boton: "Declarar que no se pagó", largo: 200 },
     conforme: { etiqueta: "Por qué lo aceptás fuera de término", boton: "Dar el pago por conforme", largo: 300 },
     observar: { etiqueta: "Qué no coincide", boton: "Observar el pago", largo: 300 },
+    cerrar: { etiqueta: "Por qué se cierra sin recuperar", boton: "Cerrar sin recuperar", largo: 300 },
   };
 
   const estaModificando = modificando && ficha.puede_modificar;
@@ -594,8 +645,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           )}
           {situacion === "no_se_pago" && (
             <p>
-              {diferencia?.recuperada_en == null ? "El Consejo confirmó que no se pagó." : "Se recuperó la plata."} Para volver a pagarla, pasa otra vez por
-              aprobación.
+              {diferencia?.cerrada_en != null
+                ? `Se cerró el reclamo sin recuperar la plata: ${diferencia.motivo_cierre}.`
+                : diferencia?.recuperada_en == null
+                  ? "El Consejo confirmó que no se pagó."
+                  : "Se recuperó la plata."}{" "}
+              {diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}
             </p>
           )}
           {observacion !== null && (
@@ -613,7 +668,18 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               {AVISO_DIFERENCIA_ESPERA}
             </p>
           )}
-          {paso === "espera_comprobante" && <p role="note">Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.</p>}
+          {paso === "espera_comprobante" && (
+            <p role="note">
+              Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.
+              {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} vas a poder tomar el pago.`}
+            </p>
+          )}
+          {ficha.toma_vigente !== null && (
+            <p role="note">
+              {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momento(ficha.toma_vigente.tomada_en)}.
+              {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
+            </p>
+          )}
           {ficha.le_toca_a !== null && ficha.le_toca_a !== "vos" && <p>{TEXTO_LE_TOCA_A[ficha.le_toca_a]}</p>}
 
           {cuentaVista !== null && (
@@ -773,6 +839,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     </dd>
                   </>
                 )}
+                {pago?.lectura_disputada === true && (
+                  <>
+                    <dt>Lectura del comprobante</dt>
+                    <dd>{AVISO_LECTURA_DISPUTADA}: los datos los escribió a mano. Comparalos con el archivo.</dd>
+                  </>
+                )}
                 {pago?.fuera_de_termino === true && (
                   <>
                     <dt>Fuera de término</dt>
@@ -797,6 +869,17 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   {AVISO_SIN_SALIDA}
                 </p>
               )}
+              {paso === "modificar" && (
+                <p className="aviso-error" role="note">
+                  {AVISO_PROVEEDOR_CAMBIADO}
+                </p>
+              )}
+              {paso === "tomar_pago" && <p role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
+              {confirmaToma && ficha.puede_tomar && (
+                <p className="aviso-error" role="alert">
+                  {AVISO_TOMAR}
+                </p>
+              )}
               {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p role="note">{AVISO_RETOMAR}</p>}
 
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
@@ -805,6 +888,16 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
                       comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido} subtitulo={Subtitulo}
                       puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
+                      alRegistrar={(texto) => terminar(texto)} releer={releer}
+                      alCambiarLaOrden={() => {
+                        releer();
+                        alCambiar();
+                      }} />
+                  )}
+                  {corrigeDiferencia && ficha.puede_corregir_diferencia && diferencia !== null && (
+                    <RegistroPago key={`diferencia-${diferencia.id}`} consorcio={consorcio} orden={orden} version={v} corregido={undefined}
+                      diferencia={diferencia} alCancelar={() => setCorrigeDiferencia(false)} comprobante={ficha.comprobante_actual} subido={null}
+                      lectura={null} subtitulo={Subtitulo} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
                         releer();
@@ -838,9 +931,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   )}
                   <div className="formulario">
                     <div className="acciones">
+                      {ficha.puede_corregir_diferencia && !corrigeDiferencia && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setCorrigeDiferencia(true)}>
+                          Corregir lo que registré
+                        </button>
+                      )}
                       {ficha.puede_recuperar && diferencia !== null && (
                         <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
                           Ya recuperamos la plata
+                        </button>
+                      )}
+                      {ficha.puede_recuperar && diferencia !== null && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("cerrar")}>
+                          Cerrar sin recuperar
                         </button>
                       )}
                       {paso === "enviar" && ficha.puede_enviar && (
@@ -883,6 +986,21 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                           Ver la cuenta para pagar
                         </button>
                       )}
+                      {ficha.puede_tomar && !confirmaToma && (
+                        <button type="button" disabled={enviando} onClick={() => setConfirmaToma(true)}>
+                          Tomar el pago
+                        </button>
+                      )}
+                      {ficha.puede_tomar && confirmaToma && (
+                        <>
+                          <button type="button" disabled={enviando} onClick={tomar}>
+                            No se transfirió: tomar el pago
+                          </button>
+                          <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmaToma(false)}>
+                            Cancelar
+                          </button>
+                        </>
+                      )}
                       {ficha.puede_conciliar && pago !== undefined && (
                         <>
                           {lecturaDistinta && (
@@ -918,7 +1036,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         </button>
                       )}
                       {ficha.puede_modificar && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setModificando(true)}>
+                        <button type="button" className={paso === "modificar" ? undefined : "secundario"} disabled={enviando} onClick={() => setModificando(true)}>
                           Modificar
                         </button>
                       )}
@@ -1005,6 +1123,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         {cuentaEnmascarada(x.cuenta_ultimos_digitos)}
                       </li>
                     ))}
+                </ol>
+              </>
+            )}
+            {ficha.diferencias_anteriores.length > 0 && (
+              <>
+                <Subtitulo>Lo que se registró antes</Subtitulo>
+                <ol className="versiones">
+                  {ficha.diferencias_anteriores.map((d) => (
+                    <li key={d.id}>
+                      Operación {d.numero_operacion}, {d.fecha_operacion}: {importe(centavosReales(d), d.moneda)}, cuenta{" "}
+                      {cuentaEnmascarada(d.cuenta_ultimos_digitos)}. Lo registró {d.registrada_por_nombre}, {momento(d.registrada_en)}
+                    </li>
+                  ))}
                 </ol>
               </>
             )}

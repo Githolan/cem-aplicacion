@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
+import { olvidarAdondeIba, tomarAdondeIba } from "./adondeIba";
 import { api } from "./api/cliente";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
@@ -68,6 +69,12 @@ export function useIrAlInicio(): (aviso: string) => void {
   return (aviso) => navegar(RUTA_INICIO, { replace: true, state: { aviso } });
 }
 
+/** Después de entrar: adonde iba la persona, si un 401 la sacó de ahí; si no, el inicio. */
+export function useIrTrasEntrar(): (aviso: string) => void {
+  const navegar = useNavigate();
+  return (aviso) => navegar(tomarAdondeIba() ?? RUTA_INICIO, { replace: true, state: { aviso } });
+}
+
 /**
  * Cierra la sesión de este navegador y, como toda salida, borra las copias de los contactos
  * (H2b_7 §5). Devuelve null si salió bien y, si no, lo que hay que decirle a la persona.
@@ -84,5 +91,6 @@ export async function salirDeLaCuenta(
     return mensaje(0, undefined);
   }
   borrarCopias();
+  olvidarAdondeIba();
   return null;
 }
