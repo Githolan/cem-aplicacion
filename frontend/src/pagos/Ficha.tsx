@@ -27,6 +27,7 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { BotonCopiar } from "./BotonCopiar";
+import { CaminoOrden } from "./CaminoOrden";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA } from "./rutas";
@@ -610,23 +611,27 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
       <div hidden={pendiente !== null}>
         <section className="ficha-pago" aria-labelledby={`${id}-titulo`}>
           <div className="ficha-pago__resumen">
-          <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
-            {TEXTO_SITUACION[situacion]}
-          </p>
-          <h2 id={`${id}-titulo`}>{v.razon_social}</h2>
-          <div className="fila-importe">
-            <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
-            {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
+            <div className="ficha-pago__arriba">
+              <p>Importe de la orden</p>
+              <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
+                {TEXTO_SITUACION[situacion]}
+              </p>
+            </div>
+            <div className="fila-importe">
+              <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
+              {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
+            </div>
+            <h2 id={`${id}-titulo`}>{v.razon_social}</h2>
+            <p>{v.concepto}</p>
           </div>
-          <p>{v.concepto}</p>
-          </div>
+          <CaminoOrden situacion={situacion} paso={paso} />
 
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-error" role="note">
               {TEXTO_ALERTA_FRACCIONAMIENTO}
             </p>
           )}
-          {situacion === "borrador" && v.alerta_fraccionamiento && <p role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
+          {situacion === "borrador" && v.alerta_fraccionamiento && <p className="aviso-info" role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
           {enDecision && anterior !== undefined && cambiosDeVersion(v, anterior).map((c) => <p key={c}>{c}</p>)}
           {ficha.orden.motivo_rechazo !== null && situacion === "rechazada" && (
             <p>
@@ -649,7 +654,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
             </p>
           )}
           {declaracion !== null && (
-            <p role="note">
+            <p className="aviso-info" role="note">
               Se declaró que no se pagó el {momento(declaracion.declarado_en)}: {declaracion.motivo}. No pagues esta orden mientras tanto.
             </p>
           )}
@@ -659,13 +664,13 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
             </p>
           )}
           {paso === "espera_comprobante" && (
-            <p role="note">
+            <p className="aviso-info" role="note">
               Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.
               {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} vas a poder tomar el pago.`}
             </p>
           )}
           {ficha.toma_vigente !== null && (
-            <p role="note">
+            <p className="aviso-info" role="note">
               {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momento(ficha.toma_vigente.tomada_en)}.
               {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
             </p>
@@ -701,7 +706,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
             <div className="tarjeta">
               {lecturaDistinta && <DistintoDeLoRegistrado lectura={comprobanteLeido} registrado={registrado} />}
               {lecturaIgual && <p className="aviso-ok">{AVISO_LECTURA_COINCIDE}</p>}
-              {lecturaIncompleta && <p role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
+              {lecturaIncompleta && <p className="aviso-info" role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
               {diferencia !== null && (
                 <>
                   <table className="comparar-pago">
@@ -847,7 +852,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
               </dl>
 
               {paso === "pagar" && ficha.puede_pagar && cuentaVista === null && (
-                <p role="note">{AVISO_VER_LA_CUENTA}</p>
+                <p className="aviso-info" role="note">{AVISO_VER_LA_CUENTA}</p>
               )}
               {paso === "subir_comprobante" && situacion === "pagando" && !ficha.puede_reabrir_cuenta && cuentaVista === null && (
                 <p className="aviso-error" role="note">
@@ -864,13 +869,13 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                   {AVISO_PROVEEDOR_CAMBIADO}
                 </p>
               )}
-              {paso === "tomar_pago" && <p role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
+              {paso === "tomar_pago" && <p className="aviso-info" role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
               {confirmaToma && ficha.puede_tomar && (
                 <p className="aviso-error" role="alert">
                   {AVISO_TOMAR}
                 </p>
               )}
-              {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p role="note">{AVISO_RETOMAR}</p>}
+              {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p className="aviso-info" role="note">{AVISO_RETOMAR}</p>}
 
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
               <div hidden={motivoAbierto !== null}>

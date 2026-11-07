@@ -148,7 +148,7 @@ h3 {
 }
 
 .aviso-info {
-  margin-top: var(--space-4);
+  margin: var(--space-4) 0 0;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-lg);
   background: var(--accent-tint);
@@ -862,6 +862,76 @@ main:has(.cotejo) {
 .ficha-pago__resumen > p:last-child {
   margin-bottom: 0;
   color: var(--on-hero-muted);
+}
+
+.ficha-pago__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ficha-pago__arriba p {
+  margin: 0;
+}
+
+.ficha-pago__arriba p:first-child {
+  color: var(--on-hero-muted);
+  font-weight: 600;
+}
+
+.ficha-pago__resumen h2 {
+  font-size: 1.125rem;
+}
+
+/* Las acciones de la ficha: anchas y una debajo de la otra, como las pide el dedo. */
+.ficha-pago .formulario .acciones button {
+  flex: 1 1 100%;
+}
+
+/* Por dónde va la orden. El paso actual lleva además aria-current, y la situación la dice la tarjeta. */
+.camino-orden {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.camino-orden li {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.375rem;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.camino-orden i {
+  display: block;
+  height: 0.375rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.camino-orden [data-estado="hecho"] i {
+  background: var(--success-text);
+}
+
+.camino-orden [data-estado="ahora"] i {
+  background: var(--accent);
+}
+
+.camino-orden [data-estado="alerta"] i {
+  background: var(--pending-text);
+}
+
+.camino-orden [aria-current="step"] {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .etiqueta-situacion {

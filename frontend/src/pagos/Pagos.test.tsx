@@ -590,6 +590,47 @@ describe("el ancho de la pantalla", () => {
   });
 });
 
+describe("ficha: la línea de pasos sale de lo que dice el servidor", () => {
+  const camino = async () => screen.findByRole("list", { name: "Por dónde va la orden" });
+  const actual = (lista: HTMLElement) => lista.querySelector('[aria-current="step"]');
+  const estado = (lista: HTMLElement, paso: string) => within(lista).getByText(paso).closest("li")?.getAttribute("data-estado");
+
+  it.each([
+    ["en_revision", "aprobar", "Aprobar", "ahora", 0],
+    ["para_pagar", "pagar", "Pagar", "ahora", 1],
+    ["para_pagar", "renovar", "Pagar", "alerta", 1],
+    ["falta_conciliar", "conciliar", "Conciliar", "ahora", 2],
+    ["observado", "corregir", "Conciliar", "alerta", 2],
+  ] as const)("%s con %s: el paso actual es %s", async (situacion, paso, nombre, tono, hechos) => {
+    abrirFicha(ficha({ situacion, paso }));
+    const lista = await camino();
+    expect(actual(lista)?.textContent).toBe(nombre);
+    expect(actual(lista)?.getAttribute("data-estado")).toBe(tono);
+    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(hechos);
+  });
+
+  it("pagada: tres hechos y «Cotejar» sin marcar, porque la ficha no sabe si se cotejó", async () => {
+    abrirFicha(ficha({ situacion: "pagada", paso: null }));
+    const lista = await camino();
+    expect(actual(lista)).toBeNull();
+    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(3);
+    expect(estado(lista, "Cotejar")).toBeNull();
+  });
+
+  it("control: una orden que no se pagó no muestra la línea", async () => {
+    abrirFicha(ficha({ situacion: "no_se_pago", paso: null }));
+    await screen.findByText("No se pagó");
+    expect(screen.queryByRole("list", { name: "Por dónde va la orden" })).toBeNull();
+  });
+
+  it("el importe va antes que el proveedor", async () => {
+    abrirFicha(ficha({ situacion: "para_pagar", paso: "pagar" }));
+    const proveedor = await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
+    const cifra = document.querySelector(".importe-ficha") as HTMLElement;
+    expect(cifra.compareDocumentPosition(proveedor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
 describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () => {
   const CASOS: [string, Ficha, string, keyof Ficha][] = [
     ["enviar", BORRADOR, "Enviar a aprobar", "puede_enviar"],
