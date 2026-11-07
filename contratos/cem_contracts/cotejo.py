@@ -19,6 +19,9 @@ MAXIMO_PAGOS_POR_COTEJO = LIMITE_COTEJO_MAXIMO
 MAXIMO_FILAS_RESULTADO = 200
 """Lo que se lista de cada lado del resultado: el total va aparte."""
 MAXIMO_FILAS_NO_LEIDAS = 20
+MONEDA_SUGERIDA = "ARS"
+"""La de un extracto mientras nadie elija otra: el archivo no la dice."""
+FORMATO_MONEDA = r"^[A-Z]{3}$"
 LARGO_MAXIMO_COLUMNA = 80
 LARGO_MAXIMO_MOTIVO = 300
 FORMATO_COLUMNA = r"^[^\x00-\x1f\x7f=+@-][^\x00-\x1f\x7f]{0,79}$"
@@ -26,6 +29,7 @@ FORMATO_COLUMNA = r"^[^\x00-\x1f\x7f=+@-][^\x00-\x1f\x7f]{0,79}$"
 planilla arma una fórmula: un encabezado así no se guarda."""
 
 NombreColumna = Annotated[str, Field(pattern=FORMATO_COLUMNA, max_length=LARGO_MAXIMO_COLUMNA)]
+MonedaExtracto = Annotated[str, Field(pattern=FORMATO_MONEDA, examples=[MONEDA_SUGERIDA])]
 
 
 class SignoExtracto(StrEnum):
@@ -48,6 +52,10 @@ class ColumnasExtracto(BaseModel):
         default=None, description="Sin ella se compara por importe y fecha."
     )
     signo: SignoExtracto
+    moneda: MonedaExtracto = Field(
+        default=MONEDA_SUGERIDA,
+        description="El archivo no la dice: un débito solo coincide con un pago en su moneda.",
+    )
 
 
 class PagoPorCotejar(BaseModel):
@@ -80,6 +88,7 @@ class ListaCotejo(BaseModel):
     )
     tope_bytes: int = Field(description="El tamaño máximo de un extracto.")
     maximo_pagos: int = Field(description="Cuántos pagos entran en un pedido de cotejar a mano.")
+    moneda_extracto: str = Field(description="La guardada del edificio, o la sugerida si no hay.")
 
 
 class PagoCotejado(PagoPorCotejar):
@@ -145,12 +154,13 @@ class VistaExtracto(BaseModel):
 
 
 class MovimientoSinRegistrar(BaseModel):
-    """Un débito del banco sin pago en Consorcio en Mano. El extracto no dice la moneda."""
+    """Un débito del banco sin pago en Consorcio en Mano, en la moneda elegida para el extracto."""
 
     model_config = ConfigDict(frozen=True)
 
     fecha: date
     importe_centavos: int
+    moneda: str
     numero_operacion: str | None
 
 

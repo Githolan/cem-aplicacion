@@ -1,5 +1,6 @@
 """Leer un extracto y compararlo con los pagos, sin base. Datos SINTETICOS / NO REAL."""
 
+import hashlib
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -274,12 +275,42 @@ def test_el_hash_no_depende_del_texto_y_si_de_la_vez():
     assert claves == [m.hash_linea for m in b.movimientos]
 
 
-def _m(importe=100, numero="0048", fecha=DIA, pago=None):
-    return MovimientoGuardado(uuid4(), fecha, importe, numero, pago)
+def _m(importe=100, numero="0048", fecha=DIA, pago=None, moneda="ARS"):
+    return MovimientoGuardado(uuid4(), fecha, importe, moneda, numero, pago)
 
 
-def _p(importe=100, numero="0048", fecha=DIA, conforme=True, cotejado=False, puede=True):
-    return PagoComparable(uuid4(), numero, fecha, importe, conforme, cotejado, False, puede)
+def _p(
+    importe=100, numero="0048", fecha=DIA, conforme=True, cotejado=False, puede=True, moneda="ARS"
+):
+    return PagoComparable(
+        uuid4(), numero, fecha, importe, moneda, conforme, cotejado, False, puede
+    )
+
+
+def test_por_numero_en_otra_moneda_no_coincide():
+    assert _comparar([_m()], [_p(moneda="USD")]).pares == []
+    assert len(_comparar([_m(moneda="USD")], [_p(moneda="USD")]).pares) == 1  # control
+
+
+def test_por_importe_y_fecha_en_otra_moneda_no_coincide():
+    assert _comparar([_m(numero=None)], [_p(moneda="USD")]).pares == []
+    assert len(_comparar([_m(numero=None)], [_p()]).pares) == 1  # control
+
+
+def test_el_hash_de_pesos_no_cambia_y_el_de_otra_moneda_si():
+    pesos = leer_movimientos(_tabla("05/11/2026;-1000,00;00481"), COLUMNAS).movimientos[0]
+    dolares = leer_movimientos(
+        _tabla("05/11/2026;-1000,00;00481"), COLUMNAS.model_copy(update={"moneda": "USD"})
+    ).movimientos[0]
+    texto = "2026-11-05|100000|00481|0"
+    assert pesos.hash_linea == hashlib.sha256(texto.encode()).hexdigest()
+    assert dolares.hash_linea != pesos.hash_linea
+    assert (pesos.moneda, dolares.moneda) == ("ARS", "USD")
+
+
+@pytest.mark.parametrize("celda", ["USD 1.000,00", "U$S 1.000,00", "US$ 1.000,00", "1.000,00 USD"])
+def test_un_importe_en_dolares_se_lee(celda):
+    assert leer_importe(celda) == Decimal("1000.00")
 
 
 def _comparar(movimientos, pagos):

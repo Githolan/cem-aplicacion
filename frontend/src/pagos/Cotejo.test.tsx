@@ -44,13 +44,13 @@ function elemento(id: string, extra: Partial<Elemento> = {}): Elemento {
 const MAXIMO_PAGOS = 100;
 
 const lista = (elementos: Elemento[], siguiente: string | null = null, maximo_pagos = MAXIMO_PAGOS) => () =>
-  Response.json({ elementos, siguiente, tope_bytes: TOPE, maximo_pagos });
+  Response.json({ elementos, siguiente, tope_bytes: TOPE, maximo_pagos, moneda_extracto: "ARS" });
 
 const VISTA_NUEVA: Vista = {
   columnas: ["Fecha valor", "Detalle", "Debito", "Referencia"], muestra: ["05/11/2026", "x", "-1,00", "0048213377"],
   signo_sugerido: "con_signo", columnas_guardadas: null,
 };
-const GUARDADAS = { fecha: "Fecha valor", importe: "Debito", numero_operacion: "Referencia", signo: "con_signo" } as const;
+const GUARDADAS = { fecha: "Fecha valor", importe: "Debito", numero_operacion: "Referencia", signo: "con_signo", moneda: "ARS" } as const;
 
 function resultado(extra: Partial<Resultado> = {}): Resultado {
   return {
@@ -411,7 +411,7 @@ describe("con el extracto", () => {
     await subir();
     await screen.findByText("12 pagos coinciden con el banco y quedaron cotejados.");
     expect(screen.queryByRole("heading", { name: "¿Qué es cada columna?" })).toBeNull();
-    expect(new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").search).toBe("");
+    expect([...new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams.keys()].filter((k) => k !== "moneda")).toEqual([]);
   });
 
   it("muestra solo lo que hay que mirar, con la acción al lado", async () => {
@@ -420,7 +420,7 @@ describe("con el extracto", () => {
       [EXTRACTO]: () =>
         Response.json(resultado({
           aca_no_banco: [elemento(P1)], total_aca_no_banco: 1, total_banco_no_aca: 1,
-          banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, numero_operacion: "0048213999" }],
+          banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, moneda: "ARS", numero_operacion: "0048213999" }],
           esperan_conciliar: 2, para_otra_persona: 1, ya_cotejados: 3, lineas_no_leidas: 2, filas_no_leidas: [14, 15],
         })),
     });
@@ -439,6 +439,38 @@ describe("con el extracto", () => {
     expect(screen.getByText(/1 coincide, pero lo tiene que cotejar/)).toBeTruthy();
     expect(screen.getByText(/2 líneas no se pudieron leer del archivo \(línea 14, 15\)/)).toBeTruthy();
     expect(screen.queryByText("No hay nada para mirar.")).toBeNull();
+  });
+
+  it("la moneda se pide con las columnas, con la sugerida puesta, y va al subir", async () => {
+    const simulado = backend({ [LISTA]: lista([elemento(P1)]), [VISTA]: () => Response.json(VISTA_NUEVA), [EXTRACTO]: () => Response.json(resultado()) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByRole("checkbox", { name: /Proveedor 22/ });
+    await subir();
+    await screen.findByRole("heading", { name: "¿Qué es cada columna?" });
+    const moneda = screen.getByLabelText("Moneda del extracto") as HTMLSelectElement;
+    expect(moneda.value).toBe("ARS");
+    fireEvent.change(moneda, { target: { value: "USD" } });
+    fireEvent.click(screen.getByRole("button", { name: /Comparar/ }));
+    await waitFor(() => expect(pedidos(simulado, EXTRACTO)).toHaveLength(1));
+    expect(new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams.get("moneda")).toBe("USD");
+  });
+
+  it("con las columnas guardadas se cambia la moneda antes de subir", async () => {
+    const simulado = backend({
+      [LISTA]: lista([elemento(P1)]),
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado()),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByRole("checkbox", { name: /Proveedor 22/ });
+    fireEvent.change(screen.getByLabelText("Moneda del extracto"), { target: { value: "USD" } });
+    await subir();
+    await waitFor(() => expect(pedidos(simulado, EXTRACTO)).toHaveLength(1));
+    const parametros = new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams;
+    expect(parametros.get("moneda")).toBe("USD");
+    expect(parametros.get("fecha")).toBeNull();
   });
 
   it("lo que coincide con un cotejo deshecho se cuenta aparte", async () => {

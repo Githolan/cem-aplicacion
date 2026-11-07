@@ -11,6 +11,7 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { MONEDAS } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
@@ -47,10 +48,6 @@ const cantidad = (n: number, una: string, varias: string) => (n === 1 ? una : `$
 /** «2026-11-05» a «05/11/2026». */
 const fechaLegible = (iso: string) => iso.split("-").reverse().join("/");
 
-/** Un débito del banco: el extracto no dice la moneda. */
-const importeDelBanco = (centavos: number) =>
-  new Intl.NumberFormat("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(centavos / 100);
-
 const detalle = (numero: string | null, fecha: string, nombre: string) =>
   numero === null ? fechaLegible(fecha) : `${nombre} ${numero} · ${fechaLegible(fecha)}`;
 
@@ -69,6 +66,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   const [vuelta, setVuelta] = useState(0);
   const [tope, setTope] = useState<number | null>(null);
   const [maximo, setMaximo] = useState<number | null>(null);
+  /** La del extracto que se va a subir. El archivo no la dice; sin leer la lista, manda la guardada. */
+  const [moneda, setMoneda] = useState<string | null>(null);
   const [tildados, setTildados] = useState<ReadonlySet<string>>(new Set());
   const [extracto, setExtracto] = useState<Extracto>({ tipo: "sin_archivo" });
   const [entrada, setEntrada] = useState(0);
@@ -92,6 +91,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           setAvisoLectura(sinLaFalla);
           setTope(data.tope_bytes);
           setMaximo(data.maximo_pagos);
+          setMoneda(data.moneda_extracto);
           setLectura((l) => ({
             tipo: "ok",
             // Una página más se suma a lo que ya se ve; volver a empezar la reemplaza.
@@ -152,7 +152,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
 
   function comparar(archivo: File, vista: Vista, columnas: Columnas | null): Promise<void> {
     return acto.hacer({
-      quePide: [archivo.name, archivo.size, archivo.lastModified, columnas],
+      quePide: [archivo.name, archivo.size, archivo.lastModified, columnas, moneda],
       nombre: "comparar el extracto",
       pedir: (clave) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/pagos/cotejo/extracto", {
@@ -161,7 +161,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             path: { consorcio_id: consorcio },
             header: { [ENCABEZADO_IDEMPOTENCIA]: clave },
             // Sin elegir, el servidor usa las columnas guardadas del edificio.
-            query: columnas ?? {},
+            query: columnas ?? (moneda === null ? {} : { moneda }),
           },
           // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
           body: archivo as unknown as string,
@@ -275,6 +275,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
               <ElegirColumnas
                 vista={extracto.vista}
                 enviando={enviando}
+                moneda={moneda}
                 alComparar={(columnas) => void comparar(extracto.archivo, extracto.vista, columnas)}
                 alVolver={() => setExtracto({ tipo: "sin_archivo" })}
               />
@@ -290,6 +291,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
                 key={entrada}
                 tope={tope}
                 ocupado={enviando || extracto.tipo === "leyendo"}
+                moneda={moneda}
+                alCambiarMoneda={setMoneda}
                 alElegir={(archivo) => void elegirArchivo(archivo)}
               />
             )}
@@ -342,9 +345,9 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   );
 }
 
-type PropsSubir = { tope: number | null; ocupado: boolean; alElegir: (archivo: File) => void };
+type PropsSubir = { tope: number | null; ocupado: boolean; moneda: string | null; alCambiarMoneda: (moneda: string) => void; alElegir: (archivo: File) => void };
 
-function SubirExtracto({ tope, ocupado, alElegir }: PropsSubir) {
+function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: PropsSubir) {
   const id = useId();
   function soltar(evento: DragEvent) {
     evento.preventDefault();
@@ -354,6 +357,17 @@ function SubirExtracto({ tope, ocupado, alElegir }: PropsSubir) {
   return (
     <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
       <h2 id={`${id}-titulo`}>Subí el extracto</h2>
+      {moneda !== null && (
+        <div className="formulario">
+          <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
+          <select id={`${id}-moneda`} value={moneda} disabled={ocupado} onChange={(e) => alCambiarMoneda(e.target.value)}>
+            {MONEDAS.map((m) => (
+              <option key={m}>{m}</option>
+            ))}
+          </select>
+          <p>El archivo del banco no la dice: un débito solo coincide con un pago en la misma moneda.</p>
+        </div>
+      )}
       <div className="zona-archivo formulario" onDragOver={(e) => e.preventDefault()} onDrop={soltar}>
         <p className="zona-archivo__soltar">Soltá acá el extracto</p>
         <label htmlFor={`${id}-archivo`}>Elegir el archivo{tope === null ? "" : ` (CSV, hasta ${tope / BYTES_POR_MB} MB)`}</label>
@@ -372,21 +386,22 @@ function SubirExtracto({ tope, ocupado, alElegir }: PropsSubir) {
   );
 }
 
-type PropsColumnas = { vista: Vista; enviando: boolean; alComparar: (c: Columnas) => void; alVolver: () => void };
+type PropsColumnas = { vista: Vista; enviando: boolean; moneda: string | null; alComparar: (c: Columnas) => void; alVolver: () => void };
 
-function ElegirColumnas({ vista, enviando, alComparar, alVolver }: PropsColumnas) {
+function ElegirColumnas({ vista, enviando, moneda: monedaSugerida, alComparar, alVolver }: PropsColumnas) {
   const id = useId();
   const { columnas, muestra, columnas_guardadas: guardadas, signo_sugerido: sugerido } = vista;
   const [fecha, setFecha] = useState(guardadas?.fecha ?? parecida(columnas, /fecha/i));
   const [monto, setMonto] = useState(guardadas?.importe ?? parecida(columnas, /importe|d[eé]bito|monto/i));
   const [numero, setNumero] = useState(guardadas?.numero_operacion ?? parecida(columnas, /operaci[oó]n|referencia|comprobante/i));
   const [signo, setSigno] = useState<Signo>(guardadas?.signo ?? sugerido);
+  const [moneda, setMoneda] = useState(monedaSugerida ?? guardadas?.moneda ?? "");
   const ejemplo = (columna: string) => muestra[columnas.indexOf(columna)] ?? "";
   const primeraFila = [fecha, monto, numero].filter((c) => c !== "").map(ejemplo);
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    alComparar({ fecha, importe: monto, numero_operacion: numero === SIN_NUMERO ? null : numero, signo });
+    alComparar({ fecha, importe: monto, numero_operacion: numero === SIN_NUMERO ? null : numero, signo, moneda });
   }
 
   const opciones = columnas.map((c) => (
@@ -413,6 +428,12 @@ function ElegirColumnas({ vista, enviando, alComparar, alVolver }: PropsColumnas
         <select id={`${id}-numero`} value={numero} onChange={(e) => setNumero(e.target.value)}>
           <option value={SIN_NUMERO}>No tiene: comparar por importe y fecha</option>
           {opciones}
+        </select>
+        <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
+        <select id={`${id}-moneda`} required value={moneda} onChange={(e) => setMoneda(e.target.value)}>
+          {MONEDAS.map((m) => (
+            <option key={m}>{m}</option>
+          ))}
         </select>
         <label htmlFor={`${id}-signo`}>Cómo figuran los pagos</label>
         <select id={`${id}-signo`} value={signo} onChange={(e) => setSigno(e.target.value as Signo)}>
@@ -616,7 +637,7 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
               <li key={`${m.fecha}-${m.importe_centavos}-${m.numero_operacion}-${i}`} className="fila-pago fila-pago--con-borde">
                 <span className="fila-pago__arriba">
                   <strong>Débito sin registrar</strong>
-                  <span className="fila-pago__importe">{importeDelBanco(m.importe_centavos)}</span>
+                  <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                 </span>
                 <span>{detalle(m.numero_operacion, m.fecha, "Referencia")}</span>
                 <span>Avisale a la administración.</span>

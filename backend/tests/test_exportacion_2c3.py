@@ -158,8 +158,8 @@ CLAVES_POR_ENTIDAD = {
     "importacion_extracto": {"id", "hash_archivo", "desde", "hasta", "importado_por_nombre",
                              "importado_en"},
     "movimiento_extracto": {"id", "importacion_id", "hash_linea", "fecha", "importe_centavos",
-                            "numero_operacion"},
-    "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo",
+                            "moneda", "numero_operacion"},
+    "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo", "moneda",
                           "guardadas_por_nombre", "guardadas_en"},
     "lectura_comprobante": {"id", "version_documento_id", "documento_id", "ejecucion_id", "modelo",
                             "version_prompt", "legible", "error", "importe", "moneda",
@@ -1295,7 +1295,7 @@ COTEJAR = "select nucleo.cotejar_pagos(cast(:pagos as uuid[]), :actor, :origen, 
 IMPORTAR = (
     "select movimiento_id from nucleo.importar_extracto(:archivo, :desde, :hasta,"
     " cast(:movimientos as jsonb), 'Fecha', 'Importe', 'Referencia', 'con_signo', :actor, :origen,"
-    " :sesion)"
+    " :sesion, 'ARS')"
 )
 COTEJAR_EXTRACTO = (
     "select nucleo.cotejar_por_extracto(cast(:pares as jsonb), :actor, :origen, :sesion)"

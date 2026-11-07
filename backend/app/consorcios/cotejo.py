@@ -24,11 +24,13 @@ from cem_contracts.cotejo import (
     MAXIMO_FILAS_NO_LEIDAS,
     MAXIMO_FILAS_RESULTADO,
     MAXIMO_PAGOS_POR_COTEJO,
+    MONEDA_SUGERIDA,
     AnulacionCotejo,
     ColumnasExtracto,
     CotejoAnulado,
     ListaCotejados,
     ListaCotejo,
+    MonedaExtracto,
     MovimientoSinRegistrar,
     NombreColumna,
     PagoCotejado,
@@ -120,12 +122,14 @@ def listar_cotejo(
             "select * from nucleo.cotejo_lectura(:d, :l, :actor, 'api', :sesion)",
             {"d": despues, "l": limite + 1},
         ).mappings().all()  # fmt: skip
+        guardadas = _columnas_guardadas(c, permiso)
     pagina = [_pago(f) for f in filas[:limite]]
     return ListaCotejo(
         elementos=pagina,
         siguiente=pagina[-1].pago_id if len(filas) > limite else None,
         tope_bytes=request.app.state.config.cotejo_tope_bytes,
         maximo_pagos=MAXIMO_PAGOS_POR_COTEJO,
+        moneda_extracto=MONEDA_SUGERIDA if guardadas is None else guardadas.moneda,
     )
 
 
@@ -273,7 +277,7 @@ def _columnas_guardadas(c: Connection, permiso: Permiso) -> ColumnasExtracto | N
         return None
     return ColumnasExtracto(
         fecha=fila["columna_fecha"], importe=fila["columna_importe"],
-        numero_operacion=fila["columna_numero"], signo=fila["signo"],
+        numero_operacion=fila["columna_numero"], signo=fila["signo"], moneda=fila["moneda"],
     )  # fmt: skip
 
 
@@ -317,7 +321,7 @@ def _comparar_y_cotejar(
     guardados = _ejecutar(
         conn, permiso,
         "select * from nucleo.importar_extracto(:a, :d, :h, cast(:m as jsonb), :cf, :ci, :cn, :s,"
-        " :actor, 'api', :sesion)",
+        " :actor, 'api', :sesion, :moneda)",
         {
             "a": hash_archivo, "d": lectura.desde, "h": lectura.hasta,
             "m": json.dumps([{
@@ -325,7 +329,7 @@ def _comparar_y_cotejar(
                 "importe_centavos": m.importe_centavos, "numero_operacion": m.numero_operacion,
             } for m in lectura.movimientos]),
             "cf": columnas.fecha, "ci": columnas.importe, "cn": columnas.numero_operacion,
-            "s": columnas.signo.value,
+            "s": columnas.signo.value, "moneda": columnas.moneda,
         },
     ).mappings().all()  # fmt: skip
     movimientos = [
@@ -333,6 +337,7 @@ def _comparar_y_cotejar(
             id=g["movimiento_id"],
             fecha=g["fecha"],
             importe_centavos=g["importe_centavos"],
+            moneda=g["moneda"],
             numero_operacion=g["numero_operacion"],
             pago_id=g["pago_id"],
         )  # fmt: skip
@@ -383,7 +388,7 @@ def _comparar_y_cotejar(
         total_aca_no_banco=len(comparacion.sin_movimiento),
         banco_no_aca=[
             MovimientoSinRegistrar(
-                fecha=m.fecha, importe_centavos=m.importe_centavos,
+                fecha=m.fecha, importe_centavos=m.importe_centavos, moneda=m.moneda,
                 numero_operacion=m.numero_operacion,
             )  # fmt: skip
             for m in comparacion.sin_pago[:MAXIMO_FILAS_RESULTADO]
@@ -428,6 +433,7 @@ async def subir_extracto(
     importe: NombreColumna | None = None,
     numero_operacion: NombreColumna | None = None,
     signo: SignoExtracto | None = None,
+    moneda: MonedaExtracto | None = None,
 ) -> Response:
     elegidas = _columnas_elegidas(fecha, importe, numero_operacion, signo)
     tope = request.app.state.config.cotejo_tope_bytes
@@ -442,6 +448,8 @@ async def subir_extracto(
                 raise ErrorApi(
                     409, CodigoError.COLUMNAS_SIN_ELEGIR, "Falta elegir qué columna es cada dato."
                 )
+            if moneda is not None:
+                columnas = columnas.model_copy(update={"moneda": moneda})
             try:
                 lectura = extracto.leer_movimientos(tabla, columnas)
             except extracto.ColumnasNoEncontradas as e:

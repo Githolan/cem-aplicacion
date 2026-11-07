@@ -309,7 +309,7 @@ def test_el_resultado_solo_trae_lo_que_hay_que_mirar_y_del_periodo(motor_migrate
     assert resultado["cotejados"] == 1
     assert [x["pago_id"] for x in resultado["aca_no_banco"]] == [str(falta_en_el_banco)]
     assert resultado["banco_no_aca"] == [{
-        "fecha": fecha.isoformat(), "importe_centavos": 1_240_000,
+        "fecha": fecha.isoformat(), "importe_centavos": 1_240_000, "moneda": "ARS",
         "numero_operacion": "0048213999",
     }]  # fmt: skip
     # Control: un extracto de otro período no dice nada de ese pago.
@@ -469,7 +469,7 @@ def test_las_columnas_quedan_guardadas_por_edificio(motor_migrate, motor_app, e)
     assert vista(e, e.mc1, cuerpo).json()["columnas_guardadas"] is None
     subio(e, e.mc1, cuerpo)
     guardadas = vista(e, e.mc1, cuerpo).json()["columnas_guardadas"]
-    assert guardadas == COLUMNAS
+    assert guardadas == COLUMNAS | {"moneda": "ARS"}
     assert subio(e, e.mc2, cuerpo, None)["ya_cotejados"] == 1  # sin elegir de nuevo
     otro = escena_economica(motor_migrate, motor_app)
     assert vista(otro, otro.mc1, cuerpo).json()["columnas_guardadas"] is None
