@@ -24,10 +24,14 @@ from cem_contracts.cotejo import (
     MAXIMO_FILAS_NO_LEIDAS,
     MAXIMO_FILAS_RESULTADO,
     MAXIMO_PAGOS_POR_COTEJO,
+    AnulacionCotejo,
     ColumnasExtracto,
+    CotejoAnulado,
+    ListaCotejados,
     ListaCotejo,
     MovimientoSinRegistrar,
     NombreColumna,
+    PagoCotejado,
     PagoPorCotejar,
     PagosACotejar,
     PagosCotejados,
@@ -141,6 +145,55 @@ def cotejar_a_mano(
             {"p": list(pedido.pagos)}, ERRORES,
         ).scalar_one()  # fmt: skip
         return 200, PagosCotejados(cotejados=hechos)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/cotejo/cotejados",
+    response_model=ListaCotejados,
+    summary="Lo cotejado y vigente, para deshacer un cotejo. Sin la cuenta",
+    responses=RESPUESTAS_LECTURA,
+)
+def listar_cotejados(
+    permiso: Leer,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
+) -> ListaCotejados:
+    with _lectura(permiso, motor) as c:
+        filas = _ejecutar(
+            c, permiso,
+            "select * from nucleo.cotejados_lectura(:d, :l, :actor, 'api', :sesion)",
+            {"d": despues, "l": limite + 1},
+        ).mappings().all()  # fmt: skip
+    pagina = [PagoCotejado(**f) for f in filas[:limite]]
+    return ListaCotejados(
+        elementos=pagina, siguiente=pagina[-1].pago_id if len(filas) > limite else None
+    )
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/cotejo/{pago_id}/anulacion",
+    response_model=CotejoAnulado,
+    summary="Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a"
+    " tildarse solo. No cambia la orden",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def anular_cotejo(
+    pago_id: UUID,
+    anulacion: AnulacionCotejo,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, CotejoAnulado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.anular_cotejo(:p, :motivo, :actor, 'api', :sesion)",
+            {"p": pago_id, "motivo": anulacion.motivo}, ERRORES,
+        )  # fmt: skip
+        return 200, CotejoAnulado(pago_id=pago_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -297,7 +350,7 @@ def _comparar_y_cotejar(
     a_cotejar = [
         {"movimiento": str(m.id), "pago": str(p.pago_id)}
         for m, p in comparacion.pares
-        if p.conforme and not p.cotejado and p.puede_cotejar
+        if p.conforme and not p.cotejado and not p.anulado and p.puede_cotejar
     ]
     cotejados = 0
     if a_cotejar:
@@ -317,8 +370,10 @@ def _comparar_y_cotejar(
         ya_cotejados=comparacion.ya_atados + sum(1 for p in pagos if p.cotejado),
         esperan_conciliar=sum(1 for p in pagos if not p.conforme),
         para_otra_persona=sum(
-            1 for p in pagos if p.conforme and not p.cotejado and not p.puede_cotejar
+            1 for p in pagos
+            if p.conforme and not p.cotejado and not p.anulado and not p.puede_cotejar
         ),
+        anulados=sum(1 for p in pagos if p.conforme and not p.cotejado and p.anulado),
         lineas_no_leidas=len(lectura.filas_no_leidas),
         filas_no_leidas=lectura.filas_no_leidas[:MAXIMO_FILAS_NO_LEIDAS],
         aca_no_banco=[

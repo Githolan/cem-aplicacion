@@ -279,7 +279,7 @@ def _m(importe=100, numero="0048", fecha=DIA, pago=None):
 
 
 def _p(importe=100, numero="0048", fecha=DIA, conforme=True, cotejado=False, puede=True):
-    return PagoComparable(uuid4(), numero, fecha, importe, conforme, cotejado, puede)
+    return PagoComparable(uuid4(), numero, fecha, importe, conforme, cotejado, False, puede)
 
 
 def _comparar(movimientos, pagos):

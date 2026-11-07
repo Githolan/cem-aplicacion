@@ -378,6 +378,8 @@ class PagoComparable:
     importe_centavos: int
     conforme: bool
     cotejado: bool
+    anulado: bool
+    """Alguien anuló un cotejo suyo (`0083`): ya no se tilda solo."""
     puede_cotejar: bool
 
 

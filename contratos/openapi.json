@@ -133,6 +133,23 @@
         "title": "AltaTotp",
         "type": "object"
       },
+      "AnulacionCotejo": {
+        "additionalProperties": false,
+        "description": "`POST …/pagos/cotejo/{pago_id}/anulacion`: el cotejo no se borra, queda con su motivo.",
+        "properties": {
+          "motivo": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "AnulacionCotejo",
+        "type": "object"
+      },
       "AnulacionVinculo": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/anular`.",
         "properties": {
@@ -1923,6 +1940,20 @@
           "datos"
         ],
         "title": "CopiaDatosPropios",
+        "type": "object"
+      },
+      "CotejoAnulado": {
+        "properties": {
+          "pago_id": {
+            "format": "uuid",
+            "title": "Pago Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pago_id"
+        ],
+        "title": "CotejoAnulado",
         "type": "object"
       },
       "CuentaParaPagoManual": {
@@ -5202,6 +5233,37 @@
         "title": "ListaContratosRevision",
         "type": "object"
       },
+      "ListaCotejados": {
+        "description": "`GET …/pagos/cotejo/cotejados`.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/PagoCotejado"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente"
+        ],
+        "title": "ListaCotejados",
+        "type": "object"
+      },
       "ListaCotejo": {
         "description": "`GET …/pagos/cotejo`: del pago registrado primero al último.",
         "properties": {
@@ -6725,6 +6787,77 @@
         "title": "Padron",
         "type": "object"
       },
+      "PagoCotejado": {
+        "description": "Un cotejo vigente. `puede_cotejar` dice también si quien pide puede anularlo: las reglas son\nlas mismas.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "cotejado_en": {
+            "format": "date-time",
+            "title": "Cotejado En",
+            "type": "string"
+          },
+          "fecha_operacion": {
+            "format": "date",
+            "title": "Fecha Operacion",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "title": "Numero Operacion",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "origen": {
+            "description": "`manual` o `extracto`.",
+            "title": "Origen",
+            "type": "string"
+          },
+          "pago_id": {
+            "description": "El id del registro o de la diferencia.",
+            "format": "uuid",
+            "title": "Pago Id",
+            "type": "string"
+          },
+          "proveedor": {
+            "title": "Proveedor",
+            "type": "string"
+          },
+          "puede_cotejar": {
+            "description": "No, si quien pide preparó la orden, vio la cuenta o registró el pago.",
+            "title": "Puede Cotejar",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pago_id",
+          "orden_id",
+          "proveedor",
+          "concepto",
+          "numero_operacion",
+          "fecha_operacion",
+          "importe_centavos",
+          "moneda",
+          "puede_cotejar",
+          "origen",
+          "cotejado_en"
+        ],
+        "title": "PagoCotejado",
+        "type": "object"
+      },
       "PagoManual": {
         "description": "Un registro de pago manual, sin la cuenta. `corrige_a`: el registro observado que\nreemplaza.",
         "properties": {
@@ -8090,6 +8223,11 @@
             "title": "Aca No Banco",
             "type": "array"
           },
+          "anulados": {
+            "description": "Coinciden con un pago cuyo cotejo se anuló: no vuelven solos, se tildan a mano.",
+            "title": "Anulados",
+            "type": "integer"
+          },
           "banco_no_aca": {
             "items": {
               "$ref": "#/components/schemas/MovimientoSinRegistrar"
@@ -8165,6 +8303,7 @@
           "ya_cotejados",
           "esperan_conciliar",
           "para_otra_persona",
+          "anulados",
           "lineas_no_leidas",
           "filas_no_leidas",
           "aca_no_banco",
@@ -16525,6 +16664,81 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/pagos/cotejo/cotejados": {
+      "get": {
+        "operationId": "listar_cotejados_api_v1_consorcios__consorcio_id__pagos_cotejo_cotejados_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaCotejados"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo cotejado y vigente, para deshacer un cotejo. Sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/pagos/cotejo/extracto": {
       "post": {
         "operationId": "subir_extracto_api_v1_consorcios__consorcio_id__pagos_cotejo_extracto_post",
@@ -16667,6 +16881,90 @@
           }
         },
         "summary": "Subir un extracto: lo que coincide queda cotejado, y responde lo que hay que mirar. No cambia ninguna orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/cotejo/{pago_id}/anulacion": {
+      "post": {
+        "operationId": "anular_cotejo_api_v1_consorcios__consorcio_id__pagos_cotejo__pago_id__anulacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pago_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pago Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnulacionCotejo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CotejoAnulado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese pago no existe en este consorcio."
+          },
+          "409": {
+            "description": "El pago todavía no está conciliado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
         "tags": [
           "egresos"
         ]

@@ -19,6 +19,7 @@ import { useActo } from "./useActo";
 // lee, se compara y se guarda allá, y acá solo se elige qué columna es cada dato.
 
 type Elemento = components["schemas"]["PagoPorCotejar"];
+type Cotejado = components["schemas"]["PagoCotejado"];
 type Vista = components["schemas"]["VistaExtracto"];
 type Columnas = components["schemas"]["ColumnasExtracto"];
 type Resultado = components["schemas"]["ResultadoCotejo"];
@@ -219,6 +220,27 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
     });
   }
 
+  function deshacer(pago: string, motivo: string, alListo: () => void) {
+    void acto.hacer({
+      quePide: ["anular-cotejo", pago, motivo],
+      nombre: "deshacer el cotejo",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/pagos/cotejo/{pago_id}/anulacion", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, pago_id: pago }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { motivo },
+        }),
+      alTerminar: () => {
+        setAviso({ texto: "Listo: deshiciste el cotejo. Queda en la historia y el pago vuelve a lo que falta cotejar.", ok: true });
+        alListo();
+        releer();
+      },
+      alFallar: (estado) => {
+        if (estado === ESTADO.conflicto || estado === ESTADO.noEncontrado) alListo();
+      },
+    });
+  }
+
   const siguiente = lectura.tipo === "ok" ? lectura.siguiente : null;
   const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
 
@@ -313,6 +335,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
               </div>
             )}
           </section>
+          <YaCotejados consorcio={consorcio} enviando={enviando} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
         </div>
       )}
     </>
@@ -413,6 +436,112 @@ function ElegirColumnas({ vista, enviando, alComparar, alVolver }: PropsColumnas
   );
 }
 
+type PropsCotejados = {
+  consorcio: string;
+  enviando: boolean;
+  aEntrar: () => void;
+  avisar: (aviso: Aviso) => void;
+  deshacer: (pago: string, motivo: string, alListo: () => void) => void;
+};
+
+/** Se lee cuando alguien lo pide: deshacer es la excepción, no la tarea de la pantalla. */
+function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCotejados) {
+  const id = useId();
+  const [elementos, setElementos] = useState<Cotejado[] | null>(null);
+  const [siguiente, setSiguiente] = useState<string | null>(null);
+  const [elegido, setElegido] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
+
+  function leer(despues: string | null) {
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/pagos/cotejo/cotejados", {
+        params: { path: { consorcio_id: consorcio }, query: despues === null ? {} : { despues } },
+      })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data === undefined) {
+          avisar({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
+          return;
+        }
+        setElementos((actuales) => (despues === null || actuales === null ? data.elementos : [...actuales, ...data.elementos]));
+        setSiguiente(data.siguiente);
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : avisar({ texto: SIN_CONEXION, ok: false })));
+  }
+
+  function listo() {
+    setElegido(null);
+    setMotivo("");
+    leer(null);
+  }
+
+  function enviar(evento: FormEvent, pago: string) {
+    evento.preventDefault();
+    deshacer(pago, motivo.trim(), listo);
+  }
+
+  return (
+    <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
+      <h2 id={`${id}-titulo`}>Lo ya cotejado</h2>
+      {elementos === null && (
+        <div className="formulario">
+          <button type="button" className="secundario" onClick={() => leer(null)}>
+            Ver lo ya cotejado
+          </button>
+        </div>
+      )}
+      {elementos !== null && elementos.length === 0 && <p>Todavía no hay pagos cotejados.</p>}
+      {elementos !== null && elementos.length > 0 && (
+        <ul className="tildes-pago" aria-label="Lo ya cotejado">
+          {elementos.map((e) => (
+            <li key={e.pago_id}>
+              <div className="tilde-pago">
+                <span className="tilde-pago__datos">
+                  <span className="fila-pago__arriba">
+                    <strong>{e.proveedor}</strong>
+                    <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
+                  </span>
+                  <span>{detalle(e.numero_operacion, e.fecha_operacion, "Operación")}</span>
+                  {!e.puede_cotejar && <span>Lo deshace otra persona del Consejo: participaste de este pago.</span>}
+                </span>
+              </div>
+              {e.puede_cotejar && elegido !== e.pago_id && (
+                <div className="formulario">
+                  <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(e.pago_id)}>
+                    Deshacer el cotejo de {e.proveedor}
+                  </button>
+                </div>
+              )}
+              {elegido === e.pago_id && (
+                <form className="formulario" onSubmit={(evento) => enviar(evento, e.pago_id)}>
+                  <label htmlFor={`${id}-motivo`}>Por qué se deshace</label>
+                  <textarea id={`${id}-motivo`} required maxLength={300} rows={3} value={motivo} disabled={enviando} onChange={(evento) => setMotivo(evento.target.value)} />
+                  <p>No se borra: queda en la historia. Al subir de nuevo el extracto no se vuelve a tildar solo.</p>
+                  <div className="acciones">
+                    <button type="submit" disabled={enviando || motivo.trim() === ""}>
+                      Deshacer el cotejo
+                    </button>
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(null)}>
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {siguiente !== null && (
+        <div className="formulario">
+          <button type="button" className="secundario" onClick={() => leer(siguiente)}>
+            Ver más cotejados
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Resumen({ r }: { r: Resultado }) {
   const noLeidas = r.filas_no_leidas.join(", ");
   return (
@@ -429,6 +558,7 @@ function Resumen({ r }: { r: Resultado }) {
           {cantidad(r.para_otra_persona, "1 coincide, pero lo tiene que cotejar", "coinciden, pero los tiene que cotejar")} otra persona del Consejo: participaste de ese pago.
         </p>
       )}
+      {r.anulados > 0 && <p>{cantidad(r.anulados, "1 coincide con un cotejo que se deshizo: si corresponde, tildalo a mano", "coinciden con cotejos que se deshicieron: si corresponde, tildalos a mano")}.</p>}
       {r.lineas_no_leidas > 0 && (
         <p>
           {cantidad(r.lineas_no_leidas, "No pudimos leer 1 línea", "líneas no se pudieron leer")} del archivo (línea {noLeidas}).
