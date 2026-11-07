@@ -1487,6 +1487,22 @@ def _diferencias(c: Connection, permiso: Permiso, orden: UUID) -> dict[UUID, Dif
     return diferencias
 
 
+REGISTRAR_DIFERENCIA = (
+    "select nucleo.registrar_diferencia_pago_manual(:o, :version, :huella, :numero, :fecha,"
+    " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion)"
+)
+
+
+def _datos_diferencia(orden_id: UUID, registro: RegistroDiferenciaPago) -> dict:
+    return {
+        "o": orden_id, "version": registro.version, "huella": bytes.fromhex(registro.huella),
+        "numero": registro.numero_operacion, "fecha": registro.fecha_operacion,
+        "importe": registro.importe_real, "moneda": registro.moneda,
+        "cuenta": registro.cuenta_real, "doc": registro.documento_id,
+        "explicacion": registro.explicacion,
+    }  # fmt: skip
+
+
 @router.post(
     "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia",
     status_code=201,
@@ -1508,14 +1524,7 @@ def registrar_diferencia_pago(
 
     def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
         diferencia = _ejecutar(
-            conn, permiso,
-            "select nucleo.registrar_diferencia_pago_manual(:o, :version, :huella, :numero, :fecha,"
-            " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion)",
-            {"o": orden_id, "version": registro.version,
-             "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
-             "fecha": registro.fecha_operacion, "importe": registro.importe_real,
-             "moneda": registro.moneda, "cuenta": registro.cuenta_real,
-             "doc": registro.documento_id, "explicacion": registro.explicacion},
+            conn, permiso, REGISTRAR_DIFERENCIA, _datos_diferencia(orden_id, registro)
         ).scalar_one()  # fmt: skip
         return 201, DiferenciaRegistrada(id=diferencia, orden_id=orden_id)
 
@@ -2063,6 +2072,34 @@ async def subir_comprobante_sin_facultad(
         ).one()  # fmt: skip
 
     return await subir_archivo(request, ctx, clave, motor, nueva)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/diferencia",
+    status_code=201,
+    response_model=DiferenciaRegistrada,
+    summary="Registrar lo que salió del banco, sin ejecutar ya pagos en el consorcio: lo resuelve"
+    " el"
+    " Consejo",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "Sin diferencia o evidencia inválida."}},
+)
+def registrar_diferencia_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    registro: RegistroDiferenciaPago,
+    identidad: IdentidadDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = _sin_ambito(motor, identidad, consorcio_id)
+
+    def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
+        diferencia = ejecutar_sin_ambito(
+            conn, ctx, REGISTRAR_DIFERENCIA, _datos_diferencia(orden_id, registro)
+        ).scalar_one()  # fmt: skip
+        return 201, DiferenciaRegistrada(id=diferencia, orden_id=orden_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
 
 
 @router.post(
