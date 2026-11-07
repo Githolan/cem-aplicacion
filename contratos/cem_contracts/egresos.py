@@ -26,7 +26,7 @@ acá, nunca un 500. Los importes van en centavos, enteros.
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -703,6 +703,35 @@ class RegistroPagoManual(BaseModel):
     )
 
 
+class TomaPagoManual(BaseModel):
+    """`POST …/ordenes-pago/{id}/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.
+    Suelta a esa persona; abrir la cuenta sigue siendo otro acto."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version: Version
+    huella: str = Field(pattern=FORMATO_HUELLA)
+    no_se_transfirio: Literal[True] = Field(
+        description="Quien toma el pago confirmó antes que la plata no salió."
+    )
+
+
+class TomaRegistrada(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    orden_id: UUID
+
+
+class TomaVigente(BaseModel):
+    """La última vez que alguien tomó el pago de esta ejecución."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tomado_por_nombre: str
+    tomada_en: datetime
+
+
 class TipoDiferencia(StrEnum):
     """Qué fue distinto de la orden. Lo deduce la base: otra moneda cuenta como otro importe."""
 
@@ -980,6 +1009,8 @@ class PasoPago(StrEnum):
     acción; los `espera_*` son de quien la ve y no le toca."""
 
     PAGAR = "pagar"
+    TOMAR_PAGO = "tomar_pago"
+    """Otra persona vio la cuenta y pasó el plazo sin que dijera nada: se puede tomar el pago."""
     SUBIR_COMPROBANTE = "subir_comprobante"
     CORREGIR = "corregir"
     ENVIAR = "enviar"
@@ -1023,6 +1054,7 @@ class GrupoPago(StrEnum):
 
 GRUPO_DE_PASO = {
     PasoPago.PAGAR: GrupoPago.PARA_PAGAR,
+    PasoPago.TOMAR_PAGO: GrupoPago.PARA_PAGAR,
     PasoPago.SUBIR_COMPROBANTE: GrupoPago.PARA_PAGAR,
     PasoPago.DECLARAR_NO_PAGO: GrupoPago.PARA_PAGAR,
     PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
@@ -1213,6 +1245,12 @@ class FichaPago(BaseModel):
         description="Si puede abrir otra vez una cuenta ya vista. Con una declaración vigente es"
         " «Retomar el pago», y abrirla deja sin efecto lo declarado."
     )
+    puede_tomar: bool = Field(
+        description="Si puede tomar el pago de quien vio la cuenta: pasó el plazo y no dijo nada."
+    )
+    tomar_desde: datetime | None = Field(
+        description="Desde cuándo se puede tomar el pago, si espera a otra persona."
+    )
     puede_modificar: bool = Field(description="Si puede guardar una versión nueva de la orden.")
     puede_subir_comprobante: bool
     puede_registrar: bool
@@ -1247,6 +1285,9 @@ class FichaPago(BaseModel):
     )
     diferencia_vigente: DiferenciaPagoManual | None = Field(
         description="Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
+    )
+    toma_vigente: TomaVigente | None = Field(
+        description="Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."
     )
 
 

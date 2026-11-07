@@ -104,6 +104,9 @@ from cem_contracts.egresos import (
     Renovacion,
     ResolucionDiferenciaPago,
     TipoDiferencia,
+    TomaPagoManual,
+    TomaRegistrada,
+    TomaVigente,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
     VersionProveedor,
@@ -246,6 +249,15 @@ ERRORES = {
     "pago_ya_registrado": (
         409, CodigoError.PAGO_YA_REGISTRADO,
         "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
+    ),
+    "pago_en_curso": (
+        409, CodigoError.PAGO_EN_CURSO,
+        "Otra persona ya vio la cuenta de este pago: esperá su comprobante, para no pagar dos"
+        " veces.",
+    ),
+    "toma_antes_de_tiempo": (
+        409, CodigoError.TOMA_ANTES_DE_TIEMPO,
+        "Todavía no pasó el plazo para tomar el pago: quien vio la cuenta puede estar pagando.",
     ),
     "numero_operacion_invalido": (
         422, CodigoError.NUMERO_OPERACION_INVALIDO,
@@ -1193,6 +1205,10 @@ def listar_pagos_manuales_revision(
         return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, conciliar, None))
 
 
+def _plazo_para_tomar(request: Request) -> timedelta:
+    return timedelta(hours=request.app.state.config.pagos_horas_tomar)
+
+
 def _ejecutor(lectura: Permiso, permiso: Permiso, motor, orden_id: UUID) -> None:
     """Como al emitir: quien ejecuta lee la orden como quien prepara y la separación se evalúa con
     quienes aprobaron la versión vigente (A5). La base vuelve a exigir todo."""
@@ -1229,6 +1245,39 @@ def cuenta_para_pago_manual(
             {"o": orden_id, "version": pedido.version, "huella": bytes.fromhex(pedido.huella)},
         ).mappings().one()  # fmt: skip
     return CuentaParaPagoManual(**fila)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar",
+    status_code=201,
+    response_model=TomaRegistrada,
+    summary="Tomar el pago de quien vio la cuenta y no dijo nada: no da la cuenta",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def tomar_pago_manual(
+    request: Request,
+    orden_id: UUID,
+    toma: TomaPagoManual,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Con la separación de pagar. La base mira el plazo y deja el evento (`0078`)."""
+    _ejecutor(lectura, permiso, motor, orden_id)
+    plazo = _plazo_para_tomar(request)
+
+    def efecto(conn: Connection) -> tuple[int, TomaRegistrada]:
+        nueva = _ejecutar(
+            conn, permiso,
+            "select nucleo.tomar_pago_manual(:o, :version, :huella, :plazo, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "version": toma.version, "huella": bytes.fromhex(toma.huella),
+             "plazo": plazo},
+        ).scalar_one()  # fmt: skip
+        return 201, TomaRegistrada(id=nueva, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
 @router.post(
@@ -1575,11 +1624,11 @@ def _lector(preparar: Permiso, revisar: Permiso) -> Permiso:
 
 
 def _acciones(
-    c: Connection, lector: Permiso, orden: UUID | None
+    c: Connection, lector: Permiso, orden: UUID | None, plazo: timedelta
 ) -> dict[UUID, circuito_pagos.AccionesOrden]:
-    sql = "select * from nucleo.acciones_de_ordenes_lectura(:o, :actor, 'api', :sesion)"
+    sql = "select * from nucleo.acciones_de_ordenes_lectura(:o, :actor, 'api', :sesion, :plazo)"
     acciones = {}
-    for fila in _ejecutar(c, lector, sql, {"o": orden}).mappings():
+    for fila in _ejecutar(c, lector, sql, {"o": orden, "plazo": plazo}).mappings():
         datos = dict(fila)
         orden_id = datos.pop("orden_id")
         acciones[orden_id] = circuito_pagos.AccionesOrden(**datos)
@@ -1718,6 +1767,20 @@ def _lectura_del_comprobante(
     )  # fmt: skip
 
 
+def _toma_vigente(
+    c: Connection, lector: Permiso, orden: UUID, ejecucion: UUID
+) -> TomaVigente | None:
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.tomas_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
+        {"o": orden, "f": LEE_COMO[lector.accion]},
+    ).mappings().all()  # fmt: skip
+    ultima = next((f for f in reversed(filas) if f["ejecucion_id"] == ejecucion), None)
+    if ultima is None:
+        return None
+    return TomaVigente(tomado_por_nombre=ultima["tomado_por_nombre"], tomada_en=ultima["tomada_en"])
+
+
 @router.get(
     "/consorcios/{consorcio_id}/pagos/bandeja",
     response_model=BandejaPagos,
@@ -1731,7 +1794,7 @@ def bandeja_pagos(
     dias = request.app.state.config.pagos_dias_bandeja
     with _lectura(lector, _una_foto(motor)) as c:
         ordenes = _ordenes(c, lector, None)
-        acciones = _acciones(c, lector, None)
+        acciones = _acciones(c, lector, None, _plazo_para_tomar(request))
     return BandejaPagos(elementos=circuito_pagos.bandeja(
         ordenes, acciones, lector.accion == PREPARAR, datetime.now(UTC) - timedelta(days=dias),
     ))  # fmt: skip
@@ -1792,6 +1855,7 @@ def consulta_pagos(
     responses=RESPUESTAS_LECTURA | {404: {"description": "No existe en este consorcio."}},
 )
 def ficha_pago(
+    request: Request,
     orden_id: UUID,
     preparar: Preparar,
     revisar: Revisar,
@@ -1803,7 +1867,9 @@ def ficha_pago(
     with _lectura(lector, _una_foto(motor)) as c:
         detalle = _leer_orden_con_versiones(c, lector, orden_id)
         orden = detalle.orden
-        a = _acciones(c, lector, orden_id).get(orden_id, circuito_pagos.SIN_ACCIONES)
+        a = _acciones(c, lector, orden_id, _plazo_para_tomar(request)).get(
+            orden_id, circuito_pagos.SIN_ACCIONES
+        )
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
         diferencia = None
@@ -1814,6 +1880,7 @@ def ficha_pago(
         )
         vigente = next(x for x in detalle.versiones if x.numero == orden.version_vigente)
         lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
+        toma = None if ejecucion is None else _toma_vigente(c, lector, orden_id, ejecucion.id)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     observacion = None
@@ -1831,6 +1898,7 @@ def ficha_pago(
         # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
         puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
         puede_reabrir_cuenta=circuito_pagos.reabre_cuenta(situacion, a),
+        puede_tomar=a.puede_tomar, tomar_desde=a.tomar_desde,
         puede_modificar=prepara and orden.estado in circuito_pagos.MODIFICABLES,
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
         puede_declarar=a.puede_declarar,
@@ -1842,7 +1910,7 @@ def ficha_pago(
         ejecucion=ejecucion, comprobante_actual=comprobante,
         comprobante_subido=subido, lectura_comprobante=lectura, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
-        diferencia_vigente=diferencia,
+        diferencia_vigente=diferencia, toma_vigente=toma,
     )  # fmt: skip
 
 

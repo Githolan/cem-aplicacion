@@ -11,6 +11,7 @@ export type Filtro = components["schemas"]["FiltroConsultaPagos"];
 
 export const VERBO: Record<Paso, string> = {
   pagar: "Pagar",
+  tomar_pago: "Tomar el pago",
   subir_comprobante: "Subir el comprobante",
   corregir: "Corregir el registro",
   enviar: "Enviar a aprobar",
@@ -102,6 +103,8 @@ export const AVISO_SIN_SALIDA =
   "Nadie vio la cuenta y ya no se puede abrir: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Declará que no se pagó y después se puede volver a pagar.";
 export const AVISO_DIFERENCIA_ESPERA = "No transfieras de nuevo hasta que el Consejo decida.";
 export const AVISO_OTRA_COSA = "La orden no queda pagada: lo resuelve el Consejo.";
+export const AVISO_TOMAR =
+  "Antes de tomarlo, confirmá con quien vio la cuenta que no transfirió. Si la plata ya salió y vos pagás, la orden se paga dos veces.";
 export const AVISO_RETOMAR = "Retomar deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nuevo.";
 export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";

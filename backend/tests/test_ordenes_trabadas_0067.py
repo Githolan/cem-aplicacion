@@ -31,6 +31,7 @@ from tests.test_pago_manual_0055 import (
     otro_ejecutor,
     pagos_de,
     registrada,
+    segunda_apertura,
     ver,
 )
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
@@ -409,7 +410,8 @@ def test_por_aclarar_no_lista_lo_que_otro_ya_registro(motor_migrate, motor_app, 
     ver(motor_migrate, e, e.adm, o)
     dar_de_baja(motor_migrate, motor_app, e, e.adm)
     assert [f["orden_id"] for f in por_aclarar(motor_migrate, e, e.adm)] == [o]  # control
-    registrada(motor_migrate, e, o, quien=x)
+    segunda_apertura(motor_migrate, e, x, o)
+    llamar(motor_migrate, e, x, REGISTRAR, **evidencia(motor_migrate, e, o))
     assert por_aclarar(motor_migrate, e, e.adm) == []
 
 

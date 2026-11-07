@@ -628,6 +628,8 @@
           "fecha_invalida",
           "modalidad_riel",
           "pago_ya_registrado",
+          "pago_en_curso",
+          "toma_antes_de_tiempo",
           "numero_operacion_invalido",
           "no_coincide_con_la_orden",
           "fecha_operacion_invalida",
@@ -3524,8 +3526,37 @@
             "title": "Puede Subir Comprobante",
             "type": "boolean"
           },
+          "puede_tomar": {
+            "description": "Si puede tomar el pago de quien vio la cuenta: pasó el plazo y no dijo nada.",
+            "title": "Puede Tomar",
+            "type": "boolean"
+          },
           "situacion": {
             "$ref": "#/components/schemas/SituacionPago"
+          },
+          "toma_vigente": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TomaVigente"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."
+          },
+          "tomar_desde": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Desde cuándo se puede tomar el pago, si espera a otra persona.",
+            "title": "Tomar Desde"
           },
           "versiones": {
             "items": {
@@ -3547,6 +3578,8 @@
           "puede_renovar",
           "puede_pagar",
           "puede_reabrir_cuenta",
+          "puede_tomar",
+          "tomar_desde",
           "puede_modificar",
           "puede_subir_comprobante",
           "puede_registrar",
@@ -3563,7 +3596,8 @@
           "lectura_comprobante",
           "observacion_vigente",
           "declaracion_vigente",
-          "diferencia_vigente"
+          "diferencia_vigente",
+          "toma_vigente"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -7045,6 +7079,7 @@
         "description": "El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la\nacción; los `espera_*` son de quien la ve y no le toca.",
         "enum": [
           "pagar",
+          "tomar_pago",
           "subir_comprobante",
           "corregir",
           "enviar",
@@ -8507,6 +8542,76 @@
           "token"
         ],
         "title": "TokenInvitacionMandato",
+        "type": "object"
+      },
+      "TomaPagoManual": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{id}/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.\nSuelta a esa persona; abrir la cuenta sigue siendo otro acto.",
+        "properties": {
+          "huella": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Huella",
+            "type": "string"
+          },
+          "no_se_transfirio": {
+            "const": true,
+            "description": "Quien toma el pago confirmó antes que la plata no salió.",
+            "title": "No Se Transfirio",
+            "type": "boolean"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "huella",
+          "no_se_transfirio"
+        ],
+        "title": "TomaPagoManual",
+        "type": "object"
+      },
+      "TomaRegistrada": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "orden_id"
+        ],
+        "title": "TomaRegistrada",
+        "type": "object"
+      },
+      "TomaVigente": {
+        "description": "La última vez que alguien tomó el pago de esta ejecución.",
+        "properties": {
+          "tomada_en": {
+            "format": "date-time",
+            "title": "Tomada En",
+            "type": "string"
+          },
+          "tomado_por_nombre": {
+            "title": "Tomado Por Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tomado_por_nombre",
+          "tomada_en"
+        ],
+        "title": "TomaVigente",
         "type": "object"
       },
       "TratamientoCentavos": {
@@ -14619,6 +14724,91 @@
           }
         },
         "summary": "Confirmar que el pago no se hizo (otro miembro del Consejo): la orden queda Fallida",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar": {
+      "post": {
+        "description": "Con la separación de pagar. La base mira el plazo y deja el evento (`0078`).",
+        "operationId": "tomar_pago_manual_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_tomar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TomaPagoManual"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TomaRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tomar el pago de quien vio la cuenta y no dijo nada: no da la cuenta",
         "tags": [
           "egresos"
         ]

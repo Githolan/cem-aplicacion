@@ -103,7 +103,7 @@ function ejecucion(pagos: Pago[] = [], declaraciones: Declaracion[] = []): NonNu
 function ficha(extra: Partial<Ficha> = {}): Ficha {
   return {
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
-    puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false,
+    puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null,
     puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
     puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
@@ -1723,6 +1723,27 @@ describe("no se pagó", () => {
     abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_reabrir_cuenta: false });
     expect(await boton("No se pudo pagar")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
+  });
+
+  it("tomar el pago pide confirmar que no se transfirió, y no pide la cuenta", async () => {
+    const tomado = { id: "01900000-0000-7000-8000-0000000000f1", orden_id: O1 };
+    const api = abrirFicha({ ...SUBIR, paso: "tomar_pago", puede_subir_comprobante: false, puede_registrar: false, puede_reabrir_cuenta: false, puede_tomar: true }, {
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/tomar`]: () => Response.json(tomado, { status: 201 }),
+    });
+    fireEvent.click(await boton("Tomar el pago"));
+    expect(screen.getByRole("alert").textContent).toMatch(/confirmá con quien vio la cuenta/);
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`)).toHaveLength(0);
+    fireEvent.click(await boton("No se transfirió: tomar el pago"));
+    await screen.findByText(/Listo: tomaste el pago/);
+    const [pedido] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`);
+    expect(await cuerpo(pedido)).toMatchObject({ no_se_transfirio: true });
+    expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
+  });
+
+  it("mientras espera, sin el plazo cumplido, no ofrece tomar el pago y dice desde cuándo", async () => {
+    abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false, puede_reabrir_cuenta: false, tomar_desde: "2026-11-08T12:00:00Z" });
+    expect(await screen.findByText(/vas a poder tomar el pago/)).toBeTruthy();
+    sinBoton("Tomar el pago");
   });
 
   it("con una declaración vigente no ofrece pagar y dice en qué quedó", async () => {

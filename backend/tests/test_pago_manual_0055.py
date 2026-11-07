@@ -122,6 +122,18 @@ def registrada(motor_migrate, e, o, quien=None, **cambios) -> UUID:
                   **evidencia(motor_migrate, e, o, **cambios))  # fmt: skip
 
 
+def segunda_apertura(motor_migrate, e, quien, o) -> None:
+    """Dos personas con la cuenta vista: la base ya no lo deja (`0078`), pero las ejecuciones
+    anteriores pueden tenerlo."""
+    with motor_migrate.begin() as c:
+        c.execute(text(
+            "insert into nucleo.apertura_cuenta_pago_manual"
+            " (consorcio_id, ejecucion_id, abierta_por, identidad_abrio)"
+            " select e.consorcio_id, e.id, :q, nucleo.identidad_humana_de(e.consorcio_id, :q)"
+            "   from nucleo.ejecucion_orden_pago e where e.orden_id = :o"
+        ), {"q": quien, "o": o})  # fmt: skip
+
+
 def ver(motor_migrate, e, quien, o) -> dict:
     with transaccion(motor_migrate, persona_id=quien, consorcio_id=e.cons) as c:
         return dict(c.execute(text(VER), {
@@ -257,8 +269,8 @@ def test_hueco_conocido_quien_vio_la_cuenta_sin_registrar(motor_migrate, e):
     prueba cambia: el dato pasa a decir que no."""
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
-    ver(motor_migrate, e, e.mc2, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
     r = post(e, e.mc2, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
     assert codigo(r) == (403, "no_es_quien_ejecuto")
@@ -269,7 +281,7 @@ def test_puede_confirmar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     con_ejecutar(motor_migrate, e, e.mc2)
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, e.mc2, o)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     dm = str(llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO"))
     # Falta que declare x: todavía no es confirmable, para nadie.
     assert puede_confirmar(e, e.mc1, o) == {dm: False}
@@ -853,7 +865,9 @@ def test_registra_solo_quien_vio_la_cuenta_de_esa_ejecucion(motor_migrate, motor
     ver(motor_migrate, e, x, otra_orden)
     niega(motor_migrate, e, x, REGISTRAR, "no_es_quien_ejecuto", **evidencia(motor_migrate, e, o))
     assert orden(motor_migrate, o)["estado"] == "en_ejecucion"
-    registrada(motor_migrate, e, o, quien=x)  # control: vio la cuenta y registra
+    # Control: vio la cuenta y registra.
+    segunda_apertura(motor_migrate, e, x, o)
+    llamar(motor_migrate, e, x, REGISTRAR, **evidencia(motor_migrate, e, o))
 
 
 def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, e):
@@ -861,8 +875,8 @@ def test_quien_vio_la_cuenta_no_concilia_aunque_registre_otro(motor_migrate, e):
     transfiere; la administración también lo abre y registra. mc2 no concilia ese pago."""
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
-    ver(motor_migrate, e, e.mc2, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)
     llamar(motor_migrate, e, e.mc1, CONCILIAR, **datos)  # control: no vio la cuenta
@@ -949,7 +963,7 @@ def test_quien_vio_la_cuenta_no_confirma_que_no_se_pago(motor_migrate, motor_app
     con_ejecutar(motor_migrate, e, e.mc2)
     ver(motor_migrate, e, e.mc2, o)
     x = otro_ejecutor(motor_migrate, motor_app, e)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     dm = llamar(motor_migrate, e, e.mc2, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc2, CONFIRMAR, "no_es_quien_ejecuto", orden=o, declaracion=dx)
@@ -979,7 +993,7 @@ def test_cada_quien_vio_la_cuenta_declara_despues_de_su_ultima_apertura(
     ver(motor_migrate, e, e.adm, o)
     llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     ver(motor_migrate, e, e.adm, o)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     dx = llamar(motor_migrate, e, x, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=dx)
     assert confirmables(e, o)[str(dx)] is False  # la lectura dice lo mismo que la confirmación
@@ -1038,7 +1052,7 @@ def test_si_dos_vieron_la_cuenta_declaran_los_dos(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     x = otro_ejecutor(motor_migrate, motor_app, e)
     ver(motor_migrate, e, e.adm, o)
-    ver(motor_migrate, e, x, o)
+    segunda_apertura(motor_migrate, e, x, o)
     d = llamar(motor_migrate, e, e.adm, DECLARAR, orden=o, version=1, motivo="SINTETICO")
     niega(motor_migrate, e, e.mc1, CONFIRMAR, "estado_invalido", orden=o, declaracion=d)
     assert confirmables(e, o) == {str(d): False}  # la pantalla del Consejo no la ofrece

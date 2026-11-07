@@ -229,6 +229,8 @@ const MENSAJES: Record<string, string> = {
   contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Elegí otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
+  pago_en_curso: "Otra persona ya vio la cuenta de este pago: esperá su comprobante, para no pagar dos veces.",
+  toma_antes_de_tiempo: "Todavía no pasó el plazo para tomar el pago: quien vio la cuenta puede estar pagando.",
   numero_operacion_invalido: "El número de operación no es válido: copialo tal como figura en el comprobante.",
   no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante o usá «Pagué otra cosa».",
   sin_diferencia: "Lo que escribiste es lo mismo que la orden: registrá el pago, no una diferencia.",

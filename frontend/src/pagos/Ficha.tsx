@@ -39,6 +39,7 @@ import {
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
+  AVISO_TOMAR,
   AVISO_VER_LA_CUENTA,
   type Paso,
   TEXTO_LE_TOCA_A,
@@ -168,6 +169,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [faltaCuenta, setFaltaCuenta] = useState(false);
   /** Lo que eligió quien resuelve; sin elegir, lo primero que se ofrece. */
   const [resolucion, setResolucion] = useState<Resolucion | null>(null);
+  /** Pidió tomar el pago: falta que confirme que no se transfirió. */
+  const [confirmaToma, setConfirmaToma] = useState(false);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
@@ -497,6 +500,27 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
+  /** No da la cuenta: suelta a quien la vio. La ficha que vuelve dice qué sigue. */
+  function tomar() {
+    void acto.hacer({
+      quePide: ["tomar", orden, v.numero, v.huella],
+      nombre: "tomar el pago",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version: v.numero, huella: v.huella, no_se_transfirio: true },
+        }),
+      alTerminar: () => {
+        setConfirmaToma(false);
+        setAviso({ texto: "Listo: tomaste el pago.", ok: true });
+        releer();
+        alCambiar();
+      },
+      alFallar: siCambio,
+    });
+  }
+
   /** Los mismos datos: la versión nueva pasa otra vez por aprobación (§9). Para cambiar algo está
    * «Modificar». */
   function volverAPagar() {
@@ -613,7 +637,18 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               {AVISO_DIFERENCIA_ESPERA}
             </p>
           )}
-          {paso === "espera_comprobante" && <p role="note">Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.</p>}
+          {paso === "espera_comprobante" && (
+            <p role="note">
+              Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.
+              {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} vas a poder tomar el pago.`}
+            </p>
+          )}
+          {ficha.toma_vigente !== null && (
+            <p role="note">
+              {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momento(ficha.toma_vigente.tomada_en)}.
+              {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
+            </p>
+          )}
           {ficha.le_toca_a !== null && ficha.le_toca_a !== "vos" && <p>{TEXTO_LE_TOCA_A[ficha.le_toca_a]}</p>}
 
           {cuentaVista !== null && (
@@ -797,6 +832,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   {AVISO_SIN_SALIDA}
                 </p>
               )}
+              {paso === "tomar_pago" && <p role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
+              {confirmaToma && ficha.puede_tomar && (
+                <p className="aviso-error" role="alert">
+                  {AVISO_TOMAR}
+                </p>
+              )}
               {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p role="note">{AVISO_RETOMAR}</p>}
 
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
@@ -882,6 +923,21 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         <button type="button" disabled={enviando} onClick={verCuenta}>
                           Ver la cuenta para pagar
                         </button>
+                      )}
+                      {ficha.puede_tomar && !confirmaToma && (
+                        <button type="button" disabled={enviando} onClick={() => setConfirmaToma(true)}>
+                          Tomar el pago
+                        </button>
+                      )}
+                      {ficha.puede_tomar && confirmaToma && (
+                        <>
+                          <button type="button" disabled={enviando} onClick={tomar}>
+                            No se transfirió: tomar el pago
+                          </button>
+                          <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmaToma(false)}>
+                            Cancelar
+                          </button>
+                        </>
                       )}
                       {ficha.puede_conciliar && pago !== undefined && (
                         <>

@@ -67,6 +67,7 @@ from tests.test_pago_manual_0055 import (
     emitida,
     evidencia,
     registrada,
+    segunda_apertura,
     ver,
 )
 from tests.test_pago_manual_0055 import e as e  # noqa: F401  (es un fixture)
@@ -557,8 +558,8 @@ def test_separacion_de_quien_resuelve(motor_migrate, motor_app, e):
     o = emitida(motor_migrate, e)
     x = segundo_ejecutor(motor_migrate, motor_app, e)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, x)
-    ver(motor_migrate, e, x, o)
     d = con_diferencia(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, x, o)
     pedido = {"orden": o, "diferencia": d, "resolucion": "reclamo"}
     niega(motor_migrate, e, e.adm, RESOLVER, "42501", **pedido)  # registró y no aprueba
     niega(motor_migrate, e, x, RESOLVER, "no_es_quien_ejecuto", **pedido)
@@ -570,8 +571,8 @@ def test_quien_vio_la_cuenta_sin_registrar_no_ve_resolver_y_da_403(motor_migrate
     """§14: un miembro del Consejo que también ejecuta y solo vio la cuenta."""
     o = emitida(motor_migrate, e)
     x = segundo_ejecutor(motor_migrate, motor_app, e)
-    ver(motor_migrate, e, x, o)
     d = con_diferencia(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, x, o)
     f = ficha(e, x, o)
     assert (f["paso"], f["puede_resolver_diferencia"]) == ("espera_resolver", False)
     assert ficha(e, e.mc1, o)["puede_resolver_diferencia"]  # control: mc1 no la vio

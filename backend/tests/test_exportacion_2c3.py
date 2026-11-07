@@ -148,6 +148,7 @@ CLAVES_POR_ENTIDAD = {
     "declaracion_no_pagado": {"id", "ejecucion_id", "motivo", "declarado_por_nombre",
                               "declarado_en", "sin_facultad"},
     "confirmacion_no_pagado": {"id", "declaracion_id", "confirmado_por_nombre", "confirmado_en"},
+    "toma_pago": {"id", "ejecucion_id", "tomado_por_nombre", "tomada_en"},
     "cotejo": {"id", "pago_id", "diferencia_id", "origen", "movimiento_id",
                "cotejado_por_nombre", "cotejado_en"},
     "importacion_extracto": {"id", "hash_archivo", "desde", "hasta", "importado_por_nombre",
@@ -1274,6 +1275,7 @@ TABLA_DE_LA_ENTIDAD = {
     "pago": "nucleo.pago_manual",
     "conciliacion": "nucleo.conciliacion_pago_manual",
     "diferencia_pago": "nucleo.diferencia_pago_manual",
+    "toma_pago": "nucleo.toma_pago_manual",
     "declaracion_no_pagado": "nucleo.declaracion_pago_no_realizado",
     "confirmacion_no_pagado": "nucleo.confirmacion_pago_no_realizado",
     "cotejo": "nucleo.cotejo_pago",
@@ -1385,6 +1387,13 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     a_otra_cuenta = emitida(motor_migrate, s)
     diferencia = con_diferencia(motor_migrate, s, a_otra_cuenta, cuenta=cbu_sintetico(50))
     resuelta(motor_migrate, s, a_otra_cuenta, diferencia, "reclamo")
+    with motor_migrate.begin() as c:  # esperar el plazo para tomar el pago no entra en la escena
+        c.execute(text(
+            "insert into nucleo.toma_pago_manual (consorcio_id, ejecucion_id, tomado_por,"
+            " identidad_tomo)"
+            " select e.consorcio_id, e.id, :q, nucleo.identidad_humana_de(e.consorcio_id, :q)"
+            "   from nucleo.ejecucion_orden_pago e where e.orden_id = :o"
+        ), {"q": s.mc1, "o": no_pagada})  # fmt: skip
     liquidacion = borrador(motor_migrate, s)
     gastos = [
         llamar(motor_migrate, s, s.adm, AGREGAR, liquidacion=liquidacion, orden=o,
@@ -1567,6 +1576,7 @@ _COLUMNAS_DE_PERSONA = {
         "resuelta_por",
         "identidad_resolvio",
     ),
+    "nucleo.toma_pago_manual": ("tomado_por", "identidad_tomo"),
     "nucleo.declaracion_pago_no_realizado": ("declarado_por", "identidad_declaro"),
     "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
     "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo"),

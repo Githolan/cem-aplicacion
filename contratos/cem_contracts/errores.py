@@ -223,6 +223,8 @@ class CodigoError(StrEnum):
     MODALIDAD_RIEL = "modalidad_riel"
     """La ejecución es del riel de pago: no se registra a mano (`0055`)."""
     PAGO_YA_REGISTRADO = "pago_ya_registrado"
+    PAGO_EN_CURSO = "pago_en_curso"
+    TOMA_ANTES_DE_TIEMPO = "toma_antes_de_tiempo"
     """La orden ya tiene un pago manual registrado, pendiente de conciliar o conforme."""
     NUMERO_OPERACION_INVALIDO = "numero_operacion_invalido"
     """El número de operación no es válido, o es una cuenta: nunca es un número de operación."""

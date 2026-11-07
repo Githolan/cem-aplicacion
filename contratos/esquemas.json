@@ -966,6 +966,8 @@
           "fecha_invalida",
           "modalidad_riel",
           "pago_ya_registrado",
+          "pago_en_curso",
+          "toma_antes_de_tiempo",
           "numero_operacion_invalido",
           "no_coincide_con_la_orden",
           "fecha_operacion_invalida",

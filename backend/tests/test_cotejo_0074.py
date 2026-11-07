@@ -38,7 +38,7 @@ from tests.test_pago_manual_0055 import (
     llamar,
     orden,
     registrada,
-    ver,
+    segunda_apertura,
 )
 from tests.test_rutas_egresos import cliente, codigo, get, post, url
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
@@ -210,8 +210,8 @@ def test_la_pagina_sigue_igual_aunque_se_coteje_en_el_medio(motor_migrate, e):
 def test_quien_vio_la_cuenta_no_coteja_y_otro_consejero_si(motor_migrate, e):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
-    ver(motor_migrate, e, e.mc2, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     llamar(motor_migrate, e, e.mc1, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
     assert pendientes(e, e.mc2)["elementos"][0]["puede_cotejar"] is False
     assert codigo(tildar(e, e.mc2, p)) == (403, "no_es_quien_ejecuto")
@@ -340,8 +340,8 @@ def test_lo_registrado_sin_conciliar_no_es_un_debito_sin_registrar_ni_se_coteja(
 def test_quien_vio_la_cuenta_sube_el_extracto_y_su_pago_queda_para_otro(motor_migrate, e):
     o = emitida(motor_migrate, e)
     con_ejecutar(motor_migrate, e, e.mc2)
-    ver(motor_migrate, e, e.mc2, o)
     p = registrada(motor_migrate, e, o)
+    segunda_apertura(motor_migrate, e, e.mc2, o)
     llamar(motor_migrate, e, e.mc1, CONCILIAR, orden=o, pago=p, resultado="conforme", motivo=None)
     cuerpo = extracto(linea_del_pago(motor_migrate, p))
     resultado = subio(e, e.mc2, cuerpo)
