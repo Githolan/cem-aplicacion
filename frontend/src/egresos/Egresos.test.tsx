@@ -333,7 +333,7 @@ describe("página /egresos/proveedores", () => {
   it("la lista y la ficha muestran la cuenta enmascarada y nunca la completa", async () => {
     vi.stubGlobal("fetch", conLista());
     const { container } = abrir("/egresos/proveedores");
-    const lista = await screen.findByRole("list", { name: "Proveedores" });
+    const lista = await screen.findByRole("table", { name: "Proveedores" });
     expect(within(lista).getByText("…1234")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
@@ -545,7 +545,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "otro" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(screen.queryByLabelText("Rubro (opcional)")).toBeNull());
-    expect(await screen.findByRole("list", { name: "Proveedores" })).toBeTruthy();
+    expect(await screen.findByRole("table", { name: "Proveedores" })).toBeTruthy();
   });
 });
 

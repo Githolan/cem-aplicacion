@@ -383,24 +383,38 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {lectura.proveedores.length === 0 ? (
                 <p className="tarjeta">El edificio no tiene proveedores cargados.</p>
               ) : (
-                <ul className="versiones" aria-label="Proveedores">
-                  {lectura.proveedores.map((p) => (
-                    <li key={p.id} className="tarjeta">
-                      <h2>{p.razon_social}</h2>
-                      <dl className="detalles">
-                        <dt>CUIT</dt>
-                        <dd>{p.cuit ?? "Sin CUIT"}</dd>
-                        <dt>Estado</dt>
-                        <dd>{TEXTO_ESTADO_PROVEEDOR[p.estado]}</dd>
-                        <dt>Cuenta</dt>
-                        <dd>{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</dd>
-                      </dl>
-                      <button type="button" className="sutil" onClick={() => verFicha(p)}>
-                        Ver la ficha de {p.razon_social}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <div className="tabla-lista tabla-tarjetas">
+                  <table aria-label="Proveedores">
+                    <thead>
+                      <tr>
+                        <th scope="col">Proveedor</th>
+                        <th scope="col">CUIT</th>
+                        <th scope="col">Estado</th>
+                        <th scope="col">Cuenta</th>
+                        <th scope="col">
+                          <span className="solo-lector">Acciones</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lectura.proveedores.map((p) => (
+                        <tr key={p.id}>
+                          <th scope="row">
+                            <h2>{p.razon_social}</h2>
+                          </th>
+                          <td data-etiqueta="CUIT">{p.cuit ?? "Sin CUIT"}</td>
+                          <td data-etiqueta="Estado">{TEXTO_ESTADO_PROVEEDOR[p.estado]}</td>
+                          <td data-etiqueta="Cuenta">{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</td>
+                          <td>
+                            <button type="button" className="sutil" onClick={() => verFicha(p)}>
+                              Ver la ficha<span className="solo-lector"> de {p.razon_social}</span>
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </>
           )}
