@@ -1,6 +1,7 @@
 import { type FormEvent, Fragment, useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
+import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
@@ -355,12 +356,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   return (
     <>
-      <h1>Proveedores</h1>
+      <CabeceraInterna titulo="Proveedores" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando}
         elegir={setConsorcio} />
-      <p>
-        <Link to={RUTA_PAGOS}>Pagos</Link>
-      </p>
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}

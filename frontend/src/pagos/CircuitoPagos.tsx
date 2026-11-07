@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 
+import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { ESTADO, type Aviso, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
@@ -110,11 +111,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     <div className={alLado && conFicha ? "circuito-pagos circuito-pagos--al-lado" : "circuito-pagos"}>
       <div>
         {veBandeja && <h1>Pagos</h1>}
-        {!veBandeja && (
-          <p>
-            <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-          </p>
-        )}
+        {!veBandeja && <CabeceraInterna titulo="Orden de pago" volver={RUTA_PAGOS} destino="Pagos" />}
         <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={elegir} />
         {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
         {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
@@ -139,7 +136,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
       </div>
       {conFicha && conPantalla && (
         <div>
-          <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} orden={abierta} titulo={alLado ? "h2" : "h1"}
+          <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} orden={abierta}
             aEntrar={aEntrar} aInicio={aInicio} terminar={terminar} alCambiar={alCambiar} />
         </div>
       )}

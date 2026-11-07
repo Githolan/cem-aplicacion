@@ -1,6 +1,7 @@
 import { type DragEvent, type FormEvent, useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 
+import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
@@ -247,10 +248,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
 
   return (
     <>
-      <p>
-        <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-      </p>
-      <h1>Cotejar con el banco</h1>
+      <CabeceraInterna titulo="Cotejar con el banco" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}

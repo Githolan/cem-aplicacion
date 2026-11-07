@@ -433,7 +433,7 @@ describe("bandeja", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
-    await screen.findByRole("heading", { level: 1, name: "Limpieza Ficticia SRL" });
+    await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
     expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
     expect(lugar()).toBe("/pagos");
@@ -584,7 +584,7 @@ describe("el ancho de la pantalla", () => {
     const api = backend(CON_UNA);
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
-    expect(await screen.findByRole("heading", { level: 1, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
     expect(screen.getAllByRole("link", { name: "Volver a Pagos" })).toHaveLength(1);
     expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`)).toHaveLength(0);
   });
@@ -614,7 +614,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     expect(await boton(nombre)).toBeTruthy();
     cleanup();
     abrirFicha({ ...f, [puede]: false });
-    await screen.findByRole("heading", { level: 1, name: "Limpieza Ficticia SRL" });
+    await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
     sinBoton(nombre);
   });
 

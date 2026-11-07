@@ -420,6 +420,35 @@ button.sutil:disabled {
   }
 }
 
+/* Cabecera de una pantalla que cuelga de otra: el círculo y el título en una línea. */
+.cabecera-interna {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.cabecera-interna h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(1.25rem, 1.1rem + 0.6vw, 1.75rem);
+}
+
+.cabecera-interna__volver {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+  color: var(--ink);
+}
+
 /* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
 .acciones-pantalla {
   display: flex;

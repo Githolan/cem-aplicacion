@@ -29,7 +29,7 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { BotonCopiar } from "./BotonCopiar";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
-import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
+import { RUTA_NUEVA } from "./rutas";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
@@ -145,8 +145,6 @@ export type Seguir = { paso: Paso; abierta: RefObject<boolean> };
 type Props = {
   consorcio: string;
   orden: string;
-  /** `h1` si la ficha es toda la pantalla; `h2` si está al lado de la bandeja. */
-  titulo: "h1" | "h2";
   aEntrar: () => void;
   aInicio: () => void;
   /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguir`, al próximo de ese paso. */
@@ -155,7 +153,7 @@ type Props = {
   alCambiar: () => void;
 };
 
-export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, terminar, alCambiar }: Props) {
+export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar }: Props) {
   const id = useId();
   const acto = useActo(aEntrar, alCambiar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -266,14 +264,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
 
   if (lectura.tipo === "cargando") return <p role="status">Cargando la orden…</p>;
   if (lectura.tipo === "no_esta")
-    return (
-      <>
-        <p className="tarjeta">Esa orden no está en este edificio.</p>
-        <p>
-          <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-        </p>
-      </>
-    );
+    return <p className="tarjeta">Esa orden no está en este edificio.</p>;
   if (lectura.tipo === "sin_servicio")
     return (
       <>
@@ -599,7 +590,6 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
 
   const estaModificando = modificando && ficha.puede_modificar;
   const elegida: Resolucion = diferencia?.se_puede_dar_por_pagada ? (resolucion ?? "pagada_por_lo_real") : "reclamo";
-  const Subtitulo = Titulo === "h1" ? "h2" : "h3";
 
   return (
     <>
@@ -623,7 +613,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
             {TEXTO_SITUACION[situacion]}
           </p>
-          <Titulo id={`${id}-titulo`}>{v.razon_social}</Titulo>
+          <h2 id={`${id}-titulo`}>{v.razon_social}</h2>
           <div className="fila-importe">
             <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
             {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
@@ -684,7 +674,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
 
           {cuentaVista !== null && (
             <div className="tarjeta">
-              <Subtitulo>Transferí desde tu banco</Subtitulo>
+              <h3>Transferí desde tu banco</h3>
               <dl className="detalles">
                 <dt>CBU/CVU</dt>
                 <dd>
@@ -886,7 +876,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               <div hidden={motivoAbierto !== null}>
                   {registra && (
                     <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
-                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido} subtitulo={Subtitulo}
+                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido}
                       puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
@@ -897,7 +887,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   {corrigeDiferencia && ficha.puede_corregir_diferencia && diferencia !== null && (
                     <RegistroPago key={`diferencia-${diferencia.id}`} consorcio={consorcio} orden={orden} version={v} corregido={undefined}
                       diferencia={diferencia} alCancelar={() => setCorrigeDiferencia(false)} comprobante={ficha.comprobante_actual} subido={null}
-                      lectura={null} subtitulo={Subtitulo} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
+                      lectura={null} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
                         releer();
@@ -1113,7 +1103,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             </dl>
             {ficha.versiones.length > 1 && (
               <>
-                <Subtitulo>Versiones anteriores</Subtitulo>
+                <h3>Versiones anteriores</h3>
                 <ol className="versiones">
                   {ficha.versiones
                     .filter((x) => x.numero !== v.numero)
@@ -1128,7 +1118,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             )}
             {ficha.diferencias_anteriores.length > 0 && (
               <>
-                <Subtitulo>Lo que se registró antes</Subtitulo>
+                <h3>Lo que se registró antes</h3>
                 <ol className="versiones">
                   {ficha.diferencias_anteriores.map((d) => (
                     <li key={d.id}>
@@ -1141,7 +1131,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             )}
             {ejecucion !== null && ejecucion.pagos.length > 1 && (
               <>
-                <Subtitulo>Registros anteriores</Subtitulo>
+                <h3>Registros anteriores</h3>
                 <ol className="versiones">
                   {ejecucion.pagos.slice(0, -1).map((p) => (
                     <li key={p.id}>

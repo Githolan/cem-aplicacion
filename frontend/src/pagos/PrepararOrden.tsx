@@ -1,6 +1,7 @@
 import { useRef } from "react";
-import { Link, useLocation, useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
+import { CabeceraInterna } from "../CabeceraInterna";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
@@ -37,10 +38,7 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
   const { aviso, pendiente, setPendiente, enviando } = acto;
   return (
     <>
-      <p>
-        <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-      </p>
-      <h1>Preparar una orden</h1>
+      <CabeceraInterna titulo="Preparar una orden" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}

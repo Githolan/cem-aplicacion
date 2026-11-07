@@ -106,7 +106,6 @@ type Props = {
   alCancelar?: () => void;
   /** Lo que la IA leyó del comprobante; nula si la lectura no corrió. */
   lectura: Lectura | null;
-  subtitulo: "h2" | "h3";
   /** Si se puede registrar lo que pasó de verdad. */
   puedeOtraCosa: boolean;
   acto: ActoEnCurso;
@@ -151,7 +150,7 @@ function DistintoDeLaOrden({ leida, version }: { leida: Lectura; version: Versio
 }
 
 export function RegistroPago(props: Props) {
-  const { consorcio, orden, version, corregido, diferencia, alCancelar, comprobante, subido, lectura, subtitulo: Subtitulo, puedeOtraCosa, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
+  const { consorcio, orden, version, corregido, diferencia, alCancelar, comprobante, subido, lectura, puedeOtraCosa, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
   const id = useId();
   const { enviando, setEnviando, setAviso, montado } = acto;
   const corrige = corregido !== undefined;
@@ -384,7 +383,7 @@ export function RegistroPago(props: Props) {
         )}
         {(subiendo || revisando || leyendo) && (
           <div role="status">
-            <Subtitulo>Estamos revisando el comprobante</Subtitulo>
+            <h3>Estamos revisando el comprobante</h3>
             <ol className="avance-comprobante">
               <li aria-current={subiendo ? "step" : undefined}>{subiendo ? "Subiendo el archivo…" : "Subido"}</li>
               <li aria-current={revisando ? "step" : undefined}>{revisando ? "El antivirus lo está revisando…" : "Antivirus"}</li>
@@ -417,7 +416,7 @@ export function RegistroPago(props: Props) {
       {conDatos && difiere && !otraCosa && <DistintoDeLaOrden leida={leida} version={version} />}
       {conDatos && pregunta && (
         <div className="formulario">
-          <Subtitulo>¿Qué pasó?</Subtitulo>
+          <h3>¿Qué pasó?</h3>
           <div className="acciones">
             <button type="button" className="secundario" disabled={enviando} onClick={() => setCambiaArchivo(true)}>
               Es otro comprobante: cambiarlo
@@ -446,12 +445,12 @@ export function RegistroPago(props: Props) {
         <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
           {otraCosa ? (
             <>
-              <Subtitulo>{corrigeDiferencia ? "Corregir lo que registré" : "Pagué otra cosa"}</Subtitulo>
+              <h3>{corrigeDiferencia ? "Corregir lo que registré" : "Pagué otra cosa"}</h3>
               <p>Escribí lo que salió del banco, tal como figura en el comprobante.{corrigeDiferencia && " Lo anterior queda en la historia."}</p>
             </>
           ) : (
             <>
-              <Subtitulo>{corrige ? "Corregir el registro" : "Registrar el pago"}</Subtitulo>
+              <h3>{corrige ? "Corregir el registro" : "Registrar el pago"}</h3>
               {cuentaLeida ? (
                 <>
                   <p className="aviso-ok" role="status">

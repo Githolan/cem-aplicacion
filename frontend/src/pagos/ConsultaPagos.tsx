@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 
+import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { type Aviso, ESTADO, importe, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
@@ -90,10 +91,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
 
   return (
     <>
-      <p>
-        <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-      </p>
-      <h1>Consultar pagos</h1>
+      <CabeceraInterna titulo="Consultar pagos" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
       {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
