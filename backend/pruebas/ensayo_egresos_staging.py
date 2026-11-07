@@ -142,6 +142,7 @@ from http.cookies import SimpleCookie
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+from cem_contracts.errores import CodigoError
 from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
 from pypdf import PdfWriter
@@ -297,6 +298,10 @@ class Respuesta:
         return self.cuerpo.get("codigo") if isinstance(self.cuerpo, dict) else None
 
 
+ESPERA_MAXIMA_CUPO_S = 60
+"""Un 429 por minuto se espera; uno diario corta el ensayo, a la vista."""
+
+
 @dataclass
 class Navegador:
     url: str
@@ -345,8 +350,16 @@ class Navegador:
         repetidas: dict[str, list[str]] = {}
         for k, v in r.headers.items():
             repetidas.setdefault(k.lower(), []).append(v)
-        return Respuesta(r.status, {k.lower(): v for k, v in r.headers.items()}, cuerpo_json,
-                         texto, bruto, repetidas)  # fmt: skip
+        respuesta = Respuesta(r.status, {k.lower(): v for k, v in r.headers.items()}, cuerpo_json,
+                              texto, bruto, repetidas)  # fmt: skip
+        if respuesta.codigo() == CodigoError.DEMASIADAS_PETICIONES.value:
+            espera = int(respuesta.encabezados["retry-after"])
+            if espera <= ESPERA_MAXIMA_CUPO_S:
+                print(f"cupo por minuto agotado: espero {espera} s", flush=True)
+                time.sleep(espera)
+                return self.pedir(metodo, ruta, cuerpo, csrf=csrf, clave=clave, crudo=crudo,
+                                  tipo=tipo, ip=ip)  # fmt: skip
+        return respuesta
 
 
 # Riel simulado -------------------------------------------------------------------------------
@@ -904,7 +917,13 @@ def entra_otra_cuenta(corrida: Corrida, rol: str, de: str) -> None:
 
 def reverificar(corrida: Corrida, rol: str) -> None:
     """El segundo factor otra vez (vale 10 minutos para lo económico), con un paso TOTP que la
-    corrida no usó: si hace falta, espera al siguiente (a lo sumo 30 segundos)."""
+    corrida no usó: si hace falta, espera al siguiente (a lo sumo 30 segundos).
+
+    Con más de media vigencia por delante no se pide: cada intento consume el cupo diario de la
+    persona (`LIMITES_INTENTOS`), y `--circuito` lo agotaba a mitad de camino."""
+    usado = (segundo_factor_app.paso_actual() - corrida.pasos_totp[rol]) * segundo_factor_app.PASO_S
+    if usado < segundo_factor_app.VIGENCIA_VERIFICACION.total_seconds() / 2:
+        return
     paso = max(segundo_factor_app.paso_actual(), corrida.pasos_totp[rol] + 1)
     while segundo_factor_app.paso_actual() < paso:
         time.sleep(1)
@@ -2648,7 +2667,7 @@ def circuito_volver_a_pagar(corrida: Corrida, p: str, cuenta: str, con_diferenci
     en_el_paso(corrida, con_diferencia, "en_revision", administracion=("espera_aprobar", "consejo"),
                consejo1=("aprobar", "vos"))  # fmt: skip
     r = emitir(corrida, "administracion", con_diferencia)
-    comprobar(r.estado == 409, f"sin el Consejo no se emite: {r.texto}")
+    comprobar(r.estado == 403, f"sin el Consejo no se emite: {r.texto}")
     comprobar(aprobar(corrida, "consejo1", con_diferencia).estado == 201, "el Consejo la aprueba")
     comprobar(emitir(corrida, "administracion", con_diferencia).estado == 200,
               "control: aprobada por el Consejo, se emite")  # fmt: skip
@@ -2666,7 +2685,7 @@ def circuito_volver_a_pagar(corrida: Corrida, p: str, cuenta: str, con_diferenci
     comprobar(r.estado == 200, f"confirmada: {r.texto}")
     comprobar(modificar_igual(corrida, o).estado == 200, "versión nueva de la simple")
     comprobar(estado(corrida, o) == "aprobada", "control: una fallida simple sigue por su franja")
-    corrida.ok("decisión 11: con diferencia vuelve al Consejo y sin él no se emite (409); una"
+    corrida.ok("decisión 11: con diferencia vuelve al Consejo y sin él no se emite (403); una"
                " fallida simple sigue por su franja")  # fmt: skip
 
 
