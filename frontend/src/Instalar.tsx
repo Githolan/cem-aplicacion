@@ -92,7 +92,7 @@ export function Instalar() {
       </section>
 
       <p>
-        <Link to={RUTA_ENTRAR}>Seguir sin instalar</Link>
+        <Link to={RUTA_ENTRAR} className="enlace-suelto">Seguir sin instalar</Link>
       </p>
     </>
   );

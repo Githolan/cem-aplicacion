@@ -151,8 +151,10 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                       </td>
                       <td data-etiqueta="Operación">{e.numero_operacion}</td>
                       <td data-etiqueta="Importe">
-                        {importe(e.importe_centavos, e.moneda)}
-                        {e.importe_pagado_centavos !== null && <p className="tabla-lista__dato">Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</p>}
+                        <div>
+                          {importe(e.importe_centavos, e.moneda)}
+                          {e.importe_pagado_centavos !== null && <p className="tabla-lista__dato">Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</p>}
+                        </div>
                       </td>
                     </tr>
                   ))}

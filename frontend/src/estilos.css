@@ -372,8 +372,9 @@ button.sutil:disabled {
   }
 }
 
-/* El número se toca con el dedo: 44 px de alto aunque el texto mida menos. */
-.enlace-telefono {
+/* El número y los enlaces solos en su renglón se tocan con el dedo: 44 px de alto aunque el texto mida menos. */
+.enlace-telefono,
+.enlace-suelto {
   display: inline-flex;
   align-items: center;
   min-height: var(--tap-min);
@@ -582,6 +583,7 @@ main:has(.tabla-lista) {
 
 /* Con letra grande o un dato muy largo la tabla puede no entrar: se desplaza ella, nunca la página. */
 .tabla-lista {
+  position: relative;
   overflow-x: auto;
 }
 
@@ -852,6 +854,11 @@ main:has(.cotejo) {
   margin-top: 1rem;
 }
 
+/* Quien solo espera no tiene ni datos ni acciones: no queda una tarjeta vacía. */
+.ficha-pago .tarjeta:not(:has(dt, p, a, button, input, table, h3)) {
+  display: none;
+}
+
 /* Lo primero de la ficha: la tarjeta oscura con la situación, a quién, cuánto y por qué. */
 .ficha-pago__resumen {
   padding: var(--space-5);
@@ -1058,6 +1065,10 @@ main:has(.cotejo) {
   margin-top: 0.5rem;
 }
 
+.copiar-a-mano input {
+  min-height: var(--tap-min);
+}
+
 .fila-importe {
   display: flex;
   flex-wrap: wrap;
@@ -1117,7 +1128,15 @@ fieldset.formulario legend {
   padding: 0.25rem 0.5rem 0.25rem 0;
   text-align: left;
   vertical-align: top;
+}
+
+/* Lo largo es la cuenta, que se corta; «Importe» y «Cuenta» no. */
+.comparar-pago td {
   overflow-wrap: anywhere;
+}
+
+.comparar-pago tbody tr:first-child td {
+  white-space: nowrap;
 }
 
 @media (max-width: 48em) {
@@ -1507,6 +1526,10 @@ fieldset.formulario legend {
 
 /* En el teléfono una tabla es una tarjeta por fila, con los mismos datos y sin desplazar. */
 @media (max-width: 48em) {
+  .tabla-tarjetas {
+    overflow-x: clip;
+  }
+
   .tabla-tarjetas table,
   .tabla-tarjetas tbody,
   .tabla-tarjetas tr,

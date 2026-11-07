@@ -329,7 +329,7 @@ export function Cuenta() {
                     : "No está activado."}
                 </p>
                 <p>
-                  <Link to={RUTA_SEGUNDO_FACTOR}>
+                  <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
                     {lista.segundoFactor.valor ? "Ver el segundo factor" : "Activar el segundo factor"}
                   </Link>
                 </p>

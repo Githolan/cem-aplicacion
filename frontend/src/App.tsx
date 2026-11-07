@@ -281,7 +281,7 @@ function NoEncontrada() {
     <>
       <h1>No encontramos esa página</h1>
       <p>
-        <Link to="/">Volver al inicio</Link>
+        <Link to="/" className="enlace-suelto">Volver al inicio</Link>
       </p>
     </>
   );

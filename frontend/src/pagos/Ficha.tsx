@@ -1055,7 +1055,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
               )}
               {ficha.puede_preparar_faltante && diferencia?.falta_centavos != null && (
                 <p>
-                  <Link to={RUTA_NUEVA}
+                  <Link to={RUTA_NUEVA} className="enlace-suelto"
                     state={{ consorcio, proveedor: v.proveedor_id, importe: aTexto(diferencia.falta_centavos), moneda: v.moneda, concepto: `Lo que faltó de: ${v.concepto}` }}>
                     Preparar la orden por lo que falta
                   </Link>
@@ -1063,7 +1063,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
               )}
               {paso === "rechazada" && (
                 <p>
-                  <Link to={RUTA_NUEVA} state={{ consorcio, proveedor: v.proveedor_id }}>
+                  <Link to={RUTA_NUEVA} state={{ consorcio, proveedor: v.proveedor_id }} className="enlace-suelto">
                     Preparar otra orden
                   </Link>
                 </p>
