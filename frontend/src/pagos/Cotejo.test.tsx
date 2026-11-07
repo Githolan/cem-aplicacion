@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import type { components } from "../api/tipos";
 import { App } from "../App";
+import { EJEMPLO_EXTRACTO } from "./textos";
 import { ContextoVersion } from "../version";
 
 // `/pagos/cotejo`. Datos ficticios, banco 999, y nada se transfiere. La API está simulada: que el
@@ -143,6 +144,19 @@ describe("la entrada", () => {
     abrir();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Cotejar con el banco" })).toBeNull());
     expect(pedidos(simulado, LISTA)).toEqual([]);
+  });
+});
+
+describe("el botón del archivo y el ejemplo", () => {
+  it("«Ver el ejemplo» muestra la forma del archivo y el tope lo dice el servidor", async () => {
+    vi.stubGlobal("fetch", backend({}));
+    abrir();
+
+    const entrada = await screen.findByLabelText("Elegir el archivo");
+    expect(entrada.getAttribute("type")).toBe("file");
+    expect(await screen.findByText(/^CSV, hasta [0-9]+ MB$/)).toBeTruthy();
+    const ejemplo = screen.getByText("Ver el ejemplo").closest("details") as HTMLElement;
+    expect(ejemplo.querySelector("pre")?.textContent).toBe(EJEMPLO_EXTRACTO);
   });
 });
 

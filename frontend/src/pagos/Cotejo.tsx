@@ -13,6 +13,7 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { MONEDAS } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
+import { EJEMPLO_EXTRACTO } from "./textos";
 import { useActo } from "./useActo";
 
 // `/pagos/cotejo`: cotejar con el banco, a mano o con el extracto (§10). Cotejar no cambia la orden
@@ -370,9 +371,10 @@ function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: Pro
       )}
       <div className="zona-archivo formulario" onDragOver={(e) => e.preventDefault()} onDrop={soltar}>
         <p className="zona-archivo__soltar">Soltá acá el extracto</p>
-        <label htmlFor={`${id}-archivo`}>Elegir el archivo{tope === null ? "" : ` (CSV, hasta ${tope / BYTES_POR_MB} MB)`}</label>
+        {/* El campo va antes que su rótulo: el foco del teclado se ve en el botón (estilos.css). */}
         <input
           id={`${id}-archivo`}
+          className="solo-lector elegir-archivo"
           type="file"
           accept=".csv,text/csv"
           disabled={ocupado}
@@ -381,7 +383,16 @@ function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: Pro
             if (elegido !== undefined) alElegir(elegido);
           }}
         />
+        <label htmlFor={`${id}-archivo`} className="boton-archivo">
+          Elegir el archivo
+        </label>
+        {tope !== null && <p className="zona-archivo__nota">CSV, hasta {tope / BYTES_POR_MB} MB</p>}
       </div>
+      <details className="historial">
+        <summary>Ver el ejemplo</summary>
+        <p>La primera línea trae los nombres de las columnas y cada una de las demás, un movimiento:</p>
+        <pre className="ejemplo-extracto">{EJEMPLO_EXTRACTO}</pre>
+      </details>
     </section>
   );
 }

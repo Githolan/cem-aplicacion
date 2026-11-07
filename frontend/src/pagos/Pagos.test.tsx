@@ -323,6 +323,7 @@ describe("bandeja", () => {
     expect(screen.getByRole("region", { name: /^Para aprobar/ }).textContent).toContain("Ascensores Ficticios SA");
     expect(screen.queryByRole("region", { name: /^Para conciliar/ })).toBeNull();
     expect(screen.queryByText("No tenés nada para hacer.")).toBeNull();
+    expect(screen.queryByText("Al día")).toBeNull();
     expect(container.textContent).not.toContain(CUENTA);
     await sinFaltasDeAccesibilidad(container);
   });
@@ -350,6 +351,7 @@ describe("bandeja", () => {
     abrir("/pagos");
     expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
     expect(screen.queryByText(/Esperando a otra persona/)).toBeNull();
+    expect(screen.getByText("Al día")).toBeTruthy();
   });
 
   it("«Preparar una orden» y «Proveedores» se ven con `egresos.preparar_orden`", async () => {

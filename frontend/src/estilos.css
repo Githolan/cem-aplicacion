@@ -722,8 +722,51 @@ main:has(.cotejo) {
   font-weight: 600;
 }
 
-.zona-archivo input {
-  max-width: 100%;
+/* El campo del sistema queda oculto: lo que se toca es su rótulo, con forma de botón. */
+.formulario .boton-archivo {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.elegir-archivo:focus-visible + .boton-archivo {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.elegir-archivo:disabled + .boton-archivo {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.zona-archivo__nota {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.ejemplo-extracto {
+  overflow-x: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: 0.875rem;
+}
+
+.bandeja-al-dia {
+  text-align: center;
+}
+
+.bandeja-al-dia p:last-child {
+  margin: 0;
+  font-weight: 700;
 }
 
 .fila-pago--con-borde {
@@ -750,8 +793,10 @@ main:has(.cotejo) {
 
 .tilde-pago input {
   flex: none;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .tilde-pago__datos {

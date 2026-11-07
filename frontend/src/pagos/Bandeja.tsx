@@ -59,7 +59,14 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
   const esperando = elementos.filter((e) => e.grupo === "esperando");
   return (
     <div className="bandeja">
-      {grupos.length === 0 && <p className="tarjeta">No tenés nada para hacer.</p>}
+      {grupos.length === 0 && (
+        <div className="tarjeta bandeja-al-dia">
+          <p className="etiqueta-situacion" data-tono="bien">
+            Al día
+          </p>
+          <p>No tenés nada para hacer.</p>
+        </div>
+      )}
       {grupos.map((g) => (
         <Seccion key={g} grupo={g} filas={elementos.filter((e) => e.grupo === g)} consorcio={consorcio} abierta={abierta} />
       ))}

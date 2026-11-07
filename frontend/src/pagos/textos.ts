@@ -92,6 +92,8 @@ export const FILTROS: readonly { valor: Filtro; texto: string }[] = [
   { valor: "en_curso", texto: "En curso" },
 ];
 
+/** Inventado: muestra la forma del archivo, que el servidor lee (`extracto.py`). */
+export const EJEMPLO_EXTRACTO = "Fecha;Débito;Número de operación\n05/11/2026;-184.350,00;0048213377";
 export const AVISO_VER_LA_CUENTA =
   "Para pagar hay que ver la cuenta. Queda registrado quién la vio, y esa persona no puede conciliar este pago.";
 export const AVISO_ANTIVIRUS_TARDA =
