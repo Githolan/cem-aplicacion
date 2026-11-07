@@ -79,7 +79,8 @@ export function Navegacion() {
       {PRINCIPALES.filter(ofrecido).map((d) => (
         <Item key={d.ruta} destino={d} />
       ))}
-      {administracion.length > 0 && <p className="navegacion__grupo">Administración</p>}
+      {/* Neutro: el servidor dice qué alcanza la persona, no con qué papel. No se deduce acá. */}
+      {administracion.length > 0 && <p className="navegacion__grupo">Gestión</p>}
       {administracion.map((d) => (
         <Item key={d.ruta} destino={d} secundario />
       ))}
