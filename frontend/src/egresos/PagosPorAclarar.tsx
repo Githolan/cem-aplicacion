@@ -350,6 +350,7 @@ export function PagosPorAclarar() {
         body: {
           version: p.version,
           huella: p.huella,
+          lectura_mal: false,
           numero_operacion: registro.numero.trim(),
           fecha_operacion: registro.fecha,
           importe_centavos: centavos,

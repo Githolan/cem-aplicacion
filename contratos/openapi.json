@@ -2842,6 +2842,11 @@
           "le_toca_a": {
             "$ref": "#/components/schemas/LeTocaA"
           },
+          "lectura_disputada": {
+            "description": "Al conciliar: quien registró dijo que la lectura estaba mal.",
+            "title": "Lectura Disputada",
+            "type": "boolean"
+          },
           "moneda": {
             "title": "Moneda",
             "type": "string"
@@ -2868,7 +2873,8 @@
           "moneda",
           "paso",
           "grupo",
-          "le_toca_a"
+          "le_toca_a",
+          "lectura_disputada"
         ],
         "title": "ElementoBandejaPagos",
         "type": "object"
@@ -6975,6 +6981,11 @@
             "title": "Importe Centavos",
             "type": "integer"
           },
+          "lectura_disputada": {
+            "description": "Quien registró dijo que la lectura del comprobante estaba mal (`0087`).",
+            "title": "Lectura Disputada",
+            "type": "boolean"
+          },
           "moneda": {
             "title": "Moneda",
             "type": "string"
@@ -7031,6 +7042,7 @@
           "motivo_conciliacion",
           "conciliado_por",
           "conciliado_en",
+          "lectura_disputada",
           "fuera_de_termino"
         ],
         "title": "PagoManual",
@@ -8138,6 +8150,12 @@
             "maximum": 9.223372036854776e+18,
             "title": "Importe Centavos",
             "type": "integer"
+          },
+          "lectura_mal": {
+            "default": false,
+            "description": "La persona eligió «Se leyó mal»: el Consejo lo ve al conciliar. Sin una lectura de ese comprobante se niega.",
+            "title": "Lectura Mal",
+            "type": "boolean"
           },
           "moneda": {
             "examples": [

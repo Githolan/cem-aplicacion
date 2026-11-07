@@ -74,6 +74,7 @@ class AccionesOrden(HechosPago):
     puede_tomar: bool = False
     tomar_desde: datetime | None = None
     puede_corregir_diferencia: bool = False
+    lectura_disputada: bool = False
     proveedor_cambiado: bool = False
     """Quien pide prepara, y el proveedor cambió después de aprobar la orden."""
 
@@ -231,6 +232,7 @@ def bandeja(
             orden_id=o.id, proveedor=o.razon_social, concepto=o.concepto,
             importe_centavos=o.importe_centavos, moneda=o.moneda, paso=paso, grupo=grupo,
             le_toca_a=le_toca_a(paso, a),
+            lectura_disputada=a.lectura_disputada and paso == PasoPago.CONCILIAR,
         )))  # fmt: skip
     filas.sort(key=lambda f: f[:2])
     return [f[2] for f in filas]

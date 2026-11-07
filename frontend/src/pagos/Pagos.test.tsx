@@ -87,7 +87,7 @@ function pago(extra: Partial<Pago> = {}): Pago {
     id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000,
     moneda: "ARS", documento_id: DOC, version_documento_id: ARCHIVO, registrado_por: PERSONA, registrado_por_nombre: "Marta Ficticia",
     registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null,
-    conciliado_en: null, fuera_de_termino: false, ...extra,
+    conciliado_en: null, fuera_de_termino: false, lectura_disputada: false, ...extra,
   };
 }
 
@@ -163,7 +163,7 @@ const CUENTA_DEL_ACTO = {
 function elemento(paso: Paso, grupo: Elemento["grupo"], extra: Partial<Elemento> = {}): Elemento {
   return {
     orden_id: O1, proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre", importe_centavos: 1_500_000, moneda: "ARS",
-    paso, grupo, le_toca_a: "vos", ...extra,
+    paso, grupo, lectura_disputada: false, le_toca_a: "vos", ...extra,
   };
 }
 
@@ -906,7 +906,7 @@ describe("registrar y corregir", () => {
     expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toEqual({
-      version: 1, huella: H1, numero_operacion: "0001-234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
+      version: 1, huella: H1, lectura_mal: false, numero_operacion: "0001-234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
       cuenta_destino: CUENTA, documento_id: DOC,
     });
   });
@@ -1100,7 +1100,7 @@ describe("registrar y corregir", () => {
     // Una sola escritura: ni `pago-manual/cuenta`, ni otra subida.
     expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/pago-manual`]);
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toEqual({
-      version: 1, huella: H1, numero_operacion: "0001-999", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
+      version: 1, huella: H1, lectura_mal: false, numero_operacion: "0001-999", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
       documento_id: DOC,
     });
   });
@@ -1472,6 +1472,24 @@ describe("la lectura con IA del comprobante", () => {
     expect(await boton("Registrar el pago")).toBeTruthy();
   });
 
+  it("elegir «Se leyó mal» viaja con el registro", async () => {
+    const REGISTRO = `${BASE}/ordenes-pago/${O1}/pago-manual`;
+    const api = abrirFicha(OTRO_IMPORTE, { [`POST ${REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    fireEvent.click(await boton("Se leyó mal: corregir el dato"));
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.click(await boton("Registrar el pago"));
+    await vi.waitFor(() => expect(pedidos(api, "POST", REGISTRO)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", REGISTRO)[0])).toMatchObject({ lectura_mal: true });
+  });
+
+  it("control: con la lectura que coincide no se dice nada", async () => {
+    const REGISTRO = `${BASE}/ordenes-pago/${O1}/pago-manual`;
+    const api = abrirFicha({ ...LISTO, lectura_comprobante: leida() }, { [`POST ${REGISTRO}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
+    fireEvent.click(await boton("Registrar el pago"));
+    await vi.waitFor(() => expect(pedidos(api, "POST", REGISTRO)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", REGISTRO)[0])).toMatchObject({ lectura_mal: false });
+  });
+
   it("es otro comprobante: recién ahí aparece dónde subirlo", async () => {
     abrirFicha(OTRO_IMPORTE);
     await boton("Es otro comprobante: cambiarlo");
@@ -1744,6 +1762,15 @@ describe("no se pagó", () => {
     abrirFicha(ficha({ orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", ejecucion: ejecucion(), diferencia_vigente: diferencia() }));
     await screen.findByText(/Se pagó otra cosa/);
     sinBoton("Corregir lo que registré");
+  });
+
+  it("al conciliar se ve que dijo que la lectura estaba mal; sin eso, no", async () => {
+    abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago({ lectura_disputada: true })]) });
+    expect(await screen.findByText(/Dijo que la lectura estaba mal/)).toBeTruthy();
+    cleanup();
+    abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago()]) });
+    await boton("Conforme");
+    expect(screen.queryByText(/Dijo que la lectura estaba mal/)).toBeNull();
   });
 
   it("volver a pagar avisa por dónde sigue: por su importe, o por el Consejo si hubo diferencia", async () => {

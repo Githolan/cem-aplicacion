@@ -34,6 +34,7 @@ import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
+  AVISO_LECTURA_DISPUTADA,
   AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_POR_EL_CONSEJO,
   AVISO_POR_FRANJA,
@@ -836,6 +837,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     <dd>
                       {pago.registrado_por_nombre}, {momento(pago.registrado_en)}
                     </dd>
+                  </>
+                )}
+                {pago?.lectura_disputada === true && (
+                  <>
+                    <dt>Lectura del comprobante</dt>
+                    <dd>{AVISO_LECTURA_DISPUTADA}: los datos los escribió a mano. Comparalos con el archivo.</dd>
                   </>
                 )}
                 {pago?.fuera_de_termino === true && (

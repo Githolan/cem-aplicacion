@@ -707,6 +707,11 @@ class RegistroPagoManual(BaseModel):
         " la orden. En cualquier otro registro nuevo la base la niega"
         " (`no_coincide_con_la_orden`).",
     )
+    lectura_mal: bool = Field(
+        default=False,
+        description="La persona eligió «Se leyó mal»: el Consejo lo ve al conciliar. Sin una lectura"
+        " de ese comprobante se niega.",
+    )
     documento_id: UUID = Field(
         description="El comprobante: cargado desde el pago de esta orden"
         " (`…/pago-manual/comprobante`), con un archivo que pasó el antivirus."
@@ -919,6 +924,9 @@ class PagoManual(BaseModel):
     motivo_conciliacion: str | None
     conciliado_por: UUID | None
     conciliado_en: datetime | None
+    lectura_disputada: bool = Field(
+        description="Quien registró dijo que la lectura del comprobante estaba mal (`0087`)."
+    )
     fuera_de_termino: bool = Field(
         description="Transferido después de que venció la aprobación (`0067`): el Consejo lo"
         " concilia con un motivo escrito, también para darlo por conforme."
@@ -1151,6 +1159,9 @@ class ElementoBandejaPagos(BaseModel):
     paso: PasoPago
     grupo: GrupoPago
     le_toca_a: LeTocaA
+    lectura_disputada: bool = Field(
+        description="Al conciliar: quien registró dijo que la lectura estaba mal."
+    )
 
 
 class BandejaPagos(BaseModel):

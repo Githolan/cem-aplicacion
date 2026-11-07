@@ -191,6 +191,9 @@ ERRORES = {
         "El proveedor está suspendido o dado de baja: no recibe órdenes nuevas.",
     ),
     "cuit_invalido": (422, CodigoError.CUIT_INVALIDO, "El CUIT no es válido."),
+    "sin_lectura": (
+        422, CodigoError.PETICION_INVALIDA, "Ese comprobante no tiene una lectura para discutir.",
+    ),
     "cuit_ya_cargado": (
         409, CodigoError.CUIT_YA_CARGADO, "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
     ),
@@ -1330,12 +1333,12 @@ def registrar_pago_manual(
         pago = _ejecutar(
             conn, permiso,
             "select nucleo.registrar_pago_manual(:o, :version, :huella, :numero, :fecha, :importe,"
-            " :moneda, :cuenta, :doc, :actor, 'api', :sesion)",
+            " :moneda, :cuenta, :doc, :actor, 'api', :sesion, :mal)",
             {"o": orden_id, "version": registro.version,
              "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
              "fecha": registro.fecha_operacion, "importe": registro.importe_centavos,
              "moneda": registro.moneda, "cuenta": registro.cuenta_destino,
-             "doc": registro.documento_id},
+             "doc": registro.documento_id, "mal": registro.lectura_mal},
         ).scalar_one()  # fmt: skip
         return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
 

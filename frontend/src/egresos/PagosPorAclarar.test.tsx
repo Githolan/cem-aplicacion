@@ -223,6 +223,7 @@ describe("pagos para aclarar (app 0067)", () => {
     const [registro] = pedidos(api, "POST", REGISTRO);
     expect(await registro?.json()).toEqual({
       version: 1,
+      lectura_mal: false,
       huella: H1,
       numero_operacion: "0001-234567",
       fecha_operacion: "2026-10-31",

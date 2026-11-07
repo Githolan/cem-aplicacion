@@ -111,6 +111,7 @@ export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nu
 export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: compará los datos con el archivo.";
 export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
+export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
 export const AVISO_POR_FRANJA = "Para volver a pagarla, pasa otra vez por la aprobación que le toca por su importe.";
 export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
 export const AVISO_PROVEEDOR_CAMBIADO =

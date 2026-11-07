@@ -188,12 +188,15 @@ export function RegistroPago(props: Props) {
   const [llenadaCon, setLlenadaCon] = useState<string | null>(null);
   /** Pidió ver o cambiar lo que se leyó; o cambiar el archivo que no coincide. */
   const [aMano, setAMano] = useState(false);
+  /** Eligió «Se leyó mal»: queda en el registro y el Consejo lo ve (decisión 14). */
+  const [dijoMal, setDijoMal] = useState(false);
   const [cambiaArchivo, setCambiaArchivo] = useState(false);
   const fuente = corrige || corrigeDiferencia || enCurso ? llenadaCon : (leida?.version_documento_id ?? null);
   if (fuente !== llenadaCon) {
     setLlenadaCon(fuente);
     setRegistro(leida === null ? datosIniciales(undefined, version.moneda) : datosLeidos(leida, version.moneda));
     setAMano(false);
+    setDijoMal(false);
     setCambiaArchivo(false);
     setOtraCosa(false);
   }
@@ -290,6 +293,7 @@ export function RegistroPago(props: Props) {
           body: {
             version: version.numero,
             huella: version.huella,
+            lectura_mal: dijoMal,
             numero_operacion: registro.numero.trim(),
             fecha_operacion: registro.fecha,
             importe_centavos: centavos,
@@ -412,7 +416,15 @@ export function RegistroPago(props: Props) {
             <button type="button" className="secundario" disabled={enviando} onClick={() => setCambiaArchivo(true)}>
               Es otro comprobante: cambiarlo
             </button>
-            <button type="button" className="secundario" disabled={enviando} onClick={() => setAMano(true)}>
+            <button
+              type="button"
+              className="secundario"
+              disabled={enviando}
+              onClick={() => {
+                setAMano(true);
+                setDijoMal(true);
+              }}
+            >
               Se leyó mal: corregir el dato
             </button>
             {puedeOtraCosa && (
