@@ -143,7 +143,7 @@ const ACCIONES_EN_FALSO = {
   puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
   puede_reabrir_cuenta: false, puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false,
   puede_declarar: false, puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
-  puede_recuperar: false, puede_preparar_faltante: false,
+  puede_recuperar: false, puede_preparar_faltante: false, puede_tomar: false, puede_corregir_diferencia: false,
 };
 const ORDEN_APROBADA = { ...ORDEN_A, estado: "aprobada", aprobaciones: 1, aprobada_en: "2026-10-31T12:00:00Z",
   aprobacion_vence_en: "2099-11-07T12:00:00Z" };
@@ -153,7 +153,7 @@ const EJECUCION_VACIA = { id: EJECUCION, version: 1, creada_en: "2026-10-31T12:3
 const fichaDe = (extra: object) => ({
   ...ACCIONES_EN_FALSO, orden: ORDEN_APROBADA, versiones: [version(null)], situacion: "para_pagar", paso: null, le_toca_a: null,
   ejecucion: null, comprobante_actual: null, comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null,
-  diferencia_vigente: null, ...extra,
+  diferencia_vigente: null, diferencias_anteriores: [], tomar_desde: null, toma_vigente: null, ...extra,
 });
 const PARA_PAGAR = fichaDe({ paso: "pagar", le_toca_a: "vos", puede_pagar: true });
 const SUBIENDO = fichaDe({
@@ -172,7 +172,7 @@ const PARA_CONCILIAR = fichaDe({
   ejecucion: { ...EJECUCION_VACIA, pagos: [{ id: PAGO, corrige_a: null, numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
     importe_centavos: 12_000_000, moneda: "ARS", documento_id: COMPROBANTE, version_documento_id: ARCHIVO, registrado_por: ADM,
     registrado_por_nombre: "Marta Ficticia", registrado_en: "2026-10-31T13:00:00Z", conciliacion: null, motivo_conciliacion: null, conciliado_por: null, conciliado_en: null,
-    fuera_de_termino: false }] },
+    fuera_de_termino: false, lectura_disputada: false }] },
 });
 
 const LO_LEIDO = {
@@ -203,6 +203,7 @@ const PARA_RESOLVER = fichaDe({
     importe_orden_centavos: 12_000_000, moneda_orden: "ARS", numero_operacion: "0001234567", fecha_operacion: "2026-10-31", ...EL_COMPROBANTE,
     explicacion: "SINTETICO: me equivoqué al escribir el importe", fuera_de_termino: false, registrada_por: ADM, registrada_por_nombre: "Marta Ficticia",
     registrada_en: "2026-10-31T13:00:00Z", resolucion: null, resuelta_por: null, resuelta_en: null, recuperada_en: null,
+    corrige_a: null, cerrada_en: null, motivo_cierre: null, lectura_disputada: false,
     falta_centavos: 2_125_000, sobra_centavos: null, se_puede_dar_por_pagada: true,
   },
 });
@@ -249,7 +250,7 @@ async function simularPagos(
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
     if (camino === `${c}/pagos/bandeja`)
       return ruta.fulfill({ json: { elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA, concepto: ORDEN_A.concepto,
-        importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""], le_toca_a: "vos" }] } });
+        importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""], lectura_disputada: false, le_toca_a: "vos" }] } });
     if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: actual });
     if (camino === `${c}/ordenes-pago/${ORDEN}/revision`)
       return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(CUENTA)], puede_aprobar: true, puede_rechazar: true } });
