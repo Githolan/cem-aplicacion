@@ -357,6 +357,14 @@ button.sutil:disabled {
   color: var(--ink-muted);
 }
 
+/* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
+.acciones-pantalla {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
 /* Invitaciones: el historial plegado (aceptadas, retiradas y vencidas) con un resumen de 44 px. */
 .historial {
   margin-top: 1rem;

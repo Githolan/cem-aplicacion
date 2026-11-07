@@ -245,6 +245,8 @@ export function presentacion({ veMandatos, veDecisiones, registra, daAltas, daBa
   ].join(" ");
 }
 
+type FormularioAbierto = "decision" | "alta";
+
 export function Mandatos() {
   const id = useId();
   const navegar = useNavigate();
@@ -270,6 +272,8 @@ export function Mandatos() {
   const [decisiones, setDecisiones] = useState<Lectura<Decision>>(CARGANDO);
   const [candidatos, setCandidatos] = useState<Lectura<Candidato>>(CARGANDO);
   const [detalle, setDetalle] = useState<Detalle | null>(null);
+  // Los formularios se abren desde los dos botones de arriba, de a uno.
+  const [abierto, setAbierto] = useState<FormularioAbierto | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   // Cada envío vuelve a pedir las listas: qué se ve lo decide la API.
@@ -293,6 +297,9 @@ export function Mandatos() {
   const formularioBaja = useRef<HTMLFormElement | null>(null);
   const confirmarSi = useRef<HTMLButtonElement | null>(null);
   const botonBaja = useRef<HTMLButtonElement | null>(null);
+  const botonDecision = useRef<HTMLButtonElement | null>(null);
+  const botonAlta = useRef<HTMLButtonElement | null>(null);
+  const tituloFormulario = useRef<HTMLHeadingElement | null>(null);
 
   // Formulario de decisión.
   const [tipoDecision, setTipoDecision] = useState<TipoDecision>(TIPO_DECISION_INICIAL);
@@ -415,6 +422,15 @@ export function Mandatos() {
     };
   }, [consorcio, vuelta, atajar, navegar, veMandatos, veDecisiones, veCandidatos, quedaElRegistro]);
 
+  useEffect(() => {
+    if (abierto !== null) tituloFormulario.current?.focus();
+  }, [abierto]);
+
+  function cerrarFormulario() {
+    (abierto === "alta" ? botonAlta : botonDecision).current?.focus();
+    setAbierto(null);
+  }
+
   /** Vuelve a pedir las listas: lo escrito en los formularios no se toca. */
   function reconsultarListas() {
     setMandatos(aReconsultar);
@@ -509,7 +525,8 @@ export function Mandatos() {
         setSha256("");
         const hecho = "Listo: registramos la decisión.";
         setAviso({ texto: hecho, ok: true });
-        origenDetalle.current = foco.current;
+        setAbierto(null);
+        origenDetalle.current = botonDecision.current;
         if (veDecisiones) pedirDecision(datos.id, hecho);
       },
     );
@@ -552,7 +569,8 @@ export function Mandatos() {
         setHasta("");
         const hecho = "Listo: el mandato quedó dado de alta.";
         setAviso({ texto: hecho, ok: true });
-        origenDetalle.current = foco.current;
+        setAbierto(null);
+        origenDetalle.current = botonAlta.current;
         if (veMandatos) pedirMandato(datos.id, hecho);
       },
     );
@@ -703,6 +721,7 @@ export function Mandatos() {
     setDecisiones(CARGANDO);
     setCandidatos(CARGANDO);
     setDetalle(null);
+    setAbierto(null);
     setDecisionAlta("");
     limpiarBaja();
     setPersona("");
@@ -710,6 +729,8 @@ export function Mandatos() {
     setConsorcio(valor);
   }
 
+  // El alta pide elegir a quién (`candidatos`) y qué decisión la respalda: sin una de las dos no se puede dar.
+  const ofreceAlta = puede("mandatos.alta") && candidatos.tipo !== "sin_permiso" && decisiones.tipo !== "sin_permiso";
   const listaDecisiones = decisiones.tipo === "ok" ? decisiones.elementos : [];
   // A15: quien registró una decisión no la usa para dar de alta ni para remover. Las del equipo no lo
   // activan. Solo los selectores: el detalle y la lista siguen mostrando todas.
@@ -781,6 +802,277 @@ export function Mandatos() {
                 ))}
               </select>
             </div>
+          )}
+
+          {(ofreceAlta || registraDecisiones) && (
+            <p className="acciones-pantalla">
+              {ofreceAlta && (
+                <button
+                  type="button"
+                  ref={botonAlta}
+                  aria-expanded={abierto === "alta"}
+                  disabled={enviando}
+                  onClick={() => setAbierto(abierto === "alta" ? null : "alta")}
+                >
+                  Dar de alta un mandato
+                </button>
+              )}
+              {registraDecisiones && (
+                <button
+                  type="button"
+                  ref={botonDecision}
+                  className="secundario"
+                  aria-expanded={abierto === "decision"}
+                  disabled={enviando}
+                  onClick={() => setAbierto(abierto === "decision" ? null : "decision")}
+                >
+                  Registrar una decisión
+                </button>
+              )}
+            </p>
+          )}
+
+          {registraDecisiones && abierto === "decision" && (
+          <section aria-labelledby={`${id}-nueva-decision`} className="tarjeta">
+            <h2 id={`${id}-nueva-decision`} ref={tituloFormulario} tabIndex={-1}>
+              Registrar una decisión
+            </h2>
+            <form className="formulario formulario-movil" onSubmit={registrarDecision}>
+              <label htmlFor={`${id}-tipo-decision`}>Tipo</label>
+              <select
+                id={`${id}-tipo-decision`}
+                value={tipoDecision}
+                disabled={enviando}
+                onChange={(e) => cambiar(claveDecision, setTipoDecision)(e.target.value as TipoDecision)}
+              >
+                {TIPOS_DECISION.map((t) => (
+                  <option key={t} value={t}>
+                    {TEXTO_TIPO_DECISION[t]}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor={`${id}-fecha-decision`}>Fecha del acto</label>
+              <input
+                id={`${id}-fecha-decision`}
+                type="date"
+                required
+                disabled={enviando}
+                value={fechaDecision}
+                onChange={(e) => cambiar(claveDecision, setFechaDecision)(e.target.value)}
+              />
+              <label htmlFor={`${id}-descripcion-decision`}>Qué se decidió</label>
+              <TextoDeUnaLinea
+                id={`${id}-descripcion-decision`}
+                rows={FILAS_DESCRIPCION}
+                autoComplete="off"
+                maxLength={LARGO_DESCRIPCION}
+                required
+                disabled={enviando}
+                value={descripcionDecision}
+                onValor={cambiar(claveDecision, setDescripcionDecision)}
+              />
+              <label htmlFor={`${id}-referencia`}>Dónde consta (libro, acta y folio)</label>
+              <TextoDeUnaLinea
+                id={`${id}-referencia`}
+                rows={FILAS_REFERENCIA}
+                autoComplete="off"
+                maxLength={LARGO_REFERENCIA}
+                required
+                disabled={enviando}
+                value={referencia}
+                onValor={cambiar(claveDecision, setReferencia)}
+              />
+              <label htmlFor={`${id}-sha256`}>Huella SHA-256 del acta escaneada (opcional)</label>
+              <input
+                id={`${id}-sha256`}
+                type="text"
+                autoComplete="off"
+                pattern={PATRON_SHA256}
+                spellCheck={false}
+                autoCapitalize="none"
+                disabled={enviando}
+                value={sha256}
+                onChange={(e) => cambiar(claveDecision, setSha256)(e.target.value)}
+              />
+              <button type="submit" disabled={enviando}>
+                Registrar decisión
+              </button>
+            </form>
+            {avisoEn("decision")}
+            <p>
+              <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
+                Cancelar
+              </button>
+            </p>
+          </section>
+          )}
+
+          {ofreceAlta && abierto === "alta" && (
+          <section aria-labelledby={`${id}-alta`} className="tarjeta">
+            <h2 id={`${id}-alta`} ref={tituloFormulario} tabIndex={-1}>
+              Dar de alta un mandato
+            </h2>
+            {candidatos.tipo === "cargando" && <p>Consultando…</p>}
+            {candidatos.tipo === "sin_servicio" && (
+              <>
+                <p>No pudimos consultar quiénes pueden recibir un mandato.</p>
+                {consultarDeNuevo(`${id}-alta`)}
+              </>
+            )}
+            {candidatos.tipo === "ok" && decisiones.tipo === "sin_servicio" && (
+              <>
+                <p>Para dar un alta hace falta elegir la decisión que la respalda, y no pudimos consultarlas.</p>
+                {consultarDeNuevo(`${id}-alta`)}
+              </>
+            )}
+            {candidatos.tipo === "ok" && decisiones.tipo === "ok" && (
+              <form className="formulario formulario-movil" onSubmit={darDeAlta}>
+                <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
+                <select
+                  id={`${id}-tipo-mandato`}
+                  value={tipoMandato}
+                  disabled={enviando}
+                  onChange={(e) => cambiar(claveAlta, setTipoMandato)(e.target.value as TipoMandato)}
+                >
+                  {TIPOS_MANDATO.map((t) => (
+                    <option key={t} value={t}>
+                      {TEXTO_TIPO_MANDATO[t]}
+                    </option>
+                  ))}
+                </select>
+                {externo ? (
+                  <>
+                    <p>
+                      La administración externa se carga por su razón social y su CUIT, sin cuenta: la
+                      cuenta se asocia después, por invitación.
+                    </p>
+                    <label htmlFor={`${id}-nombre`}>Razón social o nombre</label>
+                    <input
+                      id={`${id}-nombre`}
+                      type="text"
+                      autoComplete="off"
+                      maxLength={LARGO_NOMBRE}
+                      pattern={PATRON_TEXTO}
+                      required
+                      disabled={enviando}
+                      value={nombre}
+                      onChange={(e) => cambiar(claveAlta, setNombre)(e.target.value)}
+                    />
+                    <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
+                    <input
+                      id={`${id}-cuit`}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      pattern={PATRON_CUIT}
+                      required
+                      disabled={enviando}
+                      value={cuit}
+                      onChange={(e) => cambiar(claveAlta, setCuit)(e.target.value)}
+                    />
+                  </>
+                ) : elegibles.length === 0 ? (
+                  <p>
+                    {candidatos.elementos.length === 0
+                      ? "Nadie tiene todavía un vínculo confirmado en este edificio: sin él no se puede dar el mandato."
+                      : "Nadie más tiene un vínculo confirmado en este edificio, y nadie se da un mandato a sí mismo."}
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor={`${id}-persona`}>Persona (con vínculo confirmado en el edificio)</label>
+                    <select
+                      id={`${id}-persona`}
+                      value={personaElegida}
+                      required
+                      disabled={enviando}
+                      onChange={(e) => cambiar(claveAlta, setPersona)(e.target.value)}
+                    >
+                      {elegibles.map((c) => (
+                        <option key={c.persona_id} value={c.persona_id}>
+                          {recortar(`${c.nombre} (${c.unidades.join(", ")})`)}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                {tipoMandato !== "miembro_consejo" && (
+                  <>
+                    <label htmlFor={`${id}-matricula`}>Matrícula (opcional)</label>
+                    <input
+                      id={`${id}-matricula`}
+                      type="text"
+                      autoComplete="off"
+                      maxLength={LARGO_MATRICULA}
+                      pattern={PATRON_TEXTO}
+                      disabled={enviando}
+                      value={matricula}
+                      onChange={(e) => cambiar(claveAlta, setMatricula)(e.target.value)}
+                    />
+                  </>
+                )}
+                {usables.length === 0 ? (
+                  <p>
+                    {listaDecisiones.length === 0
+                      ? "Todavía no hay decisiones registradas: sin una que lo respalde no se puede dar el mandato."
+                      : "Las decisiones de este edificio las registraste vos, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
+                  </p>
+                ) : (
+                  <>
+                    <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
+                    <select
+                      id={`${id}-decision-alta`}
+                      value={decisionAlta}
+                      required
+                      disabled={enviando}
+                      onChange={(e) => cambiar(claveAlta, setDecisionAlta)(e.target.value)}
+                    >
+                      <option value="">Elegí la decisión</option>
+                      {usables.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {recortar(textoDecision(d))}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                <label htmlFor={`${id}-desde`}>Desde</label>
+                <input
+                  id={`${id}-desde`}
+                  type="date"
+                  required
+                  disabled={enviando}
+                  value={desde}
+                  onChange={(e) => cambiar(claveAlta, setDesde)(e.target.value)}
+                />
+                <label htmlFor={`${id}-hasta`}>Hasta (opcional; ese día ya no rige)</label>
+                <input
+                  id={`${id}-hasta`}
+                  type="date"
+                  min={desde === "" ? undefined : desde}
+                  disabled={enviando}
+                  aria-describedby={`${id}-vigencia-vacia`}
+                  value={hasta}
+                  onChange={(e) => cambiar(claveAlta, setHasta)(e.target.value)}
+                />
+                <p id={`${id}-vigencia-vacia`} aria-live="polite">
+                  {hasta !== "" &&
+                    hasta === desde &&
+                    "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
+                </p>
+                {(externo || elegibles.length > 0) && usables.length > 0 && (
+                  <button type="submit" disabled={enviando}>
+                    Dar de alta
+                  </button>
+                )}
+              </form>
+            )}
+            {avisoEn("alta")}
+            <p>
+              <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
+                Cancelar
+              </button>
+            </p>
+          </section>
           )}
 
           {mandatos.tipo !== "sin_permiso" && (
@@ -1066,235 +1358,6 @@ export function Mandatos() {
             </section>
           )}
 
-          {registraDecisiones && (
-          <section aria-labelledby={`${id}-nueva-decision`} className="tarjeta">
-            <h2 id={`${id}-nueva-decision`}>Registrar una decisión</h2>
-            <form className="formulario formulario-movil" onSubmit={registrarDecision}>
-              <label htmlFor={`${id}-tipo-decision`}>Tipo</label>
-              <select
-                id={`${id}-tipo-decision`}
-                value={tipoDecision}
-                disabled={enviando}
-                onChange={(e) => cambiar(claveDecision, setTipoDecision)(e.target.value as TipoDecision)}
-              >
-                {TIPOS_DECISION.map((t) => (
-                  <option key={t} value={t}>
-                    {TEXTO_TIPO_DECISION[t]}
-                  </option>
-                ))}
-              </select>
-              <label htmlFor={`${id}-fecha-decision`}>Fecha del acto</label>
-              <input
-                id={`${id}-fecha-decision`}
-                type="date"
-                required
-                disabled={enviando}
-                value={fechaDecision}
-                onChange={(e) => cambiar(claveDecision, setFechaDecision)(e.target.value)}
-              />
-              <label htmlFor={`${id}-descripcion-decision`}>Qué se decidió</label>
-              <TextoDeUnaLinea
-                id={`${id}-descripcion-decision`}
-                rows={FILAS_DESCRIPCION}
-                autoComplete="off"
-                maxLength={LARGO_DESCRIPCION}
-                required
-                disabled={enviando}
-                value={descripcionDecision}
-                onValor={cambiar(claveDecision, setDescripcionDecision)}
-              />
-              <label htmlFor={`${id}-referencia`}>Dónde consta (libro, acta y folio)</label>
-              <TextoDeUnaLinea
-                id={`${id}-referencia`}
-                rows={FILAS_REFERENCIA}
-                autoComplete="off"
-                maxLength={LARGO_REFERENCIA}
-                required
-                disabled={enviando}
-                value={referencia}
-                onValor={cambiar(claveDecision, setReferencia)}
-              />
-              <label htmlFor={`${id}-sha256`}>Huella SHA-256 del acta escaneada (opcional)</label>
-              <input
-                id={`${id}-sha256`}
-                type="text"
-                autoComplete="off"
-                pattern={PATRON_SHA256}
-                spellCheck={false}
-                autoCapitalize="none"
-                disabled={enviando}
-                value={sha256}
-                onChange={(e) => cambiar(claveDecision, setSha256)(e.target.value)}
-              />
-              <button type="submit" disabled={enviando}>
-                Registrar decisión
-              </button>
-            </form>
-            {avisoEn("decision")}
-          </section>
-          )}
-
-          {/* El alta pide elegir a quién (`candidatos`) y qué decisión la respalda: sin una de las dos no se puede dar. */}
-          {puede("mandatos.alta") && candidatos.tipo !== "sin_permiso" && decisiones.tipo !== "sin_permiso" && (
-          <section aria-labelledby={`${id}-alta`} className="tarjeta">
-            <h2 id={`${id}-alta`}>Dar de alta un mandato</h2>
-            {candidatos.tipo === "cargando" && <p>Consultando…</p>}
-            {candidatos.tipo === "sin_servicio" && (
-              <>
-                <p>No pudimos consultar quiénes pueden recibir un mandato.</p>
-                {consultarDeNuevo(`${id}-alta`)}
-              </>
-            )}
-            {candidatos.tipo === "ok" && decisiones.tipo === "sin_servicio" && (
-              <>
-                <p>Para dar un alta hace falta elegir la decisión que la respalda, y no pudimos consultarlas.</p>
-                {consultarDeNuevo(`${id}-alta`)}
-              </>
-            )}
-            {candidatos.tipo === "ok" && decisiones.tipo === "ok" && (
-              <form className="formulario formulario-movil" onSubmit={darDeAlta}>
-                <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
-                <select
-                  id={`${id}-tipo-mandato`}
-                  value={tipoMandato}
-                  disabled={enviando}
-                  onChange={(e) => cambiar(claveAlta, setTipoMandato)(e.target.value as TipoMandato)}
-                >
-                  {TIPOS_MANDATO.map((t) => (
-                    <option key={t} value={t}>
-                      {TEXTO_TIPO_MANDATO[t]}
-                    </option>
-                  ))}
-                </select>
-                {externo ? (
-                  <>
-                    <p>
-                      La administración externa se carga por su razón social y su CUIT, sin cuenta: la
-                      cuenta se asocia después, por invitación.
-                    </p>
-                    <label htmlFor={`${id}-nombre`}>Razón social o nombre</label>
-                    <input
-                      id={`${id}-nombre`}
-                      type="text"
-                      autoComplete="off"
-                      maxLength={LARGO_NOMBRE}
-                      pattern={PATRON_TEXTO}
-                      required
-                      disabled={enviando}
-                      value={nombre}
-                      onChange={(e) => cambiar(claveAlta, setNombre)(e.target.value)}
-                    />
-                    <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
-                    <input
-                      id={`${id}-cuit`}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      pattern={PATRON_CUIT}
-                      required
-                      disabled={enviando}
-                      value={cuit}
-                      onChange={(e) => cambiar(claveAlta, setCuit)(e.target.value)}
-                    />
-                  </>
-                ) : elegibles.length === 0 ? (
-                  <p>
-                    {candidatos.elementos.length === 0
-                      ? "Nadie tiene todavía un vínculo confirmado en este edificio: sin él no se puede dar el mandato."
-                      : "Nadie más tiene un vínculo confirmado en este edificio, y nadie se da un mandato a sí mismo."}
-                  </p>
-                ) : (
-                  <>
-                    <label htmlFor={`${id}-persona`}>Persona (con vínculo confirmado en el edificio)</label>
-                    <select
-                      id={`${id}-persona`}
-                      value={personaElegida}
-                      required
-                      disabled={enviando}
-                      onChange={(e) => cambiar(claveAlta, setPersona)(e.target.value)}
-                    >
-                      {elegibles.map((c) => (
-                        <option key={c.persona_id} value={c.persona_id}>
-                          {recortar(`${c.nombre} (${c.unidades.join(", ")})`)}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                {tipoMandato !== "miembro_consejo" && (
-                  <>
-                    <label htmlFor={`${id}-matricula`}>Matrícula (opcional)</label>
-                    <input
-                      id={`${id}-matricula`}
-                      type="text"
-                      autoComplete="off"
-                      maxLength={LARGO_MATRICULA}
-                      pattern={PATRON_TEXTO}
-                      disabled={enviando}
-                      value={matricula}
-                      onChange={(e) => cambiar(claveAlta, setMatricula)(e.target.value)}
-                    />
-                  </>
-                )}
-                {usables.length === 0 ? (
-                  <p>
-                    {listaDecisiones.length === 0
-                      ? "Todavía no hay decisiones registradas: sin una que lo respalde no se puede dar el mandato."
-                      : "Las decisiones de este edificio las registraste vos, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
-                  </p>
-                ) : (
-                  <>
-                    <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
-                    <select
-                      id={`${id}-decision-alta`}
-                      value={decisionAlta}
-                      required
-                      disabled={enviando}
-                      onChange={(e) => cambiar(claveAlta, setDecisionAlta)(e.target.value)}
-                    >
-                      <option value="">Elegí la decisión</option>
-                      {usables.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {recortar(textoDecision(d))}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
-                <label htmlFor={`${id}-desde`}>Desde</label>
-                <input
-                  id={`${id}-desde`}
-                  type="date"
-                  required
-                  disabled={enviando}
-                  value={desde}
-                  onChange={(e) => cambiar(claveAlta, setDesde)(e.target.value)}
-                />
-                <label htmlFor={`${id}-hasta`}>Hasta (opcional; ese día ya no rige)</label>
-                <input
-                  id={`${id}-hasta`}
-                  type="date"
-                  min={desde === "" ? undefined : desde}
-                  disabled={enviando}
-                  aria-describedby={`${id}-vigencia-vacia`}
-                  value={hasta}
-                  onChange={(e) => cambiar(claveAlta, setHasta)(e.target.value)}
-                />
-                <p id={`${id}-vigencia-vacia`} aria-live="polite">
-                  {hasta !== "" &&
-                    hasta === desde &&
-                    "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
-                </p>
-                {(externo || elegibles.length > 0) && usables.length > 0 && (
-                  <button type="submit" disabled={enviando}>
-                    Dar de alta
-                  </button>
-                )}
-              </form>
-            )}
-            {avisoEn("alta")}
-          </section>
-          )}
         </>
       )}
     </>

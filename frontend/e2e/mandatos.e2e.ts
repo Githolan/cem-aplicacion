@@ -161,6 +161,7 @@ test.describe("mandatos", () => {
 
     // Formularios para el teléfono (UX móvil, CEM): textos largos en textarea, la huella en una
     // línea y el botón de envío a todo el ancho, con 44 px de alto.
+    await page.getByRole("button", { name: "Registrar una decisión" }).click();
     const decision = page.getByRole("region", { name: "Registrar una decisión" });
     await expect(decision.locator("textarea")).toHaveCount(2);
     await expect(decision.getByLabel("Qué se decidió")).toHaveAttribute("rows", "4");
@@ -180,6 +181,7 @@ test.describe("mandatos", () => {
     expect(registrarAncho?.width ?? Infinity).toBeLessThan((tipoAncho?.width ?? 0) - 1);
     await page.setViewportSize({ width: 360, height: 740 });
 
+    await page.getByRole("button", { name: "Dar de alta un mandato" }).click();
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
     await expect(alta.getByLabel("Decisión que lo respalda").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
@@ -238,6 +240,7 @@ test.describe("mandatos", () => {
     await simularSesion(page, "con_sesion");
     await page.context().clearCookies();
     await page.goto("/mandatos");
+    await page.getByRole("button", { name: "Dar de alta un mandato" }).click();
     const alta = page.getByRole("region", { name: "Dar de alta un mandato" });
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
     await alta.getByLabel("Desde").fill("2026-11-01");
