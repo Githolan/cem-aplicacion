@@ -1746,6 +1746,16 @@ describe("no se pagó", () => {
     sinBoton("Corregir lo que registré");
   });
 
+  it("volver a pagar avisa por dónde sigue: por su importe, o por el Consejo si hubo diferencia", async () => {
+    abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago" }));
+    expect(await screen.findByText(/aprobación que le toca por su importe/)).toBeTruthy();
+    expect(screen.queryByText(/la aprueba el Consejo, sea cual sea/)).toBeNull();
+    cleanup();
+    abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", ejecucion: ejecucion(), diferencia_vigente: diferencia({ resolucion: "reclamo", recuperada_en: "2026-11-01T12:00:00Z" }) }));
+    expect(await screen.findByText(/la aprueba el Consejo, sea cual sea/)).toBeTruthy();
+    expect(screen.queryByText(/aprobación que le toca por su importe/)).toBeNull();
+  });
+
   it("un reclamo se cierra sin recuperar con motivo, y sin motivo no se manda", async () => {
     const d = diferencia({ resolucion: "reclamo", resuelta_en: "2026-11-01T12:00:00Z" });
     const CIERRE = `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia/${d.id}/cierre`;
@@ -1988,7 +1998,7 @@ describe("preparar, enviar y renovar", () => {
         [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }),
       });
       fireEvent.click(await boton("Volver a pagar"));
-      expect(await screen.findByText(/pasa otra vez por aprobación/)).toBeTruthy();
+      expect(await screen.findByText(/aprobación que le toca por su importe/)).toBeTruthy();
       expect(screen.queryByLabelText("Concepto")).toBeNull();
       expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[0])).toEqual({
         version_esperada: 1, importe_centavos: 1_500_000, moneda: "ARS", concepto: "Limpieza de octubre", proveedor_id: P1,

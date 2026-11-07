@@ -35,6 +35,8 @@ import {
   AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
   AVISO_LO_DECIDE_EL_CONSEJO,
+  AVISO_POR_EL_CONSEJO,
+  AVISO_POR_FRANJA,
   AVISO_NO_TRANSFIERAS,
   AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
@@ -539,7 +541,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
-  /** Los mismos datos: la versión nueva pasa otra vez por aprobación (§9). Para cambiar algo está
+  /** Los mismos datos: la versión nueva pasa otra vez por aprobación, por su franja si fue simple
+   * y por el Consejo si hubo una diferencia (decisión 11, desvío de §9). Para cambiar algo está
    * «Modificar». */
   function volverAPagar() {
     void acto.hacer({
@@ -560,7 +563,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             contrato_id: v.contrato_id,
           },
         }),
-      alTerminar: () => terminar("Listo: la orden tiene una versión nueva, con los mismos datos, y pasa otra vez por aprobación."),
+      alTerminar: () => terminar(`Listo: la orden tiene una versión nueva, con los mismos datos. ${diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}`),
       alFallar: siCambio,
     });
   }
@@ -646,7 +649,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 : diferencia?.recuperada_en == null
                   ? "El Consejo confirmó que no se pagó."
                   : "Se recuperó la plata."}{" "}
-              Para volver a pagarla, pasa otra vez por aprobación.
+              {diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}
             </p>
           )}
           {observacion !== null && (
