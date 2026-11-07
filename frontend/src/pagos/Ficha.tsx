@@ -36,6 +36,7 @@ import {
   AVISO_LECTURA_INCOMPLETA,
   AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_NO_TRANSFIERAS,
+  AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
@@ -832,6 +833,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   {AVISO_SIN_SALIDA}
                 </p>
               )}
+              {paso === "modificar" && (
+                <p className="aviso-error" role="note">
+                  {AVISO_PROVEEDOR_CAMBIADO}
+                </p>
+              )}
               {paso === "tomar_pago" && <p role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
               {confirmaToma && ficha.puede_tomar && (
                 <p className="aviso-error" role="alert">
@@ -974,7 +980,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         </button>
                       )}
                       {ficha.puede_modificar && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setModificando(true)}>
+                        <button type="button" className={paso === "modificar" ? undefined : "secundario"} disabled={enviando} onClick={() => setModificando(true)}>
                           Modificar
                         </button>
                       )}

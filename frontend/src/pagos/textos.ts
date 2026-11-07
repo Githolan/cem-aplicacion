@@ -16,6 +16,7 @@ export const VERBO: Record<Paso, string> = {
   corregir: "Corregir el registro",
   enviar: "Enviar a aprobar",
   renovar: "Renovar la aprobación",
+  modificar: "Modificar la orden",
   volver_a_pagar: "Volver a pagar",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
@@ -110,5 +111,7 @@ export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nu
 export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: compará los datos con el archivo.";
 export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
+export const AVISO_PROVEEDOR_CAMBIADO =
+  "El proveedor cambió después de aprobar esta orden: no se puede pagar. Modificala para que use los datos nuevos y vuelva a aprobación.";
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";

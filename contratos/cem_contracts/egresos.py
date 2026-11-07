@@ -1015,6 +1015,8 @@ class PasoPago(StrEnum):
     CORREGIR = "corregir"
     ENVIAR = "enviar"
     RENOVAR = "renovar"
+    MODIFICAR = "modificar"
+    """Aprobada, y el proveedor cambió: no se puede pagar hasta modificarla (`proveedor_cambiado`)."""
     VOLVER_A_PAGAR = "volver_a_pagar"
     RECHAZADA = "rechazada"
     APROBAR = "aprobar"
@@ -1060,6 +1062,7 @@ GRUPO_DE_PASO = {
     PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
     PasoPago.ENVIAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
+    PasoPago.MODIFICAR: GrupoPago.PARA_PREPARAR,
     PasoPago.VOLVER_A_PAGAR: GrupoPago.PARA_PREPARAR,
     PasoPago.RECHAZADA: GrupoPago.PARA_PREPARAR,
     PasoPago.PREPARAR_FALTANTE: GrupoPago.PARA_PREPARAR,

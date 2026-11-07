@@ -73,6 +73,8 @@ class AccionesOrden(HechosPago):
     """Quien pide podría pagar, y otra persona vio la cuenta y no dijo nada."""
     puede_tomar: bool = False
     tomar_desde: datetime | None = None
+    proveedor_cambiado: bool = False
+    """Quien pide prepara, y el proveedor cambió después de aprobar la orden."""
 
 
 SIN_ACCIONES = AccionesOrden()
@@ -152,6 +154,8 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
         case SituacionPago.PARA_PAGAR:
             if a.puede_renovar:
                 return PasoPago.RENOVAR
+            if a.proveedor_cambiado:
+                return PasoPago.MODIFICAR
             return PasoPago.PAGAR if ofrece_pagar(situacion, a) else None
         case SituacionPago.PAGANDO:
             if a.puede_subir_comprobante:

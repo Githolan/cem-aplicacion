@@ -1725,6 +1725,14 @@ describe("no se pagó", () => {
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 
+  it("aprobada con el proveedor cambiado, Modificar es lo principal y dice por qué", async () => {
+    abrirFicha(ficha({ orden: orden({ estado: "aprobada" }), situacion: "para_pagar", paso: "modificar", puede_modificar: true }));
+    const modificar = await boton("Modificar");
+    expect(modificar.className).not.toContain("secundario");
+    expect(screen.getByText(/El proveedor cambió después de aprobar/)).toBeTruthy();
+    sinBoton("Ver la cuenta para pagar");
+  });
+
   it("tomar el pago pide confirmar que no se transfirió, y no pide la cuenta", async () => {
     const tomado = { id: "01900000-0000-7000-8000-0000000000f1", orden_id: O1 };
     const api = abrirFicha({ ...SUBIR, paso: "tomar_pago", puede_subir_comprobante: false, puede_registrar: false, puede_reabrir_cuenta: false, puede_tomar: true }, {
