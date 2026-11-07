@@ -545,21 +545,26 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
    * la base. Si no se puede leer, dice solo lo que se sabe, y la bandeja muestra el resto. */
   function decirEnQueQuedo() {
     const hecho = "Listo: la orden tiene una versión nueva, con los mismos datos.";
+    // Si la ficha ya se cerró, la respuesta no mueve la pantalla que se abrió después.
+    const decir = (texto: string) => (montado.current ? terminar(texto) : alCambiar());
+    // La versión ya cambió: hasta saber en qué quedó, el botón no se vuelve a tocar.
+    acto.setEnviando(true);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/pagos/{orden_id}", { params: { path: ruta } })
       .then(({ data, response }) => {
         exigirSesion(response);
-        if (data === undefined) terminar(hecho);
-        else if (data.orden.estado === "aprobada") terminar("Listo: la orden quedó lista para pagar.");
+        if (data === undefined) decir(hecho);
+        else if (data.orden.estado === "aprobada") decir("Listo: la orden quedó lista para pagar.");
         else {
           const quienSigue = data.le_toca_a === null || data.le_toca_a === "vos" ? "" : ` ${TEXTO_LE_TOCA_A[data.le_toca_a]}`;
-          terminar(`Listo: la orden volvió a aprobación.${quienSigue}`);
+          decir(`Listo: la orden volvió a aprobación.${quienSigue}`);
         }
       })
       .catch((e: unknown) => {
-        if (e instanceof SinSesion) aEntrar();
-        else terminar(hecho);
-      });
+        if (e instanceof SinSesion && montado.current) aEntrar();
+        else decir(hecho);
+      })
+      .finally(() => acto.setEnviando(false));
   }
 
   /** Los mismos datos: la versión nueva pasa otra vez por aprobación, por su franja si fue simple

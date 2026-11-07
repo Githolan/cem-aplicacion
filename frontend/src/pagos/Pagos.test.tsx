@@ -2134,6 +2134,91 @@ describe("preparar, enviar y renovar", () => {
       expect(await screen.findByText("Listo: la orden tiene una versión nueva, con los mismos datos.")).toBeTruthy();
     });
 
+    type LecturaColgada = { soltar: (r: Response) => void; fallar: (e: Error) => void };
+    const OTRA_ORDEN: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    const FILA_OTRA = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
+
+    /** La lectura que sigue al envío queda colgada hasta que la prueba la suelta. */
+    function conLecturaColgada(extra: Respuestas = {}) {
+      const lectura: LecturaColgada = { soltar: () => undefined, fallar: () => undefined };
+      let mandada = false;
+      const api = abrirFicha(fallidaCon({}), {
+        ...LECTURAS,
+        [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => {
+          mandada = true;
+          return Response.json({ id: O1, version: 2 });
+        },
+        [`GET ${BASE}/pagos/${O1}`]: () =>
+          mandada ? new Promise<Response>((soltar, fallar) => Object.assign(lectura, { soltar, fallar })) : Response.json(fallidaCon({})),
+        ...extra,
+      });
+      return { api, lectura };
+    }
+
+    async function enviarYQuedarLeyendo(api: ReturnType<typeof vi.fn>) {
+      fireEvent.click(await boton("Enviar a aprobar de nuevo"));
+      await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)).toHaveLength(1));
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 20));
+      });
+    }
+
+    it.each<[string, (l: LecturaColgada) => void]>([
+      ["la lectura dice en qué quedó", (l) => l.soltar(Response.json(VUELTA_A_REVISION))],
+      ["la lectura falla", (l) => l.soltar(error("sin_servicio", 503))],
+      ["se cae la red", (l) => l.fallar(new TypeError("sin red"))],
+    ])("si mientras se lee en qué quedó se abrió otra orden, esa queda y la bandeja se relee: %s", async (_, terminarLectura) => {
+      ancho(true);
+      const { api, lectura } = conLecturaColgada({
+        [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("volver_a_pagar", "para_preparar"), FILA_OTRA),
+        [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA_ORDEN),
+      });
+      await enviarYQuedarLeyendo(api);
+      fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
+      expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+      const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
+      await act(async () => {
+        terminarLectura(lectura);
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(lugar()).toBe(`/pagos/${O2}`);
+      expect(screen.queryByText(/^Listo:/)).toBeNull();
+      expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
+    });
+
+    it("si mientras se lee en qué quedó se cambió de edificio, la ficha abierta en el otro queda", async () => {
+      ancho(true);
+      const otro = `/api/v1/consorcios/${C2}`;
+      const { api, lectura } = conLecturaColgada({
+        "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Azul", vinculos: [] }, { id: C2, nombre: "Bordó", vinculos: [] }]),
+        [`GET ${otro}/pagos/bandeja`]: bandejaCon(FILA_OTRA),
+        [`GET ${otro}/pagos/${O2}`]: () => Response.json(OTRA_ORDEN),
+      });
+      await enviarYQuedarLeyendo(api);
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      fireEvent.click(await screen.findByRole("link", { name: /Ascensores Ficticios SA/ }));
+      expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+      expect(lugar()).toBe(`/pagos/${O2}`);
+      await act(async () => {
+        lectura.soltar(Response.json(VUELTA_A_REVISION));
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(lugar()).toBe(`/pagos/${O2}`);
+      expect(screen.queryByText(/^Listo:/)).toBeNull();
+    });
+
+    it("mientras se lee en qué quedó, el botón no se puede tocar otra vez", async () => {
+      const { api, lectura } = conLecturaColgada();
+      await enviarYQuedarLeyendo(api);
+      expect((screen.getByRole("button", { name: "Enviar a aprobar de nuevo" }) as HTMLButtonElement).disabled).toBe(true);
+      await act(async () => {
+        lectura.soltar(Response.json(VUELTA_A_REVISION));
+        await new Promise((r) => setTimeout(r, 20));
+      });
+      expect(await screen.findByText("Listo: la orden volvió a aprobación. Le toca al Consejo.")).toBeTruthy();
+      expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)).toHaveLength(1);
+    });
+
     it("si el contrato ya no rige, enviar a aprobar de nuevo lo dice y queda Modificar", async () => {
       abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), {
         ...LECTURAS,
