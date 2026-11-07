@@ -27,7 +27,7 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
-import { Navegacion, useHayNavegacion } from "./Navegacion";
+import { Navegacion, PersonaEnCabecera, useNavegacion } from "./Navegacion";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
 import { Cotejo } from "./pagos/Cotejo";
@@ -289,7 +289,7 @@ function NoEncontrada() {
 
 export function App() {
   const [barra, setBarra] = useState<HTMLElement | null>(null);
-  const hayNavegacion = useHayNavegacion();
+  const { hay: hayNavegacion, nombre } = useNavegacion();
   return (
     <div className={hayNavegacion ? "aplicacion aplicacion--con-navegacion" : "aplicacion"}>
       {hayNavegacion && <Navegacion />}
@@ -302,6 +302,7 @@ export function App() {
         <div className="cabecera-fin">
           <div ref={setBarra} className="cabecera-punto" />
           <ModoLectura />
+          {nombre && <PersonaEnCabecera nombre={nombre} />}
         </div>
       </header>
       <main id="contenido">

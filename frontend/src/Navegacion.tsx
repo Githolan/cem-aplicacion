@@ -14,7 +14,7 @@ import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { cumpleEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
-import { useSesion } from "./sesion";
+import { useSesionConNombre } from "./sesion";
 
 interface Destino {
   ruta: string;
@@ -89,8 +89,29 @@ export function Navegacion() {
 }
 
 /** Se muestra solo con sesión: las pantallas públicas no piden ni los edificios ni las acciones. */
-export function useHayNavegacion(): boolean {
+export function useNavegacion(): { hay: boolean; nombre: string | null } {
   const { pathname } = useLocation();
   const privada = RUTAS_CON_NAVEGACION.some((ruta) => matchPath(ruta, pathname) !== null);
-  return useSesion(privada) === "con_sesion" && privada;
+  const { estado, nombre } = useSesionConNombre(privada);
+  const hay = estado === "con_sesion" && privada;
+  return { hay, nombre: hay ? nombre : null };
+}
+
+const iniciales = (nombre: string) =>
+  nombre
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((palabra) => palabra.charAt(0).toUpperCase())
+    .join("");
+
+/** Arriba, en tablet y PC: quién tiene la sesión. En el teléfono está en «Mi cuenta». */
+export function PersonaEnCabecera({ nombre }: { nombre: string }) {
+  return (
+    <NavLink to={RUTA_CUENTA} className="persona-cabecera">
+      <span className="persona-cabecera__avatar" aria-hidden="true">
+        {iniciales(nombre)}
+      </span>
+      <span className="persona-cabecera__nombre">{nombre}</span>
+    </NavLink>
+  );
 }

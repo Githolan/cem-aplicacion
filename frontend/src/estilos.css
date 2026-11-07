@@ -379,6 +379,47 @@ button.sutil:disabled {
   min-height: var(--tap-min);
 }
 
+/* Quién tiene la sesión: desde tablet, en la cabecera. */
+.persona-cabecera {
+  display: none;
+}
+
+@media (min-width: 769px) {
+  .persona-cabecera {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--tap-min);
+    max-width: 14rem;
+    padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--ink);
+    font-size: 0.875rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .persona-cabecera__avatar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+
+  .persona-cabecera__nombre {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 /* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
 .acciones-pantalla {
   display: flex;
