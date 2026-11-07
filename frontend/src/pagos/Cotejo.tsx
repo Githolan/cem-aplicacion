@@ -73,6 +73,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   const [tildados, setTildados] = useState<ReadonlySet<string>>(new Set());
   const [extracto, setExtracto] = useState<Extracto>({ tipo: "sin_archivo" });
   const [entrada, setEntrada] = useState(0);
+  const [cotejos, setCotejos] = useState(0);
   const acto = useActo(aEntrar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
 
@@ -93,7 +94,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           setAvisoLectura(sinLaFalla);
           setTope(data.tope_bytes);
           setMaximo(data.maximo_pagos);
-          setMoneda(data.moneda_extracto);
+          // La guardada solo sugiere: releer la lista no pisa lo que la persona ya eligió.
+          setMoneda((elegida) => elegida ?? data.moneda_extracto);
           setLectura((l) => ({
             tipo: "ok",
             // Una página más se suma a lo que ya se ve; volver a empezar la reemplaza.
@@ -143,6 +145,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
         }),
       alTerminar: ({ cotejados }) => {
         setTildados(new Set());
+        setCotejos((c) => c + 1);
         setAviso({ texto: cotejados === 0 ? "Esos pagos ya estaban cotejados." : `Listo: ${cantidad(cotejados, "quedó cotejado 1 pago", "pagos quedaron cotejados")}.`, ok: true });
         releer();
       },
@@ -171,6 +174,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
         }),
       alTerminar: (resultado) => {
         setExtracto({ tipo: "resultado", archivo, vista, resultado });
+        setCotejos((c) => c + 1);
         releer();
       },
       alFallar: (_, codigo) => {
@@ -337,7 +341,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
               </div>
             )}
           </section>
-          <YaCotejados consorcio={consorcio} enviando={enviando} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
+          {/* Después de cotejar, lo leído quedó viejo: vuelve a pedirse. */}
+          <YaCotejados key={cotejos} consorcio={consorcio} enviando={enviando} aEntrar={aEntrar} avisar={setAviso} deshacer={deshacer} />
         </div>
       )}
     </>

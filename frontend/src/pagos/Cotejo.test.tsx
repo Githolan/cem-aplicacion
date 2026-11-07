@@ -249,6 +249,26 @@ describe("a mano", () => {
     expect(await screen.findByText("Todavía no hay pagos cotejados.")).toBeTruthy();
   });
 
+  it("después de cotejar, lo ya cotejado se puede volver a pedir y trae lo nuevo", async () => {
+    let cotejados: unknown[] = [];
+    const simulado = backend({
+      [LISTA]: lista([elemento(P1)]),
+      [TILDAR]: () => {
+        cotejados = [{ ...elemento(P1), origen: "manual", cotejado_en: "2026-11-06T12:00:00Z" }];
+        return Response.json({ cotejados: 1 });
+      },
+      [`GET ${BASE}/pagos/cotejo/cotejados`]: () => Response.json({ elementos: cotejados, siguiente: null }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    expect(await screen.findByText("Todavía no hay pagos cotejados.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    expect(await screen.findByRole("button", { name: /Deshacer el cotejo de/ })).toBeTruthy();
+  });
+
   it("control: lo cotejado por un pago en que participó no ofrece deshacer", async () => {
     vi.stubGlobal("fetch", backend({
       [LISTA]: lista([]),
@@ -485,6 +505,27 @@ describe("con el extracto", () => {
     const parametros = new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams;
     expect(parametros.get("moneda")).toBe("USD");
     expect(parametros.get("fecha")).toBeNull();
+  });
+
+  it("la moneda elegida no vuelve a la guardada al pedir más de la lista", async () => {
+    const simulado = backend({
+      [LISTA]: lista([elemento(P1)], "pagina-2"),
+      [EXTRACTO]: () => Response.json(resultado()),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const moneda = (await screen.findByLabelText("Moneda del extracto")) as HTMLSelectElement;
+    fireEvent.change(moneda, { target: { value: "USD" } });
+    const lecturas = pedidos(simulado, LISTA).length;
+    fireEvent.click(await screen.findByRole("button", { name: "Ver más" }));
+    await waitFor(() => expect(pedidos(simulado, LISTA).length).toBeGreaterThan(lecturas));
+    await waitFor(() => expect((screen.getByLabelText("Moneda del extracto") as HTMLSelectElement).value).toBe("USD"));
+  });
+
+  it("control: sin elegir, la moneda es la guardada del edificio", async () => {
+    vi.stubGlobal("fetch", backend({}));
+    abrir();
+    await waitFor(() => expect((screen.getByLabelText("Moneda del extracto") as HTMLSelectElement).value).toBe("ARS"));
   });
 
   it("lo que coincide con un cotejo deshecho se cuenta aparte", async () => {
