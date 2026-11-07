@@ -17,7 +17,9 @@ declarar y para confirmar (`apertura_tomada`). Así, con la aprobación ya venci
 que no se pagó y la orden sale. Abrir la cuenta sigue siendo su acto, con sus barreras.
 
 **La verdad gana.** Quien vio la cuenta y vuelve con el comprobante todavía registra: si transfirió,
-tiene que poder decirlo. Las dos personas quedan separadas de conciliar (`exigir_no_ejecuto`).
+tiene que poder decirlo. Las dos personas quedan separadas de conciliar y de cotejar: quien toma
+entra en `exigir_no_ejecuto`, también con otra cuenta de la misma persona, aunque no haya abierto la
+cuenta.
 
 **Sin registro.** Con un registro observado no se toma: la plata pudo haber salido, y lo corrige
 quien lo registró.
@@ -167,7 +169,8 @@ create function nucleo.tomar_pago_manual(orden uuid, version_vista integer, huel
 
 create function nucleo.tomas_pago_manual_lectura(orden uuid, facultad text, actor uuid,
                                                  origen_pedido text, sesion uuid)
-  returns table (ejecucion_id uuid, tomado_por_nombre text, tomada_en timestamptz)
+  returns table (ejecucion_id uuid, orden_id uuid, tomado_por uuid, tomado_por_nombre text,
+                 tomada_en timestamptz)
   language plpgsql volatile security definer
   set search_path = pg_catalog, pg_temp
   as $$
@@ -176,11 +179,11 @@ create function nucleo.tomas_pago_manual_lectura(orden uuid, facultad text, acto
   begin
     perform nucleo.exigir_lectura_egresos(c, facultad, actor, origen_pedido, sesion);
     return query
-      select t.ejecucion_id, r.nombre, t.tomada_en
+      select t.ejecucion_id, e.orden_id, t.tomado_por, r.nombre, t.tomada_en
         from nucleo.toma_pago_manual t
         join nucleo.ejecucion_orden_pago e on e.consorcio_id = c and e.id = t.ejecucion_id
         join nucleo.persona r on r.id = t.tomado_por
-       where t.consorcio_id = c and e.orden_id = orden
+       where t.consorcio_id = c and (orden is null or e.orden_id = orden)
        order by t.paso;
   end
   $$;
@@ -194,6 +197,28 @@ INTERNAS = (
     "nucleo.espera_el_pago_desde(uuid, nucleo.orden_pago, uuid, uuid)",
     "nucleo.otro_tiene_el_pago(uuid, uuid)",
     "nucleo.apertura_tomada(nucleo.apertura_cuenta_pago_manual)",
+)
+
+NO_EJECUTO = "nucleo.exigir_no_ejecuto(uuid, uuid, uuid, uuid)"
+NO_EJECUTO_CAMBIOS = (
+    (
+        "                   where x.ejecucion_id = any(de_la_orden)"
+        " and x.identidad_registro = identidad)\n"
+        "    then\n",
+        "                   where x.ejecucion_id = any(de_la_orden)"
+        " and x.identidad_registro = identidad)\n"
+        "       or exists (select 1 from nucleo.toma_pago_manual t\n"
+        "                   where t.ejecucion_id = any(de_la_orden)"
+        " and t.identidad_tomo = identidad)\n"
+        "    then\n",
+    ),
+    (
+        "              where x.ejecucion_id = any(de_la_orden) loop\n",
+        "              where x.ejecucion_id = any(de_la_orden)\n"
+        "             union\n"
+        "             select t.tomado_por from nucleo.toma_pago_manual t\n"
+        "              where t.ejecucion_id = any(de_la_orden) loop\n",
+    ),
 )
 
 CUENTA_CAMBIOS = (
@@ -329,6 +354,7 @@ REEMPLAZOS = (
     (SIN_SALIDA, SIN_SALIDA_CAMBIOS),
     (FALTA, FALTA_CAMBIOS),
     (EXPORTAR, EXPORTAR_CAMBIOS),
+    (NO_EJECUTO, NO_EJECUTO_CAMBIOS),
 )
 
 GUARDA_DOWNGRADE = """

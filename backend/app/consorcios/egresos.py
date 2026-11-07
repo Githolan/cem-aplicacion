@@ -1116,11 +1116,16 @@ def baja_contrato(
 
 
 def _puede_resolver(
-    c: Connection, conciliar: Permiso, o: OrdenPago, registraron: set[UUID], declararon: set[UUID]
+    c: Connection,
+    conciliar: Permiso,
+    o: OrdenPago,
+    registraron: set[UUID],
+    declararon: set[UUID],
+    tomaron: set[UUID],
 ) -> tuple[bool, bool]:
     """Si quien lee queda separado de la orden para conciliar y para confirmar que no se pagó: la
-    separación de esas rutas, con todos los que registraron o declararon en cualquier ejecución
-    de la orden, como `nucleo.exigir_no_ejecuto`.
+    separación de esas rutas, con todos los que registraron, declararon o tomaron el pago en
+    cualquier ejecución de la orden, como `nucleo.exigir_no_ejecuto`.
 
     Quién vio la cuenta no lo lee `cem_app`. Confirmar no lo necesita: con una declaración
     `confirmable`, todos los que la vieron declararon, y por eso declarar cuenta. Conciliar sí:
@@ -1129,12 +1134,40 @@ def _puede_resolver(
     puede hacer. No audita ni concede: las rutas vuelven a decidir."""
     if _ejecutar(c, conciliar, PREPARO, {"o": o.id}).scalar_one():
         return False, False
-    personas = list(registraron | declararon)
+    personas = list(registraron | declararon | tomaron)
     decisiones = conciliar.decidir_en(
         c, [Entidad(preparado_por=o.preparada_por, ejecutado_por=p) for p in personas]
     )
     negadas = {p for p, d in zip(personas, decisiones, strict=True) if not d.permitido}
-    return bool(registraron) and negadas.isdisjoint(registraron), bool(personas) and not negadas
+    concilia = bool(registraron) and negadas.isdisjoint(registraron | tomaron)
+    return concilia, bool(personas) and not negadas
+
+
+def _tomas(c: Connection, lector: Permiso, orden: UUID | None):
+    return _ejecutar(
+        c, lector,
+        "select * from nucleo.tomas_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
+        {"o": orden, "f": LEE_COMO[lector.accion]},
+    ).mappings().all()  # fmt: skip
+
+
+def _quienes_tomaron(c: Connection, lector: Permiso, orden: UUID | None) -> dict[UUID, set[UUID]]:
+    """Quiénes tomaron el pago en cada orden: ocupan el lugar de quien ejecutó, aunque no hayan
+    abierto la cuenta."""
+    tomaron: dict[UUID, set[UUID]] = {}
+    for fila in _tomas(c, lector, orden):
+        tomaron.setdefault(fila["orden_id"], set()).add(fila["tomado_por"])
+    return tomaron
+
+
+def _verificar_no_tomo(
+    lector: Permiso, permiso: Permiso, motor, orden_id: UUID, preparada_por: UUID
+) -> None:
+    """La separación con quien tomó el pago, como con quien registró."""
+    with _lectura(lector, motor) as c:
+        tomaron = _quienes_tomaron(c, lector, orden_id).get(orden_id, set())
+    for persona in tomaron:
+        permiso.verificar(Entidad(preparado_por=preparada_por, ejecutado_por=persona))
 
 
 def _leer_ejecuciones(c: Connection, permiso: Permiso, orden: UUID | None):
@@ -1177,6 +1210,7 @@ def _pagos_manuales(
     ejecuciones, pagos, registraron, declaraciones, declararon = _leer_ejecuciones(
         c, permiso, orden
     )
+    tomaron = _quienes_tomaron(c, permiso, orden)
     alcanza_conciliar = alcanza(CONCILIAR, conciliar.ctx.autorizacion)
     elementos = []
     for e in ejecuciones:
@@ -1193,7 +1227,12 @@ def _pagos_manuales(
         concilia = confirma = False
         if alcanza_conciliar and (por_conciliar or any(d["confirmable"] for d in declaradas)):
             concilia, confirma = _puede_resolver(
-                c, conciliar, o, registraron.get(o.id, set()), declararon.get(o.id, set())
+                c,
+                conciliar,
+                o,
+                registraron.get(o.id, set()),
+                declararon.get(o.id, set()),
+                tomaron.get(o.id, set()),
             )
         elementos.append(OrdenConPagoManual(
             orden=o, puede_conciliar=por_conciliar and concilia,
@@ -1415,6 +1454,7 @@ def conciliar_pago_manual(
     permiso.verificar(Entidad(
         preparado_por=actual.orden.preparada_por, ejecutado_por=pago.registrado_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         estado = _ejecutar(
@@ -1481,6 +1521,7 @@ def confirmar_pago_no_realizado(
     permiso.verificar(Entidad(
         preparado_por=actual.orden.preparada_por, ejecutado_por=declarada.declarado_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         _ejecutar(
@@ -1621,6 +1662,7 @@ def _verificar_quien_resuelve(
     permiso.verificar(Entidad(
         preparado_por=ordenes[0].preparada_por, ejecutado_por=diferencia.registrada_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, ordenes[0].preparada_por)
 
 
 @router.post(
@@ -1885,12 +1927,9 @@ def _lectura_del_comprobante(
 def _toma_vigente(
     c: Connection, lector: Permiso, orden: UUID, ejecucion: UUID
 ) -> TomaVigente | None:
-    filas = _ejecutar(
-        c, lector,
-        "select * from nucleo.tomas_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
-        {"o": orden, "f": LEE_COMO[lector.accion]},
-    ).mappings().all()  # fmt: skip
-    ultima = next((f for f in reversed(filas) if f["ejecucion_id"] == ejecucion), None)
+    ultima = next(
+        (f for f in reversed(_tomas(c, lector, orden)) if f["ejecucion_id"] == ejecucion), None
+    )
     if ultima is None:
         return None
     return TomaVigente(tomado_por_nombre=ultima["tomado_por_nombre"], tomada_en=ultima["tomada_en"])

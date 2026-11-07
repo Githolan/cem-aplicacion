@@ -22,10 +22,24 @@ from tests.test_circuito_pagos_0072 import (
     paso,
     segundo_ejecutor,
 )
+from tests.test_cotejo_0074 import tildar
 from tests.test_egresos_1a import envejecer
 from tests.test_orden_pago_neutra import huella
-from tests.test_pago_manual_0055 import emitida, ver
-from tests.test_rutas_egresos import cliente, codigo, post, url
+from tests.test_pago_manual_0055 import (
+    CONCILIAR,
+    REGISTRAR,
+    acta,
+    emitida,
+    evidencia,
+    llamar,
+    niega,
+    otorgar,
+    otra_cuenta_en_el_consejo,
+    ver,
+)
+from tests.test_pague_otra_cosa_0075 import DIFERENCIA
+from tests.test_pague_otra_cosa_0075 import datos as datos_diferencia
+from tests.test_rutas_egresos import cliente, codigo, get, post, url
 
 pytestmark = pytest.mark.db
 # ruff: noqa: F811
@@ -242,3 +256,100 @@ def test_rls_otro_consorcio_no_ve_la_toma(motor_migrate, motor_app, e):
             c.execute(text("revoke select on nucleo.toma_pago_manual from cem_app"))
     assert propias == 1  # control: la consulta ve la fila desde su consorcio
     assert ajenas == 0
+
+
+# Quien tomó ocupa el lugar de quien ejecutó ------------------------------------------------------
+
+
+def puede_tomar(motor_migrate, e, persona) -> None:
+    with motor_migrate.connect() as c:
+        m = c.execute(
+            text("select id from nucleo.mandato where consorcio_id = :c and persona_id = :p"),
+            {"c": e.cons, "p": persona},
+        ).scalar_one()
+    a = acta(motor_migrate, e)
+    for facultad in ("egresos.ejecutar_pago", "egresos.preparar_orden"):
+        otorgar(motor_migrate, e.cons, m, a, facultad)
+
+
+def tomada_por_un_consejero(motor_migrate, e):
+    """`mc2` toma el pago sin abrir la cuenta y vuelve quien la vio: `adm` lo registra."""
+    puede_tomar(motor_migrate, e, e.mc2)
+    o = emitida(motor_migrate, e)
+    ver(motor_migrate, e, e.adm, o)
+    viejo(motor_migrate, o)
+    assert tomar(motor_migrate, e, e.mc2, o).status_code == 201
+    assert aperturas(motor_migrate, o) == 1  # no abrió la cuenta
+    return o
+
+
+def por_conciliar(motor_migrate, e):
+    o = tomada_por_un_consejero(motor_migrate, e)
+    return o, llamar(motor_migrate, e, e.adm, REGISTRAR, **evidencia(motor_migrate, e, o))
+
+
+def conciliacion(e, quien, o, p):
+    camino = f"ordenes-pago/{o}/pago-manual/{p}/conciliacion"
+    return post(e, quien, camino, {"resultado": "conforme"})
+
+
+def ofrece_conciliar(e, quien, o) -> bool:
+    [elemento] = [
+        x for x in get(e, quien, "pagos-manuales/revision").json()["elementos"]
+        if x["orden"]["id"] == str(o)
+    ]  # fmt: skip
+    return elemento["puede_conciliar"]
+
+
+def test_quien_tomo_no_concilia_lo_que_registro_el_pagador(motor_migrate, e):
+    o, p = por_conciliar(motor_migrate, e)
+    datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
+    niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)  # la base
+    assert codigo(conciliacion(e, e.mc2, o, p)) == (403, "sin_permiso")  # la API, antes
+    assert ficha(e, e.mc2, o)["puede_conciliar"] is False
+    assert ofrece_conciliar(e, e.mc2, o) is False
+    # Control: otro consejero que no tomó sí.
+    assert ficha(e, e.mc1, o)["puede_conciliar"] is True
+    assert ofrece_conciliar(e, e.mc1, o) is True
+    assert conciliacion(e, e.mc1, o, p).status_code == 200
+
+
+def test_quien_tomo_tampoco_concilia_con_otra_cuenta(motor_migrate, motor_app, e):
+    o, p = por_conciliar(motor_migrate, e)
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
+    datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
+    niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_ejecuto", **datos)
+    assert codigo(conciliacion(e, otra, o, p)) == (403, "sin_permiso")
+    assert ficha(e, otra, o)["puede_conciliar"] is False
+
+
+def test_quien_tomo_no_coteja_ni_deshace_el_cotejo(motor_migrate, motor_app, e):
+    o, p = por_conciliar(motor_migrate, e)
+    assert conciliacion(e, e.mc1, o, p).status_code == 200
+    otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
+    for quien in (e.mc2, otra):
+        assert codigo(tildar(e, quien, p)) == (403, "no_es_quien_ejecuto")
+        [elemento] = get(e, quien, "pagos/cotejo").json()["elementos"]
+        assert elemento["puede_cotejar"] is False  # la pantalla no lo ofrece
+    assert tildar(e, e.mc1, p).status_code == 200  # control
+    motivo = {"motivo": "SINTETICO: era otro débito"}
+    r = post(e, e.mc2, f"pagos/cotejo/{p}/anulacion", motivo)
+    assert codigo(r) == (403, "no_es_quien_ejecuto")
+    assert post(e, e.mc1, f"pagos/cotejo/{p}/anulacion", motivo).status_code == 200  # control
+
+
+def test_quien_tomo_no_confirma_que_no_se_pago(motor_migrate, e):
+    o = tomada_por_un_consejero(motor_migrate, e)
+    d = declarada(motor_migrate, e, e.adm, o)
+    camino = f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion"
+    assert codigo(post(e, e.mc2, camino, {})) == (403, "sin_permiso")
+    assert post(e, e.mc1, camino, {}).status_code == 200  # control
+
+
+def test_quien_tomo_no_resuelve_la_diferencia(motor_migrate, e):
+    o = tomada_por_un_consejero(motor_migrate, e)
+    d = llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos_diferencia(motor_migrate, e, o))
+    camino = f"ordenes-pago/{o}/pago-manual/diferencia/{d}/resolucion"
+    resolver = {"resolucion": "reclamo"}
+    assert codigo(post(e, e.mc2, camino, resolver)) == (403, "sin_permiso")
+    assert post(e, e.mc1, camino, resolver).status_code == 200  # control
