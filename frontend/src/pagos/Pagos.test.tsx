@@ -2588,7 +2588,9 @@ describe("consultar pagos", () => {
     const { container } = abrir("/pagos/consulta");
     const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
     expect(fila.getAttribute("href")).toBe(`/pagos/${O1}`);
-    expect(fila.textContent).toContain("Operación 0001234567");
+    const celdas = within(screen.getByRole("table", { name: "Pagos" }));
+    expect(celdas.getByRole("columnheader", { name: "Operación" })).toBeTruthy();
+    expect(celdas.getByRole("cell", { name: "0001234567" })).toBeTruthy();
     await sinFaltasDeAccesibilidad(container);
 
     fireEvent.change(screen.getByLabelText(/número de operación/), { target: { value: "Limpieza" } });

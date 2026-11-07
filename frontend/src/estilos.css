@@ -604,6 +604,13 @@ main:has(.tabla-lista) {
   overflow-wrap: anywhere;
 }
 
+/* El nombre que abre el detalle: 44 px de alto al tocarlo. */
+.enlace-fila {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
 .tabla-lista__dato {
   margin: var(--space-1) 0 0;
   color: var(--ink-soft);

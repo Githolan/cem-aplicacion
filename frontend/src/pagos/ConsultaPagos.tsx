@@ -125,24 +125,40 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           )}
           {lectura.tipo === "ok" && lectura.elementos.length === 0 && <p className="tarjeta">No encontramos pagos.</p>}
           {lectura.tipo === "ok" && lectura.elementos.length > 0 && (
-            <ul className="filas-pago" aria-label="Pagos">
-              {lectura.elementos.map((e) => (
-                <li key={e.orden_id}>
-                  <Link to={rutaFicha(e.orden_id)} state={{ consorcio }} className="fila-pago">
-                    <span className="fila-pago__arriba">
-                      <strong>{e.proveedor}</strong>
-                      <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
-                    </span>
-                    <span>{e.concepto}</span>
-                    <span className="fila-pago__verbo" data-tono={TONO_SITUACION[e.situacion]}>
-                      {TEXTO_SITUACION[e.situacion]}
-                    </span>
-                    {e.importe_pagado_centavos !== null && <span>Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</span>}
-                    {e.numero_operacion !== null && <span>Operación {e.numero_operacion}</span>}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <div className="tabla-lista tabla-tarjetas">
+              <table aria-label="Pagos">
+                <thead>
+                  <tr>
+                    <th scope="col">Proveedor</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Operación</th>
+                    <th scope="col">Importe</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lectura.elementos.map((e) => (
+                    <tr key={e.orden_id}>
+                      <th scope="row">
+                        <Link to={rutaFicha(e.orden_id)} state={{ consorcio }} className="enlace-fila">
+                          {e.proveedor}
+                        </Link>
+                        <p className="tabla-lista__dato">{e.concepto}</p>
+                      </th>
+                      <td data-etiqueta="Estado">
+                        <span className="fila-pago__verbo" data-tono={TONO_SITUACION[e.situacion]}>
+                          {TEXTO_SITUACION[e.situacion]}
+                        </span>
+                      </td>
+                      <td data-etiqueta="Operación">{e.numero_operacion}</td>
+                      <td data-etiqueta="Importe">
+                        {importe(e.importe_centavos, e.moneda)}
+                        {e.importe_pagado_centavos !== null && <p className="tabla-lista__dato">Se pagó {importe(e.importe_pagado_centavos, e.moneda)}</p>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {siguiente !== null && (
             <div className="formulario">
