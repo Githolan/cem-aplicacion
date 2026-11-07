@@ -287,7 +287,7 @@ export function Contactos() {
                     <>
                       <dt>Teléfono</dt>
                       <dd>
-                        <a href={`tel:${c.telefono.replace(/[^+0-9]/g, "")}`}>{c.telefono}</a>
+                        <a className="enlace-telefono" href={`tel:${c.telefono.replace(/[^+0-9]/g, "")}`}>{c.telefono}</a>
                       </dd>
                     </>
                   )}

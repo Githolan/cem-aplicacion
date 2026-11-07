@@ -364,6 +364,13 @@ button.sutil:disabled {
   }
 }
 
+/* El número se toca con el dedo: 44 px de alto aunque el texto mida menos. */
+.enlace-telefono {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
 /* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
 .acciones-pantalla {
   display: flex;
