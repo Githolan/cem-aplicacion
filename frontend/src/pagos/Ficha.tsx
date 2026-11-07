@@ -64,7 +64,7 @@ type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
-type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
+type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
 type LecturaComprobante = components["schemas"]["LecturaComprobante"];
@@ -501,6 +501,21 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
+  function cerrarReclamo(d: Diferencia, texto: string) {
+    void acto.hacer({
+      quePide: ["cerrar-reclamo", orden, d.id, texto],
+      nombre: "cerrar el reclamo",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/cierre", {
+          headers: encabezadoCsrf(),
+          params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { motivo: texto },
+        }),
+      alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
+      alFallar: siCambio,
+    });
+  }
+
   /** No da la cuenta: suelta a quien la vio. La ficha que vuelve dice qué sigue. */
   function tomar() {
     void acto.hacer({
@@ -554,6 +569,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     if (texto === "") return;
     if (conMotivo === "rechazar") rechazar(texto);
     else if (conMotivo === "declarar") declarar(texto);
+    else if (conMotivo === "cerrar") {
+      if (diferencia !== null) cerrarReclamo(diferencia, texto);
+    }
     else if (pago !== undefined) conciliar(pago.id, conMotivo === "observar" ? "observado" : "conforme", texto);
   }
 
@@ -561,6 +579,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const motivoAbierto =
     (conMotivo === "rechazar" && ficha.puede_rechazar) ||
     (conMotivo === "declarar" && declara) ||
+    (conMotivo === "cerrar" && ficha.puede_recuperar) ||
     ((conMotivo === "conforme" || conMotivo === "observar") && ficha.puede_conciliar)
       ? conMotivo
       : null;
@@ -569,6 +588,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     declarar: { etiqueta: "Por qué no se pagó", boton: "Declarar que no se pagó", largo: 200 },
     conforme: { etiqueta: "Por qué lo aceptás fuera de término", boton: "Dar el pago por conforme", largo: 300 },
     observar: { etiqueta: "Qué no coincide", boton: "Observar el pago", largo: 300 },
+    cerrar: { etiqueta: "Por qué se cierra sin recuperar", boton: "Cerrar sin recuperar", largo: 300 },
   };
 
   const estaModificando = modificando && ficha.puede_modificar;
@@ -619,8 +639,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           )}
           {situacion === "no_se_pago" && (
             <p>
-              {diferencia?.recuperada_en == null ? "El Consejo confirmó que no se pagó." : "Se recuperó la plata."} Para volver a pagarla, pasa otra vez por
-              aprobación.
+              {diferencia?.cerrada_en != null
+                ? `Se cerró el reclamo sin recuperar la plata: ${diferencia.motivo_cierre}.`
+                : diferencia?.recuperada_en == null
+                  ? "El Consejo confirmó que no se pagó."
+                  : "Se recuperó la plata."}{" "}
+              Para volver a pagarla, pasa otra vez por aprobación.
             </p>
           )}
           {observacion !== null && (
@@ -888,6 +912,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                       {ficha.puede_recuperar && diferencia !== null && (
                         <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
                           Ya recuperamos la plata
+                        </button>
+                      )}
+                      {ficha.puede_recuperar && diferencia !== null && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("cerrar")}>
+                          Cerrar sin recuperar
                         </button>
                       )}
                       {paso === "enviar" && ficha.puede_enviar && (

@@ -515,6 +515,24 @@
         "title": "CausaBaja",
         "type": "string"
       },
+      "CierreReclamo": {
+        "additionalProperties": false,
+        "description": "`POST …/pago-manual/diferencia/{d}/cierre`: la plata reclamada no vuelve. Otro ser humano del\nConsejo cierra el reclamo: la orden queda Fallida y la diferencia, en la historia.",
+        "properties": {
+          "motivo": {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "CierreReclamo",
+        "type": "object"
+      },
       "CodigoEntrada": {
         "description": "`POST /api/v1/auth/contrasena/segundo-factor`: el código de la aplicación o uno de\nrecuperación (que queda gastado).",
         "properties": {
@@ -2342,6 +2360,19 @@
       "DiferenciaPagoManual": {
         "description": "Lo que se pagó de verdad, sin la cuenta completa.",
         "properties": {
+          "cerrada_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si el reclamo se cerró sin recuperar la plata.",
+            "title": "Cerrada En"
+          },
           "cuenta_ultimos_digitos": {
             "title": "Cuenta Ultimos Digitos",
             "type": "string"
@@ -2397,6 +2428,17 @@
           "moneda_orden": {
             "title": "Moneda Orden",
             "type": "string"
+          },
+          "motivo_cierre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo Cierre"
           },
           "numero_operacion": {
             "title": "Numero Operacion",
@@ -2510,6 +2552,8 @@
           "resuelta_por",
           "resuelta_en",
           "recuperada_en",
+          "cerrada_en",
+          "motivo_cierre",
           "falta_centavos",
           "sobra_centavos",
           "se_puede_dar_por_pagada"
@@ -3505,7 +3549,7 @@
             "type": "boolean"
           },
           "puede_recuperar": {
-            "description": "Si puede decir que se recuperó la plata reclamada.",
+            "description": "Si puede decir que se recuperó la plata reclamada o cerrar el reclamo sin recuperarla.",
             "title": "Puede Recuperar",
             "type": "boolean"
           },
@@ -14378,6 +14422,100 @@
           }
         },
         "summary": "Registrar lo que salió del banco cuando no es lo aprobado: lo resuelve el Consejo",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/cierre": {
+      "post": {
+        "operationId": "cerrar_reclamo_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_diferencia__diferencia_id__cierre_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diferencia_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diferencia Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CierreReclamo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagoManualCambiado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cerrar un reclamo sin recuperar la plata (otro miembro del Consejo): queda Fallida y no se imputa en la liquidación",
         "tags": [
           "egresos"
         ]

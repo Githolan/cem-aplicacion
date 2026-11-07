@@ -46,6 +46,7 @@ from cem_contracts.egresos import (
     AprobacionRegistrada,
     BandejaPagos,
     CampoComprobante,
+    CierreReclamo,
     ComprobanteActual,
     ComprobantePagoNuevo,
     ComprobanteSubido,
@@ -1599,6 +1600,36 @@ def recuperar_diferencia_pago(
             conn, permiso,
             "select nucleo.recuperar_diferencia_pago_manual(:o, :d, :actor, 'api', :sesion)",
             {"o": orden_id, "d": diferencia_id},
+        )  # fmt: skip
+        return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/"
+    "cierre",
+    response_model=PagoManualCambiado,
+    summary="Cerrar un reclamo sin recuperar la plata (otro miembro del Consejo): queda Fallida y"
+    " no se imputa en la liquidación",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def cerrar_reclamo(
+    orden_id: UUID,
+    diferencia_id: UUID,
+    cierre: CierreReclamo,
+    revision: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(CONCILIAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    _verificar_quien_resuelve(revision, permiso, motor, orden_id, diferencia_id)
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.cerrar_reclamo_sin_recuperar(:o, :d, :motivo, :actor, 'api', :sesion)",
+            {"o": orden_id, "d": diferencia_id, "motivo": cierre.motivo},
         )  # fmt: skip
         return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
 

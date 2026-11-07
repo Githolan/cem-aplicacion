@@ -779,6 +779,15 @@ class DiferenciaRegistrada(BaseModel):
     orden_id: UUID
 
 
+class CierreReclamo(BaseModel):
+    """`POST …/pago-manual/diferencia/{d}/cierre`: la plata reclamada no vuelve. Otro ser humano del
+    Consejo cierra el reclamo: la orden queda Fallida y la diferencia, en la historia."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: _texto(1, 300)
+
+
 class ResolucionDiferenciaPago(BaseModel):
     """`POST …/pago-manual/diferencia/{d}/resolucion`: otro ser humano del Consejo. Dar por pagado
     lo real vale solo para otro importe en la moneda de la orden (`solo_reclamo`)."""
@@ -813,6 +822,8 @@ class DiferenciaPagoManual(BaseModel):
     resuelta_por: UUID | None
     resuelta_en: datetime | None
     recuperada_en: datetime | None
+    cerrada_en: datetime | None = Field(description="Si el reclamo se cerró sin recuperar la plata.")
+    motivo_cierre: str | None
     falta_centavos: int | None = Field(
         description="Cuánto faltó pagar, si fue de menos en la moneda de la orden."
     )
@@ -1264,7 +1275,10 @@ class FichaPago(BaseModel):
     puede_resolver_diferencia: bool = Field(
         description="Si puede resolver la diferencia sin resolver."
     )
-    puede_recuperar: bool = Field(description="Si puede decir que se recuperó la plata reclamada.")
+    puede_recuperar: bool = Field(
+        description="Si puede decir que se recuperó la plata reclamada o cerrar el reclamo sin"
+        " recuperarla."
+    )
     puede_preparar_faltante: bool = Field(
         description="Si le corresponde preparar una orden por lo que faltó pagar."
     )

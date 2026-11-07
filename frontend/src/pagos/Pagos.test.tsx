@@ -117,7 +117,7 @@ function diferencia(extra: Partial<Diferencia> = {}): Diferencia {
     importe_orden_centavos: 1_500_000, moneda_orden: "ARS", numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
     documento_id: DOC, version_documento_id: ARCHIVO, explicacion: "Me equivoqué al escribirlo", fuera_de_termino: false,
     registrada_por: PERSONA, registrada_por_nombre: "Marta Ficticia", registrada_en: "2026-10-31T13:00:00Z", resolucion: null,
-    resuelta_por: null, resuelta_en: null, recuperada_en: null, falta_centavos: 250_000, sobra_centavos: null,
+    resuelta_por: null, resuelta_en: null, recuperada_en: null, cerrada_en: null, motivo_cierre: null, falta_centavos: 250_000, sobra_centavos: null,
     se_puede_dar_por_pagada: true, ...extra,
   };
 }
@@ -1723,6 +1723,22 @@ describe("no se pagó", () => {
     abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_reabrir_cuenta: false });
     expect(await boton("No se pudo pagar")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
+  });
+
+  it("un reclamo se cierra sin recuperar con motivo, y sin motivo no se manda", async () => {
+    const d = diferencia({ resolucion: "reclamo", resuelta_en: "2026-11-01T12:00:00Z" });
+    const CIERRE = `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia/${d.id}/cierre`;
+    const api = abrirFicha(ficha({
+      orden: orden({ estado: "en_verificacion" }), situacion: "reclamo", paso: "resolver_diferencia", puede_recuperar: true, ejecucion: ejecucion(), diferencia_vigente: d,
+    }), { [`POST ${CIERRE}`]: () => Response.json({ orden_id: O1, estado: "fallida" }) });
+    fireEvent.click(await boton("Cerrar sin recuperar"));
+    const enviar = (await boton("Cerrar sin recuperar")) as HTMLButtonElement;
+    expect(enviar.disabled).toBe(true);
+    expect(pedidos(api, "POST", CIERRE)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Por qué se cierra sin recuperar"), { target: { value: "SINTETICO: el banco no devuelve" } });
+    fireEvent.click(enviar);
+    await vi.waitFor(() => expect(pedidos(api, "POST", CIERRE)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", CIERRE)[0])).toEqual({ motivo: "SINTETICO: el banco no devuelve" });
   });
 
   it("aprobada con el proveedor cambiado, Modificar es lo principal y dice por qué", async () => {
