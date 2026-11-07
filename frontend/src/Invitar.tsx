@@ -569,7 +569,7 @@ export function Invitar() {
                           <button type="button" onClick={() => retirar(i)} disabled={enviando}>
                             Sí, retirarla
                           </button>{" "}
-                          <button type="button" onClick={() => setARetirar(null)} disabled={enviando}>
+                          <button type="button" className="secundario" onClick={() => setARetirar(null)} disabled={enviando}>
                             No
                           </button>
                         </div>

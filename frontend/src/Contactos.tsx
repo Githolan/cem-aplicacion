@@ -17,7 +17,7 @@ import { RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { AlInicioSinEdificios, REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /contactos (H2b 2b-7b; doc/diseno/H2b_7_Diseno.md §5 del repositorio CEM): los contactos
 // de emergencia vigentes del edificio, que no son personales, para tenerlos a mano también sin
@@ -173,6 +173,8 @@ export function Contactos() {
     consultarEdificios();
   }
 
+  if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
+
   return (
     <>
       <h1>Contactos de emergencia</h1>
@@ -204,7 +206,6 @@ export function Contactos() {
 
       <div role="status" aria-live="polite">
         {pantalla.tipo === "cargando" && <p className="tarjeta">Consultando…</p>}
-        {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Todavía no participás de ningún edificio.</p>}
         {pantalla.tipo === "copias" && pantalla.consorcios.length === 0 && (
           <div className="tarjeta">
             <p className="aviso-error">
@@ -214,7 +215,7 @@ export function Contactos() {
             {botonReconsultar()}
           </div>
         )}
-        {pantalla.tipo !== "cargando" && pantalla.tipo !== "sin_consorcios" && pantalla.consorcios.length > 0 && estado()}
+        {pantalla.tipo !== "cargando" && pantalla.consorcios.length > 0 && estado()}
       </div>
 
       {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}

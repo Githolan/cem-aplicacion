@@ -356,7 +356,8 @@ describe("página /contactos", () => {
     expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
     caidos = false;
     fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
-    expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
+    expect(await screen.findByText(/^Todavía no participás de ningún edificio./)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
     expect(copiaGuardada()).toBeNull();
   });

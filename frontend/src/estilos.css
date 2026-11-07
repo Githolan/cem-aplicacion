@@ -351,6 +351,12 @@ button.secundario {
   color: var(--ink);
 }
 
+button.secundario:disabled,
+button.sutil:disabled {
+  box-shadow: none;
+  color: var(--ink-muted);
+}
+
 /* Invitaciones: el historial plegado (aceptadas, retiradas y vencidas) con un resumen de 44 px. */
 .historial {
   margin-top: 1rem;
@@ -400,6 +406,15 @@ button.secundario {
   text-decoration: none;
 }
 
+/* Lo que sigue en importancia a lo del rol: sin caja, para que no compita con él. */
+.enlace-boton--sutil,
+button.sutil {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
 /* Móvil (≤ 480 px = 30em): tarjetas con menos relleno, nunca texto más chico, y el botón de envío
    de los formularios de /invitaciones y /mandatos a todo el ancho. */
 @media (max-width: 30em) {
@@ -417,6 +432,11 @@ button.secundario {
 
   .formulario-movil > button[type="submit"] {
     justify-self: stretch;
+  }
+
+  .salidas-pago .enlace-boton {
+    flex: 1 1 100%;
+    justify-content: center;
   }
 }
 
@@ -931,6 +951,73 @@ fieldset.formulario legend {
   border-top: 1px solid var(--divider);
 }
 
+/* La tarjeta oscura del inicio: lo único que la persona tiene que mirar primero. */
+.resumen-inicio {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-2xl);
+  background: var(--surface-hero);
+  box-shadow: var(--shadow-hero);
+  color: var(--on-hero);
+}
+
+.resumen-inicio p {
+  margin: 0;
+}
+
+.resumen-inicio__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--on-hero-muted);
+  font-weight: 600;
+}
+
+.resumen-inicio__estado {
+  padding: 0.125rem var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--pending-bg);
+  color: var(--pending-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.resumen-inicio__estado--neutro {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+}
+
+.resumen-inicio__cifra {
+  color: var(--on-hero);
+  font-size: clamp(2.25rem, 2rem + 1vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.resumen-inicio .resumen-inicio__edificio {
+  color: var(--on-hero-muted);
+  font-size: 0.875rem;
+}
+
+.resumen-inicio__accion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  box-shadow: var(--shadow-button);
+  color: var(--on-accent);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+
 .fila-inicio {
   display: flex;
   align-items: center;
@@ -993,7 +1080,7 @@ fieldset.formulario legend {
 
 .navegacion__item {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;

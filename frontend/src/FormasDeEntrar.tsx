@@ -72,7 +72,7 @@ export function FormasDeEntrar({ correo, alCambiarCorreo, alElegir, alEntrar }: 
           .filter((forma) => forma !== metodo)
           .map((forma) => (
             <p key={forma}>
-              <button type="button" onClick={() => elegir(forma)}>
+              <button type="button" className="secundario" onClick={() => elegir(forma)}>
                 {OTRAS_FORMAS[forma]}
               </button>
             </p>

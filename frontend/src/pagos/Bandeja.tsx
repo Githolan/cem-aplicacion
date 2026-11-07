@@ -80,16 +80,16 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
             Preparar una orden
           </Link>
         )}
-        <Link to={RUTA_CONSULTA} state={{ consorcio }} className="enlace-boton">
-          Consultar pagos
-        </Link>
         {coteja && (
           <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton">
             Cotejar con el banco
           </Link>
         )}
+        <Link to={RUTA_CONSULTA} state={{ consorcio }} className="enlace-boton enlace-boton--sutil">
+          Consultar pagos
+        </Link>
         {prepara && (
-          <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton">
+          <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton enlace-boton--sutil">
             Proveedores
           </Link>
         )}

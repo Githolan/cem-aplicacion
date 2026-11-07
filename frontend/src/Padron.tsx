@@ -448,13 +448,13 @@ export function Padron() {
           (confirmable || finalizable) && (
           <p>
             {confirmable && (
-              <button type="button" onClick={() => abrir(f, "confirmar")} disabled={enviando} aria-describedby={titulo}>
+              <button type="button" className="secundario" onClick={() => abrir(f, "confirmar")} disabled={enviando} aria-describedby={titulo}>
                 Confirmar
               </button>
             )}
             {confirmable && finalizable && " "}
             {finalizable && (
-              <button type="button" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
+              <button type="button" className="secundario" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
                 Finalizar
               </button>
             )}
@@ -509,7 +509,7 @@ export function Padron() {
             <button type="submit" ref={confirmarSi} disabled={enviando}>
               Sí, finalizar
             </button>{" "}
-            <button type="button" onClick={() => setConfirmarFin(false)} disabled={enviando}>
+            <button type="button" className="secundario" onClick={() => setConfirmarFin(false)} disabled={enviando}>
               No
             </button>
           </div>
@@ -518,7 +518,7 @@ export function Padron() {
             <button type="submit" disabled={enviando}>
               {confirmar ? "Confirmar el vínculo" : "Finalizar el vínculo"}
             </button>{" "}
-            <button type="button" onClick={cerrar} disabled={enviando}>
+            <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
               Cancelar
             </button>
           </p>

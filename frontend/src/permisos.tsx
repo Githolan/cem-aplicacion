@@ -1,5 +1,5 @@
 import { type QueryClient, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router";
 
 import { api } from "./api/cliente";
@@ -44,6 +44,14 @@ async function misAcciones(consorcio: string): Promise<readonly string[]> {
   });
   if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
   return data.acciones;
+}
+
+const SIN_EDIFICIOS: Awaited<ReturnType<typeof misConsorcios>> = [];
+
+/** Los edificios de la persona; vacío mientras no se sabe. */
+export function useMisConsorcios() {
+  const consulta = useQuery({ queryKey: ["mis-consorcios"], queryFn: misConsorcios, ...SIN_CACHE });
+  return consulta.data ?? SIN_EDIFICIOS;
 }
 
 /** Lo que alcanza la persona cambió (aceptó una invitación): se vuelve a leer. */
@@ -179,6 +187,12 @@ export function useEdificioElegido<T extends { id: string }>(
     ofrecidos.find((c) => c.id === preferido) ??
     ofrecidos.find((c) => c.id === recordado) ??
     ofrecidos[0];
+  // El que trajo la navegación también queda: al volver de otra pantalla (dar de alta la verificación,
+  // por ejemplo) la dirección llega sin él, y la persona no tiene que encontrarse en otro edificio.
+  const llegoCon = preferido !== null && actual?.id === preferido;
+  useEffect(() => {
+    if (llegoCon) recordados.set(cliente, preferido);
+  }, [cliente, llegoCon, preferido]);
   return {
     edificios: resuelto.current ? ofrecidos : [],
     consorcio: resuelto.current ? (actual?.id ?? "") : "",
@@ -191,6 +205,16 @@ export function Exige({ requisito, children }: { requisito: Requisito; children:
   const porEdificio = useAccionesPorEdificio();
   if (porEdificio !== null && !cumpleEnAlguno(porEdificio, requisito)) return <Navigate to={RUTA_INICIO} replace />;
   return <>{children}</>;
+}
+
+/**
+ * El inicio es la única pantalla de quien no participa de ningún edificio: dice cómo sumarse. Se
+ * vuelve a leer lo que alcanza, porque una falla anterior no se repite sola y taparía ese aviso.
+ */
+export function AlInicioSinEdificios() {
+  const cliente = useQueryClient();
+  useEffect(() => releerAcciones(cliente), [cliente]);
+  return <Navigate to={RUTA_INICIO} replace />;
 }
 
 export const REQUISITOS = {

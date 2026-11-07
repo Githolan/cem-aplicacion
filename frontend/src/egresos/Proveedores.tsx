@@ -395,7 +395,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         <dt>Cuenta</dt>
                         <dd>{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</dd>
                       </dl>
-                      <button type="button" onClick={() => verFicha(p)}>
+                      <button type="button" className="sutil" onClick={() => verFicha(p)}>
                         Ver la ficha de {p.razon_social}
                       </button>
                     </li>

@@ -821,7 +821,7 @@ export function Mandatos() {
                       <dt>Cuenta asociada</dt>
                       <dd>{m.con_cuenta ? "Sí" : "No"}</dd>
                     </dl>
-                    <button type="button" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>
+                    <button type="button" className="secundario" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>
                       Ver detalle
                     </button>
                   </li>
@@ -850,7 +850,7 @@ export function Mandatos() {
                       {TEXTO_TIPO_DECISION[d.tipo]} del {dia(d.fecha)}
                     </h3>
                     <p>{d.descripcion}</p>
-                    <button type="button" onClick={() => verDecision(d)} disabled={enviando} aria-describedby={`${id}-${d.id}`}>
+                    <button type="button" className="secundario" onClick={() => verDecision(d)} disabled={enviando} aria-describedby={`${id}-${d.id}`}>
                       Ver detalle
                     </button>
                   </li>
@@ -885,7 +885,7 @@ export function Mandatos() {
                       : "Otra persona del edificio."}
                 </dd>
               </dl>
-              <button type="button" onClick={cerrarDetalle} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cerrarDetalle} disabled={enviando}>
                 Cerrar el detalle
               </button>
             </section>
@@ -1048,7 +1048,7 @@ export function Mandatos() {
                       <button type="button" ref={confirmarSi} onClick={() => darDeBaja(detalle.datos)} disabled={enviando}>
                         Sí, dar de baja
                       </button>{" "}
-                      <button type="button" onClick={() => setConfirmarBaja(false)} disabled={enviando}>
+                      <button type="button" className="secundario" onClick={() => setConfirmarBaja(false)} disabled={enviando}>
                         No
                       </button>
                     </div>
@@ -1060,7 +1060,7 @@ export function Mandatos() {
                 </form>
               )}
               {avisoEn("baja")}
-              <button type="button" onClick={cerrarDetalle} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cerrarDetalle} disabled={enviando}>
                 Cerrar el detalle
               </button>
             </section>

@@ -765,6 +765,33 @@ describe("página /documentos", () => {
   });
 });
 
+describe("quien ya no participa de ningún edificio", () => {
+  it("al consultar de nuevo llega al inicio, que dice cómo sumarse", async () => {
+    let caidos = true;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => {
+          if (caidos) throw new TypeError("sin red");
+          return Response.json([]);
+        },
+        "GET /api/v1/auth/sesion": () => Response.json({}),
+        "GET /health": () => Response.json({ estado: "ok", version: "0", sha_imagen: "x", sha_contratos: "", version_contrato: "0" }),
+        "GET /api/v1/me/invitaciones": () => Response.json({ elementos: [] }),
+        "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }),
+      }),
+    );
+    abrir();
+    const reintentar = await screen.findByRole("button", { name: "Consultar de nuevo" });
+    caidos = false;
+    fireEvent.click(reintentar);
+
+    expect(await screen.findByText(/^Todavía no participás de ningún edificio./)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1, name: "Documentos del edificio" })).toBeNull();
+  });
+});
+
 describe("lo que no se puede hacer no aparece en /documentos", () => {
   const conAcciones = (...acciones: string[]) => conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza(...acciones) });
   const categorias = () =>
