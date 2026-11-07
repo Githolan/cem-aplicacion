@@ -46,6 +46,7 @@ create function nucleo.negar_cambio_proveedor()
 drop trigger historia_proveedor on nucleo.proveedor;
 create trigger historia_proveedor before update or delete on nucleo.proveedor
   for each row execute function nucleo.negar_cambio_proveedor();
+revoke all on function nucleo.negar_cambio_proveedor() from public;
 
 create function {CARGAR.split("(")[0]}(proveedor uuid, version_esperada integer, cuit_nuevo text,
                                              actor uuid, origen_pedido text, sesion uuid)
