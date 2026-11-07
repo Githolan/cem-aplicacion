@@ -1087,38 +1087,45 @@ export function Mandatos() {
             )}
             {mandatos.tipo === "ok" && mandatos.elementos.length === 0 && <p>Todavía no hay mandatos cargados.</p>}
             {mandatos.tipo === "ok" && mandatos.elementos.length > 0 && (
-              <ul className="sesiones">
-                {mandatos.elementos.map((m) => (
-                  <li key={m.id}>
-                    <h3 id={`${id}-${m.id}`}>
-                      {m.nombre}, {TEXTO_TIPO_MANDATO[m.tipo]}
-                    </h3>
-                    <dl className="detalles">
-                      <dt>Estado</dt>
-                      <dd>{TEXTO_ESTADO_MANDATO[m.estado]}</dd>
-                      <dt>Desde</dt>
-                      <dd>{dia(m.vigente_desde)}</dd>
-                      {m.vigente_hasta && (
-                        <>
-                          <dt>Hasta</dt>
-                          <dd>{dia(m.vigente_hasta)} (ese día ya no rige)</dd>
-                        </>
-                      )}
-                      {m.cuit && (
-                        <>
-                          <dt>CUIT</dt>
-                          <dd>{m.cuit}</dd>
-                        </>
-                      )}
-                      <dt>Cuenta asociada</dt>
-                      <dd>{m.con_cuenta ? "Sí" : "No"}</dd>
-                    </dl>
-                    <button type="button" className="secundario" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>
-                      Ver detalle
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div className="tabla-lista tabla-tarjetas">
+                <table aria-labelledby={`${id}-mandatos`}>
+                  <thead>
+                    <tr>
+                      <th scope="col">Mandato</th>
+                      <th scope="col">Estado</th>
+                      <th scope="col">Vigencia</th>
+                      <th scope="col">CUIT</th>
+                      <th scope="col">Cuenta asociada</th>
+                      <th scope="col">
+                        <span className="solo-lector">Acciones</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mandatos.elementos.map((m) => (
+                      <tr key={m.id}>
+                        <th scope="row">
+                          <h3 id={`${id}-${m.id}`}>
+                            {m.nombre}, {TEXTO_TIPO_MANDATO[m.tipo]}
+                          </h3>
+                        </th>
+                        <td data-etiqueta="Estado">{TEXTO_ESTADO_MANDATO[m.estado]}</td>
+                        <td data-etiqueta="Vigencia">
+                          Desde el {dia(m.vigente_desde)}
+                          {m.vigente_hasta && ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)`}
+                        </td>
+                        <td data-etiqueta="CUIT">{m.cuit}</td>
+                        <td data-etiqueta="Cuenta asociada">{m.con_cuenta ? "Sí" : "No"}</td>
+                        <td>
+                          <button type="button" className="secundario" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>
+                            Ver detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
           )}
@@ -1135,19 +1142,36 @@ export function Mandatos() {
             )}
             {decisiones.tipo === "ok" && decisiones.elementos.length === 0 && <p>Todavía no hay decisiones registradas.</p>}
             {decisiones.tipo === "ok" && decisiones.elementos.length > 0 && (
-              <ul className="sesiones">
-                {decisiones.elementos.map((d) => (
-                  <li key={d.id}>
-                    <h3 id={`${id}-${d.id}`}>
-                      {TEXTO_TIPO_DECISION[d.tipo]} del {dia(d.fecha)}
-                    </h3>
-                    <p>{d.descripcion}</p>
-                    <button type="button" className="secundario" onClick={() => verDecision(d)} disabled={enviando} aria-describedby={`${id}-${d.id}`}>
-                      Ver detalle
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div className="tabla-lista tabla-tarjetas">
+                <table aria-labelledby={`${id}-decisiones`}>
+                  <thead>
+                    <tr>
+                      <th scope="col">Decisión</th>
+                      <th scope="col">Qué se decidió</th>
+                      <th scope="col">
+                        <span className="solo-lector">Acciones</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {decisiones.elementos.map((d) => (
+                      <tr key={d.id}>
+                        <th scope="row">
+                          <h3 id={`${id}-${d.id}`}>
+                            {TEXTO_TIPO_DECISION[d.tipo]} del {dia(d.fecha)}
+                          </h3>
+                        </th>
+                        <td>{d.descripcion}</td>
+                        <td>
+                          <button type="button" className="secundario" onClick={() => verDecision(d)} disabled={enviando} aria-describedby={`${id}-${d.id}`}>
+                            Ver detalle
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </section>
           )}

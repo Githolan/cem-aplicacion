@@ -357,6 +357,13 @@ button.sutil:disabled {
   color: var(--ink-muted);
 }
 
+/* Tarjetas una al lado de la otra desde tablet. */
+@media (min-width: 769px) {
+  .sesiones--grilla {
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  }
+}
+
 /* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
 .acciones-pantalla {
   display: flex;
@@ -481,6 +488,56 @@ button.sutil {
 .tabla-desplazable th[scope="row"],
 .tabla-desplazable th[scope="col"]:first-child {
   text-align: left;
+}
+
+/* Una lista de datos: tabla real desde tablet; en el teléfono, una tarjeta por fila (.tabla-tarjetas). */
+main:has(.tabla-lista) {
+  max-width: 64rem;
+}
+
+/* Con letra grande o un dato muy largo la tabla puede no entrar: se desplaza ella, nunca la página. */
+.tabla-lista {
+  overflow-x: auto;
+}
+
+.tabla-lista table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tabla-lista th,
+.tabla-lista td {
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: break-word;
+}
+
+/* Un nombre largo sin espacios no ensancha la tabla: se corta él, no las demás columnas. */
+.tabla-lista tbody th {
+  min-width: 7rem;
+  overflow-wrap: anywhere;
+}
+
+.tabla-lista thead th {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.tabla-lista tbody th,
+.tabla-lista tbody td {
+  border-top: 1px solid var(--divider);
+}
+
+.tabla-lista h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.tabla-lista button {
+  padding-inline: var(--space-3);
+  white-space: nowrap;
 }
 
 /* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
@@ -1283,6 +1340,23 @@ fieldset.formulario legend {
     content: attr(data-etiqueta);
     color: var(--ink-muted);
     text-align: left;
+  }
+
+  /* Un dato que no está no deja su rótulo solo. */
+  .tabla-lista td:empty {
+    display: none;
+  }
+
+  .tabla-lista td:not([data-etiqueta]) {
+    display: block;
+  }
+
+  .tabla-lista td[data-etiqueta] {
+    text-align: right;
+  }
+
+  .tabla-lista td[data-etiqueta]::before {
+    flex: none;
   }
 }
 

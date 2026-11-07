@@ -104,7 +104,7 @@ function abrir(ruta = "/padron") {
 
 /** La tarjeta del vínculo cuyo título es `titulo`. */
 async function tarjeta(titulo: string): Promise<HTMLElement> {
-  return (await screen.findByRole("heading", { level: 3, name: titulo })).closest("li") as HTMLElement;
+  return (await screen.findByRole("heading", { level: 3, name: titulo })).closest("tbody") as HTMLElement;
 }
 
 function escribir(etiqueta: string, valor: string) {
@@ -113,7 +113,7 @@ function escribir(etiqueta: string, valor: string) {
 
 /** Los vínculos en el orden en que se ven. */
 function titulos() {
-  return within(screen.getByRole("list", { name: "Padrón" }))
+  return within(screen.getByRole("table", { name: "Padrón" }))
     .getAllByRole("heading", { level: 3 })
     .map((h) => h.textContent);
 }
@@ -421,7 +421,7 @@ describe("página /padron", () => {
     vi.stubGlobal("fetch", conPadron());
     abrir();
     await tarjeta("1° A: Ana Ruiz");
-    const lista = screen.getByRole("list", { name: "Padrón" });
+    const lista = screen.getByRole("table", { name: "Padrón" });
     expect(lista.compareDocumentPosition(estadoDePantalla()) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
@@ -597,15 +597,15 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json({ elementos: [] }) }));
     abrir();
     expect(await screen.findByText("El padrón no tiene vínculos vigentes ni futuros.")).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Padrón" })).toBeNull();
+    expect(screen.queryByRole("table", { name: "Padrón" })).toBeNull();
   });
 
   it("una sola unidad: la lista muestra solo sus vínculos", async () => {
     const padron = { elementos: [fila(V_PROP, "Ana Ruiz")] };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
     abrir();
-    const lista = await screen.findByRole("list", { name: "Padrón" });
-    expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
+    const lista = await screen.findByRole("table", { name: "Padrón" });
+    expect(within(lista).getAllByRole("rowheader")).toHaveLength(1);
   });
 
   it("error al consultar el padrón: lo dice y deja de decir «Consultando…»", async () => {

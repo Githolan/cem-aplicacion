@@ -276,7 +276,7 @@ export function Contactos() {
         {contactos.length === 0 ? (
           <p>El edificio no tiene contactos de emergencia cargados.</p>
         ) : (
-          <ul className="sesiones" aria-label="Contactos de emergencia">
+          <ul className="sesiones sesiones--grilla" aria-label="Contactos de emergencia">
             {contactos.map((c) => (
               <li key={c.id}>
                 <h3>
