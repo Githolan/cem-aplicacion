@@ -68,6 +68,28 @@ quien no vio la cuenta recibe 404 y consejo2 lo concilia: Pagada. El pago fuera 
 (P3 180) no entra: pide una aprobación de más de 7 días y el ensayo no toca el reloj (SIN
 VERIFICAR en staging; lo cubren las pruebas).
 
+**Circuito de pagos** (`--circuito --otro-consorcio <uuid>`, tanda del 07-11-2026, `0072` a `0077`):
+en otro consorcio LAB (`NOMBRE_CONSORCIO_CIRCUITO`), por HTTP y con la lectura real de
+`cem-trabajos` (modelo real, comprobantes sintéticos):
+
+- bandeja y ficha por rol en cada paso (`en_el_paso`), siempre sin la cuenta;
+- lectura: `cuenta_coincide = true` y registro sin escribir la cuenta, con sus controles (otra
+  cuenta da `false`; una página en blanco, nulo; en los dos el registro sin cuenta se niega);
+- «Pagué otra cosa» por otro importe (resuelta: Pagada, y a quien prepara le queda lo que falta) y
+  por otra cuenta (solo reclamo; recuperada: Fallida), con las separaciones de quien registró;
+- cotejo a mano y con un extracto CSV sintético, con la repetición y las separaciones;
+- `/contenido` con 200 real por nginx: cabeceras y bytes, y los 404 y el 401;
+- un error provocado en el proceso de `cem-backend-staging` que no escribe nada, y devuelve en
+  `error_provocado` lo que `ensayo_registros_staging.py` busca en los registros.
+
+Consume cuatro lecturas del modelo. **Para sumar lo de la tanda del 07-11-2026 cuando llegue a
+staging** cada decisión tiene su lugar: «Tomar el pago» y el cierre de `pago-manual/cuenta` al
+segundo ejecutor (1) y «Volver a pagar» (11) después de `emitida_con_la_cuenta_vista`; «Pagué otra
+cosa» sin la facultad (3) como en `recorrer_orden_trabada`; «Cerrar sin recuperar» (5) y corregir
+la diferencia con `corrige_a` (6) en `circuito_pague_a_otra_cuenta`; anular el cotejo (7) y la
+moneda del extracto (9) en `circuito_cotejo` y `extracto_sintetico`; la nota «Se leyó mal» (14) en
+`circuito_pague_menos`. Hasta entonces nada de eso se prueba acá.
+
 Al final comprueba que ningún evento de auditoría del consorcio lleva una cuenta, que la cola del
 consorcio no tiene trabajos muertos, la cadena de auditoría, y revoca sesiones y da de baja los
 mandatos de la corrida.
@@ -117,6 +139,7 @@ from uuid import UUID, uuid4
 from cem_contracts.estados import TipoVinculo
 from cem_contracts.invitaciones import InvitacionNueva
 from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import Engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
@@ -135,6 +158,7 @@ NOMBRE_CONSORCIO_MANUAL = "CEM LAB — pago manual sintético (SINTETICO, PRUEBA
 NOMBRE_CONSORCIO_LIQUIDACION = "CEM LAB — liquidación sintética (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_COMPLETO = "CEM LAB — recorrido completo sintético (SINTETICO, PRUEBA, NO REAL)"
 NOMBRE_CONSORCIO_TRABADA = "CEM LAB — orden trabada sintética (SINTETICO, PRUEBA, NO REAL)"
+NOMBRE_CONSORCIO_CIRCUITO = "CEM LAB — circuito de pagos sintético (SINTETICO, PRUEBA, NO REAL)"
 DOMINIO = "cem-prueba.invalid"
 SUFIJO_STAGING = "-staging"
 ZONA = "America/Argentina/Buenos_Aires"
@@ -144,6 +168,10 @@ IP_DE_PRUEBA = "198.51.100.78"
 UMBRAL_CENTAVOS = 10_000_000
 """El umbral sintético del consorcio LAB: 100.000,00 ARS."""
 ESPERA_ANTIVIRUS_S = 120
+ESPERA_LECTURA_S = 180
+"""La lectura del comprobante corre en `cem-trabajos`, después del antivirus: una llamada al modelo
+con el plazo de `lectura_comprobantes.ESPERA_S`, más lo que tarde la cola."""
+SALTO_CUIT = 20
 PESOS_1 = (7, 1, 3, 9, 7, 1, 3)
 PESOS_2 = (3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3)
 
@@ -165,21 +193,39 @@ def _digito(cifras: str, pesos: tuple[int, ...]) -> str:
     return str((10 - sum(int(c) * p for c, p in zip(cifras, pesos, strict=True)) % 10) % 10)
 
 
-def pdf_sintetico(corrida_id: str) -> bytes:
-    """Un PDF válido de una página en blanco, sin contenido activo: el analizador de documentos
-    lo lee con pypdf y lo rechaza si no puede (`pdf_mal_formado`). Único por corrida, así el
-    antivirus y el almacenamiento lo ven como un archivo nuevo."""
+def pdf_sintetico(corrida_id: str, renglones: tuple[str, ...] = ()) -> bytes:
+    """Un PDF válido de una página, sin contenido activo: el analizador de documentos lo lee con
+    pypdf y lo rechaza si no puede (`pdf_mal_formado`). Único por corrida, así el antivirus y el
+    almacenamiento lo ven como un archivo nuevo. Con `renglones` lleva ese texto, para que la
+    lectura del comprobante tenga qué leer; sin ellos, la página queda en blanco."""
     w = PdfWriter()
-    w.add_blank_page(width=595, height=842)
+    pagina = w.add_blank_page(width=595, height=842)
+    if renglones:
+        fuente = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                                   NameObject("/Subtype"): NameObject("/Type1"),
+                                   NameObject("/BaseFont"): NameObject("/Helvetica")})  # fmt: skip
+        pagina[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): w._add_object(fuente)})}
+        )
+        lineas = " ".join(f"({_literal_pdf(r)}) Tj T*" for r in renglones)
+        flujo = DecodedStreamObject()
+        flujo.set_data(f"BT /F1 14 Tf 60 760 Td 22 TL {lineas} ET".encode("latin-1"))
+        pagina[NameObject("/Contents")] = w._add_object(flujo)
     w.add_metadata({"/Title": f"CEM LAB {corrida_id} SINTETICO (NO REAL)"})
     salida = io.BytesIO()
     w.write(salida)
     return salida.getvalue()
 
 
+def _literal_pdf(renglon: str) -> str:
+    return renglon.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
 def cuit_sintetico(n: int) -> str:
-    """Un CUIT con su dígito verificador: cada proveedor de la corrida lleva el suyo."""
-    for intento in range(n, n + 20):
+    """Un CUIT con su dígito verificador. Si el dígito da 10 salta al número siguiente, hasta
+    `SALTO_CUIT` veces: por eso los proveedores de una corrida van separados por `SALTO_CUIT`, y dos
+    seguidos no pueden caer en el mismo (corrida `38dc46bd`, `cuit_repetido`)."""
+    for intento in range(n, n + SALTO_CUIT):
         base = f"30{intento % 10**8:08d}"
         pares = zip(base, (5, 4, 3, 2, 7, 6, 5, 4, 3, 2), strict=True)
         resto = 11 - sum(int(x) * w for x, w in pares) % 11
@@ -234,6 +280,10 @@ class Respuesta:
     encabezados: dict[str, str]
     cuerpo: object
     texto: str
+    bruto: bytes = b""
+    """El cuerpo tal como llegó: `/contenido` devuelve un archivo, no un texto."""
+    repetidas: dict[str, list[str]] = field(default_factory=dict)
+    """Cada cabecera con todos sus valores: dos CSP en la misma respuesta se tienen que ver."""
 
     def codigo(self) -> str | None:
         return self.cuerpo.get("codigo") if isinstance(self.cuerpo, dict) else None
@@ -249,9 +299,9 @@ class Navegador:
 
     def pedir(self, metodo: str, ruta: str, cuerpo: object = None, *, csrf: bool = False,
               clave: str | None = None, crudo: bytes | None = None,
-              tipo: str | None = None) -> Respuesta:  # fmt: skip
+              tipo: str | None = None, ip: str = IP_DE_PRUEBA) -> Respuesta:  # fmt: skip
         encabezados = {"Host": self.host, "Accept": "application/json",
-                       "CF-Connecting-IP": IP_DE_PRUEBA}  # fmt: skip
+                       "CF-Connecting-IP": ip}  # fmt: skip
         datos = crudo
         if cuerpo is not None:
             datos = json.dumps(cuerpo).encode()
@@ -280,11 +330,15 @@ class Navegador:
                         self.cookies.pop(nombre, None)
                     else:
                         self.cookies[nombre] = morsel.value
-        texto = r.read().decode()
+        bruto = r.read()
+        texto = bruto.decode(errors="replace")
         cuerpo_json = json.loads(texto) if texto and r.headers.get_content_type() == (
             "application/json") else None  # fmt: skip
+        repetidas: dict[str, list[str]] = {}
+        for k, v in r.headers.items():
+            repetidas.setdefault(k.lower(), []).append(v)
         return Respuesta(r.status, {k.lower(): v for k, v in r.headers.items()}, cuerpo_json,
-                         texto)  # fmt: skip
+                         texto, bruto, repetidas)  # fmt: skip
 
 
 # Riel simulado -------------------------------------------------------------------------------
@@ -462,13 +516,17 @@ def preparar_escena(corrida: Corrida) -> None:
 # Proveedor, documento y abono ----------------------------------------------------------------
 
 
+def razon_social(corrida: Corrida, n: int) -> str:
+    return f"Proveedor LAB {corrida.id}-{n} SINTETICO (NO REAL)"
+
+
 def proveedor(corrida: Corrida, n: int) -> str:
     cuenta = cbu_sintetico(int(corrida.id, 16) % 10**9 + n)
     corrida.cuentas.append(cuenta)
     adm = corrida.n("administracion")
     r = adm.pedir("POST", corrida.c("/proveedores"),
-                  {"razon_social": f"Proveedor LAB {corrida.id}-{n} SINTETICO (NO REAL)",
-                   "cuit": cuit_sintetico(int(corrida.id, 16) % 10**7 + n),
+                  {"razon_social": razon_social(corrida, n),
+                   "cuit": cuit_sintetico(int(corrida.id, 16) % 10**7 + n * SALTO_CUIT),
                    "rubro": "Mantenimiento SINTETICO", "cuenta_destino": cuenta},
                   csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"alta del proveedor {n}: {r.texto}")
@@ -496,10 +554,11 @@ def documento_disponible(corrida: Corrida, categoria: str, titulo: str) -> str:
 
 
 def con_archivo_disponible(corrida: Corrida, doc: str, categoria: str,
-                           rol: str = "administracion") -> str:  # fmt: skip
+                           rol: str = "administracion",
+                           archivo: bytes | None = None) -> str:  # fmt: skip
     adm = corrida.n(rol)
     r = adm.pedir("POST", corrida.c(f"/documentos/{doc}/versiones"),
-                  crudo=pdf_sintetico(corrida.id),
+                  crudo=archivo or pdf_sintetico(corrida.id),
                   tipo="application/pdf", csrf=True, clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado in (201, 202), f"subir la versión: {r.texto}")
     # Desde 0052 un contrato solo se respalda en una versión que pasó el antivirus. Se la espera
@@ -852,8 +911,8 @@ def al_dia(corrida: Corrida, *roles: str) -> None:
         reverificar(corrida, rol)
 
 
-def comprobante_disponible(corrida: Corrida, n: int, orden: str,
-                           rol: str = "administracion") -> str:  # fmt: skip
+def comprobante_disponible(corrida: Corrida, n: int, orden: str, rol: str = "administracion",
+                           archivo: bytes | None = None) -> str:  # fmt: skip
     """Cargado desde el pago de `orden` por `rol`, que vio la cuenta (`0063`): nace con la orden
     y restringido, y la lista se la devuelve."""
     adm = corrida.n(rol)
@@ -862,7 +921,7 @@ def comprobante_disponible(corrida: Corrida, n: int, orden: str,
                   {"titulo": titulo, "fecha": time.strftime("%Y-%m-%d")}, csrf=True,
                   clave=str(uuid4()))  # fmt: skip
     comprobar(r.estado == 201, f"cargar el comprobante desde el pago: {r.texto}")
-    doc = con_archivo_disponible(corrida, r.cuerpo["id"], "facturas_y_comprobantes", rol)
+    doc = con_archivo_disponible(corrida, r.cuerpo["id"], "facturas_y_comprobantes", rol, archivo)
     lista = adm.pedir("GET", corrida.c("/documentos"))
     [d] = [x for x in lista.cuerpo["documentos"] if x["id"] == doc]
     comprobar(d["orden_pago_id"] == orden, f"la lista da la orden del comprobante: {d}")
@@ -934,9 +993,9 @@ def en_paralelo(*pedidos) -> list[Respuesta]:
     return resultados
 
 
-def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> str:
-    """Devuelve la orden 1, pagada y conciliada (la usa `--completo`)."""
-    adm = corrida.n("administracion")
+def otra_cuenta_en_el_consejo(corrida: Corrida) -> None:
+    """La misma persona que la administración, con otra cuenta y mandato en el Consejo. Deja también
+    a consejo2 con el segundo factor."""
     entra_otra_cuenta(corrida, "administracion_otra", "administracion")
     with corrida.tx() as conn:
         hoy = conn.execute(
@@ -957,6 +1016,11 @@ def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> str:
         activar_totp(corrida, rol)
     corrida.ok("otra cuenta de la misma persona que la administración, en el Consejo, con TOTP")
 
+
+def recorrer_pago_manual(corrida: Corrida, otro_consorcio: UUID) -> str:
+    """Devuelve la orden 1, pagada y conciliada (la usa `--completo`)."""
+    adm = corrida.n("administracion")
+    otra_cuenta_en_el_consejo(corrida)
     al_dia(corrida, "administracion", "consejo1")
     # 1. Proveedor nuevo y contrato: la administración prepara; el Consejo aprueba.
     p1 = proveedor(corrida, 1)
@@ -1866,6 +1930,492 @@ def recorrer_orden_trabada(corrida: Corrida) -> None:
     corrida.ok("consejo2 concilia el pago que registró la administración anterior: Pagada")
 
 
+# Circuito de pagos (`0072` a `0077`, modo `--circuito`) ----------------------------------------
+
+
+def bandeja_de(corrida: Corrida, rol: str) -> dict[str, dict]:
+    r = corrida.n(rol).pedir("GET", corrida.c("/pagos/bandeja"))
+    comprobar(r.estado == 200, f"bandeja de {rol}: {r.texto}")
+    comprobar(not any(c in r.texto for c in corrida.cuentas),
+              f"la bandeja de {rol} no trae ninguna cuenta")  # fmt: skip
+    return {x["orden_id"]: x for x in r.cuerpo["elementos"]}
+
+
+def ficha_pago(corrida: Corrida, rol: str, o: str) -> dict:
+    r = corrida.n(rol).pedir("GET", corrida.c(f"/pagos/{o}"))
+    comprobar(r.estado == 200, f"ficha de pago de {o} para {rol}: {r.texto}")
+    comprobar(not any(c in r.texto for c in corrida.cuentas),
+              f"la ficha de pago de {rol} no trae ninguna cuenta")  # fmt: skip
+    return r.cuerpo
+
+
+def en_el_paso(corrida: Corrida, o: str, situacion: str, **por_rol: tuple[str, str] | None) -> None:
+    """La misma respuesta en la ficha y en la bandeja de cada rol: `(paso, le_toca_a)`, o `None` si
+    a ese rol no le toca ni espera nada y la orden no le aparece."""
+    for rol, esperado in por_rol.items():
+        f = ficha_pago(corrida, rol, o)
+        comprobar(f["situacion"] == situacion, f"{rol} ve {f['situacion']}, no {situacion}")
+        vista = None if f["paso"] is None else (f["paso"], f["le_toca_a"])
+        comprobar(vista == esperado, f"ficha de {rol} en {situacion}: {vista}, no {esperado}")
+        fila = bandeja_de(corrida, rol).get(o)
+        en_bandeja = None if fila is None else (fila["paso"], fila["le_toca_a"])
+        comprobar(en_bandeja == esperado,
+                  f"bandeja de {rol} en {situacion}: {en_bandeja}, no {esperado}")  # fmt: skip
+
+
+def lectura_de(corrida: Corrida, rol: str, o: str) -> dict:
+    """La lectura del comprobante actual, cuando terminó: la hace `cem-trabajos` con el modelo real
+    (`CEM_LECTURA_COMPROBANTES=encendida` en staging)."""
+    limite = time.monotonic() + ESPERA_LECTURA_S
+    while True:
+        leida = ficha_pago(corrida, rol, o)["lectura_comprobante"]
+        if leida is not None and leida["estado"] != "leyendo":
+            return leida
+        comprobar(time.monotonic() < limite, f"la lectura de {o} no terminó: {leida}")
+        time.sleep(3)
+
+
+def pesos(centavos: int) -> str:
+    return f"{centavos // 100:,}".replace(",", ".") + f",{centavos % 100:02d}"
+
+
+def comprobante_legible(corrida: Corrida, n: int, importe: int, cuenta: str, numero: str) -> bytes:
+    """Un comprobante sintético con el texto que lee el modelo. `n` es el del proveedor."""
+    return pdf_sintetico(corrida.id, (
+        "Banco LAB SINTETICO - Comprobante de transferencia (NO REAL)",
+        f"Fecha: {hoy_del_consorcio(corrida).strftime('%d/%m/%Y')}",
+        f"Importe: $ {pesos(importe)} ARS",
+        f"Destinatario: {razon_social(corrida, n)}",
+        f"CBU destino: {cuenta}",
+        f"Numero de operacion: {numero}",
+    ))  # fmt: skip
+
+
+def emitida_con_la_cuenta_vista(corrida: Corrida, o: str, cuenta: str) -> None:
+    comprobar(emitir(corrida, "administracion", o).estado == 200, f"emitir {o}")
+    en_el_paso(corrida, o, "pagando", administracion=("pagar", "vos"), consejo1=None)
+    reverificar(corrida, "administracion")
+    r = cuenta_para_pagar(corrida, "administracion", o)
+    comprobar(r.estado == 200 and r.cuerpo["cuenta_destino"] == cuenta,
+              f"la cuenta en el acto de ejecución de {o}: {r.texto}")  # fmt: skip
+    en_el_paso(corrida, o, "pagando", administracion=("subir_comprobante", "vos"), consejo1=None)
+
+
+def circuito_lectura_que_coincide(corrida: Corrida, p: str, cuenta: str) -> dict:
+    """A1 y decisión 2: el archivo dice la cuenta de la orden, y se registra sin escribirla."""
+    al_dia(corrida, "administracion", "consejo1", "consejo2")
+    importe, numero = 2_500_000, f"LAB{corrida.id}01"
+    o = preparar(corrida, p, importe)
+    en_el_paso(corrida, o, "en_revision", administracion=("espera_aprobar", "consejo"),
+               consejo1=("aprobar", "vos"))  # fmt: skip
+    comprobar(ficha_pago(corrida, "consejo1", o)["puede_aprobar"], "el Consejo puede aprobar")
+    comprobar(not ficha_pago(corrida, "administracion", o)["puede_aprobar"],
+              "quien preparó no puede aprobar")  # fmt: skip
+    comprobar(aprobar(corrida, "consejo1", o).estado == 201, "el Consejo aprueba")
+    en_el_paso(corrida, o, "para_pagar", administracion=("pagar", "vos"), consejo1=None)
+    emitida_con_la_cuenta_vista(corrida, o, cuenta)
+    corrida.ok("bandeja y ficha: en revisión, para pagar y pagando, por rol y sin la cuenta")
+
+    archivo = comprobante_legible(corrida, 1, importe, cuenta, numero)
+    doc = comprobante_disponible(corrida, 1, o, archivo=archivo)
+    leida = lectura_de(corrida, "administracion", o)
+    comprobar(leida["estado"] == "leida" and leida["cuenta_coincide"] is True,
+              f"la lectura da la cuenta de la orden: {leida}")  # fmt: skip
+    comprobar((leida["cuenta_ultimos_digitos"], leida["importe_centavos"], leida["moneda"])
+              == (cuenta[-4:], importe, "ARS"),
+              f"cuenta, importe y moneda leídos: {leida}")  # fmt: skip
+    comprobar(leida["distinto_de_la_orden"] == [] and leida["titular_distinto"] is False,
+              f"nada distinto de la orden: {leida}")  # fmt: skip
+    comprobar(leida["coincide_con_lo_registrado"] is False, f"todavía no hay registro: {leida}")
+    corrida.ok("cuenta_coincide = true con el modelo real: el comprobante lleva la cuenta de la"
+               " orden, y la ficha da solo sus 4 últimos dígitos")  # fmt: skip
+
+    reverificar(corrida, "administracion")
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
+                       numero_operacion=numero, documento_id=doc)  # fmt: skip
+    comprobar(r.estado == 201, f"con la lectura que coincide se registra sin la cuenta: {r.texto}")
+    pago = r.cuerpo["id"]
+    en_el_paso(corrida, o, "falta_conciliar", administracion=("espera_conciliar", "consejo"),
+               consejo2=("conciliar", "vos"))  # fmt: skip
+    vista = ficha_pago(corrida, "consejo2", o)
+    leida = vista["lectura_comprobante"]
+    comprobar(leida is not None and leida["coincide_con_lo_registrado"] is True
+              and leida["distinto_de_lo_registrado"] == [],
+              f"el Consejo ve que coincide con lo registrado: {leida}")  # fmt: skip
+    reverificar(corrida, "consejo2")
+    comprobar(conciliar(corrida, "consejo2", o, pago, "conforme").estado == 200, "concilia")
+    en_el_paso(corrida, o, "pagada", administracion=None, consejo2=None)
+    corrida.ok("registrado sin escribir la cuenta (la acreditó la lectura) y conciliado: Pagada")
+    return {"orden": o, "pago": pago, "documento": doc, "archivo": archivo,
+            "version": vista["comprobante_actual"]["version_documento_id"]}  # fmt: skip
+
+
+def registrar_diferencia(corrida: Corrida, o: str, **datos) -> Respuesta:
+    v = vigente(ficha(corrida, "administracion", o))
+    cuerpo = {"version": v["numero"], "huella": v["huella"], "moneda": "ARS",
+              "fecha_operacion": hoy_del_consorcio(corrida).isoformat()} | datos  # fmt: skip
+    return corrida.n("administracion").pedir(
+        "POST", corrida.c(f"/ordenes-pago/{o}/pago-manual/diferencia"), cuerpo, csrf=True,
+        clave=str(uuid4()),
+    )  # fmt: skip
+
+
+def resolver(corrida: Corrida, rol: str, o: str, d: str, resolucion: str) -> Respuesta:
+    return corrida.n(rol).pedir(
+        "POST", corrida.c(f"/ordenes-pago/{o}/pago-manual/diferencia/{d}/resolucion"),
+        {"resolucion": resolucion}, csrf=True, clave=str(uuid4()),
+    )  # fmt: skip
+
+
+def circuito_pague_menos(corrida: Corrida, p: str, cuenta: str) -> dict:
+    """«Pagué otra cosa» por otro importe: el Consejo lo da por pagado y queda lo que falta."""
+    al_dia(corrida, "administracion", "consejo2", "administracion_otra")
+    orden_c, real_c, numero = 1_000_000, 900_000, f"LAB{corrida.id}02"
+    o = preparar(corrida, p, orden_c)
+    en_el_paso(corrida, o, "para_pagar", administracion=("pagar", "vos"), consejo1=None)
+    emitida_con_la_cuenta_vista(corrida, o, cuenta)
+    archivo = comprobante_legible(corrida, 1, real_c, cuenta, numero)
+    doc = comprobante_disponible(corrida, 2, o, archivo=archivo)
+    leida = lectura_de(corrida, "administracion", o)
+    comprobar(leida["cuenta_coincide"] is True and leida["distinto_de_la_orden"] == ["importe"],
+              f"la lectura avisa el importe distinto: {leida}")  # fmt: skip
+
+    reverificar(corrida, "administracion")
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=real_c,
+                       cuenta_destino=cuenta, numero_operacion=numero,
+                       documento_id=doc)  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (422, "no_coincide_con_la_orden"),
+              f"otro importe no se registra como pago: {r.texto}")  # fmt: skip
+    igual = {"numero_operacion": numero, "documento_id": doc, "cuenta_real": cuenta,
+             "explicacion": "SINTETICO: el banco debitó menos de lo aprobado"}  # fmt: skip
+    r = registrar_diferencia(corrida, o, importe_real="10000.00", **igual)
+    comprobar((r.estado, r.codigo()) == (422, "sin_diferencia"),
+              f"lo mismo que la orden no es una diferencia: {r.texto}")  # fmt: skip
+    r = registrar_diferencia(corrida, o, importe_real="9000.00", **igual | {
+        "explicacion": f"SINTETICO: fue a {cuenta[:8]} {cuenta[8:]}"})  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (422, "motivo_con_cuenta"),
+              f"la explicación con una cuenta no se guarda: {r.texto}")  # fmt: skip
+    r = registrar_diferencia(corrida, o, importe_real="9000.00", **igual)
+    comprobar(r.estado == 201, f"«Pagué otra cosa»: {r.texto}")
+    d = r.cuerpo["id"]
+    en_el_paso(corrida, o, "con_diferencia", administracion=("espera_resolver", "consejo"),
+               consejo2=("resolver_diferencia", "vos"))  # fmt: skip
+    vista = ficha_pago(corrida, "consejo2", o)
+    diferencia = vista["diferencia_vigente"]
+    comprobar((diferencia["tipo"], diferencia["falta_centavos"], diferencia["sobra_centavos"])
+              == ("importe", orden_c - real_c, None) and diferencia["se_puede_dar_por_pagada"],
+              f"la ficha dice lo que falta: {diferencia}")  # fmt: skip
+    comprobar(diferencia["cuenta_ultimos_digitos"] == cuenta[-4:]
+              and vista["puede_resolver_diferencia"],
+              f"el Consejo la puede resolver, con los últimos dígitos: {vista}")  # fmt: skip
+    comprobar(vista["lectura_comprobante"]["distinto_de_lo_registrado"] == [],
+              f"lo declarado es lo leído: {vista['lectura_comprobante']}")  # fmt: skip
+    corrida.ok("«Pagué otra cosa»: otro importe, sin registrar como pago, con lo que falta en la"
+               " ficha; sin diferencia y con la cuenta en la explicación se niega"
+               " (422)")  # fmt: skip
+
+    for rol in ("administracion", "administracion_otra"):
+        r = resolver(corrida, rol, o, d, "pagada_por_lo_real")
+        comprobar(r.estado == 403, f"quien registró no resuelve ({rol}): {r.texto}")
+    comprobar(estado(corrida, o) != "pagada", "sigue sin resolver")
+    reverificar(corrida, "consejo2")
+    r = resolver(corrida, "consejo2", o, d, "pagada_por_lo_real")
+    comprobar(r.estado == 200 and r.cuerpo["estado"] == "pagada", f"resuelta: {r.texto}")
+    r = resolver(corrida, "consejo2", o, d, "pagada_por_lo_real")
+    # La orden ya está cerrada: la base lo dice antes de mirar la diferencia.
+    comprobar((r.estado, r.codigo()) == (409, "orden_no_admite"),
+              f"no se resuelve dos veces: {r.texto}")  # fmt: skip
+    en_el_paso(corrida, o, "pagada", administracion=("preparar_faltante", "vos"), consejo2=None)
+    corrida.ok("el Consejo da por pagado lo real; quien registró no resuelve, tampoco con otra"
+               " cuenta (403); a quien prepara le queda preparar lo que falta")  # fmt: skip
+    return {"orden": o, "diferencia": d, "numero": numero, "importe": real_c}
+
+
+def circuito_pague_a_otra_cuenta(corrida: Corrida, p: str, cuenta: str) -> dict:
+    """El control de A1 y la otra salida de la diferencia: el archivo dice otra cuenta, no se
+    registra sin escribirla, y el Consejo solo puede reclamar."""
+    al_dia(corrida, "administracion", "consejo1", "consejo2")
+    importe, numero = 2_000_000, f"LAB{corrida.id}03"
+    otra = cbu_sintetico(int(corrida.id, 16) % 10**9 + 11)
+    corrida.cuentas.append(otra)
+    o = preparar(corrida, p, importe)
+    comprobar(aprobar(corrida, "consejo1", o).estado == 201, "el Consejo aprueba")
+    emitida_con_la_cuenta_vista(corrida, o, cuenta)
+    doc = comprobante_disponible(corrida, 3, o, archivo=comprobante_legible(
+        corrida, 2, importe, otra, numero))  # fmt: skip
+    leida = lectura_de(corrida, "administracion", o)
+    comprobar(leida["estado"] == "leida" and leida["cuenta_coincide"] is False,
+              f"control de A1: con otra cuenta, cuenta_coincide = false: {leida}")  # fmt: skip
+    comprobar(leida["cuenta_ultimos_digitos"] == otra[-4:]
+              and leida["distinto_de_la_orden"] == ["cuenta"],
+              f"la lectura avisa la cuenta distinta: {leida}")  # fmt: skip
+    reverificar(corrida, "administracion")
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
+                       numero_operacion=numero, documento_id=doc)  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (422, "no_coincide_con_la_orden"),
+              f"control de A1: otra cuenta no se registra sin escribirla: {r.texto}")  # fmt: skip
+    corrida.ok("control de A1: otra cuenta da cuenta_coincide = false y el registro sin cuenta"
+               " se niega (422)")  # fmt: skip
+
+    r = registrar_diferencia(corrida, o, importe_real="20000.00", cuenta_real=otra,
+                             numero_operacion=numero, documento_id=doc,
+                             explicacion="SINTETICO: fue a otra cuenta")  # fmt: skip
+    comprobar(r.estado == 201, f"«Pagué otra cosa» por otra cuenta: {r.texto}")
+    d = r.cuerpo["id"]
+    vista = ficha_pago(corrida, "consejo2", o)
+    diferencia = vista["diferencia_vigente"]
+    comprobar((diferencia["tipo"], diferencia["cuenta_ultimos_digitos"]) == ("cuenta", otra[-4:])
+              and not diferencia["se_puede_dar_por_pagada"],
+              f"otra cuenta: {diferencia}")  # fmt: skip
+    comprobar(vista["lectura_comprobante"]["distinto_de_lo_registrado"] == [],
+              f"la cuenta declarada es la leída: {vista['lectura_comprobante']}")  # fmt: skip
+    reverificar(corrida, "consejo2")
+    r = resolver(corrida, "consejo2", o, d, "pagada_por_lo_real")
+    comprobar((r.estado, r.codigo()) == (409, "solo_reclamo"),
+              f"otra cuenta no se da por pagada: {r.texto}")  # fmt: skip
+    r = resolver(corrida, "consejo2", o, d, "reclamo")
+    comprobar(r.estado == 200, f"el Consejo reclama: {r.texto}")
+    en_el_paso(corrida, o, "reclamo", administracion=("espera_resolver", "consejo"),
+               consejo2=("resolver_diferencia", "vos"))  # fmt: skip
+    comprobar(ficha_pago(corrida, "consejo2", o)["puede_recuperar"], "se puede decir recuperada")
+    r = corrida.n("consejo2").pedir(
+        "POST", corrida.c(f"/ordenes-pago/{o}/pago-manual/diferencia/{d}/recuperada"), None,
+        csrf=True, clave=str(uuid4()),
+    )  # fmt: skip
+    comprobar(r.estado == 200 and r.cuerpo["estado"] == "fallida", f"recuperada: {r.texto}")
+    en_el_paso(corrida, o, "no_se_pago", administracion=("volver_a_pagar", "vos"), consejo2=None)
+    r = corrida.n("consejo2").pedir("GET", corrida.c("/pagos/consulta?filtro=no_se_pagaron"))
+    comprobar(r.estado == 200 and not any(c in r.texto for c in corrida.cuentas)
+              and o in {x["orden_id"] for x in r.cuerpo["elementos"]},
+              f"la consulta la encuentra entre las que no se pagaron: {r.texto}")  # fmt: skip
+    corrida.ok("otra cuenta: solo reclamo (409 si se da por pagada), recuperada: Fallida, y la"
+               " consulta la lista sin la cuenta")  # fmt: skip
+    return {"orden": o, "diferencia": d}
+
+
+def circuito_sin_lectura_de_cuenta(corrida: Corrida, p: str, cuenta: str) -> dict:
+    """Segundo control de A1: un archivo sin cuenta legible no acredita nada. El pago se registra
+    a mano y queda sin conciliar: el cotejo lo usa."""
+    al_dia(corrida, "administracion")
+    importe, numero = 1_500_000, f"LAB{corrida.id}04"
+    o = preparar(corrida, p, importe)
+    emitida_con_la_cuenta_vista(corrida, o, cuenta)
+    doc = comprobante_disponible(corrida, 4, o)
+    leida = lectura_de(corrida, "administracion", o)
+    comprobar(leida["cuenta_coincide"] is None and leida["cuenta_ultimos_digitos"] is None,
+              f"una página en blanco no da ninguna cuenta: {leida}")  # fmt: skip
+    reverificar(corrida, "administracion")
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
+                       numero_operacion=numero, documento_id=doc)  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (422, "no_coincide_con_la_orden"),
+              f"sin lectura de la cuenta hay que escribirla: {r.texto}")  # fmt: skip
+    r = registrar_pago(corrida, "administracion", o, importe_centavos=importe,
+                       cuenta_destino=cuenta, numero_operacion=numero,
+                       documento_id=doc)  # fmt: skip
+    comprobar(r.estado == 201, f"escribiendo la cuenta sí: {r.texto}")
+    corrida.ok("un archivo sin cuenta legible no acredita: sin escribirla 422, escribiéndola 201")
+    return {"orden": o, "pago": r.cuerpo["id"], "importe": importe}
+
+
+def extracto_sintetico(corrida: Corrida, cuenta: str, menos: dict, sin_conciliar: dict) -> bytes:
+    fecha = hoy_del_consorcio(corrida).strftime("%d/%m/%Y")
+    return "\n".join((
+        "Fecha;Descripcion;Importe;Comprobante",
+        f"{fecha};TRANSFERENCIA SINTETICA A {cuenta};-{pesos(menos['importe'])};{menos['numero']}",
+        f"{fecha};TRANSFERENCIA SINTETICA SIN NUMERO;-{pesos(sin_conciliar['importe'])};",
+        f"{fecha};CREDITO SINTETICO;500,00;",
+        f"{fecha};DEBITO SINTETICO DESCONOCIDO;-1.234,56;LAB{corrida.id}99",
+        f"no es una fecha;RENGLON SINTETICO ROTO;-1,00;LAB{corrida.id}98",
+        "",
+    )).encode()  # fmt: skip
+
+
+def subir_extracto(corrida: Corrida, rol: str, archivo: bytes, con_columnas: bool) -> Respuesta:
+    columnas = ("?fecha=Fecha&importe=Importe&numero_operacion=Comprobante&signo=con_signo"
+                if con_columnas else "")  # fmt: skip
+    return corrida.n(rol).pedir("POST", corrida.c(f"/pagos/cotejo/extracto{columnas}"),
+                                crudo=archivo, tipo="text/csv", csrf=True,
+                                clave=str(uuid4()))  # fmt: skip
+
+
+def para_cotejar(corrida: Corrida, rol: str) -> dict[str, dict]:
+    r = corrida.n(rol).pedir("GET", corrida.c("/pagos/cotejo"))
+    comprobar(r.estado == 200, f"lista para cotejar de {rol}: {r.texto}")
+    comprobar(not any(c in r.texto for c in corrida.cuentas), "la lista no trae ninguna cuenta")
+    return {x["pago_id"]: x for x in r.cuerpo["elementos"]}
+
+
+def cotejar_a_mano(corrida: Corrida, rol: str, pagos_ids: list[str]) -> Respuesta:
+    return corrida.n(rol).pedir("POST", corrida.c("/pagos/cotejo"), {"pagos": pagos_ids},
+                                csrf=True, clave=str(uuid4()))  # fmt: skip
+
+
+def circuito_cotejo(corrida: Corrida, cuenta: str, conforme: dict, menos: dict,
+                    a_otra_cuenta: dict, sin_conciliar: dict) -> None:  # fmt: skip
+    """A mano y con el extracto. Cotejar no cambia ninguna orden. Lo reclamado y recuperado también
+    salió del banco (`0075`): se coteja aunque la orden haya quedado Fallida."""
+    al_dia(corrida, "consejo2", "administracion_otra")
+    pago = conforme["pago"]
+    lista = para_cotejar(corrida, "consejo2")
+    comprobar(pago in lista and lista[pago]["puede_cotejar"], f"el conforme, para cotejar: {lista}")
+    comprobar(lista[menos["diferencia"]]["importe_centavos"] == menos["importe"],
+              f"la diferencia resuelta va por su importe real: {lista}")  # fmt: skip
+    comprobar(sin_conciliar["pago"] not in lista, "lo que falta conciliar no se coteja")
+    r = corrida.n("administracion").pedir("GET", corrida.c("/pagos/cotejo"))
+    comprobar(r.estado == 403, f"quien ejecutó no entra al cotejo: {r.texto}")
+    otra = para_cotejar(corrida, "administracion_otra")
+    comprobar(not otra[pago]["puede_cotejar"], f"su otra cuenta lo ve sin poder cotejar: {otra}")
+    r = cotejar_a_mano(corrida, "administracion_otra", [pago])
+    comprobar(r.estado == 403, f"la otra cuenta de quien ejecutó no coteja: {r.texto}")
+    r = cotejar_a_mano(corrida, "consejo2", [sin_conciliar["pago"]])
+    comprobar((r.estado, r.codigo()) == (409, "pago_sin_conciliar"),
+              f"sin conciliar no se coteja: {r.texto}")  # fmt: skip
+    r = cotejar_a_mano(corrida, "consejo2", [pago])
+    comprobar(r.estado == 200 and r.cuerpo["cotejados"] == 1, f"cotejado a mano: {r.texto}")
+    comprobar(pago not in para_cotejar(corrida, "consejo2"), "cotejado: sale de la lista")
+    r = cotejar_a_mano(corrida, "consejo2", [pago])
+    comprobar(r.estado == 200 and r.cuerpo["cotejados"] == 0, f"dos veces no suma: {r.texto}")
+    comprobar(estado(corrida, conforme["orden"]) == "pagada", "cotejar no cambia la orden")
+    corrida.ok("cotejo a mano: quien ejecutó no coteja (403, también con otra cuenta), sin"
+               " conciliar 409, dos veces no suma, y la orden no cambia")  # fmt: skip
+
+    archivo = extracto_sintetico(corrida, cuenta, menos, sin_conciliar)
+    mc = corrida.n("consejo2")
+    r = mc.pedir("POST", corrida.c("/pagos/cotejo/columnas"), crudo=archivo, tipo="text/csv",
+                 csrf=True)  # fmt: skip
+    comprobar(r.estado == 200 and r.cuerpo["columnas_guardadas"] is None
+              and r.cuerpo["signo_sugerido"] == "con_signo", f"columnas: {r.texto}")  # fmt: skip
+    comprobar(cuenta.encode() in archivo and cuenta not in r.texto,
+              "la muestra no devuelve la cuenta que trae el archivo")  # fmt: skip
+    r = subir_extracto(corrida, "consejo2", archivo, con_columnas=False)
+    comprobar((r.estado, r.codigo()) == (409, "columnas_sin_elegir"), f"sin columnas: {r.texto}")
+    r = subir_extracto(corrida, "administracion", archivo, con_columnas=True)
+    comprobar(r.estado == 403, f"quien ejecutó no sube el extracto: {r.texto}")
+
+    r = subir_extracto(corrida, "consejo2", archivo, con_columnas=True)
+    comprobar(r.estado == 200, f"subir el extracto: {r.texto}")
+    x = r.cuerpo
+    comprobar((x["movimientos_nuevos"], x["cotejados"], x["esperan_conciliar"],
+               x["lineas_no_leidas"], x["total_banco_no_aca"]) == (3, 1, 1, 1, 1),
+              f"por número coteja, sin conciliar espera, lo demás se muestra: {x}")  # fmt: skip
+    comprobar(x["banco_no_aca"][0]["numero_operacion"] == f"LAB{corrida.id}99".upper(),
+              f"el débito desconocido: {x}")  # fmt: skip
+    comprobar(cuenta not in r.texto, "el resultado no trae ninguna cuenta")
+    reverificar(corrida, "consejo2")
+    comprobar(conciliar(corrida, "consejo2", sin_conciliar["orden"], sin_conciliar["pago"],
+                        "conforme").estado == 200, "concilia lo que faltaba")  # fmt: skip
+    r = subir_extracto(corrida, "consejo2", archivo, con_columnas=False)
+    comprobar(r.estado == 200, f"con las columnas guardadas: {r.texto}")
+    x = r.cuerpo
+    comprobar((x["movimientos_nuevos"], x["movimientos_repetidos"], x["cotejados"]) == (0, 3, 1),
+              f"el mismo extracto no duplica y coteja lo ya conciliado: {x}")  # fmt: skip
+    r = subir_extracto(corrida, "consejo2", archivo, con_columnas=False)
+    comprobar(r.estado == 200 and r.cuerpo["cotejados"] == 0, f"una tercera vez: {r.texto}")
+    reclamada = a_otra_cuenta["diferencia"]
+    queda = para_cotejar(corrida, "consejo2")
+    comprobar(set(queda) == {reclamada}, f"queda solo la transferencia reclamada: {queda}")
+    r = cotejar_a_mano(corrida, "consejo2", [reclamada])
+    comprobar(r.estado == 200 and r.cuerpo["cotejados"] == 1,
+              f"la reclamada se coteja: {r.texto}")  # fmt: skip
+    comprobar(para_cotejar(corrida, "consejo2") == {}, "no queda nada para cotejar")
+    comprobar(estado(corrida, a_otra_cuenta["orden"]) == "fallida", "y su orden sigue Fallida")
+    for o in (menos["orden"], sin_conciliar["orden"]):
+        comprobar(estado(corrida, o) == "pagada", f"el extracto no cambia la orden {o}")
+    corrida.ok("extracto: la muestra sin la cuenta, sin columnas 409, quien ejecutó 403; coteja por"
+               " número y por importe y fecha, muestra lo desconocido, y repetido no"
+               " duplica")  # fmt: skip
+
+
+def circuito_contenido(corrida: Corrida, conforme: dict, otro_consorcio: UUID) -> None:
+    """A3: el archivo por `/contenido`, por nginx y con una sesión: cabeceras y cuerpo."""
+    ruta = f"/documentos/{conforme['documento']}/versiones/{conforme['version']}/contenido"
+    r = corrida.n("consejo2").pedir("GET", corrida.c(ruta))
+    comprobar(r.estado == 200, f"/contenido para el Consejo que no preparó: {r.estado} {r.texto}")
+    comprobar(r.bruto == conforme["archivo"], f"el cuerpo es el archivo: {len(r.bruto)} bytes")
+    comprobar(r.bruto.startswith(b"%PDF-"), "el cuerpo es un PDF")
+    esperadas = {
+        "content-type": ["application/pdf"],
+        "content-disposition": ["inline"],
+        "content-security-policy": ["sandbox; default-src 'none'"],
+        "x-content-type-options": ["nosniff"],
+        "x-frame-options": ["DENY"],
+        "referrer-policy": ["strict-origin-when-cross-origin"],
+    }
+    for cabecera, valor in esperadas.items():
+        comprobar(r.repetidas.get(cabecera) == valor,
+                  f"{cabecera}: {r.repetidas.get(cabecera)}, no {valor}")  # fmt: skip
+    comprobar(int(r.encabezados["content-length"]) == len(conforme["archivo"]), "el largo")
+    comprobar("no-store" in r.encabezados["cache-control"], f"sin caché: {r.repetidas}")
+    # Control: una ruta común lleva la CSP de la aplicación, no la del archivo.
+    control = corrida.n("consejo2").pedir("GET", corrida.c("/pagos/bandeja"))
+    csp = str(control.repetidas.get("content-security-policy"))
+    comprobar(control.estado == 200 and "sandbox" not in csp, f"control: {control.repetidas}")
+    r = corrida.n("administracion").pedir("GET", corrida.c(ruta))
+    comprobar(r.estado == 200 and r.bruto == conforme["archivo"], f"quien lo subió: {r.estado}")
+    for rol in ("administracion_otra", "propietario"):
+        r = corrida.n(rol).pedir("GET", corrida.c(ruta))
+        comprobar(r.estado == 404 and conforme["archivo"] != r.bruto,
+                  f"/contenido para {rol}: {r.estado}")  # fmt: skip
+    otro = f"/api/v1/consorcios/{otro_consorcio}{ruta}"
+    r = corrida.n("consejo2").pedir("GET", otro)
+    comprobar(r.estado == 404, f"por otro consorcio: {r.estado}")
+    r = Navegador(corrida.url, corrida.host, corrida.contexto).pedir("GET", corrida.c(ruta))
+    comprobar(r.estado == 401 and r.bruto != conforme["archivo"], f"sin sesión: {r.estado}")
+    corrida.ok(f"/contenido por nginx: 200 con los {len(conforme['archivo'])} bytes del archivo,"
+               " una sola CSP sandbox y un solo nosniff; 404 a la otra cuenta, al propietario y"
+               " por otro consorcio; 401 sin sesión")  # fmt: skip
+
+
+def circuito_error_provocado(corrida: Corrida, orden: str) -> dict:
+    """A4: un error real en el proceso de `cem-backend-staging`, sin escribir nada. `ip_cliente`
+    falla si lo que llega no es una IP (error de configuración, no un dato del cliente), y en este
+    camino eso ocurre antes de tocar la base. Por la entrada pública lo escribe Cloudflare; acá el
+    ensayo entra por adentro y lo escribe él. El resumen lleva lo que busca
+    `ensayo_registros_staging.py` en los registros."""
+    antes = bandeja_de(corrida, "administracion"), estado(corrida, orden)
+    correo = f"error-{corrida.id}@{DOMINIO}"
+    cuenta = cbu_sintetico(int(corrida.id, 16) % 10**9 + 13)
+    secreto = secrets.token_hex(12)
+    n = Navegador(corrida.url, corrida.host, corrida.contexto)
+    entrada = {"correo": correo, "contrasena": secrets.token_urlsafe(24)}
+    r = n.pedir("POST", "/api/v1/auth/contrasena/entrar", entrada,
+                ip=f"{cuenta} {correo} clave={secreto}")  # fmt: skip
+    comprobar((r.estado, r.codigo()) == (500, "error_interno"), f"el error provocado: {r.texto}")
+    comprobar(not any(x in r.texto for x in (cuenta, correo, secreto)),
+              f"la respuesta no devuelve nada de lo enviado: {r.texto}")  # fmt: skip
+    correlacion = r.cuerpo["id_correlacion"]
+    r = n.pedir("POST", "/api/v1/auth/contrasena/entrar", entrada)
+    comprobar((r.estado, r.codigo()) == (401, "credenciales_invalidas"),
+              f"control: con una IP, la misma entrada no falla: {r.texto}")  # fmt: skip
+    marca = f"LABERR{corrida.id}"
+    r = n.pedir("GET", f"/api/v1/{marca}/{cuenta}/{correo}/token={secreto}")
+    comprobar(r.estado == 404, f"una ruta inventada con datos: {r.estado}")
+    comprobar((bandeja_de(corrida, "administracion"), estado(corrida, orden)) == antes,
+              "el error no cambió nada")  # fmt: skip
+    corrida.ok("error provocado: 500 genérico sin devolver lo enviado; con una IP, 401; bandeja y"
+               " orden iguales")  # fmt: skip
+    return {"id_correlacion": correlacion, "marca": marca, "cuenta": cuenta, "correo": correo,
+            "secreto": secreto}  # fmt: skip
+
+
+def recorrer_circuito(corrida: Corrida, otro_consorcio: UUID) -> dict:
+    """Bandeja, ficha, «Pagué otra cosa», resolución, cotejo, `/contenido` y el error provocado."""
+    otra_cuenta_en_el_consejo(corrida)
+    entra(corrida, "propietario")
+    al_dia(corrida, "administracion")
+    p1 = proveedor(corrida, 1)
+    cuenta1 = corrida.cuentas[-1]
+    p2 = proveedor(corrida, 2)
+    cuenta2 = corrida.cuentas[-1]
+    conforme = circuito_lectura_que_coincide(corrida, p1, cuenta1)
+    menos = circuito_pague_menos(corrida, p1, cuenta1)
+    a_otra_cuenta = circuito_pague_a_otra_cuenta(corrida, p2, cuenta2)
+    sin_conciliar = circuito_sin_lectura_de_cuenta(corrida, p1, cuenta1)
+    circuito_cotejo(corrida, cuenta1, conforme, menos, a_otra_cuenta, sin_conciliar)
+    circuito_contenido(corrida, conforme, otro_consorcio)
+    return circuito_error_provocado(corrida, conforme["orden"])
+
+
 def comprobar_fin(corrida: Corrida, inicio) -> None:
     with corrida.tx() as conn:
         textos = conn.execute(
@@ -1936,6 +2486,11 @@ def main(argumentos: list[str] | None = None) -> int:
         help="recorre la orden que quedaba trabada (0067, P3 179): declara quien vio la cuenta",
     )
     p.add_argument(
+        "--circuito",
+        action="store_true",
+        help="recorre bandeja, ficha, lectura, diferencia, cotejo, /contenido y un error provocado",
+    )
+    p.add_argument(
         "--otro-consorcio",
         type=UUID,
         help="con --pago-manual o --liquidacion: un consorcio ajeno para probar que no se cruza",
@@ -1946,12 +2501,13 @@ def main(argumentos: list[str] | None = None) -> int:
         help="con --liquidacion: una orden pagada de --otro-consorcio, que no se puede agregar",
     )
     a = p.parse_args(argumentos)
-    if sum((a.pago_manual, a.liquidacion, a.completo, a.orden_trabada)) > 1:
+    if sum((a.pago_manual, a.liquidacion, a.completo, a.orden_trabada, a.circuito)) > 1:
         p.error(
-            "--pago-manual, --liquidacion, --completo y --orden-trabada van en corridas distintas"
+            "--pago-manual, --liquidacion, --completo, --orden-trabada y --circuito van en"
+            " corridas distintas"
         )
-    if (a.pago_manual or a.liquidacion or a.completo) and a.otro_consorcio is None:
-        p.error("--pago-manual, --liquidacion y --completo piden --otro-consorcio")
+    if (a.pago_manual or a.liquidacion or a.completo or a.circuito) and a.otro_consorcio is None:
+        p.error("--pago-manual, --liquidacion, --completo y --circuito piden --otro-consorcio")
     if a.liquidacion and a.orden_ajena is None:
         p.error("--liquidacion pide --orden-ajena")
     config = cargar()
@@ -1979,6 +2535,8 @@ def main(argumentos: list[str] | None = None) -> int:
             nombre = NOMBRE_CONSORCIO_COMPLETO
         elif a.orden_trabada:
             nombre = NOMBRE_CONSORCIO_TRABADA
+        elif a.circuito:
+            nombre = NOMBRE_CONSORCIO_CIRCUITO
         creado = asegurar_consorcio(motor, a.consorcio, nombre)
         print(
             f"corrida {corrida.id}; consorcio {a.consorcio} ({'creado' if creado else 'existente'})"
@@ -1988,6 +2546,7 @@ def main(argumentos: list[str] | None = None) -> int:
         corrida.inicio = inicio
         error = None
         exportacion = None
+        error_provocado = None
         try:
             preparar_escena(corrida)
             if a.completo:
@@ -1998,6 +2557,8 @@ def main(argumentos: list[str] | None = None) -> int:
                 recorrer_liquidacion(corrida, a.otro_consorcio, a.orden_ajena)
             elif a.orden_trabada:
                 recorrer_orden_trabada(corrida)
+            elif a.circuito:
+                error_provocado = recorrer_circuito(corrida, a.otro_consorcio)
             else:
                 recorrer_ordenes(corrida)
             comprobar_fin(corrida, inicio)
@@ -2020,6 +2581,7 @@ def main(argumentos: list[str] | None = None) -> int:
                         "sesiones_abiertas_al_cerrar": abiertas,
                         "controles": corrida.controles,
                         "exportacion": exportacion if error is None else None,
+                        "error_provocado": error_provocado,
                     },
                     ensure_ascii=False,
                     indent=2,
