@@ -294,9 +294,34 @@ describe("pagos para aclarar (app 0067)", () => {
     fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "SINTETICO: transferí de menos" } });
     fireEvent.click(screen.getByRole("button", { name: "Registrar lo que pasó" }));
     await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
-    expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ documento_id: DOC, explicacion: "SINTETICO: transferí de menos", cuenta_real: CUENTA });
+    expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "ARS", documento_id: DOC, explicacion: "SINTETICO: transferí de menos", cuenta_real: CUENTA });
     expect(await screen.findByText(/lo resuelve el Consejo/)).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/pago`)).toHaveLength(0);
+  });
+
+  it("«Pagué otra cosa» trae la moneda de la orden y se puede cambiar", async () => {
+    const DIFERENCIA = `${BASE}/pagos-por-aclarar/${O1}/diferencia`;
+    const api = backend({
+      "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible" }] }),
+      [`POST ${DIFERENCIA}`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/por-aclarar");
+    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    expect(screen.queryByLabelText("Moneda que salió del banco")).toBeNull(); // el registro común no la pide
+    fireEvent.click(screen.getByRole("button", { name: "Pagué otra cosa" }));
+    const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
+    expect(moneda.value).toBe("ARS");
+    fireEvent.change(moneda, { target: { value: "usd" } });
+    expect(moneda.value).toBe("USD");
+    fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
+    fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
+    fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "SINTETICO: salió en dólares" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registrar lo que pasó" }));
+    await waitFor(() => expect(pedidos(api, "POST", DIFERENCIA)).toHaveLength(1));
+    expect(await pedidos(api, "POST", DIFERENCIA)[0]?.json()).toMatchObject({ moneda: "USD" });
   });
 
   it("sin pagos para aclarar lo dice", async () => {

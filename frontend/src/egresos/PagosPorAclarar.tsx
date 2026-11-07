@@ -6,6 +6,7 @@ import { encabezadoCsrf } from "../csrf";
 import { useAEntrar } from "../sesionEncima";
 import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { MONEDAS } from "../pagos/FormularioOrden";
 import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
@@ -44,9 +45,9 @@ export const RUTA_POR_ACLARAR = "/pagos/por-aclarar";
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: PorAclarar[] };
 type Pendiente = { acto: string; reintentar: () => void };
-type Registro = { numero: string; fecha: string; importe: string; cuenta: string; explicacion: string };
+type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
-const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", cuenta: "", explicacion: "" };
+const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", moneda: "", cuenta: "", explicacion: "" };
 const hoy = () => new Date().toLocaleDateString("en-CA");
 /** El título del comprobante cargado desde acá. */
 const TITULO_COMPROBANTE = "Comprobante de la transferencia";
@@ -182,7 +183,7 @@ export function PagosPorAclarar() {
 
   function abrirTransferi(p: PorAclarar) {
     setTransfirio(p.orden_id);
-    setRegistro(REGISTRO_VACIO);
+    setRegistro({ ...REGISTRO_VACIO, moneda: p.moneda });
     setArchivo(null);
     setEsperaAgotada(false);
     claveCarga.current = null;
@@ -300,7 +301,7 @@ export function PagosPorAclarar() {
           numero_operacion: registro.numero.trim(),
           fecha_operacion: registro.fecha,
           importe_real: aDecimal(centavos),
-          moneda: p.moneda,
+          moneda: registro.moneda,
           cuenta_real: registro.cuenta.replace(/\D/g, ""),
           documento_id: p.comprobante_id,
           explicacion: registro.explicacion.trim(),
@@ -480,6 +481,20 @@ export function PagosPorAclarar() {
                       <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
                       <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
                         alCambiar={(texto) => cambiar("importe", texto)} />
+                      {otraCosa && (
+                        <>
+                          <label htmlFor={`${id}-moneda`}>Moneda que salió del banco</label>
+                          <input id={`${id}-moneda`} required list={`${id}-monedas`} pattern="[A-Z]{3}" maxLength={3} autoCapitalize="characters"
+                            aria-describedby={`${id}-moneda-ayuda`} value={registro.moneda} disabled={enviando}
+                            onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
+                          <datalist id={`${id}-monedas`}>
+                            {MONEDAS.map((m) => (
+                              <option key={m} value={m} />
+                            ))}
+                          </datalist>
+                          <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
+                        </>
+                      )}
                       <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
                       <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta}
                         disabled={enviando} onChange={(e) => cambiar("cuenta", e.target.value)} />
