@@ -40,7 +40,8 @@ import {
   AVISO_LECTURA_DISPUTADA,
   AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_POR_EL_CONSEJO,
-  AVISO_POR_FRANJA,
+  AVISO_PASA_SOLA,
+  AVISO_VUELVE_A_APROBACION,
   AVISO_NO_TRANSFIERAS,
   AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
@@ -50,6 +51,8 @@ import {
   AVISO_VER_LA_CUENTA,
   type Paso,
   TEXTO_LE_TOCA_A,
+  VERBO,
+  VERBO_PASA_SOLA,
   TEXTO_SITUACION,
   TONO_SITUACION,
 } from "./textos";
@@ -287,6 +290,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
   const { situacion, paso, ejecucion, declaracion_vigente: declaracion, observacion_vigente: observacion, diferencia_vigente: diferencia } = ficha;
   const v = vigenteDe(ficha);
   const ruta = { consorcio_id: consorcio, orden_id: orden };
+  // Lo que se espera con los mismos datos: decide la base, y el aviso final dice lo que pasó.
+  const pasaSola = diferencia === null && !v.alerta_fraccionamiento && (v.franja === "rutinaria" || v.franja === "bajo_umbral");
   const pago = ejecucion?.pagos.at(-1);
   // La cuenta era de la versión que se abrió: de otra versión no se muestra.
   const cuentaVista = cuenta?.version === v.numero ? cuenta : null;
@@ -536,13 +541,34 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
     });
   }
 
+  /** Después de mandar los mismos datos, dice en qué quedó la orden: la franja la vuelve a calcular
+   * la base. Si no se puede leer, dice solo lo que se sabe, y la bandeja muestra el resto. */
+  function decirEnQueQuedo() {
+    const hecho = "Listo: la orden tiene una versión nueva, con los mismos datos.";
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/pagos/{orden_id}", { params: { path: ruta } })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (data === undefined) terminar(hecho);
+        else if (data.orden.estado === "aprobada") terminar("Listo: la orden quedó lista para pagar.");
+        else {
+          const quienSigue = data.le_toca_a === null || data.le_toca_a === "vos" ? "" : ` ${TEXTO_LE_TOCA_A[data.le_toca_a]}`;
+          terminar(`Listo: la orden volvió a aprobación.${quienSigue}`);
+        }
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else terminar(hecho);
+      });
+  }
+
   /** Los mismos datos: la versión nueva pasa otra vez por aprobación, por su franja si fue simple
    * y por el Consejo si hubo una diferencia (decisión 11, desvío de §9). Para cambiar algo está
    * «Modificar». */
   function volverAPagar() {
     void acto.hacer({
       quePide: ["volver-a-pagar", orden, v.numero],
-      nombre: "volver a pagar",
+      nombre: "enviar la orden de nuevo",
       pedir: (clave) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/versiones", {
           headers: encabezadoCsrf(),
@@ -558,7 +584,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
             contrato_id: v.contrato_id,
           },
         }),
-      alTerminar: () => terminar(`Listo: la orden tiene una versión nueva, con los mismos datos. ${diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}`),
+      alTerminar: decirEnQueQuedo,
       alFallar: siCambio,
     });
   }
@@ -647,7 +673,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                 : diferencia?.recuperada_en == null
                   ? "El Consejo confirmó que no se pagó."
                   : "Se recuperó la plata."}{" "}
-              {diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}
+              {diferencia !== null ? AVISO_POR_EL_CONSEJO : pasaSola ? AVISO_PASA_SOLA : AVISO_VUELVE_A_APROBACION}
             </p>
           )}
           {observacion !== null && (
@@ -955,7 +981,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                       )}
                       {paso === "volver_a_pagar" && ficha.puede_modificar && (
                         <button type="button" disabled={enviando} onClick={volverAPagar}>
-                          Volver a pagar
+                          {pasaSola ? VERBO_PASA_SOLA : VERBO.volver_a_pagar}
                         </button>
                       )}
                       {ficha.puede_aprobar && (

@@ -17,7 +17,7 @@ export const VERBO: Record<Paso, string> = {
   enviar: "Enviar a aprobar",
   renovar: "Renovar la aprobación",
   modificar: "Modificar la orden",
-  volver_a_pagar: "Volver a pagar",
+  volver_a_pagar: "Enviar a aprobar de nuevo",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
   aprobar: "Aprobar o rechazar",
@@ -116,7 +116,10 @@ export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con l
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: compará los datos con el archivo.";
 export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
 export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
-export const AVISO_POR_FRANJA = "Para volver a pagarla, pasa otra vez por la aprobación que le toca por su importe.";
+export const AVISO_VUELVE_A_APROBACION = "Para volver a pagarla, hay que enviarla a aprobar de nuevo.";
+export const AVISO_PASA_SOLA = "No pide aprobación: se puede dejar lista para pagar de nuevo.";
+/** El botón de `volver_a_pagar` cuando la orden no pasa por el Consejo: dice lo que ocurre al tocarlo. */
+export const VERBO_PASA_SOLA = "Dejar lista para pagar";
 export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
 export const AVISO_PROVEEDOR_CAMBIADO =
   "El proveedor cambió después de aprobar esta orden: no se puede pagar. Modificala para que use los datos nuevos y vuelva a aprobación.";
