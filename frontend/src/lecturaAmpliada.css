@@ -133,16 +133,75 @@
   margin-block: 0.75em;
 }
 
-.lectura-ampliada a {
+/* Solo el enlace común: uno con clase ya trae su forma y su color, y sobre su fondo este no se lee. */
+.lectura-ampliada a:not([class]) {
   display: inline-block;
   padding-block: 0.375rem;
   color: var(--accent);
+}
+
+.lectura-ampliada a {
   text-decoration-thickness: 0.12em;
   text-underline-offset: 0.2em;
 }
 
 .lectura-ampliada .navegacion {
   border-color: var(--ink);
+}
+
+.lectura-ampliada .persona-cabecera__avatar {
+  display: none;
+}
+
+/* Con la letra grande las tablas no entran en una tablet: una tarjeta por fila, como en el teléfono. */
+@media (max-width: 64em) {
+  .lectura-ampliada .tabla-tarjetas {
+    overflow-x: clip;
+  }
+
+  .lectura-ampliada .tabla-tarjetas table,
+  .lectura-ampliada .tabla-tarjetas tbody,
+  .lectura-ampliada .tabla-tarjetas tr,
+  .lectura-ampliada .tabla-tarjetas th[scope="row"] {
+    display: block;
+    width: 100%;
+  }
+
+  .lectura-ampliada .tabla-tarjetas thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .lectura-ampliada .tabla-tarjetas tr {
+    margin-bottom: var(--space-3);
+    padding: var(--space-3) 0;
+  }
+
+  .lectura-ampliada .tabla-tarjetas th[scope="row"] {
+    min-width: 0;
+    padding: 0 0 var(--space-1);
+    border: 0;
+  }
+
+  .lectura-ampliada .tabla-tarjetas td {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    border: 0;
+  }
+
+  .lectura-ampliada .tabla-tarjetas td::before {
+    content: attr(data-etiqueta);
+  }
+
+  .lectura-ampliada .tabla-tarjetas td:empty {
+    display: none;
+  }
 }
 
 .lectura-ampliada .navegacion__item {
@@ -191,7 +250,6 @@
   padding: 0.75rem 1.25rem;
   border: 2px solid var(--accent);
   border-radius: 0.25rem;
-  color: var(--on-accent);
 }
 
 .lectura-ampliada :focus-visible,
