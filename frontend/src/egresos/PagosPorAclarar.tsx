@@ -6,9 +6,11 @@ import { encabezadoCsrf } from "../csrf";
 import { useAEntrar } from "../sesionEncima";
 import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { MONEDAS } from "../pagos/FormularioOrden";
 import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
+  aDecimal,
   type Aviso,
   ENCABEZADO_IDEMPOTENCIA,
   importe,
@@ -33,6 +35,9 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus, useMonta
 //
 // Si transfirió (app 0068, P3 184), sube el comprobante y registra el pago desde acá; la cuenta
 // la escribe como figura en el comprobante. Otro miembro del Consejo lo concilia.
+//
+// Si transfirió otra cosa (decisión 3 del 07-11-2026), el mismo formulario registra lo que salió del
+// banco. La orden no queda pagada: lo resuelve el Consejo.
 
 type PorAclarar = components["schemas"]["PagoPorAclarar"];
 
@@ -40,9 +45,9 @@ export const RUTA_POR_ACLARAR = "/pagos/por-aclarar";
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: PorAclarar[] };
 type Pendiente = { acto: string; reintentar: () => void };
-type Registro = { numero: string; fecha: string; importe: string; cuenta: string };
+type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
-const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", cuenta: "" };
+const REGISTRO_VACIO: Registro = { numero: "", fecha: "", importe: "", moneda: "", cuenta: "", explicacion: "" };
 const hoy = () => new Date().toLocaleDateString("en-CA");
 /** El título del comprobante cargado desde acá. */
 const TITULO_COMPROBANTE = "Comprobante de la transferencia";
@@ -66,6 +71,7 @@ export function PagosPorAclarar() {
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const [transfirio, setTransfirio] = useState<string | null>(null);
   const [registro, setRegistro] = useState<Registro>(REGISTRO_VACIO);
+  const [otraCosa, setOtraCosa] = useState(false);
   const [archivo, setArchivo] = useState<File | null>(null);
   /** Cambia para vaciar el campo del archivo después de subirlo. */
   const [entrada, setEntrada] = useState(0);
@@ -177,7 +183,7 @@ export function PagosPorAclarar() {
 
   function abrirTransferi(p: PorAclarar) {
     setTransfirio(p.orden_id);
-    setRegistro(REGISTRO_VACIO);
+    setRegistro({ ...REGISTRO_VACIO, moneda: p.moneda });
     setArchivo(null);
     setEsperaAgotada(false);
     claveCarga.current = null;
@@ -270,6 +276,59 @@ export function PagosPorAclarar() {
     }
   }
 
+  function registrarOtraCosa(evento: FormEvent, p: PorAclarar, reintento = false) {
+    evento.preventDefault();
+    if (p.comprobante_id == null || !montado.current) return;
+    const centavos = aCentavos(registro.importe);
+    if (centavos === null) {
+      setAviso({ texto: "Escribí el importe que salió del banco.", ok: false });
+      return;
+    }
+    if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(["otra-cosa", p.orden_id, p.version, p.huella, p.comprobante_id, registro]));
+    clave.current ??= crypto.randomUUID();
+    setEnviando(true);
+    setAviso(null);
+    void api
+      .POST("/api/v1/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/diferencia", {
+        headers: encabezadoCsrf(),
+        params: {
+          path: { consorcio_id: p.consorcio_id, orden_id: p.orden_id },
+          header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current },
+        },
+        body: {
+          version: p.version,
+          huella: p.huella,
+          numero_operacion: registro.numero.trim(),
+          fecha_operacion: registro.fecha,
+          importe_real: aDecimal(centavos),
+          moneda: registro.moneda,
+          cuenta_real: registro.cuenta.replace(/\D/g, ""),
+          documento_id: p.comprobante_id,
+          explicacion: registro.explicacion.trim(),
+        },
+      })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data !== undefined) {
+          clave.current = null;
+          setTransfirio(null);
+          setOtraCosa(false);
+          setAviso({ texto: "Listo: registraste lo que pasó. La orden no queda pagada: lo resuelve el Consejo.", ok: true });
+          setVuelta((v) => v + 1);
+          return;
+        }
+        const codigo = codigoDe(error);
+        if (codigo !== SEGUNDO_FACTOR_REQUERIDO && renovarClave(response.status, codigo)) clave.current = null;
+        const actual = clave.current;
+        fallo(response.status, codigo, "registrar lo que pasó", () => {
+          clave.current = actual;
+          registrarOtraCosa(evento, p, true);
+        });
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
+      .finally(() => setEnviando(false));
+  }
+
   function registrar(evento: FormEvent, p: PorAclarar, reintento = false) {
     evento.preventDefault();
     if (p.comprobante_id == null || !montado.current) return;
@@ -292,6 +351,7 @@ export function PagosPorAclarar() {
         body: {
           version: p.version,
           huella: p.huella,
+          lectura_mal: false,
           numero_operacion: registro.numero.trim(),
           fecha_operacion: registro.fecha,
           importe_centavos: centavos,
@@ -376,8 +436,8 @@ export function PagosPorAclarar() {
                   </form>
                   )}
                   {transfirio === p.orden_id && (
-                    <form className="formulario" onSubmit={(e) => registrar(e, p)}>
-                      <h3>Registrá la transferencia</h3>
+                    <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, p) : registrar(e, p))}>
+                      <h3>{otraCosa ? "Pagué otra cosa" : "Registrá la transferencia"}</h3>
                       <p role="status">{textoDelComprobante(p)}</p>
                       {fallaLista !== null && (
                         <p className="aviso-error" role="alert">
@@ -418,15 +478,40 @@ export function PagosPorAclarar() {
                       <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
                       <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
                         onChange={(e) => cambiar("fecha", e.target.value)} />
-                      <label htmlFor={`${id}-importe`}>Importe transferido (como figura en el comprobante)</label>
+                      <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
                       <CampoImporte id={`${id}-importe`} valor={registro.importe} deshabilitado={enviando}
                         alCambiar={(texto) => cambiar("importe", texto)} />
+                      {otraCosa && (
+                        <>
+                          <label htmlFor={`${id}-moneda`}>Moneda que salió del banco</label>
+                          <input id={`${id}-moneda`} required list={`${id}-monedas`} pattern="[A-Z]{3}" maxLength={3} autoCapitalize="characters"
+                            aria-describedby={`${id}-moneda-ayuda`} value={registro.moneda} disabled={enviando}
+                            onChange={(e) => cambiar("moneda", e.target.value.toUpperCase())} />
+                          <datalist id={`${id}-monedas`}>
+                            {MONEDAS.map((m) => (
+                              <option key={m} value={m} />
+                            ))}
+                          </datalist>
+                          <p id={`${id}-moneda-ayuda`}>El código de tres letras, como {MONEDAS.join(" o ")}. Si no es la de la orden, solo se puede reclamar.</p>
+                        </>
+                      )}
                       <label htmlFor={`${id}-cuenta`}>CBU/CVU de destino (como figura en el comprobante)</label>
                       <input id={`${id}-cuenta`} required inputMode="numeric" maxLength={30} value={registro.cuenta}
                         disabled={enviando} onChange={(e) => cambiar("cuenta", e.target.value)} />
+                      {otraCosa && (
+                        <>
+                          <label htmlFor={`${id}-explicacion`}>Qué pasó</label>
+                          <textarea id={`${id}-explicacion`} required maxLength={300} rows={3} value={registro.explicacion} disabled={enviando}
+                            onChange={(e) => cambiar("explicacion", e.target.value)} />
+                          <p>Hasta 300 caracteres. No incluyas el número de una cuenta. La orden no queda pagada: lo resuelve el Consejo.</p>
+                        </>
+                      )}
                       <div className="acciones">
                         <button type="submit" disabled={enviando || p.comprobante_estado !== "disponible"}>
-                          Registrar el pago
+                          {otraCosa ? "Registrar lo que pasó" : "Registrar el pago"}
+                        </button>
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
+                          {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
                         </button>
                         <button type="button" className="secundario" disabled={enviando} onClick={() => setTransfirio(null)}>
                           Volver

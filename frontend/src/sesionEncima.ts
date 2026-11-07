@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
 
+import { guardarAdondeIba } from "./adondeIba";
 import { borrarCopias } from "./copiaContactos";
 import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 
@@ -91,12 +92,14 @@ export const olvidarRecuperada = () => {
   if (foto.recuperada) publicar({ recuperada: false });
 };
 
-/** Salir a /entrar por un 401, salvo que la hoja ya lo esté resolviendo sobre esta pantalla. */
+/** Salir a /entrar por un 401, salvo que la hoja ya lo esté resolviendo sobre esta pantalla. La
+ * sesión no se conocía: no hay hoja que conserve la pantalla, así que se guarda adónde iba. */
 export function useAEntrar(antes?: () => void): () => void {
   const navegar = useNavigate();
   return useCallback(() => {
     if (pidiendoEntrar()) return;
     antes?.();
+    guardarAdondeIba();
     navegar(RUTA_ENTRAR, { replace: true });
   }, [antes, navegar]);
 }

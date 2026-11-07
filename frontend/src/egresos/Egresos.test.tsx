@@ -293,6 +293,33 @@ describe("página /egresos/proveedores", () => {
       ...extra,
     });
 
+  it("un proveedor sin CUIT lo carga por su ruta, con la versión que se vio", async () => {
+    const CARGA = `${BASE}/proveedores/${P1}/cuit`;
+    const sinCuit = proveedor({ cuit: null });
+    const api = conLista({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuit] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [] }),
+      [`POST ${CARGA}`]: () => Response.json({ id: P1, version: 2 }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
+    expect(await screen.findByText(/Listo: cargaste el CUIT/)).toBeTruthy();
+    const pedido = api.mock.calls.map(([q]) => q as Request).find((q) => q.method === "POST" && new URL(q.url).pathname === CARGA);
+    expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
+  });
+
+  it("control: un proveedor con CUIT no ofrece cargarlo", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    await screen.findByRole("button", { name: "Cambiar los datos" });
+    expect(screen.queryByRole("button", { name: "Cargar el CUIT" })).toBeNull();
+  });
+
   it("con una sola versión, la ficha no repite los datos que ya muestra", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");
@@ -333,7 +360,7 @@ describe("página /egresos/proveedores", () => {
   it("la lista y la ficha muestran la cuenta enmascarada y nunca la completa", async () => {
     vi.stubGlobal("fetch", conLista());
     const { container } = abrir("/egresos/proveedores");
-    const lista = await screen.findByRole("list", { name: "Proveedores" });
+    const lista = await screen.findByRole("table", { name: "Proveedores" });
     expect(within(lista).getByText("…1234")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
@@ -545,7 +572,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "otro" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(screen.queryByLabelText("Rubro (opcional)")).toBeNull());
-    expect(await screen.findByRole("list", { name: "Proveedores" })).toBeTruthy();
+    expect(await screen.findByRole("table", { name: "Proveedores" })).toBeTruthy();
   });
 });
 

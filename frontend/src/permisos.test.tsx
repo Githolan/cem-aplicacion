@@ -431,7 +431,7 @@ describe("el edificio elegido", () => {
     fireEvent.change(codigo.getByLabelText("Correo"), { target: { value: "otra@ejemplo.com" } });
     fireEvent.change(codigo.getByLabelText(/^Código de 6 números/), { target: { value: "042917" } });
     fireEvent.submit(codigo.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
-    fireEvent.click(await screen.findByRole("link", { name: "Padrón del edificio" }));
+    fireEvent.click(await within(screen.getByRole("main")).findByRole("link", { name: "Padrón del edificio" }));
 
     const selector = (await screen.findByLabelText("Edificio")) as HTMLSelectElement;
     expect(selector.value).toBe(C1);

@@ -159,7 +159,7 @@ describe("entrar encima", () => {
     const entrar = (await screen.findByRole("heading", { name: HOJA })).closest<HTMLElement>(".hoja-fondo")!;
     const fallo = (await screen.findByRole("heading", { name: "No se pudo confirmar" })).closest<HTMLElement>(".hoja-fondo")!;
     expect(entrar.inert).toBeFalsy();
-    expect(fallo.inert).toBe(true);
+    await waitFor(() => expect(fallo.inert).toBe(true));
     expect(entrar.contains(document.activeElement)).toBe(true);
 
     await entrarConCodigo();
@@ -346,9 +346,11 @@ describe("entrar encima", () => {
 
     tocar("Guardar");
     await screen.findByRole("heading", { name: HOJA });
+    window.sessionStorage.setItem("cem.entrar.adonde_iba", "/pagos");
     tocar("Salir de la cuenta");
 
     await waitFor(() => expect(salidas.aEntrar).toHaveBeenCalledOnce());
+    expect(window.sessionStorage.getItem("cem.entrar.adonde_iba")).toBeNull();
   });
 
   it.each([

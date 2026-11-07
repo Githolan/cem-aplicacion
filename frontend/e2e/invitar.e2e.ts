@@ -75,6 +75,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     const permisos = simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
+      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === "/api/v1/me/consorcios")
         return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: quien === "propietaria" ? ["propietario"] : [] }] });
       if (camino === `/api/v1/consorcios/${C1}/unidades`) return ruta.fulfill({ json: UNIDADES });

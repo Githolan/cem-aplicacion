@@ -122,7 +122,7 @@ test.describe("mi cuenta", () => {
     await page.goto("/");
     await page.getByRole("link", { name: "Mi cuenta" }).click();
 
-    await expect(page.getByText("Ana Pérez")).toBeVisible();
+    await expect(page.getByLabel("Tus datos").getByText("Ana Pérez")).toBeVisible();
     // La versión pasó del inicio al pie de esta pantalla.
     await expect(page.getByText(`Compilación ${SHA_BACKEND.slice(0, LARGO_SHA_CORTA)}`)).toBeVisible();
     await expect(page.getByText(/Está activado/)).toBeVisible();

@@ -17,14 +17,15 @@ from app.contexto import ContextoDep, require_scope
 from app.main import crear_app
 
 _QUIEN_VIO_LA_CUENTA = (
-    "0067 y 0068, P3 179 y 184: quien vio la cuenta y perdió la facultad ya no tiene ámbito en el"
-    " consorcio; la ruta parte de la sesión y la base exige todo (responde 404 a cualquier otra"
-    " persona)"
+    "0067, 0068 y 0079, P3 179 y 184: quien vio la cuenta y perdió la facultad ya no tiene ámbito"
+    " en el consorcio; la ruta parte de la sesión y la base exige todo (responde 404 a cualquier"
+    " otra persona)"
 )
 SIN_AMBITO = {
     f"['POST'] /api/v1/consorcios/{{consorcio_id}}/pagos-por-aclarar/{{orden_id}}/{resto}":
         _QUIEN_VIO_LA_CUENTA
-    for resto in ("no-realizado", "comprobante", "comprobante/{documento_id}/versiones", "pago")
+    for resto in ("no-realizado", "comprobante", "comprobante/{documento_id}/versiones", "pago",
+                  "diferencia")
 }  # fmt: skip
 """Las únicas rutas con `{consorcio_id}` sin `requiere`, con su motivo. No usan el ámbito: no
 deciden con un `Contexto` de políticas (`test_las_rutas_sin_ambito_no_usan_el_ambito`)."""

@@ -267,7 +267,7 @@ export function Cuenta() {
                 <dd>{lista.yo.valor.correo}</dd>
               </dl>
             )}
-            <button type="button" onClick={salir} disabled={enviando}>
+            <button type="button" className="secundario" onClick={salir} disabled={enviando}>
               Salir
             </button>
           </section>
@@ -300,6 +300,7 @@ export function Cuenta() {
                     </dl>
                     <button
                       type="button"
+                      className="secundario"
                       onClick={() => cerrar(s)}
                       disabled={enviando}
                       aria-describedby={`${id}-${s.id}`}
@@ -311,7 +312,7 @@ export function Cuenta() {
               </ul>
             )}
             {hayOtras && (
-              <button type="button" onClick={cerrarOtras} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cerrarOtras} disabled={enviando}>
                 Cerrar las otras sesiones
               </button>
             )}
@@ -328,7 +329,7 @@ export function Cuenta() {
                     : "No está activado."}
                 </p>
                 <p>
-                  <Link to={RUTA_SEGUNDO_FACTOR}>
+                  <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
                     {lista.segundoFactor.valor ? "Ver el segundo factor" : "Activar el segundo factor"}
                   </Link>
                 </p>

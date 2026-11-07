@@ -193,7 +193,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           : "Todavía no tenés contraseña: entrás con el enlace o el código que te mandamos por correo."}
       </p>
       {!abierto && (
-        <button type="button" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
+        <button type="button" className="secundario" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
           {estado.definida ? "Cambiar la contraseña" : "Definir una contraseña"}
         </button>
       )}

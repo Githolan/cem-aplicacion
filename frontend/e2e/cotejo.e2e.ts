@@ -27,9 +27,9 @@ const VISTA = {
 };
 
 const RESULTADO = {
-  desde: "2026-11-01", hasta: "2026-11-30", movimientos_nuevos: 2, movimientos_repetidos: 0, cotejados: 12, ya_cotejados: 0,
+  desde: "2026-11-01", hasta: "2026-11-30", movimientos_nuevos: 2, movimientos_repetidos: 0, cotejados: 12, ya_cotejados: 0, anulados: 0,
   esperan_conciliar: 0, para_otra_persona: 0, lineas_no_leidas: 0, filas_no_leidas: [], aca_no_banco: [pago(P2, "0048211904")],
-  total_aca_no_banco: 1, banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, numero_operacion: "0048213999" }],
+  total_aca_no_banco: 1, banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, moneda: "ARS", numero_operacion: "0048213999" }],
   total_banco_no_aca: 1,
 };
 
@@ -48,7 +48,7 @@ async function simularCotejo(pagina: Page, baseURL: string): Promise<Pedidos> {
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
     if (camino === `${c}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "GET")
-      return ruta.fulfill({ json: { elementos: pendientes, siguiente: null, tope_bytes: 20 * 1024 * 1024, maximo_pagos: 100 } });
+      return ruta.fulfill({ json: { elementos: pendientes, siguiente: null, tope_bytes: 20 * 1024 * 1024, maximo_pagos: 100, moneda_extracto: "ARS" } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "POST") {
       pedidos.tildes.push(pedido.postDataJSON());
       pendientes = pendientes.filter((p) => p.pago_id !== P1);
@@ -133,6 +133,7 @@ test.describe("cotejar con el banco", () => {
     const [subido] = pedidos.extracto;
     expect(subido?.cuerpo).toBe(CSV); // el archivo tal cual, sin pasar por JSON
     expect(subido?.parametros.get("importe")).toBe("Debito");
+    expect(subido?.parametros.get("moneda")).toBe("ARS"); // el extracto dice en qué moneda está (decisión 9)
     expect(errores).toEqual([]);
   });
 

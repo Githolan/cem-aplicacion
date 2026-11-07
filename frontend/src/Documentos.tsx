@@ -8,7 +8,7 @@ import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
-import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
+import { AlInicioSinEdificios, REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
@@ -520,6 +520,8 @@ export function Documentos() {
 
   const conMensaje = aviso !== null || pantalla.tipo !== "lista";
 
+  if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
+
   return (
     <>
       <h1>Documentos del edificio</h1>
@@ -562,7 +564,7 @@ export function Documentos() {
               )}
               {lectura.tipo !== "cargando" && (
                 <p>
-                  <button type="button" onClick={volverAPedir} disabled={enviando}>
+                  <button type="button" className="secundario" onClick={volverAPedir} disabled={enviando}>
                     Actualizar
                   </button>
                 </p>
@@ -614,7 +616,6 @@ export function Documentos() {
             </button>
           </>
         )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
         {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
@@ -680,6 +681,7 @@ export function Documentos() {
               <p>
                 <button
                   type="button"
+                  className="secundario"
                   onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })}
                   disabled={enviando}
                   aria-describedby={titulo}
@@ -738,7 +740,7 @@ export function Documentos() {
           <button type="submit" disabled={enviando}>
             Subir el archivo
           </button>{" "}
-          <button type="button" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -800,7 +802,7 @@ export function Documentos() {
           {!soloCarga && (
             <>
               {" "}
-              <button type="button" onClick={cerrar} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
                 Cancelar
               </button>
             </>

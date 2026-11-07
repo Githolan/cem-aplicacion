@@ -46,6 +46,8 @@ from cem_contracts.egresos import (
     AprobacionRegistrada,
     BandejaPagos,
     CampoComprobante,
+    CargaCuitProveedor,
+    CierreReclamo,
     ComprobanteActual,
     ComprobantePagoNuevo,
     ComprobanteSubido,
@@ -104,6 +106,9 @@ from cem_contracts.egresos import (
     Renovacion,
     ResolucionDiferenciaPago,
     TipoDiferencia,
+    TomaPagoManual,
+    TomaRegistrada,
+    TomaVigente,
     VersionOrdenPago,
     VersionOrdenPagoRevision,
     VersionProveedor,
@@ -186,6 +191,12 @@ ERRORES = {
         "El proveedor está suspendido o dado de baja: no recibe órdenes nuevas.",
     ),
     "cuit_invalido": (422, CodigoError.CUIT_INVALIDO, "El CUIT no es válido."),
+    "sin_lectura": (
+        422, CodigoError.PETICION_INVALIDA, "Ese comprobante no tiene una lectura para discutir.",
+    ),
+    "cuit_ya_cargado": (
+        409, CodigoError.CUIT_YA_CARGADO, "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
+    ),
     "cuit_repetido": (
         409, CodigoError.CUIT_REPETIDO, "Ya hay un proveedor con ese CUIT en este consorcio.",
     ),
@@ -246,6 +257,15 @@ ERRORES = {
     "pago_ya_registrado": (
         409, CodigoError.PAGO_YA_REGISTRADO,
         "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
+    ),
+    "pago_en_curso": (
+        409, CodigoError.PAGO_EN_CURSO,
+        "Otra persona ya vio la cuenta de este pago: esperá su comprobante, para no pagar dos"
+        " veces.",
+    ),
+    "toma_antes_de_tiempo": (
+        409, CodigoError.TOMA_ANTES_DE_TIEMPO,
+        "Todavía no pasó el plazo para tomar el pago: quien vio la cuenta puede estar pagando.",
     ),
     "numero_operacion_invalido": (
         422, CodigoError.NUMERO_OPERACION_INVALIDO,
@@ -593,6 +613,30 @@ def crear_proveedor(
             {"cuit": nuevo.cuit, **_datos_proveedor(nuevo)},
         ).scalar_one()  # fmt: skip
         return 201, ProveedorCreado(id=nuevo_id, version=1)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/cuit",
+    response_model=ProveedorCreado,
+    summary="Cargar el CUIT de un proveedor que no lo tiene: una sola vez, con una versión nueva",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "CUIT inválido."}},
+)
+def cargar_cuit_proveedor(
+    proveedor_id: UUID,
+    carga: CargaCuitProveedor,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, ProveedorCreado]:
+        version = _ejecutar(
+            conn, permiso,
+            "select nucleo.cargar_cuit_proveedor(:p, :esperada, :cuit, :actor, 'api', :sesion)",
+            {"p": proveedor_id, "esperada": carga.version_esperada, "cuit": carga.cuit},
+        ).scalar_one()  # fmt: skip
+        return 200, ProveedorCreado(id=proveedor_id, version=version)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -1072,11 +1116,16 @@ def baja_contrato(
 
 
 def _puede_resolver(
-    c: Connection, conciliar: Permiso, o: OrdenPago, registraron: set[UUID], declararon: set[UUID]
+    c: Connection,
+    conciliar: Permiso,
+    o: OrdenPago,
+    registraron: set[UUID],
+    declararon: set[UUID],
+    tomaron: set[UUID],
 ) -> tuple[bool, bool]:
     """Si quien lee queda separado de la orden para conciliar y para confirmar que no se pagó: la
-    separación de esas rutas, con todos los que registraron o declararon en cualquier ejecución
-    de la orden, como `nucleo.exigir_no_ejecuto`.
+    separación de esas rutas, con todos los que registraron, declararon o tomaron el pago en
+    cualquier ejecución de la orden, como `nucleo.exigir_no_ejecuto`.
 
     Quién vio la cuenta no lo lee `cem_app`. Confirmar no lo necesita: con una declaración
     `confirmable`, todos los que la vieron declararon, y por eso declarar cuenta. Conciliar sí:
@@ -1085,12 +1134,40 @@ def _puede_resolver(
     puede hacer. No audita ni concede: las rutas vuelven a decidir."""
     if _ejecutar(c, conciliar, PREPARO, {"o": o.id}).scalar_one():
         return False, False
-    personas = list(registraron | declararon)
+    personas = list(registraron | declararon | tomaron)
     decisiones = conciliar.decidir_en(
         c, [Entidad(preparado_por=o.preparada_por, ejecutado_por=p) for p in personas]
     )
     negadas = {p for p, d in zip(personas, decisiones, strict=True) if not d.permitido}
-    return bool(registraron) and negadas.isdisjoint(registraron), bool(personas) and not negadas
+    concilia = bool(registraron) and negadas.isdisjoint(registraron | tomaron)
+    return concilia, bool(personas) and not negadas
+
+
+def _tomas(c: Connection, lector: Permiso, orden: UUID | None):
+    return _ejecutar(
+        c, lector,
+        "select * from nucleo.tomas_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
+        {"o": orden, "f": LEE_COMO[lector.accion]},
+    ).mappings().all()  # fmt: skip
+
+
+def _quienes_tomaron(c: Connection, lector: Permiso, orden: UUID | None) -> dict[UUID, set[UUID]]:
+    """Quiénes tomaron el pago en cada orden: ocupan el lugar de quien ejecutó, aunque no hayan
+    abierto la cuenta."""
+    tomaron: dict[UUID, set[UUID]] = {}
+    for fila in _tomas(c, lector, orden):
+        tomaron.setdefault(fila["orden_id"], set()).add(fila["tomado_por"])
+    return tomaron
+
+
+def _verificar_no_tomo(
+    lector: Permiso, permiso: Permiso, motor, orden_id: UUID, preparada_por: UUID
+) -> None:
+    """La separación con quien tomó el pago, como con quien registró."""
+    with _lectura(lector, motor) as c:
+        tomaron = _quienes_tomaron(c, lector, orden_id).get(orden_id, set())
+    for persona in tomaron:
+        permiso.verificar(Entidad(preparado_por=preparada_por, ejecutado_por=persona))
 
 
 def _leer_ejecuciones(c: Connection, permiso: Permiso, orden: UUID | None):
@@ -1133,6 +1210,7 @@ def _pagos_manuales(
     ejecuciones, pagos, registraron, declaraciones, declararon = _leer_ejecuciones(
         c, permiso, orden
     )
+    tomaron = _quienes_tomaron(c, permiso, orden)
     alcanza_conciliar = alcanza(CONCILIAR, conciliar.ctx.autorizacion)
     elementos = []
     for e in ejecuciones:
@@ -1149,7 +1227,12 @@ def _pagos_manuales(
         concilia = confirma = False
         if alcanza_conciliar and (por_conciliar or any(d["confirmable"] for d in declaradas)):
             concilia, confirma = _puede_resolver(
-                c, conciliar, o, registraron.get(o.id, set()), declararon.get(o.id, set())
+                c,
+                conciliar,
+                o,
+                registraron.get(o.id, set()),
+                declararon.get(o.id, set()),
+                tomaron.get(o.id, set()),
             )
         elementos.append(OrdenConPagoManual(
             orden=o, puede_conciliar=por_conciliar and concilia,
@@ -1193,6 +1276,10 @@ def listar_pagos_manuales_revision(
         return ListaPagosManuales(elementos=_pagos_manuales(c, permiso, conciliar, None))
 
 
+def _plazo_para_tomar(request: Request) -> timedelta:
+    return timedelta(hours=request.app.state.config.pagos_horas_tomar)
+
+
 def _ejecutor(lectura: Permiso, permiso: Permiso, motor, orden_id: UUID) -> None:
     """Como al emitir: quien ejecuta lee la orden como quien prepara y la separación se evalúa con
     quienes aprobaron la versión vigente (A5). La base vuelve a exigir todo."""
@@ -1232,6 +1319,39 @@ def cuenta_para_pago_manual(
 
 
 @router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar",
+    status_code=201,
+    response_model=TomaRegistrada,
+    summary="Tomar el pago de quien vio la cuenta y no dijo nada: no da la cuenta",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def tomar_pago_manual(
+    request: Request,
+    orden_id: UUID,
+    toma: TomaPagoManual,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Con la separación de pagar. La base mira el plazo y deja el evento (`0078`)."""
+    _ejecutor(lectura, permiso, motor, orden_id)
+    plazo = _plazo_para_tomar(request)
+
+    def efecto(conn: Connection) -> tuple[int, TomaRegistrada]:
+        nueva = _ejecutar(
+            conn, permiso,
+            "select nucleo.tomar_pago_manual(:o, :version, :huella, :plazo, :actor, 'api',"
+            " :sesion)",
+            {"o": orden_id, "version": toma.version, "huella": bytes.fromhex(toma.huella),
+             "plazo": plazo},
+        ).scalar_one()  # fmt: skip
+        return 201, TomaRegistrada(id=nueva, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
     "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual",
     status_code=201,
     response_model=PagoManualRegistrado,
@@ -1252,12 +1372,12 @@ def registrar_pago_manual(
         pago = _ejecutar(
             conn, permiso,
             "select nucleo.registrar_pago_manual(:o, :version, :huella, :numero, :fecha, :importe,"
-            " :moneda, :cuenta, :doc, :actor, 'api', :sesion)",
+            " :moneda, :cuenta, :doc, :actor, 'api', :sesion, :mal)",
             {"o": orden_id, "version": registro.version,
              "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
              "fecha": registro.fecha_operacion, "importe": registro.importe_centavos,
              "moneda": registro.moneda, "cuenta": registro.cuenta_destino,
-             "doc": registro.documento_id},
+             "doc": registro.documento_id, "mal": registro.lectura_mal},
         ).scalar_one()  # fmt: skip
         return 201, PagoManualRegistrado(id=pago, orden_id=orden_id)
 
@@ -1334,6 +1454,7 @@ def conciliar_pago_manual(
     permiso.verificar(Entidad(
         preparado_por=actual.orden.preparada_por, ejecutado_por=pago.registrado_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         estado = _ejecutar(
@@ -1400,6 +1521,7 @@ def confirmar_pago_no_realizado(
     permiso.verificar(Entidad(
         preparado_por=actual.orden.preparada_por, ejecutado_por=declarada.declarado_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, actual.orden.preparada_por)
 
     def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
         _ejecutar(
@@ -1415,8 +1537,11 @@ def confirmar_pago_no_realizado(
 # --- «Pagué otra cosa» (`0075`) -----------------------------------------------------------------
 
 
-def _diferencias(c: Connection, permiso: Permiso, orden: UUID) -> dict[UUID, DiferenciaPagoManual]:
-    """Por ejecución, sin la cuenta completa: la base entrega solo sus últimos dígitos."""
+def _diferencias(
+    c: Connection, permiso: Permiso, orden: UUID
+) -> dict[UUID, list[DiferenciaPagoManual]]:
+    """Por ejecución, sin la cuenta completa: la base entrega solo sus últimos dígitos. La última de
+    cada lista es la vigente; las demás, lo que corrigió (`0082`)."""
     filas = _ejecutar(
         c, permiso,
         "select * from nucleo.diferencias_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
@@ -1429,13 +1554,39 @@ def _diferencias(c: Connection, permiso: Permiso, orden: UUID) -> dict[UUID, Dif
         del datos["orden_id"]
         misma_moneda = datos["moneda"] == datos["moneda_orden"]
         saldo = datos["importe_orden_centavos"] - int(datos["importe_real"] * 100)
-        diferencias[ejecucion] = DiferenciaPagoManual(
+        diferencias.setdefault(ejecucion, []).append(DiferenciaPagoManual(
             **datos,
             falta_centavos=saldo if misma_moneda and saldo > 0 else None,
             sobra_centavos=-saldo if misma_moneda and saldo < 0 else None,
             se_puede_dar_por_pagada=datos["tipo"] == "importe" and misma_moneda,
-        )  # fmt: skip
+        ))  # fmt: skip
     return diferencias
+
+
+REGISTRAR_DIFERENCIA = (
+    "select nucleo.registrar_diferencia_pago_manual(:o, :version, :huella, :numero, :fecha,"
+    " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion, :corrige)"
+)
+
+
+ERRORES_CORRECCION = {
+    "no_es_quien_registro": (
+        403, CodigoError.NO_ES_QUIEN_REGISTRO, "La diferencia la corrige quien la registró.",
+    ),
+}  # fmt: skip
+"""Al corregir una diferencia, `no_es_quien_registro` no habla de un contrato."""
+
+
+def _datos_diferencia(
+    orden_id: UUID, registro: RegistroDiferenciaPago, corrige: UUID | None = None
+) -> dict:
+    return {
+        "o": orden_id, "version": registro.version, "huella": bytes.fromhex(registro.huella),
+        "numero": registro.numero_operacion, "fecha": registro.fecha_operacion,
+        "importe": registro.importe_real, "moneda": registro.moneda,
+        "cuenta": registro.cuenta_real, "doc": registro.documento_id,
+        "explicacion": registro.explicacion, "corrige": corrige,
+    }  # fmt: skip
 
 
 @router.post(
@@ -1459,16 +1610,40 @@ def registrar_diferencia_pago(
 
     def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
         diferencia = _ejecutar(
-            conn, permiso,
-            "select nucleo.registrar_diferencia_pago_manual(:o, :version, :huella, :numero, :fecha,"
-            " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion)",
-            {"o": orden_id, "version": registro.version,
-             "huella": bytes.fromhex(registro.huella), "numero": registro.numero_operacion,
-             "fecha": registro.fecha_operacion, "importe": registro.importe_real,
-             "moneda": registro.moneda, "cuenta": registro.cuenta_real,
-             "doc": registro.documento_id, "explicacion": registro.explicacion},
+            conn, permiso, REGISTRAR_DIFERENCIA, _datos_diferencia(orden_id, registro)
         ).scalar_one()  # fmt: skip
         return 201, DiferenciaRegistrada(id=diferencia, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/"
+    "correccion",
+    status_code=201,
+    response_model=DiferenciaRegistrada,
+    summary="Corregir una diferencia mal cargada (quien la registró, antes de la resolución): fila"
+    " nueva",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "Sin diferencia o evidencia inválida."}},
+)
+def corregir_diferencia_pago(
+    orden_id: UUID,
+    diferencia_id: UUID,
+    registro: RegistroDiferenciaPago,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Los mismos controles que al registrar; la base mira quién registró y si ya se resolvió."""
+    _ejecutor(lectura, permiso, motor, orden_id)
+
+    def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
+        nueva = _ejecutar(
+            conn, permiso, REGISTRAR_DIFERENCIA,
+            _datos_diferencia(orden_id, registro, diferencia_id), ERRORES_CORRECCION,
+        ).scalar_one()  # fmt: skip
+        return 201, DiferenciaRegistrada(id=nueva, orden_id=orden_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -1481,12 +1656,13 @@ def _verificar_quien_resuelve(
     with _lectura(revision, motor) as c:
         ordenes = _ordenes(c, revision, orden_id)
         diferencias = _diferencias(c, revision, orden_id).values()
-    diferencia = next((d for d in diferencias if d.id == diferencia_id), None)
+    diferencia = next((d[-1] for d in diferencias if d[-1].id == diferencia_id), None)
     if not ordenes or diferencia is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
     permiso.verificar(Entidad(
         preparado_por=ordenes[0].preparada_por, ejecutado_por=diferencia.registrada_por
     ))  # fmt: skip
+    _verificar_no_tomo(revision, permiso, motor, orden_id, ordenes[0].preparada_por)
 
 
 @router.post(
@@ -1547,6 +1723,36 @@ def recuperar_diferencia_pago(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/"
+    "cierre",
+    response_model=PagoManualCambiado,
+    summary="Cerrar un reclamo sin recuperar la plata (otro miembro del Consejo): queda Fallida y"
+    " no se imputa en la liquidación",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def cerrar_reclamo(
+    orden_id: UUID,
+    diferencia_id: UUID,
+    cierre: CierreReclamo,
+    revision: Annotated[Permiso, Depends(requiere(REVISAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(CONCILIAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    _verificar_quien_resuelve(revision, permiso, motor, orden_id, diferencia_id)
+
+    def efecto(conn: Connection) -> tuple[int, PagoManualCambiado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.cerrar_reclamo_sin_recuperar(:o, :d, :motivo, :actor, 'api', :sesion)",
+            {"o": orden_id, "d": diferencia_id, "motivo": cierre.motivo},
+        )  # fmt: skip
+        return 200, PagoManualCambiado(orden_id=orden_id, estado=EstadoOrdenPago.FALLIDA)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
 # --- Circuito de pagos: bandeja, ficha y consulta (`0072`) --------------------------------------
 # Las lee quien prepara o quien revisa, sin el gesto. Lo que cada persona puede hacer lo decide la
 # base con `nucleo.acciones_de_ordenes_lectura`. Ninguna de estas rutas da la cuenta completa.
@@ -1575,11 +1781,11 @@ def _lector(preparar: Permiso, revisar: Permiso) -> Permiso:
 
 
 def _acciones(
-    c: Connection, lector: Permiso, orden: UUID | None
+    c: Connection, lector: Permiso, orden: UUID | None, plazo: timedelta
 ) -> dict[UUID, circuito_pagos.AccionesOrden]:
-    sql = "select * from nucleo.acciones_de_ordenes_lectura(:o, :actor, 'api', :sesion)"
+    sql = "select * from nucleo.acciones_de_ordenes_lectura(:o, :actor, 'api', :sesion, :plazo)"
     acciones = {}
-    for fila in _ejecutar(c, lector, sql, {"o": orden}).mappings():
+    for fila in _ejecutar(c, lector, sql, {"o": orden, "plazo": plazo}).mappings():
         datos = dict(fila)
         orden_id = datos.pop("orden_id")
         acciones[orden_id] = circuito_pagos.AccionesOrden(**datos)
@@ -1718,6 +1924,17 @@ def _lectura_del_comprobante(
     )  # fmt: skip
 
 
+def _toma_vigente(
+    c: Connection, lector: Permiso, orden: UUID, ejecucion: UUID
+) -> TomaVigente | None:
+    ultima = next(
+        (f for f in reversed(_tomas(c, lector, orden)) if f["ejecucion_id"] == ejecucion), None
+    )
+    if ultima is None:
+        return None
+    return TomaVigente(tomado_por_nombre=ultima["tomado_por_nombre"], tomada_en=ultima["tomada_en"])
+
+
 @router.get(
     "/consorcios/{consorcio_id}/pagos/bandeja",
     response_model=BandejaPagos,
@@ -1731,7 +1948,7 @@ def bandeja_pagos(
     dias = request.app.state.config.pagos_dias_bandeja
     with _lectura(lector, _una_foto(motor)) as c:
         ordenes = _ordenes(c, lector, None)
-        acciones = _acciones(c, lector, None)
+        acciones = _acciones(c, lector, None, _plazo_para_tomar(request))
     return BandejaPagos(elementos=circuito_pagos.bandeja(
         ordenes, acciones, lector.accion == PREPARAR, datetime.now(UTC) - timedelta(days=dias),
     ))  # fmt: skip
@@ -1792,6 +2009,7 @@ def consulta_pagos(
     responses=RESPUESTAS_LECTURA | {404: {"description": "No existe en este consorcio."}},
 )
 def ficha_pago(
+    request: Request,
     orden_id: UUID,
     preparar: Preparar,
     revisar: Revisar,
@@ -1803,17 +2021,21 @@ def ficha_pago(
     with _lectura(lector, _una_foto(motor)) as c:
         detalle = _leer_orden_con_versiones(c, lector, orden_id)
         orden = detalle.orden
-        a = _acciones(c, lector, orden_id).get(orden_id, circuito_pagos.SIN_ACCIONES)
+        a = _acciones(c, lector, orden_id, _plazo_para_tomar(request)).get(
+            orden_id, circuito_pagos.SIN_ACCIONES
+        )
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
-        diferencia = None
+        de_la_ejecucion = []
         if ejecucion is not None:
-            diferencia = _diferencias(c, lector, orden_id).get(ejecucion.id)
+            de_la_ejecucion = _diferencias(c, lector, orden_id).get(ejecucion.id, [])
+        diferencia = de_la_ejecucion[-1] if de_la_ejecucion else None
         comprobante, subido = _comprobantes(
             c, lector, ver, orden_id, diferencia or ultimo, a.pago_observado and diferencia is None
         )
         vigente = next(x for x in detalle.versiones if x.numero == orden.version_vigente)
         lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
+        toma = None if ejecucion is None else _toma_vigente(c, lector, orden_id, ejecucion.id)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     observacion = None
@@ -1831,6 +2053,7 @@ def ficha_pago(
         # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
         puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
         puede_reabrir_cuenta=circuito_pagos.reabre_cuenta(situacion, a),
+        puede_tomar=a.puede_tomar, tomar_desde=a.tomar_desde,
         puede_modificar=prepara and orden.estado in circuito_pagos.MODIFICABLES,
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
         puede_declarar=a.puede_declarar,
@@ -1838,11 +2061,13 @@ def ficha_pago(
         puede_confirmar=a.puede_confirmar,
         puede_resolver_diferencia=a.puede_resolver_diferencia and a.diferencia_sin_resolver,
         puede_recuperar=a.puede_resolver_diferencia and a.reclamo_abierto,
+        puede_corregir_diferencia=a.puede_corregir_diferencia,
         puede_preparar_faltante=paso == PasoPago.PREPARAR_FALTANTE,
         ejecucion=ejecucion, comprobante_actual=comprobante,
         comprobante_subido=subido, lectura_comprobante=lectura, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
-        diferencia_vigente=diferencia,
+        diferencia_vigente=diferencia, diferencias_anteriores=de_la_ejecucion[:-1],
+        toma_vigente=toma,
     )  # fmt: skip
 
 
@@ -1995,6 +2220,34 @@ async def subir_comprobante_sin_facultad(
         ).one()  # fmt: skip
 
     return await subir_archivo(request, ctx, clave, motor, nueva)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/diferencia",
+    status_code=201,
+    response_model=DiferenciaRegistrada,
+    summary="Registrar lo que salió del banco, sin ejecutar ya pagos en el consorcio: lo resuelve"
+    " el"
+    " Consejo",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "Sin diferencia o evidencia inválida."}},
+)
+def registrar_diferencia_sin_facultad(
+    consorcio_id: UUID,
+    orden_id: UUID,
+    registro: RegistroDiferenciaPago,
+    identidad: IdentidadDep,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = _sin_ambito(motor, identidad, consorcio_id)
+
+    def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
+        diferencia = ejecutar_sin_ambito(
+            conn, ctx, REGISTRAR_DIFERENCIA, _datos_diferencia(orden_id, registro)
+        ).scalar_one()  # fmt: skip
+        return 201, DiferenciaRegistrada(id=diferencia, orden_id=orden_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
 
 
 @router.post(

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
+import { olvidarAdondeIba, tomarAdondeIba } from "./adondeIba";
 import { api } from "./api/cliente";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
@@ -19,22 +20,29 @@ export type EstadoSesion = "consultando" | "con_sesion" | "sin_sesion" | "sin_se
 interface Lectura {
   estado: EstadoSesion;
   correo: string | null;
+  nombre: string | null;
 }
 
+const SIN_LEER: Lectura = { estado: "consultando", correo: null, nombre: null };
+
 function useLectura(activa: boolean): Lectura {
-  const [lectura, setLectura] = useState<Lectura>({ estado: "consultando", correo: null });
+  const [lectura, setLectura] = useState<Lectura>(SIN_LEER);
 
   useEffect(() => {
-    if (!activa) return;
+    // Lo leído no queda para quien entre después en este navegador.
+    if (!activa) {
+      setLectura(SIN_LEER);
+      return;
+    }
     let vigente = true;
     void api.GET("/api/v1/auth/sesion", { fetch: comprobarSesion }).then(
       ({ data, response }) => {
         if (!vigente) return;
-        if (data !== undefined) setLectura({ estado: "con_sesion", correo: data.correo });
-        else setLectura({ estado: response.status === ESTADO_SIN_SESION ? "sin_sesion" : "sin_servicio", correo: null });
+        if (data !== undefined) setLectura({ estado: "con_sesion", correo: data.correo, nombre: data.nombre });
+        else setLectura({ estado: response.status === ESTADO_SIN_SESION ? "sin_sesion" : "sin_servicio", correo: null, nombre: null });
       },
       () => {
-        if (vigente) setLectura({ estado: "sin_servicio", correo: null });
+        if (vigente) setLectura({ estado: "sin_servicio", correo: null, nombre: null });
       },
     );
     return () => {
@@ -49,10 +57,22 @@ export function useSesion(activa = true): EstadoSesion {
   return useLectura(activa).estado;
 }
 
+/** La sesión con su nombre, para quien además lo muestra. */
+export function useSesionConNombre(activa: boolean): Pick<Lectura, "estado" | "nombre"> {
+  const { estado, nombre } = useLectura(activa);
+  return { estado, nombre };
+}
+
 /** Terminó una acción que lleva al inicio, con el aviso del resultado. */
 export function useIrAlInicio(): (aviso: string) => void {
   const navegar = useNavigate();
   return (aviso) => navegar(RUTA_INICIO, { replace: true, state: { aviso } });
+}
+
+/** Después de entrar: adonde iba la persona, si un 401 la sacó de ahí; si no, el inicio. */
+export function useIrTrasEntrar(): (aviso: string) => void {
+  const navegar = useNavigate();
+  return (aviso) => navegar(tomarAdondeIba() ?? RUTA_INICIO, { replace: true, state: { aviso } });
 }
 
 /**
@@ -71,5 +91,6 @@ export async function salirDeLaCuenta(
     return mensaje(0, undefined);
   }
   borrarCopias();
+  olvidarAdondeIba();
   return null;
 }

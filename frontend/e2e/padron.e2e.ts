@@ -64,6 +64,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: "consejo" | "vec
     const permisos = quien === "vecina" ? simularPermisos(ruta, camino, ["consorcios.mis"]) : simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
+      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (quien === "vecina") return ruta.fulfill(error(403, "sin_permiso"));
       if (camino === `${BASE}/padron`)
@@ -115,7 +116,7 @@ test.describe("padrón", () => {
     await page.goto("/");
     await page.getByRole("link", { name: "Padrón del edificio" }).click();
 
-    const beto = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
+    const beto = page.getByRole("rowgroup").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
     await expect(beto).toBeVisible();
     await expect(page.getByRole("heading", { name: `1° A: ${NOMBRE_LARGO}` })).toBeVisible();
     await expect(page.getByText("(todavía no empezó)")).toBeVisible();
@@ -146,7 +147,7 @@ test.describe("padrón", () => {
     const envios = await simularApi(page, baseURL!, "consejo");
     await page.setViewportSize({ width: 360, height: 740 });
     await page.goto("/padron");
-    const propia = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: `1° A: ${NOMBRE_LARGO}` }) });
+    const propia = page.getByRole("rowgroup").filter({ has: page.getByRole("heading", { name: `1° A: ${NOMBRE_LARGO}` }) });
     await propia.getByRole("button", { name: "Finalizar" }).click();
     await page.getByLabel("Motivo").fill("Venta de la unidad");
     await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
@@ -157,7 +158,7 @@ test.describe("padrón", () => {
     await expect(page.getByText(/No tenés permiso para finalizar/)).toBeFocused();
     await sinFaltasDeAccesibilidad(page);
 
-    const beto = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
+    const beto = page.getByRole("rowgroup").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
     await beto.getByRole("button", { name: "Finalizar" }).click();
     await page.getByLabel("Motivo").fill("Fin del contrato");
     await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
@@ -184,7 +185,7 @@ test.describe("padrón", () => {
     const envios = await simularApi(page, baseURL!, "consejo");
     await page.context().clearCookies();
     await page.goto("/padron");
-    const beto = page.getByRole("listitem").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
+    const beto = page.getByRole("rowgroup").filter({ has: page.getByRole("heading", { name: "1° A: Beto Pérez" }) });
     await beto.getByRole("button", { name: "Confirmar" }).click();
     await page.getByLabel("Referencia del título").fill("Contrato 77");
     await page.getByRole("button", { name: "Confirmar el vínculo" }).click();

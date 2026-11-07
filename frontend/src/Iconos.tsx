@@ -67,6 +67,7 @@ const TRAZOS = {
     </>
   ),
   flecha: <path d="m9 18 6-6-6-6" />,
+  volver: <path d="m15 18-6-6 6-6" />,
 } satisfies Record<string, ReactNode>;
 
 export type NombreIcono = keyof typeof TRAZOS;

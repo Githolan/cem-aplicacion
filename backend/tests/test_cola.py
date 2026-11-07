@@ -477,8 +477,21 @@ def test_un_solo_planificador_es_lider(motor_app, cola_vacia, monkeypatch, tmp_p
     assert (tmp_path / "latido").exists()
 
 
+@pytest.fixture
+def procesos():
+    """Si la prueba falla a mitad de camino, el proceso no sigue encolando en las de atrás."""
+    lanzados: list[subprocess.Popen] = []
+    yield lanzados
+    for proceso in lanzados:
+        if proceso.poll() is None:
+            proceso.kill()
+            proceso.communicate(timeout=20)
+
+
 @pytest.mark.db
-def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_vacia, tmp_path):
+def test_los_procesos_arrancan_con_las_tareas_registradas(
+    motor_migrate, cola_vacia, tmp_path, procesos
+):
     """Como en el contenedor: `sh arranque.sh` con CEM_PROCESO, y salida limpia con SIGTERM."""
     entorno = os.environ | {
         "CEM_DATABASE_URL": url_rol("app"),
@@ -489,10 +502,12 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(motor_migrate, cola_va
     planificador = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
+    procesos.append(planificador)
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 8)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
+    procesos.append(trabajos)
     # Sin las variables de las copias, la copia, la réplica de documentos, el control de tamaño de
     # las copias y el control de índices fallan y lo dicen; no se saltean en silencio. La
     # vigilancia de la cuarentena termina y anota que no llega a `clamd` (sin aviso a Kuma

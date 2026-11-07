@@ -20,6 +20,9 @@ const COPIA_VALIDA = JSON.stringify({
   lista: { elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" },
 });
 
+/** El nombre también está en la cabecera: acá importa el de la pantalla. */
+const enPantalla = () => within(screen.getByRole("main"));
+
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const ACTUAL = "11111111-1111-4111-8111-111111111111";
 const OTRA = "22222222-2222-4222-8222-222222222222";
@@ -185,7 +188,7 @@ describe("página /cuenta", () => {
 
     vi.stubGlobal("fetch", conSesion({ "GET /health": () => error("servicio_no_disponible", 503) }));
     abrir();
-    await screen.findByText("Ana Pérez");
+    await enPantalla().findByText("Ana Pérez");
     expect(screen.queryByText(/Versión/)).toBeNull();
   });
 
@@ -207,7 +210,7 @@ describe("página /cuenta", () => {
     vi.stubGlobal("fetch", conSesion());
     abrir();
 
-    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
     expect(screen.getByText("ana@ejemplo.com")).toBeTruthy();
     const lista = screen.getByRole("heading", { name: "Dónde tenés la sesión abierta" }).parentElement!;
     const items = within(lista).getAllByRole("listitem");
@@ -280,7 +283,7 @@ describe("página /cuenta", () => {
   ])("un %s con %i habla del servicio, no de la conexión, y no cambia de pantalla", async (ruta, status) => {
     vi.stubGlobal("fetch", conSesion({ [ruta]: () => error("error_interno", status) }));
     abrir();
-    await screen.findByText("Ana Pérez");
+    await enPantalla().findByText("Ana Pérez");
     if (ruta.endsWith("revocar")) fireEvent.click(await botonCerrar("Chrome en Android"));
     else if (ruta.endsWith("salir")) fireEvent.click(screen.getByRole("button", { name: "Salir" }));
     else fireEvent.click(screen.getByRole("button", { name: "Cerrar las otras sesiones" }));
@@ -398,7 +401,7 @@ describe("página /cuenta", () => {
     caida = false;
     fireEvent.click(boton);
 
-    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
@@ -417,10 +420,10 @@ describe("página /cuenta", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
 
-    expect(await screen.findByText(sigue)).toBeTruthy();
+    expect(await enPantalla().findByText(sigue)).toBeTruthy();
     const region = within(screen.getByRole("region", { name: parte }));
     expect(region.getByRole("alert").textContent).toBe(SERVICIO_NO_DISPONIBLE);
-    expect(screen.queryByText(recupera)).toBeNull();
+    expect(enPantalla().queryByText(recupera)).toBeNull();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
     // Salir tiene que seguir a mano aunque falte una parte.
     expect(screen.getByRole("button", { name: "Salir" })).toBeTruthy();
@@ -452,7 +455,7 @@ describe("página /cuenta", () => {
       }),
     );
     abrir();
-    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
     const region = within(screen.getByRole("region", { name: "Dónde tenés la sesión abierta" }));
     expect(region.getByRole("alert").textContent).toBe(SIN_CONEXION);
 
@@ -461,7 +464,7 @@ describe("página /cuenta", () => {
     await waitFor(() =>
       expect((region.getByRole("button", { name: "Reintentar" }) as HTMLButtonElement).disabled).toBe(false),
     );
-    expect(screen.getByText("Ana Pérez")).toBeTruthy();
+    expect(enPantalla().getByText("Ana Pérez")).toBeTruthy();
 
     fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
     expect(await screen.findByText("Chrome en Android")).toBeTruthy();
@@ -488,7 +491,7 @@ describe("página /cuenta", () => {
     );
     const { container } = abrir();
     if (estado === "sin_servicio") await screen.findByText(/El servicio no está disponible/);
-    else await screen.findByText("Ana Pérez");
+    else await enPantalla().findByText("Ana Pérez");
     if (estado === "aviso") {
       fireEvent.click(await botonCerrar("Chrome en Android"));
       await screen.findByText(/Listo: cerramos/);
@@ -497,6 +500,26 @@ describe("página /cuenta", () => {
     // jsdom no calcula colores: el contraste lo mide axe en el navegador (e2e/cuenta.e2e.ts).
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
+  });
+});
+
+describe("quién tiene la sesión, en la cabecera", () => {
+  it("con sesión: su nombre, sus iniciales y el enlace a la cuenta", async () => {
+    vi.stubGlobal("fetch", conSesion());
+    abrir();
+
+    const cabecera = within(screen.getByRole("banner"));
+    const enlace = await cabecera.findByRole("link", { name: "Ana Pérez" });
+    expect(enlace.getAttribute("href")).toBe("/cuenta");
+    expect(within(enlace).getByText("AP").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("control: sin sesión no muestra a nadie", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/sesion": () => error("no_autenticado", 401) }));
+    abrir();
+
+    await screen.findByRole("heading", ENTRAR);
+    expect(within(screen.getByRole("banner")).queryByRole("link", { name: "Ana Pérez" })).toBeNull();
   });
 });
 
@@ -851,10 +874,10 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     // Las otras tres ya respondieron: igual no se pinta nada hasta tener las cuatro.
     // Las cuatro, la versión y lo que pide la navegación.
     await waitFor(() => expect(retenido.mock.calls.length).toBeGreaterThanOrEqual(5));
-    expect(screen.queryByText("Ana Pérez")).toBeNull();
+    expect(enPantalla().queryByText("Ana Pérez")).toBeNull();
     soltar();
 
-    expect(await screen.findByText("Ana Pérez")).toBeTruthy();
+    expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
     expect(screen.queryByText("Consultando…")).toBeNull();
   });
 

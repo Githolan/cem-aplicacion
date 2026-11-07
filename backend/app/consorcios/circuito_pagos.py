@@ -11,9 +11,9 @@ a pagar y la ficha tiene que decir qué falta.
 **Sin ejecución manual** (el riel) una orden en ejecución o en verificación queda `pagando`: §3 no
 la nombra, y ninguna persona la resuelve.
 
-**Una sola persona paga.** Con la orden en `pagando` y alguien que ya vio la cuenta, a otro ejecutor
-no se le ofrece pagar aunque la base se lo acepte: espera el comprobante. Evita la doble
-transferencia (decisión del hilo principal, 06-11-2026).
+**Una sola persona paga.** Con la orden en `pagando` y alguien que ya vio la cuenta, otro ejecutor
+espera el comprobante: la base tampoco le da la cuenta (`pago_en_curso`, `0078`). Pasado el plazo,
+puede tomar el pago (decisión 1 del propietario, 07-11-2026).
 
 **Un pago sin salida no queda invisible.** En ejecución, sin nadie que haya visto la cuenta y sin
 poder abrirla (la aprobación venció, por ejemplo), `renovar` no sirve: la base solo renueva una
@@ -69,6 +69,14 @@ class AccionesOrden(HechosPago):
     falta_que_declares: bool = False
     pago_sin_salida: bool = False
     puede_resolver_diferencia: bool = False
+    pago_de_otro: bool = False
+    """Quien pide podría pagar, y otra persona vio la cuenta y no dijo nada."""
+    puede_tomar: bool = False
+    tomar_desde: datetime | None = None
+    puede_corregir_diferencia: bool = False
+    lectura_disputada: bool = False
+    proveedor_cambiado: bool = False
+    """Quien pide prepara, y el proveedor cambió después de aprobar la orden."""
 
 
 SIN_ACCIONES = AccionesOrden()
@@ -148,6 +156,8 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
         case SituacionPago.PARA_PAGAR:
             if a.puede_renovar:
                 return PasoPago.RENOVAR
+            if a.proveedor_cambiado:
+                return PasoPago.MODIFICAR
             return PasoPago.PAGAR if ofrece_pagar(situacion, a) else None
         case SituacionPago.PAGANDO:
             if a.puede_subir_comprobante:
@@ -156,7 +166,9 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
                 return PasoPago.DECLARAR_NO_PAGO if a.puede_declarar else PasoPago.ESPERA_DECLARAR
             if ofrece_pagar(situacion, a):
                 return PasoPago.PAGAR
-            return PasoPago.ESPERA_COMPROBANTE if a.puede_pagar else None
+            if a.puede_tomar:
+                return PasoPago.TOMAR_PAGO
+            return PasoPago.ESPERA_COMPROBANTE if a.puede_pagar or a.pago_de_otro else None
         case SituacionPago.FALTA_CONCILIAR:
             return PasoPago.CONCILIAR if a.puede_conciliar else PasoPago.ESPERA_CONCILIAR
         case SituacionPago.OBSERVADO:
@@ -220,6 +232,7 @@ def bandeja(
             orden_id=o.id, proveedor=o.razon_social, concepto=o.concepto,
             importe_centavos=o.importe_centavos, moneda=o.moneda, paso=paso, grupo=grupo,
             le_toca_a=le_toca_a(paso, a),
+            lectura_disputada=a.lectura_disputada and paso == PasoPago.CONCILIAR,
         )))  # fmt: skip
     filas.sort(key=lambda f: f[:2])
     return [f[2] for f in filas]

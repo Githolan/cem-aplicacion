@@ -174,7 +174,12 @@ function abrir(ruta = "/mandatos") {
 }
 
 const cargado = () => screen.findByText("Ana Díaz, Consejo de propietarios");
-const seccion = (nombre: string) => screen.getByRole("region", { name: nombre });
+const FORMULARIOS = ["Dar de alta un mandato", "Registrar una decisión"];
+/** Una sección de la pantalla; los dos formularios se abren con su botón. */
+function seccion(nombre: string) {
+  if (FORMULARIOS.includes(nombre) && screen.queryByRole("region", { name: nombre }) === null) fireEvent.click(boton(nombre));
+  return screen.getByRole("region", { name: nombre });
+}
 const boton = (nombre: string) => screen.getByRole("button", { name: nombre });
 
 async function completarAlta(decision = D_EQUIPO) {
@@ -224,7 +229,7 @@ describe("página /mandatos", () => {
   it("el inicio tiene el enlace a mandatos y decisiones", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Mandatos y decisiones" })).getAttribute("href")).toBe("/mandatos");
+    expect((await within(screen.getByRole("main")).findByRole("link", { name: "Mandatos y decisiones" })).getAttribute("href")).toBe("/mandatos");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
@@ -247,10 +252,10 @@ describe("página /mandatos", () => {
     abrir();
     await cargado();
     const mandatos = seccion("Mandatos");
-    const consejo = within(mandatos).getByText("Ana Díaz, Consejo de propietarios").closest("li") as HTMLElement;
-    expect(within(consejo).queryByText("CUIT")).toBeNull();
-    const externo = within(mandatos).getByText("Estudio Sur, Administración externa").closest("li") as HTMLElement;
-    expect(within(externo).getByText(CUIT)).toBeTruthy();
+    const consejo = within(mandatos).getByText("Ana Díaz, Consejo de propietarios").closest("tr") as HTMLElement;
+    expect(within(consejo).queryByText(/^CUIT/)).toBeNull();
+    const externo = within(mandatos).getByText("Estudio Sur, Administración externa").closest("tr") as HTMLElement;
+    expect(within(externo).getByText(`CUIT ${CUIT}`)).toBeTruthy();
     expect(within(externo).getByText(/1 de febrero de 2027 \(ese día ya no rige\)/)).toBeTruthy();
     const decisiones = seccion("Decisiones");
     expect(within(decisiones).getByText("Asamblea del 10 de enero de 2026")).toBeTruthy();
@@ -272,7 +277,7 @@ describe("página /mandatos", () => {
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
     expect(screen.queryByText(/No tenés permiso/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Dar de alta" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
   });
 
   it("el detalle de un mandato suma lo autorizado y lleva el foco a su título", async () => {
@@ -450,6 +455,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json({ elementos: [...DECISIONES.elementos, otra] }) }));
     abrir();
     await cargado();
+    seccion("Dar de alta un mandato");
     expect(opciones("Decisión que lo respalda")).toEqual(["", D_EQUIPO, D_OTRA]);
     // La lista la sigue mostrando: lo que se saca es la opción.
     expect(within(seccion("Decisiones")).getByText("Contrata al estudio")).toBeTruthy();
@@ -460,6 +466,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => Response.json(ajenas) }));
     abrir();
     await cargado();
+    seccion("Dar de alta un mandato");
     expect(opciones("Decisión que lo respalda")).toEqual(["", D_EQUIPO, D_PROPIA]);
   });
 
@@ -770,7 +777,7 @@ describe("página /mandatos", () => {
     const creado = await screen.findByRole("heading", { level: 2, name: "Beto Pérez, Consejo de propietarios" });
     await waitFor(() => expect(document.activeElement).toBe(creado));
     fireEvent.click(boton("Cerrar el detalle"));
-    expect(document.activeElement).toBe(boton("Dar de alta"));
+    expect(document.activeElement).toBe(boton("Dar de alta un mandato"));
     const ver = screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" });
     ver.focus();
     fireEvent.click(ver);
@@ -844,13 +851,15 @@ describe("página /mandatos", () => {
       vi.stubGlobal("fetch", simulado);
       abrir();
       await cargado();
-      const form = completarDecision();
+      completarDecision();
       boton("Registrar decisión").focus();
       fireEvent.click(boton("Registrar decisión"));
       const titulo = await screen.findByRole("heading", { level: 2, name: "Contrato de administración del 1 de octubre de 2026" });
       await waitFor(() => expect(document.activeElement).toBe(titulo));
       expect(within(titulo.closest("section") as HTMLElement).getByText("Contrato del 01-10")).toBeTruthy();
       expect(screen.getByText("Listo: registramos la decisión.")).toBeTruthy();
+      expect(screen.queryByRole("region", { name: "Registrar una decisión" })).toBeNull();
+      const form = seccion("Registrar una decisión");
       expect(valor(form, "Tipo")).toBe("asamblea");
       expect(valor(form, "Fecha del acto")).toBe("");
       expect(valor(form, "Qué se decidió")).toBe("");
@@ -937,6 +946,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+    seccion("Registrar una decisión");
     const decision = screen.getByLabelText("Qué se decidió") as HTMLTextAreaElement;
     fireEvent.change(decision, { target: { value: "A medio escribir" } });
     caida = false;
@@ -962,6 +972,8 @@ describe("página /mandatos", () => {
       }),
     );
     const { container } = abrir();
+    await screen.findByRole("button", { name: "Dar de alta un mandato" });
+    seccion("Dar de alta un mandato");
     expect(await screen.findByText("No pudimos consultar quiénes pueden recibir un mandato.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Consultar de nuevo", description: "Mandatos" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Consultar de nuevo", description: "Decisiones" })).toBeTruthy();
@@ -982,6 +994,9 @@ describe("página /mandatos", () => {
       conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => (caida ? error("error_interno", 500) : Response.json(DECISIONES)) }),
     );
     abrir();
+    await screen.findByText("No pudimos consultar las decisiones.");
+    expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeTruthy();
+    seccion("Dar de alta un mandato");
     expect(await screen.findByText(/no pudimos consultarlas/)).toBeTruthy();
     caida = false;
     fireEvent.click(within(seccion("Dar de alta un mandato")).getByRole("button", { name: "Consultar de nuevo" }));
@@ -1016,6 +1031,7 @@ describe("página /mandatos", () => {
       vi.stubGlobal("fetch", simulado);
       abrir();
       expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+      seccion("Registrar una decisión");
       fireEvent.change(screen.getByLabelText("Qué se decidió"), { target: { value: "A medio escribir" } });
       caida = false;
       volvioLaRed();
@@ -1178,6 +1194,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_CANDIDATOS}`]: () => error("error_interno", 500) }));
     abrir();
     await cargado();
+    seccion("Dar de alta un mandato");
     expect(screen.getByText("No pudimos consultar quiénes pueden recibir un mandato.")).toBeTruthy();
     expect(within(seccion("Decisiones")).getByText("Asamblea del 10 de enero de 2026")).toBeTruthy();
   });
@@ -1227,6 +1244,7 @@ describe("página /mandatos", () => {
       expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
       expect(screen.getByText("Todavía no hay decisiones registradas.")).toBeTruthy();
       caida = false;
+      seccion("Registrar una decisión");
       fireEvent.click(boton("Registrar decisión"));
       await screen.findByText("Listo: registramos la decisión.");
       const enA = en(pedidos(simulado, "POST", RUTA_DECISIONES), 0).headers.get("Idempotency-Key");
@@ -1445,11 +1463,44 @@ describe("página /mandatos: estados de pantalla mínima (documento 08, §13.1)"
   });
 });
 
+describe("los dos botones de arriba", () => {
+  it("los formularios arrancan cerrados y arriba de las listas al abrirse", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    expect(screen.queryByRole("region", { name: "Registrar una decisión" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Dar de alta un mandato" })).toBeNull();
+    const form = seccion("Registrar una decisión");
+    expect(form.compareDocumentPosition(seccion("Mandatos")) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(document.activeElement).toBe(within(form).getByRole("heading", { level: 2 }));
+    expect(boton("Registrar una decisión").getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("se abre uno por vez, y lo escrito en el otro queda", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    fireEvent.change(within(seccion("Registrar una decisión")).getByLabelText("Qué se decidió"), { target: { value: "A medio escribir" } });
+    seccion("Dar de alta un mandato");
+    expect(screen.queryByRole("region", { name: "Registrar una decisión" })).toBeNull();
+    expect((within(seccion("Registrar una decisión")).getByLabelText("Qué se decidió") as HTMLTextAreaElement).value).toBe("A medio escribir");
+  });
+
+  it("«Cancelar» lo cierra y devuelve el foco al botón que lo abrió", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    fireEvent.click(within(seccion("Dar de alta un mandato")).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("region", { name: "Dar de alta un mandato" })).toBeNull();
+    expect(document.activeElement).toBe(boton("Dar de alta un mandato"));
+  });
+});
+
 describe("lo que no se puede hacer no aparece en /mandatos", () => {
   const conAcciones = (...acciones: string[]) => conConsejo({ [`GET ${BASE}/mis-acciones`]: alcanza(...acciones) });
   const LECTURAS = ["mandatos.ver", "decisiones.ver", "mandatos.ver_candidatos"];
-  const FORMULARIO_DECISION = { level: 2, name: "Registrar una decisión" };
-  const FORMULARIO_ALTA = { level: 2, name: "Dar de alta un mandato" };
+  const FORMULARIO_DECISION = { name: "Registrar una decisión" };
+  const FORMULARIO_ALTA = { name: "Dar de alta un mandato" };
 
   it("la presentación dice solo lo que la persona alcanza", () => {
     const nada = { veMandatos: false, veDecisiones: false, registra: false, daAltas: false, daBajas: false };
@@ -1480,16 +1531,16 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     vi.stubGlobal("fetch", conAcciones(...LECTURAS, "decisiones.registrar"));
     abrir();
     await cargado();
-    expect(screen.getByRole("heading", FORMULARIO_DECISION)).toBeTruthy();
-    expect(screen.queryByRole("heading", FORMULARIO_ALTA)).toBeNull();
+    expect(screen.getByRole("button", FORMULARIO_DECISION)).toBeTruthy();
+    expect(screen.queryByRole("button", FORMULARIO_ALTA)).toBeNull();
   });
 
   it("«Dar de alta» se ve con `mandatos.alta`", async () => {
     vi.stubGlobal("fetch", conAcciones(...LECTURAS, "mandatos.alta"));
     abrir();
     await cargado();
-    expect(await screen.findByRole("button", { name: "Dar de alta" })).toBeTruthy();
-    expect(screen.queryByRole("heading", FORMULARIO_DECISION)).toBeNull();
+    expect(await screen.findByRole("button", FORMULARIO_ALTA)).toBeTruthy();
+    expect(screen.queryByRole("button", FORMULARIO_DECISION)).toBeNull();
   });
 
   it("control: «Dar de alta» sin poder elegir la decisión que la respalda no se ofrece", async () => {
@@ -1497,7 +1548,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await cargado();
-    expect(screen.queryByRole("heading", FORMULARIO_ALTA)).toBeNull();
+    expect(screen.queryByRole("button", FORMULARIO_ALTA)).toBeNull();
     expect(screen.queryByText(/no tenés permiso/i)).toBeNull();
   });
 
@@ -1570,7 +1621,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     const simulado = conAcciones("decisiones.registrar");
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByRole("heading", FORMULARIO_DECISION)).toBeTruthy();
+    expect(await screen.findByRole("button", FORMULARIO_DECISION)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Mandatos" })).toBeNull();
     expect(screen.queryByRole("region", { name: "Decisiones" })).toBeNull();
     for (const ruta of [RUTA_MANDATOS, RUTA_DECISIONES, RUTA_CANDIDATOS]) expect(pedidos(simulado, "GET", ruta)).toHaveLength(0);
@@ -1582,7 +1633,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     await cargado();
     expect(screen.queryByRole("region", { name: "Decisiones" })).toBeNull();
     expect(screen.getByRole("region", { name: "Mandatos" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 2, name: "Dar de alta un mandato" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
     expect(screen.queryByText(/No tenés permiso/)).toBeNull();
   });
 });

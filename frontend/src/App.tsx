@@ -15,6 +15,7 @@ import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EntrarEncima } from "./EntrarEncima";
 import { AvisoServicio, PuntoServicio } from "./EstadoServicio";
+import { ElegirConsorcio } from "./egresos/ElegirConsorcio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
@@ -26,13 +27,14 @@ import { InvitacionMandato } from "./InvitacionMandato";
 import { Invitar, RUTA_INVITACIONES } from "./Invitar";
 import { Mandatos, RUTA_MANDATOS } from "./Mandatos";
 import { ModoLectura } from "./ModoLectura";
-import { Navegacion, useHayNavegacion } from "./Navegacion";
+import { Navegacion, PersonaEnCabecera, useNavegacion } from "./Navegacion";
 import { CircuitoPagos } from "./pagos/CircuitoPagos";
 import { ConsultaPagos } from "./pagos/ConsultaPagos";
 import { Cotejo } from "./pagos/Cotejo";
 import { PrepararOrden } from "./pagos/PrepararOrden";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { Padron, RUTA_PADRON } from "./Padron";
+import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
@@ -164,6 +166,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     gcTime: 0,
     retry: false,
   });
+  const pagos = useResumenPagos(porEdificio);
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
   if (sesion === "consultando") return <p role="status">Cargando…</p>;
   // Sin saber qué puede la persona, solo lo que le sirve igual: los contactos guardados.
@@ -171,6 +174,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     porEdificio === null
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
+  const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
@@ -181,11 +185,17 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         avisos desde acá.
       </p>
       {porEdificio?.size === 0 && (
-        <p>
-          Todavía no participás de ningún edificio.
-          {invitaciones.data?.length === 0 &&
-            " Para sumarte, abrí el enlace de la invitación que te llegó por correo."}
-        </p>
+        <section className="resumen-inicio" aria-label="Tu edificio">
+          <div className="resumen-inicio__arriba">
+            <span>Tu edificio</span>
+            <span className="resumen-inicio__estado resumen-inicio__estado--neutro">Sin edificio</span>
+          </div>
+          <p>
+            Todavía no participás de ningún edificio.
+            {invitaciones.data?.length === 0 &&
+              " Para sumarte, abrí el enlace de la invitación que te llegó por correo."}
+          </p>
+        </section>
       )}
       {falla !== null && (
         <div className="tarjeta">
@@ -198,9 +208,24 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
+      <ElegirConsorcio
+        pantalla={{ tipo: "lista", consorcios: pagos.edificios }}
+        consorcio={pagos.consorcio}
+        elegir={pagos.setConsorcio}
+        deshabilitado={false}
+      />
+      {pagos.enTarjeta && edificio !== undefined && (
+        <TarjetaPagos
+          cantidad={pagos.cantidad}
+          falla={pagos.falla}
+          reintentar={pagos.reintentar}
+          reintentando={pagos.reintentando}
+          edificio={edificio.nombre}
+        />
+      )}
       <div className="grupos-inicio">
         {GRUPOS_DE_INICIO.map((g) => {
-          const propios = g.enlaces.filter((e) => enlaces.includes(e));
+          const propios = g.enlaces.filter((e) => enlaces.includes(e) && !(pagos.enTarjeta && e.ruta === RUTA_PAGOS));
           const aclarar = g.titulo === "Dinero" && porAclarar.data === true;
           if (propios.length === 0 && !aclarar) return null;
           return (
@@ -208,7 +233,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
               <h2 className="titulo-seccion">{g.titulo}</h2>
               <ul className="filas-inicio">
                 {propios.map((e) => (
-                  <FilaDeInicio key={e.ruta} enlace={e} />
+                  <FilaDeInicio key={e.ruta} enlace={e.ruta === RUTA_PAGOS ? { ...e, detalle: pagos.detalle } : e} />
                 ))}
                 {aclarar && (
                   <FilaDeInicio
@@ -224,6 +249,9 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           );
         })}
       </div>
+      {pagos.prepara && (
+        <p className="aviso-info">La aplicación no mueve dinero: el pago se hace por home banking y acá registrás la evidencia.</p>
+      )}
       <EnlaceInstalar />
     </>
   );
@@ -253,7 +281,7 @@ function NoEncontrada() {
     <>
       <h1>No encontramos esa página</h1>
       <p>
-        <Link to="/">Volver al inicio</Link>
+        <Link to="/" className="enlace-suelto">Volver al inicio</Link>
       </p>
     </>
   );
@@ -261,7 +289,7 @@ function NoEncontrada() {
 
 export function App() {
   const [barra, setBarra] = useState<HTMLElement | null>(null);
-  const hayNavegacion = useHayNavegacion();
+  const { hay: hayNavegacion, nombre } = useNavegacion();
   return (
     <div className={hayNavegacion ? "aplicacion aplicacion--con-navegacion" : "aplicacion"}>
       {hayNavegacion && <Navegacion />}
@@ -274,6 +302,7 @@ export function App() {
         <div className="cabecera-fin">
           <div ref={setBarra} className="cabecera-punto" />
           <ModoLectura />
+          {nombre && <PersonaEnCabecera nombre={nombre} />}
         </div>
       </header>
       <main id="contenido">

@@ -125,6 +125,8 @@ function exigirSesion(response: Response) {
   if (response.status === ESTADO.sinSesion) throw new SinSesion();
 }
 
+const COLUMNAS_PADRON = 5;
+
 export function Padron() {
   const id = useId();
   const navegar = useNavigate();
@@ -408,9 +410,22 @@ export function Padron() {
             )}
             {lectura.tipo === "ok" && lectura.filas.length === 0 && <p>El padrón no tiene vínculos vigentes ni futuros.</p>}
             {lectura.tipo === "ok" && lectura.filas.length > 0 && (
-              <ul className="sesiones" aria-label="Padrón">
-                {(puede("padron.confirmar_vinculo") ? sinConfirmarPrimero(lectura.filas) : lectura.filas).map((f) => tarjeta(f))}
-              </ul>
+              <div className="tabla-lista tabla-tarjetas">
+                <table aria-label="Padrón">
+                  <thead>
+                    <tr>
+                      <th scope="col">Unidad y persona</th>
+                      <th scope="col">Carácter</th>
+                      <th scope="col">Vigencia</th>
+                      <th scope="col">Confirmación</th>
+                      <th scope="col">
+                        <span className="solo-lector">Acciones</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  {(puede("padron.confirmar_vinculo") ? sinConfirmarPrimero(lectura.filas) : lectura.filas).map((f) => tarjeta(f))}
+                </table>
+              </div>
             )}
           </section>
         </>
@@ -427,43 +442,39 @@ export function Padron() {
     const confirmable = f.confirmable_por_vos;
     const finalizable = !futuro && puede("padron.gestionar");
     return (
-      <li key={f.vinculo_id}>
-        <h3 id={titulo}>
-          {f.designacion}: {f.nombre}
-        </h3>
-        <dl className="detalles">
-          <dt>Unidad</dt>
-          <dd>{f.designacion}</dd>
-          <dt>Carácter</dt>
-          <dd>{TEXTO_TIPO[f.tipo]}</dd>
-          <dt>Vigencia</dt>
-          <dd>
+      <tbody key={f.vinculo_id}>
+        <tr>
+          <th scope="row">
+            <h3 id={titulo}>
+              {f.designacion}: {f.nombre}
+            </h3>
+          </th>
+          <td data-etiqueta="Carácter">{TEXTO_TIPO[f.tipo]}</td>
+          <td data-etiqueta="Vigencia">
             {vigencia(f)}
             {futuro && " (todavía no empezó)"}
-          </dd>
-          <dt>Confirmación</dt>
-          <dd>{f.confirmado ? "Confirmado con el título" : "Sin confirmar"}</dd>
-        </dl>
-        {esteAbierto === null ? (
-          (confirmable || finalizable) && (
-          <p>
-            {confirmable && (
-              <button type="button" onClick={() => abrir(f, "confirmar")} disabled={enviando} aria-describedby={titulo}>
+          </td>
+          <td data-etiqueta="Confirmación">{f.confirmado ? "Confirmado con el título" : "Sin confirmar"}</td>
+          <td>
+            {esteAbierto === null && confirmable && (
+              <button type="button" className="secundario" onClick={() => abrir(f, "confirmar")} disabled={enviando} aria-describedby={titulo}>
                 Confirmar
               </button>
             )}
-            {confirmable && finalizable && " "}
-            {finalizable && (
-              <button type="button" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
+            {esteAbierto === null && confirmable && finalizable && " "}
+            {esteAbierto === null && finalizable && (
+              <button type="button" className="secundario" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
                 Finalizar
               </button>
             )}
-          </p>
-          )
-        ) : (
-          formulario(f, esteAbierto, titulo)
+          </td>
+        </tr>
+        {esteAbierto !== null && (
+          <tr>
+            <td colSpan={COLUMNAS_PADRON}>{formulario(f, esteAbierto, titulo)}</td>
+          </tr>
         )}
-      </li>
+      </tbody>
     );
   }
 
@@ -509,7 +520,7 @@ export function Padron() {
             <button type="submit" ref={confirmarSi} disabled={enviando}>
               Sí, finalizar
             </button>{" "}
-            <button type="button" onClick={() => setConfirmarFin(false)} disabled={enviando}>
+            <button type="button" className="secundario" onClick={() => setConfirmarFin(false)} disabled={enviando}>
               No
             </button>
           </div>
@@ -518,7 +529,7 @@ export function Padron() {
             <button type="submit" disabled={enviando}>
               {confirmar ? "Confirmar el vínculo" : "Finalizar el vínculo"}
             </button>{" "}
-            <button type="button" onClick={cerrar} disabled={enviando}>
+            <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
               Cancelar
             </button>
           </p>

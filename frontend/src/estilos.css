@@ -147,6 +147,14 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.aviso-info {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
 .aviso-ok {
   background: var(--success-bg);
   color: var(--success-text);
@@ -351,6 +359,105 @@ button.secundario {
   color: var(--ink);
 }
 
+button.secundario:disabled,
+button.sutil:disabled {
+  box-shadow: none;
+  color: var(--ink-muted);
+}
+
+/* Tarjetas una al lado de la otra desde tablet. */
+@media (min-width: 769px) {
+  .sesiones--grilla {
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  }
+}
+
+/* El número y los enlaces solos en su renglón se tocan con el dedo: 44 px de alto aunque el texto mida menos. */
+.enlace-telefono,
+.enlace-suelto {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
+/* Quién tiene la sesión: desde tablet, en la cabecera. */
+.persona-cabecera {
+  display: none;
+}
+
+@media (min-width: 769px) {
+  .persona-cabecera {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: var(--tap-min);
+    max-width: 14rem;
+    padding: var(--space-1) var(--space-3) var(--space-1) var(--space-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--ink);
+    font-size: 0.875rem;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .persona-cabecera__avatar {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    background: var(--accent-tint);
+    color: var(--accent);
+  }
+
+  .persona-cabecera__nombre {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* Cabecera de una pantalla que cuelga de otra: el círculo y el título en una línea. */
+.cabecera-interna {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-3) 0 var(--space-4);
+}
+
+.cabecera-interna h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: clamp(1.25rem, 1.1rem + 0.6vw, 1.75rem);
+}
+
+.cabecera-interna__volver {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-soft);
+  color: var(--ink);
+}
+
+/* Lo que abre un formulario, arriba de las listas; baja a dos filas si no entra. */
+.acciones-pantalla {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: var(--space-4) 0;
+}
+
 /* Invitaciones: el historial plegado (aceptadas, retiradas y vencidas) con un resumen de 44 px. */
 .historial {
   margin-top: 1rem;
@@ -400,6 +507,15 @@ button.secundario {
   text-decoration: none;
 }
 
+/* Lo que sigue en importancia a lo del rol: sin caja, para que no compita con él. */
+.enlace-boton--sutil,
+button.sutil {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
 /* Móvil (≤ 480 px = 30em): tarjetas con menos relleno, nunca texto más chico, y el botón de envío
    de los formularios de /invitaciones y /mandatos a todo el ancho. */
 @media (max-width: 30em) {
@@ -417,6 +533,11 @@ button.secundario {
 
   .formulario-movil > button[type="submit"] {
     justify-self: stretch;
+  }
+
+  .salidas-pago .enlace-boton {
+    flex: 1 1 100%;
+    justify-content: center;
   }
 }
 
@@ -453,6 +574,72 @@ button.secundario {
 .tabla-desplazable th[scope="row"],
 .tabla-desplazable th[scope="col"]:first-child {
   text-align: left;
+}
+
+/* Una lista de datos: tabla real desde tablet; en el teléfono, una tarjeta por fila (.tabla-tarjetas). */
+main:has(.tabla-lista) {
+  max-width: 64rem;
+}
+
+/* Con letra grande o un dato muy largo la tabla puede no entrar: se desplaza ella, nunca la página. */
+.tabla-lista {
+  position: relative;
+  overflow-x: auto;
+}
+
+.tabla-lista table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tabla-lista th,
+.tabla-lista td {
+  padding: var(--space-2);
+  text-align: left;
+  vertical-align: middle;
+  overflow-wrap: break-word;
+}
+
+/* Un nombre largo sin espacios no ensancha la tabla: se corta él, no las demás columnas. */
+.tabla-lista tbody th {
+  min-width: 10rem;
+  overflow-wrap: anywhere;
+}
+
+/* El nombre que abre el detalle: 44 px de alto al tocarlo. */
+.enlace-fila {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
+.tabla-lista__dato {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.tabla-lista thead th {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.tabla-lista tbody th,
+.tabla-lista tbody td {
+  border-top: 1px solid var(--divider);
+}
+
+.tabla-lista h2,
+.tabla-lista h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.tabla-lista button {
+  padding-inline: var(--space-3);
+  white-space: nowrap;
 }
 
 /* Circuito de pagos: una bandeja y una ficha. En PC, una al lado de la otra; más angosto, aparte. */
@@ -573,8 +760,51 @@ main:has(.cotejo) {
   font-weight: 600;
 }
 
-.zona-archivo input {
-  max-width: 100%;
+/* El campo del sistema queda oculto: lo que se toca es su rótulo, con forma de botón. */
+.formulario .boton-archivo {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.elegir-archivo:focus-visible + .boton-archivo {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.elegir-archivo:disabled + .boton-archivo {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.zona-archivo__nota {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+.ejemplo-extracto {
+  overflow-x: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: 0.875rem;
+}
+
+.bandeja-al-dia {
+  text-align: center;
+}
+
+.bandeja-al-dia p:last-child {
+  margin: 0;
+  font-weight: 700;
 }
 
 .fila-pago--con-borde {
@@ -601,8 +831,10 @@ main:has(.cotejo) {
 
 .tilde-pago input {
   flex: none;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .tilde-pago__datos {
@@ -622,6 +854,11 @@ main:has(.cotejo) {
   margin-top: 1rem;
 }
 
+/* Quien solo espera no tiene ni datos ni acciones: no queda una tarjeta vacía. */
+.ficha-pago .tarjeta:not(:has(dt, p, a, button, input, table, h3)) {
+  display: none;
+}
+
 /* Lo primero de la ficha: la tarjeta oscura con la situación, a quién, cuánto y por qué. */
 .ficha-pago__resumen {
   padding: var(--space-5);
@@ -639,6 +876,76 @@ main:has(.cotejo) {
 .ficha-pago__resumen > p:last-child {
   margin-bottom: 0;
   color: var(--on-hero-muted);
+}
+
+.ficha-pago__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ficha-pago__arriba p {
+  margin: 0;
+}
+
+.ficha-pago__arriba p:first-child {
+  color: var(--on-hero-muted);
+  font-weight: 600;
+}
+
+.ficha-pago__resumen h2 {
+  font-size: 1.125rem;
+}
+
+/* Las acciones de la ficha: anchas y una debajo de la otra, como las pide el dedo. */
+.ficha-pago .formulario .acciones button {
+  flex: 1 1 100%;
+}
+
+/* Por dónde va la orden. El paso actual lleva además aria-current, y la situación la dice la tarjeta. */
+.camino-orden {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.camino-orden li {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.375rem;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.camino-orden i {
+  display: block;
+  height: 0.375rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.camino-orden [data-estado="hecho"] i {
+  background: var(--success-text);
+}
+
+.camino-orden [data-estado="ahora"] i {
+  background: var(--accent);
+}
+
+.camino-orden [data-estado="alerta"] i {
+  background: var(--pending-text);
+}
+
+.camino-orden [aria-current="step"] {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .etiqueta-situacion {
@@ -758,6 +1065,10 @@ main:has(.cotejo) {
   margin-top: 0.5rem;
 }
 
+.copiar-a-mano input {
+  min-height: var(--tap-min);
+}
+
 .fila-importe {
   display: flex;
   flex-wrap: wrap;
@@ -817,7 +1128,15 @@ fieldset.formulario legend {
   padding: 0.25rem 0.5rem 0.25rem 0;
   text-align: left;
   vertical-align: top;
+}
+
+/* Lo largo es la cuenta, que se corta; «Importe» y «Cuenta» no. */
+.comparar-pago td {
   overflow-wrap: anywhere;
+}
+
+.comparar-pago tbody tr:first-child td {
+  white-space: nowrap;
 }
 
 @media (max-width: 48em) {
@@ -931,6 +1250,73 @@ fieldset.formulario legend {
   border-top: 1px solid var(--divider);
 }
 
+/* La tarjeta oscura del inicio: lo único que la persona tiene que mirar primero. */
+.resumen-inicio {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding: var(--space-5);
+  border-radius: var(--radius-2xl);
+  background: var(--surface-hero);
+  box-shadow: var(--shadow-hero);
+  color: var(--on-hero);
+}
+
+.resumen-inicio p {
+  margin: 0;
+}
+
+.resumen-inicio__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--on-hero-muted);
+  font-weight: 600;
+}
+
+.resumen-inicio__estado {
+  padding: 0.125rem var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--pending-bg);
+  color: var(--pending-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.resumen-inicio__estado--neutro {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+}
+
+.resumen-inicio__cifra {
+  color: var(--on-hero);
+  font-size: clamp(2.25rem, 2rem + 1vw, 2.75rem);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.resumen-inicio .resumen-inicio__edificio {
+  color: var(--on-hero-muted);
+  font-size: 0.875rem;
+}
+
+.resumen-inicio__accion {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  box-shadow: var(--shadow-button);
+  color: var(--on-accent);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+
 .fila-inicio {
   display: flex;
   align-items: center;
@@ -993,7 +1379,7 @@ fieldset.formulario legend {
 
 .navegacion__item {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -1140,6 +1526,10 @@ fieldset.formulario legend {
 
 /* En el teléfono una tabla es una tarjeta por fila, con los mismos datos y sin desplazar. */
 @media (max-width: 48em) {
+  .tabla-tarjetas {
+    overflow-x: clip;
+  }
+
   .tabla-tarjetas table,
   .tabla-tarjetas tbody,
   .tabla-tarjetas tr,
@@ -1188,6 +1578,23 @@ fieldset.formulario legend {
     content: attr(data-etiqueta);
     color: var(--ink-muted);
     text-align: left;
+  }
+
+  /* Un dato que no está no deja su rótulo solo. */
+  .tabla-lista td:empty {
+    display: none;
+  }
+
+  .tabla-lista td:not([data-etiqueta]) {
+    display: block;
+  }
+
+  .tabla-lista td[data-etiqueta] {
+    text-align: right;
+  }
+
+  .tabla-lista td[data-etiqueta]::before {
+    flex: none;
   }
 }
 

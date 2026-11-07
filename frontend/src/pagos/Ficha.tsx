@@ -27,18 +27,24 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { BotonCopiar } from "./BotonCopiar";
+import { CaminoOrden } from "./CaminoOrden";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
-import { RUTA_NUEVA, RUTA_PAGOS } from "./rutas";
+import { RUTA_NUEVA } from "./rutas";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
+  AVISO_LECTURA_DISPUTADA,
   AVISO_LO_DECIDE_EL_CONSEJO,
+  AVISO_POR_EL_CONSEJO,
+  AVISO_POR_FRANJA,
   AVISO_NO_TRANSFIERAS,
+  AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
+  AVISO_TOMAR,
   AVISO_VER_LA_CUENTA,
   type Paso,
   TEXTO_LE_TOCA_A,
@@ -62,7 +68,7 @@ type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
-type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar";
+type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
 type LecturaComprobante = components["schemas"]["LecturaComprobante"];
@@ -140,8 +146,6 @@ export type Seguir = { paso: Paso; abierta: RefObject<boolean> };
 type Props = {
   consorcio: string;
   orden: string;
-  /** `h1` si la ficha es toda la pantalla; `h2` si está al lado de la bandeja. */
-  titulo: "h1" | "h2";
   aEntrar: () => void;
   aInicio: () => void;
   /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguir`, al próximo de ese paso. */
@@ -150,7 +154,7 @@ type Props = {
   alCambiar: () => void;
 };
 
-export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, terminar, alCambiar }: Props) {
+export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar }: Props) {
   const id = useId();
   const acto = useActo(aEntrar, alCambiar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -168,6 +172,10 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [faltaCuenta, setFaltaCuenta] = useState(false);
   /** Lo que eligió quien resuelve; sin elegir, lo primero que se ofrece. */
   const [resolucion, setResolucion] = useState<Resolucion | null>(null);
+  /** Pidió tomar el pago: falta que confirme que no se transfirió. */
+  const [confirmaToma, setConfirmaToma] = useState(false);
+  /** Pidió corregir la diferencia que registró. */
+  const [corrigeDiferencia, setCorrigeDiferencia] = useState(false);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
@@ -257,14 +265,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
 
   if (lectura.tipo === "cargando") return <p role="status">Cargando la orden…</p>;
   if (lectura.tipo === "no_esta")
-    return (
-      <>
-        <p className="tarjeta">Esa orden no está en este edificio.</p>
-        <p>
-          <Link to={RUTA_PAGOS}>Volver a Pagos</Link>
-        </p>
-      </>
-    );
+    return <p className="tarjeta">Esa orden no está en este edificio.</p>;
   if (lectura.tipo === "sin_servicio")
     return (
       <>
@@ -497,7 +498,44 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     });
   }
 
-  /** Los mismos datos: la versión nueva pasa otra vez por aprobación (§9). Para cambiar algo está
+  function cerrarReclamo(d: Diferencia, texto: string) {
+    void acto.hacer({
+      quePide: ["cerrar-reclamo", orden, d.id, texto],
+      nombre: "cerrar el reclamo",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/cierre", {
+          headers: encabezadoCsrf(),
+          params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { motivo: texto },
+        }),
+      alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
+      alFallar: siCambio,
+    });
+  }
+
+  /** No da la cuenta: suelta a quien la vio. La ficha que vuelve dice qué sigue. */
+  function tomar() {
+    void acto.hacer({
+      quePide: ["tomar", orden, v.numero, v.huella],
+      nombre: "tomar el pago",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version: v.numero, huella: v.huella, no_se_transfirio: true },
+        }),
+      alTerminar: () => {
+        setConfirmaToma(false);
+        setAviso({ texto: "Listo: tomaste el pago.", ok: true });
+        releer();
+        alCambiar();
+      },
+      alFallar: siCambio,
+    });
+  }
+
+  /** Los mismos datos: la versión nueva pasa otra vez por aprobación, por su franja si fue simple
+   * y por el Consejo si hubo una diferencia (decisión 11, desvío de §9). Para cambiar algo está
    * «Modificar». */
   function volverAPagar() {
     void acto.hacer({
@@ -518,7 +556,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             contrato_id: v.contrato_id,
           },
         }),
-      alTerminar: () => terminar("Listo: la orden tiene una versión nueva, con los mismos datos, y pasa otra vez por aprobación."),
+      alTerminar: () => terminar(`Listo: la orden tiene una versión nueva, con los mismos datos. ${diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}`),
       alFallar: siCambio,
     });
   }
@@ -529,6 +567,9 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     if (texto === "") return;
     if (conMotivo === "rechazar") rechazar(texto);
     else if (conMotivo === "declarar") declarar(texto);
+    else if (conMotivo === "cerrar") {
+      if (diferencia !== null) cerrarReclamo(diferencia, texto);
+    }
     else if (pago !== undefined) conciliar(pago.id, conMotivo === "observar" ? "observado" : "conforme", texto);
   }
 
@@ -536,6 +577,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const motivoAbierto =
     (conMotivo === "rechazar" && ficha.puede_rechazar) ||
     (conMotivo === "declarar" && declara) ||
+    (conMotivo === "cerrar" && ficha.puede_recuperar) ||
     ((conMotivo === "conforme" || conMotivo === "observar") && ficha.puede_conciliar)
       ? conMotivo
       : null;
@@ -544,11 +586,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
     declarar: { etiqueta: "Por qué no se pagó", boton: "Declarar que no se pagó", largo: 200 },
     conforme: { etiqueta: "Por qué lo aceptás fuera de término", boton: "Dar el pago por conforme", largo: 300 },
     observar: { etiqueta: "Qué no coincide", boton: "Observar el pago", largo: 300 },
+    cerrar: { etiqueta: "Por qué se cierra sin recuperar", boton: "Cerrar sin recuperar", largo: 300 },
   };
 
   const estaModificando = modificando && ficha.puede_modificar;
   const elegida: Resolucion = diferencia?.se_puede_dar_por_pagada ? (resolucion ?? "pagada_por_lo_real") : "reclamo";
-  const Subtitulo = Titulo === "h1" ? "h2" : "h3";
 
   return (
     <>
@@ -569,23 +611,27 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
       <div hidden={pendiente !== null}>
         <section className="ficha-pago" aria-labelledby={`${id}-titulo`}>
           <div className="ficha-pago__resumen">
-          <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
-            {TEXTO_SITUACION[situacion]}
-          </p>
-          <Titulo id={`${id}-titulo`}>{v.razon_social}</Titulo>
-          <div className="fila-importe">
-            <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
-            {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
+            <div className="ficha-pago__arriba">
+              <p>Importe de la orden</p>
+              <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
+                {TEXTO_SITUACION[situacion]}
+              </p>
+            </div>
+            <div className="fila-importe">
+              <p className="importe-ficha">{importe(v.importe_centavos, v.moneda)}</p>
+              {cuentaVista !== null && <BotonCopiar valor={importeParaCopiar(v.importe_centavos)} nombre="el importe" />}
+            </div>
+            <h2 id={`${id}-titulo`}>{v.razon_social}</h2>
+            <p>{v.concepto}</p>
           </div>
-          <p>{v.concepto}</p>
-          </div>
+          <CaminoOrden situacion={situacion} paso={paso} />
 
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-error" role="note">
               {TEXTO_ALERTA_FRACCIONAMIENTO}
             </p>
           )}
-          {situacion === "borrador" && v.alerta_fraccionamiento && <p role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
+          {situacion === "borrador" && v.alerta_fraccionamiento && <p className="aviso-info" role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
           {enDecision && anterior !== undefined && cambiosDeVersion(v, anterior).map((c) => <p key={c}>{c}</p>)}
           {ficha.orden.motivo_rechazo !== null && situacion === "rechazada" && (
             <p>
@@ -594,8 +640,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
           )}
           {situacion === "no_se_pago" && (
             <p>
-              {diferencia?.recuperada_en == null ? "El Consejo confirmó que no se pagó." : "Se recuperó la plata."} Para volver a pagarla, pasa otra vez por
-              aprobación.
+              {diferencia?.cerrada_en != null
+                ? `Se cerró el reclamo sin recuperar la plata: ${diferencia.motivo_cierre}.`
+                : diferencia?.recuperada_en == null
+                  ? "El Consejo confirmó que no se pagó."
+                  : "Se recuperó la plata."}{" "}
+              {diferencia === null ? AVISO_POR_FRANJA : AVISO_POR_EL_CONSEJO}
             </p>
           )}
           {observacion !== null && (
@@ -604,7 +654,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             </p>
           )}
           {declaracion !== null && (
-            <p role="note">
+            <p className="aviso-info" role="note">
               Se declaró que no se pagó el {momento(declaracion.declarado_en)}: {declaracion.motivo}. No pagues esta orden mientras tanto.
             </p>
           )}
@@ -613,12 +663,23 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               {AVISO_DIFERENCIA_ESPERA}
             </p>
           )}
-          {paso === "espera_comprobante" && <p role="note">Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.</p>}
+          {paso === "espera_comprobante" && (
+            <p className="aviso-info" role="note">
+              Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.
+              {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} vas a poder tomar el pago.`}
+            </p>
+          )}
+          {ficha.toma_vigente !== null && (
+            <p className="aviso-info" role="note">
+              {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momento(ficha.toma_vigente.tomada_en)}.
+              {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
+            </p>
+          )}
           {ficha.le_toca_a !== null && ficha.le_toca_a !== "vos" && <p>{TEXTO_LE_TOCA_A[ficha.le_toca_a]}</p>}
 
           {cuentaVista !== null && (
             <div className="tarjeta">
-              <Subtitulo>Transferí desde tu banco</Subtitulo>
+              <h3>Transferí desde tu banco</h3>
               <dl className="detalles">
                 <dt>CBU/CVU</dt>
                 <dd>
@@ -645,7 +706,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             <div className="tarjeta">
               {lecturaDistinta && <DistintoDeLoRegistrado lectura={comprobanteLeido} registrado={registrado} />}
               {lecturaIgual && <p className="aviso-ok">{AVISO_LECTURA_COINCIDE}</p>}
-              {lecturaIncompleta && <p role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
+              {lecturaIncompleta && <p className="aviso-info" role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
               {diferencia !== null && (
                 <>
                   <table className="comparar-pago">
@@ -773,6 +834,12 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                     </dd>
                   </>
                 )}
+                {pago?.lectura_disputada === true && (
+                  <>
+                    <dt>Lectura del comprobante</dt>
+                    <dd>{AVISO_LECTURA_DISPUTADA}: los datos los escribió a mano. Comparalos con el archivo.</dd>
+                  </>
+                )}
                 {pago?.fuera_de_termino === true && (
                   <>
                     <dt>Fuera de término</dt>
@@ -785,7 +852,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               </dl>
 
               {paso === "pagar" && ficha.puede_pagar && cuentaVista === null && (
-                <p role="note">{AVISO_VER_LA_CUENTA}</p>
+                <p className="aviso-info" role="note">{AVISO_VER_LA_CUENTA}</p>
               )}
               {paso === "subir_comprobante" && situacion === "pagando" && !ficha.puede_reabrir_cuenta && cuentaVista === null && (
                 <p className="aviso-error" role="note">
@@ -797,14 +864,35 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   {AVISO_SIN_SALIDA}
                 </p>
               )}
-              {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p role="note">{AVISO_RETOMAR}</p>}
+              {paso === "modificar" && (
+                <p className="aviso-error" role="note">
+                  {AVISO_PROVEEDOR_CAMBIADO}
+                </p>
+              )}
+              {paso === "tomar_pago" && <p className="aviso-info" role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
+              {confirmaToma && ficha.puede_tomar && (
+                <p className="aviso-error" role="alert">
+                  {AVISO_TOMAR}
+                </p>
+              )}
+              {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p className="aviso-info" role="note">{AVISO_RETOMAR}</p>}
 
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
               <div hidden={motivoAbierto !== null}>
                   {registra && (
                     <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
-                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido} subtitulo={Subtitulo}
+                      comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido}
                       puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
+                      alRegistrar={(texto) => terminar(texto)} releer={releer}
+                      alCambiarLaOrden={() => {
+                        releer();
+                        alCambiar();
+                      }} />
+                  )}
+                  {corrigeDiferencia && ficha.puede_corregir_diferencia && diferencia !== null && (
+                    <RegistroPago key={`diferencia-${diferencia.id}`} consorcio={consorcio} orden={orden} version={v} corregido={undefined}
+                      diferencia={diferencia} alCancelar={() => setCorrigeDiferencia(false)} comprobante={ficha.comprobante_actual} subido={null}
+                      lectura={null} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
                       alCambiarLaOrden={() => {
                         releer();
@@ -838,9 +926,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   )}
                   <div className="formulario">
                     <div className="acciones">
+                      {ficha.puede_corregir_diferencia && !corrigeDiferencia && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setCorrigeDiferencia(true)}>
+                          Corregir lo que registré
+                        </button>
+                      )}
                       {ficha.puede_recuperar && diferencia !== null && (
                         <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
                           Ya recuperamos la plata
+                        </button>
+                      )}
+                      {ficha.puede_recuperar && diferencia !== null && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("cerrar")}>
+                          Cerrar sin recuperar
                         </button>
                       )}
                       {paso === "enviar" && ficha.puede_enviar && (
@@ -883,6 +981,21 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                           Ver la cuenta para pagar
                         </button>
                       )}
+                      {ficha.puede_tomar && !confirmaToma && (
+                        <button type="button" disabled={enviando} onClick={() => setConfirmaToma(true)}>
+                          Tomar el pago
+                        </button>
+                      )}
+                      {ficha.puede_tomar && confirmaToma && (
+                        <>
+                          <button type="button" disabled={enviando} onClick={tomar}>
+                            No se transfirió: tomar el pago
+                          </button>
+                          <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmaToma(false)}>
+                            Cancelar
+                          </button>
+                        </>
+                      )}
                       {ficha.puede_conciliar && pago !== undefined && (
                         <>
                           {lecturaDistinta && (
@@ -918,7 +1031,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         </button>
                       )}
                       {ficha.puede_modificar && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setModificando(true)}>
+                        <button type="button" className={paso === "modificar" ? undefined : "secundario"} disabled={enviando} onClick={() => setModificando(true)}>
                           Modificar
                         </button>
                       )}
@@ -942,7 +1055,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               )}
               {ficha.puede_preparar_faltante && diferencia?.falta_centavos != null && (
                 <p>
-                  <Link to={RUTA_NUEVA}
+                  <Link to={RUTA_NUEVA} className="enlace-suelto"
                     state={{ consorcio, proveedor: v.proveedor_id, importe: aTexto(diferencia.falta_centavos), moneda: v.moneda, concepto: `Lo que faltó de: ${v.concepto}` }}>
                     Preparar la orden por lo que falta
                   </Link>
@@ -950,7 +1063,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
               )}
               {paso === "rechazada" && (
                 <p>
-                  <Link to={RUTA_NUEVA} state={{ consorcio, proveedor: v.proveedor_id }}>
+                  <Link to={RUTA_NUEVA} state={{ consorcio, proveedor: v.proveedor_id }} className="enlace-suelto">
                     Preparar otra orden
                   </Link>
                 </p>
@@ -995,7 +1108,7 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
             </dl>
             {ficha.versiones.length > 1 && (
               <>
-                <Subtitulo>Versiones anteriores</Subtitulo>
+                <h3>Versiones anteriores</h3>
                 <ol className="versiones">
                   {ficha.versiones
                     .filter((x) => x.numero !== v.numero)
@@ -1008,9 +1121,22 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                 </ol>
               </>
             )}
+            {ficha.diferencias_anteriores.length > 0 && (
+              <>
+                <h3>Lo que se registró antes</h3>
+                <ol className="versiones">
+                  {ficha.diferencias_anteriores.map((d) => (
+                    <li key={d.id}>
+                      Operación {d.numero_operacion}, {d.fecha_operacion}: {importe(centavosReales(d), d.moneda)}, cuenta{" "}
+                      {cuentaEnmascarada(d.cuenta_ultimos_digitos)}. Lo registró {d.registrada_por_nombre}, {momento(d.registrada_en)}
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
             {ejecucion !== null && ejecucion.pagos.length > 1 && (
               <>
-                <Subtitulo>Registros anteriores</Subtitulo>
+                <h3>Registros anteriores</h3>
                 <ol className="versiones">
                   {ejecucion.pagos.slice(0, -1).map((p) => (
                     <li key={p.id}>

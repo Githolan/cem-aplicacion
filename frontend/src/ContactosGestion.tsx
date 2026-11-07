@@ -548,7 +548,7 @@ export function ContactosGestion() {
             {(["corregir", "verificar", "senalar", "retirar"] as const).map((a, i) => (
               <span key={a}>
                 {i > 0 && " "}
-                <button type="button" onClick={() => abrir(a, c)} disabled={enviando} aria-describedby={titulo}>
+                <button type="button" className="secundario" onClick={() => abrir(a, c)} disabled={enviando} aria-describedby={titulo}>
                   {{ corregir: "Corregir", verificar: "Comprobado", senalar: "Señalar un error", retirar: "Retirar" }[a]}
                 </button>
               </span>
@@ -674,7 +674,7 @@ export function ContactosGestion() {
           <button type="submit" disabled={enviando}>
             {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
           </button>{" "}
-          <button type="button" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -698,7 +698,7 @@ export function ContactosGestion() {
           >
             Sí, retirar
           </button>{" "}
-          <button type="button" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
             No
           </button>
         </p>
@@ -762,7 +762,7 @@ export function ContactosGestion() {
           >
             {texto.boton}
           </button>{" "}
-          <button type="button" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>
