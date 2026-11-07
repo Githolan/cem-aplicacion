@@ -150,7 +150,7 @@ describe("página /padron", () => {
   it("el inicio tiene el enlace al padrón", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Padrón del edificio" })).getAttribute("href")).toBe("/padron");
+    expect((await within(screen.getByRole("main")).findByRole("link", { name: "Padrón del edificio" })).getAttribute("href")).toBe("/padron");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {

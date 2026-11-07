@@ -147,7 +147,7 @@ describe("página /invitaciones", () => {
   it("el inicio tiene el enlace para invitar", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Invitar a una persona" })).getAttribute("href")).toBe(
+    expect((await within(screen.getByRole("main")).findByRole("link", { name: "Invitar a una persona" })).getAttribute("href")).toBe(
       "/invitaciones",
     );
   });

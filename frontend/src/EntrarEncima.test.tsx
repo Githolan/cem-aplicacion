@@ -159,7 +159,7 @@ describe("entrar encima", () => {
     const entrar = (await screen.findByRole("heading", { name: HOJA })).closest<HTMLElement>(".hoja-fondo")!;
     const fallo = (await screen.findByRole("heading", { name: "No se pudo confirmar" })).closest<HTMLElement>(".hoja-fondo")!;
     expect(entrar.inert).toBeFalsy();
-    expect(fallo.inert).toBe(true);
+    await waitFor(() => expect(fallo.inert).toBe(true));
     expect(entrar.contains(document.activeElement)).toBe(true);
 
     await entrarConCodigo();

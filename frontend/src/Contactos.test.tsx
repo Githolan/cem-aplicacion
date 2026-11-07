@@ -188,10 +188,7 @@ describe("página /contactos", () => {
       }),
     );
     abrir();
-    // Pasa por la pantalla, el permiso y el inicio: con la suite entera en paralelo no alcanza 1 s.
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" }, { timeout: 5000 }),
-    ).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
     expect(screen.queryByText(/No tenés acceso/)).toBeNull();
     expect(copiaGuardada(C1)).toBeNull();
     // Control: la copia de otro edificio no se toca.

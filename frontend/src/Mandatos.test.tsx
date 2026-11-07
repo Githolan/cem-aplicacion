@@ -224,7 +224,7 @@ describe("página /mandatos", () => {
   it("el inicio tiene el enlace a mandatos y decisiones", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Mandatos y decisiones" })).getAttribute("href")).toBe("/mandatos");
+    expect((await within(screen.getByRole("main")).findByRole("link", { name: "Mandatos y decisiones" })).getAttribute("href")).toBe("/mandatos");
   });
 
   it("sin sesión (401) manda a /entrar", async () => {
