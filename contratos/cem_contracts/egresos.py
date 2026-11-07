@@ -203,6 +203,16 @@ class ProveedorNuevo(DatosProveedor):
     cuit: str = Field(pattern=FORMATO_CUIT, description="Obligatorio y único en el consorcio.")
 
 
+class CargaCuitProveedor(BaseModel):
+    """`POST …/proveedores/{id}/cuit`: un proveedor de antes de que el CUIT fuera obligatorio. Se
+    carga una sola vez y deja una versión nueva con los mismos datos: la huella incluye el CUIT."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cuit: str = Field(pattern=FORMATO_CUIT)
+    version_esperada: int = Field(ge=1)
+
+
 class ProveedorVersionNueva(DatosProveedor):
     """`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya
     preparadas siguen apuntando a la anterior. El CUIT no cambia.

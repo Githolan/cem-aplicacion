@@ -951,6 +951,7 @@
           "proveedor_inexistente",
           "proveedor_inactivo",
           "cuit_repetido",
+          "cuit_ya_cargado",
           "documento_invalido",
           "aprobacion_vencida",
           "aprobacion_vigente",

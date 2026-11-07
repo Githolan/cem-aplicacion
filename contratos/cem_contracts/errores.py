@@ -192,6 +192,7 @@ class CodigoError(StrEnum):
     PROVEEDOR_INACTIVO = "proveedor_inactivo"
     """El proveedor está suspendido o dado de baja: no recibe órdenes nuevas."""
     CUIT_REPETIDO = "cuit_repetido"
+    CUIT_YA_CARGADO = "cuit_ya_cargado"
     """Ya hay un proveedor con ese CUIT en este consorcio."""
     DOCUMENTO_INVALIDO = "documento_invalido"
     """El documento de respaldo no existe en este consorcio o no está vigente."""

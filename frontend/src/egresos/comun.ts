@@ -221,6 +221,7 @@ const MENSAJES: Record<string, string> = {
   proveedor_sin_cuenta: "El proveedor no tiene cuenta destino: cargala antes de emitir.",
   cuit_invalido: "El CUIT no es válido.",
   cuit_repetido: "Ya hay un proveedor con ese CUIT en este edificio.",
+  cuit_ya_cargado: "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
   documento_invalido: "El documento no existe en este edificio o no está vigente.",
   aprobacion_vencida: "La aprobación tiene más de 7 días: renová la orden para que vuelva a revisión.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",

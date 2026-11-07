@@ -46,6 +46,7 @@ from cem_contracts.egresos import (
     AprobacionRegistrada,
     BandejaPagos,
     CampoComprobante,
+    CargaCuitProveedor,
     CierreReclamo,
     ComprobanteActual,
     ComprobantePagoNuevo,
@@ -190,6 +191,9 @@ ERRORES = {
         "El proveedor está suspendido o dado de baja: no recibe órdenes nuevas.",
     ),
     "cuit_invalido": (422, CodigoError.CUIT_INVALIDO, "El CUIT no es válido."),
+    "cuit_ya_cargado": (
+        409, CodigoError.CUIT_YA_CARGADO, "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
+    ),
     "cuit_repetido": (
         409, CodigoError.CUIT_REPETIDO, "Ya hay un proveedor con ese CUIT en este consorcio.",
     ),
@@ -606,6 +610,30 @@ def crear_proveedor(
             {"cuit": nuevo.cuit, **_datos_proveedor(nuevo)},
         ).scalar_one()  # fmt: skip
         return 201, ProveedorCreado(id=nuevo_id, version=1)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/cuit",
+    response_model=ProveedorCreado,
+    summary="Cargar el CUIT de un proveedor que no lo tiene: una sola vez, con una versión nueva",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "CUIT inválido."}},
+)
+def cargar_cuit_proveedor(
+    proveedor_id: UUID,
+    carga: CargaCuitProveedor,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, ProveedorCreado]:
+        version = _ejecutar(
+            conn, permiso,
+            "select nucleo.cargar_cuit_proveedor(:p, :esperada, :cuit, :actor, 'api', :sesion)",
+            {"p": proveedor_id, "esperada": carga.version_esperada, "cuit": carga.cuit},
+        ).scalar_one()  # fmt: skip
+        return 200, ProveedorCreado(id=proveedor_id, version=version)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 

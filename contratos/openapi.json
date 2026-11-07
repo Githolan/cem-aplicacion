@@ -412,6 +412,28 @@
         "title": "CanjeEnlace",
         "type": "object"
       },
+      "CargaCuitProveedor": {
+        "additionalProperties": false,
+        "description": "`POST …/proveedores/{id}/cuit`: un proveedor de antes de que el CUIT fuera obligatorio. Se\ncarga una sola vez y deja una versión nueva con los mismos datos: la huella incluye el CUIT.",
+        "properties": {
+          "cuit": {
+            "pattern": "^[0-9]{11}$",
+            "title": "Cuit",
+            "type": "string"
+          },
+          "version_esperada": {
+            "minimum": 1.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cuit",
+          "version_esperada"
+        ],
+        "title": "CargaCuitProveedor",
+        "type": "object"
+      },
       "CasoPrivacidad": {
         "description": "Un caso del titular, sin el código, la corroboración ni la referencia del pedido.",
         "properties": {
@@ -648,6 +670,7 @@
           "proveedor_inexistente",
           "proveedor_inactivo",
           "cuit_repetido",
+          "cuit_ya_cargado",
           "documento_invalido",
           "aprobacion_vencida",
           "aprobacion_vigente",
@@ -17194,6 +17217,83 @@
           }
         },
         "summary": "Un proveedor con toda su historia: cada cambio de cuenta es una versión",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/cuit": {
+      "post": {
+        "operationId": "cargar_cuit_proveedor_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__cuit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CargaCuitProveedor"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProveedorCreado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "CUIT inválido."
+          }
+        },
+        "summary": "Cargar el CUIT de un proveedor que no lo tiene: una sola vez, con una versión nueva",
         "tags": [
           "egresos"
         ]
