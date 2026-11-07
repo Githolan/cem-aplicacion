@@ -189,3 +189,14 @@ def test_quien_no_concilia_no_lee_lo_cotejado(motor_migrate, e):
     _, p = pagado(motor_migrate, e)
     tildar(e, e.mc1, p)
     assert get(e, e.adm, "pagos/cotejo/cotejados").status_code == 403
+
+
+def test_cem_app_no_ejecuta_la_barrera_de_la_historia(motor_migrate):
+    """El trigger corre igual sin el permiso: `cem_app` no tiene por qué poder llamarla."""
+    with motor_migrate.connect() as c:
+        assert not c.execute(
+            text(
+                "select has_function_privilege('cem_app',"
+                " 'nucleo.negar_cambio_cotejo_pago()', 'EXECUTE')"
+            )
+        ).scalar_one()

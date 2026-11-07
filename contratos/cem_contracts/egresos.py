@@ -709,8 +709,8 @@ class RegistroPagoManual(BaseModel):
     )
     lectura_mal: bool = Field(
         default=False,
-        description="La persona eligió «Se leyó mal»: el Consejo lo ve al conciliar. Sin una lectura"
-        " de ese comprobante se niega.",
+        description="La persona eligió «Se leyó mal»: el Consejo lo ve al conciliar. Sin una"
+        " lectura de ese comprobante se niega.",
     )
     documento_id: UUID = Field(
         description="El comprobante: cargado desde el pago de esta orden"
@@ -719,7 +719,7 @@ class RegistroPagoManual(BaseModel):
 
 
 class TomaPagoManual(BaseModel):
-    """`POST …/ordenes-pago/{id}/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.
+    """`POST …/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.
     Suelta a esa persona; abrir la cuenta sigue siendo otro acto."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -837,8 +837,12 @@ class DiferenciaPagoManual(BaseModel):
     resuelta_por: UUID | None
     resuelta_en: datetime | None
     recuperada_en: datetime | None
-    corrige_a: UUID | None = Field(description="La diferencia que esta fila corrigió, si corrigió una.")
-    cerrada_en: datetime | None = Field(description="Si el reclamo se cerró sin recuperar la plata.")
+    corrige_a: UUID | None = Field(
+        description="La diferencia que esta fila corrigió, si corrigió una."
+    )
+    cerrada_en: datetime | None = Field(
+        description="Si el reclamo se cerró sin recuperar la plata."
+    )
     motivo_cierre: str | None
     falta_centavos: int | None = Field(
         description="Cuánto faltó pagar, si fue de menos en la moneda de la orden."
@@ -1046,7 +1050,7 @@ class PasoPago(StrEnum):
     ENVIAR = "enviar"
     RENOVAR = "renovar"
     MODIFICAR = "modificar"
-    """Aprobada, y el proveedor cambió: no se puede pagar hasta modificarla (`proveedor_cambiado`)."""
+    """Aprobada, y el proveedor cambió: no se paga hasta modificarla (`proveedor_cambiado`)."""
     VOLVER_A_PAGAR = "volver_a_pagar"
     RECHAZADA = "rechazada"
     APROBAR = "aprobar"

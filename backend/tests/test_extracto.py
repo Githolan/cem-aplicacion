@@ -282,9 +282,7 @@ def _m(importe=100, numero="0048", fecha=DIA, pago=None, moneda="ARS"):
 def _p(
     importe=100, numero="0048", fecha=DIA, conforme=True, cotejado=False, puede=True, moneda="ARS"
 ):
-    return PagoComparable(
-        uuid4(), numero, fecha, importe, moneda, conforme, cotejado, False, puede
-    )
+    return PagoComparable(uuid4(), numero, fecha, importe, moneda, conforme, cotejado, False, puede)
 
 
 def test_por_numero_en_otra_moneda_no_coincide():

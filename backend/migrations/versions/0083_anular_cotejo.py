@@ -85,6 +85,7 @@ create function nucleo.negar_cambio_cotejo_pago()
 drop trigger historia_cotejo_pago on nucleo.cotejo_pago;
 create trigger historia_cotejo_pago before update or delete on nucleo.cotejo_pago
   for each row execute function nucleo.negar_cambio_cotejo_pago();
+revoke all on function nucleo.negar_cambio_cotejo_pago() from public;
 """
 
 FUNCIONES = f"""

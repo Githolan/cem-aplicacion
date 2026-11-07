@@ -183,7 +183,8 @@ class ResultadoCotejo(BaseModel):
         description="Coinciden con un pago que quien subió el extracto no puede cotejar."
     )
     anulados: int = Field(
-        description="Coinciden con un pago cuyo cotejo se anuló: no vuelven solos, se tildan a mano."
+        description="Coinciden con un pago cuyo cotejo se anuló: no vuelven solos,"
+        " se tildan a mano."
     )
     lineas_no_leidas: int
     filas_no_leidas: list[int] = Field(
