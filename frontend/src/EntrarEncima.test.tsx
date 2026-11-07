@@ -346,9 +346,11 @@ describe("entrar encima", () => {
 
     tocar("Guardar");
     await screen.findByRole("heading", { name: HOJA });
+    window.sessionStorage.setItem("cem.entrar.adonde_iba", "/pagos");
     tocar("Salir de la cuenta");
 
     await waitFor(() => expect(salidas.aEntrar).toHaveBeenCalledOnce());
+    expect(window.sessionStorage.getItem("cem.entrar.adonde_iba")).toBeNull();
   });
 
   it.each([

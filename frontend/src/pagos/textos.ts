@@ -11,10 +11,12 @@ export type Filtro = components["schemas"]["FiltroConsultaPagos"];
 
 export const VERBO: Record<Paso, string> = {
   pagar: "Pagar",
+  tomar_pago: "Tomar el pago",
   subir_comprobante: "Subir el comprobante",
   corregir: "Corregir el registro",
   enviar: "Enviar a aprobar",
   renovar: "Renovar la aprobación",
+  modificar: "Modificar la orden",
   volver_a_pagar: "Volver a pagar",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
@@ -102,10 +104,17 @@ export const AVISO_SIN_SALIDA =
   "Nadie vio la cuenta y ya no se puede abrir: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Declará que no se pagó y después se puede volver a pagar.";
 export const AVISO_DIFERENCIA_ESPERA = "No transfieras de nuevo hasta que el Consejo decida.";
 export const AVISO_OTRA_COSA = "La orden no queda pagada: lo resuelve el Consejo.";
+export const AVISO_TOMAR =
+  "Antes de tomarlo, confirmá con quien vio la cuenta que no transfirió. Si la plata ya salió y vos pagás, la orden se paga dos veces.";
 export const AVISO_RETOMAR = "Retomar deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nuevo.";
 export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: compará los datos con el archivo.";
 export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
+export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
+export const AVISO_POR_FRANJA = "Para volver a pagarla, pasa otra vez por la aprobación que le toca por su importe.";
+export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
+export const AVISO_PROVEEDOR_CAMBIADO =
+  "El proveedor cambió después de aprobar esta orden: no se puede pagar. Modificala para que use los datos nuevos y vuelva a aprobación.";
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";

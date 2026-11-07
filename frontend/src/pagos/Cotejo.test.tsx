@@ -44,18 +44,18 @@ function elemento(id: string, extra: Partial<Elemento> = {}): Elemento {
 const MAXIMO_PAGOS = 100;
 
 const lista = (elementos: Elemento[], siguiente: string | null = null, maximo_pagos = MAXIMO_PAGOS) => () =>
-  Response.json({ elementos, siguiente, tope_bytes: TOPE, maximo_pagos });
+  Response.json({ elementos, siguiente, tope_bytes: TOPE, maximo_pagos, moneda_extracto: "ARS" });
 
 const VISTA_NUEVA: Vista = {
   columnas: ["Fecha valor", "Detalle", "Debito", "Referencia"], muestra: ["05/11/2026", "x", "-1,00", "0048213377"],
   signo_sugerido: "con_signo", columnas_guardadas: null,
 };
-const GUARDADAS = { fecha: "Fecha valor", importe: "Debito", numero_operacion: "Referencia", signo: "con_signo" } as const;
+const GUARDADAS = { fecha: "Fecha valor", importe: "Debito", numero_operacion: "Referencia", signo: "con_signo", moneda: "ARS" } as const;
 
 function resultado(extra: Partial<Resultado> = {}): Resultado {
   return {
     desde: "2026-11-01", hasta: "2026-11-30", movimientos_nuevos: 1, movimientos_repetidos: 0, cotejados: 12, ya_cotejados: 0,
-    esperan_conciliar: 0, para_otra_persona: 0, lineas_no_leidas: 0, filas_no_leidas: [], aca_no_banco: [], total_aca_no_banco: 0,
+    esperan_conciliar: 0, para_otra_persona: 0, anulados: 0, lineas_no_leidas: 0, filas_no_leidas: [], aca_no_banco: [], total_aca_no_banco: 0,
     banco_no_aca: [], total_banco_no_aca: 0, ...extra,
   };
 }
@@ -205,6 +205,46 @@ describe("a mano", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
     await screen.findByText(/Listo/);
     expect(await pedidos(simulado, TILDAR)[0]?.clone().json()).toEqual({ pagos: [P1, P2] });
+  });
+
+  it("deshacer un cotejo pide el motivo y lo manda con una clave; sin motivo no se manda", async () => {
+    const COTEJADOS = `GET ${BASE}/pagos/cotejo/cotejados`;
+    const ANULAR = `POST ${BASE}/pagos/cotejo/${P1}/anulacion`;
+    let cotejados = [{ ...elemento(P1), origen: "extracto", cotejado_en: "2026-11-06T12:00:00Z" }];
+    const simulado = backend({
+      [LISTA]: lista([]),
+      [COTEJADOS]: () => Response.json({ elementos: cotejados, siguiente: null }),
+      [ANULAR]: () => {
+        cotejados = [];
+        return Response.json({ pago_id: P1 });
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Deshacer el cotejo de Proveedor 22/ }));
+    const deshacer = screen.getByRole("button", { name: "Deshacer el cotejo" }) as HTMLButtonElement;
+    expect(deshacer.disabled).toBe(true);
+    expect(pedidos(simulado, ANULAR)).toHaveLength(0);
+    fireEvent.change(screen.getByLabelText("Por qué se deshace"), { target: { value: "SINTETICO: era otro débito" } });
+    fireEvent.click(deshacer);
+    expect(await screen.findByText(/Listo: deshiciste el cotejo/)).toBeTruthy();
+    const [pedido] = pedidos(simulado, ANULAR);
+    expect(await pedido?.clone().json()).toEqual({ motivo: "SINTETICO: era otro débito" });
+    expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await screen.findByText("Todavía no hay pagos cotejados.")).toBeTruthy();
+  });
+
+  it("control: lo cotejado por un pago en que participó no ofrece deshacer", async () => {
+    vi.stubGlobal("fetch", backend({
+      [LISTA]: lista([]),
+      [`GET ${BASE}/pagos/cotejo/cotejados`]: () =>
+        Response.json({ elementos: [{ ...elemento(P1, { puede_cotejar: false }), origen: "manual", cotejado_en: "2026-11-06T12:00:00Z" }], siguiente: null }),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
+    expect(await screen.findByText(/Lo deshace otra persona del Consejo/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Deshacer el cotejo/ })).toBeNull();
   });
 
   it("sin nada para cotejar, lo dice", async () => {
@@ -371,7 +411,7 @@ describe("con el extracto", () => {
     await subir();
     await screen.findByText("12 pagos coinciden con el banco y quedaron cotejados.");
     expect(screen.queryByRole("heading", { name: "¿Qué es cada columna?" })).toBeNull();
-    expect(new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").search).toBe("");
+    expect([...new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams.keys()].filter((k) => k !== "moneda")).toEqual([]);
   });
 
   it("muestra solo lo que hay que mirar, con la acción al lado", async () => {
@@ -380,7 +420,7 @@ describe("con el extracto", () => {
       [EXTRACTO]: () =>
         Response.json(resultado({
           aca_no_banco: [elemento(P1)], total_aca_no_banco: 1, total_banco_no_aca: 1,
-          banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, numero_operacion: "0048213999" }],
+          banco_no_aca: [{ fecha: "2026-11-02", importe_centavos: 1_240_000, moneda: "ARS", numero_operacion: "0048213999" }],
           esperan_conciliar: 2, para_otra_persona: 1, ya_cotejados: 3, lineas_no_leidas: 2, filas_no_leidas: [14, 15],
         })),
     });
@@ -399,6 +439,48 @@ describe("con el extracto", () => {
     expect(screen.getByText(/1 coincide, pero lo tiene que cotejar/)).toBeTruthy();
     expect(screen.getByText(/2 líneas no se pudieron leer del archivo \(línea 14, 15\)/)).toBeTruthy();
     expect(screen.queryByText("No hay nada para mirar.")).toBeNull();
+  });
+
+  it("la moneda se pide con las columnas, con la sugerida puesta, y va al subir", async () => {
+    const simulado = backend({ [LISTA]: lista([elemento(P1)]), [VISTA]: () => Response.json(VISTA_NUEVA), [EXTRACTO]: () => Response.json(resultado()) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByRole("checkbox", { name: /Proveedor 22/ });
+    await subir();
+    await screen.findByRole("heading", { name: "¿Qué es cada columna?" });
+    const moneda = screen.getByLabelText("Moneda del extracto") as HTMLSelectElement;
+    expect(moneda.value).toBe("ARS");
+    fireEvent.change(moneda, { target: { value: "USD" } });
+    fireEvent.click(screen.getByRole("button", { name: /Comparar/ }));
+    await waitFor(() => expect(pedidos(simulado, EXTRACTO)).toHaveLength(1));
+    expect(new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams.get("moneda")).toBe("USD");
+  });
+
+  it("con las columnas guardadas se cambia la moneda antes de subir", async () => {
+    const simulado = backend({
+      [LISTA]: lista([elemento(P1)]),
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado()),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await screen.findByRole("checkbox", { name: /Proveedor 22/ });
+    fireEvent.change(screen.getByLabelText("Moneda del extracto"), { target: { value: "USD" } });
+    await subir();
+    await waitFor(() => expect(pedidos(simulado, EXTRACTO)).toHaveLength(1));
+    const parametros = new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams;
+    expect(parametros.get("moneda")).toBe("USD");
+    expect(parametros.get("fecha")).toBeNull();
+  });
+
+  it("lo que coincide con un cotejo deshecho se cuenta aparte", async () => {
+    vi.stubGlobal("fetch", backend({
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado({ cotejados: 0, anulados: 1 })),
+    }));
+    abrir();
+    await subir();
+    expect(await screen.findByText(/1 coincide con un cotejo que se deshizo/)).toBeTruthy();
   });
 
   it("control: sin nada para mirar lo dice y no muestra secciones vacías", async () => {

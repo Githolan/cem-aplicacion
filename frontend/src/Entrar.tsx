@@ -6,7 +6,7 @@ import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceInstalar } from "./Instalar";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
 import { codigoDe, mensajeDeFallaConEnlace } from "./fallas";
-import { useIrAlInicio, useSesion } from "./sesion";
+import { useIrTrasEntrar, useSesion } from "./sesion";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
 // fragmento (#token=…), que el navegador nunca manda al servidor: no queda en el registro de
@@ -87,7 +87,7 @@ export function Entrar() {
   const [correo, setCorreo] = useState("");
   const canjeado = useRef(false);
   const saliendo = useRef(false);
-  const terminarEntrada = useIrAlInicio();
+  const terminarEntrada = useIrTrasEntrar();
   const sesion = useSesion(token === null);
 
   // Al recargar o irse, el navegador corta el canje en curso y fetch falla: ese canje no
