@@ -134,12 +134,18 @@ function DistintoDeLaOrden({ leida, version }: { leida: Lectura; version: Versio
           El comprobante dice <strong>{leida.moneda}</strong> y la orden es en <strong>{version.moneda}</strong>.
         </p>
       )}
-      {leida.distinto_de_la_orden.includes("cuenta") && (
-        <p>
-          El comprobante dice la cuenta <strong>{cuentaEnmascarada(ultimos)}</strong> y la orden es a la cuenta{" "}
-          <strong>{cuentaEnmascarada(version.cuenta_ultimos_digitos)}</strong>.
-        </p>
-      )}
+      {leida.distinto_de_la_orden.includes("cuenta") &&
+        (ultimos === version.cuenta_ultimos_digitos ? (
+          <p>
+            La cuenta del comprobante termina igual que la de la orden (<strong>{cuentaEnmascarada(ultimos)}</strong>), pero no es la misma
+            cuenta.
+          </p>
+        ) : (
+          <p>
+            El comprobante dice la cuenta <strong>{cuentaEnmascarada(ultimos)}</strong> y la orden es a la cuenta{" "}
+            <strong>{cuentaEnmascarada(version.cuenta_ultimos_digitos)}</strong>.
+          </p>
+        ))}
     </div>
   );
 }

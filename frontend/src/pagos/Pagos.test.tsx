@@ -1465,6 +1465,15 @@ describe("la lectura con IA del comprobante", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(`El comprobante dice la cuenta …7710 y la orden es a la cuenta …${CUENTA.slice(-4)}.`);
   });
 
+  it("otra cuenta con los mismos últimos dígitos: termina igual, y dice que no es la misma", async () => {
+    const ultimos = CUENTA.slice(-4);
+    abrirFicha({ ...LISTO, lectura_comprobante: leida({ cuenta_coincide: false, cuenta_ultimos_digitos: ultimos, distinto_de_la_orden: ["cuenta"] }) });
+    const aviso = (await screen.findByRole("alert")).textContent;
+    expect(aviso).toContain(`La cuenta del comprobante termina igual que la de la orden (…${ultimos}), pero no es la misma cuenta.`);
+    expect(aviso?.split(`…${ultimos}`)).toHaveLength(2);
+    expect(aviso).not.toContain("El comprobante dice la cuenta");
+  });
+
   it("se leyó mal: se escribe sobre lo leído, y el aviso sigue a la vista", async () => {
     abrirFicha(OTRO_IMPORTE);
     fireEvent.click(await boton("Se leyó mal: corregir el dato"));
