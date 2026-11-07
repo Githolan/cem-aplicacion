@@ -249,6 +249,9 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           );
         })}
       </div>
+      {pagos.prepara && (
+        <p className="aviso-info">La aplicación no mueve dinero: el pago se hace por home banking y acá registrás la evidencia.</p>
+      )}
       <EnlaceInstalar />
     </>
   );

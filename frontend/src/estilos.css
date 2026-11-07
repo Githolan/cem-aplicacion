@@ -147,6 +147,14 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.aviso-info {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--accent-tint);
+  color: var(--ink);
+}
+
 .aviso-ok {
   background: var(--success-bg);
   color: var(--success-text);

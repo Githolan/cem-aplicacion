@@ -207,6 +207,25 @@ describe("Pagos en el inicio de quien prepara", () => {
   });
 });
 
+describe("aviso de que la aplicación no mueve dinero", () => {
+  const AVISO = /^La aplicación no mueve dinero/;
+
+  it("lo ve quien prepara", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: conElementos() } }));
+    abrir();
+
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+  });
+
+  it("control: quien revisa no lo ve", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos() } }));
+    abrir();
+
+    await within(await tarjeta()).findByText("No tenés nada para hacer.");
+    expect(screen.queryByText(AVISO)).toBeNull();
+  });
+});
+
 describe("quien no ve Pagos", () => {
   it("no pide la bandeja ni ve el selector", async () => {
     const simulado = backend({ consorcios: [AZUL, VERDE], acciones: { [C1]: VECINO, [C2]: VECINO } });

@@ -55,6 +55,7 @@ export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string
     setConsorcio,
     /** Quien revisa y no prepara tiene Pagos como tarjeta; quien prepara, como fila entre las demás. */
     enTarjeta: porEdificio !== null && consorcio !== "" && !cumple(porEdificio.get(consorcio) ?? [], REQUISITOS.ordenes),
+    prepara: porEdificio !== null && cumple(porEdificio.get(consorcio) ?? [], REQUISITOS.ordenes),
     detalle,
     cantidad,
     falla: consulta.isError ? mensajeDeLectura(consulta.error) : null,
