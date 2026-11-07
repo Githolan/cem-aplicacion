@@ -538,6 +538,33 @@ describe("con el extracto", () => {
     expect(await screen.findByText(/1 coincide con un cotejo que se deshizo/)).toBeTruthy();
   });
 
+  it("una línea sin leer puede ser un débito sin registrar: no dice que no hay nada para mirar", async () => {
+    vi.stubGlobal("fetch", backend({
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado({ lineas_no_leidas: 1, filas_no_leidas: [14] })),
+    }));
+    abrir();
+    await subir();
+    const lista = (await screen.findByRole("heading", { name: /Falta revisar/ })).nextElementSibling as HTMLElement;
+    expect(lista.textContent).toContain("No pudimos leer 1 línea del archivo (línea 14).");
+    expect(screen.queryByText("No hay nada para mirar.")).toBeNull();
+  });
+
+  it.each([
+    ["falta conciliar", { esperan_conciliar: 1 }],
+    ["lo coteja otra persona", { para_otra_persona: 1 }],
+    ["un cotejo deshecho", { anulados: 1 }],
+  ])("%s también es algo para mirar", async (_, campos) => {
+    vi.stubGlobal("fetch", backend({
+      [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
+      [EXTRACTO]: () => Response.json(resultado(campos)),
+    }));
+    abrir();
+    await subir();
+    expect(await screen.findByRole("heading", { name: /Falta revisar/ })).toBeTruthy();
+    expect(screen.queryByText("No hay nada para mirar.")).toBeNull();
+  });
+
   it("control: sin nada para mirar lo dice y no muestra secciones vacías", async () => {
     vi.stubGlobal("fetch", backend({
       [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
@@ -547,6 +574,7 @@ describe("con el extracto", () => {
     await subir();
     expect(await screen.findByText("No hay nada para mirar.")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: /Están/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Falta revisar/ })).toBeNull();
   });
 
   it("después de comparar se vuelve a leer lo que falta cotejar", async () => {

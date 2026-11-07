@@ -166,6 +166,10 @@ export function aTexto(centavos: number): string {
 
 const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" });
 export const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
+/** Para cerrar una frase: «a. m.» ya trae su punto. */
+export const momentoAlFinal = (iso: string) => momento(iso).replace(/\.?$/, ".");
+/** «2026-11-05» como se lee: «05/11/2026». */
+export const fechaLegible = (iso: string) => iso.split("-").reverse().join("/");
 
 /** Otro acto u otros datos llevan otra clave. Repetir el mismo (después de un 5xx, una caída de la
  * red o `idempotencia_en_curso`) es el mismo pedido: conserva la suya para recibir lo guardado, en

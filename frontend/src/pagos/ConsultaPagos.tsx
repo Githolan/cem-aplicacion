@@ -10,6 +10,7 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { CargandoPagos } from "./CargandoPagos";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { FILTROS, type Filtro, TEXTO_SITUACION, TONO_SITUACION } from "./textos";
 
@@ -112,7 +113,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
               </button>
             ))}
           </div>
-          {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
+          {lectura.tipo === "cargando" && <CargandoPagos />}
           {lectura.tipo === "sin_servicio" && (
             <FallaDeLectura
               alReintentar={() => {

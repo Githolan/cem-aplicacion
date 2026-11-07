@@ -16,7 +16,7 @@ import {
   importe,
   mensajeDeActo,
   mensajeDeError,
-  momento,
+  momentoAlFinal,
   renovarClave,
   SEGUNDO_FACTOR_REQUERIDO,
   sinLaFalla,
@@ -418,7 +418,7 @@ export function PagosPorAclarar() {
                     {p.consorcio}: {importe(p.importe_centavos, p.moneda)}
                   </h2>
                   <p>{p.concepto}</p>
-                  <p>Viste la cuenta el {momento(p.cuenta_vista_en)}.</p>
+                  <p>Viste la cuenta el {momentoAlFinal(p.cuenta_vista_en)}</p>
                   {transfirio !== p.orden_id && (
                   <form className="formulario" onSubmit={(e) => alEnviar(e, p)}>
                     <label htmlFor={`${id}-${p.orden_id}`}>Por qué no se transfirió</label>
