@@ -303,3 +303,8 @@
 .lectura-ampliada .pie-version {
   color: var(--ink);
 }
+
+/* Con la letra grande el importe no entra en un renglón de la comparación. */
+.lectura-ampliada .comparar-pago tbody tr:first-child td {
+  white-space: normal;
+}
