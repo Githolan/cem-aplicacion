@@ -253,9 +253,9 @@ describe("página /mandatos", () => {
     await cargado();
     const mandatos = seccion("Mandatos");
     const consejo = within(mandatos).getByText("Ana Díaz, Consejo de propietarios").closest("tr") as HTMLElement;
-    expect(consejo.querySelector("[data-etiqueta=CUIT]")?.textContent).toBe("");
+    expect(within(consejo).queryByText(/^CUIT/)).toBeNull();
     const externo = within(mandatos).getByText("Estudio Sur, Administración externa").closest("tr") as HTMLElement;
-    expect(within(externo).getByText(CUIT)).toBeTruthy();
+    expect(within(externo).getByText(`CUIT ${CUIT}`)).toBeTruthy();
     expect(within(externo).getByText(/1 de febrero de 2027 \(ese día ya no rige\)/)).toBeTruthy();
     const decisiones = seccion("Decisiones");
     expect(within(decisiones).getByText("Asamblea del 10 de enero de 2026")).toBeTruthy();

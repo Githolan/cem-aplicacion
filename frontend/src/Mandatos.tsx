@@ -1094,7 +1094,6 @@ export function Mandatos() {
                       <th scope="col">Mandato</th>
                       <th scope="col">Estado</th>
                       <th scope="col">Vigencia</th>
-                      <th scope="col">CUIT</th>
                       <th scope="col">Cuenta asociada</th>
                       <th scope="col">
                         <span className="solo-lector">Acciones</span>
@@ -1108,13 +1107,13 @@ export function Mandatos() {
                           <h3 id={`${id}-${m.id}`}>
                             {m.nombre}, {TEXTO_TIPO_MANDATO[m.tipo]}
                           </h3>
+                          {m.cuit && <p className="tabla-lista__dato">CUIT {m.cuit}</p>}
                         </th>
                         <td data-etiqueta="Estado">{TEXTO_ESTADO_MANDATO[m.estado]}</td>
                         <td data-etiqueta="Vigencia">
                           Desde el {dia(m.vigente_desde)}
                           {m.vigente_hasta && ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)`}
                         </td>
-                        <td data-etiqueta="CUIT">{m.cuit}</td>
                         <td data-etiqueta="Cuenta asociada">{m.con_cuenta ? "Sí" : "No"}</td>
                         <td>
                           <button type="button" className="secundario" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>

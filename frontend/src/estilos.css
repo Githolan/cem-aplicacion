@@ -571,8 +571,15 @@ main:has(.tabla-lista) {
 
 /* Un nombre largo sin espacios no ensancha la tabla: se corta él, no las demás columnas. */
 .tabla-lista tbody th {
-  min-width: 7rem;
+  min-width: 10rem;
   overflow-wrap: anywhere;
+}
+
+.tabla-lista__dato {
+  margin: var(--space-1) 0 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  font-weight: 400;
 }
 
 .tabla-lista thead th {
@@ -586,6 +593,7 @@ main:has(.tabla-lista) {
   border-top: 1px solid var(--divider);
 }
 
+.tabla-lista h2,
 .tabla-lista h3 {
   margin: 0;
   font-size: 1rem;
