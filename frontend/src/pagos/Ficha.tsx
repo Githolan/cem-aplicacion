@@ -172,6 +172,8 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
   const [resolucion, setResolucion] = useState<Resolucion | null>(null);
   /** Pidió tomar el pago: falta que confirme que no se transfirió. */
   const [confirmaToma, setConfirmaToma] = useState(false);
+  /** Pidió corregir la diferencia que registró. */
+  const [corrigeDiferencia, setCorrigeDiferencia] = useState(false);
 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
@@ -882,6 +884,16 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         alCambiar();
                       }} />
                   )}
+                  {corrigeDiferencia && ficha.puede_corregir_diferencia && diferencia !== null && (
+                    <RegistroPago key={`diferencia-${diferencia.id}`} consorcio={consorcio} orden={orden} version={v} corregido={undefined}
+                      diferencia={diferencia} alCancelar={() => setCorrigeDiferencia(false)} comprobante={ficha.comprobante_actual} subido={null}
+                      lectura={null} subtitulo={Subtitulo} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
+                      alRegistrar={(texto) => terminar(texto)} releer={releer}
+                      alCambiarLaOrden={() => {
+                        releer();
+                        alCambiar();
+                      }} />
+                  )}
                   {ficha.puede_resolver_diferencia && diferencia !== null && (
                     <fieldset className="formulario">
                       <legend>Qué hacemos</legend>
@@ -909,6 +921,11 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                   )}
                   <div className="formulario">
                     <div className="acciones">
+                      {ficha.puede_corregir_diferencia && !corrigeDiferencia && (
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setCorrigeDiferencia(true)}>
+                          Corregir lo que registré
+                        </button>
+                      )}
                       {ficha.puede_recuperar && diferencia !== null && (
                         <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
                           Ya recuperamos la plata
@@ -1096,6 +1113,19 @@ export function Ficha({ consorcio, orden, titulo: Titulo, aEntrar, aInicio, term
                         {cuentaEnmascarada(x.cuenta_ultimos_digitos)}
                       </li>
                     ))}
+                </ol>
+              </>
+            )}
+            {ficha.diferencias_anteriores.length > 0 && (
+              <>
+                <Subtitulo>Lo que se registró antes</Subtitulo>
+                <ol className="versiones">
+                  {ficha.diferencias_anteriores.map((d) => (
+                    <li key={d.id}>
+                      Operación {d.numero_operacion}, {d.fecha_operacion}: {importe(centavosReales(d), d.moneda)}, cuenta{" "}
+                      {cuentaEnmascarada(d.cuenta_ultimos_digitos)}. Lo registró {d.registrada_por_nombre}, {momento(d.registrada_en)}
+                    </li>
+                  ))}
                 </ol>
               </>
             )}

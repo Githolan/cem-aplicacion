@@ -50,9 +50,22 @@ type Subido = components["schemas"]["ComprobanteSubido"];
 type Version = components["schemas"]["VersionOrdenPago"];
 type Pago = components["schemas"]["PagoManual"];
 type Lectura = components["schemas"]["LecturaComprobante"];
+type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
 const hoy = () => new Date().toLocaleDateString("en-CA");
+
+/** Lo registrado, para corregirlo. La cuenta no viaja: se vuelve a escribir del comprobante. */
+function datosDeLaDiferencia(d: Diferencia): Registro {
+  return {
+    numero: d.numero_operacion,
+    fecha: d.fecha_operacion,
+    importe: aTexto(aCentavos(d.importe_real) ?? 0),
+    moneda: d.moneda,
+    cuenta: "",
+    explicacion: d.explicacion,
+  };
+}
 
 function datosIniciales(corregido: Pago | undefined, moneda: string): Registro {
   if (corregido === undefined) return { numero: "", fecha: hoy(), importe: "", moneda, cuenta: "", explicacion: "" };
@@ -87,6 +100,10 @@ type Props = {
   corregido: Pago | undefined;
   comprobante: Comprobante | null;
   subido: Subido | null;
+  /** La diferencia que se corrige (decisión 6): mismo formulario que «Pagué otra cosa», con el
+   * comprobante que ya tiene. Se puede dejar de corregir. */
+  diferencia?: Diferencia;
+  alCancelar?: () => void;
   /** Lo que la IA leyó del comprobante; nula si la lectura no corrió. */
   lectura: Lectura | null;
   subtitulo: "h2" | "h3";
@@ -128,12 +145,13 @@ function DistintoDeLaOrden({ leida, version }: { leida: Lectura; version: Versio
 }
 
 export function RegistroPago(props: Props) {
-  const { consorcio, orden, version, corregido, comprobante, subido, lectura, subtitulo: Subtitulo, puedeOtraCosa, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
+  const { consorcio, orden, version, corregido, diferencia, alCancelar, comprobante, subido, lectura, subtitulo: Subtitulo, puedeOtraCosa, acto, aEntrar, alRegistrar, releer, alCambiarLaOrden } = props;
   const id = useId();
   const { enviando, setEnviando, setAviso, montado } = acto;
   const corrige = corregido !== undefined;
-  const [registro, setRegistro] = useState<Registro>(() => datosIniciales(corregido, version.moneda));
-  const [otraCosa, setOtraCosa] = useState(false);
+  const corrigeDiferencia = diferencia !== undefined;
+  const [registro, setRegistro] = useState<Registro>(() => (diferencia !== undefined ? datosDeLaDiferencia(diferencia) : datosIniciales(corregido, version.moneda)));
+  const [otraCosa, setOtraCosa] = useState(corrigeDiferencia);
   /** Lo elegido en este dispositivo: se ve enseguida, y el reintento no pide elegirlo de nuevo. */
   const [elegido, setElegido] = useState<File | null>(null);
   const [subiendo, setSubiendo] = useState(false);
@@ -171,7 +189,7 @@ export function RegistroPago(props: Props) {
   /** Pidió ver o cambiar lo que se leyó; o cambiar el archivo que no coincide. */
   const [aMano, setAMano] = useState(false);
   const [cambiaArchivo, setCambiaArchivo] = useState(false);
-  const fuente = corrige || enCurso ? llenadaCon : (leida?.version_documento_id ?? null);
+  const fuente = corrige || corrigeDiferencia || enCurso ? llenadaCon : (leida?.version_documento_id ?? null);
   if (fuente !== llenadaCon) {
     setLlenadaCon(fuente);
     setRegistro(leida === null ? datosIniciales(undefined, version.moneda) : datosLeidos(leida, version.moneda));
@@ -295,25 +313,35 @@ export function RegistroPago(props: Props) {
       return;
     }
     void acto.hacer({
-      quePide: ["otra-cosa", orden, version.numero, version.huella, registro, documento],
-      nombre: "registrar lo que pasó",
-      pedir: (clave) =>
-        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia", {
+      quePide: ["otra-cosa", orden, version.numero, version.huella, registro, documento, diferencia?.id],
+      nombre: corrigeDiferencia ? "corregir lo que registraste" : "registrar lo que pasó",
+      pedir: (clave) => {
+        const cuerpo = {
+          version: version.numero,
+          huella: version.huella,
+          numero_operacion: registro.numero.trim(),
+          fecha_operacion: registro.fecha,
+          importe_real: aDecimal(centavos),
+          moneda: registro.moneda,
+          cuenta_real: registro.cuenta.replace(/\D/g, ""),
+          documento_id: documento,
+          explicacion: registro.explicacion.trim(),
+        };
+        const camino = { consorcio_id: consorcio, orden_id: orden };
+        const encabezado = { [ENCABEZADO_IDEMPOTENCIA]: clave };
+        if (diferencia !== undefined)
+          return api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/correccion", {
+            headers: encabezadoCsrf(),
+            params: { path: { ...camino, diferencia_id: diferencia.id }, header: encabezado },
+            body: cuerpo,
+          });
+        return api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia", {
           headers: encabezadoCsrf(),
-          params: { path: { consorcio_id: consorcio, orden_id: orden }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
-          body: {
-            version: version.numero,
-            huella: version.huella,
-            numero_operacion: registro.numero.trim(),
-            fecha_operacion: registro.fecha,
-            importe_real: aDecimal(centavos),
-            moneda: registro.moneda,
-            cuenta_real: registro.cuenta.replace(/\D/g, ""),
-            documento_id: documento,
-            explicacion: registro.explicacion.trim(),
-          },
-        }),
-      alTerminar: () => alRegistrar(`Listo: registraste lo que pasó. ${AVISO_OTRA_COSA}`),
+          params: { path: camino, header: encabezado },
+          body: cuerpo,
+        });
+      },
+      alTerminar: () => alRegistrar(corrigeDiferencia ? `Listo: corregiste lo que registraste. ${AVISO_OTRA_COSA}` : `Listo: registraste lo que pasó. ${AVISO_OTRA_COSA}`),
       alFallar: (estado, codigo) => {
         if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
       },
@@ -324,9 +352,10 @@ export function RegistroPago(props: Props) {
     setRegistro((r) => ({ ...r, [campo]: valor }));
   }
 
-  const conDatos = comprobante !== null && !enCurso && !leyendo;
+  const documentoDelRegistro = diferencia?.documento_id ?? comprobante?.documento_id ?? null;
+  const conDatos = documentoDelRegistro !== null && !enCurso && !leyendo;
   /** Lo que no coincide espera a que la persona diga qué pasó; al corregir ya lo sabe. */
-  const pregunta = difiere && !corrige && !aMano && !otraCosa;
+  const pregunta = difiere && !corrige && !aMano && !otraCosa && !corrigeDiferencia;
   /** La cuenta y el importe los leyó la IA y coinciden: no hay nada que escribir de eso. */
   const cuentaLeida = coincide && !corrige && !aMano;
 
@@ -369,7 +398,7 @@ export function RegistroPago(props: Props) {
             </button>
           </div>
         )}
-        {!enCurso && !leyendo && (!pregunta || cambiaArchivo) && (
+        {!enCurso && !leyendo && !corrigeDiferencia && (!pregunta || cambiaArchivo) && (
           <ZonaComprobante deshabilitada={enviando} reemplaza={comprobante !== null} alElegir={elegir} />
         )}
       </section>
@@ -396,11 +425,11 @@ export function RegistroPago(props: Props) {
       )}
 
       {conDatos && !pregunta && (
-        <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, comprobante.documento_id) : registrar(e, comprobante.documento_id))}>
+        <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
           {otraCosa ? (
             <>
-              <Subtitulo>Pagué otra cosa</Subtitulo>
-              <p>Escribí lo que salió del banco, tal como figura en el comprobante.</p>
+              <Subtitulo>{corrigeDiferencia ? "Corregir lo que registré" : "Pagué otra cosa"}</Subtitulo>
+              <p>Escribí lo que salió del banco, tal como figura en el comprobante.{corrigeDiferencia && " Lo anterior queda en la historia."}</p>
             </>
           ) : (
             <>
@@ -478,16 +507,21 @@ export function RegistroPago(props: Props) {
           )}
           <div className="acciones">
             <button type="submit" disabled={enviando}>
-              {otraCosa ? "Registrar lo que pasó" : corrige ? "Guardar la corrección" : "Registrar el pago"}
+              {corrigeDiferencia ? "Guardar la corrección" : otraCosa ? "Registrar lo que pasó" : corrige ? "Guardar la corrección" : "Registrar el pago"}
             </button>
             {cuentaLeida && !otraCosa && (
               <button type="button" className="secundario" disabled={enviando} onClick={() => setAMano(true)}>
                 Corregir lo que se leyó
               </button>
             )}
-            {puedeOtraCosa && (
+            {puedeOtraCosa && !corrigeDiferencia && (
               <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
                 {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
+              </button>
+            )}
+            {alCancelar !== undefined && (
+              <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+                Cancelar
               </button>
             )}
           </div>

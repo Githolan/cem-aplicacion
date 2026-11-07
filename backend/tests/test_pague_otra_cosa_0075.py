@@ -771,7 +771,7 @@ def test_la_lectura_de_otro_consorcio_no_la_trae(motor_migrate, motor_app, e):
 def test_las_funciones_las_ejecuta_solo_cem_app(motor_migrate):
     rutas = (
         "nucleo.registrar_diferencia_pago_manual(uuid, integer, bytea, text, date, numeric, text,"
-        " text, uuid, text, uuid, text, uuid)",
+        " text, uuid, text, uuid, text, uuid, uuid)",
         "nucleo.resolver_diferencia_pago_manual(uuid, uuid, text, uuid, text, uuid)",
         "nucleo.recuperar_diferencia_pago_manual(uuid, uuid, uuid, text, uuid)",
         "nucleo.diferencias_pago_manual_lectura(uuid, text, uuid, text, uuid)",

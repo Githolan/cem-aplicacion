@@ -103,7 +103,7 @@ function ejecucion(pagos: Pago[] = [], declaraciones: Declaracion[] = []): NonNu
 function ficha(extra: Partial<Ficha> = {}): Ficha {
   return {
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
-    puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null,
+    puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
     puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
     puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
@@ -117,7 +117,7 @@ function diferencia(extra: Partial<Diferencia> = {}): Diferencia {
     importe_orden_centavos: 1_500_000, moneda_orden: "ARS", numero_operacion: "0001234567", fecha_operacion: "2026-10-31",
     documento_id: DOC, version_documento_id: ARCHIVO, explicacion: "Me equivoqué al escribirlo", fuera_de_termino: false,
     registrada_por: PERSONA, registrada_por_nombre: "Marta Ficticia", registrada_en: "2026-10-31T13:00:00Z", resolucion: null,
-    resuelta_por: null, resuelta_en: null, recuperada_en: null, cerrada_en: null, motivo_cierre: null, falta_centavos: 250_000, sobra_centavos: null,
+    resuelta_por: null, resuelta_en: null, recuperada_en: null, cerrada_en: null, motivo_cierre: null, corrige_a: null, falta_centavos: 250_000, sobra_centavos: null,
     se_puede_dar_por_pagada: true, ...extra,
   };
 }
@@ -1723,6 +1723,27 @@ describe("no se pagó", () => {
     abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_reabrir_cuenta: false });
     expect(await boton("No se pudo pagar")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
+  });
+
+  it("quien registró la diferencia la corrige con la fila nueva, reescribiendo la cuenta", async () => {
+    const d = diferencia();
+    const CORRECCION = `${BASE}/ordenes-pago/${O1}/pago-manual/diferencia/${d.id}/correccion`;
+    const api = abrirFicha(ficha({
+      orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", puede_corregir_diferencia: true, ejecucion: ejecucion(), diferencia_vigente: d,
+    }), { [`POST ${CORRECCION}`]: () => Response.json({ id: d.id, orden_id: O1 }, { status: 201 }) });
+    fireEvent.click(await boton("Corregir lo que registré"));
+    expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe(d.numero_operacion);
+    expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
+    fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
+    fireEvent.click(await boton("Guardar la corrección"));
+    await vi.waitFor(() => expect(pedidos(api, "POST", CORRECCION)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", CORRECCION)[0])).toMatchObject({ numero_operacion: d.numero_operacion, cuenta_real: CUENTA });
+  });
+
+  it("sin poder corregir la diferencia no se ofrece", async () => {
+    abrirFicha(ficha({ orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", ejecucion: ejecucion(), diferencia_vigente: diferencia() }));
+    await screen.findByText(/Se pagó otra cosa/);
+    sinBoton("Corregir lo que registré");
   });
 
   it("un reclamo se cierra sin recuperar con motivo, y sin motivo no se manda", async () => {

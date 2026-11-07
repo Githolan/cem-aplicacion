@@ -1465,8 +1465,11 @@ def confirmar_pago_no_realizado(
 # --- «Pagué otra cosa» (`0075`) -----------------------------------------------------------------
 
 
-def _diferencias(c: Connection, permiso: Permiso, orden: UUID) -> dict[UUID, DiferenciaPagoManual]:
-    """Por ejecución, sin la cuenta completa: la base entrega solo sus últimos dígitos."""
+def _diferencias(
+    c: Connection, permiso: Permiso, orden: UUID
+) -> dict[UUID, list[DiferenciaPagoManual]]:
+    """Por ejecución, sin la cuenta completa: la base entrega solo sus últimos dígitos. La última de
+    cada lista es la vigente; las demás, lo que corrigió (`0082`)."""
     filas = _ejecutar(
         c, permiso,
         "select * from nucleo.diferencias_pago_manual_lectura(:o, :f, :actor, 'api', :sesion)",
@@ -1479,28 +1482,38 @@ def _diferencias(c: Connection, permiso: Permiso, orden: UUID) -> dict[UUID, Dif
         del datos["orden_id"]
         misma_moneda = datos["moneda"] == datos["moneda_orden"]
         saldo = datos["importe_orden_centavos"] - int(datos["importe_real"] * 100)
-        diferencias[ejecucion] = DiferenciaPagoManual(
+        diferencias.setdefault(ejecucion, []).append(DiferenciaPagoManual(
             **datos,
             falta_centavos=saldo if misma_moneda and saldo > 0 else None,
             sobra_centavos=-saldo if misma_moneda and saldo < 0 else None,
             se_puede_dar_por_pagada=datos["tipo"] == "importe" and misma_moneda,
-        )  # fmt: skip
+        ))  # fmt: skip
     return diferencias
 
 
 REGISTRAR_DIFERENCIA = (
     "select nucleo.registrar_diferencia_pago_manual(:o, :version, :huella, :numero, :fecha,"
-    " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion)"
+    " :importe, :moneda, :cuenta, :doc, :explicacion, :actor, 'api', :sesion, :corrige)"
 )
 
 
-def _datos_diferencia(orden_id: UUID, registro: RegistroDiferenciaPago) -> dict:
+ERRORES_CORRECCION = {
+    "no_es_quien_registro": (
+        403, CodigoError.NO_ES_QUIEN_REGISTRO, "La diferencia la corrige quien la registró.",
+    ),
+}  # fmt: skip
+"""Al corregir una diferencia, `no_es_quien_registro` no habla de un contrato."""
+
+
+def _datos_diferencia(
+    orden_id: UUID, registro: RegistroDiferenciaPago, corrige: UUID | None = None
+) -> dict:
     return {
         "o": orden_id, "version": registro.version, "huella": bytes.fromhex(registro.huella),
         "numero": registro.numero_operacion, "fecha": registro.fecha_operacion,
         "importe": registro.importe_real, "moneda": registro.moneda,
         "cuenta": registro.cuenta_real, "doc": registro.documento_id,
-        "explicacion": registro.explicacion,
+        "explicacion": registro.explicacion, "corrige": corrige,
     }  # fmt: skip
 
 
@@ -1532,6 +1545,37 @@ def registrar_diferencia_pago(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/"
+    "correccion",
+    status_code=201,
+    response_model=DiferenciaRegistrada,
+    summary="Corregir una diferencia mal cargada (quien la registró, antes de la resolución): fila"
+    " nueva",
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": "Sin diferencia o evidencia inválida."}},
+)
+def corregir_diferencia_pago(
+    orden_id: UUID,
+    diferencia_id: UUID,
+    registro: RegistroDiferenciaPago,
+    lectura: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True))],
+    permiso: Annotated[Permiso, Depends(requiere(EJECUTAR))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Los mismos controles que al registrar; la base mira quién registró y si ya se resolvió."""
+    _ejecutor(lectura, permiso, motor, orden_id)
+
+    def efecto(conn: Connection) -> tuple[int, DiferenciaRegistrada]:
+        nueva = _ejecutar(
+            conn, permiso, REGISTRAR_DIFERENCIA,
+            _datos_diferencia(orden_id, registro, diferencia_id), ERRORES_CORRECCION,
+        ).scalar_one()  # fmt: skip
+        return 201, DiferenciaRegistrada(id=nueva, orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
 def _verificar_quien_resuelve(
     revision: Permiso, permiso: Permiso, motor, orden_id: UUID, diferencia_id: UUID
 ) -> None:
@@ -1540,7 +1584,7 @@ def _verificar_quien_resuelve(
     with _lectura(revision, motor) as c:
         ordenes = _ordenes(c, revision, orden_id)
         diferencias = _diferencias(c, revision, orden_id).values()
-    diferencia = next((d for d in diferencias if d.id == diferencia_id), None)
+    diferencia = next((d[-1] for d in diferencias if d[-1].id == diferencia_id), None)
     if not ordenes or diferencia is None:
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
     permiso.verificar(Entidad(
@@ -1912,9 +1956,10 @@ def ficha_pago(
         )
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
-        diferencia = None
+        de_la_ejecucion = []
         if ejecucion is not None:
-            diferencia = _diferencias(c, lector, orden_id).get(ejecucion.id)
+            de_la_ejecucion = _diferencias(c, lector, orden_id).get(ejecucion.id, [])
+        diferencia = de_la_ejecucion[-1] if de_la_ejecucion else None
         comprobante, subido = _comprobantes(
             c, lector, ver, orden_id, diferencia or ultimo, a.pago_observado and diferencia is None
         )
@@ -1946,11 +1991,13 @@ def ficha_pago(
         puede_confirmar=a.puede_confirmar,
         puede_resolver_diferencia=a.puede_resolver_diferencia and a.diferencia_sin_resolver,
         puede_recuperar=a.puede_resolver_diferencia and a.reclamo_abierto,
+        puede_corregir_diferencia=a.puede_corregir_diferencia,
         puede_preparar_faltante=paso == PasoPago.PREPARAR_FALTANTE,
         ejecucion=ejecucion, comprobante_actual=comprobante,
         comprobante_subido=subido, lectura_comprobante=lectura, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
-        diferencia_vigente=diferencia, toma_vigente=toma,
+        diferencia_vigente=diferencia, diferencias_anteriores=de_la_ejecucion[:-1],
+        toma_vigente=toma,
     )  # fmt: skip
 
 

@@ -73,6 +73,7 @@ class AccionesOrden(HechosPago):
     """Quien pide podría pagar, y otra persona vio la cuenta y no dijo nada."""
     puede_tomar: bool = False
     tomar_desde: datetime | None = None
+    puede_corregir_diferencia: bool = False
     proveedor_cambiado: bool = False
     """Quien pide prepara, y el proveedor cambió después de aprobar la orden."""
 

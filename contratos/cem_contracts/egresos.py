@@ -822,6 +822,7 @@ class DiferenciaPagoManual(BaseModel):
     resuelta_por: UUID | None
     resuelta_en: datetime | None
     recuperada_en: datetime | None
+    corrige_a: UUID | None = Field(description="La diferencia que esta fila corrigió, si corrigió una.")
     cerrada_en: datetime | None = Field(description="Si el reclamo se cerró sin recuperar la plata.")
     motivo_cierre: str | None
     falta_centavos: int | None = Field(
@@ -1279,6 +1280,9 @@ class FichaPago(BaseModel):
         description="Si puede decir que se recuperó la plata reclamada o cerrar el reclamo sin"
         " recuperarla."
     )
+    puede_corregir_diferencia: bool = Field(
+        description="Si registró la diferencia vigente y el Consejo todavía no la resolvió."
+    )
     puede_preparar_faltante: bool = Field(
         description="Si le corresponde preparar una orden por lo que faltó pagar."
     )
@@ -1302,6 +1306,9 @@ class FichaPago(BaseModel):
     )
     diferencia_vigente: DiferenciaPagoManual | None = Field(
         description="Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
+    )
+    diferencias_anteriores: list[DiferenciaPagoManual] = Field(
+        description="Lo que `diferencia_vigente` corrigió, de lo más viejo a lo más nuevo."
     )
     toma_vigente: TomaVigente | None = Field(
         description="Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."

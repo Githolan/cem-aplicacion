@@ -2373,6 +2373,19 @@
             "description": "Si el reclamo se cerró sin recuperar la plata.",
             "title": "Cerrada En"
           },
+          "corrige_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La diferencia que esta fila corrigió, si corrigió una.",
+            "title": "Corrige A"
+          },
           "cuenta_ultimos_digitos": {
             "title": "Cuenta Ultimos Digitos",
             "type": "string"
@@ -2552,6 +2565,7 @@
           "resuelta_por",
           "resuelta_en",
           "recuperada_en",
+          "corrige_a",
           "cerrada_en",
           "motivo_cierre",
           "falta_centavos",
@@ -3445,6 +3459,14 @@
             ],
             "description": "Lo que se pagó de verdad en la ejecución de la versión vigente, resuelto o no."
           },
+          "diferencias_anteriores": {
+            "description": "Lo que `diferencia_vigente` corrigió, de lo más viejo a lo más nuevo.",
+            "items": {
+              "$ref": "#/components/schemas/DiferenciaPagoManual"
+            },
+            "title": "Diferencias Anteriores",
+            "type": "array"
+          },
           "ejecucion": {
             "anyOf": [
               {
@@ -3515,6 +3537,11 @@
           },
           "puede_corregir": {
             "title": "Puede Corregir",
+            "type": "boolean"
+          },
+          "puede_corregir_diferencia": {
+            "description": "Si registró la diferencia vigente y el Consejo todavía no la resolvió.",
+            "title": "Puede Corregir Diferencia",
             "type": "boolean"
           },
           "puede_declarar": {
@@ -3633,6 +3660,7 @@
           "puede_confirmar",
           "puede_resolver_diferencia",
           "puede_recuperar",
+          "puede_corregir_diferencia",
           "puede_preparar_faltante",
           "ejecucion",
           "comprobante_actual",
@@ -3641,6 +3669,7 @@
           "observacion_vigente",
           "declaracion_vigente",
           "diferencia_vigente",
+          "diferencias_anteriores",
           "toma_vigente"
         ],
         "title": "FichaPago",
@@ -14516,6 +14545,94 @@
           }
         },
         "summary": "Cerrar un reclamo sin recuperar la plata (otro miembro del Consejo): queda Fallida y no se imputa en la liquidación",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/diferencia/{diferencia_id}/correccion": {
+      "post": {
+        "description": "Los mismos controles que al registrar; la base mira quién registró y si ya se resolvió.",
+        "operationId": "corregir_diferencia_pago_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__pago_manual_diferencia__diferencia_id__correccion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "diferencia_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Diferencia Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroDiferenciaPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiferenciaRegistrada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "description": "Sin diferencia o evidencia inválida."
+          }
+        },
+        "summary": "Corregir una diferencia mal cargada (quien la registró, antes de la resolución): fila nueva",
         "tags": [
           "egresos"
         ]
