@@ -173,9 +173,9 @@ describe("a mano", () => {
     vi.stubGlobal("fetch", simulado);
     const { container } = abrir();
     const uno = await screen.findByRole("checkbox", { name: /Proveedor 22/ });
-    expect((screen.getByRole("button", { name: "Guardar lo tildado" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Marcar como cotejados" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(uno);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     expect(await screen.findByText("Listo: quedó cotejado 1 pago.")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("checkbox", { name: /Proveedor 22/ })).toBeNull());
     const [pedido] = pedidos(simulado, TILDAR);
@@ -197,7 +197,7 @@ describe("a mano", () => {
     vi.stubGlobal("fetch", backend({ [LISTA]: lista([elemento(P1, { puede_cotejar: false })]) }));
     abrir();
     await screen.findByText(/Lo coteja otra persona del Consejo/);
-    expect(screen.queryByRole("button", { name: "Guardar lo tildado" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Marcar como cotejados" })).toBeNull();
   });
 
   it("no deja tildar más de lo que entra en un pedido y dice por qué", async () => {
@@ -210,13 +210,13 @@ describe("a mano", () => {
     const [uno, dos, tres] = (await screen.findAllByRole("checkbox")) as [HTMLInputElement, HTMLInputElement, HTMLInputElement];
     fireEvent.click(uno);
     expect(tres.disabled).toBe(false);
-    expect(screen.queryByText(/Se guardan hasta 2/)).toBeNull();
+    expect(screen.queryByText(/Se marcan hasta 2/)).toBeNull();
     fireEvent.click(dos);
     expect(tres.disabled).toBe(true);
     expect(uno.disabled).toBe(false); // lo tildado se puede destildar
-    expect(screen.getByText("Se guardan hasta 2 por vez: guardá estos y seguí con los demás.")).toBeTruthy();
+    expect(screen.getByText("Se marcan hasta 2 por vez: primero estos, y después los demás.")).toBeTruthy();
     fireEvent.click(tres);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     await screen.findByText(/Listo/);
     expect(await pedidos(simulado, TILDAR)[0]?.clone().json()).toEqual({ pagos: [P1, P2] });
   });
@@ -264,7 +264,7 @@ describe("a mano", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
     expect(await screen.findByText("Todavía no hay pagos cotejados.")).toBeTruthy();
     fireEvent.click(await screen.findByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     fireEvent.click(await screen.findByRole("button", { name: "Ver lo ya cotejado" }));
     expect(await screen.findByRole("button", { name: /Deshacer el cotejo de/ })).toBeTruthy();
   });
@@ -298,7 +298,7 @@ describe("a mano", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.click(await screen.findByRole("checkbox", { name: /Proveedor 22/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     await verificarCodigo();
     expect(await screen.findByText("Listo: quedó cotejado 1 pago.")).toBeTruthy();
     const claves = pedidos(simulado, TILDAR).map((p) => p.headers.get("Idempotency-Key"));
@@ -311,7 +311,7 @@ describe("a mano", () => {
     abrir();
     const tilde = await screen.findByRole("checkbox", { name: /Proveedor 22/ });
     fireEvent.click(tilde);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     expect((await screen.findByRole("alert")).textContent).toContain("no lo concilia");
     expect((tilde as HTMLInputElement).checked).toBe(true);
   });
@@ -393,7 +393,7 @@ describe("a mano", () => {
     abrir();
     fireEvent.click(await screen.findByRole("checkbox", { name: /Proveedor 22/ }));
     fireEvent.click(screen.getByRole("button", { name: "Ver más" }));
-    fireEvent.click(screen.getByRole("button", { name: "Guardar lo tildado" }));
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como cotejados" }));
     await screen.findByRole("checkbox", { name: /Proveedor 34/ });
     await act(async () => {
       soltarVieja(lista([elemento(P2)])());

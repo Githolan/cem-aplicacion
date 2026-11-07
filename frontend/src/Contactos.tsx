@@ -13,7 +13,7 @@ import {
   leerCopias,
   vigentes,
 } from "./copiaContactos";
-import { RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
+import { type PedidoDeGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
@@ -33,7 +33,7 @@ const ESTADO = { sinSesion: 401, sinPermiso: 403, noEncontrado: 404 } as const;
 
 const TEXTO_FUNCION: Record<Contacto["funcion"], string> = {
   administracion: "Administración",
-  encargado: "Encargado o encargada",
+  encargado: "Encargado/a",
   emergencias: "Emergencias",
   aseguradora: "Aseguradora",
   proveedor_critico: "Proveedor crítico",
@@ -220,9 +220,12 @@ export function Contactos() {
 
       {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
 
+      {/* El botón dice lo que hace (comentario 25): agregar arriba, y cada contacto con lo suyo. */}
       {consorcio !== "" && puede("contactos.gestionar") && (
         <p className="tarjeta">
-          <Link to={RUTA_CONTACTOS_GESTION} className="enlace-suelto">Gestionar la lista</Link>
+          <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "agregar" } satisfies PedidoDeGestion} className="enlace-boton">
+            Agregar un contacto
+          </Link>
         </p>
       )}
     </>
@@ -279,7 +282,7 @@ export function Contactos() {
           <ul className="sesiones sesiones--grilla" aria-label="Contactos de emergencia">
             {contactos.map((c) => (
               <li key={c.id}>
-                <h3>
+                <h3 id={`${id}-${c.id}`}>
                   {TEXTO_FUNCION[c.funcion]}: {c.nombre}
                 </h3>
                 <dl className="detalles">
@@ -304,6 +307,19 @@ export function Contactos() {
                     </>
                   )}
                 </dl>
+                {/* Sin conexión no se ofrece: corregir y retirar necesitan la lista en línea. */}
+                {!sinConexion && consorcio !== "" && puede("contactos.gestionar") && (
+                  <p>
+                    <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "corregir", contacto: c.id } satisfies PedidoDeGestion}
+                      className="enlace-boton" aria-describedby={`${id}-${c.id}`}>
+                      Corregir
+                    </Link>{" "}
+                    <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "retirar", contacto: c.id } satisfies PedidoDeGestion}
+                      className="enlace-boton peligro" aria-describedby={`${id}-${c.id}`}>
+                      Retirar
+                    </Link>
+                  </p>
+                )}
               </li>
             ))}
           </ul>

@@ -951,8 +951,9 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                         <span>Reclamar la devolución: la orden queda abierta hasta recuperar la plata</span>
                       </label>
                       <div className="acciones">
+                        {/* El botón dice lo que ocurre (comentario 29): lo elegido arriba. */}
                         <button type="button" disabled={enviando} onClick={() => resolver(diferencia, elegida)}>
-                          Resolver
+                          {elegida === "reclamo" ? "Reclamar la devolución" : "Dar por pagado lo real"}
                         </button>
                       </div>
                     </fieldset>
@@ -970,7 +971,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                         </button>
                       )}
                       {ficha.puede_recuperar && diferencia !== null && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("cerrar")}>
+                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => escribir("cerrar")}>
                           Cerrar sin recuperar
                         </button>
                       )}
@@ -1004,7 +1005,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                         </button>
                       )}
                       {ficha.puede_rechazar && (
-                        <button type="button" className={ficha.puede_aprobar ? "secundario" : undefined} disabled={enviando}
+                        <button type="button" className={ficha.puede_aprobar ? "secundario peligro" : "peligro"} disabled={enviando}
                           onClick={() => escribir("rechazar")}>
                           Rechazar
                         </button>
@@ -1024,7 +1025,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                           <button type="button" disabled={enviando} onClick={tomar}>
                             No se transfirió: tomar el pago
                           </button>
-                          <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmaToma(false)}>
+                          <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setConfirmaToma(false)}>
                             Cancelar
                           </button>
                         </>
@@ -1032,7 +1033,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                       {ficha.puede_conciliar && pago !== undefined && (
                         <>
                           {lecturaDistinta && (
-                            <button type="button" disabled={enviando} onClick={() => escribir("observar")}>
+                            <button type="button" className="peligro" disabled={enviando} onClick={() => escribir("observar")}>
                               Observar
                             </button>
                           )}
@@ -1041,14 +1042,14 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                             Conforme
                           </button>
                           {!lecturaDistinta && (
-                            <button type="button" className="secundario" disabled={enviando} onClick={() => escribir("observar")}>
+                            <button type="button" className="secundario peligro" disabled={enviando} onClick={() => escribir("observar")}>
                               Observar
                             </button>
                           )}
                         </>
                       )}
                       {ficha.puede_confirmar && declaracion !== null && (
-                        <button type="button" disabled={enviando} onClick={() => confirmarNoPago(declaracion.id)}>
+                        <button type="button" className="peligro" disabled={enviando} onClick={() => confirmarNoPago(declaracion.id)}>
                           Confirmar que no se pagó
                         </button>
                       )}
@@ -1058,7 +1059,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                         </button>
                       )}
                       {declara && (
-                        <button type="button" className={paso === "declarar_no_pago" ? undefined : "secundario"} disabled={enviando}
+                        <button type="button" className={paso === "declarar_no_pago" ? "peligro" : "secundario peligro"} disabled={enviando}
                           onClick={() => escribir("declarar")}>
                           No se pudo pagar
                         </button>
@@ -1077,10 +1078,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                   <input id={`${id}-motivo`} required maxLength={TEXTOS_MOTIVO[motivoAbierto].largo} value={motivo} disabled={enviando}
                     onChange={(e) => setMotivo(e.target.value)} />
                   <div className="acciones">
-                    <button type="submit" disabled={enviando || motivo.trim() === ""}>
+                    {/* Dar por conforme avanza; los demás motivos son de una acción negativa. */}
+                    <button type="submit" className={motivoAbierto === "conforme" ? undefined : "peligro"} disabled={enviando || motivo.trim() === ""}>
                       {TEXTOS_MOTIVO[motivoAbierto].boton}
                     </button>
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => setConMotivo(null)}>
+                    <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setConMotivo(null)}>
                       Cancelar
                     </button>
                   </div>

@@ -26,6 +26,9 @@ type Alta = components["schemas"]["AltaTotp"];
 
 export const RUTA_SEGUNDO_FACTOR = "/cuenta/segundo-factor";
 
+/** Con la llave, el segundo factor ya está: se informa, no se pide nada (comentario 23). */
+export const ACTIVADO_CON_LLAVE = "Está activado con la llave de acceso: no hace falta hacer nada más.";
+
 const ESTADO_SIN_SESION = 401;
 const ESTADO_DEMASIADOS = 429;
 const CODIGO_INVALIDO = "segundo_factor_invalido";
@@ -283,7 +286,7 @@ export function SegundoFactor() {
         <SeccionLlave alCambiar={consultar} alCodigos={mostrarCodigosDeLlave} alTerminar={terminar} />
       )}
       <p>
-        Otra opción, si la preferís: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
+        Otra opción: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
         Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
         números que cambia cada 30 segundos.
       </p>
@@ -299,11 +302,14 @@ export function SegundoFactor() {
         />
       )}
 
+      {/* Con la llave ya está activado: el estado va como información y la aplicación queda como
+          opción secundaria, para que no parezca una tarea pendiente (comentarios 23 y 25). */}
       {pantalla.tipo === "inactivo" && pendiente === null && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>{conLlave ? "Está activado con tu llave de acceso" : "Todavía no lo activaste"}</h2>
-          <button type="button" onClick={empezarAlta} disabled={enviando}>
-            {conLlave ? "Agregar la aplicación" : "Activar el segundo factor"}
+          {conLlave && <p className="aviso-info">{ACTIVADO_CON_LLAVE}</p>}
+          <h2 id={`${id}-titulo`}>{conLlave ? "Otro método, opcional" : "Todavía no está activado"}</h2>
+          <button type="button" className={conLlave ? "secundario" : undefined} onClick={empezarAlta} disabled={enviando}>
+            {conLlave ? "Agregar también la aplicación" : "Activar el segundo factor"}
           </button>
         </section>
       )}
@@ -341,7 +347,7 @@ export function SegundoFactor() {
               onChange={(e) => setCodigo(e.target.value)}
             />
             <button type="submit" disabled={enviando}>
-              Confirmar
+              Activar la aplicación
             </button>
           </form>
         </section>
@@ -362,9 +368,9 @@ export function SegundoFactor() {
           </dl>
           <h3>Desactivar</h3>
           <p>
-            Borra la aplicación cargada y los códigos de recuperación. Te avisamos por correo.
+            Borra la aplicación cargada y los códigos de recuperación. Se avisa por correo.
           </p>
-          <button type="button" onClick={desactivar} disabled={enviando}>
+          <button type="button" className="peligro" onClick={desactivar} disabled={enviando}>
             Desactivar el segundo factor
           </button>
         </section>

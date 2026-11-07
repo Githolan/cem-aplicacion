@@ -374,7 +374,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                           {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} (grupo {g.grupo},
                           esquema versión {g.esquema_version}; pagada el {g.pagada_el}){" "}
                           {detalle.liquidacion.estado === "borrador" && (
-                            <button type="button" className="secundario" disabled={enviando}
+                            <button type="button" className="secundario peligro" disabled={enviando}
                               aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
                               onClick={() => hacer({ tipo: "quitar", liquidacion: detalle.liquidacion.id, gasto: g.id })}>
                               Quitar
@@ -426,7 +426,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       <input id={`${id}-motivo`} required maxLength={500} value={motivo} disabled={enviando}
                         onChange={(e) => setMotivo(e.target.value)} />
                       <div className="acciones">
-                        <button type="submit" className="secundario" disabled={enviando || motivo.trim() === ""}>
+                        <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
                           Descartar el borrador
                         </button>
                       </div>

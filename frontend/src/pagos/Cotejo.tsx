@@ -542,7 +542,7 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
               </div>
               {e.puede_cotejar && elegido !== e.pago_id && (
                 <div className="formulario">
-                  <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(e.pago_id)}>
+                  <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setElegido(e.pago_id)}>
                     Deshacer el cotejo de {e.proveedor}
                   </button>
                 </div>
@@ -553,10 +553,10 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
                   <textarea id={`${id}-motivo`} required maxLength={300} rows={3} value={motivo} disabled={enviando} onChange={(evento) => setMotivo(evento.target.value)} />
                   <p>No se borra: queda en la historia. Al subir de nuevo el extracto no se vuelve a tildar solo.</p>
                   <div className="acciones">
-                    <button type="submit" disabled={enviando || motivo.trim() === ""}>
+                    <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
                       Deshacer el cotejo
                     </button>
-                    <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(null)}>
+                    <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setElegido(null)}>
                       Cancelar
                     </button>
                   </div>
@@ -737,11 +737,11 @@ function ATildar({ elementos, tildados, maximo, enviando, alternar, alGuardar }:
           );
         })}
       </ul>
-      {lleno && <p role="status">Se guardan hasta {maximo} por vez: guardá estos y seguí con los demás.</p>}
+      {lleno && <p role="status">Se marcan hasta {maximo} por vez: primero estos, y después los demás.</p>}
       {hayQuienPuede && (
         <div className="formulario">
           <button type="submit" disabled={enviando || tildados.size === 0}>
-            Guardar lo tildado
+            Marcar como cotejados
           </button>
         </div>
       )}

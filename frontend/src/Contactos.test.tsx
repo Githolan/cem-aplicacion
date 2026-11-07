@@ -534,19 +534,27 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
       [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", ...acciones),
     });
 
-  it("«Gestionar la lista» se ve con `contactos.gestionar`", async () => {
+  it("con `contactos.gestionar`, «Agregar un contacto» arriba y en cada contacto «Corregir» y «Retirar», en rojo", async () => {
     vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
     abrir();
-    expect((await screen.findByRole("link", { name: "Gestionar la lista" })).getAttribute("href")).toBe("/contactos/gestion");
+    expect((await screen.findByRole("link", { name: "Agregar un contacto" })).getAttribute("href")).toBe("/contactos/gestion");
+    // El botón dice lo que hace (comentario 25): ya no hay «Gestionar la lista».
+    expect(screen.queryByRole("link", { name: "Gestionar la lista" })).toBeNull();
+    const retirar = screen.getAllByRole("link", { name: "Retirar" });
+    expect(retirar).toHaveLength(LISTA.elementos.length);
+    expect(screen.getAllByRole("link", { name: "Corregir" })).toHaveLength(LISTA.elementos.length);
+    for (const r of retirar) expect(r.className).toBe("enlace-boton peligro");
     // Si el enlace se ve, la persona alcanza la acción: no hace falta aclarar para quién es.
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
   });
 
-  it("control: sin `contactos.gestionar` la lista se ve y el enlace no", async () => {
+  it("control: sin `contactos.gestionar` la lista se ve y ni agregar ni corregir ni retirar", async () => {
     vi.stubGlobal("fetch", conAcciones());
     abrir();
     await nombres();
-    expect(screen.queryByRole("link", { name: "Gestionar la lista" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Agregar un contacto" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Corregir" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Retirar" })).toBeNull();
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
   });
 });

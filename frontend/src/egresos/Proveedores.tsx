@@ -2,6 +2,7 @@ import { type FormEvent, Fragment, useEffect, useId, useRef, useState } from "re
 import { useLocation, useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
+import { CampoCuit, cuitConError } from "../CampoCuit";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
@@ -39,7 +40,6 @@ type Version = components["schemas"]["VersionProveedor"];
 
 export const RUTA_PROVEEDORES = "/egresos/proveedores";
 const CBU = "[0-9]{22}";
-const CUIT = "[0-9]{11}";
 
 type Lectura =
   | { tipo: "cargando" }
@@ -239,6 +239,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function enviar(evento: FormEvent) {
     evento.preventDefault();
     if (formulario === null) return;
+    // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
+    if (formulario.modo !== "cambio" && cuitConError(datos.cuit.trim())) return;
     const cambiaCuenta = formulario.modo === "cambio" && !conservaCuenta(formulario, datos);
     if (cambiaCuenta && !confirmarCuenta) {
       setConfirmarCuenta(true);
@@ -480,14 +482,12 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             <form className="formulario tarjeta" onSubmit={enviar} aria-labelledby={`${id}-form`}>
               <h2 id={`${id}-form`}>Cargar el CUIT de {formulario.proveedor.razon_social}</h2>
               <p>Se carga una sola vez y después no cambia: revisalo antes de guardar. Deja una versión nueva del proveedor.</p>
-              <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
-              <input id={`${id}-cuit`} inputMode="numeric" required pattern={CUIT} value={datos.cuit} disabled={enviando}
-                onChange={(e) => cambiar("cuit", e.target.value)} />
+              <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
               <div className="acciones">
                 <button type="submit" disabled={enviando}>
                   Guardar el CUIT
                 </button>
-                <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
+                <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
                   Cancelar
                 </button>
               </div>
@@ -500,11 +500,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 {formulario.modo === "alta" ? "Alta de un proveedor" : `Cambiar ${formulario.proveedor.razon_social}`}
               </h2>
               {formulario.modo === "alta" && (
-                <>
-                  <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
-                  <input id={`${id}-cuit`} inputMode="numeric" required pattern={CUIT} value={datos.cuit} disabled={enviando}
-                    onChange={(e) => cambiar("cuit", e.target.value)} />
-                </>
+                <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
               )}
               <label htmlFor={`${id}-razon`}>Razón social</label>
               <input id={`${id}-razon`} required maxLength={200} value={datos.razon} disabled={enviando}
@@ -535,9 +531,11 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               <label htmlFor={`${id}-cuenta`}>
                 {formulario.modo === "alta"
                   ? "Cuenta destino: CBU o CVU de 22 números (opcional)"
-                  : `Cuenta destino nueva: CBU o CVU de 22 números (vacío conserva ${cuentaEnmascarada(formulario.proveedor.cuenta_ultimos_digitos)})`}
+                  : "Cuenta destino: CBU o CVU de 22 números. Cambia solo si se escribe otra"}
               </label>
+              {/* La cuenta que tiene va dentro del campo (comentario 27): vacío la conserva. */}
               <input id={`${id}-cuenta`} inputMode="numeric" pattern={CBU} value={datos.cuenta} disabled={enviando}
+                placeholder={formulario.modo === "cambio" ? cuentaEnmascarada(formulario.proveedor.cuenta_ultimos_digitos) : undefined}
                 onChange={(e) => cambiar("cuenta", e.target.value)} />
               {formulario.modo === "cambio" && (
                 <>
@@ -557,9 +555,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               )}
               <div className="acciones">
                 <button type="submit" disabled={enviando}>
-                  {confirmarCuenta ? "Sí, cambiar la cuenta" : "Guardar"}
+                  {confirmarCuenta ? "Sí, cambiar la cuenta" : formulario.modo === "alta" ? "Dar de alta el proveedor" : "Guardar los cambios"}
                 </button>
-                <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
+                <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
                   Cancelar
                 </button>
               </div>

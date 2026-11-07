@@ -9,7 +9,7 @@ import { App } from "./App";
 import { trazoQr } from "./CodigoQr";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { ENTRAR_DE_NUEVO, RECARGAR } from "./fallas";
-import { codigoAplicacion, codigoVerificacion, secretoEnBloques } from "./SegundoFactor";
+import { ACTIVADO_CON_LLAVE, codigoAplicacion, codigoVerificacion, secretoEnBloques } from "./SegundoFactor";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -181,7 +181,7 @@ describe("página /cuenta/segundo-factor", () => {
     expect(screen.getByRole("link", { name: "abrí la aplicación desde acá" }).getAttribute("href")).toBe(URI);
 
     escribirCodigo("Código de la aplicación", " 042 917 ");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
 
     const lista = await screen.findByRole("list", { name: "Códigos de recuperación" });
     expect(within(lista).getAllByRole("listitem").map((li) => li.textContent)).toEqual(CODIGOS);
@@ -219,12 +219,12 @@ describe("página /cuenta/segundo-factor", () => {
     await screen.findByRole("img", { name: /Código QR/ });
 
     escribirCodigo("Código de la aplicación", "04291");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(screen.getByText("Escribí los seis números que muestra la aplicación.")).toBeTruthy();
     expect(rutas(pedido)).toHaveLength(2);
 
     escribirCodigo("Código de la aplicación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
     expect(screen.getByRole("img", { name: /Código QR/ })).toBeTruthy();
   });
@@ -242,7 +242,7 @@ describe("página /cuenta/segundo-factor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
     await screen.findByRole("img", { name: /Código QR/ });
     escribirCodigo("Código de la aplicación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
 
     expect(await screen.findByText(/Empezá de nuevo/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Activar el segundo factor" })).toBeTruthy();
@@ -258,7 +258,8 @@ describe("página /cuenta/segundo-factor", () => {
     expect(screen.queryByText("Verificado en esta sesión")).toBeNull();
     // Control: lo demás de la tarjeta sigue ahí.
     expect(screen.getByText("Códigos de recuperación sin usar")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Desactivar el segundo factor" })).toBeTruthy();
+    // Desactivar es una acción negativa: va en rojo (comentario 26).
+    expect(screen.getByRole("button", { name: "Desactivar el segundo factor" }).className).toBe("peligro");
   });
 
   it("al pedir confirmación acepta un código de recuperación escrito como venga, con CSRF", async () => {
@@ -317,7 +318,7 @@ describe("página /cuenta/segundo-factor", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
     await screen.findByRole("img", { name: /Código QR/ });
     escribirCodigo("Código de la aplicación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
 
     expect(await screen.findByText(/demasiados intentos/)).toBeTruthy();
     // El código sigue escrito, para corregirlo sin empezar de nuevo.
@@ -386,17 +387,19 @@ describe("página /cuenta/segundo-factor", () => {
     expect(bajas[2]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
-  it("quien solo tiene llave ve que está activado, igual que en /cuenta; sin nada, que no", async () => {
+  it("quien solo tiene llave ve que está activado como información, y la aplicación como opción secundaria; sin nada, que no", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(SOLO_LLAVE) }));
     abrir();
-    expect(await screen.findByRole("heading", { name: "Está activado con tu llave de acceso" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Todavía no lo activaste" })).toBeNull();
+    expect((await screen.findByText(ACTIVADO_CON_LLAVE)).className).toBe("aviso-info");
+    expect(screen.getByRole("button", { name: "Agregar también la aplicación" }).className).toBe("secundario");
+    expect(screen.queryByRole("heading", { name: "Todavía no está activado" })).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }) }));
     abrir();
-    expect(await screen.findByRole("heading", { name: "Todavía no lo activaste" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: /con tu llave de acceso/ })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Todavía no está activado" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Activar el segundo factor" }).className).toBe("");
+    expect(screen.queryByText(ACTIVADO_CON_LLAVE)).toBeNull();
   });
 
   it("quien tiene llave suma la aplicación confirmando acá mismo", async () => {
@@ -415,7 +418,7 @@ describe("página /cuenta/segundo-factor", () => {
     );
     abrir();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Agregar la aplicación" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar también la aplicación" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
     escribirCodigo("Código", "k7m2q-x9p4t");
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
@@ -579,7 +582,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
     await screen.findByRole("img", { name: /Código QR/ });
     escribirCodigo("Código de la aplicación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
 
     expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
     expect(screen.getByRole("img", { name: /Código QR/ })).toBeTruthy();
@@ -615,7 +618,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
     fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
     await screen.findByRole("img", { name: /Código QR/ });
     escribirCodigo("Código de la aplicación", "042917");
-    fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
@@ -655,7 +658,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
       fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
       await screen.findByRole("img", { name: /Código QR/ });
       escribirCodigo("Código de la aplicación", "042917");
-      fireEvent.click(screen.getByRole("button", { name: "Confirmar" }));
+      fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     } else fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
 
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();

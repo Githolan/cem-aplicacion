@@ -129,16 +129,55 @@ afterEach(() => {
 });
 
 describe("página /contactos/gestion", () => {
-  it("la página /contactos tiene el enlace a la gestión", async () => {
-    vi.stubGlobal(
-      "fetch",
-      backend({
-        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
-        [`GET ${BASE}`]: () => Response.json({ elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" }),
-      }),
-    );
+  const desdeLaLista = (gestion: typeof LISTA = LISTA) =>
+    conLista({
+      [`GET ${BASE}`]: () => Response.json({ ...LISTA, actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" }),
+      [`GET ${GESTION}`]: () => Response.json(gestion),
+    });
+
+  it("desde /contactos, «Agregar un contacto» abre el alta en la gestión", async () => {
+    vi.stubGlobal("fetch", desdeLaLista());
     abrir("/contactos");
-    expect((await screen.findByRole("link", { name: "Gestionar la lista" })).getAttribute("href")).toBe("/contactos/gestion");
+    const agregar = await screen.findByRole("link", { name: "Agregar un contacto" });
+    expect(agregar.getAttribute("href")).toBe("/contactos/gestion");
+    fireEvent.click(agregar);
+    expect(await screen.findByRole("heading", { name: "Agregar un contacto" })).toBeTruthy();
+    expect(screen.getByLabelText("Nombre")).toBeTruthy();
+  });
+
+  it("control: la gestión abierta sin pedir nada no abre ningún formulario", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    await tarjeta("Encargado/a: Marta Ruiz");
+    expect(screen.queryByRole("heading", { name: "Agregar un contacto" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
+    expect(screen.queryByText(/¿Retirar el contacto/)).toBeNull();
+  });
+
+  it("desde /contactos, «Retirar» en un contacto abre la pregunta de ese contacto, y «Corregir» sus datos", async () => {
+    vi.stubGlobal("fetch", desdeLaLista());
+    abrir("/contactos");
+    fireEvent.click(within(await tarjeta("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
+    expect(await screen.findByText("¿Retirar el contacto Marta Ruiz? No se puede deshacer.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sí, retirar" }).className).toBe("peligro");
+    // Solo ese: el otro contacto sigue sin nada abierto.
+    expect(screen.queryByText(/¿Retirar el contacto Plomería Rápida/)).toBeNull();
+    cleanup();
+
+    vi.stubGlobal("fetch", desdeLaLista());
+    abrir("/contactos");
+    fireEvent.click(within(await tarjeta("Emergencias: Plomería Rápida")).getByRole("link", { name: "Corregir" }));
+    expect(await screen.findByRole("heading", { name: "Corregir el contacto" })).toBeTruthy();
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida");
+  });
+
+  it("control: si el contacto ya no está en la gestión, queda la lista sin nada abierto", async () => {
+    vi.stubGlobal("fetch", desdeLaLista({ elementos: [LISTA.elementos[0]!] }));
+    abrir("/contactos");
+    fireEvent.click(within(await tarjeta("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
+    await tarjeta("Emergencias: Plomería Rápida");
+    expect(screen.queryByText(/¿Retirar el contacto/)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Corregir el contacto" })).toBeNull();
   });
 
   it("sin sesión (401) manda a /entrar y borra las copias de /contactos", async () => {
@@ -164,7 +203,7 @@ describe("página /contactos/gestion", () => {
     expect(within(plomeria).getByText("0800-555-1234")).toBeTruthy();
     expect(within(plomeria).getByText("Desde el 1 de octubre de 2026, sin fecha de fin")).toBeTruthy();
     expect(within(plomeria).getByText("Sin comprobar")).toBeTruthy();
-    const marta = await tarjeta("Encargado o encargada: Marta Ruiz");
+    const marta = await tarjeta("Encargado/a: Marta Ruiz");
     expect(within(marta).getByText("Nota firmada del 20-10")).toBeTruthy();
     expect(within(marta).getByText("El teléfono no atiende")).toBeTruthy();
     // Nada de la lista de gestión queda en el almacenamiento (§5): ni la copia de /contactos.
@@ -322,7 +361,7 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`PUT ${BASE}/${K2}`]: () => Response.json({ id: K2 }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const marta = await tarjeta("Encargado o encargada: Marta Ruiz");
+    const marta = await tarjeta("Encargado/a: Marta Ruiz");
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Marta Ruiz");
     expect((screen.getByLabelText("Constancia del consentimiento") as HTMLInputElement).value).toBe("Nota firmada del 20-10");
@@ -355,7 +394,7 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const marta = await tarjeta("Encargado o encargada: Marta Ruiz");
+    const marta = await tarjeta("Encargado/a: Marta Ruiz");
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     escribir("Teléfono", "11 4000-0001");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
@@ -544,7 +583,7 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
     expect(await screen.findByText(/^Ese contacto ya no está vigente/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    await tarjeta("Encargado o encargada: Marta Ruiz");
+    await tarjeta("Encargado/a: Marta Ruiz");
     expect(screen.queryByRole("heading", { level: 3, name: "Emergencias: Plomería Rápida" })).toBeNull();
     expect(screen.queryByLabelText("Motivo")).toBeNull();
     // Un motivo no alcanza para un contacto nuevo: señalar no abre Agregar.
@@ -582,7 +621,7 @@ describe("página /contactos/gestion", () => {
   it("no tiene faltas de accesibilidad detectables por axe, con la lista y con cada formulario abierto", async () => {
     vi.stubGlobal("fetch", conLista());
     const { container } = abrir();
-    const marta = await tarjeta("Encargado o encargada: Marta Ruiz");
+    const marta = await tarjeta("Encargado/a: Marta Ruiz");
     const reglas = { rules: { "color-contrast": { enabled: false } } };
     const faltas = async () => (await axe.run(container, reglas)).violations.map((v) => v.id);
     expect(await faltas()).toEqual([]);

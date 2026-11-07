@@ -168,11 +168,11 @@ describe("página /padron", () => {
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(conPrivados) }));
     const { container } = abrir();
     const ana = await tarjeta("1° A: Ana Ruiz");
-    expect(within(ana).getByText("Propietario o propietaria")).toBeTruthy();
+    expect(within(ana).getByText("Propietario/a")).toBeTruthy();
     expect(within(ana).getByText("Desde el 1 de marzo de 2024, sin fecha de fin")).toBeTruthy();
     expect(within(ana).getByText("Confirmado con el título")).toBeTruthy();
     const beto = await tarjeta("1° A: Beto Pérez");
-    expect(within(beto).getByText("Inquilino o inquilina")).toBeTruthy();
+    expect(within(beto).getByText("Inquilino/a")).toBeTruthy();
     // `vigente_hasta` es exclusivo: el último día es el anterior.
     expect(within(beto).getByText("Desde el 1 de marzo de 2024; último día: 31 de diciembre de 2026")).toBeTruthy();
     expect(within(beto).getByText("Sin confirmar")).toBeTruthy();
