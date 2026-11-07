@@ -5,13 +5,14 @@ import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { type Aviso, ENCABEZADO_IDEMPOTENCIA, ESTADO, importe, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
+import { type Aviso, ENCABEZADO_IDEMPOTENCIA, ESTADO, fechaLegible, importe, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { CargandoPagos } from "./CargandoPagos";
 import { MONEDAS } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { EJEMPLO_EXTRACTO } from "./textos";
@@ -48,7 +49,6 @@ const SIGNOS: readonly { valor: Signo; texto: string }[] = [
 const cantidad = (n: number, una: string, varias: string) => (n === 1 ? una : `${n} ${varias}`);
 
 /** «2026-11-05» a «05/11/2026». */
-const fechaLegible = (iso: string) => iso.split("-").reverse().join("/");
 
 const detalle = (numero: string | null, fecha: string, nombre: string) =>
   numero === null ? fechaLegible(fecha) : `${nombre} ${numero} · ${fechaLegible(fecha)}`;
@@ -303,7 +303,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           </div>
           <section className="tarjeta" aria-labelledby="cotejo-a-mano">
             <h2 id="cotejo-a-mano">O tildá a mano</h2>
-            {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
+            {lectura.tipo === "cargando" && <CargandoPagos />}
             {lectura.tipo === "sin_servicio" && (
               <FallaDeLectura
                 alReintentar={() => {
@@ -578,29 +578,28 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
 }
 
 function Resumen({ r }: { r: Resultado }) {
-  const noLeidas = r.filas_no_leidas.join(", ");
   return (
-    <>
-      <p className="aviso-ok" role="status">
-        {r.cotejados === 0
-          ? "Ningún pago nuevo quedó cotejado."
-          : `${cantidad(r.cotejados, "1 pago coincide con el banco y quedó cotejado", "pagos coinciden con el banco y quedaron cotejados")}.`}
-      </p>
-      {r.ya_cotejados > 0 && <p>{cantidad(r.ya_cotejados, "1 ya estaba cotejado", "ya estaban cotejados")}.</p>}
-      {r.esperan_conciliar > 0 && <p>{cantidad(r.esperan_conciliar, "1 coincide, pero falta conciliarlo", "coinciden, pero falta conciliarlos")}.</p>}
-      {r.para_otra_persona > 0 && (
-        <p>
-          {cantidad(r.para_otra_persona, "1 coincide, pero lo tiene que cotejar", "coinciden, pero los tiene que cotejar")} otra persona del Consejo: participaste de ese pago.
-        </p>
-      )}
-      {r.anulados > 0 && <p>{cantidad(r.anulados, "1 coincide con un cotejo que se deshizo: si corresponde, tildalo a mano", "coinciden con cotejos que se deshicieron: si corresponde, tildalos a mano")}.</p>}
-      {r.lineas_no_leidas > 0 && (
-        <p>
-          {cantidad(r.lineas_no_leidas, "No pudimos leer 1 línea", "líneas no se pudieron leer")} del archivo (línea {noLeidas}).
-        </p>
-      )}
-    </>
+    <p className="aviso-ok" role="status">
+      {r.cotejados === 0
+        ? "Ningún pago nuevo quedó cotejado."
+        : `${cantidad(r.cotejados, "1 pago coincide con el banco y quedó cotejado", "pagos coinciden con el banco y quedaron cotejados")}.`}
+    </p>
   );
+}
+
+/** Lo que el extracto no resolvió por sí solo. Una línea sin leer puede ser un débito sin registrar. */
+function pendientesDelExtracto(r: Resultado): string[] {
+  const textos: string[] = [];
+  if (r.lineas_no_leidas > 0) {
+    const lineas = r.filas_no_leidas.join(", ");
+    textos.push(`${cantidad(r.lineas_no_leidas, "No pudimos leer 1 línea", "líneas no se pudieron leer")} del archivo (línea ${lineas}).`);
+  }
+  if (r.esperan_conciliar > 0) textos.push(`${cantidad(r.esperan_conciliar, "1 coincide, pero falta conciliarlo", "coinciden, pero falta conciliarlos")}.`);
+  if (r.para_otra_persona > 0) {
+    textos.push(`${cantidad(r.para_otra_persona, "1 coincide, pero lo tiene que cotejar", "coinciden, pero los tiene que cotejar")} otra persona del Consejo: participaste de ese pago.`);
+  }
+  if (r.anulados > 0) textos.push(`${cantidad(r.anulados, "1 coincide con un cotejo que se deshizo: si corresponde, tildalo a mano", "coinciden con cotejos que se deshicieron: si corresponde, tildalos a mano")}.`);
+  return textos;
 }
 
 function TituloConTotal({ texto, total }: { texto: string; total: number }) {
@@ -615,13 +614,15 @@ type PropsResultado = { r: Resultado; consorcio: string; alElegirColumnas: () =>
 
 function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }: PropsResultado) {
   const id = useId();
-  const nadaParaMirar = r.total_aca_no_banco === 0 && r.total_banco_no_aca === 0;
+  const pendientes = pendientesDelExtracto(r);
+  const nadaParaMirar = r.total_aca_no_banco === 0 && r.total_banco_no_aca === 0 && pendientes.length === 0;
   return (
     <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
       <h2 id={`${id}-titulo`}>
         Extracto del {fechaLegible(r.desde)} al {fechaLegible(r.hasta)}
       </h2>
       <Resumen r={r} />
+      {r.ya_cotejados > 0 && <p>{cantidad(r.ya_cotejados, "1 ya estaba cotejado", "ya estaban cotejados")}.</p>}
       {nadaParaMirar && <p>No hay nada para mirar.</p>}
       {r.total_aca_no_banco > 0 && (
         <>
@@ -654,11 +655,23 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
                   <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                 </span>
                 <span>{detalle(m.numero_operacion, m.fecha, "Referencia")}</span>
-                <span>Avisale a la administración.</span>
+                <span className="fila-pago__nota">Avisale a la administración.</span>
               </li>
             ))}
           </ul>
           {r.total_banco_no_aca > r.banco_no_aca.length && <p>Se ven los primeros {r.banco_no_aca.length}.</p>}
+        </>
+      )}
+      {pendientes.length > 0 && (
+        <>
+          <TituloConTotal texto="Falta revisar" total={pendientes.length} />
+          <ul className="filas-pago">
+            {pendientes.map((texto) => (
+              <li key={texto} className="fila-pago fila-pago--con-borde">
+                {texto}
+              </li>
+            ))}
+          </ul>
         </>
       )}
       <div className="formulario">

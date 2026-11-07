@@ -10,6 +10,7 @@ import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { CargandoPagos } from "./CargandoPagos";
 import { Bandeja } from "./Bandeja";
 import { Ficha, type Seguir } from "./Ficha";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
@@ -76,22 +77,24 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
 
   const terminar = useCallback(
     (texto: string, seguir?: Seguir) => {
-      const irA = (destino: string) => {
-        navegar(destino, { state: { aviso: texto, consorcio } });
+      const irA = (destino: string, aviso = texto) => {
+        navegar(destino, { state: { aviso, consorcio } });
         setPrimera(null);
         setVuelta((v) => v + 1);
         setActo((a) => a + 1);
       };
       if (seguir === undefined) return irA(RUTA_PAGOS);
       // Si mientras tanto se abrió otra ficha, esa queda; la bandeja igual cambió.
-      const irSiSigue = (destino: string) => (seguir.abierta.current ? irA(destino) : setVuelta((v) => v + 1));
+      const irSiSigue = (destino: string, aviso = texto) => (seguir.abierta.current ? irA(destino, aviso) : setVuelta((v) => v + 1));
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/pagos/bandeja", { params: { path: { consorcio_id: consorcio } } })
         .then(({ data, response }) => {
           exigirSesion(response);
           // Sin la lista va a la bandeja, que dice qué pasó al leerla.
-          const siguiente = data?.elementos.find((e) => e.paso === seguir.paso);
-          irSiSigue(siguiente === undefined ? RUTA_PAGOS : rutaFicha(siguiente.orden_id));
+          const quedan = data?.elementos.filter((e) => e.paso === seguir.paso) ?? [];
+          const [siguiente] = quedan;
+          if (siguiente === undefined) irSiSigue(RUTA_PAGOS);
+          else irSiSigue(rutaFicha(siguiente.orden_id), `${texto} Sigue este, 1 de ${quedan.length}.`);
         })
         .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : irSiSigue(RUTA_PAGOS)));
     },
@@ -119,7 +122,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         {veBandeja && <AvisoPantalla aviso={aviso} />}
         {veBandeja && conPantalla && (
           <>
-            {lectura.tipo === "cargando" && <p role="status">Cargando los pagos…</p>}
+            {lectura.tipo === "cargando" && <CargandoPagos />}
             {lectura.tipo === "sin_servicio" && (
               <FallaDeLectura
                 alReintentar={() => {

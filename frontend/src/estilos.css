@@ -707,6 +707,22 @@ main:has(.cotejo) {
   font-weight: 700;
 }
 
+.fila-pago__nota {
+  font-weight: 700;
+}
+
+.bloques-carga {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.bloques-carga__bloque {
+  display: block;
+  height: 4rem;
+  border-radius: 1rem;
+  background: var(--border);
+}
+
 .salidas-pago,
 .filtros-pago {
   display: flex;

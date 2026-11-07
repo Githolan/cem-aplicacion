@@ -15,7 +15,9 @@ import {
   importe,
   importeParaCopiar,
   mensajeDeError,
+  fechaLegible,
   momento,
+  momentoAlFinal,
   sinLaFalla,
   sinPisarLoHecho,
   TEXTO_ALERTA_FRACCIONAMIENTO,
@@ -446,7 +448,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
       alTerminar: () =>
         terminar(
           resultado === "conforme"
-            ? "Listo: conciliaste el pago. La orden quedó pagada."
+            ? `Listo: quedó conciliado el pago a ${v.razon_social}.`
             : "Listo: observaste el pago. Quien lo registró tiene que corregirlo.",
           { paso: "conciliar", abierta: montado },
         ),
@@ -671,7 +673,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
           )}
           {ficha.toma_vigente !== null && (
             <p className="aviso-info" role="note">
-              {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momento(ficha.toma_vigente.tomada_en)}.
+              {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momentoAlFinal(ficha.toma_vigente.tomada_en)}
               {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
             </p>
           )}
@@ -749,7 +751,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                     <dt>Número de operación</dt>
                     <dd>{diferencia.numero_operacion}</dd>
                     <dt>Fecha de la transferencia</dt>
-                    <dd>{diferencia.fecha_operacion}</dd>
+                    <dd>{fechaLegible(diferencia.fecha_operacion)}</dd>
                     <dt>Registró</dt>
                     <dd>
                       {diferencia.registrada_por_nombre}, {momento(diferencia.registrada_en)}
@@ -821,7 +823,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                     <dt>Número de operación</dt>
                     <dd>{pago.numero_operacion}</dd>
                     <dt>Fecha de la transferencia</dt>
-                    <dd>{pago.fecha_operacion}</dd>
+                    <dd>{fechaLegible(pago.fecha_operacion)}</dd>
                     {paso !== "conciliar" && (
                       <>
                         <dt>Importe registrado</dt>

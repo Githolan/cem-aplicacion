@@ -536,7 +536,7 @@ describe("el ancho de la pantalla", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(lugar()).toBe(`/pagos/${O2}`);
-    expect(screen.queryByText("Listo: conciliaste el pago. La orden quedó pagada.")).toBeNull();
+    expect(screen.queryByText(/Listo: quedó conciliado/)).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
   });
 
@@ -1653,7 +1653,7 @@ describe("la lectura con IA del comprobante", () => {
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     fireEvent.click(await boton("Conforme"));
-    await screen.findByText(/Listo: conciliaste/);
+    await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
   });
 
@@ -2415,6 +2415,13 @@ describe("aprobar y rechazar", () => {
 describe("conciliar", () => {
   const RUTA_CONCILIACION = `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`;
 
+  it("la fecha de la transferencia se lee día, mes y año", async () => {
+    abrirFicha(CONCILIAR);
+    await boton("Conforme");
+    expect(screen.getByText("31/10/2026")).toBeTruthy();
+    expect(screen.queryByText("2026-10-31")).toBeNull();
+  });
+
   it("conforme abre el pago siguiente, con el aviso", async () => {
     const api = abrirFicha(CONCILIAR, {
       [`GET ${BASE}/pagos/${O2}`]: () => Response.json({ ...CONCILIAR, orden: orden({ id: O2, estado: "en_verificacion" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] }),
@@ -2425,7 +2432,7 @@ describe("conciliar", () => {
     fireEvent.click(await boton("Conforme"));
     expect(await screen.findByRole("heading", { name: "Ascensores Ficticios SA" })).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O2}`);
-    expect(await screen.findByText("Listo: conciliaste el pago. La orden quedó pagada.")).toBeTruthy();
+    expect(await screen.findByText(/Listo: quedó conciliado el pago a .+\. Sigue este, 1 de 1\.$/)).toBeTruthy();
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
   });
 
@@ -2435,7 +2442,7 @@ describe("conciliar", () => {
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     fireEvent.click(await boton("Conforme"));
-    await screen.findByText(/Listo: conciliaste/);
+    await screen.findByText(/Listo: quedó conciliado/);
     expect(lugar()).toBe("/pagos");
   });
 
@@ -2459,7 +2466,7 @@ describe("conciliar", () => {
     expect(escrituras(api)).toEqual([]);
     fireEvent.change(await screen.findByLabelText("Por qué lo aceptás fuera de término"), { target: { value: "Lo autorizó el Consejo" } });
     fireEvent.click(await boton("Dar el pago por conforme"));
-    await screen.findByText(/Listo: conciliaste/);
+    await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme", motivo: "Lo autorizó el Consejo" });
   });
 
