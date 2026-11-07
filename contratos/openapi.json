@@ -8821,7 +8821,7 @@
       },
       "TomaPagoManual": {
         "additionalProperties": false,
-        "description": "`POST …/ordenes-pago/{id}/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.\nSuelta a esa persona; abrir la cuenta sigue siendo otro acto.",
+        "description": "`POST …/pago-manual/tomar`: quien vio la cuenta desapareció y pasó el plazo.\nSuelta a esa persona; abrir la cuenta sigue siendo otro acto.",
         "properties": {
           "huella": {
             "pattern": "^[0-9a-f]{64}$",
