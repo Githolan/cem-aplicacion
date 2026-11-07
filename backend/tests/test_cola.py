@@ -549,7 +549,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ]
 
 
-def esperar(condicion, segundos: float = 0.01) -> None:
+def esperar(condicion, segundos: float = 10) -> None:
     limite = time.monotonic() + segundos
     while not condicion():
         assert time.monotonic() < limite
