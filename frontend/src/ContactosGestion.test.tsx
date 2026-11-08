@@ -109,8 +109,17 @@ function abrir(ruta: string | { pathname: string; state: unknown } = "/contactos
   );
 }
 
-async function tarjeta(titulo: string): Promise<HTMLElement> {
-  return (await screen.findByRole("heading", { level: 3, name: titulo })).closest("li") as HTMLElement;
+/** La fila del contacto: un botón cuyo nombre empieza con el título. */
+async function filaDe(titulo: string): Promise<HTMLElement> {
+  return screen.findByRole("button", { name: new RegExp(`^${titulo}( |$)`) });
+}
+
+/** Abre la ficha del contacto desde su fila (con el foco en la fila, como al tocarla) y la devuelve. */
+async function abrirFicha(titulo: string): Promise<HTMLElement> {
+  const fila = await filaDe(titulo);
+  fila.focus();
+  fireEvent.click(fila);
+  return screen.getByRole("dialog", { name: titulo });
 }
 
 function escribir(etiqueta: string | RegExp, valor: string) {
@@ -148,7 +157,7 @@ describe("página /contactos/gestion", () => {
   it("control: la gestión abierta sin pedir nada no abre ningún formulario", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir();
-    await tarjeta("Encargado/a: Marta Ruiz");
+    await filaDe("Encargado/a: Marta Ruiz");
     expect(screen.queryByRole("heading", { name: "Agregar un contacto" })).toBeNull();
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
     expect(screen.queryByText(/¿Retirar el contacto/)).toBeNull();
@@ -157,7 +166,7 @@ describe("página /contactos/gestion", () => {
   it("desde /contactos, «Retirar» en un contacto abre la pregunta de ese contacto, y «Corregir» sus datos", async () => {
     vi.stubGlobal("fetch", desdeLaLista());
     abrir("/contactos");
-    fireEvent.click(within(await tarjeta("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
+    fireEvent.click(within(await abrirFicha("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
     expect(await screen.findByText("¿Retirar el contacto Marta Ruiz? No se puede deshacer.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sí, retirar" }).className).toBe("peligro");
     // Solo ese: el otro contacto sigue sin nada abierto.
@@ -166,7 +175,7 @@ describe("página /contactos/gestion", () => {
 
     vi.stubGlobal("fetch", desdeLaLista());
     abrir("/contactos");
-    fireEvent.click(within(await tarjeta("Emergencias: Plomería Rápida")).getByRole("link", { name: "Corregir" }));
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("link", { name: "Corregir" }));
     expect(await screen.findByRole("heading", { name: "Corregir el contacto" })).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida");
   });
@@ -216,7 +225,7 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     recargar({ consorcio: "99999999-9999-4999-8999-999999999999", accion: "agregar" });
-    await tarjeta("Encargado/a: Marta Ruiz");
+    await filaDe("Encargado/a: Marta Ruiz");
     expect(screen.queryByRole("heading", { name: "Agregar un contacto" })).toBeNull();
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
@@ -225,8 +234,8 @@ describe("página /contactos/gestion", () => {
   it("control: si el contacto ya no está en la gestión, queda la lista sin nada abierto", async () => {
     vi.stubGlobal("fetch", desdeLaLista({ elementos: [LISTA.elementos[0]!] }));
     abrir("/contactos");
-    fireEvent.click(within(await tarjeta("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
-    await tarjeta("Emergencias: Plomería Rápida");
+    fireEvent.click(within(await abrirFicha("Encargado/a: Marta Ruiz")).getByRole("link", { name: "Retirar" }));
+    await filaDe("Emergencias: Plomería Rápida");
     expect(screen.queryByText(/¿Retirar el contacto/)).toBeNull();
     expect(screen.queryByRole("heading", { name: "Corregir el contacto" })).toBeNull();
   });
@@ -249,12 +258,12 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista();
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     expect(within(plomeria).getByText("Servicio")).toBeTruthy();
     expect(within(plomeria).getByText("0800-555-1234")).toBeTruthy();
     expect(within(plomeria).getByText("Desde el 1 de octubre de 2026, sin fecha de fin")).toBeTruthy();
     expect(within(plomeria).getByText("Sin comprobar")).toBeTruthy();
-    const marta = await tarjeta("Encargado/a: Marta Ruiz");
+    const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     expect(within(marta).getByText("Nota firmada del 20-10")).toBeTruthy();
     expect(within(marta).getByText("El teléfono no atiende")).toBeTruthy();
     // Nada de la lista de gestión queda en el almacenamiento (§5): ni la copia de /contactos.
@@ -298,7 +307,7 @@ describe("página /contactos/gestion", () => {
     escribir("Nombre", "Bomberos");
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    await tarjeta("Emergencias: Plomería Rápida");
+    await filaDe("Emergencias: Plomería Rápida");
     // El mismo campo: el formulario no se desarmó mientras llegaba la lista.
     expect(screen.getByLabelText("Nombre")).toBe(nombre);
     expect(nombre.value).toBe("Bomberos");
@@ -317,7 +326,7 @@ describe("página /contactos/gestion", () => {
     expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(await filaDe("Emergencias: Plomería Rápida")).toBeTruthy();
     expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2);
     expect(screen.queryByText(SIN_CONEXION)).toBeNull();
     // Control: con la lista a la vista no hay nada que reintentar.
@@ -336,7 +345,7 @@ describe("página /contactos/gestion", () => {
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    expect(await tarjeta("Emergencias: Plomería Rápida")).toBeTruthy();
+    expect(await filaDe("Emergencias: Plomería Rápida")).toBeTruthy();
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
   });
 
@@ -412,7 +421,7 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`PUT ${BASE}/${K2}`]: () => Response.json({ id: K2 }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const marta = await tarjeta("Encargado/a: Marta Ruiz");
+    const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Marta Ruiz");
     expect((screen.getByLabelText("Constancia del consentimiento") as HTMLInputElement).value).toBe("Nota firmada del 20-10");
@@ -445,24 +454,27 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const marta = await tarjeta("Encargado/a: Marta Ruiz");
+    const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     escribir("Teléfono", "11 4000-0001");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
     await screen.findByText("Listo: corregimos el contacto Marta Ruiz.");
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
+    // Ni la ficha ni las filas: nada de la lista vieja queda a mano.
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryAllByRole("button", { name: "Corregir" })).toHaveLength(0);
+    expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
     expect(screen.getByText("Consultando…")).toBeTruthy();
     soltar();
-    // Control: con la lista nueva, los botones vuelven.
-    expect(await screen.findAllByRole("button", { name: "Corregir" })).toHaveLength(2);
+    // Control: con la lista nueva, las filas vuelven y la ficha ofrece corregir otra vez.
+    expect(within(await abrirFicha("Encargado/a: Marta Ruiz")).getByRole("button", { name: "Corregir" })).toBeTruthy();
   });
 
-  it("retirar pregunta de una, en dos toques; «No» no envía y «Sí, retirar» sí", async () => {
+  it("retirar, desde la ficha, pregunta de una en dos toques; «No» no envía y «Sí, retirar» sí", async () => {
     const simulado = conLista({ [`POST ${BASE}/${K1}/retirar`]: () => Response.json({ id: K1 }) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     expect(screen.getByText("¿Retirar el contacto Plomería Rápida? No se puede deshacer.")).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Sí, retirar" }));
@@ -471,7 +483,7 @@ describe("página /contactos/gestion", () => {
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "No" }));
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(0);
-    // «No» deja la tarjeta como estaba.
+    // «No» deja la ficha como estaba.
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
     await screen.findByText("Listo: retiramos el contacto Plomería Rápida.");
@@ -485,12 +497,15 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`POST ${ruta}`]: () => error("servicio_no_disponible", 503) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     const si = screen.getByRole("button", { name: "Sí, retirar" }) as HTMLButtonElement;
     fireEvent.click(si);
     const aviso = await screen.findByText(/El servicio no está disponible/);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
+    // El rechazo va dentro de la ficha abierta: lo de atrás queda inerte.
+    expect(plomeria.contains(aviso)).toBe(true);
+    expect(aviso.getAttribute("role")).toBe("alert");
     expect(si.disabled).toBe(false);
     fireEvent.click(si);
     await waitFor(() => expect(pedidos(simulado, "POST", ruta)).toHaveLength(2));
@@ -502,12 +517,12 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`POST ${BASE}/${K1}/retirar`]: () => error("contacto_terminado", 409) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
     expect(await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.")).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    await tarjeta("Emergencias: Plomería Rápida");
+    await filaDe("Emergencias: Plomería Rápida");
     expect(screen.queryByRole("button", { name: "Sí, retirar" })).toBeNull();
     // No había nada escrito: retirar no abre Agregar.
     expect(screen.queryByLabelText("Nombre")).toBeNull();
@@ -520,12 +535,12 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    let plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    let plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Comprobado" }));
     fireEvent.click(screen.getByRole("button", { name: "Lo comprobé" }));
     await screen.findByText("Listo: quedó la constancia de que comprobaste el contacto Plomería Rápida.");
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
-    plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     expect(document.activeElement).toBe(screen.getByLabelText("Motivo"));
     escribir("Motivo", " Cambió de dirección ");
@@ -542,7 +557,7 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
     escribir("Nombre", "Llamar al 11 2345 6789");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
@@ -579,7 +594,7 @@ describe("página /contactos/gestion", () => {
   it("corregir un contacto que ya no está (404) también deja lo escrito en Agregar", async () => {
     vi.stubGlobal("fetch", conLista({ [`PUT ${BASE}/${K1}`]: () => error("no_encontrado", 404) }));
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
@@ -592,13 +607,13 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`PUT ${BASE}/${K1}`]: () => error("conflicto", 409) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
     expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    await tarjeta("Emergencias: Plomería Rápida");
+    await filaDe("Emergencias: Plomería Rápida");
     expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
     expect(screen.queryByLabelText("Nombre")).toBeNull();
   });
@@ -607,13 +622,13 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`POST ${BASE}/${K1}/senalar`]: () => error("conflicto", 409) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     escribir("Motivo", "No atiende");
     fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
     expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    const nueva = await tarjeta("Emergencias: Plomería Rápida");
+    const nueva = await screen.findByRole("dialog", { name: "Emergencias: Plomería Rápida" });
     expect((within(nueva).getByLabelText("Motivo") as HTMLInputElement).value).toBe("No atiende");
   });
 
@@ -628,13 +643,13 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     escribir("Motivo", "No atiende");
     fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
     expect(await screen.findByText(/^Ese contacto ya no está vigente/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
-    await tarjeta("Encargado/a: Marta Ruiz");
+    await filaDe("Encargado/a: Marta Ruiz");
     expect(screen.queryByRole("heading", { level: 3, name: "Emergencias: Plomería Rápida" })).toBeNull();
     expect(screen.queryByLabelText("Motivo")).toBeNull();
     // Un motivo no alcanza para un contacto nuevo: señalar no abre Agregar.
@@ -646,7 +661,7 @@ describe("página /contactos/gestion", () => {
     const simulado = conLista({ [`POST ${BASE}/${K1}/senalar`]: () => respuesta() });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const plomeria = await tarjeta("Emergencias: Plomería Rápida");
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     escribir("Motivo", "No atiende");
     const enviar = () => fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
@@ -669,12 +684,15 @@ describe("página /contactos/gestion", () => {
     expect(claves[4]).not.toBe(claves[3]);
   });
 
-  it("no tiene faltas de accesibilidad detectables por axe, con la lista y con cada formulario abierto", async () => {
+  it("no tiene faltas de accesibilidad detectables por axe, con la lista, la ficha y cada formulario abierto", async () => {
     vi.stubGlobal("fetch", conLista());
-    const { container } = abrir();
-    const marta = await tarjeta("Encargado/a: Marta Ruiz");
+    abrir();
+    await filaDe("Encargado/a: Marta Ruiz");
     const reglas = { rules: { "color-contrast": { enabled: false } } };
-    const faltas = async () => (await axe.run(container, reglas)).violations.map((v) => v.id);
+    // La ficha va en un portal, fuera del contenedor: se revisa la página entera.
+    const faltas = async () => (await axe.run(document.body, reglas)).violations.map((v) => v.id);
+    expect(await faltas()).toEqual([]);
+    const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     expect(await faltas()).toEqual([]);
     for (const [boton, cierre] of [
       ["Corregir", "Cancelar"],
@@ -686,6 +704,7 @@ describe("página /contactos/gestion", () => {
       expect(await faltas()).toEqual([]);
       fireEvent.click(screen.getByRole("button", { name: cierre }));
     }
+    fireEvent.click(within(marta).getByRole("button", { name: "Cerrar" }));
     fireEvent.click(screen.getByRole("button", { name: "Agregar un contacto" }));
     fireEvent.change(screen.getByLabelText("Naturaleza"), { target: { value: "profesional" } });
     expect(await faltas()).toEqual([]);

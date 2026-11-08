@@ -96,9 +96,15 @@ function guardar(consorcio: string, nombre: string, lista: Lista, guardada_en = 
 
 async function nombres(): Promise<string[]> {
   const lista = await screen.findByRole("list", { name: "Contactos de emergencia" });
-  return within(lista)
-    .getAllByRole("heading", { level: 3 })
-    .map((h) => h.textContent ?? "");
+  return [...lista.querySelectorAll(".fila-registro__titulo")].map((t) => t.textContent ?? "");
+}
+
+/** Abre la ficha del contacto desde su fila y la devuelve. */
+async function abrirFicha(titulo: string): Promise<HTMLElement> {
+  const fila = await screen.findByRole("button", { name: new RegExp(`^${titulo}( |$)`) });
+  fila.focus();
+  fireEvent.click(fila);
+  return screen.getByRole("dialog", { name: titulo });
 }
 
 // Los datos son del 20 y 21-10-2026 y la guardia de gas vence el 1-11: sin un reloj fijo, desde
@@ -212,6 +218,11 @@ describe("página /contactos", () => {
     // `vigente_hasta` es exclusivo: el 1-11 la guardia de gas ya no figura.
     expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur"]);
     expect(screen.getByText(/Esta es la copia guardada el /)).toBeTruthy();
+    // Sin conexión la ficha se lee, con el teléfono, pero no ofrece corregir ni retirar.
+    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
+    expect(within(ficha).getByRole("link", { name: "0800-555-1234" }).getAttribute("href")).toBe("tel:08005551234");
+    expect(within(ficha).queryByRole("link", { name: "Corregir" })).toBeNull();
+    expect(within(ficha).queryByRole("link", { name: "Retirar" })).toBeNull();
   });
 
   it("control: el día anterior al fin, sin conexión, el contacto se muestra", async () => {
@@ -534,16 +545,20 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
       [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", ...acciones),
     });
 
-  it("con `contactos.gestionar`, «Agregar un contacto» arriba y en cada contacto «Corregir» y «Retirar», en rojo", async () => {
+  it("con `contactos.gestionar`, «Agregar un contacto» arriba y en la ficha de cada contacto «Corregir» y «Retirar», en rojo", async () => {
     vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
     abrir();
     expect((await screen.findByRole("link", { name: "Agregar un contacto" })).getAttribute("href")).toBe("/contactos/gestion");
     // El botón dice lo que hace (comentario 25): ya no hay «Gestionar la lista».
     expect(screen.queryByRole("link", { name: "Gestionar la lista" })).toBeNull();
-    const retirar = screen.getAllByRole("link", { name: "Retirar" });
-    expect(retirar).toHaveLength(LISTA.elementos.length);
-    expect(screen.getAllByRole("link", { name: "Corregir" })).toHaveLength(LISTA.elementos.length);
-    for (const r of retirar) expect(r.className).toBe("enlace-boton peligro");
+    // En la lista, nada para corregir ni retirar: eso va en la ficha.
+    expect(screen.queryByRole("link", { name: "Retirar" })).toBeNull();
+    for (const titulo of await nombres()) {
+      const ficha = await abrirFicha(titulo);
+      expect(within(ficha).getByRole("link", { name: "Corregir" }).getAttribute("href")).toBe("/contactos/gestion");
+      expect(within(ficha).getByRole("link", { name: "Retirar" }).className).toBe("enlace-boton peligro");
+      fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
+    }
     // Si el enlace se ve, la persona alcanza la acción: no hace falta aclarar para quién es.
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
   });
@@ -553,8 +568,11 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
     abrir();
     await nombres();
     expect(screen.queryByRole("link", { name: "Agregar un contacto" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Corregir" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Retirar" })).toBeNull();
+    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
+    expect(within(ficha).getByRole("link", { name: "0800-555-1234" })).toBeTruthy();
+    expect(within(ficha).queryByRole("link", { name: "Corregir" })).toBeNull();
+    expect(within(ficha).queryByRole("link", { name: "Retirar" })).toBeNull();
+    expect(within(ficha).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cerrar"]);
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
+import { FilaDeRegistro } from "../FichaDeRegistro";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
   type Aviso,
@@ -333,13 +334,15 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {liquidaciones.length === 0 ? (
                 <p className="tarjeta">Todavía no hay liquidaciones en este edificio.</p>
               ) : (
-                <ul className="versiones" aria-label="Liquidaciones">
+                // Cada fila entera abre el borrador debajo (comentario 21); la abierta queda marcada.
+                <ul className="filas-registro" aria-label="Liquidaciones">
                   {liquidaciones.map((l) => (
                     <li key={l.id}>
-                      <button type="button" className="secundario" disabled={enviando || abierta === l.id}
-                        aria-pressed={abierta === l.id} onClick={() => abrir(l.id)}>
-                        {periodo(l.periodo)}, versión {l.version} ({l.estado})
-                      </button>
+                      <FilaDeRegistro titulo={`${periodo(l.periodo)}, versión ${l.version} (${l.estado})`}
+                        alAbrir={() => {
+                          // La abierta no se reabre: lo escrito en su borrador queda.
+                          if (abierta !== l.id) abrir(l.id);
+                        }} deshabilitada={enviando} abierta={abierta === l.id} />
                     </li>
                   ))}
                 </ul>

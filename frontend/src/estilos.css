@@ -1658,3 +1658,96 @@ fieldset.formulario legend {
     animation: none;
   }
 }
+
+/* ==========================================================================
+   Listas que llevan a la ficha de cada registro (comentario 21; FichaDeRegistro.tsx).
+   Bloque aparte, al final, para que no se mezcle con otros cambios de este archivo.
+   ========================================================================== */
+.filas-registro {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* La fila entera es un botón: se lee como una fila, no como un botón de acción. */
+button.fila-registro {
+  display: grid;
+  gap: 0.125rem;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+  font-weight: 500;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+button.fila-registro:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button.fila-registro[aria-current="true"] {
+  outline: 2px solid var(--accent);
+}
+
+button.fila-registro:disabled {
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+}
+
+.fila-registro__titulo {
+  font-weight: 700;
+}
+
+.fila-registro__resumen {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+/* La fila y lo que vale la pena tener a un toque sin abrirla (el teléfono de un contacto de emergencia). */
+.fila-con-atajo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ficha-registro {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.ficha-registro__dato {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.ficha-registro dt {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.ficha-registro dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ficha-registro__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+.ficha-registro__cerrar {
+  margin: 1rem 0 0;
+}

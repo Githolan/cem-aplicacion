@@ -6,6 +6,7 @@ import { CampoCuit, cuitConError } from "./CampoCuit";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
+import { FilaDeRegistro } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
 import { useAlVolverLaRed, useMiPersona } from "./egresos/useConsorcio";
@@ -1078,44 +1079,25 @@ export function Mandatos() {
             )}
             {mandatos.tipo === "ok" && mandatos.elementos.length === 0 && <p>Todavía no hay mandatos cargados.</p>}
             {mandatos.tipo === "ok" && mandatos.elementos.length > 0 && (
-              <div className="tabla-lista tabla-tarjetas">
-                <table aria-labelledby={`${id}-mandatos`}>
-                  <thead>
-                    <tr>
-                      <th scope="col">Mandato</th>
-                      <th scope="col">Estado</th>
-                      <th scope="col">Vigencia</th>
-                      <th scope="col">Cuenta asociada</th>
-                      <th scope="col">
-                        <span className="solo-lector">Acciones</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mandatos.elementos.map((m) => (
-                      <tr key={m.id}>
-                        <th scope="row">
-                          <h3 id={`${id}-${m.id}`}>
-                            {m.nombre}, {TEXTO_TIPO_MANDATO[m.tipo]}
-                          </h3>
-                          {m.cuit && <p className="tabla-lista__dato">CUIT {m.cuit}</p>}
-                        </th>
-                        <td data-etiqueta="Estado">{TEXTO_ESTADO_MANDATO[m.estado]}</td>
-                        <td data-etiqueta="Vigencia">
-                          Desde el {dia(m.vigente_desde)}
-                          {m.vigente_hasta && ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)`}
-                        </td>
-                        <td data-etiqueta="Cuenta asociada">{m.con_cuenta ? "Sí" : "No"}</td>
-                        <td>
-                          <button type="button" className="secundario" onClick={() => verMandato(m)} disabled={enviando} aria-describedby={`${id}-${m.id}`}>
-                            Ver detalle
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="filas-registro" aria-labelledby={`${id}-mandatos`}>
+                {/* Cada fila abre el detalle del mandato (comentario 21), con su baja si el rol la permite. */}
+                {mandatos.elementos.map((m) => (
+                  <li key={m.id}>
+                    <FilaDeRegistro
+                      titulo={`${m.nombre}, ${TEXTO_TIPO_MANDATO[m.tipo]}`}
+                      resumen={[
+                        TEXTO_ESTADO_MANDATO[m.estado],
+                        `Desde el ${dia(m.vigente_desde)}${m.vigente_hasta ? ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)` : ""}`,
+                        ...(m.cuit ? [`CUIT ${m.cuit}`] : []),
+                        m.con_cuenta ? "Con cuenta asociada" : "Sin cuenta asociada",
+                      ].join(" · ")}
+                      alAbrir={() => verMandato(m)}
+                      deshabilitada={enviando}
+                      abierta={detalle?.tipo === "mandato" && detalle.datos.id === m.id}
+                    />
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
           )}
@@ -1132,36 +1114,19 @@ export function Mandatos() {
             )}
             {decisiones.tipo === "ok" && decisiones.elementos.length === 0 && <p>Todavía no hay decisiones registradas.</p>}
             {decisiones.tipo === "ok" && decisiones.elementos.length > 0 && (
-              <div className="tabla-lista tabla-tarjetas">
-                <table aria-labelledby={`${id}-decisiones`}>
-                  <thead>
-                    <tr>
-                      <th scope="col">Decisión</th>
-                      <th scope="col">Qué se decidió</th>
-                      <th scope="col">
-                        <span className="solo-lector">Acciones</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {decisiones.elementos.map((d) => (
-                      <tr key={d.id}>
-                        <th scope="row">
-                          <h3 id={`${id}-${d.id}`}>
-                            {TEXTO_TIPO_DECISION[d.tipo]} del {dia(d.fecha)}
-                          </h3>
-                        </th>
-                        <td>{d.descripcion}</td>
-                        <td>
-                          <button type="button" className="secundario" onClick={() => verDecision(d)} disabled={enviando} aria-describedby={`${id}-${d.id}`}>
-                            Ver detalle
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ul className="filas-registro" aria-labelledby={`${id}-decisiones`}>
+                {decisiones.elementos.map((d) => (
+                  <li key={d.id}>
+                    <FilaDeRegistro
+                      titulo={`${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}`}
+                      resumen={d.descripcion}
+                      alAbrir={() => verDecision(d)}
+                      deshabilitada={enviando}
+                      abierta={detalle?.tipo === "decision" && detalle.datos.id === d.id}
+                    />
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
           )}

@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
@@ -15,7 +16,9 @@ import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 // una sola no se pregunta. Es solo interfaz: invitar decide igual, y un 403 que llegue se dice en
 // la pantalla (política `invitaciones.crear`). El correo de una invitación solo llega en las
 // pendientes que creó quien mira (P6); si la API lo manda nulo, no se muestra. Diseño provisorio:
-// el definitivo llega con G3.
+// el definitivo llega con G3. Cada invitación es una fila que abre su ficha (comentario 21), con
+// «Retirar» adentro si el rol lo permite. No hay forma de modificar una invitación: se retira y se
+// manda otra.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Unidad = components["schemas"]["Unidad"];
@@ -102,6 +105,7 @@ export function Invitar() {
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [aRetirar, setARetirar] = useState<Invitacion | null>(null);
+  const fichas = useFichas<string>();
   // Cada invitación nueva vuelve a pedir la lista: qué se ve (y con qué correo) lo decide la API.
   const [vuelta, setVuelta] = useState(0);
   // Aparte de `vuelta`: invitar no vuelve a pedir las unidades, y la elegida queda como estaba.
@@ -284,7 +288,9 @@ export function Invitar() {
   }
 
   function retirar(invitacion: Invitacion) {
-    foco.current = document.activeElement;
+    // Al terminar, la ficha se cierra y `Hoja` devuelve el foco a la fila: eso no es que la persona
+    // lo haya llevado a otro lado, y el foco va al aviso del resultado.
+    foco.current = fichas.filaDe(invitacion.id) ?? document.activeElement;
     alAviso.current = true;
     setEnviando(true);
     setAviso(null);
@@ -335,7 +341,17 @@ export function Invitar() {
         setAviso({ texto: `Listo: retiramos la invitación de ${invitacion.nombre}.`, ok: true });
       })
       .catch(atajar)
-      .finally(() => setEnviando(false));
+      .finally(() => {
+        // El resultado se dice en la página, que con la ficha abierta queda inerte.
+        setARetirar(null);
+        fichas.cerrar(false);
+        setEnviando(false);
+      });
+  }
+
+  function abrirFicha(i: Invitacion) {
+    setARetirar(null);
+    fichas.abrir(i.id);
   }
 
   const conMensaje = aviso !== null || pantalla.tipo !== "lista";
@@ -343,6 +359,8 @@ export function Invitar() {
   // pendientes a la vista y el resto plegado. La API devuelve todas y nada se borra.
   const pendientes = (invitaciones ?? []).filter((i) => i.estado === "pendiente");
   const historial = (invitaciones ?? []).filter((i) => i.estado !== "pendiente");
+  // La ficha muestra la invitación de la lista vigente: si una recarga la saca, la ficha se va.
+  const enFicha = invitaciones?.find((i) => i.id === fichas.abierta);
 
   return (
     <>
@@ -502,89 +520,83 @@ export function Invitar() {
               {pendientes.length === 0 ? (
                 <p>No hay invitaciones pendientes.</p>
               ) : (
-                <ul className="sesiones" aria-label="Pendientes">
-                  {pendientes.map(tarjeta)}
+                <ul className="filas-registro" aria-label="Pendientes">
+                  {pendientes.map(fila)}
                 </ul>
               )}
               {historial.length > 0 && (
                 <details className="historial">
                   <summary>Historial: aceptadas, retiradas y vencidas ({historial.length})</summary>
-                  <ul className="sesiones compactas">{historial.map(tarjeta)}</ul>
+                  <ul className="filas-registro" aria-label="Historial">{historial.map(fila)}</ul>
                 </details>
               )}
             </>
           )}
         </section>
       )}
+
+      {enFicha !== undefined && ficha(enFicha)}
     </>
   );
 
-  /** Una invitación: en la vista principal (pendiente) o en el historial (las demás). */
-  function tarjeta(i: Invitacion) {
-    const cierre = i.aceptada_en ?? i.revocada_en;
+  /** Una invitación en la lista: en la vista principal (pendiente) o en el historial (las demás). */
+  function fila(i: Invitacion) {
     return (
-                  <li key={i.id}>
-                    <h3 id={`${id}-${i.id}`}>
-                      {i.nombre}, {i.unidad}
-                    </h3>
-                    <dl className="detalles">
-                      <dt>Vínculo</dt>
-                      <dd>{TEXTO_TIPO[i.tipo]}</dd>
-                      <dt>Estado</dt>
-                      <dd>{TEXTO_ESTADO[i.estado]}</dd>
-                      {i.correo && (
-                        <>
-                          <dt>Correo</dt>
-                          <dd>{i.correo}</dd>
-                        </>
-                      )}
-                      <dt>Enviada</dt>
-                      <dd>{fecha(i.creada_en)}</dd>
-                      {i.estado === "pendiente" && (
-                        <>
-                          <dt>Vence</dt>
-                          <dd>{fecha(i.vence_en)}</dd>
-                        </>
-                      )}
-                      {i.estado === "vencida" && (
-                        <>
-                          <dt>Venció</dt>
-                          <dd>{fecha(i.vence_en)}</dd>
-                        </>
-                      )}
-                      {cierre && (
-                        <>
-                          <dt>{i.estado === "aceptada" ? "Aceptada el" : "Retirada el"}</dt>
-                          <dd>{fecha(cierre)}</dd>
-                        </>
-                      )}
-                    </dl>
-                    {(i.estado === "pendiente" || i.estado === "vencida") &&
-                      puede("invitaciones.revocar") &&
-                      (aRetirar?.id === i.id ? (
-                        <div role="group" aria-labelledby={`${id}-${i.id}-confirmar`}>
-                          <p id={`${id}-${i.id}-confirmar`}>
-                            ¿Retirar la invitación de {i.nombre} a la unidad {i.unidad}?
-                          </p>
-                          <button type="button" className="peligro" onClick={() => retirar(i)} disabled={enviando}>
-                            Sí, retirarla
-                          </button>{" "}
-                          <button type="button" className="secundario" onClick={() => setARetirar(null)} disabled={enviando}>
-                            No
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="secundario peligro"
-                          onClick={() => setARetirar(i)}
-                          disabled={enviando}
-                          aria-describedby={`${id}-${i.id}`}
-                        >
-                          Retirar
-                        </button>
-                      ))}
-                  </li>
+      <li key={i.id}>
+        <FilaDeRegistro
+          titulo={`${i.nombre}, ${i.unidad}`}
+          resumen={`${TEXTO_ESTADO[i.estado]} · ${TEXTO_TIPO[i.tipo]}`}
+          alAbrir={() => abrirFicha(i)}
+          refFila={fichas.refFila(i.id)}
+          abierta={fichas.abierta === i.id}
+        />
+      </li>
+    );
+  }
+
+  /** La ficha de una invitación, con «Retirar» si se puede (pendiente o vencida) y el rol lo permite. */
+  function ficha(i: Invitacion) {
+    const cierre = i.aceptada_en ?? i.revocada_en;
+    const retirable = (i.estado === "pendiente" || i.estado === "vencida") && puede("invitaciones.revocar");
+    return (
+      <FichaDeRegistro
+        titulo={`${i.nombre}, ${i.unidad}`}
+        alCerrar={() => {
+          setARetirar(null);
+          fichas.cerrar();
+        }}
+        ocupada={enviando}
+        datos={[
+          { etiqueta: "Persona", valor: i.nombre },
+          { etiqueta: "Unidad", valor: i.unidad },
+          { etiqueta: "Vínculo", valor: TEXTO_TIPO[i.tipo] },
+          { etiqueta: "Estado", valor: TEXTO_ESTADO[i.estado] },
+          ...(i.correo ? [{ etiqueta: "Correo", valor: i.correo }] : []),
+          { etiqueta: "Enviada", valor: fecha(i.creada_en) },
+          ...(i.estado === "pendiente" ? [{ etiqueta: "Vence", valor: fecha(i.vence_en) }] : []),
+          ...(i.estado === "vencida" ? [{ etiqueta: "Venció", valor: fecha(i.vence_en) }] : []),
+          ...(cierre ? [{ etiqueta: i.estado === "aceptada" ? "Aceptada el" : "Retirada el", valor: fecha(cierre) }] : []),
+        ]}
+      >
+        {retirable &&
+          (aRetirar?.id === i.id ? (
+            <div role="group" aria-labelledby={`${id}-${i.id}-confirmar`}>
+              <p id={`${id}-${i.id}-confirmar`}>¿Retirar la invitación de {i.nombre} a la unidad {i.unidad}?</p>
+              <button type="button" className="peligro" onClick={() => retirar(i)} disabled={enviando}>
+                Sí, retirarla
+              </button>{" "}
+              <button type="button" className="secundario" onClick={() => setARetirar(null)} disabled={enviando}>
+                No
+              </button>
+            </div>
+          ) : (
+            <p className="ficha-registro__acciones">
+              <button type="button" className="secundario peligro" onClick={() => setARetirar(i)} disabled={enviando}>
+                Retirar
+              </button>
+            </p>
+          ))}
+      </FichaDeRegistro>
     );
   }
 }

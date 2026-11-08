@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido } from "./permisos";
@@ -13,7 +14,7 @@ import { REQUISITOS, useEdificioElegido } from "./permisos";
 // Página /contactos/gestion (H2b 2b-7c; doc/diseno/H2b_7_Diseno.md §3 y §4 del repositorio CEM):
 // la lista de gestión de los contactos de emergencia, con los futuros, la observación y la
 // constancia del consentimiento, y los formularios para agregar, corregir, retirar, verificar y
-// señalar. Quien no alcanza `contactos.gestionar` no llega acá: la dirección y una lectura negada
+// señalar. Cada contacto es una fila que abre su ficha (comentario 21), con sus datos y sus acciones. Quien no alcanza `contactos.gestionar` no llega acá: la dirección y una lectura negada
 // llevan al inicio. Es solo interfaz: la API decide cada pedido, la base vuelve a controlar y un
 // 403 al actuar se dice en la pantalla. Esta lista nunca se guarda en el dispositivo (§5): la copia
 // sin conexión es solo la de /contactos.
@@ -224,6 +225,8 @@ export function ContactosGestion() {
   // Se usa una sola vez, con la primera lectura de la lista.
   const pedido = useRef(pedidoInicial);
   const [abierto, setAbierto] = useState<Abierto | null>(null);
+  // La ficha abierta, por el id del contacto; las acciones de ese contacto van dentro de ella.
+  const { abierta: fichaAbierta, abrir: abrirFichaDe, cerrar: cerrarFichaDe, refFila } = useFichas<string>();
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -291,6 +294,7 @@ export function ContactosGestion() {
       if (elegido === undefined) return;
       setDatos(datosDe(elegido));
       setAbierto({ accion: p.accion, contacto: elegido });
+      abrirFichaDe(elegido.id);
     };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/contactos/gestion", { params: { path: { consorcio_id: consorcio } } })
@@ -321,7 +325,15 @@ export function ContactosGestion() {
     return () => {
       vigente = false;
     };
-  }, [consorcio, vuelta, aEntrar, navegar]);
+  }, [consorcio, vuelta, aEntrar, navegar, abrirFichaDe]);
+
+  // Si la lista nueva ya no trae el contacto de la ficha, la ficha y su formulario se van.
+  const contactos = lectura.tipo === "ok" ? lectura.contactos : null;
+  useEffect(() => {
+    if (contactos === null || fichaAbierta === null || contactos.some((c) => c.id === fichaAbierta)) return;
+    cerrarFichaDe(false);
+    setAbierto((actual) => (actual?.accion === "agregar" ? actual : null));
+  }, [contactos, fichaAbierta, cerrarFichaDe]);
 
   // Mientras llega la lista nueva, la vieja no queda a mano: un formulario abierto con sus datos
   // mandaría un PUT completo que deshace el cambio recién hecho.
@@ -347,6 +359,26 @@ export function ContactosGestion() {
   function cerrar() {
     clave.current = null;
     setAbierto(null);
+  }
+
+  function abrirFicha(c: Contacto) {
+    cerrar();
+    setMotivo("");
+    setAviso(null);
+    abrirFichaDe(c.id);
+  }
+
+  /** De un formulario a la ficha con sus botones; el rechazo de ese formulario ya no vale. */
+  function volverALaFicha() {
+    cerrar();
+    setAviso((actual) => (actual?.ok === false ? null : actual));
+  }
+
+  /** Cierra la ficha. Si la cierra un resultado, el foco va a su aviso y no a la fila. */
+  function cerrarFicha(devolverFoco = true) {
+    if (devolverFoco) volverALaFicha();
+    else cerrar();
+    cerrarFichaDe(devolverFoco);
   }
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
@@ -415,13 +447,16 @@ export function ContactosGestion() {
           if (cambioLaLista(response.status, codigo)) {
             // Lo escrito no se pierde: una corrección que ya no tiene contacto sigue como uno nuevo, y el
             // motivo espera la lista nueva, que muestra el formulario solo si el contacto sigue ahí.
-            if (accion === "corregir" && yaNoEsta(response.status, codigo)) setAbierto({ accion: "agregar", contacto: null });
-            else if (accion !== "senalar" && accion !== "agregar") cerrar();
+            if (accion === "corregir" && yaNoEsta(response.status, codigo)) {
+              setAbierto({ accion: "agregar", contacto: null });
+              cerrarFichaDe(false);
+            } else if (accion !== "senalar" && accion !== "agregar") cerrarFicha(false);
             volverAPedir();
           }
           return;
         }
-        cerrar();
+        if (accion === "agregar") cerrar();
+        else cerrarFicha(false);
         const hecho: Record<Accion, string> = {
           agregar: `agregamos el contacto ${nombre}`,
           corregir: `corregimos el contacto ${nombre}`,
@@ -440,7 +475,11 @@ export function ContactosGestion() {
       .finally(() => setEnviando(false));
   }
 
-  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  // La ficha muestra el contacto de la lista vigente: mientras llega una lista nueva, no se ve.
+  const enFicha = contactos?.find((c) => c.id === fichaAbierta);
+  // Con la ficha abierta, lo de atrás queda inerte: un rechazo va dentro de la ficha.
+  const avisoEnFicha = enFicha !== undefined && aviso !== null && !aviso.ok;
+  const conMensaje = (aviso !== null && !avisoEnFicha) || pantalla.tipo !== "lista";
 
   return (
     <>
@@ -492,8 +531,18 @@ export function ContactosGestion() {
               <>
                 {lectura.contactos.length === 0 && <p>El edificio no tiene contactos de emergencia cargados.</p>}
                 {lectura.contactos.length > 0 && (
-                  <ul className="sesiones" aria-label="Contactos para gestionar">
-                    {lectura.contactos.map((c) => tarjeta(c))}
+                  <ul className="filas-registro" aria-label="Contactos para gestionar">
+                    {lectura.contactos.map((c) => (
+                      <li key={c.id}>
+                        <FilaDeRegistro
+                          titulo={titulo(c)}
+                          resumen={resumen(c)}
+                          alAbrir={() => abrirFicha(c)}
+                          refFila={refFila(c.id)}
+                          abierta={fichaAbierta === c.id}
+                        />
+                      </li>
+                    ))}
                   </ul>
                 )}
               </>
@@ -534,77 +583,73 @@ export function ContactosGestion() {
           </>
         )}
         {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
-        {aviso && (
+        {aviso && !avisoEnFicha && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
         )}
       </div>
+
+      {enFicha !== undefined && ficha(enFicha)}
     </>
   );
 
-  /** Un contacto con sus datos de gestión y sus acciones (la API decide si se puede). */
-  function tarjeta(c: Contacto) {
-    const titulo = `${id}-${c.id}`;
+  function titulo(c: Contacto) {
+    return `${TEXTO_FUNCION[c.funcion]}: ${c.nombre}`;
+  }
+
+  /** En la fila, lo que dice si el contacto está en condiciones; todo lo demás va en la ficha. */
+  function resumen(c: Contacto) {
+    return [
+      c.telefono ?? "Sin teléfono",
+      c.verificado_en === null ? "Sin comprobar" : "Comprobado",
+      ...(c.observado ? ["Dato señalado como incorrecto"] : []),
+    ].join(" · ");
+  }
+
+  /** La ficha de un contacto con sus datos de gestión y sus acciones (la API decide si se puede). */
+  function ficha(c: Contacto) {
+    const base = `${id}-${c.id}`;
     const accion = abierto?.contacto?.id === c.id ? abierto.accion : null;
     return (
-      <li key={c.id}>
-        <h3 id={titulo}>
-          {TEXTO_FUNCION[c.funcion]}: {c.nombre}
-        </h3>
-        <dl className="detalles">
-          <dt>Naturaleza</dt>
-          <dd>{TEXTO_NATURALEZA[c.naturaleza]}</dd>
-          {c.telefono !== null && (
-            <>
-              <dt>Teléfono</dt>
-              <dd>{c.telefono}</dd>
-            </>
-          )}
-          {c.consentimiento_referencia !== null && (
-            <>
-              <dt>Constancia del consentimiento</dt>
-              <dd>{c.consentimiento_referencia}</dd>
-            </>
-          )}
-          {c.indicaciones !== null && (
-            <>
-              <dt>Indicaciones</dt>
-              <dd>{c.indicaciones}</dd>
-            </>
-          )}
-          <dt>Vigencia</dt>
-          <dd>{vigencia(c)}</dd>
-          <dt>Última modificación</dt>
-          <dd>{momento(c.actualizado_en)}</dd>
-          <dt>Última comprobación</dt>
-          <dd>{c.verificado_en === null ? "Sin comprobar" : momento(c.verificado_en)}</dd>
-          {c.observado && (
-            <>
-              <dt>Dato señalado como incorrecto</dt>
-              <dd>{c.observacion ?? "Sin el motivo"}</dd>
-            </>
-          )}
-        </dl>
+      <FichaDeRegistro
+        titulo={titulo(c)}
+        alCerrar={() => cerrarFicha()}
+        ocupada={enviando}
+        datos={[
+          { etiqueta: "Función", valor: TEXTO_FUNCION[c.funcion] },
+          { etiqueta: "Nombre", valor: c.nombre },
+          { etiqueta: "Naturaleza", valor: TEXTO_NATURALEZA[c.naturaleza] },
+          { etiqueta: "Teléfono", valor: c.telefono ?? "Sin teléfono" },
+          ...(c.consentimiento_referencia === null ? [] : [{ etiqueta: "Constancia del consentimiento", valor: c.consentimiento_referencia }]),
+          ...(c.indicaciones === null ? [] : [{ etiqueta: "Indicaciones", valor: c.indicaciones }]),
+          { etiqueta: "Vigencia", valor: vigencia(c) },
+          { etiqueta: "Última modificación", valor: momento(c.actualizado_en) },
+          { etiqueta: "Última comprobación", valor: c.verificado_en === null ? "Sin comprobar" : momento(c.verificado_en) },
+          ...(c.observado ? [{ etiqueta: "Dato señalado como incorrecto", valor: c.observacion ?? "Sin el motivo" }] : []),
+        ]}
+      >
+        {avisoEnFicha && (
+          <p ref={textoAviso} tabIndex={-1} role="alert" className="aviso-error">
+            {aviso.texto}
+          </p>
+        )}
         {accion === null ? (
-          <p>
-            {(["corregir", "verificar", "senalar", "retirar"] as const).map((a, i) => (
-              <span key={a}>
-                {i > 0 && " "}
-                <button type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando} aria-describedby={titulo}>
-                  {{ corregir: "Corregir", verificar: "Comprobado", senalar: "Señalar un error", retirar: "Retirar" }[a]}
-                </button>
-              </span>
+          <p className="ficha-registro__acciones">
+            {(["corregir", "verificar", "senalar", "retirar"] as const).map((a) => (
+              <button key={a} type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando}>
+                {{ corregir: "Corregir", verificar: "Comprobado", senalar: "Señalar un error", retirar: "Retirar" }[a]}
+              </button>
             ))}
           </p>
         ) : accion === "corregir" ? (
-          formularioDatos(c, titulo)
+          formularioDatos(c, base)
         ) : accion === "retirar" ? (
-          preguntaRetirar(c, titulo)
+          preguntaRetirar(c, base)
         ) : (
-          accion !== "agregar" && formularioAccion(accion, titulo)
+          accion !== "agregar" && formularioAccion(accion, base)
         )}
-      </li>
+      </FichaDeRegistro>
     );
   }
 
@@ -614,11 +659,9 @@ export function ContactosGestion() {
     const profesional = datos.naturaleza === "profesional";
     const ayudaTelefono = `${titulo}-ayuda-telefono`;
     const ayudaTexto = `${titulo}-ayuda-texto`;
-    // Agregar cuelga de la sección, también sin tarjetas a la vista; corregir, de la tarjeta.
-    const Nivel = nuevo ? "h3" : "h4";
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        <Nivel id={`${titulo}-accion`}>{nuevo ? "Agregar un contacto" : "Corregir el contacto"}</Nivel>
+        <h3 id={`${titulo}-accion`}>{nuevo ? "Agregar un contacto" : "Corregir el contacto"}</h3>
         <label htmlFor={`${titulo}-funcion`}>Función</label>
         <select
           id={`${titulo}-funcion`}
@@ -717,7 +760,7 @@ export function ContactosGestion() {
           <button type="submit" disabled={enviando}>
             {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={nuevo ? cerrar : volverALaFicha} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -742,7 +785,7 @@ export function ContactosGestion() {
           >
             Sí, retirar
           </button>{" "}
-          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={volverALaFicha} disabled={enviando}>
             No
           </button>
         </p>
@@ -756,18 +799,18 @@ export function ContactosGestion() {
     const texto = {
       verificar: {
         titulo: "Dejar constancia de la comprobación",
-        ayuda: "Confirmá que llamaste o comprobaste de otra forma que el contacto es correcto. Resuelve el dato señalado, si había.",
+        ayuda: "Sirve para dejar constancia de que se llamó o se comprobó de otra forma que el contacto es correcto. Resuelve el dato señalado, si había.",
         boton: "Lo comprobé",
       },
       senalar: {
         titulo: "Señalar un dato incorrecto",
-        ayuda: "Contá qué está mal, sin teléfonos ni correos. Lo resuelve quien corrija o compruebe el contacto.",
+        ayuda: "Qué está mal, sin teléfonos ni correos. Lo resuelve quien corrija o compruebe el contacto.",
         boton: "Señalar el error",
       },
     }[accion];
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
-        <h4 id={`${titulo}-accion`}>{texto.titulo}</h4>
+        <h3 id={`${titulo}-accion`}>{texto.titulo}</h3>
         <p id={ayuda}>{texto.ayuda}</p>
         {accion === "senalar" && (
           <>
@@ -806,7 +849,7 @@ export function ContactosGestion() {
           >
             {texto.boton}
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={volverALaFicha} disabled={enviando}>
             Cancelar
           </button>
         </p>
