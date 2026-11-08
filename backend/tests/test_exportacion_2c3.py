@@ -121,7 +121,7 @@ CLAVES_POR_ENTIDAD = {
                       "proveedor_id", "proveedor_version", "razon_social",
                       "cuenta_ultimos_digitos", "condicion_beneficiario", "comprobante",
                       "usa_fondo_reserva", "aprobaciones_requeridas", "franja", "umbral_id",
-                      "contrato_id", "documento_id", "alerta_fraccionamiento",
+                      "contrato_id", "documento_id", "factura_version_id", "alerta_fraccionamiento",
                       "preparada_por_nombre", "creada_en"},
     "orden_aprobacion": {"id", "orden_id", "version", "aprobada_por_nombre", "creada_en"},
     "orden_transicion": {"orden_id", "fecha", "accion", "origen", "desde", "hacia", "version",

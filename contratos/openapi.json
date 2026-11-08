@@ -6912,7 +6912,7 @@
             "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
             "title": "Contrato Id"
           },
-          "documento_id": {
+          "factura_version_id": {
             "anyOf": [
               {
                 "format": "uuid",
@@ -6922,8 +6922,8 @@
                 "type": "null"
               }
             ],
-            "description": "La factura que respalda la orden: un documento vigente del consorcio, cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
-            "title": "Documento Id"
+            "description": "La factura que respalda la orden: la versión exacta del archivo que la persona vio (`version_documento_id` de `LecturaCarga`), `disponible`, de un documento vigente del consorcio cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes». No puede ser el comprobante de un pago. Entra en la huella con el sha256 del archivo: aprobar la versión aprueba ese archivo, y otro subido después al mismo documento no lo cambia.",
+            "title": "Factura Version Id"
           },
           "importe_centavos": {
             "description": "En centavos.",
@@ -6998,7 +6998,7 @@
             "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
             "title": "Contrato Id"
           },
-          "documento_id": {
+          "factura_version_id": {
             "anyOf": [
               {
                 "format": "uuid",
@@ -7008,8 +7008,8 @@
                 "type": "null"
               }
             ],
-            "description": "La factura que respalda la orden: un documento vigente del consorcio, cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
-            "title": "Documento Id"
+            "description": "La factura que respalda la orden: la versión exacta del archivo que la persona vio (`version_documento_id` de `LecturaCarga`), `disponible`, de un documento vigente del consorcio cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes». No puede ser el comprobante de un pago. Entra en la huella con el sha256 del archivo: aprobar la versión aprueba ese archivo, y otro subido después al mismo documento no lo cambia.",
+            "title": "Factura Version Id"
           },
           "importe_centavos": {
             "description": "En centavos.",
@@ -9463,8 +9463,21 @@
                 "type": "null"
               }
             ],
-            "description": "La factura que respalda la versión, si tiene. Se abre con `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de documentos).",
+            "description": "El documento de la factura que respalda la versión, si tiene.",
             "title": "Documento Id"
+          },
+          "factura_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La versión exacta del archivo de la factura que se aprobó con esta versión. Se abre con `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido`.",
+            "title": "Factura Version Id"
           },
           "franja": {
             "$ref": "#/components/schemas/Franja"
@@ -9662,8 +9675,21 @@
                 "type": "null"
               }
             ],
-            "description": "La factura que respalda la versión, si tiene. Se abre con `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de documentos).",
+            "description": "El documento de la factura que respalda la versión, si tiene.",
             "title": "Documento Id"
+          },
+          "factura_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La versión exacta del archivo de la factura que se aprobó con esta versión. Se abre con `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido`.",
+            "title": "Factura Version Id"
           },
           "franja": {
             "$ref": "#/components/schemas/Franja"
@@ -14413,7 +14439,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un documento vigente del consorcio con su archivo aprobado, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
           }
         },
         "summary": "Preparar una orden de pago (queda en borrador, versión 1)",
@@ -16097,7 +16123,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un documento vigente del consorcio con su archivo aprobado, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
           }
         },
         "summary": "Modificar una orden: crea una versión nueva y la vuelve a revisión si hacía falta",

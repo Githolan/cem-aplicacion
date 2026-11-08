@@ -638,19 +638,26 @@ def test_las_funciones_y_quien_las_ejecuta(motor_migrate):
 # La factura de la orden ------------------------------------------------------------------------
 
 
-def factura(motor_app, e) -> str:
-    """Un documento para carga como factura, con su archivo aprobado (lectura apagada)."""
+def factura(motor_app, e) -> tuple[str, str]:
+    """Un documento para carga como factura y la versión de su archivo aprobada (sin lectura)."""
     doc = para_carga(e).json()["id"]
-    subir(e, doc)
+    version = subir(e, doc)
     assert analizar(motor_app) == 1
-    return doc
+    return doc, version
+
+
+def otra_version(motor_app, e, doc) -> str:
+    """Otro archivo del mismo documento, aprobado: lo que ofrece «Subir otra versión»."""
+    version = subir(e, doc)
+    assert analizar(motor_app) == 1
+    return version
 
 
 def huella_con_y_sin(motor_migrate, o, numero) -> tuple[bool, bool]:
     """Si la huella guardada es la de los datos con su factura, y si es la de sin factura."""
     with motor_migrate.connect() as c:
         return tuple(c.execute(text(
-            "select v.huella = nucleo.huella_orden_pago_con_factura(base, v.documento_id),"
+            "select v.huella = nucleo.huella_orden_pago_con_factura(base, v.factura_version_id),"
             " v.huella = base"
             " from nucleo.orden_pago_version v"
             " join nucleo.proveedor_version pv on pv.proveedor_id = v.proveedor_id"
@@ -663,68 +670,138 @@ def huella_con_y_sin(motor_migrate, o, numero) -> tuple[bool, bool]:
         ), {"o": o, "n": numero}).one())  # fmt: skip
 
 
-def test_la_orden_lleva_su_factura_y_entra_en_la_huella(motor_migrate, motor_app, e, bucket):
-    doc = factura(motor_app, e)
-    o = preparar(e, documento_id=doc)
+def de_la_factura(v) -> tuple[str | None, str | None]:
+    return (
+        None if v["documento_id"] is None else str(v["documento_id"]),
+        None if v["factura_version_id"] is None else str(v["factura_version_id"]),
+    )
+
+
+def test_la_orden_lleva_la_version_de_su_factura_y_entra_en_la_huella(
+    motor_migrate, motor_app, e, bucket
+):
+    doc, ver = factura(motor_app, e)
+    o = preparar(e, factura_version_id=ver)
     [v] = versiones(motor_migrate, o)
-    assert str(v["documento_id"]) == doc
+    assert de_la_factura(v) == (doc, ver)
     assert huella_con_y_sin(motor_migrate, o, 1) == (True, False)
     r = get(e, e.adm, f"ordenes-pago/{o}")
-    assert r.json()["versiones"][0]["documento_id"] == doc
+    assert de_la_factura(r.json()["versiones"][0]) == (doc, ver)
     sin = preparar(e)
     # Control: sin factura, la huella de antes.
     assert huella_con_y_sin(motor_migrate, sin, 1) == (True, True)
-    assert get(e, e.adm, f"ordenes-pago/{sin}").json()["versiones"][0]["documento_id"] is None
+    assert de_la_factura(get(e, e.adm, f"ordenes-pago/{sin}").json()["versiones"][0]) == (
+        None,
+        None,
+    )
 
 
-def test_el_consejo_ve_la_factura_al_revisar(motor_migrate, motor_app, e, bucket):
-    doc = factura(motor_app, e)
-    o = preparar(e, documento_id=doc)
+def test_la_huella_lleva_el_archivo(motor_migrate, motor_app, e, bucket):
+    """Dos archivos del mismo documento dan dos huellas: entra la versión con su sha256."""
+    doc, ver = factura(motor_app, e)
+    otra = otra_version(motor_app, e, doc)
+    base = bytes(range(32))
+    sql = text("select nucleo.huella_orden_pago_con_factura(:b, :f)")
+    with motor_migrate.connect() as c:
+        una, dos = (bytes(c.execute(sql, {"b": base, "f": f}).scalar_one()) for f in (ver, otra))
+        cambiado = c.execute(
+            text("select sha256(:b || convert_to(jsonb_build_object("
+                 "'factura_version', cast(:f as uuid),"
+                 " 'sha256', x.sha256)::text, 'UTF8')) from nucleo.version_documento x"
+                 " where x.id = :f"), {"b": base, "f": ver},
+        ).scalar_one()  # fmt: skip
+    assert una != dos
+    assert una == bytes(cambiado)
+
+
+def test_el_consejo_ve_la_version_de_la_factura_al_revisar(motor_migrate, motor_app, e, bucket):
+    doc, ver = factura(motor_app, e)
+    o = preparar(e, factura_version_id=ver)
     r = post(e, e.adm, f"ordenes-pago/{o}/enviar-a-revision", {"version_esperada": 1})
     assert r.status_code == 200, r.text
     r = get(e, e.mc1, f"ordenes-pago/{o}/revision")
-    assert r.json()["versiones"][0]["documento_id"] == doc
+    assert de_la_factura(r.json()["versiones"][0]) == (doc, ver)
 
 
-def test_cambiar_solo_la_factura_es_una_version_nueva_con_otra_huella(
+def test_otro_archivo_subido_despues_no_cambia_la_factura_aprobada(
     motor_migrate, motor_app, e, bucket
 ):
-    primera, segunda = factura(motor_app, e), factura(motor_app, e)
-    o = preparar(e, documento_id=primera)
+    doc, ver = factura(motor_app, e)
+    o = preparar(e, factura_version_id=ver)
+    r = post(e, e.adm, f"ordenes-pago/{o}/enviar-a-revision", {"version_esperada": 1})
+    assert r.status_code == 200, r.text
+    [vista] = get(e, e.mc1, f"ordenes-pago/{o}/revision").json()["versiones"]
+    r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": vista["huella"]})
+    assert r.status_code == 201, r.text
+    [antes] = versiones(motor_migrate, o)
+    otra = otra_version(motor_app, e, doc)
+    # El documento tiene ahora otro archivo disponible, más nuevo.
+    archivos = get(e, e.adm, "documentos").json()["documentos"]
+    [d] = [x for x in archivos if x["id"] == doc]
+    assert [x["id"] for x in d["versiones"] if x["estado"] == "disponible"] == [otra, ver]
+    [despues] = versiones(motor_migrate, o)
+    assert de_la_factura(despues) == (doc, ver)
+    assert despues["huella"] == antes["huella"]
+    orden = get(e, e.adm, f"ordenes-pago/{o}").json()
+    assert orden["orden"]["estado"] == "aprobada"
+    assert de_la_factura(orden["versiones"][0]) == (doc, ver)
+    assert huella_con_y_sin(motor_migrate, o, 1) == (True, False)
+
+
+def test_cambiar_solo_la_version_de_la_factura_es_una_version_nueva_con_otra_huella(
+    motor_migrate, motor_app, e, bucket
+):
+    doc, primera = factura(motor_app, e)
+    segunda = otra_version(motor_app, e, doc)
+    o = preparar(e, factura_version_id=primera)
     datos = ORDEN | {"proveedor_id": str(e.proveedor), "version_esperada": 1}
-    r = post(e, e.adm, f"ordenes-pago/{o}/versiones", datos | {"documento_id": primera})
-    assert codigo(r) == (409, "sin_cambios")  # control: la misma factura no es un cambio
-    r = post(e, e.adm, f"ordenes-pago/{o}/versiones", datos | {"documento_id": segunda})
+    r = post(e, e.adm, f"ordenes-pago/{o}/versiones", datos | {"factura_version_id": primera})
+    assert codigo(r) == (409, "sin_cambios")  # control: el mismo archivo no es un cambio
+    r = post(e, e.adm, f"ordenes-pago/{o}/versiones", datos | {"factura_version_id": segunda})
     assert r.status_code == 200, r.text
     v1, v2 = versiones(motor_migrate, o)
-    assert (str(v1["documento_id"]), str(v2["documento_id"])) == (primera, segunda)
+    assert (de_la_factura(v1), de_la_factura(v2)) == ((doc, primera), (doc, segunda))
+    assert v1["huella"] != v2["huella"]
     assert huella_con_y_sin(motor_migrate, o, 2) == (True, False)
     r = post(e, e.adm, f"ordenes-pago/{o}/versiones", datos | {"version_esperada": 2})
     assert r.status_code == 200, r.text  # sacarla también es un cambio
-    assert versiones(motor_migrate, o)[2]["documento_id"] is None
+    assert de_la_factura(versiones(motor_migrate, o)[2]) == (None, None)
 
 
 def test_una_factura_que_no_sirve_no_entra(motor_migrate, motor_app, e, bucket):
     # Los controles primero, con sus archivos aprobados: la de este consorcio y una factura cargada
     # desde Documentos, que también es una factura.
-    buena = factura(motor_app, e)
+    buena_doc, buena = factura(motor_app, e)
     comun = documento_comun(e)
-    subir(e, comun)
+    comun_ver = subir(e, comun)
     assert analizar(motor_app) == 1
     otra = escena_economica(motor_migrate, motor_app)
-    ajena = factura(motor_app, otra)
+    _, ajena = factura(motor_app, otra)
     acta = documento_comun(e, "actas_y_decisiones")
-    subir(e, acta)
+    acta_ver = subir(e, acta)
     assert analizar(motor_app) == 1
-    en_cuarentena = para_carga(e).json()["id"]
-    subir(e, en_cuarentena)
-    sin_archivo = para_carga(e).json()["id"]
-    for doc in (ajena, acta, en_cuarentena, sin_archivo, str(uuid4())):
+    en_cuarentena = subir(e, para_carga(e).json()["id"])
+    # El id del documento no es el de una versión: tiene que ser el archivo exacto.
+    for archivo in (ajena, acta_ver, en_cuarentena, buena_doc, str(uuid4())):
         r = post(e, e.adm, "ordenes-pago",
-                 ORDEN | {"proveedor_id": str(e.proveedor), "documento_id": doc})  # fmt: skip
-        assert codigo(r) == (422, "documento_invalido"), doc
-    preparar(e, documento_id=buena)
-    preparar(e, documento_id=comun)
+                 ORDEN | {"proveedor_id": str(e.proveedor),
+                          "factura_version_id": archivo})  # fmt: skip
+        assert codigo(r) == (422, "documento_invalido"), archivo
+    preparar(e, factura_version_id=buena)
+    preparar(e, factura_version_id=comun_ver)
+
+
+def test_la_base_no_acepta_documento_sin_version_ni_al_reves(motor_migrate, motor_app, e, bucket):
+    doc, ver = factura(motor_app, e)
+    o = preparar(e, factura_version_id=ver)
+    # Sin los triggers de historia, para llegar al check (se deshace con el error).
+    for columna in ("factura_version_id", "documento_id"):
+        with pytest.raises(DBAPIError) as error, motor_migrate.begin() as c:
+            c.execute(text("alter table nucleo.orden_pago_version disable trigger user"))
+            c.execute(text(f"update nucleo.orden_pago_version set {columna} = null"
+                           " where orden_id = :o"), {"o": o})  # fmt: skip
+        assert error.value.orig.sqlstate == "23514"  # check_violation
+    assert de_la_factura(versiones(motor_migrate, o)[0]) == (doc, ver)
 
 
 # El proveedor ----------------------------------------------------------------------------------

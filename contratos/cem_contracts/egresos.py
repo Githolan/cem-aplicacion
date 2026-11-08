@@ -321,12 +321,14 @@ class DatosOrdenPago(BaseModel):
         default=None,
         description="El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
     )
-    documento_id: UUID | None = Field(
+    factura_version_id: UUID | None = Field(
         default=None,
-        description="La factura que respalda la orden: un documento vigente del consorcio,"
-        " cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y"
-        " comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de"
-        " un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
+        description="La factura que respalda la orden: la versión exacta del archivo que la"
+        " persona vio (`version_documento_id` de `LecturaCarga`), `disponible`, de un documento"
+        " vigente del consorcio cargado para preparar una orden (`DocumentoParaCarga` con"
+        " `factura`) o de «Facturas y comprobantes». No puede ser el comprobante de un pago."
+        " Entra en la huella con el sha256 del archivo: aprobar la versión aprueba ese archivo, y"
+        " otro subido después al mismo documento no lo cambia.",
     )
 
 
@@ -459,10 +461,12 @@ class VersionOrdenPago(BaseModel):
     umbral_moneda: str | None
     contrato_id: UUID | None = Field(description="El contrato que la hace rutinaria.")
     documento_id: UUID | None = Field(
+        default=None, description="El documento de la factura que respalda la versión, si tiene."
+    )
+    factura_version_id: UUID | None = Field(
         default=None,
-        description="La factura que respalda la versión, si tiene. Se abre con"
-        " `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de"
-        " documentos).",
+        description="La versión exacta del archivo de la factura que se aprobó con esta versión."
+        " Se abre con `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido`.",
     )
 
 

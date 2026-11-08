@@ -357,9 +357,9 @@ RESPUESTAS_LECTURA = {
     403: {"description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."}
 }
 DESCRIPCION_422_ORDEN = (
-    "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un"
-    " documento vigente del consorcio con su archivo aprobado, para carga como factura o de"
-    " «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+    "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo"
+    " `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y"
+    " comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
 )
 RESPUESTAS_ESCRITURA = RESPUESTAS_LECTURA | {
     404: {"description": "No existe en este consorcio."},
@@ -859,7 +859,7 @@ def _datos_orden(d: DatosOrdenPago) -> dict:
         "comprobante": d.comprobante,
         "reserva": d.usa_fondo_reserva,
         "contrato": d.contrato_id,
-        "factura": d.documento_id,
+        "factura": d.factura_version_id,
     }
 
 

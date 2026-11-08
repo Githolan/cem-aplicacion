@@ -17,15 +17,19 @@ cierra; si no, `cuit_invalido`.
 **Qué le toca a quien mira** (`lectura_carga_lectura`): quien prepara (`egresos.preparar_orden`).
 `leyendo` sale del trabajo de la cola, como en `0077`.
 
-**La factura de la orden.** `orden_pago_version.documento_id`: la factura que respalda la versión.
-`nueva_version_orden_pago` la exige del mismo consorcio, vigente, con un archivo `disponible`, para
-carga como `factura` o de «Facturas y comprobantes», y que no sea el comprobante de un pago
-(`documento_invalido`). Entra en la huella (`huella_orden_pago_con_factura`): aprobar una versión
-aprueba también su factura. Sin factura la huella es la de antes, así que las versiones ya
-guardadas no cambian. Modificar cambiando solo la factura es un cambio; renovar la conserva.
+**La factura de la orden.** `orden_pago_version.factura_version_id`: la versión exacta del archivo
+de la factura que respalda la versión de la orden, la que la persona vio al prepararla; y
+`documento_id`, su documento. Un archivo subido después al mismo documento no cambia lo que se
+aprobó (como el comprobante de `0055`). `nueva_version_orden_pago` exige la versión `disponible`, de
+un documento del mismo consorcio, vigente, para carga como `factura` o de «Facturas y
+comprobantes», y que no sea el comprobante de un pago (`documento_invalido`). Entra en la huella
+con el `sha256` del archivo (`huella_orden_pago_con_factura`): aprobar una versión aprueba también
+ese archivo. Sin factura la huella es la de antes, así que las versiones ya guardadas no cambian.
+Modificar cambiando solo la versión de la factura es un cambio; renovar la conserva.
 `preparar_orden_pago` y `modificar_orden_pago` la suman al final con `DEFAULT NULL`.
 
-**Exportación (`0069`):** `orden_version` suma `documento_id` y `documento`, `lectura_carga`.
+**Exportación (`0069`):** `orden_version` suma `documento_id` y `factura_version_id`, y `documento`,
+`lectura_carga`.
 `exportar_ordenes_pago` suma la entidad `lectura_carga`, como `exportar_pagos` suma
 `lectura_comprobante` (`0077`): cada fila con el modelo, el prompt y lo leído, los textos pasados
 por `texto_sin_cuenta`. Va en la parte de órdenes porque la lee quien prepara (la factura de una
@@ -157,7 +161,9 @@ create trigger historia_lectura_carga_truncate before truncate on nucleo.lectura
   for each statement execute function nucleo.negar_cambio_historia_orden_pago();
 {SIN_CUENTA}
 alter table nucleo.orden_pago_version add column documento_id uuid,
-  add foreign key (consorcio_id, documento_id) references nucleo.documento (consorcio_id, id);
+  add column factura_version_id uuid references nucleo.version_documento (id),
+  add foreign key (consorcio_id, documento_id) references nucleo.documento (consorcio_id, id),
+  add check ((documento_id is null) = (factura_version_id is null));
 """
 
 FUNCIONES = f"""
@@ -286,32 +292,41 @@ create function nucleo.lectura_carga_lectura(documento uuid, version uuid, actor
   end
   $$;
 
--- Sin factura, la huella de siempre: las versiones ya guardadas no cambian.
-create function nucleo.huella_orden_pago_con_factura(base bytea, factura uuid)
+-- Sin factura, la huella de siempre: las versiones ya guardadas no cambian. Con factura, la versión
+-- exacta del archivo y su sha256 (que no cambia: `0035`).
+create function nucleo.huella_orden_pago_con_factura(base bytea, factura_version uuid)
   returns bytea
-  language sql immutable
+  language sql stable
   set search_path = pg_catalog, pg_temp
   as $$
-    select case when factura is null then base
-                else sha256(base || convert_to(jsonb_build_object('factura', factura)::text,
-                                               'UTF8')) end
+    select case when factura_version is null then base
+                else sha256(base || convert_to(jsonb_build_object(
+                       'factura_version', factura_version,
+                       'sha256', (select x.sha256 from nucleo.version_documento x
+                                   where x.id = factura_version))::text, 'UTF8')) end
   $$;
 
-create function nucleo.exigir_factura_de_la_orden(c uuid, factura uuid)
+-- La versión del archivo de la factura: `disponible`, de un documento del consorcio que sirve como
+-- factura, vigente, y que no es el comprobante de un pago.
+create function nucleo.exigir_factura_de_la_orden(c uuid, factura_version uuid)
   returns void
   language plpgsql stable
   set search_path = pg_catalog, pg_temp
   as $$
+  declare
+    doc uuid;
   begin
-    if factura is null then
+    if factura_version is null then
       return;
     end if;
-    if not exists (
-         select 1 from nucleo.documento d
-          where d.consorcio_id = c and d.id = factura and d.orden_comprobante is null
-            and (d.lectura_carga = 'factura' or d.categoria = '{CATEGORIA}'))
-       or not nucleo.documento_respalda(c, factura) then
-      raise exception 'la factura no es un documento vigente del consorcio'
+    select d.id into doc
+      from nucleo.version_documento x
+      join nucleo.documento d on d.consorcio_id = x.consorcio_id and d.id = x.documento_id
+     where x.id = factura_version and x.consorcio_id = c and x.estado = 'disponible'
+       and d.orden_comprobante is null
+       and (d.lectura_carga = 'factura' or d.categoria = '{CATEGORIA}');
+    if doc is null or not nucleo.documento_respalda(c, doc) then
+      raise exception 'la factura no es un archivo aprobado de un documento vigente del consorcio'
         using errcode = 'P0001', hint = 'documento_invalido';
     end if;
   end
@@ -323,82 +338,85 @@ RUTAS = (CREAR, ES_CARGA, GUARDAR, LEER)
 
 FIRMA_NUEVA = (
     "contrato_nuevo uuid, actor uuid, identidad uuid)\n RETURNS bytea",
-    "contrato_nuevo uuid, actor uuid, identidad uuid, factura uuid)\n RETURNS bytea",
+    "contrato_nuevo uuid, actor uuid, identidad uuid, factura_version uuid)\n RETURNS bytea",
 )
 NUEVA_CAMBIOS = (
     FIRMA_NUEVA,
     (
         "    select * into ev from nucleo.evaluar_orden_pago(",
-        "    -- 0088: la factura, del consorcio, vigente y con su archivo aprobado.\n"
-        "    perform nucleo.exigir_factura_de_la_orden(c, factura);\n"
+        "    -- 0088: la versión del archivo de la factura, aprobada, de un documento vigente.\n"
+        "    perform nucleo.exigir_factura_de_la_orden(c, factura_version);\n"
         "    select * into ev from nucleo.evaluar_orden_pago(",
     ),
     (
         "           ev.franja, ev.umbral_id, ev.contrato_id);\n",
         "           ev.franja, ev.umbral_id, ev.contrato_id);\n"
         "    -- 0088: la factura, si tiene, también entra en la huella.\n"
-        "    h := nucleo.huella_orden_pago_con_factura(h, factura);\n",
+        "    h := nucleo.huella_orden_pago_con_factura(h, factura_version);\n",
     ),
     (
         "       contrato_id, alerta_fraccionamiento)\n",
-        "       contrato_id, alerta_fraccionamiento, documento_id)\n",
+        "       contrato_id, alerta_fraccionamiento, documento_id, factura_version_id)\n",
     ),
     (
         "            ev.contrato_id, ev.alerta);\n",
-        "            ev.contrato_id, ev.alerta, factura);\n",
+        "            ev.contrato_id, ev.alerta,\n"
+        "            (select x.documento_id from nucleo.version_documento x\n"
+        "              where x.id = factura_version), factura_version);\n",
     ),
 )
 PREPARAR_CAMBIOS = (
     (
         "contrato_nuevo uuid, actor uuid, origen_pedido text, sesion uuid)\n RETURNS uuid",
         "contrato_nuevo uuid, actor uuid, origen_pedido text, sesion uuid,"
-        " factura uuid DEFAULT NULL::uuid)\n RETURNS uuid",
+        " factura_version uuid DEFAULT NULL::uuid)\n RETURNS uuid",
     ),
-    ("           actor, identidad);\n", "           actor, identidad, factura);\n"),
+    ("           actor, identidad);\n", "           actor, identidad, factura_version);\n"),
 )
 MODIFICAR_CAMBIOS = (
     (
         "contrato_nuevo uuid, actor uuid, origen_pedido text, sesion uuid)\n RETURNS integer",
         "contrato_nuevo uuid, actor uuid, origen_pedido text, sesion uuid,"
-        " factura uuid DEFAULT NULL::uuid)\n RETURNS integer",
+        " factura_version uuid DEFAULT NULL::uuid)\n RETURNS integer",
     ),
     (
         "        v.comprobante, v.usa_fondo_reserva, v.contrato_id)\n",
-        "        v.comprobante, v.usa_fondo_reserva, v.contrato_id, v.documento_id)\n",
+        "        v.comprobante, v.usa_fondo_reserva, v.contrato_id, v.factura_version_id)\n",
     ),
     (
         "                             btrim(comprobante_nuevo), usa_reserva, contrato_nuevo)\n",
         "                             btrim(comprobante_nuevo), usa_reserva, contrato_nuevo,\n"
-        "                             factura)\n",
+        "                             factura_version)\n",
     ),
     (
         "           contrato_nuevo, actor, identidad);\n",
-        "           contrato_nuevo, actor, identidad, factura);\n",
+        "           contrato_nuevo, actor, identidad, factura_version);\n",
     ),
 )
 RENOVAR_CAMBIOS = (
     (
         "           case when sin_contrato then null else v.contrato_id end, actor, identidad);\n",
         "           case when sin_contrato then null else v.contrato_id end, actor, identidad,\n"
-        "           v.documento_id);\n",
+        "           v.factura_version_id);\n",
     ),
 )
 VERSIONES_CAMBIOS = (
     (
         " cuenta_destino text, aprobada_por uuid[])\n",
-        " cuenta_destino text, aprobada_por uuid[], documento_id uuid)\n",
+        " cuenta_destino text, aprobada_por uuid[], documento_id uuid, factura_version_id uuid)\n",
     ),
     (
         "                          and a.version = v.numero), '{}')\n",
         "                          and a.version = v.numero), '{}'),\n"
-        "             v.documento_id\n",
+        "             v.documento_id, v.factura_version_id\n",
     ),
 )
 EXPORTAR_ORDENES_CAMBIOS = (
     (
         "                                'contrato_id', v.contrato_id,\n",
         "                                'contrato_id', v.contrato_id,\n"
-        "                                'documento_id', v.documento_id,\n",
+        "                                'documento_id', v.documento_id,\n"
+        "                                'factura_version_id', v.factura_version_id,\n",
     ),
     (
         "        from nucleo.aprobaciones_orden_pago x\n       where x.consorcio_id = c\n"
@@ -513,7 +531,10 @@ def downgrade() -> None:
         _otra(hasta, desde, cambios, de_la_app, al_reves=True)
     for funcion in RUTAS + INTERNAS:
         op.execute(f"drop function {funcion}")
-    op.execute("alter table nucleo.orden_pago_version drop column documento_id")
+    op.execute(
+        "alter table nucleo.orden_pago_version drop column factura_version_id,"
+        " drop column documento_id"
+    )
     op.execute("drop table nucleo.lectura_carga")
     op.execute("drop trigger lectura_carga_fija on nucleo.documento")
     op.execute(f"drop function {FIJA}")
