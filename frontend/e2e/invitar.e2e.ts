@@ -143,7 +143,14 @@ test.describe("invitar", () => {
 
     await expect(page.getByText(/Invitar no acredita el carácter/)).toBeVisible();
     await expect(page.getByText("Beto Pérez, 1° A")).toBeVisible();
-    await expect(page.getByText("beto@ejemplo.com")).toHaveCount(0); // no la creó: P6
+    // El correo va en la ficha (comentario 21): ni en la fila ni en la ficha, porque no la creó (P6).
+    await expect(page.getByText("beto@ejemplo.com")).toHaveCount(0);
+    await page.locator(".filas-registro li", { hasText: "Beto Pérez, 1° A" }).getByRole("button").click();
+    const ficha = page.getByRole("dialog", { name: "Beto Pérez, 1° A" });
+    await expect(ficha).toBeVisible();
+    await expect(ficha.getByText("beto@ejemplo.com")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(ficha).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
 
@@ -179,7 +186,12 @@ test.describe("invitar", () => {
     const { envios } = await simularApi(page, baseURL!, "propietaria");
     await simularSesion(page, "con_sesion");
     await page.goto("/invitaciones");
-    await expect(page.getByText("beto@ejemplo.com")).toBeVisible(); // la creó ella: P6
+    // La creó ella (P6): el correo se ve en la ficha de la invitación (comentario 21).
+    await page.locator(".filas-registro li", { hasText: "Beto Pérez, 1° A" }).getByRole("button").click();
+    const ficha = page.getByRole("dialog", { name: "Beto Pérez, 1° A" });
+    await expect(ficha.getByText("beto@ejemplo.com")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(ficha).toHaveCount(0);
 
     await invitar(page, "2° B", "Eva Sosa", "eva@ejemplo.com");
     await expect(page.getByText("No tenés permiso para invitar a esa unidad.")).toBeVisible();
