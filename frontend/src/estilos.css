@@ -367,20 +367,19 @@ button.sutil:disabled {
   color: var(--ink-muted);
 }
 
-/* Acciones negativas en rojo (comentario 26): borrar, quitar, retirar, finalizar, rechazar,
-   cancelar. Lleno el que la hace; con borde el que la abre o la deja de lado. El texto dice la
-   acción: el color no es lo único que la distingue. */
-button.peligro:not(:disabled) {
+/* Acciones negativas en rojo (comentarios 26 y 31): borrar, quitar, retirar, finalizar, rechazar,
+   cancelar. Todas llenas, fondo rojo y texto blanco (#fff sobre #8c1f17, 9,0:1), también la que la
+   abre o la deja de lado (`secundario peligro`, como «Cancelar») y el enlace con forma de botón. El
+   texto dice la acción: el color no es lo único que la distingue. Deshabilitado queda gris, como
+   cualquier botón; el foco es el contorno de siempre. */
+button.peligro:not(:disabled),
+.formulario .acciones .secundario.peligro:not(:disabled),
+button.secundario.peligro:not(:disabled),
+.enlace-boton.peligro {
+  border-color: var(--danger-text);
   background: var(--danger-text);
   box-shadow: none;
   color: var(--on-danger);
-}
-
-.formulario .acciones .secundario.peligro:not(:disabled),
-button.secundario.peligro:not(:disabled) {
-  border-color: currentcolor;
-  background: var(--surface-raised);
-  color: var(--danger-text);
 }
 
 /* Tarjetas una al lado de la otra desde tablet. */
@@ -523,11 +522,6 @@ button.secundario.peligro:not(:disabled) {
   color: var(--ink);
   font-weight: 700;
   text-decoration: none;
-}
-
-.enlace-boton.peligro {
-  border-color: currentcolor;
-  color: var(--danger-text);
 }
 
 /* Lo que sigue en importancia a lo del rol: sin caja, para que no compita con él. */

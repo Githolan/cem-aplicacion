@@ -255,8 +255,13 @@
   border-radius: 0.25rem;
 }
 
-.lectura-ampliada button.peligro:not(:disabled) {
+/* Las acciones negativas siguen llenas (comentario 31): #fff sobre #8a0f12 9,7:1; oscuro #000 sobre #ff9b9b 10,4:1. */
+.lectura-ampliada button.peligro:not(:disabled),
+.lectura-ampliada button.secundario.peligro:not(:disabled),
+.lectura-ampliada .enlace-boton.peligro {
   border-color: var(--danger-text);
+  background: var(--danger-text);
+  color: var(--on-danger);
 }
 
 .lectura-ampliada :focus-visible,
