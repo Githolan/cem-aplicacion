@@ -1,4 +1,4 @@
-"""Medir la lectura de comprobantes con el modelo real, en staging (SINTETICO, NO REAL).
+"""Medir la lectura de comprobantes y facturas con el modelo real, en staging (SINTETICO, NO REAL).
 
 Dos modos, los dos en un proceso de corta vida dentro de `cem-trabajos-staging`, leído de la entrada
 estándar: no cambian ninguna variable del contenedor, no escriben en la base y no encolan nada.
@@ -11,6 +11,15 @@ la ficha. La capa `llm` no devuelve el uso: acá se anota el `usage` de cada res
 proveedor, envolviendo el método del SDK sin cambiar lo que devuelve. Si no hubo `usage` (un
 proveedor con el otro protocolo), lo dice y no inventa.
 
+**`--medir --tipo factura`.** Lo mismo con `lectura_carga.leer`, la función del trabajo
+`documentos.leer_carga` (`0088`), sobre las facturas de `facturas_sinteticas.py`. Cada campo se
+compara por su lado: CUIT exacto, razón social y número con las normalizaciones de la ficha,
+teléfono por sus dígitos, correo sin mayúsculas, domicilio sin acentos ni signos, importe y fecha
+exactos. El concepto es un resumen que el modelo escribe: acierta si vuelve cuando figura y nulo
+cuando no, sin comparar el texto. Además cuenta los CUIT marcados inválidos y, de una factura con
+un CBU impreso (`esperado.cuenta_impresa`), si esos dígitos volvieron en algún campo: tiene que ser
+nunca.
+
 **`--clave-invalida`.** Primero el control, con la clave del contenedor: el comprobante se lee.
 Después el mismo comprobante con una clave inventada, puesta solo en `os.environ` de este proceso:
 tiene que volver el 401 del proveedor, la lectura `falla_del_modelo` sin campos, y el registro con
@@ -20,6 +29,8 @@ el tipo de la falla, sin la clave. La clave verdadera nunca se lee ni se imprime
     ssh oci 'docker exec -i -w /app -e PYTHONPATH=/app <cem-trabajos-staging> python - --medir \\
         --base <host de cem-postgres-staging> --datos /tmp/comprobantes.json' \\
         < backend/pruebas/ensayo_lectura_staging.py
+
+Con facturas, el mismo comando con `--tipo factura` y el archivo de `facturas_sinteticas.py`.
 """
 
 import argparse
@@ -28,9 +39,11 @@ import io
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import time
+import unicodedata
 from collections import Counter
 from dataclasses import asdict
 from datetime import date
@@ -40,9 +53,13 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 
 from app import llm, registros
+from app.consorcios import lectura_carga
 from app.consorcios import lectura_comprobantes as lectura
 
 CAMPOS = ("importe", "moneda", "cuenta", "titular", "numero", "fecha")
+CAMPOS_FACTURA = ("cuit", "razon_social", "domicilio", "telefono", "correo", "numero_comprobante",
+                  "fecha", "importe", "moneda", "concepto")  # fmt: skip
+TIPOS = ("comprobante", "factura")
 VARIABLE_CLAVE = "CEM_LLM_API_KEY"
 HTTP_NO_AUTORIZADO = 401
 
@@ -96,6 +113,38 @@ def igual(campo: str, leido, esperado) -> bool:
             return lectura.titular_normalizado(leido) == lectura.titular_normalizado(esperado)
         case "numero":
             return lectura.numero_normalizado(leido) == lectura.numero_normalizado(esperado)
+        case _:
+            return leido == esperado
+
+
+def _sin_signos(texto: str) -> str:
+    """En mayúsculas, sin acentos y con un espacio entre palabras."""
+    sin_acentos = "".join(
+        letra for letra in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(letra)
+    )
+    return " ".join(re.sub(r"[^A-Z0-9]", " ", sin_acentos.upper()).split())
+
+
+def igual_factura(campo: str, leido, esperado) -> bool:
+    if leido is None or esperado is None:
+        return leido is None and esperado is None
+    match campo:
+        case "importe":
+            return leido == Decimal(esperado)
+        case "fecha":
+            return leido == date.fromisoformat(esperado)
+        case "razon_social":
+            return lectura.titular_normalizado(leido) == lectura.titular_normalizado(esperado)
+        case "numero_comprobante":
+            return lectura.numero_normalizado(leido) == lectura.numero_normalizado(esperado)
+        case "telefono":
+            return re.sub(r"[^0-9]", "", leido) == re.sub(r"[^0-9]", "", esperado)
+        case "correo":
+            return leido.lower() == esperado.lower()
+        case "domicilio":
+            return _sin_signos(leido) == _sin_signos(esperado)
+        case "concepto":
+            return True  # un resumen: que vuelva cuando figura ya se comprobó arriba
         case _:
             return leido == esperado
 
@@ -159,6 +208,69 @@ def medir(datos: dict) -> dict:
     }
 
 
+def devolvio_la_cuenta(valores: dict, cuenta: str) -> bool:
+    """Si los dígitos de la cuenta impresa están en algún texto leído, con o sin separadores."""
+    return any(
+        cuenta in re.sub(r"[^0-9]", "", str(valores[c]))
+        for c in CAMPOS_FACTURA if valores[c] is not None
+    )  # fmt: skip
+
+
+def medir_facturas(datos: dict) -> dict:
+    usos = Usos()
+    por_campo = {c: Counter() for c in CAMPOS_FACTURA}
+    legibles = Counter()
+    cuit_invalidos = 0
+    cuentas_devueltas = []
+    filas = []
+    for factura in datos["comprobantes"]:
+        contenido = base64.b64decode(factura["archivo"])
+        esperado = factura["esperado"]
+        inicio = time.monotonic()
+        leida = lectura_carga.leer(contenido, factura["tipo"])
+        segundos = round(time.monotonic() - inicio, 1)
+        uso = usos.tomar()
+        legibles["acierto" if leida.legible == esperado["legible"] else "error"] += 1
+        cuit_invalidos += leida.cuit_invalido
+        valores = asdict(leida)
+        cuenta = esperado.get("cuenta_impresa")
+        if cuenta is not None and devolvio_la_cuenta(valores, cuenta):
+            cuentas_devueltas.append(factura["nombre"])
+        fallos = {}
+        if esperado["legible"]:
+            for campo in CAMPOS_FACTURA:
+                valor = valores[campo]
+                if igual_factura(campo, valor, esperado[campo]):
+                    por_campo[campo]["acierto"] += 1
+                else:
+                    clase = clase_de_error(valor, esperado[campo])
+                    por_campo[campo][clase] += 1
+                    fallos[campo] = {"clase": clase, "leido": None if valor is None else str(valor),
+                                     "esperado": esperado[campo]}  # fmt: skip
+        fila = {"nombre": factura["nombre"], "rasgo": factura["rasgo"], "tipo": factura["tipo"],
+                "bytes": len(contenido), "segundos": segundos, "legible": leida.legible,
+                "esperado_legible": esperado["legible"], "error": leida.error,
+                "cuit_invalido": leida.cuit_invalido, "modelo": leida.modelo, "uso": uso,
+                "fallos": fallos}  # fmt: skip
+        filas.append(fila)
+        print(json.dumps(fila, ensure_ascii=False), flush=True)
+    con_uso = [f["uso"] for f in filas if f["uso"] is not None]
+    return {
+        "facturas": len(filas),
+        "prompt": lectura_carga.VERSION_PROMPT,
+        "por_campo": {c: dict(v) for c, v in por_campo.items()},
+        "legible": dict(legibles),
+        "cuit_invalidos": cuit_invalidos,
+        "cuentas_devueltas": cuentas_devueltas,
+        "modelos": sorted({f["modelo"] for f in filas if f["modelo"]}),
+        "con_uso": len(con_uso),
+        "fichas_entrada": sum(u["entrada"] for u in con_uso),
+        "fichas_salida": sum(u["salida"] for u in con_uso),
+        "fin": dict(Counter(u["fin"] for u in con_uso)),
+        "segundos": sum(f["segundos"] for f in filas),
+    }
+
+
 def clave_invalida(datos: dict) -> None:
     comprobante = next(c for c in datos["comprobantes"] if c["esperado"]["legible"])
     contenido = base64.b64decode(comprobante["archivo"])
@@ -199,10 +311,18 @@ def main() -> None:
     modo = p.add_mutually_exclusive_group(required=True)
     modo.add_argument("--medir", action="store_true")
     modo.add_argument("--clave-invalida", action="store_true")
+    p.add_argument("--tipo", choices=TIPOS, default="comprobante",
+                   help="qué se mide con --medir (por omisión, comprobantes)")  # fmt: skip
     a = p.parse_args()
+    if a.clave_invalida and a.tipo != "comprobante":
+        p.error("--clave-invalida prueba la capa con un comprobante: sin --tipo")
     exigir_staging(a.base)
     datos = json.loads(a.datos.read_text(encoding="utf-8"))
-    if a.medir:
+    if datos.get("tipo", "comprobante") != a.tipo:
+        sys.exit(f"negado: --datos es de {datos.get('tipo', 'comprobante')}, no de {a.tipo}")
+    if a.medir and a.tipo == "factura":
+        print(json.dumps({"resumen": medir_facturas(datos)}, ensure_ascii=False))
+    elif a.medir:
         print(json.dumps({"resumen": medir(datos)}, ensure_ascii=False))
     else:
         clave_invalida(datos)
