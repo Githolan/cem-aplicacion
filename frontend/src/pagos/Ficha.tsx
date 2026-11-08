@@ -187,8 +187,10 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
   const versionLeida = leida?.orden.version_vigente;
-  /** La factura de la versión vigente (0088), si quien mira puede abrirla; se ve en una hoja. */
-  const factura = useVersionVisible(consorcio, leida === null ? null : (vigenteDe(leida).documento_id ?? null), aEntrar);
+  /** El archivo exacto de la factura aprobada con la versión vigente (0088), si quien mira puede
+   * abrirlo; se ve en una hoja. */
+  const vigenteLeida = leida === null ? null : vigenteDe(leida);
+  const factura = useVersionVisible(consorcio, vigenteLeida?.documento_id ?? null, vigenteLeida?.factura_version_id ?? null, aEntrar);
   const [viendoFactura, setViendoFactura] = useState(false);
 
   useEffect(() => {

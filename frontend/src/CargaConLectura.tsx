@@ -275,13 +275,14 @@ export function MarcaDeLectura({ alRevisar }: { alRevisar: () => void }) {
   );
 }
 
-/** La versión disponible de un documento que quien mira puede abrir, para «Ver la factura»; nula si
- * no hay o si no la ve (la lista de documentos solo trae lo que puede ver). */
-export function useVersionVisible(consorcio: string, documento: string | null, aEntrar: () => void): Cargado | null {
+/** Esa versión exacta del archivo, si quien mira puede abrirla, para «Ver la factura»: la que se
+ * aprobó con la orden, nunca la más nueva del documento. Nula si no está disponible o si no la ve
+ * (la lista de documentos solo trae lo que puede ver). */
+export function useVersionVisible(consorcio: string, documento: string | null, version: string | null, aEntrar: () => void): Cargado | null {
   const [cargado, setCargado] = useState<Cargado | null>(null);
   useEffect(() => {
     setCargado(null);
-    if (documento === null) return;
+    if (documento === null || version === null) return;
     let vigente = true;
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
@@ -289,8 +290,8 @@ export function useVersionVisible(consorcio: string, documento: string | null, a
         exigirSesion(response);
         if (!vigente || data === undefined) return;
         const d = data.documentos.find((x) => x.id === documento);
-        const disponible = d?.versiones.find((v) => v.estado === "disponible");
-        if (d !== undefined && disponible !== undefined) setCargado({ documento: d.id, version: disponible.id, nombre: d.titulo });
+        const esa = d?.versiones.find((v) => v.id === version && v.estado === "disponible");
+        if (d !== undefined && esa !== undefined) setCargado({ documento: d.id, version: esa.id, nombre: d.titulo });
       })
       .catch((e: unknown) => {
         if (vigente && e instanceof SinSesion) aEntrar();
@@ -298,6 +299,6 @@ export function useVersionVisible(consorcio: string, documento: string | null, a
     return () => {
       vigente = false;
     };
-  }, [consorcio, documento, aEntrar]);
+  }, [consorcio, documento, version, aEntrar]);
   return cargado;
 }

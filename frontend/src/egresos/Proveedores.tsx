@@ -104,8 +104,9 @@ const datosDe = (p: Proveedor): Datos => ({
 
 type CampoLeido = "cuit" | "razon" | "domicilio" | "telefono" | "correo";
 
-/** Lo que trae la orden al dar de alta el proveedor de su factura (`AltaDesdeLaFactura`). */
-type DesdeLaFactura = { datos: Partial<Datos>; documento: Cargado | null; orden: Record<string, unknown> | null };
+/** Lo que trae la orden al dar de alta el proveedor de su factura (`AltaDesdeLaFactura`), con el
+ * edificio de esa factura: en otro edificio no se usa. */
+type DesdeLaFactura = { consorcio: string; datos: Partial<Datos>; documento: Cargado | null; orden: Record<string, unknown> | null };
 
 /** Los datos del proveedor que leyó la IA; nunca la cuenta. */
 function datosLeidos(l: Pick<LecturaCarga, "cuit" | "razon_social" | "domicilio" | "telefono" | "correo">): Partial<Datos> {
@@ -122,8 +123,8 @@ const textoONulo = (v: unknown) => (typeof v === "string" ? v : null);
 
 function desdeLaFactura(estado: unknown): DesdeLaFactura | null {
   if (typeof estado !== "object" || estado === null || !("alta" in estado)) return null;
-  const { alta, documento, orden } = estado as Record<string, unknown>;
-  if (typeof alta !== "object" || alta === null) return null;
+  const { alta, documento, orden, consorcio } = estado as Record<string, unknown>;
+  if (typeof alta !== "object" || alta === null || typeof consorcio !== "string") return null;
   const a = alta as Record<string, unknown>;
   const d = typeof documento === "object" && documento !== null ? (documento as Record<string, unknown>) : null;
   const cargado =
@@ -131,6 +132,7 @@ function desdeLaFactura(estado: unknown): DesdeLaFactura | null {
       ? { documento: d.documento, version: d.version, nombre: d.nombre }
       : null;
   return {
+    consorcio,
     datos: datosLeidos({ cuit: textoONulo(a.cuit), razon_social: textoONulo(a.razon_social), domicilio: textoONulo(a.domicilio),
       telefono: textoONulo(a.telefono), correo: textoONulo(a.correo) }),
     documento: cargado,
@@ -164,7 +166,9 @@ export function Proveedores() {
   const estado = useLocation().state;
   const vuelveAPreparar = useRef(vieneAPreparar(estado));
   const factura = useRef(desdeLaFactura(estado));
-  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} factura={factura.current} />;
+  // Lo leído de la factura es del edificio de la orden: al elegir otro edificio no se usa.
+  const deEsteEdificio = factura.current?.consorcio === elegido.consorcio ? factura.current : null;
+  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} factura={deEsteEdificio} />;
 }
 
 /** Lo que se sabe para ubicarlo: solo lo que está cargado. */

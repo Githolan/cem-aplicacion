@@ -228,7 +228,7 @@ function Lugar() {
   return <output data-testid="lugar">{useLocation().pathname}</output>;
 }
 
-function abrir(ruta: string) {
+function abrir(ruta: string | { pathname: string; state: unknown }) {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -3044,7 +3044,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(3);
     expect(await boton("Ver la factura")).toBeTruthy();
     expect(await guardar(api)).toMatchObject({
-      documento_id: FAC, proveedor_id: P1, importe_centavos: 2_345_600, moneda: "ARS", concepto: "Limpieza de noviembre, torre A",
+      factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600, moneda: "ARS", concepto: "Limpieza de noviembre, torre A",
       comprobante: "B 0001-00000077",
     });
   });
@@ -3088,7 +3088,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(valor("Concepto")).toBe("Limpieza de noviembre");
     expect(valor("Comprobante (opcional)")).toBe("B 0001-00000077");
     expect(await boton("Ver la factura")).toBeTruthy();
-    expect(await guardar(api)).toMatchObject({ documento_id: FAC, proveedor_id: P1, importe_centavos: 2_345_600 });
+    expect(await guardar(api)).toMatchObject({ factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600 });
   });
 
   it("un CUIT que no cierra avisa que hay que revisar el del proveedor", async () => {
@@ -3119,7 +3119,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(valor("Concepto")).toBe("");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
-    expect(await guardar(api)).toMatchObject({ documento_id: FAC, importe_centavos: 1_500_000, concepto: "Limpieza" });
+    expect(await guardar(api)).toMatchObject({ factura_version_id: VF, importe_centavos: 1_500_000, concepto: "Limpieza" });
   });
 
   it("un archivo que no pasa el antivirus no queda como factura", async () => {
@@ -3131,17 +3131,55 @@ describe("la factura arriba de la orden (0088)", () => {
     sinBoton("Ver la factura");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
-    expect(await guardar(api)).toMatchObject({ documento_id: null });
+    expect(await guardar(api)).toMatchObject({ factura_version_id: null });
   });
 
   it("control: sin factura el formulario es el de siempre y no sube nada", async () => {
     const api = conFactura([lectura()]);
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
-    expect(await guardar(api)).toMatchObject({ documento_id: null, importe_centavos: 1_500_000 });
+    expect(await guardar(api)).toMatchObject({ factura_version_id: null, importe_centavos: 1_500_000 });
     expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(0);
     expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(0);
     expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+  });
+
+  describe("lo leído de la factura es de su edificio", () => {
+    const C3 = "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3";
+    const DESDE_LA_FACTURA = {
+      pathname: "/egresos/proveedores",
+      state: {
+        consorcio: C1, paraPreparar: true, documento: { documento: FAC, version: VF, nombre: "factura-noviembre" },
+        alta: { cuit: "20000000001", razon_social: "Limpieza Ficticia SRL", domicilio: null, telefono: null, correo: null },
+        orden: { importe: "23456,00", moneda: "ARS", concepto: "Limpieza", comprobante: "", factura: { documento: FAC, version: VF, nombre: "factura-noviembre" } },
+      },
+    };
+    const dosEdificios = () =>
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [] }]),
+        [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+        [`GET /api/v1/consorcios/${C3}/proveedores`]: () => Response.json({ elementos: [] }),
+      });
+
+    it("en el edificio de la factura, el alta abre con lo leído y su documento", async () => {
+      vi.stubGlobal("fetch", dosEdificios());
+      abrir(DESDE_LA_FACTURA);
+      expect(((await screen.findByLabelText(/Razón social/)) as HTMLInputElement).value).toBe("Limpieza Ficticia SRL");
+      expect(await boton("Ver el documento")).toBeTruthy();
+    });
+
+    it("al elegir otro edificio, el alta no lleva nada de la factura del primero", async () => {
+      vi.stubGlobal("fetch", dosEdificios());
+      abrir(DESDE_LA_FACTURA);
+      await screen.findByLabelText(/Razón social/);
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C3 } });
+      fireEvent.click(await boton("Dar de alta un proveedor"));
+      expect(((await screen.findByLabelText(/Razón social/)) as HTMLInputElement).value).toBe("");
+      expect(((screen.getByLabelText(/CUIT/)) as HTMLInputElement).value).toBe("");
+      sinBoton("Ver el documento");
+      expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+    });
   });
 
   it("control: el alta de proveedores sin factura abre vacía y sin marcas", async () => {
@@ -3154,25 +3192,34 @@ describe("la factura arriba de la orden (0088)", () => {
   });
 
   describe("«Ver la factura» en la ficha", () => {
-    const CON_FACTURA = { ...APROBAR, versiones: [version({ aprobada_por: [], documento_id: FAC })] };
-    const documentos = (visibles: boolean) => () =>
+    /** Un archivo subido al documento después de aprobar la orden: el más nuevo, y no el aprobado. */
+    const VF_NUEVA = "e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1";
+    const CON_FACTURA = { ...APROBAR, versiones: [version({ aprobada_por: [], documento_id: FAC, factura_version_id: VF })] };
+    const archivo = (id: string) => ({ id, estado: "disponible", motivo_rechazo: null, tipo: "pdf", tamano: 18, sha256: H1, subida_en: "2026-11-01T12:00:00Z" });
+    const documentos = (visibles: boolean, versiones = [archivo(VF_NUEVA), archivo(VF)]) => () =>
       Response.json({
         documentos: visibles
-          ? [{
-            id: FAC, categoria: "facturas", titulo: "factura-noviembre", fecha: "2026-11-01", cargado_en: "2026-11-01T12:00:00Z",
-            versiones: [{ id: VF, estado: "disponible", motivo_rechazo: null, tipo: "pdf", tamano: 18, sha256: H1, subida_en: "2026-11-01T12:00:00Z" }],
-          }]
+          ? [{ id: FAC, categoria: "facturas", titulo: "factura-noviembre", fecha: "2026-11-01", cargado_en: "2026-11-01T12:00:00Z", versiones }]
           : [],
       });
 
-    it("con la factura en la versión y a la vista de quien mira, la abre en el visor", async () => {
+    it("abre el archivo exacto que se aprobó con la versión, aunque el documento tenga otro más nuevo", async () => {
       pdf.abrirPdf.mockResolvedValue({ numPages: 1, getPage: () => Promise.resolve(PAGINA), destroy: () => Promise.resolve() });
       const api = abrirFicha(CON_FACTURA, {
         [`GET ${BASE}/documentos`]: documentos(true),
         [`GET ${BASE}/documentos/${FAC}/versiones/${VF}/contenido`]: IMAGEN,
+        [`GET ${BASE}/documentos/${FAC}/versiones/${VF_NUEVA}/contenido`]: IMAGEN,
       });
       fireEvent.click(await boton("Ver la factura"));
       await waitFor(() => expect(pedidos(api, "GET", `${BASE}/documentos/${FAC}/versiones/${VF}/contenido`).length).toBeGreaterThan(0));
+      expect(pedidos(api, "GET", `${BASE}/documentos/${FAC}/versiones/${VF_NUEVA}/contenido`)).toHaveLength(0);
+    });
+
+    it("control: si el documento se ve pero no ese archivo, no hay botón (no se cambia por otro)", async () => {
+      const api = abrirFicha(CON_FACTURA, { [`GET ${BASE}/documentos`]: documentos(true, [archivo(VF_NUEVA)]) });
+      await waitFor(() => expect(pedidos(api, "GET", `${BASE}/documentos`).length).toBeGreaterThan(0));
+      expect(await boton("Aprobar esta versión")).toBeTruthy();
+      sinBoton("Ver la factura");
     });
 
     it("control: si quien mira no la ve en sus documentos, no hay botón", async () => {

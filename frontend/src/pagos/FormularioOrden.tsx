@@ -33,7 +33,8 @@ import type { ActoEnCurso } from "./useActo";
 //
 // Arriba, la factura (0088): elegir el archivo la sube, el antivirus la revisa y la IA lee importe,
 // moneda, número, concepto y el CUIT del proveedor. Lo que completa la lectura queda marcado hasta que
-// la persona lo cambia o lo da por revisado; guardar manda la factura como `documento_id`.
+// la persona lo cambia o lo da por revisado; guardar manda la versión exacta del archivo que se vio
+// (`factura_version_id`): otro archivo subido después al mismo documento no cambia lo aprobado.
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
@@ -155,10 +156,18 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   /** Los datos de la versión que se abrió, para saber qué cambió la persona. */
   const vistos = useRef<Datos | null>(null);
   const versionVista = modificar?.version;
-  /** La factura que se manda al guardar: la de la versión abierta, la que vuelve del alta o la subida. */
-  const [factura, setFactura] = useState<string | null>(modificar?.version.documento_id ?? inicial?.factura?.documento ?? null);
+  /** La versión del archivo de la factura que se manda al guardar: la de la versión abierta, la que
+   * vuelve del alta o la subida acá. */
+  const [factura, setFactura] = useState<string | null>(
+    modificar?.version.factura_version_id ?? inicial?.factura?.version ?? null,
+  );
   const facturaTocada = useRef(false);
-  const facturaDeLaVersion = useVersionVisible(consorcio, inicial?.factura === undefined ? (modificar?.version.documento_id ?? null) : null, aEntrar);
+  const facturaDeLaVersion = useVersionVisible(
+    consorcio,
+    inicial?.factura === undefined ? (modificar?.version.documento_id ?? null) : null,
+    inicial?.factura === undefined ? (modificar?.version.factura_version_id ?? null) : null,
+    aEntrar,
+  );
   /** Los campos que completó la lectura y la persona todavía no revisó. */
   const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<Campo>>(new Set());
   /** La lectura con un proveedor que no está cargado: se ofrece darlo de alta. */
@@ -226,7 +235,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     setConfirmar(false);
     setDatos((d) => (d === null || antes === null ? nuevos : sobreLoNuevo(d, antes, nuevos)));
     // La factura sigue a la versión, salvo que la persona haya subido otra.
-    if (!facturaTocada.current) setFactura(versionVista.documento_id ?? null);
+    if (!facturaTocada.current) setFactura(versionVista.factura_version_id ?? null);
     if (antes === null && versionVista.contrato_id !== null && nuevos.contrato === "")
       setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
   }, [lectura, versionVista, inicial, setAviso]);
@@ -244,7 +253,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     facturaTocada.current = true;
     setConfirmar(false);
     // Mientras el archivo nuevo no pasa el antivirus, no hay factura que mandar.
-    setFactura(cargada?.documento ?? null);
+    setFactura(cargada?.version ?? null);
   }
 
   function leerFactura(l: LecturaCarga) {
@@ -297,7 +306,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       comprobante: opcional(datos.comprobante),
       usa_fondo_reserva: datos.reserva,
       contrato_id: datos.contrato === "" ? null : datos.contrato,
-      documento_id: factura,
+      factura_version_id: factura,
     };
     void acto.hacer({
       quePide: ["guardar", modificar?.orden, modificar?.version.numero, datos, factura],
