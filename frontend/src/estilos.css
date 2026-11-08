@@ -838,6 +838,215 @@ main:has(.cotejo) {
   margin-top: 0.75rem;
 }
 
+.ejemplo-extracto {
+  overflow-x: auto;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  font-size: 0.875rem;
+}
+
+.bandeja-al-dia {
+  text-align: center;
+}
+
+.bandeja-al-dia p:last-child {
+  margin: 0;
+  font-weight: 700;
+}
+
+.fila-pago--con-borde {
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.tildes-pago {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tilde-pago {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 44px;
+  padding: 0.5rem 0;
+  overflow-wrap: anywhere;
+}
+
+.tilde-pago input {
+  flex: none;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.tilde-pago__datos {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 0.125rem;
+}
+
+.ficha-pago h1,
+.ficha-pago h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ficha-pago .tarjeta {
+  margin-top: 1rem;
+}
+
+/* Quien solo espera no tiene ni datos ni acciones: no queda una tarjeta vacía. */
+.ficha-pago .tarjeta:not(:has(dt, p, a, button, input, table, h3)) {
+  display: none;
+}
+
+/* Lo primero de la ficha: la tarjeta oscura con la situación, a quién, cuánto y por qué. */
+.ficha-pago__resumen {
+  padding: var(--space-5);
+  border-radius: var(--radius-2xl);
+  background: var(--surface-hero);
+  box-shadow: var(--shadow-hero);
+  color: var(--on-hero);
+}
+
+.ficha-pago__resumen h1,
+.ficha-pago__resumen h2 {
+  color: inherit;
+}
+
+.ficha-pago__resumen > p:last-child {
+  margin-bottom: 0;
+  color: var(--on-hero-muted);
+}
+
+.ficha-pago__arriba {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.ficha-pago__arriba p {
+  margin: 0;
+}
+
+.ficha-pago__arriba p:first-child {
+  color: var(--on-hero-muted);
+  font-weight: 600;
+}
+
+.ficha-pago__resumen h2 {
+  font-size: 1.125rem;
+}
+
+/* Las acciones de la ficha: anchas y una debajo de la otra, como las pide el dedo. */
+.ficha-pago .formulario .acciones button {
+  flex: 1 1 100%;
+}
+
+/* Por dónde va la orden. El paso actual lleva además aria-current, y la situación la dice la tarjeta. */
+.camino-orden {
+  display: flex;
+  gap: var(--space-1);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.camino-orden li {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.375rem;
+  color: var(--ink-muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.camino-orden i {
+  display: block;
+  height: 0.375rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+}
+
+.camino-orden [data-estado="hecho"] i {
+  background: var(--success-text);
+}
+
+.camino-orden [data-estado="ahora"] i {
+  background: var(--accent);
+}
+
+.camino-orden [data-estado="alerta"] i {
+  background: var(--pending-text);
+}
+
+.camino-orden [aria-current="step"] {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.etiqueta-situacion {
+  display: inline-flex;
+  margin: 0 0 var(--space-2);
+  padding: 0.375rem var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* Estado = palabra + color: nunca el color solo. */
+.fila-pago__verbo[data-tono] {
+  justify-self: start;
+  padding: 0.125rem var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: 0.875rem;
+}
+
+[data-tono="pendiente"] {
+  background: var(--pending-bg);
+  color: var(--pending-text);
+}
+
+[data-tono="bien"] {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+[data-tono="mal"] {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+[data-tono="neutro"] {
+  background: var(--surface-sunken);
+  color: var(--ink-soft);
+}
+
+.importe-ficha {
+  margin: var(--space-1) 0;
+  font-size: clamp(1.75rem, 1.5rem + 1vw, 2.5rem);
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.ficha-pago code {
+  overflow-wrap: anywhere;
+}
+
 /* El comprobante al lado de los datos; en un ancho angosto, uno arriba del otro. */
 .comprobante-y-datos {
   display: grid;
@@ -868,6 +1077,10 @@ main:has(.cotejo) {
   border: 2px dashed var(--step-todo);
   border-radius: var(--radius-lg);
   text-align: center;
+}
+
+.visor-comprobante + .zona-comprobante {
+  margin-top: 0.75rem;
 }
 
 .zona-comprobante button {
