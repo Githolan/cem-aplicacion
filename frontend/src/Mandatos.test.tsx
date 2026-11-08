@@ -182,6 +182,8 @@ function seccion(nombre: string) {
   return screen.getByRole("region", { name: nombre });
 }
 const boton = (nombre: string) => screen.getByRole("button", { name: nombre });
+/** El nombre de la fila que abre el detalle: empieza con el título y sigue con el resumen. */
+const fila = (titulo: string) => new RegExp(`^${titulo}( |$)`);
 
 async function completarAlta(decision = D_EQUIPO) {
   await cargado();
@@ -193,7 +195,7 @@ async function completarAlta(decision = D_EQUIPO) {
 /** Abre el detalle del externo y completa la baja por renuncia, sin confirmar. */
 async function abrirBaja() {
   await cargado();
-  fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+  fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
   await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
   fireEvent.change(screen.getByLabelText("Por qué termina"), { target: { value: "Renuncia presentada" } });
   fireEvent.change(screen.getByLabelText("Instrumento (nota, certificado u otro)"), { target: { value: "Nota del 10-10" } });
@@ -253,11 +255,13 @@ describe("página /mandatos", () => {
     abrir();
     await cargado();
     const mandatos = seccion("Mandatos");
-    const consejo = within(mandatos).getByText("Ana Díaz, Consejo de propietarios").closest("tr") as HTMLElement;
-    expect(within(consejo).queryByText(/^CUIT/)).toBeNull();
-    const externo = within(mandatos).getByText("Estudio Sur, Administración externa").closest("tr") as HTMLElement;
-    expect(within(externo).getByText(`CUIT ${CUIT}`)).toBeTruthy();
-    expect(within(externo).getByText(/1 de febrero de 2027 \(ese día ya no rige\)/)).toBeTruthy();
+    // Cada fila es un solo botón que abre el detalle; su resumen dice lo mínimo.
+    const consejo = within(mandatos).getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") });
+    expect(consejo.textContent).not.toMatch(/CUIT/);
+    const externo = within(mandatos).getByRole("button", { name: fila("Estudio Sur, Administración externa") });
+    expect(externo.textContent).toContain(`CUIT ${CUIT}`);
+    expect(externo.textContent).toMatch(/1 de febrero de 2027 \(ese día ya no rige\)/);
+    expect(within(mandatos).queryByRole("button", { name: "Ver detalle" })).toBeNull();
     const decisiones = seccion("Decisiones");
     expect(within(decisiones).getByText("Asamblea del 10 de enero de 2026")).toBeTruthy();
     expect(within(decisiones).queryByText(/Acta 14/)).toBeNull();
@@ -285,7 +289,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE) }));
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
     await waitFor(() => expect(document.activeElement).toBe(titulo));
     const detalle = titulo.closest("section") as HTMLElement;
@@ -300,7 +304,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(respaldado) }));
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
     const detalle = titulo.closest("section") as HTMLElement;
     expect(within(detalle).getByText("Reunión del Consejo del 5 de marzo de 2026: Contrata al estudio")).toBeTruthy();
@@ -310,7 +314,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Reunión del Consejo del 5 de marzo de 2026" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Reunión del Consejo del 5 de marzo de 2026") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Reunión del Consejo del 5 de marzo de 2026" });
     const detalle = titulo.closest("section") as HTMLElement;
     expect(within(detalle).getByText("Acta 14, libro 3, folio 52")).toBeTruthy();
@@ -322,7 +326,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     expect(await screen.findByText("Ese mandato ya no está en este edificio.")).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_MANDATOS)).toHaveLength(2));
   });
@@ -500,7 +504,7 @@ describe("página /mandatos", () => {
     const detalles = () => pedidos(simulado, "GET", `${RUTA_DECISIONES}/${D_EQUIPO}`);
     expect(detalles()).toHaveLength(0);
     // Control: lo que cuenta los pedidos los encuentra cuando el pedido existe.
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Asamblea del 10 de enero de 2026" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Asamblea del 10 de enero de 2026") }));
     await waitFor(() => expect(detalles()).toHaveLength(1));
   });
 
@@ -611,7 +615,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     fireEvent.change(screen.getByLabelText("Por qué termina"), { target: { value: "Renuncia presentada" } });
     fireEvent.change(screen.getByLabelText("Instrumento (nota, certificado u otro)"), { target: { value: "Nota del 10-10" } });
@@ -643,7 +647,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     fireEvent.change(screen.getByLabelText("Causa"), { target: { value: "remocion" } });
     expect(opciones("Asamblea que lo remueve")).toEqual(["", D_EQUIPO]);
@@ -664,7 +668,7 @@ describe("página /mandatos", () => {
       );
       abrir();
       await cargado();
-      fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+      fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
       await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     };
 
@@ -692,7 +696,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(detalle) }));
     abrir();
     await cargado();
-    const ver = () => fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    const ver = () => fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     ver();
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     expect(within(screen.getByLabelText("Causa")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual(["error_carga"]);
@@ -707,7 +711,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(pendiente) }));
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     expect(screen.getByText("Pendiente de revisión: sin condición para integrar el Consejo")).toBeTruthy();
     expect(within(screen.getByLabelText("Causa")).getAllByRole("option").map((o) => o.getAttribute("value"))).toEqual([
@@ -777,7 +781,7 @@ describe("página /mandatos", () => {
     );
     abrir();
     await abrirBaja();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Ana Díaz, Consejo de propietarios" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }));
     await screen.findByRole("heading", { level: 2, name: "Ana Díaz, Consejo de propietarios" });
     expect((screen.getByLabelText("Por qué termina") as HTMLInputElement).value).toBe("");
     expect((screen.getByLabelText("Instrumento (nota, certificado u otro)") as HTMLInputElement).value).toBe("");
@@ -799,7 +803,7 @@ describe("página /mandatos", () => {
     await waitFor(() => expect(document.activeElement).toBe(creado));
     fireEvent.click(boton("Cerrar el detalle"));
     expect(document.activeElement).toBe(boton("Dar de alta un mandato"));
-    const ver = screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" });
+    const ver = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
     ver.focus();
     fireEvent.click(ver);
     await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
@@ -839,7 +843,7 @@ describe("página /mandatos", () => {
     );
     abrir();
     await cargado();
-    const ver = screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" });
+    const ver = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
     fireEvent.click(ver);
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
@@ -1287,7 +1291,7 @@ describe("página /mandatos", () => {
       vi.stubGlobal("fetch", simulado);
       abrir();
       await cargado();
-      fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+      fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
       fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
       await screen.findByText("Eva Sosa, Consejo de propietarios");
       soltar();
@@ -1316,7 +1320,7 @@ describe("página /mandatos", () => {
       );
       abrir();
       await cargado();
-      fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+      fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
       fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
       await screen.findByText("Eva Sosa, Consejo de propietarios");
       soltar();
@@ -1331,7 +1335,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(dadoDeBaja) }));
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
     const etiqueta = within(titulo.closest("section") as HTMLElement).getByText("Baja registrada");
     expect(etiqueta.nextElementSibling?.textContent).toMatch(/19 de octubre de 2026.*12:30/);
@@ -1347,7 +1351,7 @@ describe("página /mandatos", () => {
     );
     abrir();
     await abrirBaja();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Ana Díaz, Consejo de propietarios" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }));
     expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
     expect(await screen.findByText("No tenés permiso para ver ese mandato.")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeNull();
@@ -1358,7 +1362,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(removido) }));
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
     const detalle = titulo.closest("section") as HTMLElement;
     const etiqueta = within(detalle).getByText("Asamblea que lo removió");
@@ -1390,7 +1394,7 @@ describe("página /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE) }));
     const { container } = abrir();
     await completarAlta();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     await screen.findByRole("heading", { level: 3, name: "Dar de baja" });
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations.map((v) => v.id)).toEqual([]);
@@ -1599,7 +1603,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     );
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     const titulo = await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
     const detalle = titulo.closest("section") as HTMLElement;
     expect(within(detalle).queryAllByRole("heading", { level: 3, name: "Dar de baja" })).toHaveLength(veces);
@@ -1617,7 +1621,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     );
     abrir();
     await cargado();
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle", description: "Estudio Sur, Administración externa" }));
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
     expect(await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Dar de baja" })).toBeNull();

@@ -451,11 +451,13 @@ describe("liquidación (borrador)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
     fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
+    // Control: mientras está abierta, su fila queda marcada.
+    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-current")).toBe("true");
     const pedidasAntes = pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`).length;
     fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
     expect(await screen.findByText(/Listo: descartaste el borrador/)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Borrador de octubre de 2026" })).toBeNull();
-    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-current")).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`)).toHaveLength(pedidasAntes);
   });
 
@@ -486,7 +488,7 @@ describe("liquidación (borrador)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     const boton = screen.getByRole("button", { name: /octubre de 2026, versión 1/ });
-    expect(boton.getAttribute("aria-pressed")).toBe("false");
+    expect(boton.getAttribute("aria-current")).toBeNull();
 
     fireEvent.click(boton);
     const reintentar = await screen.findByRole("button", { name: "Reintentar" });
