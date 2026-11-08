@@ -101,7 +101,7 @@ test.describe("cotejar con el banco", () => {
     await sinFaltasDeAccesibilidad(page);
 
     await tilde.check();
-    await page.getByRole("button", { name: "Guardar lo tildado" }).click();
+    await page.getByRole("button", { name: "Marcar como cotejados" }).click();
     await expect(page.getByText("Listo: quedó cotejado 1 pago.")).toBeVisible();
     await expect(tilde).toHaveCount(0);
     expect(pedidos.tildes).toEqual([{ pagos: [P1] }]);

@@ -211,17 +211,19 @@ export function ContactosGestion() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const { state } = useLocation();
+  // Lo que se pidió desde /contactos. Al recargar, la historia lo conserva pero el edificio
+  // elegido en memoria se pierde: el del pedido se prefiere al elegir (Codex en #220).
+  const [pedidoInicial] = useState(() => pedidoDe(state));
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.contactosGestion,
+    pedidoInicial?.consorcio ?? null,
   );
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
-  const { state } = useLocation();
-  // Se usa una sola vez: lo que se pidió desde /contactos, con la primera lista de ese edificio.
-  const pedido = useRef(pedidoDe(state));
-  const [abierto, setAbierto] = useState<Abierto | null>(() =>
-    pedido.current?.accion === "agregar" ? { accion: "agregar", contacto: null } : null,
-  );
+  // Se usa una sola vez, con la primera lectura de la lista.
+  const pedido = useRef(pedidoInicial);
+  const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -272,6 +274,24 @@ export function ContactosGestion() {
   useEffect(() => {
     if (consorcio === "") return;
     let vigente = true;
+    /** Lo pedido desde /contactos se hace solo en el edificio para el que se pidió: si quedó
+     * otro (no se gestiona ese, o ya no está), no se abre nada. Agregar no depende de la lista
+     * leída; corregir y retirar, sí. */
+    const tomarPedido = (contactos: readonly Contacto[] | null) => {
+      const p = pedido.current;
+      pedido.current = null;
+      if (p === null || p.consorcio !== consorcio) return;
+      if (p.accion === "agregar") {
+        setDatos(VACIO);
+        setAbierto({ accion: "agregar", contacto: null });
+        return;
+      }
+      // Si el contacto ya no está, queda la lista: no se abre otro en su lugar.
+      const elegido = contactos?.find((c) => c.id === p.contacto);
+      if (elegido === undefined) return;
+      setDatos(datosDe(elegido));
+      setAbierto({ accion: p.accion, contacto: elegido });
+    };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/contactos/gestion", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
@@ -280,21 +300,13 @@ export function ContactosGestion() {
         if (!vigente) return;
         if (data !== undefined) {
           setLectura({ tipo: "ok", contactos: data.elementos });
-          const p = pedido.current;
-          pedido.current = null;
-          // Si el contacto ya no está, queda la lista: no se abre otro en su lugar.
-          const elegido = p !== null && p.accion !== "agregar" && p.consorcio === consorcio
-            ? data.elementos.find((c) => c.id === p.contacto)
-            : undefined;
-          if (p !== null && p.accion !== "agregar" && elegido !== undefined) {
-            setDatos(datosDe(elegido));
-            setAbierto({ accion: p.accion, contacto: elegido });
-          }
+          tomarPedido(data.elementos);
         } else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else {
           setLectura({ tipo: "sin_servicio" });
           const falla = mensajeDeFalla(response.status, codigoDe(error));
           setAviso((actual) => (actual?.ok ? actual : { texto: falla, ok: false }));
+          tomarPedido(null);
         }
       })
       .catch((e: unknown) => {
@@ -303,6 +315,7 @@ export function ContactosGestion() {
         else {
           setLectura({ tipo: "sin_servicio" });
           setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
+          tomarPedido(null);
         }
       });
     return () => {

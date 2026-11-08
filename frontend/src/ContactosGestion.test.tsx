@@ -94,7 +94,7 @@ function pedidos(simulado: ReturnType<typeof vi.fn>, metodo: string, camino: str
     .filter((p) => p.method === metodo && new URL(p.url).pathname === camino);
 }
 
-function abrir(ruta = "/contactos/gestion") {
+function abrir(ruta: string | { pathname: string; state: unknown } = "/contactos/gestion") {
   const consultas = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <StrictMode>
@@ -169,6 +169,57 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(within(await tarjeta("Emergencias: Plomería Rápida")).getByRole("link", { name: "Corregir" }));
     expect(await screen.findByRole("heading", { name: "Corregir el contacto" })).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida");
+  });
+
+  // Recargar la página deja el pedido en la historia pero no el edificio elegido en memoria
+  // (`permisos.tsx`): un render nuevo, con su propio QueryClient, es esa recarga.
+  const C2 = "22222222-2222-4222-8222-222222222222";
+  const BASE2 = `/api/v1/consorcios/${C2}/contactos`;
+  const DOS_EDIFICIOS = [...CONSORCIOS, { id: C2, nombre: "Edificio Bordó", vinculos: [] }];
+  const K3 = "66666666-6666-4666-8666-666666666666";
+  const conDosEdificios = (extra: Respuestas = {}) =>
+    conLista({
+      "GET /api/v1/me/consorcios": () => Response.json(DOS_EDIFICIOS),
+      [`GET ${BASE2}/gestion`]: () => Response.json({ elementos: [contacto(K3, "Gas Ficticio")] }),
+      ...extra,
+    });
+  const recargar = (state: unknown) => abrir({ pathname: "/contactos/gestion", state });
+
+  it("al recargar, «Agregar un contacto» pedido para el segundo edificio se abre y se manda a ese edificio", async () => {
+    const simulado = conDosEdificios({
+      [`POST ${BASE}`]: () => Response.json({ id: K1 }, { status: 201 }),
+      [`POST ${BASE2}`]: () => Response.json({ id: K3 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    recargar({ consorcio: C2, accion: "agregar" });
+    expect(await screen.findByRole("heading", { name: "Agregar un contacto" })).toBeTruthy();
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2);
+    fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
+    escribir("Nombre", "Seguros del Plata");
+    escribir(/^Teléfono/, "0810-222-3333");
+    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    await screen.findByText("Listo: agregamos el contacto Seguros del Plata.");
+    expect(pedidos(simulado, "POST", BASE2)).toHaveLength(1);
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
+  });
+
+  it("al recargar, «Retirar» pedido en el segundo edificio abre el contacto de ese edificio", async () => {
+    vi.stubGlobal("fetch", conDosEdificios());
+    recargar({ consorcio: C2, accion: "retirar", contacto: K3 });
+    expect(await screen.findByText("¿Retirar el contacto Gas Ficticio? No se puede deshacer.")).toBeTruthy();
+    expect((screen.getByLabelText("Edificio") as HTMLSelectElement).value).toBe(C2);
+  });
+
+  it("control: un pedido para un edificio que no se gestiona no abre nada ni manda nada, tampoco en el primero", async () => {
+    const simulado = conDosEdificios({
+      [`POST ${BASE}`]: () => Response.json({ id: K1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    recargar({ consorcio: "99999999-9999-4999-8999-999999999999", accion: "agregar" });
+    await tarjeta("Encargado/a: Marta Ruiz");
+    expect(screen.queryByRole("heading", { name: "Agregar un contacto" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
+    expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
   });
 
   it("control: si el contacto ya no está en la gestión, queda la lista sin nada abierto", async () => {

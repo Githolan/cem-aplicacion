@@ -75,7 +75,7 @@ async function completarAlta(pagina: Page) {
   await pagina.getByLabel("Razón social").fill(RAZON);
 }
 
-const guardar = (pagina: Page) => pagina.getByRole("button", { name: "Guardar" }).click();
+const guardar = (pagina: Page) => pagina.getByRole("button", { name: "Dar de alta el proveedor" }).click();
 
 async function sinDesborde(pagina: Page) {
   const { scrollWidth, clientWidth } = await pagina.evaluate(() => {
