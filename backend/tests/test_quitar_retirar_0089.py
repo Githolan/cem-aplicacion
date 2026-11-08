@@ -8,6 +8,7 @@ pasa. Datos SINTETICOS / NO REAL.
 """
 
 import importlib.util
+import threading
 from uuid import UUID, uuid4
 
 import pytest
@@ -446,6 +447,102 @@ def test_retirar_y_registrar_el_acta_se_esperan(motor_migrate, motor_app, e, buc
         assert espera.value.orig.diag.sqlstate == "55P03"
     assert codigo(retirar(e, otro)) == (409, "documento_referenciado")
     assert documento(motor_migrate, otro)["estado"] == "vigente"
+
+
+VERSION_A_MANO = text(
+    "insert into nucleo.version_documento (consorcio_id, documento_id, tipo, tamano, sha256,"
+    " clave_objeto, subida_por) values (:c, :d, 'application/pdf', 10, :s, :k, :p)"
+)
+
+
+def version_a_mano(c, e, doc, quien) -> None:
+    """Datos sintéticos: una versión insertada directo, sin pasar por la carga."""
+    c.execute(VERSION_A_MANO, {"c": e.cons, "d": doc, "s": "b" * 64,
+                               "k": f"cem/sintetica/{uuid4()}", "p": quien})  # fmt: skip
+
+
+def test_un_documento_dado_de_baja_no_recibe_versiones(motor_migrate, motor_app, e, bucket):
+    """El disparador, por cualquier camino: también una fila insertada directo."""
+    quitado, _ = factura(motor_app, e)
+    retirado, _ = comun_con_archivo(motor_app, e)
+    vigente, _ = comun_con_archivo(motor_app, e)
+    assert quitar(e, quitado).status_code == 200
+    assert retirar(e, retirado).status_code == 200
+    for doc in (quitado, retirado):
+        with pytest.raises(DBAPIError) as error:
+            with motor_migrate.begin() as c:
+                version_a_mano(c, e, doc, e.adm)
+        assert error.value.orig.diag.message_hint == "no_encontrado"
+        r = post(e, e.adm, f"documentos/{doc}/versiones", {})
+        assert codigo(r) == (404, "no_encontrado")
+    with motor_migrate.begin() as c:  # control: al vigente, sí
+        version_a_mano(c, e, vigente, e.adm)
+
+
+ESPERA_DEL_HILO = 2.0
+"""Segundos que se mira que la versión siga esperando: sin el bloqueo entra en milisegundos."""
+NUEVA_VERSION = text(
+    "select id from nucleo.nueva_version(:d, 'application/pdf', 10, :s, :a, 'api')"
+)
+QUITAR = text("select nucleo.quitar_documento(:d, :a, 'api', :s)")
+
+
+def version_esperando(motor_app, e, doc, sha: str) -> tuple[threading.Thread, list]:
+    """Una versión nueva en otro hilo, que queda esperando el bloqueo del documento. Devuelve el
+    hilo y la lista donde deja el resultado (el id, o la excepción)."""
+    resultado: list = []
+
+    def subir_version():
+        try:
+            with transaccion(motor_app, persona_id=e.adm, consorcio_id=e.cons) as b:
+                resultado.append(
+                    b.execute(NUEVA_VERSION, {"d": doc, "s": sha, "a": e.adm}).scalar()
+                )
+        except DBAPIError as error:
+            resultado.append(error)
+
+    hilo = threading.Thread(target=subir_version)
+    hilo.start()
+    return hilo, resultado
+
+
+@pytest.mark.parametrize("baja", ["quitar", "retirar"])
+def test_la_version_que_llega_durante_la_baja_espera_y_se_niega(
+    motor_migrate, motor_app, e, bucket, baja
+):
+    """La versión pasa el control de la función (el documento todavía está vigente para ella) y
+    espera el bloqueo; cuando la baja se confirma, el disparador la niega. Sin el disparador,
+    entraba: una versión huérfana en un documento quitado o retirado."""
+    doc, _ = factura(motor_app, e) if baja == "quitar" else comun_con_archivo(motor_app, e)
+    with transaccion(motor_app, persona_id=e.adm, consorcio_id=e.cons) as a:
+        if baja == "quitar":
+            a.execute(QUITAR, {"d": doc, "a": e.adm, "s": e.sesion[e.adm]})
+        else:
+            a.execute(text("select nucleo.retirar_documento(:d, :m, :a, 'api')"),
+                      {"d": doc, "m": MOTIVO, "a": e.adm})  # fmt: skip
+        hilo, resultado = version_esperando(motor_app, e, doc, "c" * 64)
+        # Sigue esperando el bloqueo: sin él, la versión entraba enseguida.
+        hilo.join(timeout=ESPERA_DEL_HILO)
+        assert hilo.is_alive() and resultado == []
+    hilo.join(timeout=30)
+    assert not hilo.is_alive()
+    [error] = resultado
+    assert isinstance(error, DBAPIError), resultado
+    assert error.orig.diag.message_hint == "no_encontrado"
+    assert len(versiones_de(motor_migrate, doc)) == 1
+
+
+def test_la_version_ajena_primero_y_quitar_despues_se_niega(motor_migrate, motor_app, e, bucket):
+    doc, _ = factura(motor_app, e)
+    with motor_migrate.begin() as b:
+        version_a_mano(b, e, doc, e.mc1)
+        with pytest.raises(DBAPIError) as espera:
+            with transaccion(motor_app, persona_id=e.adm, consorcio_id=e.cons) as a:
+                a.execute(text("set local lock_timeout = '500ms'"))
+                a.execute(QUITAR, {"d": doc, "a": e.adm, "s": e.sesion[e.adm]})
+        assert espera.value.orig.diag.sqlstate == "55P03"
+    assert codigo(quitar(e, doc)) == (403, "no_es_quien_lo_subio")
+    assert documento(motor_migrate, doc)["estado"] == "vigente"
 
 
 def test_las_funciones_y_quien_las_ejecuta(motor_migrate):

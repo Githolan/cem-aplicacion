@@ -34,6 +34,10 @@ decisión no es una clave foránea sino un `sha256`: al registrarlo (`nucleo.dec
 insertar o al cambiar `sha256_acta`), `nucleo.acta_de_documento_vigente` bloquea `for share` los
 documentos del consorcio con una versión de ese `sha256` y se niega (`acta_dada_de_baja`) si alguno
 está descartado o retirado. Un acta que no está entre los documentos se registra como siempre.
+Una versión nueva (`nucleo.version_documento`, por cualquier camino: la carga de Documentos, la del
+formulario o la del comprobante de `0068`) bloquea su documento `for share` y vuelve a mirar que
+siga vigente (`nucleo.version_de_documento_vigente`, `no_encontrado`): un archivo que llega mientras
+se quita o se retira espera y se niega, o quitar espera y ve la versión ajena.
 
 **Los archivos quedan.** Las versiones no cambian (su estado sigue siendo el del antivirus) y los
 objetos del almacén no se borran: el borrado de un rechazado (`documentos.borrar_rechazado`) existe
@@ -86,6 +90,7 @@ lectura con IA de un documento para carga (no es lo que se guardó)."""
 REFERENCIADO = "nucleo.documento_referenciado(uuid, uuid)"
 CITADO = "nucleo.documento_citado_vigente()"
 ACTA = "nucleo.acta_de_documento_vigente()"
+VERSION_VIGENTE = "nucleo.version_de_documento_vigente()"
 NO_CAMBIA = "nucleo.documento_dado_de_baja_no_cambia()"
 QUITAR = "nucleo.quitar_documento(uuid, uuid, text, uuid)"
 RETIRAR = "nucleo.retirar_documento(uuid, text, uuid, text)"
@@ -226,6 +231,30 @@ create function {ACTA.removesuffix("()")}()
 create trigger acta_de_documento_vigente before insert or update of sha256_acta
   on nucleo.decision_formal
   for each row execute function {ACTA};
+
+-- Una versión nueva bloquea su documento y, en otra sentencia (otra foto, después de esperar a
+-- quien quita o retira), vuelve a mirar que siga vigente. Las funciones que crean versiones ya lo
+-- miraban, pero sin bloquear.
+create function {VERSION_VIGENTE.removesuffix("()")}()
+  returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    perform 1 from nucleo.documento d
+     where d.consorcio_id = new.consorcio_id and d.id = new.documento_id
+       for share;
+    if not exists (select 1 from nucleo.documento d
+                    where d.consorcio_id = new.consorcio_id and d.id = new.documento_id
+                      and d.estado = 'vigente') then
+      raise exception 'el documento no está vigente: no recibe archivos'
+        using errcode = 'P0001', hint = 'no_encontrado';
+    end if;
+    return new;
+  end
+  $$;
+create trigger version_de_documento_vigente before insert on nucleo.version_documento
+  for each row execute function {VERSION_VIGENTE};
 create function nucleo.quitar_documento(documento uuid, actor uuid, origen_pedido text,
                                         sesion uuid)
   returns void
@@ -304,7 +333,7 @@ create function nucleo.retirar_documento(documento uuid, motivo text, actor uuid
   $$;
 """
 
-INTERNAS = (REFERENCIADO, CITADO, ACTA)
+INTERNAS = (REFERENCIADO, CITADO, ACTA, VERSION_VIGENTE)
 RUTAS = (QUITAR, RETIRAR)
 
 EXPORTAR_DOCUMENTOS_CAMBIOS = (
@@ -382,6 +411,7 @@ def downgrade() -> None:
     for tabla, _ in REFERENCIAS:
         op.execute(f"drop trigger documento_citado_vigente on {tabla}")
     op.execute("drop trigger acta_de_documento_vigente on nucleo.decision_formal")
+    op.execute("drop trigger version_de_documento_vigente on nucleo.version_documento")
     for funcion in INTERNAS:
         op.execute(f"drop function {funcion}")
     op.execute("drop trigger documento_dado_de_baja_no_cambia on nucleo.documento")
