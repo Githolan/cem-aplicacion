@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
+import type { Cargado } from "../CargaConLectura";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
@@ -13,14 +14,31 @@ import { useActo } from "./useActo";
 
 // `/pagos/nueva`: preparar una orden. Al guardar sigue a su ficha, donde está el paso que falta.
 
-/** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella. */
+/** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella; al
+ * volver del alta del proveedor de una factura, también su número y la factura ya subida. */
 function inicialDe(estado: unknown): OrdenInicial {
   if (typeof estado !== "object" || estado === null) return {};
   const texto = (campo: string) => {
     const valor = (estado as Record<string, unknown>)[campo];
     return typeof valor === "string" ? valor : undefined;
   };
-  return { proveedor: texto("proveedor"), importe: texto("importe"), moneda: texto("moneda"), concepto: texto("concepto") };
+  return {
+    proveedor: texto("proveedor"),
+    importe: texto("importe"),
+    moneda: texto("moneda"),
+    concepto: texto("concepto"),
+    comprobante: texto("comprobante"),
+    factura: facturaDe((estado as Record<string, unknown>).factura),
+  };
+}
+
+/** La factura ya subida que vuelve del alta del proveedor (`AltaDesdeLaFactura`). */
+function facturaDe(valor: unknown): Cargado | undefined {
+  if (typeof valor !== "object" || valor === null) return undefined;
+  const { documento, version, nombre } = valor as Record<string, unknown>;
+  return typeof documento === "string" && typeof version === "string" && typeof nombre === "string"
+    ? { documento, version, nombre }
+    : undefined;
 }
 
 export function PrepararOrden() {
