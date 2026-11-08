@@ -4,9 +4,11 @@ import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { useAEntrar } from "../sesionEncima";
-import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
+import { TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "../archivos";
+import { mensajeDeError as mensajeDeCarga } from "../Documentos";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { MONEDAS } from "../pagos/FormularioOrden";
+import { SubirArchivo } from "../SubirArchivo";
 import { CampoImporte } from "./CampoImporte";
 import {
   aCentavos,
@@ -36,6 +38,9 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useEsperaAntivirus, useMonta
 // Si transfirió (app 0068, P3 184), sube el comprobante y registra el pago desde acá; la cuenta
 // la escribe como figura en el comprobante. Otro miembro del Consejo lo concilia.
 //
+// El comprobante subido no tiene «Ver»: la lista no trae el id de la versión, y quien está acá ya no
+// ejecuta pagos en ese edificio, así que puede no tener `documentos.ver` para abrir `…/contenido`.
+//
 // Si transfirió otra cosa (decisión 3 del 07-11-2026), el mismo formulario registra lo que salió del
 // banco. La orden no queda pagada: lo resuelve el Consejo.
 
@@ -54,10 +59,10 @@ const TITULO_COMPROBANTE = "Comprobante de la transferencia";
 
 /** Qué pasa con el comprobante, según el estado de su último archivo. */
 function textoDelComprobante(p: PorAclarar): string {
-  if (p.comprobante_estado === "disponible") return "El comprobante pasó el antivirus: ya podés registrar el pago.";
+  if (p.comprobante_estado === "disponible") return "El comprobante pasó el antivirus: ya se puede registrar el pago.";
   if (p.comprobante_estado === "en_cuarentena") return "El antivirus revisa el comprobante: esto se actualiza solo en unos segundos.";
-  if (p.comprobante_estado === "rechazado") return "El antivirus rechazó el archivo: subí otro.";
-  return "Primero subí el comprobante de la transferencia.";
+  if (p.comprobante_estado === "rechazado") return "El antivirus rechazó el archivo: hay que subir otro.";
+  return "Primero hay que subir el comprobante de la transferencia.";
 }
 
 export function PagosPorAclarar() {
@@ -73,8 +78,6 @@ export function PagosPorAclarar() {
   const [registro, setRegistro] = useState<Registro>(REGISTRO_VACIO);
   const [otraCosa, setOtraCosa] = useState(false);
   const [archivo, setArchivo] = useState<File | null>(null);
-  /** Cambia para vaciar el campo del archivo después de subirlo. */
-  const [entrada, setEntrada] = useState(0);
   /** Lo que no se pudo actualizar con el formulario abierto: sigue a la vista con lo escrito. */
   const [fallaLista, setFallaLista] = useState<string | null>(null);
   /** El antivirus agotó la espera: deja de mirar solo hasta que la persona lo pida. */
@@ -201,17 +204,10 @@ export function PagosPorAclarar() {
     setVuelta((v) => v + 1);
   }
 
-  /** Crea el comprobante (si todavía no hay uno propio de la orden) y sube el archivo. */
+  /** Crea el comprobante (si todavía no hay uno propio de la orden) y sube el archivo, que ya pasó el
+   * control de tipo y tamaño de `SubirArchivo`. */
   async function subirComprobante(p: PorAclarar, elegido: File) {
     if (!montado.current) return;
-    const problema = problemaDelArchivo(elegido);
-    if (problema !== null) {
-      // Ese archivo no va a entrar: el campo queda vacío para elegir otro.
-      setArchivo(null);
-      setEntrada((n) => n + 1);
-      setAviso({ texto: problema, ok: false });
-      return;
-    }
     const ruta = { consorcio_id: p.consorcio_id, orden_id: p.orden_id };
     setEnviando(true);
     setAviso(null);
@@ -264,7 +260,6 @@ export function PagosPorAclarar() {
       claveArchivo.current = null;
       sinArchivo.current = null;
       setArchivo(null);
-      setEntrada((n) => n + 1);
       setEsperaAgotada(false);
       setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y esto se actualiza solo.", ok: true });
       setVuelta((v) => v + 1);
@@ -444,14 +439,12 @@ export function PagosPorAclarar() {
                           {fallaLista}
                         </p>
                       )}
-                      <label htmlFor={`${id}-archivo`}>Archivo del comprobante (PDF, JPEG o PNG, hasta 20 MB)</label>
-                      <input key={entrada} id={`${id}-archivo`} type="file" accept="application/pdf,image/jpeg,image/png"
-                        disabled={enviando}
-                        onChange={(e) => {
-                          const elegido = e.target.files?.[0] ?? null;
+                      <SubirArchivo titulo={p.comprobante_id == null ? "Subir el comprobante" : "Cambiar el comprobante"} de="del comprobante"
+                        tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={p.comprobante_id != null} deshabilitada={enviando}
+                        alElegir={(elegido) => {
                           claveArchivo.current = null;
                           setArchivo(elegido);
-                          if (elegido !== null) void subirComprobante(p, elegido);
+                          void subirComprobante(p, elegido);
                         }} />
                       {((archivo !== null && !enviando) || fallaLista !== null) && (
                         <div className="acciones">
