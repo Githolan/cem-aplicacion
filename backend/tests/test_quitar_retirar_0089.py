@@ -138,7 +138,7 @@ def test_quitar_tambien_mientras_lo_revisa_el_antivirus(motor_migrate, e, bucket
 
 
 def test_quitar_dos_veces_es_404_y_el_reintento_con_la_misma_clave_es_la_misma_respuesta(
-    motor_app, e, bucket
+    motor_migrate, motor_app, e, bucket
 ):
     doc, _ = factura(motor_app, e)
     clave = clave_idempotencia()
@@ -149,6 +149,7 @@ def test_quitar_dos_veces_es_404_y_el_reintento_con_la_misma_clave_es_la_misma_r
     assert primero.status_code == reintento.status_code == 200
     assert reintento.json() == primero.json()
     assert codigo(otra) == (404, "no_encontrado")
+    assert [a for a, _ in eventos(motor_migrate, doc)].count("consorcio.documento.quitar") == 1
 
 
 @pytest.mark.parametrize("ajeno", ["documento", "version"])
@@ -249,6 +250,20 @@ def test_retirar_saca_el_documento_de_la_lista_y_deja_la_constancia(
     # El motivo es texto libre: no va a la auditoría.
     assert (accion, despues) == ("consorcio.documento.retirar", {"categoria": "seguros"})
     assert codigo(retirar(e, doc)) == (404, "no_encontrado")  # ya no está vigente
+
+
+def test_el_reintento_de_un_retiro_hecho_recibe_la_misma_respuesta(
+    motor_migrate, motor_app, e, bucket
+):
+    doc, _ = comun_con_archivo(motor_app, e)
+    clave = clave_idempotencia()
+    primero = post(e, e.adm, f"documentos/{doc}/retiro", {"motivo": MOTIVO}, clave)
+    reintento = post(e, e.adm, f"documentos/{doc}/retiro", {"motivo": MOTIVO}, clave)
+    assert primero.status_code == reintento.status_code == 200, reintento.text
+    assert reintento.json() == primero.json() == {"id": doc}
+    # Control: otra clave sobre el documento ya retirado se niega.
+    assert codigo(retirar(e, doc)) == (404, "no_encontrado")
+    assert [a for a, _ in eventos(motor_migrate, doc)].count("consorcio.documento.retirar") == 1
 
 
 def test_tambien_se_retira_un_documento_para_carga_que_nadie_cita(motor_migrate, motor_app, e,

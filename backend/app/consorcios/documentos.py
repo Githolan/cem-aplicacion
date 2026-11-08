@@ -417,9 +417,16 @@ def retirar_documento(
     ctx = cargar.ctx
     _verificar_carga(cargar, operativos, None)
     restringidos.verificar(Entidad())
-    _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
 
     def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        # La categoría depende del estado: se lee adentro, después de que `responder_una_vez` miró
+        # la clave. Un reintento de un retiro hecho recibe la respuesta guardada, no un 404.
+        categoria = _escribir(
+            conn, "select nucleo.categoria_para_cargar(:d)", {"d": documento_id}
+        ).scalar_one()
+        if categoria is None:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        _verificar_carga(cargar, operativos, CategoriaDocumento(categoria))
         _escribir(
             conn,
             "select nucleo.retirar_documento(:d, :m, :a, 'api')",

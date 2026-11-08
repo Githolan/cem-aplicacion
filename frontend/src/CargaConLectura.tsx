@@ -239,7 +239,8 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
 
   /** Quitar el archivo subido acá: el servidor lo da de baja y el formulario vuelve al anterior. */
   async function quitarArchivo() {
-    if (propio === null) return;
+    // Nunca con otro archivo subiéndose, en el antivirus o leyéndose: quitar soltaría su espera.
+    if (propio === null || subiendoOtro) return;
     setQuitar("quitando");
     setFalloQuitar(null);
     claveQuitar.current ??= crypto.randomUUID();
@@ -274,11 +275,16 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     claveArchivo.current = null;
     claveQuitar.current = null;
     setFalloQuitar(null);
+    // Otro archivo cancela una pregunta de quitar abierta: se preguntaba por el anterior.
+    setQuitar("nada");
     void subir(archivo);
   }
 
   // Mientras se quita, tampoco se guarda: el formulario mandaría el archivo que se está quitando.
-  const ocupada = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo" || quitar === "quitando";
+  // Con la pregunta de quitar abierta no se elige otro archivo (`SubirArchivo` deshabilitada).
+  /** Un archivo subiéndose, en el antivirus o leyéndose. */
+  const subiendoOtro = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo";
+  const ocupada = subiendoOtro || quitar === "quitando";
   useEffect(() => {
     ultimas.current.alEsperar(ocupada);
   }, [ocupada]);
@@ -300,7 +306,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   return (
     <section className="carga-con-lectura" aria-label={titulo}>
       <SubirArchivo titulo={titulo} de={de} tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={cargado !== null}
-        deshabilitada={deshabilitada || ocupada}
+        deshabilitada={deshabilitada || ocupada || quitar !== "nada"}
         nota="Los datos que se lean completan el formulario: hay que revisarlos antes de guardar." alElegir={elegir} />
       {progreso !== null && (
         <p role="status" className="aviso-info">
@@ -370,7 +376,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
         <div role="group" aria-label={QUITAR_ARCHIVO} className="confirmar-quitar">
           <p>{preguntaQuitar(propio.nombre)}</p>
           <div className="acciones">
-            <button type="button" className="secundario peligro" disabled={quitar === "quitando"} onClick={() => void quitarArchivo()}>
+            <button type="button" className="secundario peligro" disabled={quitar === "quitando" || subiendoOtro} onClick={() => void quitarArchivo()}>
               {quitar === "quitando" ? "Quitando…" : CONFIRMAR_QUITAR}
             </button>
             <button type="button" className="secundario" disabled={quitar === "quitando"} onClick={() => setQuitar("nada")}>

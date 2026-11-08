@@ -3178,6 +3178,23 @@ describe("la factura arriba de la orden (0088)", () => {
       expect(await guardar(api)).toMatchObject({ factura_version_id: null });
     });
 
+    it("con la pregunta de quitar abierta no se elige otro archivo: ni se sube ni se suelta su espera", async () => {
+      const api = await conFacturaSubida({ [`POST ${QUITAR}`]: () => Response.json({ id: FAC }) });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByLabelText("Archivo de la factura") as HTMLInputElement).disabled).toBe(true);
+      // Aunque llegue un archivo (soltado o por el campo), no se manda nada.
+      const otra = new File(["%PDF-1.4 OTRA SINTETICA"], "otra-factura.pdf", { type: "application/pdf" });
+      fireEvent.change(screen.getByLabelText("Archivo de la factura"), { target: { files: [otra] } });
+      expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(1);
+      expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
+      expect(screen.queryByText(TEXTO_REVISANDO)).toBeNull();
+      // Control: al cerrar la pregunta se puede elegir otro archivo de nuevo.
+      fireEvent.click(await boton(NO_QUITAR));
+      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+    });
+
     it("«No, dejarlo» no manda nada y la factura sigue adjunta", async () => {
       const api = await conFacturaSubida({});
       fireEvent.click(await boton(QUITAR_ARCHIVO));
