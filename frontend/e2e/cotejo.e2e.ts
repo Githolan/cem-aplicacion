@@ -112,10 +112,11 @@ test.describe("cotejar con el banco", () => {
     const errores = vigilarErrores(page);
     const pedidos = await simularCotejo(page, baseURL!);
     await page.goto("/pagos/cotejo");
-    const soltar = page.getByText("Soltá acá el extracto");
-    if ((page.viewportSize()?.width ?? 0) > 768) await expect(soltar).toBeVisible();
-    else await expect(soltar).toBeHidden();
-    await page.getByLabel(/Elegir el archivo/).setInputFiles({ name: "extracto.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) });
+    // Soltar o elegir el archivo en todos los anchos; un CSV no se saca con la cámara.
+    await expect(page.getByText("Soltar el archivo acá")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Elegir un archivo" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sacar una foto" })).toHaveCount(0);
+    await page.getByLabel("Archivo del extracto").setInputFiles({ name: "extracto.csv", mimeType: "text/csv", buffer: Buffer.from(CSV) });
 
     await expect(page.getByRole("heading", { name: "¿Qué es cada columna?" })).toBeVisible();
     await expect(page.getByText("Primera fila: 05/11/2026 · -184350,00 · 0048213377")).toBeVisible();
@@ -140,7 +141,7 @@ test.describe("cotejar con el banco", () => {
   test("en PC el extracto y la lista van uno al lado del otro; más angosto, uno abajo del otro", async ({ page, baseURL }) => {
     await simularCotejo(page, baseURL!);
     await page.goto("/pagos/cotejo");
-    const extracto = page.getByRole("heading", { name: "Subí el extracto" });
+    const extracto = page.getByRole("heading", { name: "Subir el extracto" });
     const lista = page.getByRole("heading", { name: "O tildá a mano" });
     await expect(lista).toBeVisible();
     const [a, b] = [await extracto.boundingBox(), await lista.boundingBox()];

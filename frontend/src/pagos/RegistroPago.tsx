@@ -3,7 +3,8 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { mensajeDeError as mensajeDeCarga, problemaDelArchivo } from "../Documentos";
+import { TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "../archivos";
+import { mensajeDeError as mensajeDeCarga } from "../Documentos";
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
   aCentavos,
@@ -23,8 +24,9 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { MONEDAS } from "./FormularioOrden";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_LECTURA_FALLO, AVISO_OTRA_COSA } from "./textos";
 import type { ActoEnCurso } from "./useActo";
-import { useUrlDelArchivo, VisorComprobante } from "./VisorComprobante";
-import { ZonaComprobante } from "./ZonaComprobante";
+import { SubirArchivo } from "../SubirArchivo";
+import { useUrlDelArchivo } from "../VisorDocumento";
+import { VisorComprobante } from "./VisorComprobante";
 
 // Registrar el pago o corregir un registro observado, con el comprobante al lado. Registrar no es
 // pagar: la orden queda pagada recién con la conciliación.
@@ -269,12 +271,8 @@ export function RegistroPago(props: Props) {
     }
   }
 
+  /** El archivo ya pasó el control de tipo y tamaño de `SubirArchivo`. */
   function elegir(archivo: File) {
-    const problema = problemaDelArchivo(archivo);
-    if (problema !== null) {
-      setAviso({ texto: problema, ok: false });
-      return;
-    }
     // Otro archivo es otro pedido: si el anterior no entró, sirve su documento, no su clave.
     claveArchivo.current = null;
     setElegido(archivo);
@@ -408,7 +406,8 @@ export function RegistroPago(props: Props) {
           </div>
         )}
         {!enCurso && !leyendo && !corrigeDiferencia && (!pregunta || cambiaArchivo) && (
-          <ZonaComprobante deshabilitada={enviando} reemplaza={comprobante !== null} alElegir={elegir} />
+          <SubirArchivo titulo={comprobante === null ? "Subir el comprobante" : "Cambiar el comprobante"} de="del comprobante"
+            tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={comprobante !== null} deshabilitada={enviando} alElegir={elegir} />
         )}
       </section>
 

@@ -10,7 +10,8 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { ACEPTA, mensajeDeError, REFRESCO_CUARENTENA_MS, tamano, TOPE_BYTES } from "./Documentos";
+import { aceptar, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
+import { mensajeDeError, REFRESCO_CUARENTENA_MS, tamano } from "./Documentos";
 import { SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
@@ -142,7 +143,7 @@ function pdf(nombre = "acta.pdf"): File {
 }
 
 function elegir(elegido: File) {
-  fireEvent.change(screen.getByLabelText("Archivo"), { target: { files: [elegido] } });
+  fireEvent.change(screen.getByLabelText("Archivo del documento"), { target: { files: [elegido] } });
 }
 
 /** Abre el formulario nuevo y lo completa con un presupuesto y el archivo dado. */
@@ -285,6 +286,35 @@ describe("página /documentos", () => {
     // Control: en toda la página hay una sola descarga, y la descarga nunca se pidió con fetch.
     expect(screen.getAllByRole("link", { name: "Descargar" })).toHaveLength(1);
     expect(simulado.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/descargar"))).toBe(false);
+  });
+
+  it("«Ver» abre el archivo disponible en una hoja, sin bajarlo, y «Cerrar» la cierra", async () => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:sintetico", revokeObjectURL: () => undefined }));
+    const FOTO = documento(D1, "Foto del tablero", { versiones: [version(V2, { estado: "en_cuarentena" }), version(V1, { tipo: "image/png" })] });
+    const contenido = `${BASE}/${D1}/versiones/${V1}/contenido`;
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => Response.json({ documentos: [FOTO] }),
+      [`GET ${contenido}`]: () => new Response(new Blob(["PNG"], { type: "image/png" }), { headers: { "Content-Type": "image/png" } }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const foto = await tarjeta("Foto del tablero");
+    // Solo el disponible tiene «Ver», al lado de «Descargar»; el que está en revisión, no.
+    const ver = within(foto).getAllByRole("button", { name: "Ver" });
+    expect(ver).toHaveLength(1);
+    expect(pedidos(simulado, "GET", contenido)).toHaveLength(0);
+    ver[0]!.focus();
+    fireEvent.click(ver[0]!);
+    const hoja = await screen.findByRole("dialog", { name: "Foto del tablero" });
+    expect((await within(hoja).findByRole("img", { name: "Foto del tablero" })).getAttribute("src")).toBe("blob:sintetico");
+    expect(hoja.className).toContain("hoja--ancha");
+    // En StrictMode el efecto corre dos veces; el primero se descarta. Lo que importa: se pidió por `…/contenido`.
+    expect(pedidos(simulado, "GET", contenido).length).toBeGreaterThan(0);
+    expect(simulado.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/descargar"))).toBe(false);
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Control: el foco vuelve a «Ver».
+    expect(document.activeElement).toBe(ver[0]);
   });
 
   it("mientras llega la lista dice «Consultando…», sin documentos", async () => {
@@ -468,7 +498,11 @@ describe("página /documentos", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
     expect(document.activeElement).toBe(screen.getByLabelText("Categoría"));
-    expect(screen.getByLabelText("Archivo").getAttribute("accept")).toBe(ACEPTA);
+    expect(screen.getByLabelText("Archivo del documento").getAttribute("accept")).toBe(aceptar(TIPOS_DE_DOCUMENTO));
+    // Todos los caminos a la vez: soltar, la cámara, la galería y el archivo.
+    expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
+    for (const nombre of ["Sacar una foto", "Elegir de la galería", "Elegir un archivo"]) expect(screen.getByRole("button", { name: nombre })).toBeTruthy();
+    expect(screen.getByLabelText("Foto del documento").getAttribute("capture")).toBe("environment");
     llenarNuevo(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
 
@@ -492,19 +526,21 @@ describe("página /documentos", () => {
     expect(screen.queryByLabelText("Título")).toBeNull();
   });
 
-  it("un archivo de más de 20 MB o de otro tipo se rechaza antes de mandar nada", async () => {
+  it("un archivo de más de 20 MB o de otro tipo se rechaza al elegirlo, antes de mandar nada", async () => {
     const simulado = conLista();
     vi.stubGlobal("fetch", simulado);
     abrir();
     const grande = pdf("grande.pdf");
     Object.defineProperty(grande, "size", { value: TOPE_BYTES + 1 });
     await completarNuevo(grande);
+    expect((await screen.findByRole("alert")).textContent).toBe("El archivo pasa de 20 MB, el máximo. Hay que elegir uno más chico.");
+    expect(screen.queryByText(/Elegido:/)).toBeNull();
+    // El rechazado no quedó elegido: enviar pide el archivo.
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-    const aviso = await screen.findByText("El archivo pasa de 20 MB, el máximo. Elegí uno más chico.");
+    const aviso = await screen.findByText("Hay que elegir el archivo.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     elegir(archivo(["hola"], "notas.txt", "text/plain"));
-    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-    expect(await screen.findByText("Solo se aceptan archivos PDF, JPEG o PNG. Elegí otro archivo.")).toBeTruthy();
+    expect(await screen.findByText("Solo se aceptan archivos PDF, JPEG o PNG. Hay que elegir otro archivo.")).toBeTruthy();
     // Control: con un archivo justo de 20 MB, sí sale el pedido.
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
     const justo = pdf("justo.pdf");
@@ -534,10 +570,10 @@ describe("página /documentos", () => {
     abrir();
     const contrato = await tarjeta("Contrato de limpieza");
     fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
-    expect(document.activeElement).toBe(screen.getByLabelText("Archivo"));
+    expect(document.activeElement).toBe(within(contrato).getByRole("button", { name: "Sacar una foto" }));
     elegir(pdf("contrato.pdf"));
     fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
-    expect(await screen.findByText("El archivo pasa de 20 MB y no se guardó. Elegí uno más chico.")).toBeTruthy();
+    expect(await screen.findByText("El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.")).toBeTruthy();
     respuesta = () => error("tipo_no_admitido", 415);
     fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
     expect(await screen.findByText(/^Solo se aceptan archivos PDF, JPEG o PNG, y el contenido tiene que coincidir/)).toBeTruthy();
@@ -753,7 +789,7 @@ describe("página /documentos", () => {
     // Los tipos que la página acepta son exactamente los del cuerpo crudo del contrato.
     const tipos = Object.keys(subir?.requestBody?.content ?? {}).sort();
     expect(tipos).toEqual(["application/pdf", "image/jpeg", "image/png"]);
-    expect(ACEPTA.split(",").filter((t) => t.includes("/")).sort()).toEqual(tipos);
+    expect(aceptar(TIPOS_DE_DOCUMENTO).split(",").filter((t) => t.includes("/")).sort()).toEqual(tipos);
     const esquemas = contrato.components.schemas as Record<string, { properties?: Record<string, { maxLength?: number }> }>;
     expect(esquemas.DocumentoNuevo?.properties?.titulo?.maxLength).toBe(200);
     expect(TOPE_BYTES).toBe(20 * 1024 * 1024);
@@ -881,7 +917,7 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
       vi.stubGlobal("fetch", simulado);
       abrir();
       await screen.findByLabelText("Categoría");
-      const campoArchivo = screen.getByLabelText("Archivo");
+      const campoArchivo = screen.getByLabelText("Archivo del documento");
       llenarNuevo(pdf());
       fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
       const aviso = await screen.findByText("Listo: subimos el archivo de «Presupuesto de pintura». Queda «En revisión» mientras lo analizamos.");
@@ -889,8 +925,9 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
       expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("");
       expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe("");
       expect(screen.queryByText(/Elegido:/)).toBeNull();
-      // Un campo nuevo: el navegador no vacía solo el archivo que ya se eligió.
-      expect(screen.getByLabelText("Archivo")).not.toBe(campoArchivo);
+      // El campo del sistema no guarda el archivo ya elegido: se vacía al elegir.
+      expect((screen.getByLabelText("Archivo del documento") as HTMLInputElement).value).toBe("");
+      expect(screen.getByLabelText("Archivo del documento")).toBe(campoArchivo);
       // Control: sin lista a la vista no hay nada que volver a pedir.
       expect(pedidos(simulado, "GET", BASE)).toHaveLength(0);
       expect(screen.queryByRole("heading", { level: 2, name: "Documentos" })).toBeNull();

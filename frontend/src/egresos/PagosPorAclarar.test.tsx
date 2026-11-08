@@ -194,12 +194,12 @@ describe("pagos para aclarar (app 0067)", () => {
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/pagos/por-aclarar");
     fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
-    expect(screen.getByText("Primero subí el comprobante de la transferencia.")).toBeTruthy();
+    expect(screen.getByText("Primero hay que subir el comprobante de la transferencia.")).toBeTruthy();
     const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
     expect(registrar.disabled).toBe(true);
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
-    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
     expect(await screen.findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
     expect(registrar.disabled).toBe(true); // en cuarentena todavía no se registra
@@ -212,7 +212,7 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(screen.queryByRole("button", { name: "Actualizar" })).toBeNull();
     lista = [{ ...POR_ACLARAR, comprobante_id: NUEVO, comprobante_estado: "disponible" }];
     await vi.advanceTimersByTimeAsync(ESPERA);
-    expect(await screen.findByText(/ya podés registrar el pago/)).toBeTruthy();
+    expect(await screen.findByText(/ya se puede registrar el pago/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
     fireEvent.change(screen.getByLabelText(/^Importe transferido/), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` } });
@@ -246,7 +246,7 @@ describe("pagos para aclarar (app 0067)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
     expect(screen.getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
     expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/comprobante`)).toHaveLength(0);
@@ -265,7 +265,7 @@ describe("pagos para aclarar (app 0067)", () => {
     abrir("/pagos/por-aclarar");
     fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/^Archivo del comprobante/), { target: { files: [archivo] } });
+    fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await screen.findByText(/El archivo no se subió/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar la subida" }));
     expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
@@ -391,7 +391,7 @@ describe("fricción: las lecturas y el comprobante", () => {
       expect(registrar.disabled).toBe(true);
       estado = "disponible";
       await vi.advanceTimersByTimeAsync(ESPERA);
-      expect(await screen.findByText(/ya podés registrar el pago/)).toBeTruthy();
+      expect(await screen.findByText(/ya se puede registrar el pago/)).toBeTruthy();
       expect(registrar.disabled).toBe(false);
     });
 
