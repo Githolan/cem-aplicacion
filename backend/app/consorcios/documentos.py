@@ -30,6 +30,13 @@ contrato): la categoría elige la acción.
 - **`GET …/documentos/{id}/versiones/{v}/contenido`** (el mismo control): el archivo por el mismo
   origen, para verlo en la pantalla (`Rediseno_Circuito_Pagos_2026-11-06.md`, §4). Lo subió una
   persona: va con el tipo verificado al subirlo, `nosniff` y una CSP que no deja ejecutar nada.
+
+- **`POST …/documentos/{id}/retiro`** (`0089`): retira un documento que dejó de valer, con un
+  motivo. Lo hace quien carga esa categoría y además tiene la facultad `documentos.ver`
+  (`documentos.ver_restringidos`): la administración. No se borra nada: deja de aparecer en la lista
+  y la descarga, y queda en la exportación. Se niega si algo guardado lo cita (409). Quitar un
+  archivo subido por error en un formulario es `POST …/documentos/{id}/quitar`, en `egresos.py`,
+  junto a la creación del documento para carga.
 """
 
 import hashlib
@@ -52,6 +59,7 @@ from cem_contracts.documentos import (
     DocumentoNuevo,
     EstadoVersion,
     ListaDocumentos,
+    RetiroDocumento,
     TipoArchivo,
     VersionCargada,
     VersionEnLista,
@@ -112,9 +120,25 @@ TRAMO_CONTENIDO = 64 * 1024
 """El archivo pasa en tramos: 20 MB no se guardan en la memoria del proceso (§3)."""
 SIN_OBJETO = ("404", "NoSuchKey", "NoSuchVersion")
 
-ERRORES = {"no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)}
-"""Motivos de las funciones de `0035`. `origen_invalido` lo fija esta ruta: si llega, es un
-defecto (500)."""
+ERRORES_BAJA = {
+    "documento_referenciado": (
+        409, CodigoError.DOCUMENTO_REFERENCIADO,
+        "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el"
+        " acta de una decisión): no se puede quitar ni retirar.",
+    ),
+    "no_es_quien_lo_subio": (
+        403, CodigoError.NO_ES_QUIEN_LO_SUBIO, "Solo quien subió el archivo lo puede quitar.",
+    ),
+    "motivo_con_cuenta": (
+        422, CodigoError.MOTIVO_CON_CUENTA,
+        "El motivo no puede llevar el número de una cuenta. Si no es una cuenta, separar los"
+        " números con una coma.",
+    ),
+}  # fmt: skip
+"""Motivos de quitar y retirar (`0089`); quitar los usa desde `egresos.py`."""
+ERRORES = {"no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)} | ERRORES_BAJA
+"""Motivos de las funciones de `0035` y de `0089`. `origen_invalido` lo fija esta ruta: si llega,
+es un defecto (500)."""
 
 
 def _demasiado_grande() -> ErrorApi:
@@ -361,6 +385,49 @@ async def subir_archivo(
         return await anyio.to_thread.run_sync(lambda: responder_una_vez(motor, ctx, pedido, efecto))
     finally:
         turnos.release()
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/retiro",
+    response_model=DocumentoId,
+    summary="Retirar un documento que dejó de valer, con un motivo: no se borra, deja de aparecer"
+    " en la lista y queda en la exportación",
+    responses={
+        403: {
+            "description": "Sin una acción de carga para la categoría del documento, o sin la"
+            " facultad `documentos.ver` (`documentos.ver_restringidos`)."
+        },
+        404: {"description": "El documento no existe en este consorcio o ya no está vigente."},
+        409: {
+            "description": "Algo guardado cita el documento (`documento_referenciado`): una orden,"
+            " un pago, un proveedor, un contrato o el acta de una decisión."
+        },
+        422: {"description": "Sin motivo, o el motivo lleva un teléfono, un correo o una cuenta."},
+    },
+)
+def retirar_documento(
+    documento_id: UUID,
+    retiro: RetiroDocumento,
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    ctx = cargar.ctx
+    _verificar_carga(cargar, operativos, None)
+    restringidos.verificar(Entidad())
+    _verificar_carga(cargar, operativos, _categoria_para_cargar(motor, ctx, documento_id))
+
+    def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        _escribir(
+            conn,
+            "select nucleo.retirar_documento(:d, :m, :a, 'api')",
+            {"d": documento_id, "m": retiro.motivo, "a": ctx.persona_id},
+        )
+        return 200, DocumentoId(id=documento_id)
+
+    return responder_una_vez(motor, ctx, idempotencia, efecto)
 
 
 def _leer(conn: Connection, sql: str, parametros: dict, ver: Permiso):

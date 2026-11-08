@@ -990,7 +990,9 @@
           "columnas_no_encontradas",
           "columnas_sin_elegir",
           "pago_sin_conciliar",
-          "movimiento_no_coincide"
+          "movimiento_no_coincide",
+          "no_es_quien_lo_subio",
+          "documento_referenciado"
         ],
         "title": "CodigoError",
         "type": "string"

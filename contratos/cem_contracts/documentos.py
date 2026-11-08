@@ -16,6 +16,11 @@ propietario del 25-10-2026 (`Decisiones_Propietario_2026-10-25.md`, §1.3).
   `disponible`; nunca hay una URL permanente.
 - El título no admite teléfonos ni correos, como el texto libre de los contactos (2b-7); la base
   repite la regla (`nucleo.sin_contacto_libre`).
+- **Nada se borra** (`0089`): un archivo subido por error en un formulario lo quita quien lo subió
+  (`POST …/documentos/{id}/quitar`, estado `descartado`), y un documento que dejó de valer lo retira
+  quien administra los documentos, con un motivo (`POST …/documentos/{id}/retiro`, estado
+  `retirado`). Los dos se niegan si algo guardado cita el documento (`documento_referenciado`). Las
+  listas y la descarga muestran solo los vigentes; la exportación lleva también los retirados.
 """
 
 from datetime import date, datetime
@@ -28,6 +33,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from cem_contracts.contactos import _sin_contacto_libre
 
 LARGO_MAXIMO_TITULO = 200
+LARGO_MAXIMO_MOTIVO_RETIRO = 300
 TOPE_BYTES = 20 * 1024 * 1024
 """20 MB (decisión del 25-10, §1.3). Un byte más es 413."""
 
@@ -149,4 +155,20 @@ class ListaDocumentos(BaseModel):
     documentos: list[DocumentoEnLista] = Field(
         description="Los vigentes de las categorías que la persona puede ver, del más nuevo al"
         " más viejo por su fecha."
+    )
+
+
+MotivoRetiro = Annotated[
+    str, Field(max_length=LARGO_MAXIMO_MOTIVO_RETIRO), AfterValidator(_sin_contacto_libre)
+]
+
+
+class RetiroDocumento(BaseModel):
+    """`POST …/documentos/{id}/retiro`: el documento sale de las listas y queda en la exportación,
+    con este motivo. No se borra nada."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    motivo: MotivoRetiro = Field(
+        description="Por qué se retira (obligatorio): sin teléfonos, correos ni cuentas."
     )

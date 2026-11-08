@@ -19,6 +19,11 @@ import { VisorDocumento } from "./VisorDocumento";
 // o se lee, el formulario no se guarda (`alEsperar`): guardar sin el archivo lo perdería. El archivo
 // anterior sigue valiendo hasta que el nuevo pasa el antivirus; «Seguir sin este archivo» deja de
 // esperarlo y vuelve al anterior, si había.
+//
+// «Quitar el archivo» (app 0089): el archivo subido acá que resultó ser el equivocado se quita antes
+// de guardar. El formulario lo suelta (vuelve el anterior, si había) y el servidor lo da de baja: deja
+// de aparecer en Documentos, sin borrar nada. Solo el subido acá, y el servidor lo niega si ya respalda
+// algo guardado. Pide confirmación: es un acto que no se deshace.
 
 export type LecturaCarga = components["schemas"]["LecturaCarga"];
 export type TipoCarga = components["schemas"]["TipoCarga"];
@@ -38,7 +43,9 @@ type Fase =
   | { tipo: "rechazado" }
   | { tipo: "no_subio" }
   /** La persona dejó de esperar: sin el archivo nuevo (antivirus) o sin su lectura (a mano). */
-  | { tipo: "dejado"; conArchivo: boolean };
+  | { tipo: "dejado"; conArchivo: boolean }
+  /** Se quitó el archivo subido acá (app 0089). */
+  | { tipo: "quitado"; vuelveAnterior: boolean };
 
 export const TEXTO_SUBIENDO = "Subiendo…";
 export const TEXTO_REVISANDO = "El antivirus lo está revisando…";
@@ -56,6 +63,14 @@ export const TEXTO_DEJADO_SIN_ARCHIVO = "Se dejó de esperar ese archivo: no que
 export const TEXTO_DEJADO_SIN_LECTURA = "Se dejó de esperar la lectura: el archivo queda adjunto y los datos se completan a mano.";
 export const SEGUIR_SIN_ESPERAR = "Seguir sin este archivo";
 export const SEGUIR_SIN_LECTURA = "Seguir sin la lectura";
+export const QUITAR_ARCHIVO = "Quitar el archivo";
+export const CONFIRMAR_QUITAR = "Sí, quitar el archivo";
+export const NO_QUITAR = "No, dejarlo";
+/** La pregunta antes de quitar. */
+export const preguntaQuitar = (nombre: string) =>
+  `¿Quitar «${nombre}»? Deja de estar adjunto y sale de Documentos. No se puede deshacer.`;
+export const TEXTO_QUITADO = "Se quitó el archivo: no queda adjunto ni aparece en Documentos.";
+export const TEXTO_QUITADO_VUELVE_ANTERIOR = "Se quitó el archivo: vuelve a estar adjunto el anterior.";
 /** Lo que dice el formulario mientras no se puede guardar. */
 export const TEXTO_ESPERA_PARA_GUARDAR = "Hay que esperar a que termine el archivo, o elegir seguir sin él, para guardar.";
 
@@ -100,6 +115,11 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   const [tocado, setTocado] = useState(false);
   const cargado = tocado ? propio : inicial;
   const [viendo, setViendo] = useState(false);
+  /** Preguntando si se quita el archivo subido acá, o quitándolo. */
+  const [quitar, setQuitar] = useState<"nada" | "preguntando" | "quitando">("nada");
+  const claveQuitar = useRef<string | null>(null);
+  /** Por qué no se pudo quitar; lo demás (la lectura, sus avisos) sigue como estaba. */
+  const [falloQuitar, setFalloQuitar] = useState<string | null>(null);
   /** La versión que se sube o se espera. */
   const enEspera = useRef<{ documento: string; version: string; nombre: string } | null>(null);
   /** El documento creado cuyo archivo todavía no entró: el reintento sube solo el archivo. */
@@ -217,13 +237,48 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     }
   }
 
+  /** Quitar el archivo subido acá: el servidor lo da de baja y el formulario vuelve al anterior. */
+  async function quitarArchivo() {
+    if (propio === null) return;
+    setQuitar("quitando");
+    setFalloQuitar(null);
+    claveQuitar.current ??= crypto.randomUUID();
+    try {
+      const { error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/quitar", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, documento_id: propio.documento }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveQuitar.current } },
+      });
+      exigirSesion(response);
+      if (!response.ok) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) claveQuitar.current = null;
+        setQuitar("nada");
+        setFalloQuitar(`El archivo no se quitó. ${mensajeDeActo(response.status, codigo)}`);
+        return;
+      }
+      claveQuitar.current = null;
+      setQuitar("nada");
+      setTocado(false);
+      setPropio(null);
+      ultimas.current.alCargar(inicial);
+      setFase({ tipo: "quitado", vuelveAnterior: inicial !== null });
+    } catch (e: unknown) {
+      setQuitar("nada");
+      if (e instanceof SinSesion) aEntrar();
+      else setFalloQuitar(`El archivo no se quitó. ${SIN_CONEXION}`);
+    }
+  }
+
   function elegir(archivo: File) {
     // Otro archivo es otro pedido: si el anterior no entró, sirve su documento, no su clave.
     claveArchivo.current = null;
+    claveQuitar.current = null;
+    setFalloQuitar(null);
     void subir(archivo);
   }
 
-  const ocupada = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo";
+  // Mientras se quita, tampoco se guarda: el formulario mandaría el archivo que se está quitando.
+  const ocupada = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo" || quitar === "quitando";
   useEffect(() => {
     ultimas.current.alEsperar(ocupada);
   }, [ocupada]);
@@ -288,11 +343,40 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
           {texto}
         </p>
       )}
+      {fase.tipo === "quitado" && (
+        <p role="status" className="aviso-info">
+          {fase.vuelveAnterior ? TEXTO_QUITADO_VUELVE_ANTERIOR : TEXTO_QUITADO}
+        </p>
+      )}
+      {falloQuitar !== null && (
+        <p className="aviso-error" role="alert">
+          {falloQuitar}
+        </p>
+      )}
       {cargado !== null && (
         <div className="acciones">
           <button type="button" className="secundario" onClick={() => setViendo(true)}>
             {textoVer}
           </button>
+          {/* Solo el subido acá: el que trae la orden o el proveedor ya respalda algo guardado. */}
+          {tocado && propio !== null && quitar === "nada" && (
+            <button type="button" className="secundario peligro" disabled={deshabilitada || ocupada} onClick={() => setQuitar("preguntando")}>
+              {QUITAR_ARCHIVO}
+            </button>
+          )}
+        </div>
+      )}
+      {tocado && propio !== null && quitar !== "nada" && (
+        <div role="group" aria-label={QUITAR_ARCHIVO} className="confirmar-quitar">
+          <p>{preguntaQuitar(propio.nombre)}</p>
+          <div className="acciones">
+            <button type="button" className="secundario peligro" disabled={quitar === "quitando"} onClick={() => void quitarArchivo()}>
+              {quitar === "quitando" ? "Quitando…" : CONFIRMAR_QUITAR}
+            </button>
+            <button type="button" className="secundario" disabled={quitar === "quitando"} onClick={() => setQuitar("nada")}>
+              {NO_QUITAR}
+            </button>
+          </div>
         </div>
       )}
       {viendo && cargado !== null && (

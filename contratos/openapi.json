@@ -709,7 +709,9 @@
           "columnas_no_encontradas",
           "columnas_sin_elegir",
           "pago_sin_conciliar",
-          "movimiento_no_coincide"
+          "movimiento_no_coincide",
+          "no_es_quien_lo_subio",
+          "documento_referenciado"
         ],
         "title": "CodigoError",
         "type": "string"
@@ -8638,6 +8640,23 @@
         "title": "ResultadoCotejo",
         "type": "object"
       },
+      "RetiroDocumento": {
+        "additionalProperties": false,
+        "description": "`POST …/documentos/{id}/retiro`: el documento sale de las listas y queda en la exportación,\ncon este motivo. No se borra nada.",
+        "properties": {
+          "motivo": {
+            "description": "Por qué se retira (obligatorio): sin teléfonos, correos ni cuentas.",
+            "maxLength": 300,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "RetiroDocumento",
+        "type": "object"
+      },
       "RevisionMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision` (E62, alternativa 1\ndel propietario): le da eficacia hacia adelante a un mandato del Consejo pendiente de\nrevisión. No toca el mandato ni cubre el período en que estuvo sin efecto.",
         "properties": {
@@ -12535,6 +12554,158 @@
         "summary": "Crear un documento para cargar datos con IA: la factura de una orden o lo que respalda los datos de un proveedor",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/quitar": {
+      "post": {
+        "description": "Con lo mismo que pide crearlo, y solo quien lo creó y subió todos sus archivos, mientras nada\nlo cite (`0089`). El documento queda `descartado`: sale de la lista y de la descarga, el archivo\nqueda en el almacén y el acto, en la auditoría.",
+        "operationId": "quitar_documento_para_carga_api_v1_consorcios__consorcio_id__documentos__documento_id__quitar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10). O no es quien creó el documento y subió todos sus archivos (`no_es_quien_lo_subio`)."
+          },
+          "404": {
+            "description": "No existe en este consorcio, ya no está vigente o no es un documento para carga."
+          },
+          "409": {
+            "description": "Algo guardado lo cita (`documento_referenciado`): la versión de una orden o de un proveedor, por ejemplo."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quitar un archivo subido por error en un formulario, antes de guardar: el documento para carga deja de aparecer. No se borra nada",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/retiro": {
+      "post": {
+        "operationId": "retirar_documento_api_v1_consorcios__consorcio_id__documentos__documento_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetiroDocumento"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin una acción de carga para la categoría del documento, o sin la facultad `documentos.ver` (`documentos.ver_restringidos`)."
+          },
+          "404": {
+            "description": "El documento no existe en este consorcio o ya no está vigente."
+          },
+          "409": {
+            "description": "Algo guardado cita el documento (`documento_referenciado`): una orden, un pago, un proveedor, un contrato o el acta de una decisión."
+          },
+          "422": {
+            "description": "Sin motivo, o el motivo lleva un teléfono, un correo o una cuenta."
+          }
+        },
+        "summary": "Retirar un documento que dejó de valer, con un motivo: no se borra, deja de aparecer en la lista y queda en la exportación",
+        "tags": [
+          "documentos"
         ]
       }
     },

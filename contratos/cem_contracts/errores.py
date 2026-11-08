@@ -277,6 +277,11 @@ class CodigoError(StrEnum):
     """Se coteja un pago ya conciliado conforme: este todavía no lo está."""
     MOVIMIENTO_NO_COINCIDE = "movimiento_no_coincide"
     """El movimiento del extracto no tiene el importe y el número o la fecha del pago."""
+    NO_ES_QUIEN_LO_SUBIO = "no_es_quien_lo_subio"
+    """Un archivo subido por error lo quita solo quien lo subió (`0089`)."""
+    DOCUMENTO_REFERENCIADO = "documento_referenciado"
+    """El documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta
+    de una decisión): no se quita ni se retira (`0089`)."""
 
 
 class Error(BaseModel):
