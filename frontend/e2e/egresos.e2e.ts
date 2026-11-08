@@ -107,20 +107,21 @@ test.describe("egresos en un teléfono", () => {
     const lecturas = await simularApi(page, baseURL!, "consejero");
     await page.goto("/egresos/proveedores");
     const edificio = page.getByLabel("Edificio");
+    // Cada proveedor es una fila que abre su ficha (comentario 21): el nombre está en el botón de la fila.
 
-    await expect(page.getByRole("heading", { name: RAZON_LARGA })).toBeVisible();
+    await expect(page.getByRole("button", { name: RAZON_LARGA })).toBeVisible();
     await expect(page.getByText(`…${CUENTA.slice(-4)}`)).toBeVisible();
     await entraEnElTelefono(page);
     await sinFaltasDeAccesibilidad(page);
 
     await edificio.selectOption(B);
-    await expect(page.getByRole("heading", { name: "Limpieza Bordó SINTETICO" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: RAZON_LARGA })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Limpieza Bordó SINTETICO" })).toBeVisible();
+    await expect(page.getByRole("button", { name: RAZON_LARGA })).toHaveCount(0);
     await entraEnElTelefono(page);
 
     await edificio.selectOption(A);
-    await expect(page.getByRole("heading", { name: RAZON_LARGA })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Limpieza Bordó SINTETICO" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: RAZON_LARGA })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Limpieza Bordó SINTETICO" })).toHaveCount(0);
 
     const deProveedores = lecturas.filter((l) => l.endsWith("/proveedores"));
     expect(deProveedores).toEqual([A, B, A].map((c) => `/api/v1/consorcios/${c}/proveedores`));
