@@ -304,7 +304,7 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
     fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
@@ -313,10 +313,22 @@ describe("página /egresos/proveedores", () => {
     expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
   });
 
+  it("la fila entera abre la ficha, sin un botón aparte, y al volver el foco queda en la fila", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir("/egresos/proveedores");
+    const fila = await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
+    expect(fila.textContent).toContain("Cuenta …1234");
+    expect(screen.queryByRole("button", { name: /Ver la ficha/ })).toBeNull();
+    fireEvent.click(fila);
+    expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
+    await waitFor(() => expect(document.activeElement?.textContent).toMatch(/^Limpieza Ficticia SRL /));
+  });
+
   it("control: un proveedor con CUIT no ofrece cargarlo", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     await screen.findByRole("button", { name: "Cambiar los datos" });
     expect(screen.queryByRole("button", { name: "Cargar el CUIT" })).toBeNull();
   });
@@ -324,7 +336,7 @@ describe("página /egresos/proveedores", () => {
   it("con una sola versión, la ficha no repite los datos que ya muestra", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     await screen.findByRole("button", { name: "Cambiar los datos" });
     expect(screen.queryByText("Versiones anteriores")).toBeNull();
     expect(screen.queryByText(/^Versión 1/)).toBeNull();
@@ -352,7 +364,7 @@ describe("página /egresos/proveedores", () => {
       }),
     );
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     expect(await screen.findByText("Versiones anteriores")).toBeTruthy();
     expect(screen.getByText(/^Versión 1,.*Limpieza Vieja SRL/)).toBeTruthy();
     expect(screen.queryByText(/^Versión 2/)).toBeNull();
@@ -361,9 +373,9 @@ describe("página /egresos/proveedores", () => {
   it("la lista y la ficha muestran la cuenta enmascarada y nunca la completa", async () => {
     vi.stubGlobal("fetch", conLista());
     const { container } = abrir("/egresos/proveedores");
-    const lista = await screen.findByRole("table", { name: "Proveedores" });
-    expect(within(lista).getByText("…1234")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    const lista = await screen.findByRole("list", { name: "Proveedores" });
+    expect(within(lista).getByText(/· Cuenta …1234$/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     await screen.findByLabelText(/^Cuenta destino/);
     // Control: el número completo no aparece en ningún lugar del documento, ni en un campo.
@@ -389,10 +401,10 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" });
+    await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / });
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByRole("button", { name: "Ver la ficha de Pintura Ficticia SA" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" })).toBeNull();
+    expect(await screen.findByRole("button", { name: /^Pintura Ficticia SA / })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Limpieza Ficticia SRL / })).toBeNull();
   });
 
   it("una respuesta tardía del edificio anterior no aparece en el nuevo", async () => {
@@ -412,7 +424,7 @@ describe("página /egresos/proveedores", () => {
       }),
     );
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
     expect(await screen.findByText("El edificio no tiene proveedores cargados.")).toBeTruthy();
     soltar(Response.json({ proveedor: proveedor(), versiones: [] }));
@@ -438,7 +450,7 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     expect(await screen.findByLabelText("Código")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByRole("button", { name: "Ver la ficha de Pintura Ficticia SA" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^Pintura Ficticia SA / })).toBeTruthy();
     expect(screen.queryByLabelText("Código")).toBeNull();
   });
 
@@ -504,7 +516,7 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza integral" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
@@ -519,7 +531,7 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText(/^Cuenta destino/), { target: { value: CUENTA_NUEVA } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
@@ -537,7 +549,7 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza y jardín" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
@@ -561,7 +573,7 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText(/^Cuenta destino/), { target: { value: CUENTA_NUEVA } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
@@ -594,12 +606,12 @@ describe("página /egresos/proveedores", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/egresos/proveedores");
-    fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "otro" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     await waitFor(() => expect(screen.queryByLabelText("Rubro (opcional)")).toBeNull());
-    expect(await screen.findByRole("table", { name: "Proveedores" })).toBeTruthy();
+    expect(await screen.findByRole("list", { name: "Proveedores" })).toBeTruthy();
   });
 });
 

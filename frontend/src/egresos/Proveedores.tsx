@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { CampoCuit, cuitConError } from "../CampoCuit";
+import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
 import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura } from "../CargaConLectura";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
@@ -192,6 +193,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
+  /** La fila que abrió la ficha (comentario 21): al volver a la lista, el foco vuelve a ella. */
+  const { abrir: abrirFila, cerrar: cerrarFila, refFila } = useFichas<string>();
   const [formulario, setFormulario] = useState<Formulario | null>(factura === null ? null : { modo: "alta" });
   const [datos, setDatos] = useState<Datos>(factura === null ? VACIO : { ...VACIO, ...factura.datos });
   /** El documento que respalda el alta (0088), ya aprobado por el antivirus. */
@@ -241,6 +244,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function volverAPedir() {
     setLectura({ tipo: "cargando" });
     setFicha(null);
+    cerrarFila(false);
     setVuelta((v) => v + 1);
   }
 
@@ -257,8 +261,10 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       })
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        if (data !== undefined) setFicha(data);
-        else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
+        if (data !== undefined) {
+          setFicha(data);
+          abrirFila(p.id);
+        } else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver el proveedor", reintentar: () => verFicha(p) });
         else setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
       })
@@ -465,38 +471,15 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {lectura.proveedores.length === 0 ? (
                 <p className="tarjeta">El edificio no tiene proveedores cargados.</p>
               ) : (
-                <div className="tabla-lista tabla-tarjetas">
-                  <table aria-label="Proveedores">
-                    <thead>
-                      <tr>
-                        <th scope="col">Proveedor</th>
-                        <th scope="col">CUIT</th>
-                        <th scope="col">Estado</th>
-                        <th scope="col">Cuenta</th>
-                        <th scope="col">
-                          <span className="solo-lector">Acciones</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lectura.proveedores.map((p) => (
-                        <tr key={p.id}>
-                          <th scope="row">
-                            <h2>{p.razon_social}</h2>
-                          </th>
-                          <td data-etiqueta="CUIT">{p.cuit ?? "Sin CUIT"}</td>
-                          <td data-etiqueta="Estado">{TEXTO_ESTADO_PROVEEDOR[p.estado]}</td>
-                          <td data-etiqueta="Cuenta">{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</td>
-                          <td>
-                            <button type="button" className="sutil" onClick={() => verFicha(p)}>
-                              Ver la ficha<span className="solo-lector"> de {p.razon_social}</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                // La fila entera abre la ficha del proveedor; las acciones están en la ficha.
+                <ul className="filas-registro" aria-label="Proveedores">
+                  {lectura.proveedores.map((p) => (
+                    <li key={p.id}>
+                      <FilaDeRegistro titulo={p.razon_social} refFila={refFila(p.id)} deshabilitada={enviando} alAbrir={() => verFicha(p)}
+                        resumen={`${p.cuit ?? "Sin CUIT"} · ${TEXTO_ESTADO_PROVEEDOR[p.estado]} · Cuenta ${cuentaEnmascarada(p.cuenta_ultimos_digitos)}`} />
+                    </li>
+                  ))}
+                </ul>
               )}
             </>
           )}
@@ -540,7 +523,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       Cargar el CUIT
                     </button>
                   )}
-                  <button type="button" className="secundario" onClick={() => setFicha(null)}>
+                  <button
+                    type="button"
+                    className="secundario"
+                    onClick={() => {
+                      setFicha(null);
+                      cerrarFila();
+                    }}
+                  >
                     Volver a la lista
                   </button>
                 </div>
