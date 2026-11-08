@@ -382,6 +382,72 @@ def test_el_acta_de_una_decision_no_se_retira(motor_migrate, motor_app, e, bucke
     assert retirar(e, libre).status_code == 200  # control
 
 
+def decision_de(motor_migrate, e) -> UUID:
+    with motor_migrate.connect() as c:
+        return c.execute(
+            text("select id from nucleo.decision_formal where consorcio_id = :c limit 1"),
+            {"c": e.cons},
+        ).scalar_one()
+
+
+REGISTRAR_CON_ACTA = text(
+    "select nucleo.registrar_decision('asamblea', date '2026-01-01', 'Aprueba SINTETICO',"
+    " 'Acta 99, libro 9, folio 9', null, 'soporte', :s)"
+)
+ACTA_DE_LA_DECISION = text("update nucleo.decision_formal set sha256_acta = :s where id = :d")
+
+
+def test_no_se_registra_una_decision_con_el_acta_de_un_documento_dado_de_baja(
+    motor_migrate, motor_app, e, bucket
+):
+    retirado, _ = comun_con_archivo(motor_app, e, "actas_y_decisiones")
+    vigente, _ = comun_con_archivo(motor_app, e, "actas_y_decisiones", pdf(flujo=b"0 0 5 5 re f"))
+    [del_retirado] = versiones_de(motor_migrate, retirado)
+    [del_vigente] = versiones_de(motor_migrate, vigente)
+    assert retirar(e, retirado).status_code == 200
+    with pytest.raises(DBAPIError) as error:
+        with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c:
+            c.execute(REGISTRAR_CON_ACTA, {"s": del_retirado["sha256"]})
+    assert error.value.orig.diag.message_hint == "acta_dada_de_baja"
+    # Control: con el acta de un documento vigente, la decisión se registra.
+    with transaccion(motor_app, persona_id=None, consorcio_id=e.cons) as c:
+        assert c.execute(REGISTRAR_CON_ACTA, {"s": del_vigente["sha256"]}).scalar_one()
+    # Y ese documento ya no se retira: es el acta de una decisión.
+    assert codigo(retirar(e, vigente)) == (409, "documento_referenciado")
+
+
+def test_retirar_y_registrar_el_acta_se_esperan(motor_migrate, motor_app, e, bucket):
+    """Dos conexiones: quien llega primero bloquea el documento y el otro espera (acá, con
+    `lock_timeout`, falla por la espera) y después ve lo que hizo el primero."""
+    doc, _ = comun_con_archivo(motor_app, e, "actas_y_decisiones")
+    otro, _ = comun_con_archivo(motor_app, e, "actas_y_decisiones", pdf(flujo=b"0 0 7 7 re f"))
+    [v], [w] = versiones_de(motor_migrate, doc), versiones_de(motor_migrate, otro)
+    decision = decision_de(motor_migrate, e)
+    retiro = text("select nucleo.retirar_documento(:d, :m, :a, 'api')")
+    # Retirar primero: registrar el acta espera y, cuando el retiro se confirma, se niega.
+    with transaccion(motor_app, persona_id=e.adm, consorcio_id=e.cons) as a:
+        a.execute(retiro, {"d": doc, "m": MOTIVO, "a": e.adm})
+        with pytest.raises(DBAPIError) as espera:
+            with motor_migrate.begin() as b:
+                b.execute(text("set local lock_timeout = '500ms'"))
+                b.execute(ACTA_DE_LA_DECISION, {"s": v["sha256"], "d": decision})
+        assert espera.value.orig.diag.sqlstate == "55P03"
+    with pytest.raises(DBAPIError) as despues:
+        with motor_migrate.begin() as b:
+            b.execute(ACTA_DE_LA_DECISION, {"s": v["sha256"], "d": decision})
+    assert despues.value.orig.diag.message_hint == "acta_dada_de_baja"
+    # Registrar primero: retirar espera y, cuando el acta se confirma, se niega.
+    with motor_migrate.begin() as b:
+        b.execute(ACTA_DE_LA_DECISION, {"s": w["sha256"], "d": decision})
+        with pytest.raises(DBAPIError) as espera:
+            with transaccion(motor_app, persona_id=e.adm, consorcio_id=e.cons) as a:
+                a.execute(text("set local lock_timeout = '500ms'"))
+                a.execute(retiro, {"d": otro, "m": MOTIVO, "a": e.adm})
+        assert espera.value.orig.diag.sqlstate == "55P03"
+    assert codigo(retirar(e, otro)) == (409, "documento_referenciado")
+    assert documento(motor_migrate, otro)["estado"] == "vigente"
+
+
 def test_las_funciones_y_quien_las_ejecuta(motor_migrate):
     m = _migracion()
     with motor_migrate.connect() as c:

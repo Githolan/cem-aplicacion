@@ -12307,7 +12307,7 @@
             "description": "Sin `decisiones.registrar` en el consorcio."
           },
           "422": {
-            "description": "Faltan datos, la referencia no es válida o la fecha es posterior a hoy en el consorcio (`fecha_futura`)."
+            "description": "Faltan datos, la referencia no es válida, la fecha es posterior a hoy en el consorcio (`fecha_futura`), o la huella del acta es la de un documento quitado o retirado (`documento_invalido`, `0089`)."
           }
         },
         "summary": "Registrar una decisión formal ya tomada, con la referencia del acta",

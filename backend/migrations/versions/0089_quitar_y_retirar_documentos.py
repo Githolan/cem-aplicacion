@@ -29,7 +29,11 @@ las claves foráneas del catálogo: una tabla nueva que cite documentos no pasa 
 **Sin carreras.** Quitar y retirar bloquean la fila del documento (`for update`) antes de mirar las
 citas. Toda tabla que cita un documento lo bloquea `for share` al insertar
 (`nucleo.documento_citado_vigente`) y se niega con `documento_invalido` si ya está descartado o
-retirado: o la cita espera y ve el estado nuevo, o quitar espera y ve la cita.
+retirado: o la cita espera y ve el estado nuevo, o quitar espera y ve la cita. El acta de una
+decisión no es una clave foránea sino un `sha256`: al registrarlo (`nucleo.decision_formal`, al
+insertar o al cambiar `sha256_acta`), `nucleo.acta_de_documento_vigente` bloquea `for share` los
+documentos del consorcio con una versión de ese `sha256` y se niega (`acta_dada_de_baja`) si alguno
+está descartado o retirado. Un acta que no está entre los documentos se registra como siempre.
 
 **Los archivos quedan.** Las versiones no cambian (su estado sigue siendo el del antivirus) y los
 objetos del almacén no se borran: el borrado de un rechazado (`documentos.borrar_rechazado`) existe
@@ -81,6 +85,7 @@ lectura con IA de un documento para carga (no es lo que se guardó)."""
 
 REFERENCIADO = "nucleo.documento_referenciado(uuid, uuid)"
 CITADO = "nucleo.documento_citado_vigente()"
+ACTA = "nucleo.acta_de_documento_vigente()"
 NO_CAMBIA = "nucleo.documento_dado_de_baja_no_cambia()"
 QUITAR = "nucleo.quitar_documento(uuid, uuid, text, uuid)"
 RETIRAR = "nucleo.retirar_documento(uuid, text, uuid, text)"
@@ -189,6 +194,38 @@ create function {CITADO.removesuffix("()")}()
   end
   $$;
 {DISPARADORES}
+-- El acta de una decisión cita un documento por el `sha256` de una versión: se bloquean esos
+-- documentos como en `documento_citado_vigente`, y retirar (que los bloquea `for update` y después
+-- mira las decisiones) espera o es esperado.
+create function {ACTA.removesuffix("()")}()
+  returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if new.sha256_acta is null then
+      return new;
+    end if;
+    perform 1 from nucleo.documento d
+     where d.consorcio_id = new.consorcio_id
+       and d.id in (select v.documento_id from nucleo.version_documento v
+                     where v.consorcio_id = new.consorcio_id and v.sha256 = new.sha256_acta)
+       for share;
+    -- Otra sentencia, otra foto: después de esperar, ve el estado que dejó quien retiró.
+    if exists (select 1 from nucleo.documento d
+                 join nucleo.version_documento v
+                   on v.consorcio_id = d.consorcio_id and v.documento_id = d.id
+                where d.consorcio_id = new.consorcio_id and v.sha256 = new.sha256_acta
+                  and d.estado in ('descartado', 'retirado')) then
+      raise exception 'el acta es un documento quitado o retirado: no respalda una decisión'
+        using errcode = 'P0001', hint = 'acta_dada_de_baja';
+    end if;
+    return new;
+  end
+  $$;
+create trigger acta_de_documento_vigente before insert or update of sha256_acta
+  on nucleo.decision_formal
+  for each row execute function {ACTA};
 create function nucleo.quitar_documento(documento uuid, actor uuid, origen_pedido text,
                                         sesion uuid)
   returns void
@@ -267,7 +304,7 @@ create function nucleo.retirar_documento(documento uuid, motivo text, actor uuid
   $$;
 """
 
-INTERNAS = (REFERENCIADO, CITADO)
+INTERNAS = (REFERENCIADO, CITADO, ACTA)
 RUTAS = (QUITAR, RETIRAR)
 
 EXPORTAR_DOCUMENTOS_CAMBIOS = (
@@ -344,6 +381,7 @@ def downgrade() -> None:
         op.execute(f"drop function {funcion}")
     for tabla, _ in REFERENCIAS:
         op.execute(f"drop trigger documento_citado_vigente on {tabla}")
+    op.execute("drop trigger acta_de_documento_vigente on nucleo.decision_formal")
     for funcion in INTERNAS:
         op.execute(f"drop function {funcion}")
     op.execute("drop trigger documento_dado_de_baja_no_cambia on nucleo.documento")

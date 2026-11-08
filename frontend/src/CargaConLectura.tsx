@@ -240,7 +240,8 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   /** Quitar el archivo subido acá: el servidor lo da de baja y el formulario vuelve al anterior. */
   async function quitarArchivo() {
     // Nunca con otro archivo subiéndose, en el antivirus o leyéndose: quitar soltaría su espera.
-    if (propio === null || subiendoOtro) return;
+    // Ni con el formulario guardando (`deshabilitada`): mandaría el archivo que se está quitando.
+    if (propio === null || subiendoOtro || deshabilitada) return;
     setQuitar("quitando");
     setFalloQuitar(null);
     claveQuitar.current ??= crypto.randomUUID();
@@ -282,6 +283,10 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
 
   // Mientras se quita, tampoco se guarda: el formulario mandaría el archivo que se está quitando.
   // Con la pregunta de quitar abierta no se elige otro archivo (`SubirArchivo` deshabilitada).
+  // Si el formulario empieza a guardar con la pregunta abierta, la pregunta se cierra.
+  useEffect(() => {
+    if (deshabilitada) setQuitar((actual) => (actual === "preguntando" ? "nada" : actual));
+  }, [deshabilitada]);
   /** Un archivo subiéndose, en el antivirus o leyéndose. */
   const subiendoOtro = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo";
   const ocupada = subiendoOtro || quitar === "quitando";
@@ -376,7 +381,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
         <div role="group" aria-label={QUITAR_ARCHIVO} className="confirmar-quitar">
           <p>{preguntaQuitar(propio.nombre)}</p>
           <div className="acciones">
-            <button type="button" className="secundario peligro" disabled={quitar === "quitando" || subiendoOtro} onClick={() => void quitarArchivo()}>
+            <button type="button" className="secundario peligro" disabled={quitar === "quitando" || subiendoOtro || deshabilitada} onClick={() => void quitarArchivo()}>
               {quitar === "quitando" ? "Quitando…" : CONFIRMAR_QUITAR}
             </button>
             <button type="button" className="secundario" disabled={quitar === "quitando"} onClick={() => setQuitar("nada")}>

@@ -3195,6 +3195,24 @@ describe("la factura arriba de la orden (0088)", () => {
       expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
     });
 
+    it("si el formulario empieza a guardar con la pregunta abierta, la pregunta se cierra y no se quita nada", async () => {
+      let soltar: (r: Response) => void = () => undefined;
+      const guardando = new Promise<Response>((resolver) => {
+        soltar = resolver;
+      });
+      const api = await conFacturaSubida({ [`POST ${ORDENES}`]: () => guardando });
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      expect(await boton(CONFIRMAR_QUITAR)).toBeTruthy();
+      fireEvent.click(await boton("Guardar la orden"));
+      await waitFor(() => expect(pedidos(api, "POST", ORDENES)).toHaveLength(1));
+      await waitFor(() => sinBoton(CONFIRMAR_QUITAR));
+      expect(await cuerpo(pedidos(api, "POST", ORDENES)[0])).toMatchObject({ factura_version_id: VF });
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+      soltar(Response.json({ id: O1, version: 1 }, { status: 201 }));
+    });
+
     it("«No, dejarlo» no manda nada y la factura sigue adjunta", async () => {
       const api = await conFacturaSubida({});
       fireEvent.click(await boton(QUITAR_ARCHIVO));
