@@ -64,6 +64,7 @@
   --success-text: #0f5223;
   --danger-bg: #ffffff;
   --danger-text: #8a0f12;
+  --on-danger: #ffffff;
   --border: #000000;
   --border-input: #000000;
   --divider: #000000;
@@ -100,6 +101,7 @@
     --success-text: #7fe08f;
     --danger-bg: #000000;
     --danger-text: #ff9b9b;
+    --on-danger: #000000;
     --border: #ffffff;
     --border-input: #ffffff;
     --divider: #ffffff;
@@ -230,6 +232,7 @@
 }
 
 .lectura-ampliada .aviso-ok,
+.lectura-ampliada .aviso-info,
 .lectura-ampliada .aviso-error,
 .lectura-ampliada [data-tono] {
   border: 2px solid currentcolor;
@@ -250,6 +253,10 @@
   padding: 0.75rem 1.25rem;
   border: 2px solid var(--accent);
   border-radius: 0.25rem;
+}
+
+.lectura-ampliada button.peligro:not(:disabled) {
+  border-color: var(--danger-text);
 }
 
 .lectura-ampliada :focus-visible,

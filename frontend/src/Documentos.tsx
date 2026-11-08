@@ -740,7 +740,7 @@ export function Documentos() {
           <button type="submit" disabled={enviando}>
             Subir el archivo
           </button>{" "}
-          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -802,7 +802,7 @@ export function Documentos() {
           {!soloCarga && (
             <>
               {" "}
-              <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+              <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
                 Cancelar
               </button>
             </>

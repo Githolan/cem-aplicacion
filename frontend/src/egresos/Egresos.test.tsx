@@ -25,6 +25,7 @@ import {
   TEXTO_SESION_VENCIDA,
 } from "./comun";
 import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO } from "./Proveedores";
+import { CUIT_INVALIDO } from "../CampoCuit";
 
 // Pantallas de egresos (H3, aprobadas el 30-10-2026). Todos los datos son ficticios: CUIT y CBU
 // inventados, sin ningún proveedor ni cuenta real.
@@ -364,10 +365,14 @@ describe("página /egresos/proveedores", () => {
     expect(within(lista).getByText("…1234")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
-    await screen.findByLabelText(/Cuenta destino nueva/);
+    await screen.findByLabelText(/^Cuenta destino/);
     // Control: el número completo no aparece en ningún lugar del documento, ni en un campo.
     expect(container.innerHTML).not.toContain(CUENTA);
-    expect((screen.getByLabelText(/Cuenta destino nueva/) as HTMLInputElement).value).toBe("");
+    const cuenta = screen.getByLabelText(/^Cuenta destino/) as HTMLInputElement;
+    expect(cuenta.value).toBe("");
+    // La cuenta que tiene va dentro del campo (comentario 27), y una sola vez en el formulario.
+    expect(cuenta.placeholder).toBe("…1234");
+    expect(screen.getByRole("form", { name: /^Cambiar/ }).textContent).not.toContain("…1234");
     await sinFaltasDeAccesibilidad(container);
   });
 
@@ -456,7 +461,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
     fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
     fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
     await verificarCodigo();
     expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1);
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
@@ -465,6 +470,28 @@ describe("página /egresos/proveedores", () => {
     await new Promise((r) => setTimeout(r, 50));
     // El alta pendiente del primer edificio no se repite al llegar la verificación.
     expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1);
+  });
+
+  it("un CUIT con el verificador mal se marca en el campo y el alta no sale; corregido, sale", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => Response.json({ id: P1, version: 1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000008" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    expect(screen.getByRole("alert").textContent).toBe(CUIT_INVALIDO);
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(0);
+    // Control: con el verificador bien, el mismo formulario sí sale.
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
+    expect(screen.queryByText(CUIT_INVALIDO)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1));
   });
 
   it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {
@@ -480,7 +507,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza integral" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
     expect(await enviado.json()).toMatchObject({ documento_id: DOC });
@@ -494,8 +521,8 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
-    fireEvent.change(await screen.findByLabelText(/Cuenta destino nueva/), { target: { value: CUENTA_NUEVA } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.change(await screen.findByLabelText(/^Cuenta destino/), { target: { value: CUENTA_NUEVA } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     expect((await screen.findByRole("alert")).textContent).toBe(AVISO_CUENTA);
     expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Sí, cambiar la cuenta" }));
@@ -513,7 +540,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza y jardín" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
     expect(screen.queryByText(AVISO_CUENTA)).toBeNull();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
@@ -536,14 +563,14 @@ describe("página /egresos/proveedores", () => {
     abrir("/egresos/proveedores");
     fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
-    fireEvent.change(await screen.findByLabelText(/Cuenta destino nueva/), { target: { value: CUENTA_NUEVA } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.change(await screen.findByLabelText(/^Cuenta destino/), { target: { value: CUENTA_NUEVA } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sí, cambiar la cuenta" }));
     expect(await screen.findByText(AVISO_PROVEEDOR_CAMBIO)).toBeTruthy();
     await waitFor(() => expect((screen.getByLabelText("Rubro (opcional)") as HTMLInputElement).value).toBe("limpieza integral"));
-    expect((screen.getByLabelText(/Cuenta destino nueva/) as HTMLInputElement).value).toBe(CUENTA_NUEVA);
+    expect((screen.getByLabelText(/^Cuenta destino/) as HTMLInputElement).value).toBe(CUENTA_NUEVA);
     expect(screen.queryByRole("button", { name: "Sí, cambiar la cuenta" })).toBeNull();
-    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar los cambios" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sí, cambiar la cuenta" }));
     expect(await screen.findByText("Listo: el proveedor quedó en la versión 3.")).toBeTruthy();
     const intentos = pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`);
@@ -570,7 +597,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Ver la ficha de Limpieza Ficticia SRL" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "otro" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
     await waitFor(() => expect(screen.queryByLabelText("Rubro (opcional)")).toBeNull());
     expect(await screen.findByRole("table", { name: "Proveedores" })).toBeTruthy();
   });

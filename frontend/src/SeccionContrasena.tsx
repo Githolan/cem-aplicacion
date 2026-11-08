@@ -260,7 +260,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           <button type="submit" disabled={enviando}>
             {estado.definida ? "Guardar la contraseña nueva" : "Guardar la contraseña"}
           </button>
-          <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
+          <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
             Cancelar
           </button>
         </div>

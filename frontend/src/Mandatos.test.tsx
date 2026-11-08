@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
+import { CUIT_INVALIDO } from "./CampoCuit";
 import { VOLVIO_LA_RED } from "./egresos/comun";
 import { mensajeDeError, presentacion } from "./Mandatos";
 import { ContextoVersion } from "./version";
@@ -446,6 +447,26 @@ describe("página /mandatos", () => {
     await screen.findByText("Listo: el mandato quedó dado de alta.");
     const cuerpo = (await en(pedidos(simulado, "POST", RUTA_MANDATOS), 0).json()) as Record<string, unknown>;
     expect([cuerpo.persona_id, cuerpo.nombre, cuerpo.cuit, cuerpo.matricula]).toEqual([null, "Estudio Norte", CUIT, "RPA 99"]);
+  });
+
+  it("un CUIT con el verificador mal se marca en el campo y el alta no sale (comentario 27)", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_MANDATOS}`]: () => Response.json({ id: NUEVO }, { status: 201 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarAlta();
+    const alta = seccion("Dar de alta un mandato");
+    fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
+    fireEvent.change(within(alta).getByLabelText("Razón social o nombre"), { target: { value: "Estudio Norte" } });
+    fireEvent.change(within(alta).getByLabelText("CUIT (11 números, sin guiones)"), { target: { value: "20123456787" } });
+    expect(within(alta).getByRole("alert").textContent).toBe(CUIT_INVALIDO);
+    fireEvent.click(boton("Dar de alta"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(0);
+    // Control: con el verificador bien, sale.
+    fireEvent.change(within(alta).getByLabelText("CUIT (11 números, sin guiones)"), { target: { value: CUIT } });
+    fireEvent.click(boton("Dar de alta"));
+    await screen.findByText("Listo: el mandato quedó dado de alta.");
+    expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
   });
 
   const opciones = (etiqueta: string) => within(screen.getByLabelText(etiqueta)).getAllByRole("option").map((o) => o.getAttribute("value"));

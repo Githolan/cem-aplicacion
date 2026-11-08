@@ -2,6 +2,7 @@ import { type FormEvent, type MutableRefObject, useCallback, useEffect, useId, u
 import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
+import { CampoCuit, cuitConError } from "./CampoCuit";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
@@ -53,7 +54,6 @@ const LARGO_NOMBRE = 200;
 const LARGO_MATRICULA = 100;
 /** Cuánto de la descripción entra en una opción: el ancho de un `<select>` es el de su opción más larga. */
 const LARGO_OPCION = 60;
-const PATRON_CUIT = "[0-9]{11}";
 const PATRON_SHA256 = "[0-9a-fA-F]{64}";
 /** Un texto con algo más que espacios (la API rechaza el vacío después de recortar). */
 const PATRON_TEXTO = ".*\\S.*";
@@ -539,6 +539,8 @@ export function Mandatos() {
 
   function darDeAlta(evento: FormEvent) {
     evento.preventDefault();
+    // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
+    if (externo && cuitConError(cuit)) return;
     enviar(
       claveAlta,
       "alta",
@@ -900,7 +902,7 @@ export function Mandatos() {
             </form>
             {avisoEn("decision")}
             <p>
-              <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
+              <button type="button" className="secundario peligro" onClick={cerrarFormulario} disabled={enviando}>
                 Cancelar
               </button>
             </p>
@@ -958,18 +960,7 @@ export function Mandatos() {
                       value={nombre}
                       onChange={(e) => cambiar(claveAlta, setNombre)(e.target.value)}
                     />
-                    <label htmlFor={`${id}-cuit`}>CUIT (11 números, sin guiones)</label>
-                    <input
-                      id={`${id}-cuit`}
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      pattern={PATRON_CUIT}
-                      required
-                      disabled={enviando}
-                      value={cuit}
-                      onChange={(e) => cambiar(claveAlta, setCuit)(e.target.value)}
-                    />
+                    <CampoCuit id={`${id}-cuit`} valor={cuit} deshabilitado={enviando} alCambiar={cambiar(claveAlta, setCuit)} />
                   </>
                 ) : elegibles.length === 0 ? (
                   <p>
@@ -1068,7 +1059,7 @@ export function Mandatos() {
             )}
             {avisoEn("alta")}
             <p>
-              <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
+              <button type="button" className="secundario peligro" onClick={cerrarFormulario} disabled={enviando}>
                 Cancelar
               </button>
             </p>
@@ -1360,7 +1351,7 @@ export function Mandatos() {
                       <p id={`${id}-confirmar-baja`}>
                         ¿Dar de baja el mandato de {detalle.datos.nombre}? La baja no se puede deshacer.
                       </p>
-                      <button type="button" ref={confirmarSi} onClick={() => darDeBaja(detalle.datos)} disabled={enviando}>
+                      <button type="button" className="peligro" ref={confirmarSi} onClick={() => darDeBaja(detalle.datos)} disabled={enviando}>
                         Sí, dar de baja
                       </button>{" "}
                       <button type="button" className="secundario" onClick={() => setConfirmarBaja(false)} disabled={enviando}>
@@ -1368,7 +1359,7 @@ export function Mandatos() {
                       </button>
                     </div>
                   ) : (
-                    <button type="submit" ref={botonBaja} disabled={enviando}>
+                    <button type="submit" className="peligro" ref={botonBaja} disabled={enviando}>
                       Dar de baja
                     </button>
                   )}

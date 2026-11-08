@@ -9,7 +9,7 @@ const EDIFICIO = "a1111111-1111-4111-8111-111111111111";
 const PROVEEDOR = "b2222222-2222-4222-8222-222222222222";
 const PERSONA = "99999999-9999-4999-8999-999999999999";
 const RUTA_PROVEEDORES = `/api/v1/consorcios/${EDIFICIO}/proveedores`;
-const CUIT = "30712345679";
+const CUIT = "30712345671";
 const RAZON = "Plomería SINTETICA SRL (NO REAL)";
 const ANCHO_HOJA_CENTRADA_PX = 769;
 
@@ -75,7 +75,7 @@ async function completarAlta(pagina: Page) {
   await pagina.getByLabel("Razón social").fill(RAZON);
 }
 
-const guardar = (pagina: Page) => pagina.getByRole("button", { name: "Guardar" }).click();
+const guardar = (pagina: Page) => pagina.getByRole("button", { name: "Dar de alta el proveedor" }).click();
 
 async function sinDesborde(pagina: Page) {
   const { scrollWidth, clientWidth } = await pagina.evaluate(() => {

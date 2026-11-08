@@ -202,7 +202,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
 
   const hayOtro = activos !== null && METODOS.filter((m) => activos[m]).length > 1;
   const cancelar = (
-    <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+    <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
       Cancelar
     </button>
   );

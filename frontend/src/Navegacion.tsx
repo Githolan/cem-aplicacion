@@ -19,6 +19,9 @@ import { useSesionConNombre } from "./sesion";
 interface Destino {
   ruta: string;
   texto: string;
+  /** Lo que entra en las pestañas del teléfono. Sin él va `texto`: la función completa, y se
+   * abrevia solo cuando falta lugar (comentario 24). */
+  corto?: string;
   icono: NombreIcono;
   /** Sin requisito: lo tiene toda persona con sesión. */
   requisito?: Requisito;
@@ -28,7 +31,7 @@ const PRINCIPALES: readonly Destino[] = [
   { ruta: RUTA_INICIO, texto: "Inicio", icono: "inicio" },
   { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
   { ruta: RUTA_DOCUMENTOS, texto: "Documentos", icono: "documento", requisito: REQUISITOS.documentos },
-  { ruta: RUTA_CONTACTOS, texto: "Contactos", icono: "telefono", requisito: REQUISITOS.contactos },
+  { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", corto: "Emergencias", icono: "telefono", requisito: REQUISITOS.contactos },
   { ruta: RUTA_CUENTA, texto: "Mi cuenta", icono: "persona" },
 ];
 
@@ -59,7 +62,15 @@ function Item({ destino, secundario }: { destino: Destino; secundario?: boolean 
   return (
     <NavLink to={destino.ruta} end={destino.ruta === RUTA_INICIO} className={clase}>
       <Icono nombre={destino.icono} />
-      <span>{destino.texto}</span>
+      {destino.corto === undefined ? (
+        <span>{destino.texto}</span>
+      ) : (
+        // Las dos están en la página y el ancho deja ver una: el nombre del enlace es el que se ve.
+        <>
+          <span className="navegacion__largo">{destino.texto}</span>
+          <span className="navegacion__corto">{destino.corto}</span>
+        </>
+      )}
     </NavLink>
   );
 }

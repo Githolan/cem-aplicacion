@@ -41,8 +41,8 @@ const LARGO_TEXTO = 300;
 const PATRON_TEXTO = ".*\\S.*";
 
 const TEXTO_TIPO: Record<TipoVinculo, string> = {
-  propietario: "Propietario o propietaria",
-  inquilino: "Inquilino o inquilina",
+  propietario: "Propietario/a",
+  inquilino: "Inquilino/a",
   ocupante: "Ocupante",
 };
 
@@ -463,7 +463,7 @@ export function Padron() {
             )}
             {esteAbierto === null && confirmable && finalizable && " "}
             {esteAbierto === null && finalizable && (
-              <button type="button" className="secundario" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
+              <button type="button" className="secundario peligro" onClick={() => abrir(f, "finalizar")} disabled={enviando} aria-describedby={titulo}>
                 Finalizar
               </button>
             )}
@@ -517,7 +517,7 @@ export function Padron() {
             <p id={pregunta}>
               ¿Finalizar el vínculo de {f.nombre} con la unidad {f.designacion}? No se puede deshacer.
             </p>
-            <button type="submit" ref={confirmarSi} disabled={enviando}>
+            <button type="submit" className="peligro" ref={confirmarSi} disabled={enviando}>
               Sí, finalizar
             </button>{" "}
             <button type="button" className="secundario" onClick={() => setConfirmarFin(false)} disabled={enviando}>
@@ -526,10 +526,10 @@ export function Padron() {
           </div>
         ) : (
           <p>
-            <button type="submit" disabled={enviando}>
+            <button type="submit" className={confirmar ? undefined : "peligro"} disabled={enviando}>
               {confirmar ? "Confirmar el vínculo" : "Finalizar el vínculo"}
             </button>{" "}
-            <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+            <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
               Cancelar
             </button>
           </p>

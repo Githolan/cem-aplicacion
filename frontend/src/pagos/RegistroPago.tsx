@@ -537,7 +537,7 @@ export function RegistroPago(props: Props) {
               </button>
             )}
             {alCancelar !== undefined && (
-              <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
+              <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
                 Cancelar
               </button>
             )}

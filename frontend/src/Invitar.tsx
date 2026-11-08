@@ -30,8 +30,8 @@ const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 const LARGO_MAXIMO_NOMBRE = 100;
 
 const TIPOS: { valor: TipoVinculo; texto: string }[] = [
-  { valor: "propietario", texto: "Propietario o propietaria" },
-  { valor: "inquilino", texto: "Inquilino o inquilina" },
+  { valor: "propietario", texto: "Propietario/a" },
+  { valor: "inquilino", texto: "Inquilino/a" },
   { valor: "ocupante", texto: "Ocupante" },
 ];
 const TEXTO_TIPO = Object.fromEntries(TIPOS.map((t) => [t.valor, t.texto])) as Record<TipoVinculo, string>;
@@ -566,7 +566,7 @@ export function Invitar() {
                           <p id={`${id}-${i.id}-confirmar`}>
                             ¿Retirar la invitación de {i.nombre} a la unidad {i.unidad}?
                           </p>
-                          <button type="button" onClick={() => retirar(i)} disabled={enviando}>
+                          <button type="button" className="peligro" onClick={() => retirar(i)} disabled={enviando}>
                             Sí, retirarla
                           </button>{" "}
                           <button type="button" className="secundario" onClick={() => setARetirar(null)} disabled={enviando}>
@@ -576,6 +576,7 @@ export function Invitar() {
                       ) : (
                         <button
                           type="button"
+                          className="secundario peligro"
                           onClick={() => setARetirar(i)}
                           disabled={enviando}
                           aria-describedby={`${id}-${i.id}`}

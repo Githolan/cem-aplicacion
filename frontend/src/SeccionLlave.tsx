@@ -149,7 +149,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
               {esDeEsteDispositivo(k.credencial_id) && " (este dispositivo)"}{" "}
               <button
                 type="button"
-                className="secundario"
+                className="secundario peligro"
                 disabled={enviando}
                 onClick={() => quitar(k)}
               >

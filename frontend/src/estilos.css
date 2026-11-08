@@ -147,12 +147,14 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+/* Lo informativo va en verde, como lo logrado (comentario 26); el naranja queda para lo que hay
+   que mirar. */
 .aviso-info {
   margin: var(--space-4) 0 0;
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-lg);
-  background: var(--accent-tint);
-  color: var(--ink);
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 
 .aviso-ok {
@@ -365,6 +367,22 @@ button.sutil:disabled {
   color: var(--ink-muted);
 }
 
+/* Acciones negativas en rojo (comentario 26): borrar, quitar, retirar, finalizar, rechazar,
+   cancelar. Lleno el que la hace; con borde el que la abre o la deja de lado. El texto dice la
+   acción: el color no es lo único que la distingue. */
+button.peligro:not(:disabled) {
+  background: var(--danger-text);
+  box-shadow: none;
+  color: var(--on-danger);
+}
+
+.formulario .acciones .secundario.peligro:not(:disabled),
+button.secundario.peligro:not(:disabled) {
+  border-color: currentcolor;
+  background: var(--surface-raised);
+  color: var(--danger-text);
+}
+
 /* Tarjetas una al lado de la otra desde tablet. */
 @media (min-width: 769px) {
   .sesiones--grilla {
@@ -505,6 +523,11 @@ button.sutil:disabled {
   color: var(--ink);
   font-weight: 700;
   text-decoration: none;
+}
+
+.enlace-boton.peligro {
+  border-color: currentcolor;
+  color: var(--danger-text);
 }
 
 /* Lo que sigue en importancia a lo del rol: sin caja, para que no compita con él. */
@@ -1420,6 +1443,11 @@ fieldset.formulario legend {
   display: none;
 }
 
+/* En las pestañas del teléfono va la etiqueta corta; desde tablet, la función completa. */
+.navegacion__largo {
+  display: none;
+}
+
 .navegacion__item:focus-visible {
   outline-offset: -2px;
 }
@@ -1448,6 +1476,14 @@ fieldset.formulario legend {
 
   .aplicacion--con-navegacion .aviso-version {
     bottom: 1rem;
+  }
+
+  .navegacion__largo {
+    display: inline;
+  }
+
+  .navegacion__corto {
+    display: none;
   }
 
   .navegacion {

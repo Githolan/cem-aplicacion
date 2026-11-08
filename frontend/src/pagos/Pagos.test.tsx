@@ -1051,7 +1051,12 @@ describe("registrar y corregir", () => {
       });
       await screen.findByText("La orden contra lo que salió del banco");
       expect(screen.getByRole("radio", { name: /Dar por pagados .*12\.500,00 y preparar otra orden por .*2\.500,00/ })).toBeTruthy();
-      fireEvent.click(await boton("Resolver"));
+      // El botón dice lo elegido (comentario 29), y cambia con la elección.
+      fireEvent.click(screen.getByRole("radio", { name: /Reclamar la devolución/ }));
+      expect(await boton("Reclamar la devolución")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Dar por pagado lo real" })).toBeNull();
+      fireEvent.click(screen.getByRole("radio", { name: /Dar por pagados/ }));
+      fireEvent.click(await boton("Dar por pagado lo real"));
       expect(await screen.findByText(/quedó pagada por lo que salió del banco/)).toBeTruthy();
       expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "pagada_por_lo_real" });
     });
@@ -1063,7 +1068,7 @@ describe("registrar y corregir", () => {
       }), { [`POST ${CAMINO}/resolucion`]: () => Response.json({ orden_id: O1, estado: "en_verificacion" }) });
       expect(await screen.findByText("…9044")).toBeTruthy();
       expect(screen.queryByRole("radio", { name: /Dar por pagados/ })).toBeNull();
-      fireEvent.click(await boton("Resolver"));
+      fireEvent.click(await boton("Reclamar la devolución"));
       expect(await screen.findByText(/queda abierta hasta recuperar/)).toBeTruthy();
       expect(await cuerpo(pedidos(api, "POST", `${CAMINO}/resolucion`)[0])).toEqual({ resolucion: "reclamo" });
     });
@@ -1071,7 +1076,7 @@ describe("registrar y corregir", () => {
     it("a quien espera le dice que no transfiera, sin botones de resolver", async () => {
       abrirFicha(ficha({ ...RESOLVER, paso: "espera_resolver", le_toca_a: "consejo", puede_resolver_diferencia: false }));
       expect(await screen.findByText(/No transfieras de nuevo/)).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Resolver" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /^(Dar por pagado lo real|Reclamar la devolución)$/ })).toBeNull();
     });
 
     it("con el reclamo abierto se dice que volvió la plata", async () => {
@@ -1643,7 +1648,8 @@ describe("la lectura con IA del comprobante", () => {
     expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y registraron $ 15.000,00.");
     await boton("Conforme");
     expect(nombres()).toEqual(["Observar", "Conforme"]);
-    expect((await boton("Observar")).className).toBe("");
+    // Observar es una acción negativa: principal y en rojo (comentario 26).
+    expect((await boton("Observar")).className).toBe("peligro");
     expect((await boton("Conforme")).className).toBe("secundario");
   });
 
@@ -1937,7 +1943,7 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     fireEvent.change(screen.getByLabelText("Contrato o abono (opcional)"), { target: { value: K1 } });
-    fireEvent.click(await boton("Guardar"));
+    fireEvent.click(await boton("Guardar la orden"));
     expect(await boton("Enviar a aprobar")).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O1}`);
     expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
@@ -1960,13 +1966,13 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     const envios = () => pedidos(api, "POST", `${BASE}/ordenes-pago`);
-    fireEvent.click(await boton("Guardar"));
+    fireEvent.click(await boton("Guardar la orden"));
     await screen.findByRole("alert");
-    fireEvent.click(await boton("Guardar"));
+    fireEvent.click(await boton("Guardar la orden"));
     await waitFor(() => expect(envios()).toHaveLength(2));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Guardar" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza de tanques" } });
-    fireEvent.click(await boton("Guardar"));
+    fireEvent.click(await boton("Guardar la orden"));
     await waitFor(() => expect(envios()).toHaveLength(3));
     const [a, b, c] = claves(envios());
     expect(a).toBe(b);
@@ -1978,7 +1984,7 @@ describe("preparar, enviar y renovar", () => {
     abrir("/pagos/nueva");
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "1234,50" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Arreglo del portón" } });
-    fireEvent.click(await boton("Guardar"));
+    fireEvent.click(await boton("Guardar la orden"));
     expect(await screen.findByText(/está suspendido o de baja/)).toBeTruthy();
     expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Arreglo del portón");
     expect(lugar()).toBe("/pagos/nueva");
@@ -2034,7 +2040,7 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar"));
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       expect(await screen.findByText(AVISO_MODIFICAR)).toBeTruthy();
       expect(escrituras(api)).toEqual([]);
       fireEvent.click(await boton("Sí, crear la versión nueva"));
@@ -2050,7 +2056,7 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar"));
       await screen.findByLabelText("Concepto");
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       await screen.findByText("Listo: guardamos la versión nueva.");
       expect(escrituras(api)).toHaveLength(1);
       expect(screen.queryByText(AVISO_MODIFICAR)).toBeNull();
@@ -2060,7 +2066,7 @@ describe("preparar, enviar y renovar", () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("sin_cambios", 409) });
       fireEvent.click(await boton("Modificar"));
       await screen.findByLabelText("Concepto");
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       expect((await screen.findByRole("alert")).textContent).toContain("ningún cambio");
       expect(screen.getByLabelText("Concepto")).toBeTruthy();
     });
@@ -2250,12 +2256,12 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar"));
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Mío" } });
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       fireEvent.click(await boton("Sí, crear la versión nueva"));
       await waitFor(() => expect((screen.getByLabelText("Importe") as HTMLInputElement).value).toContain("20"));
       expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Mío");
       sinBoton("Sí, crear la versión nueva");
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       fireEvent.click(await boton("Sí, crear la versión nueva"));
       await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)).toHaveLength(2));
       expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[1])).toMatchObject({ version_esperada: 2, importe_centavos: 2_000_000 });
@@ -2272,7 +2278,7 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar"));
       await screen.findByLabelText("Concepto");
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       fireEvent.click(await boton("Sí, crear la versión nueva"));
       await waitFor(() => expect(screen.queryByLabelText("Concepto")).toBeNull());
     });
@@ -2281,7 +2287,7 @@ describe("preparar, enviar y renovar", () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("orden_no_admite", 409) });
       fireEvent.click(await boton("Modificar"));
       await screen.findByLabelText("Concepto");
-      fireEvent.click(await boton("Guardar"));
+      fireEvent.click(await boton("Guardar la orden"));
       expect((await screen.findByRole("alert")).textContent).toContain("ya no admite");
       await waitFor(() => expect(screen.queryByLabelText("Concepto")).toBeNull());
     });
@@ -2897,7 +2903,10 @@ describe("rutas y navegación", () => {
     await screen.findByRole("link", { name: "Contactos de emergencia" });
     expect(screen.queryByRole("link", { name: "Pagos" })).toBeNull();
     const navegacion = screen.getByRole("navigation", { name: "Secciones" });
-    expect(await within(navegacion).findByRole("link", { name: "Contactos" })).toBeTruthy();
+    const contactos = await within(navegacion).findByRole("link", { name: /^Contactos de emergencia/ });
+    // Comentario 24: la función completa y, para las pestañas del teléfono, la corta. El CSS deja ver una.
+    expect(contactos.querySelector(".navegacion__largo")?.textContent).toBe("Contactos de emergencia");
+    expect(contactos.querySelector(".navegacion__corto")?.textContent).toBe("Emergencias");
     expect(within(navegacion).queryByRole("link", { name: "Proveedores" })).toBeNull();
   });
 

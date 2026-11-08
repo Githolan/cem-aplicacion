@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
@@ -45,7 +45,7 @@ const PATRON_TEXTO = ".*\\S.*";
 
 export const TEXTO_FUNCION: Record<Funcion, string> = {
   administracion: "Administración",
-  encargado: "Encargado o encargada",
+  encargado: "Encargado/a",
   emergencias: "Emergencias",
   aseguradora: "Aseguradora",
   proveedor_critico: "Proveedor crítico",
@@ -185,6 +185,20 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; c
 
 type Abierto = { accion: Accion; contacto: Contacto | null };
 
+/** Lo que se tocó en /contactos para hacer acá (comentario 25): agregar, o corregir o retirar uno. */
+export type PedidoDeGestion =
+  | { consorcio: string; accion: "agregar" }
+  | { consorcio: string; accion: "corregir" | "retirar"; contacto: string };
+
+function pedidoDe(estado: unknown): PedidoDeGestion | null {
+  if (typeof estado !== "object" || estado === null) return null;
+  const { consorcio, accion, contacto } = estado as Record<string, unknown>;
+  if (typeof consorcio !== "string") return null;
+  if (accion === "agregar") return { consorcio, accion };
+  if ((accion === "corregir" || accion === "retirar") && typeof contacto === "string") return { consorcio, accion, contacto };
+  return null;
+}
+
 type Aviso = { texto: string; ok: boolean };
 
 class SinSesion extends Error {}
@@ -197,11 +211,18 @@ export function ContactosGestion() {
   const id = useId();
   const navegar = useNavigate();
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
+  const { state } = useLocation();
+  // Lo que se pidió desde /contactos. Al recargar, la historia lo conserva pero el edificio
+  // elegido en memoria se pierde: el del pedido se prefiere al elegir (Codex en #220).
+  const [pedidoInicial] = useState(() => pedidoDe(state));
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(
     pantalla.tipo === "lista" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.contactosGestion,
+    pedidoInicial?.consorcio ?? null,
   );
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
+  // Se usa una sola vez, con la primera lectura de la lista.
+  const pedido = useRef(pedidoInicial);
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [motivo, setMotivo] = useState("");
@@ -253,18 +274,39 @@ export function ContactosGestion() {
   useEffect(() => {
     if (consorcio === "") return;
     let vigente = true;
+    /** Lo pedido desde /contactos se hace solo en el edificio para el que se pidió: si quedó
+     * otro (no se gestiona ese, o ya no está), no se abre nada. Agregar no depende de la lista
+     * leída; corregir y retirar, sí. */
+    const tomarPedido = (contactos: readonly Contacto[] | null) => {
+      const p = pedido.current;
+      pedido.current = null;
+      if (p === null || p.consorcio !== consorcio) return;
+      if (p.accion === "agregar") {
+        setDatos(VACIO);
+        setAbierto({ accion: "agregar", contacto: null });
+        return;
+      }
+      // Si el contacto ya no está, queda la lista: no se abre otro en su lugar.
+      const elegido = contactos?.find((c) => c.id === p.contacto);
+      if (elegido === undefined) return;
+      setDatos(datosDe(elegido));
+      setAbierto({ accion: p.accion, contacto: elegido });
+    };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/contactos/gestion", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, error, response }) => {
         exigirSesion(response);
         // Una lista pedida antes de un cambio, o de otro edificio, puede llegar después.
         if (!vigente) return;
-        if (data !== undefined) setLectura({ tipo: "ok", contactos: data.elementos });
-        else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
+        if (data !== undefined) {
+          setLectura({ tipo: "ok", contactos: data.elementos });
+          tomarPedido(data.elementos);
+        } else if (response.status === ESTADO.sinPermiso) navegar(RUTA_INICIO, { replace: true });
         else {
           setLectura({ tipo: "sin_servicio" });
           const falla = mensajeDeFalla(response.status, codigoDe(error));
           setAviso((actual) => (actual?.ok ? actual : { texto: falla, ok: false }));
+          tomarPedido(null);
         }
       })
       .catch((e: unknown) => {
@@ -273,6 +315,7 @@ export function ContactosGestion() {
         else {
           setLectura({ tipo: "sin_servicio" });
           setAviso((actual) => (actual?.ok ? actual : { texto: SIN_CONEXION, ok: false }));
+          tomarPedido(null);
         }
       });
     return () => {
@@ -548,7 +591,7 @@ export function ContactosGestion() {
             {(["corregir", "verificar", "senalar", "retirar"] as const).map((a, i) => (
               <span key={a}>
                 {i > 0 && " "}
-                <button type="button" className="secundario" onClick={() => abrir(a, c)} disabled={enviando} aria-describedby={titulo}>
+                <button type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando} aria-describedby={titulo}>
                   {{ corregir: "Corregir", verificar: "Comprobado", senalar: "Señalar un error", retirar: "Retirar" }[a]}
                 </button>
               </span>
@@ -674,7 +717,7 @@ export function ContactosGestion() {
           <button type="submit" disabled={enviando}>
             {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
           </button>{" "}
-          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -691,6 +734,7 @@ export function ContactosGestion() {
         <p>
           <button
             type="submit"
+            className="peligro"
             disabled={enviando}
             ref={(e) => {
               primerCampo.current = e;
@@ -762,7 +806,7 @@ export function ContactosGestion() {
           >
             {texto.boton}
           </button>{" "}
-          <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
             Cancelar
           </button>
         </p>

@@ -446,8 +446,9 @@ test.describe("circuito de pagos", () => {
     await expect(dar).toBeChecked();
     await page.getByRole("radio", { name: /Reclamar la devolución/ }).check();
     await expect(dar).not.toBeChecked();
-    expect((await page.getByText(/Reclamar la devolución/).boundingBox())?.height).toBeGreaterThan(0);
-    await expect(page.getByRole("button", { name: "Resolver" })).toBeVisible();
+    // La opción, no el botón, que ahora dice lo mismo (comentario 29).
+    expect((await page.getByText(/Reclamar la devolución: la orden/).boundingBox())?.height).toBeGreaterThan(0);
+    await expect(page.getByRole("button", { name: "Reclamar la devolución", exact: true })).toBeVisible();
     expect(await page.content()).not.toContain(CUENTA);
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);

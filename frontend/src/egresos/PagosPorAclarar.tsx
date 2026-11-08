@@ -426,7 +426,7 @@ export function PagosPorAclarar() {
                       value={motivos[p.orden_id] ?? ""}
                       onChange={(e) => setMotivos((m) => ({ ...m, [p.orden_id]: e.target.value }))} />
                     <div className="acciones">
-                      <button type="submit" disabled={enviando || (motivos[p.orden_id] ?? "").trim() === ""}>
+                      <button type="submit" className="peligro" disabled={enviando || (motivos[p.orden_id] ?? "").trim() === ""}>
                         No transferí
                       </button>
                       <button type="button" className="secundario" disabled={enviando} onClick={() => abrirTransferi(p)}>
@@ -513,8 +513,8 @@ export function PagosPorAclarar() {
                         <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
                           {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
                         </button>
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setTransfirio(null)}>
-                          Volver
+                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setTransfirio(null)}>
+                          Cancelar
                         </button>
                       </div>
                     </form>
