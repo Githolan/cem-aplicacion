@@ -457,6 +457,22 @@ def _version_disponible(
 ):
     """La fila de una versión `disponible` que quien pide puede leer. Toda lectura del archivo pasa
     por acá: es el control de acceso de §9.2 y de `0061`/`0062`."""
+    f = version_visible(documento_id, version_id, ver, restringidos, motor)
+    if f["estado"] != EstadoVersion.DISPONIBLE:
+        raise ErrorApi(
+            409,
+            CodigoError.VERSION_NO_DISPONIBLE,
+            "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
+        )
+    return f
+
+
+def version_visible(
+    documento_id: UUID, version_id: UUID, ver: Permiso, restringidos: Permiso, motor
+):
+    """La fila de una versión que quien pide puede ver, en cualquier estado: la `disponible`, o la
+    que subió y todavía está en cuarentena o fue rechazada. Lo demás es 404, como en la lista. Es el
+    control de `_version_disponible` y de la lectura para carga (`0088`)."""
     ctx = ver.ctx
     ver.verificar(Entidad())
     with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
@@ -494,12 +510,6 @@ def _version_disponible(
     if f["estado"] != EstadoVersion.DISPONIBLE and not f["propia"]:
         # La de otro, en cuarentena o rechazada: la lista no se la muestra, la descarga tampoco.
         raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
-    if f["estado"] != EstadoVersion.DISPONIBLE:
-        raise ErrorApi(
-            409,
-            CodigoError.VERSION_NO_DISPONIBLE,
-            "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
-        )
     return f
 
 

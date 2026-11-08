@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
+import { useVersionVisible } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import {
   cambioLaOrden,
@@ -28,6 +29,7 @@ import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { VisorDocumento } from "../VisorDocumento";
 import { BotonCopiar } from "./BotonCopiar";
 import { CaminoOrden } from "./CaminoOrden";
 import { FormularioOrden } from "./FormularioOrden";
@@ -185,6 +187,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
   const leida = lectura.tipo === "ok" ? lectura.ficha : null;
   const decide = leida !== null && (leida.paso === "aprobar" || leida.puede_aprobar || leida.puede_rechazar || leida.puede_conciliar);
   const versionLeida = leida?.orden.version_vigente;
+  /** El archivo exacto de la factura aprobada con la versión vigente (0088), si quien mira puede
+   * abrirlo; se ve en una hoja. */
+  const vigenteLeida = leida === null ? null : vigenteDe(leida);
+  const factura = useVersionVisible(consorcio, vigenteLeida?.documento_id ?? null, vigenteLeida?.factura_version_id ?? null, aEntrar);
+  const [viendoFactura, setViendoFactura] = useState(false);
 
   useEffect(() => {
     if (!decide) return;
@@ -819,6 +826,17 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                     </tr>
                   </tbody>
                 </table>
+              )}
+              {factura !== null && (
+                <div className="acciones">
+                  <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
+                    Ver la factura
+                  </button>
+                </div>
+              )}
+              {viendoFactura && factura !== null && (
+                <VisorDocumento consorcio={consorcio} documento={factura.documento} version={factura.version} nombre={factura.nombre}
+                  alCerrar={() => setViendoFactura(false)} aEntrar={aEntrar} />
               )}
               <dl className="detalles">
                 {enDecision && (

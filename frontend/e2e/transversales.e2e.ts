@@ -290,7 +290,8 @@ test.describe("datos del proveedor", () => {
   test("la ficha muestra el contacto", async ({ page, baseURL }) => {
     await simularApi(page, baseURL!, () => creado);
     await page.goto("/egresos/proveedores");
-    await page.getByRole("button", { name: `Ver la ficha de ${RAZON}` }).click();
+    // La fila entera abre la ficha (comentario 21): su nombre empieza por la razón social.
+    await page.getByRole("button", { name: RAZON }).click();
 
     for (const dato of [proveedor.contacto, proveedor.telefono, proveedor.whatsapp, proveedor.correo, proveedor.domicilio])
       await expect(page.getByText(dato, { exact: true })).toBeVisible();

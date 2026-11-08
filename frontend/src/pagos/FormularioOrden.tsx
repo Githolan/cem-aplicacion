@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
+import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO_ESPERA_PARA_GUARDAR, useVersionVisible } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
@@ -29,6 +30,11 @@ import type { ActoEnCurso } from "./useActo";
 // escribe a mano. Con la orden abierta (`modificar`), el formulario sigue a la versión que muestra
 // la ficha: si otra persona la cambió, lo que se escribió queda sobre la versión nueva y lo que se
 // confirmó se vuelve a confirmar.
+//
+// Arriba, la factura (0088): elegir el archivo la sube, el antivirus la revisa y la IA lee importe,
+// moneda, número, concepto y el CUIT del proveedor. Lo que completa la lectura queda marcado hasta que
+// la persona lo cambia o lo da por revisado; guardar manda la versión exacta del archivo que se vio
+// (`factura_version_id`): otro archivo subido después al mismo documento no cambia lo aprobado.
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
@@ -84,7 +90,39 @@ function datosDe(v: Version, contratos: Contrato[]): Datos {
 }
 
 /** Con qué abre una orden nueva. */
-export type OrdenInicial = { proveedor?: string; importe?: string; moneda?: string; concepto?: string };
+export type OrdenInicial = {
+  proveedor?: string;
+  importe?: string;
+  moneda?: string;
+  concepto?: string;
+  comprobante?: string;
+  /** La factura ya subida (vuelve del alta del proveedor). */
+  factura?: Cargado;
+};
+
+/** Lo que lleva la pantalla de Proveedores para dar de alta el proveedor de la factura leída y volver
+ * a la orden con lo que ya estaba escrito. Nunca una cuenta: la lectura no la trae. */
+export type AltaDesdeLaFactura = {
+  cuit: string | null;
+  razon_social: string | null;
+  domicilio: string | null;
+  telefono: string | null;
+  correo: string | null;
+};
+
+type Campo = keyof Datos;
+
+/** Los campos que la lectura de la factura completa, con su valor en el formulario. */
+function camposLeidos(l: LecturaCarga, proveedores: Proveedor[]): Partial<Datos> {
+  const sugerido = proveedores.find((p) => p.id === l.proveedor_sugerido?.id && p.estado === "activo");
+  return {
+    ...(l.importe_centavos === null ? {} : { importe: aTexto(l.importe_centavos) }),
+    ...(l.moneda !== null && (MONEDAS as readonly string[]).includes(l.moneda) ? { moneda: l.moneda } : {}),
+    ...(l.numero_comprobante === null ? {} : { comprobante: l.numero_comprobante.slice(0, 200) }),
+    ...(l.concepto === null ? {} : { concepto: l.concepto }),
+    ...(sugerido === undefined ? {} : { proveedor: sugerido.id }),
+  };
+}
 
 type Modificar = {
   orden: string;
@@ -118,6 +156,26 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   /** Los datos de la versión que se abrió, para saber qué cambió la persona. */
   const vistos = useRef<Datos | null>(null);
   const versionVista = modificar?.version;
+  /** La versión del archivo de la factura que se manda al guardar: la de la versión abierta, la que
+   * vuelve del alta o la subida acá. */
+  const [factura, setFactura] = useState<string | null>(
+    modificar?.version.factura_version_id ?? inicial?.factura?.version ?? null,
+  );
+  const facturaTocada = useRef(false);
+  const facturaDeLaVersion = useVersionVisible(
+    consorcio,
+    inicial?.factura === undefined ? (modificar?.version.documento_id ?? null) : null,
+    inicial?.factura === undefined ? (modificar?.version.factura_version_id ?? null) : null,
+    aEntrar,
+  );
+  /** Los campos que completó la lectura y la persona todavía no revisó. */
+  const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<Campo>>(new Set());
+  /** La lectura con un proveedor que no está cargado: se ofrece darlo de alta. */
+  const [sinProveedor, setSinProveedor] = useState<AltaDesdeLaFactura | null>(null);
+  /** Un archivo de factura subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
+  const [facturaEnEspera, setFacturaEnEspera] = useState(false);
+  /** La factura subida en este formulario, ya aprobada por el antivirus. */
+  const [subida, setSubida] = useState<Cargado | null>(null);
 
   useEffect(() => {
     let vigente = true;
@@ -162,12 +220,13 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       setDatos((d) => {
         if (d !== null) return d;
         const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor && p.estado === "activo");
-        const { importe: importeInicial, moneda, concepto } = inicial ?? {};
+        const { importe: importeInicial, moneda, concepto, comprobante } = inicial ?? {};
         return {
           ...datosVacios((elegido ?? lectura.proveedores.find((p) => p.estado === "activo"))?.id ?? ""),
           ...(importeInicial === undefined ? {} : { importe: importeInicial }),
           ...(moneda === undefined ? {} : { moneda }),
           ...(concepto === undefined ? {} : { concepto }),
+          ...(comprobante === undefined ? {} : { comprobante }),
         };
       });
       return;
@@ -177,11 +236,49 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     vistos.current = nuevos;
     setConfirmar(false);
     setDatos((d) => (d === null || antes === null ? nuevos : sobreLoNuevo(d, antes, nuevos)));
+    // La factura sigue a la versión, salvo que la persona haya subido otra.
+    if (!facturaTocada.current) setFactura(versionVista.factura_version_id ?? null);
     if (antes === null && versionVista.contrato_id !== null && nuevos.contrato === "")
       setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
   }, [lectura, versionVista, inicial, setAviso]);
 
+  function revisado(campo: Campo) {
+    setDeLaLectura((marcados) => {
+      if (!marcados.has(campo)) return marcados;
+      const otros = new Set(marcados);
+      otros.delete(campo);
+      return otros;
+    });
+  }
+
+  function cargarFactura(cargada: Cargado | null) {
+    facturaTocada.current = true;
+    setConfirmar(false);
+    // Mientras el archivo nuevo no pasa el antivirus, no hay factura que mandar.
+    setFactura(cargada?.version ?? null);
+  }
+
+  function leerFactura(l: LecturaCarga) {
+    if (lectura.tipo !== "ok") return;
+    const leidos = camposLeidos(l, lectura.proveedores);
+    setConfirmar(false);
+    setDatos((d) => {
+      if (d === null) return d;
+      const nuevo = { ...d, ...leidos };
+      if (leidos.proveedor !== undefined && leidos.proveedor !== d.proveedor) nuevo.contrato = "";
+      if (leidos.moneda !== undefined && leidos.moneda !== d.moneda) nuevo.contrato = "";
+      return nuevo;
+    });
+    setDeLaLectura(new Set(Object.keys(leidos) as Campo[]));
+    setSinProveedor(
+      l.proveedor_sugerido === null && (l.cuit !== null || l.razon_social !== null)
+        ? { cuit: l.cuit, razon_social: l.razon_social, domicilio: l.domicilio, telefono: l.telefono, correo: l.correo }
+        : null,
+    );
+  }
+
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
+    revisado(campo);
     setConfirmar(false);
     setDatos((d) => {
       if (d === null) return d;
@@ -193,7 +290,8 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
 
   function guardar(evento: FormEvent) {
     evento.preventDefault();
-    if (datos === null) return;
+    // Guardar ahora mandaría la orden sin el archivo que todavía no terminó (o sin la factura anterior).
+    if (datos === null || facturaEnEspera) return;
     const centavos = aCentavos(datos.importe);
     if (centavos === null) {
       setAviso({ texto: "Escribí el importe en pesos, por ejemplo 12345,50.", ok: false });
@@ -211,9 +309,10 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       comprobante: opcional(datos.comprobante),
       usa_fondo_reserva: datos.reserva,
       contrato_id: datos.contrato === "" ? null : datos.contrato,
+      factura_version_id: factura,
     };
     void acto.hacer({
-      quePide: ["guardar", modificar?.orden, modificar?.version.numero, datos],
+      quePide: ["guardar", modificar?.orden, modificar?.version.numero, datos, factura],
       nombre: "guardar la orden",
       pedir: (clave) => {
         const header = { [ENCABEZADO_IDEMPOTENCIA]: clave };
@@ -265,9 +364,38 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     );
   if (datos === null) return null;
 
+  const marca = (campo: Campo) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
+  const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
+  const alAlta = sinProveedor === null ? null : {
+    consorcio,
+    alta: sinProveedor,
+    documento: facturaVisible,
+    ...(modificar === undefined
+      ? { paraPreparar: true, orden: { importe: datos.importe, moneda: datos.moneda, concepto: datos.concepto, comprobante: datos.comprobante, factura: facturaVisible } }
+      : {}),
+  };
+
   return (
     <form className="formulario tarjeta" onSubmit={guardar} aria-labelledby={`${id}-form`}>
       <h2 id={`${id}-form`}>{modificar === undefined ? "Preparar una orden" : "Modificar la orden"}</h2>
+      <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
+        deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
+        alCargar={(c) => {
+          setSubida(c);
+          cargarFactura(c);
+        }}
+        alLeer={leerFactura} alEsperar={setFacturaEnEspera} />
+      {alAlta !== null && (
+        <div className="aviso-info" role="note">
+          <p>
+            El proveedor de la factura no está cargado en este edificio
+            {sinProveedor?.razon_social != null && <> ({sinProveedor.razon_social})</>}.
+          </p>
+          <Link to={RUTA_PROVEEDORES} state={alAlta}>
+            Dar de alta el proveedor
+          </Link>
+        </div>
+      )}
       <label htmlFor={`${id}-proveedor`}>Proveedor</label>
       <select id={`${id}-proveedor`} required value={datos.proveedor} disabled={enviando}
         onChange={(e) => cambiar("proveedor", e.target.value)}>
@@ -282,9 +410,11 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
             </option>
           ))}
       </select>
+      {marca("proveedor")}
       <label htmlFor={`${id}-importe`}>Importe</label>
       <CampoImporte id={`${id}-importe`} valor={datos.importe} deshabilitado={enviando}
         alCambiar={(texto) => cambiar("importe", texto)} />
+      {marca("importe")}
       <label htmlFor={`${id}-moneda`}>Moneda</label>
       <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
         {MONEDAS.map((m) => (
@@ -293,6 +423,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           </option>
         ))}
       </select>
+      {marca("moneda")}
       <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
       <select id={`${id}-contrato`} value={datos.contrato} disabled={enviando}
         onChange={(e) => cambiar("contrato", e.target.value)}>
@@ -306,9 +437,11 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <label htmlFor={`${id}-concepto`}>Concepto</label>
       <input id={`${id}-concepto`} required maxLength={300} value={datos.concepto} disabled={enviando}
         onChange={(e) => cambiar("concepto", e.target.value)} />
+      {marca("concepto")}
       <label htmlFor={`${id}-comprobante`}>Comprobante (opcional)</label>
       <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
         onChange={(e) => cambiar("comprobante", e.target.value)} />
+      {marca("comprobante")}
       <label>
         <input type="checkbox" checked={datos.reserva} disabled={enviando}
           onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
@@ -319,8 +452,14 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           {AVISO_MODIFICAR}
         </p>
       )}
+      {facturaEnEspera && (
+        <p id={`${id}-espera`} className="aviso-info">
+          {TEXTO_ESPERA_PARA_GUARDAR}
+        </p>
+      )}
       <div className="acciones">
-        <button type="submit" disabled={enviando || datos.proveedor === ""}>
+        <button type="submit" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
+          aria-describedby={facturaEnEspera ? `${id}-espera` : undefined}>
           {confirmar ? "Sí, crear la versión nueva" : "Guardar la orden"}
         </button>
         <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>

@@ -1657,6 +1657,23 @@ fieldset.formulario legend {
   }
 }
 
+/* Un campo que completó la lectura con IA (0088): se mira antes de guardar, con el color de lo
+   que hay que mirar. */
+.marca-lectura {
+  margin: var(--space-1) 0 0;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-lg);
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--pending-bg);
+  color: var(--pending-text);
+}
+
+.carga-con-lectura {
+  display: grid;
+  gap: var(--space-2);
+}
+
 /* ==========================================================================
    Listas que llevan a la ficha de cada registro (comentario 21; FichaDeRegistro.tsx).
    Bloque aparte, al final, para que no se mezcle con otros cambios de este archivo.

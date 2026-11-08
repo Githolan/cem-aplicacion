@@ -12,6 +12,7 @@ import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_
 import { AlInicioSinEdificios, REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { SubirArchivo } from "./SubirArchivo";
 import { VisorDocumento } from "./VisorDocumento";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
@@ -210,6 +211,23 @@ function esperaArchivo(d: Documento): boolean {
   return !d.versiones.some((v) => v.estado !== "rechazado");
 }
 
+/** Con un archivo disponible y ninguno en revisión se puede subir otra versión; con uno en revisión
+ * se espera a que termine. */
+function admiteOtraVersion(d: Documento): boolean {
+  return d.versiones.some((v) => v.estado === "disponible") && !d.versiones.some((v) => v.estado === "en_cuarentena");
+}
+
+/** El resumen de la fila: la fecha y el estado del archivo más nuevo; el detalle va en la ficha. */
+function resumenDe(d: Documento): string {
+  const [ultima] = d.versiones;
+  const estado =
+    ultima === undefined ? "Sin archivo"
+    : ultima.estado === "disponible" ? "Disponible"
+    : ultima.estado === "en_cuarentena" ? "En revisión"
+    : "Rechazado";
+  return `${dia(d.fecha)} · ${estado}`;
+}
+
 export function Documentos() {
   const id = useId();
   const navegar = useNavigate();
@@ -237,6 +255,8 @@ export function Documentos() {
   /** La versión que se está mirando en la hoja de «Ver». */
   const [viendo, setViendo] = useState<{ documento: string; version: string; titulo: string } | null>(null);
   const [vuelta, setVuelta] = useState(0);
+  /** La ficha del documento abierta (comentario 21): la fila entera la abre. */
+  const { abierta: fichaAbierta, abrir: abrirFicha, cerrar: cerrarFichaDe, refFila } = useFichas<string>();
   const consultado = useRef(false);
   // Una clave por intento lógico de cada paso: se conserva si el pedido se cae y se renueva al
   // cambiar los datos o el archivo.
@@ -268,6 +288,8 @@ export function Documentos() {
     const fallo = (texto: string) => {
       alAviso.current = true;
       setAviso({ texto, ok: false });
+      // El aviso está en la página, debajo de la ficha: la ficha se cierra para que lo tome el foco.
+      cerrarFichaDe(false);
     };
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/descargar", {
@@ -490,6 +512,7 @@ export function Documentos() {
         return;
       }
       cerrar();
+      cerrarFichaDe(false);
       // Sin acceso a la lista, quien solo carga no ve el resultado del análisis. Con la lista caída
       // no hay refresco automático: queda «Actualizar».
       const despues = soloCarga
@@ -524,6 +547,7 @@ export function Documentos() {
                 disabled={enviando}
                 onChange={(e) => {
                   cerrar();
+                  cerrarFichaDe(false);
                   setAviso(null);
                   setLectura({ tipo: "cargando" });
                   setConsorcio(e.target.value);
@@ -567,9 +591,10 @@ export function Documentos() {
               <h2 id={`${id}-carga`}>Cargar un documento</h2>
               {formulario?.tipo === "nuevo" ? (
                 formularioNuevo()
-              ) : formulario?.tipo === "subir" && !enLaLista(formulario.documento) ? (
-                // El reintento del archivo de un documento que la lista no muestra: quien solo carga
-                // (sin acceso a la lista), una categoría que la persona carga pero no ve, o la lista caída.
+              ) : formulario?.tipo === "subir" && !enSuFicha(formulario.documento) ? (
+                // El reintento del archivo de un documento cuya ficha no está abierta: el que se acaba
+                // de crear, el de quien solo carga (sin acceso a la lista), una categoría que la persona
+                // carga pero no ve, o la lista caída.
                 formularioArchivo(`${id}-reintento`, `Subir el archivo de «${formulario.titulo}»`, "h3")
               ) : (
                 <p>
@@ -582,6 +607,8 @@ export function Documentos() {
           )}
         </>
       )}
+
+      {fichaDelDocumento()}
 
       {viendo !== null && (
         <VisorDocumento consorcio={consorcio} documento={viendo.documento} version={viendo.version} nombre={viendo.titulo}
@@ -625,74 +652,91 @@ export function Documentos() {
     return (
       <section key={c} aria-labelledby={titulo}>
         <h3 id={titulo}>{TEXTO_CATEGORIA[c]}</h3>
-        <ul className="sesiones" aria-labelledby={titulo}>
-          {deEsta.map((d) => tarjeta(d))}
+        <ul className="filas-registro" aria-labelledby={titulo}>
+          {deEsta.map((d) => (
+            <li key={d.id}>
+              <FilaDeRegistro titulo={d.titulo} resumen={resumenDe(d)} alAbrir={() => abrirFicha(d.id)} refFila={refFila(d.id)}
+                abierta={fichaAbierta === d.id} deshabilitada={enviando} />
+            </li>
+          ))}
         </ul>
       </section>
     );
   }
 
-  /** Un documento con su fecha y sus versiones, de la más nueva a la más vieja. */
-  function tarjeta(d: Documento) {
-    const titulo = `${id}-${d.id}`;
+  /** Cerrar la ficha también deja el archivo a medio elegir de ese documento. */
+  function cerrarFicha() {
+    if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cerrar();
+    cerrarFichaDe();
+  }
+
+  /** Si la ficha de ese documento está a la vista (ahí se dibuja su formulario de archivo). */
+  function enSuFicha(documento: string) {
+    return fichaAbierta === documento && lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
+  }
+
+  /** La ficha del documento: categoría, fecha y sus versiones, de la más nueva a la más vieja, con
+   * «Ver» y «Descargar» en las disponibles y, si el rol carga esa categoría, subir un archivo. */
+  function fichaDelDocumento() {
+    if (fichaAbierta === null || lectura.tipo !== "ok") return null;
+    const d = lectura.documentos.find((x) => x.id === fichaAbierta);
+    if (d === undefined) return null;
     const subiendo = abierto?.tipo === "subir" && abierto.documento === d.id;
+    const subir = esperaArchivo(d) ? "Subir archivo" : admiteOtraVersion(d) ? "Subir otra versión" : null;
     return (
-      <li key={d.id}>
-        <h4 id={titulo}>{d.titulo}</h4>
-        <dl className="detalles">
-          <dt>Fecha del documento</dt>
-          <dd>{dia(d.fecha)}</dd>
-        </dl>
-        {d.versiones.length === 0 ? (
-          <p>Todavía no tiene un archivo.</p>
-        ) : (
-          <ul className="versiones" aria-label={`Archivos de ${d.titulo}`}>
-            {d.versiones.map((v) => (
-              <li key={v.id}>
-                <strong>{estadoEnPalabras(v)}</strong>
-                <span>
-                  {" "}
-                  · {TEXTO_TIPO[v.tipo]} de {tamano(v.tamano)} · subido el {momento(v.subida_en)}
-                </span>
-                {v.estado === "disponible" && (
-                  <>
-                    {" "}
-                    <button type="button" className="secundario" aria-describedby={titulo}
-                      onClick={() => setViendo({ documento: d.id, version: v.id, titulo: d.titulo })}>
-                      Ver
-                    </button>{" "}
-                    <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} aria-describedby={titulo} onClick={(e) => bajar(e, d.id, v.id)}>
-                      Descargar
-                    </a>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+      <FichaDeRegistro
+        titulo={d.titulo}
+        alCerrar={cerrarFicha}
+        ocupada={enviando}
+        datos={[
+          { etiqueta: "Categoría", valor: TEXTO_CATEGORIA[d.categoria] },
+          { etiqueta: "Fecha del documento", valor: dia(d.fecha) },
+          {
+            etiqueta: "Archivos",
+            valor:
+              d.versiones.length === 0 ? (
+                "Todavía no tiene un archivo."
+              ) : (
+                <ul className="versiones" aria-label={`Archivos de ${d.titulo}`}>
+                  {d.versiones.map((v) => (
+                    <li key={v.id}>
+                      <strong>{estadoEnPalabras(v)}</strong>
+                      <span>
+                        {" "}
+                        · {TEXTO_TIPO[v.tipo]} de {tamano(v.tamano)} · subido el {momento(v.subida_en)}
+                      </span>
+                      {v.estado === "disponible" && (
+                        <>
+                          {" "}
+                          <button type="button" className="secundario"
+                            onClick={() => setViendo({ documento: d.id, version: v.id, titulo: d.titulo })}>
+                            Ver
+                          </button>{" "}
+                          <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} onClick={(e) => bajar(e, d.id, v.id)}>
+                            Descargar
+                          </a>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ),
+          },
+        ]}
+      >
         {subiendo
-          ? formularioArchivo(titulo, `Subir el archivo de «${d.titulo}»`)
-          : esperaArchivo(d) &&
+          ? formularioArchivo(`${id}-${d.id}`, `Subir el archivo de «${d.titulo}»`, "h3")
+          : subir !== null &&
             puede(...accionesDeCarga(d.categoria)) && (
               <p>
-                <button
-                  type="button"
-                  className="secundario"
-                  onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })}
-                  disabled={enviando}
-                  aria-describedby={titulo}
-                >
-                  Subir archivo
+                <button type="button" className="secundario" onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })}
+                  disabled={enviando}>
+                  {subir}
                 </button>
               </p>
             )}
-      </li>
+      </FichaDeRegistro>
     );
-  }
-
-  /** Si el documento figura en la lista que se está mostrando (ahí se dibuja su reintento). */
-  function enLaLista(documento: string) {
-    return lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
   }
 
   /** Elegir el archivo: se manda con el botón del formulario, que también reintenta con la misma clave. */

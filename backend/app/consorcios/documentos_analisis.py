@@ -18,6 +18,10 @@ la misma transacción `documentos.leer`, que le pide a la capa `llm` que la lea 
 circuito de pagos). Nunca corre en el pedido web. Una sola llamada: lo que falla queda como no leído
 y la persona carga a mano. El resultado llena campos y nada más.
 
+Con la misma variable, una versión aprobada de un documento creado para carga (`0088`: la factura
+de una orden o lo que respalda los datos de un proveedor) encola `documentos.leer_carga`, que le
+pide a la capa los datos del emisor y de la factura. Lo leído solo se propone en el formulario.
+
 Si no se puede completar (`clamd` caído, firmas viejas, almacén que falla), el trabajo falla, la
 versión sigue en cuarentena y la cola reintenta con espera creciente; `vigilar_cuarentena` avisa
 a Kuma si alguna queda demorada o si las firmas envejecen.
@@ -38,7 +42,7 @@ from pypdf.errors import PyPdfError
 from pypdf.generic import ArrayObject, DictionaryObject, IndirectObject, NameObject
 from sqlalchemy import Connection, text
 
-from app.consorcios import lectura_comprobantes
+from app.consorcios import lectura_carga, lectura_comprobantes
 from app.consorcios.documentos import INTENTOS_VERIFICAR, TRABAJO_VERIFICAR, tipo_real
 from app.plataforma import almacen, antivirus, cola, copias
 from app.plataforma.planificador import periodica
@@ -187,6 +191,18 @@ def verificar(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
                 consorcio_id=trabajo.consorcio_id,
                 clave_unica=f"{lectura_comprobantes.TRABAJO_LEER}:{version}",
             )
+        elif conn.execute(
+            text("select nucleo.version_es_documento_para_carga(:v)"), {"v": version}
+        ).scalar_one():
+            # Un documento para carga (`0088`) nunca es un comprobante de pago: o una lectura o la
+            # otra, nunca las dos.
+            cola.encolar(
+                conn,
+                lectura_carga.TRABAJO_LEER_CARGA,
+                carga={"version": str(version)},
+                consorcio_id=trabajo.consorcio_id,
+                clave_unica=f"{lectura_carga.TRABAJO_LEER_CARGA}:{version}",
+            )
     return {"estado": "rechazado" if motivo else "disponible", "motivo": motivo}
 
 
@@ -216,6 +232,31 @@ def leer_comprobante(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
             " :importe, :moneda, :cuenta, :titular, :numero, :fecha)"
         ),
         {"v": version, "prompt": lectura_comprobantes.VERSION_PROMPT, **asdict(lectura)},
+    )
+    return {"leida": lectura.legible, "error": lectura.error}
+
+
+@cola.REGISTRO.tipo(lectura_carga.TRABAJO_LEER_CARGA, maximo_intentos=1)
+def leer_documento_para_carga(conn: Connection, trabajo: cola.Trabajo) -> dict[str, Any]:
+    """Lee una versión aprobada de un documento para carga y guarda lo leído. Como
+    `leer_comprobante`: apagada con el trabajo en la cola no llama a nadie, y el resultado no lleva
+    lo leído."""
+    if not lectura_comprobantes.encendida():
+        return {"leida": False, "motivo": "apagada"}
+    version = UUID(trabajo.carga["version"])
+    v = _version(conn, version)
+    if v is None or v["estado"] != "disponible":
+        raise cola.ErrorDefinitivo(f"la versión {version} no está disponible: no se lee")
+    origen = almacen.AlmacenDocumentos.desde_entorno(almacen.DOCUMENTOS_ANALISIS)
+    contenido = origen.cliente().get_object(**_lugar(origen, v))["Body"].read()
+    lectura = lectura_carga.leer(contenido, v["tipo"])
+    conn.execute(
+        text(
+            "select nucleo.guardar_lectura_carga(:v, :modelo, :prompt, :legible, :error, :cuit,"
+            " :cuit_invalido, :razon_social, :domicilio, :telefono, :correo, :numero_comprobante,"
+            " :fecha, :importe, :moneda, :concepto)"
+        ),
+        {"v": version, "prompt": lectura_carga.VERSION_PROMPT, **asdict(lectura)},
     )
     return {"leida": lectura.legible, "error": lectura.error}
 

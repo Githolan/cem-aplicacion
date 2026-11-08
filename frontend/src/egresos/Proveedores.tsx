@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
 import { CampoCuit, cuitConError } from "../CampoCuit";
+import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
+import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO_ESPERA_PARA_GUARDAR } from "../CargaConLectura";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
@@ -34,6 +36,10 @@ import { exigirSesion, SinSesion, useConsorcio, useMontado } from "./useConsorci
 // Página /egresos/proveedores (pantalla 1, aprobada el 30-10-2026; app 0048 y 0049): la lista con
 // la cuenta enmascarada, la ficha con la historia de versiones, el alta y el cambio. Cambiar la
 // cuenta pide confirmación explícita. Lo decide la API con `egresos.preparar_orden`.
+//
+// El alta empieza por el documento que respalda los datos (0088): la IA lee CUIT, razón social,
+// domicilio, teléfono y correo, y los marca para revisar. La cuenta se escribe siempre a mano: la
+// lectura nunca la trae. Desde una orden, llega con lo leído de la factura y vuelve a la orden.
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Version = components["schemas"]["VersionProveedor"];
@@ -96,6 +102,44 @@ const datosDe = (p: Proveedor): Datos => ({
   estado: p.estado,
 });
 
+type CampoLeido = "cuit" | "razon" | "domicilio" | "telefono" | "correo";
+
+/** Lo que trae la orden al dar de alta el proveedor de su factura (`AltaDesdeLaFactura`), con el
+ * edificio de esa factura: en otro edificio no se usa. */
+type DesdeLaFactura = { consorcio: string; datos: Partial<Datos>; documento: Cargado | null; orden: Record<string, unknown> | null };
+
+/** Los datos del proveedor que leyó la IA; nunca la cuenta. */
+function datosLeidos(l: Pick<LecturaCarga, "cuit" | "razon_social" | "domicilio" | "telefono" | "correo">): Partial<Datos> {
+  return {
+    ...(l.cuit === null ? {} : { cuit: l.cuit }),
+    ...(l.razon_social === null ? {} : { razon: l.razon_social }),
+    ...(l.domicilio === null ? {} : { domicilio: l.domicilio }),
+    ...(l.telefono === null ? {} : { telefono: l.telefono }),
+    ...(l.correo === null ? {} : { correo: l.correo }),
+  };
+}
+
+const textoONulo = (v: unknown) => (typeof v === "string" ? v : null);
+
+function desdeLaFactura(estado: unknown): DesdeLaFactura | null {
+  if (typeof estado !== "object" || estado === null || !("alta" in estado)) return null;
+  const { alta, documento, orden, consorcio } = estado as Record<string, unknown>;
+  if (typeof alta !== "object" || alta === null || typeof consorcio !== "string") return null;
+  const a = alta as Record<string, unknown>;
+  const d = typeof documento === "object" && documento !== null ? (documento as Record<string, unknown>) : null;
+  const cargado =
+    d !== null && typeof d.documento === "string" && typeof d.version === "string" && typeof d.nombre === "string"
+      ? { documento: d.documento, version: d.version, nombre: d.nombre }
+      : null;
+  return {
+    consorcio,
+    datos: datosLeidos({ cuit: textoONulo(a.cuit), razon_social: textoONulo(a.razon_social), domicilio: textoONulo(a.domicilio),
+      telefono: textoONulo(a.telefono), correo: textoONulo(a.correo) }),
+    documento: cargado,
+    orden: typeof orden === "object" && orden !== null ? (orden as Record<string, unknown>) : null,
+  };
+}
+
 /** Si se llegó desde Órdenes de pago porque faltaba un proveedor (`state.paraPreparar`). */
 function vieneAPreparar(estado: unknown): boolean {
   return typeof estado === "object" && estado !== null && "paraPreparar" in estado && estado.paraPreparar === true;
@@ -113,14 +157,18 @@ export const AVISO_CUENTA =
 
 export const AVISO_PROVEEDOR_CAMBIO = "El proveedor cambió mientras lo editabas. Revisá los datos y volvé a guardar.";
 
-type PropsDelEdificio = ReturnType<typeof useConsorcio> & { vuelveAPreparar: boolean };
+type PropsDelEdificio = ReturnType<typeof useConsorcio> & { vuelveAPreparar: boolean; factura: DesdeLaFactura | null };
 
 // Cada edificio monta la pantalla de nuevo: nada de un edificio (estado, respuestas tardías,
 // el reintento pendiente después del código) llega a la pantalla de otro.
 export function Proveedores() {
   const elegido = useConsorcio(REQUISITOS.proveedores);
-  const vuelveAPreparar = useRef(vieneAPreparar(useLocation().state));
-  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} />;
+  const estado = useLocation().state;
+  const vuelveAPreparar = useRef(vieneAPreparar(estado));
+  const factura = useRef(desdeLaFactura(estado));
+  // Lo leído de la factura es del edificio de la orden: al elegir otro edificio no se usa.
+  const deEsteEdificio = factura.current?.consorcio === elegido.consorcio ? factura.current : null;
+  return <ProveedoresDelEdificio key={elegido.consorcio} {...elegido} vuelveAPreparar={vuelveAPreparar.current} factura={deEsteEdificio} />;
 }
 
 /** Lo que se sabe para ubicarlo: solo lo que está cargado. */
@@ -143,14 +191,24 @@ function DatosDeContacto({ proveedor: p }: { proveedor: Proveedor }) {
     ));
 }
 
-function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar }: PropsDelEdificio) {
+function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio, reintentar, vuelveAPreparar, factura }: PropsDelEdificio) {
   const id = useId();
   const navegar = useNavigate();
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [ficha, setFicha] = useState<{ proveedor: Proveedor; versiones: Version[] } | null>(null);
-  const [formulario, setFormulario] = useState<Formulario | null>(null);
-  const [datos, setDatos] = useState<Datos>(VACIO);
+  /** La fila que abrió la ficha (comentario 21): al volver a la lista, el foco vuelve a ella. */
+  const { abrir: abrirFila, cerrar: cerrarFila, refFila } = useFichas<string>();
+  const [formulario, setFormulario] = useState<Formulario | null>(factura === null ? null : { modo: "alta" });
+  const [datos, setDatos] = useState<Datos>(factura === null ? VACIO : { ...VACIO, ...factura.datos });
+  /** El documento que respalda el alta (0088), ya aprobado por el antivirus. */
+  const [respaldo, setRespaldo] = useState<Cargado | null>(factura?.documento ?? null);
+  /** El documento del alta subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
+  const [respaldoEnEspera, setRespaldoEnEspera] = useState(false);
+  /** Los campos que completó la lectura y la persona todavía no revisó. */
+  const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<CampoLeido>>(
+    new Set(factura === null ? [] : (Object.keys(factura.datos) as CampoLeido[])),
+  );
   const [confirmarCuenta, setConfirmarCuenta] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
@@ -192,6 +250,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function volverAPedir() {
     setLectura({ tipo: "cargando" });
     setFicha(null);
+    cerrarFila(false);
     setVuelta((v) => v + 1);
   }
 
@@ -208,8 +267,10 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       })
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        if (data !== undefined) setFicha(data);
-        else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
+        if (data !== undefined) {
+          setFicha(data);
+          abrirFila(p.id);
+        } else if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO)
           setPendiente({ acto: "ver el proveedor", reintentar: () => verFicha(p) });
         else setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
       })
@@ -221,7 +282,25 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setConfirmarCuenta(false);
     setAviso(null);
     setDatos(f.modo === "alta" ? VACIO : datosDe(f.proveedor));
+    setRespaldo(null);
+    setDeLaLectura(new Set());
     setFormulario(f);
+  }
+
+  function revisado(campo: keyof Datos) {
+    setDeLaLectura((marcados) => {
+      if (!marcados.has(campo as CampoLeido)) return marcados;
+      const otros = new Set(marcados);
+      otros.delete(campo as CampoLeido);
+      return otros;
+    });
+  }
+
+  function leerDocumento(l: LecturaCarga) {
+    const leidos = datosLeidos(l);
+    clave.current = null;
+    setDatos((d) => ({ ...d, ...leidos }));
+    setDeLaLectura(new Set(Object.keys(leidos) as CampoLeido[]));
   }
 
   function cerrar() {
@@ -231,6 +310,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   }
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
+    revisado(campo);
     clave.current = null;
     setConfirmarCuenta(false);
     setDatos((d) => ({ ...d, [campo]: valor }));
@@ -238,7 +318,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    if (formulario === null) return;
+    // Dar de alta ahora mandaría el proveedor sin el documento que todavía no terminó.
+    if (formulario === null || (formulario.modo === "alta" && respaldoEnEspera)) return;
     // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
     if (formulario.modo !== "cambio" && cuitConError(datos.cuit.trim())) return;
     const cambiaCuenta = formulario.modo === "cambio" && !conservaCuenta(formulario, datos);
@@ -301,7 +382,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         ? api.POST("/api/v1/consorcios/{consorcio_id}/proveedores", {
             headers: encabezadoCsrf(),
             params: { path: { consorcio_id: consorcio }, header: encabezado },
-            body: { ...comunes, cuit: datos.cuit.trim() },
+            body: { ...comunes, cuit: datos.cuit.trim(), documento_id: respaldo?.documento ?? null },
           })
         : api.POST("/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/versiones", {
             headers: encabezadoCsrf(),
@@ -326,7 +407,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 ? `Listo: cargaste el CUIT y el proveedor quedó en la versión ${data.version}. Una orden ya aprobada hay que modificarla.`
                 : `Listo: el proveedor quedó en la versión ${data.version}.`;
           if (f.modo === "alta" && vuelveAPreparar) {
-            navegar(RUTA_NUEVA, { state: { consorcio, proveedor: data.id, aviso: hecho } });
+            navegar(RUTA_NUEVA, { state: { ...(factura?.orden ?? {}), consorcio, proveedor: data.id, aviso: hecho } });
             return;
           }
           setAviso({ texto: hecho, ok: true });
@@ -355,6 +436,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
       .finally(() => setEnviando(false));
   }
+
+  const marca = (campo: CampoLeido) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
 
   return (
     <>
@@ -395,38 +478,15 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {lectura.proveedores.length === 0 ? (
                 <p className="tarjeta">El edificio no tiene proveedores cargados.</p>
               ) : (
-                <div className="tabla-lista tabla-tarjetas">
-                  <table aria-label="Proveedores">
-                    <thead>
-                      <tr>
-                        <th scope="col">Proveedor</th>
-                        <th scope="col">CUIT</th>
-                        <th scope="col">Estado</th>
-                        <th scope="col">Cuenta</th>
-                        <th scope="col">
-                          <span className="solo-lector">Acciones</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lectura.proveedores.map((p) => (
-                        <tr key={p.id}>
-                          <th scope="row">
-                            <h2>{p.razon_social}</h2>
-                          </th>
-                          <td data-etiqueta="CUIT">{p.cuit ?? "Sin CUIT"}</td>
-                          <td data-etiqueta="Estado">{TEXTO_ESTADO_PROVEEDOR[p.estado]}</td>
-                          <td data-etiqueta="Cuenta">{cuentaEnmascarada(p.cuenta_ultimos_digitos)}</td>
-                          <td>
-                            <button type="button" className="sutil" onClick={() => verFicha(p)}>
-                              Ver la ficha<span className="solo-lector"> de {p.razon_social}</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                // La fila entera abre la ficha del proveedor; las acciones están en la ficha.
+                <ul className="filas-registro" aria-label="Proveedores">
+                  {lectura.proveedores.map((p) => (
+                    <li key={p.id}>
+                      <FilaDeRegistro titulo={p.razon_social} refFila={refFila(p.id)} deshabilitada={enviando} alAbrir={() => verFicha(p)}
+                        resumen={`${p.cuit ?? "Sin CUIT"} · ${TEXTO_ESTADO_PROVEEDOR[p.estado]} · Cuenta ${cuentaEnmascarada(p.cuenta_ultimos_digitos)}`} />
+                    </li>
+                  ))}
+                </ul>
               )}
             </>
           )}
@@ -470,7 +530,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       Cargar el CUIT
                     </button>
                   )}
-                  <button type="button" className="secundario" onClick={() => setFicha(null)}>
+                  <button
+                    type="button"
+                    className="secundario"
+                    onClick={() => {
+                      setFicha(null);
+                      cerrarFila();
+                    }}
+                  >
                     Volver a la lista
                   </button>
                 </div>
@@ -500,11 +567,22 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 {formulario.modo === "alta" ? "Alta de un proveedor" : `Cambiar ${formulario.proveedor.razon_social}`}
               </h2>
               {formulario.modo === "alta" && (
-                <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
+                <>
+                  <CargaConLectura consorcio={consorcio} tipo="proveedor" titulo="Documento del proveedor" de="del proveedor"
+                    textoVer="Ver el documento" deshabilitada={enviando} inicial={factura?.documento ?? null} aEntrar={aEntrar}
+                    alCargar={(c) => {
+                      clave.current = null;
+                      setRespaldo(c);
+                    }}
+                    alLeer={leerDocumento} alEsperar={setRespaldoEnEspera} />
+                  <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
+                  {marca("cuit")}
+                </>
               )}
               <label htmlFor={`${id}-razon`}>Razón social</label>
               <input id={`${id}-razon`} required maxLength={200} value={datos.razon} disabled={enviando}
                 onChange={(e) => cambiar("razon", e.target.value)} />
+              {marca("razon")}
               <label htmlFor={`${id}-rubro`}>Rubro (opcional)</label>
               <input id={`${id}-rubro`} maxLength={100} value={datos.rubro} disabled={enviando}
                 onChange={(e) => cambiar("rubro", e.target.value)} />
@@ -514,15 +592,18 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               <label htmlFor={`${id}-telefono`}>Teléfono (opcional)</label>
               <input id={`${id}-telefono`} type="tel" autoComplete="off" maxLength={50} value={datos.telefono} disabled={enviando}
                 onChange={(e) => cambiar("telefono", e.target.value)} />
+              {marca("telefono")}
               <label htmlFor={`${id}-whatsapp`}>WhatsApp (opcional)</label>
               <input id={`${id}-whatsapp`} type="tel" autoComplete="off" maxLength={50} value={datos.whatsapp} disabled={enviando}
                 onChange={(e) => cambiar("whatsapp", e.target.value)} />
               <label htmlFor={`${id}-correo`}>Correo (opcional)</label>
               <input id={`${id}-correo`} type="email" autoComplete="off" maxLength={254} value={datos.correo} disabled={enviando}
                 onChange={(e) => cambiar("correo", e.target.value)} />
+              {marca("correo")}
               <label htmlFor={`${id}-domicilio`}>Domicilio (opcional)</label>
               <input id={`${id}-domicilio`} autoComplete="off" maxLength={200} value={datos.domicilio} disabled={enviando}
                 onChange={(e) => cambiar("domicilio", e.target.value)} />
+              {marca("domicilio")}
               <label className="opcion">
                 <input type="checkbox" checked={datos.emergencias} disabled={enviando}
                   onChange={(e) => cambiar("emergencias", e.target.checked)} />
@@ -553,8 +634,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   {AVISO_CUENTA}
                 </p>
               )}
+              {formulario.modo === "alta" && respaldoEnEspera && (
+                <p id={`${id}-espera`} className="aviso-info">
+                  {TEXTO_ESPERA_PARA_GUARDAR}
+                </p>
+              )}
               <div className="acciones">
-                <button type="submit" disabled={enviando}>
+                <button type="submit" disabled={enviando || (formulario.modo === "alta" && respaldoEnEspera)}
+                  aria-describedby={formulario.modo === "alta" && respaldoEnEspera ? `${id}-espera` : undefined}>
                   {confirmarCuenta ? "Sí, cambiar la cuenta" : formulario.modo === "alta" ? "Dar de alta el proveedor" : "Guardar los cambios"}
                 </button>
                 <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
