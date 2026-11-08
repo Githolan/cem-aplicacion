@@ -65,14 +65,18 @@ from cem_contracts.egresos import (
     DeclaracionRegistrada,
     DiferenciaPagoManual,
     DiferenciaRegistrada,
+    DocumentoParaCarga,
     EjecucionManual,
     ElementoConsultaPagos,
     Emision,
     EnvioARevision,
     EstadoLectura,
+    EstadoLecturaCarga,
     EstadoOrdenPago,
+    EstadoProveedor,
     FichaPago,
     FiltroConsultaPagos,
+    LecturaCarga,
     LecturaComprobante,
     ListaContratos,
     ListaContratosRevision,
@@ -99,12 +103,14 @@ from cem_contracts.egresos import (
     ProveedorConVersiones,
     ProveedorCreado,
     ProveedorNuevo,
+    ProveedorSugerido,
     ProveedorVersionNueva,
     Rechazo,
     RegistroDiferenciaPago,
     RegistroPagoManual,
     Renovacion,
     ResolucionDiferenciaPago,
+    TipoCarga,
     TipoDiferencia,
     TomaPagoManual,
     TomaRegistrada,
@@ -123,7 +129,13 @@ from sqlalchemy.exc import DBAPIError
 from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
 from app.consorcios import circuito_pagos, lectura_comprobantes
-from app.consorcios.documentos import RESPUESTAS_SUBIDA, SUBIDA_OPENAPI, subir_archivo
+from app.consorcios.documentos import (
+    RESPUESTAS_SUBIDA,
+    RESPUESTAS_VERSION,
+    SUBIDA_OPENAPI,
+    subir_archivo,
+    version_visible,
+)
 from app.consorcios.padron import Discrepancia
 from app.contexto import Contexto, IdentidadDep, MotorDep
 from app.db import transaccion
@@ -681,6 +693,98 @@ def versionar_proveedor(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+# --- Documentos para carga: la IA propone, la persona confirma (`0088`) -------------------------
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/documentos/para-carga",
+    status_code=201,
+    response_model=DocumentoId,
+    summary="Crear un documento para cargar datos con IA: la factura de una orden o lo que respalda"
+    " los datos de un proveedor",
+    responses=RESPUESTAS_LECTURA,
+)
+def crear_documento_para_carga(
+    nuevo: DocumentoParaCarga,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Como `POST …/documentos`, en «Facturas y comprobantes», para quien prepara órdenes y
+    proveedores y además carga documentos. El archivo se sube después a
+    `…/documentos/{id}/versiones`; cuando el antivirus lo aprueba, con la lectura encendida, la IA
+    lo lee (`GET …/lectura-carga`). Sin gesto: no mueve dinero, y confirmar lo leído es mandar el
+    formulario de la orden o del proveedor, que pide lo suyo."""
+    cargar.verificar(Entidad())
+
+    def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        doc = _ejecutar(
+            conn, permiso,
+            "select nucleo.crear_documento_para_carga(:tipo, :titulo, :fecha, :actor, 'api',"
+            " :sesion)",
+            {"tipo": nuevo.tipo.value, "titulo": nuevo.titulo, "fecha": nuevo.fecha},
+        ).scalar_one()  # fmt: skip
+        return 201, DocumentoId(id=doc)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+def _proveedor_sugerido(c: Connection, permiso: Permiso, cuit: str | None):
+    """El proveedor activo con ese CUIT. El CUIT es único en el consorcio (`0048`)."""
+    if cuit is None:
+        return None
+    activo = next(
+        (p for p in _proveedores(c, permiso, None)
+         if p.cuit == cuit and p.estado == EstadoProveedor.ACTIVO),
+        None,
+    )  # fmt: skip
+    if activo is None:
+        return None
+    return ProveedorSugerido(id=activo.id, razon_social=activo.razon_social)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/lectura-carga",
+    response_model=LecturaCarga,
+    summary="Lo que la IA leyó de un documento para carga: propone, la persona confirma",
+    responses=RESPUESTAS_LECTURA | {
+        404: {"description": RESPUESTAS_VERSION[404]["description"] + " O no es un documento para"
+              " carga."},
+    },
+)  # fmt: skip
+def lectura_para_carga(
+    documento_id: UUID,
+    version_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    ver: Annotated[Permiso, Depends(requiere("documentos.ver"))],
+    restringidos: Annotated[Permiso, Depends(requiere("documentos.ver_restringidos"))],
+    motor: MotorDep,
+) -> LecturaCarga:
+    """Con las reglas del archivo (quien no puede abrir la versión no sabe qué dice: 404) y solo
+    para quien prepara. Mientras `estado_version` es `en_cuarentena` o `estado` es `leyendo`, se
+    vuelve a preguntar."""
+    f = version_visible(documento_id, version_id, ver, restringidos, motor)
+    with _lectura(permiso, motor) as c:
+        leido = _ejecutar(
+            c, permiso,
+            "select * from nucleo.lectura_carga_lectura(:d, :v, :actor, 'api', :sesion)",
+            {"d": documento_id, "v": version_id},
+        ).one_or_none()  # fmt: skip
+        if leido is None:
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+        sugerido = _proveedor_sugerido(c, permiso, leido.cuit)
+    return LecturaCarga(
+        documento_id=documento_id, version_documento_id=version_id, tipo=TipoCarga(leido.tipo),
+        estado_version=EstadoVersion(f["estado"]), estado=EstadoLecturaCarga(leido.estado),
+        cuit=leido.cuit, cuit_invalido=leido.cuit_invalido, razon_social=leido.razon_social,
+        domicilio=leido.domicilio, telefono=leido.telefono, correo=leido.correo,
+        numero_comprobante=leido.numero_comprobante, fecha=leido.fecha,
+        importe_centavos=None if leido.importe is None else int(leido.importe * 100),
+        moneda=leido.moneda, concepto=leido.concepto, proveedor_sugerido=sugerido,
+    )  # fmt: skip
+
+
 # --- Órdenes de pago: preparación --------------------------------------------------------------
 
 
@@ -750,6 +854,7 @@ def _datos_orden(d: DatosOrdenPago) -> dict:
         "comprobante": d.comprobante,
         "reserva": d.usa_fondo_reserva,
         "contrato": d.contrato_id,
+        "factura": d.documento_id,
     }
 
 
@@ -770,7 +875,7 @@ def preparar_orden(
         orden_id = _ejecutar(
             conn, permiso,
             "select nucleo.preparar_orden_pago(:importe, :moneda, :concepto, :proveedor,"
-            " :comprobante, :reserva, :contrato, :actor, 'api', :sesion)",
+            " :comprobante, :reserva, :contrato, :actor, 'api', :sesion, :factura)",
             _datos_orden(nueva),
         ).scalar_one()  # fmt: skip
         return 201, OrdenPagoCambiada(id=orden_id, version=1)
@@ -795,7 +900,7 @@ def modificar_orden(
         version = _ejecutar(
             conn, permiso,
             "select nucleo.modificar_orden_pago(:o, :esperada, :importe, :moneda, :concepto,"
-            " :proveedor, :comprobante, :reserva, :contrato, :actor, 'api', :sesion)",
+            " :proveedor, :comprobante, :reserva, :contrato, :actor, 'api', :sesion, :factura)",
             {"o": orden_id, "esperada": datos.version_esperada, **_datos_orden(datos)},
         ).scalar_one()  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=version)

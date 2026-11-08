@@ -38,7 +38,7 @@ from pydantic import (
     model_validator,
 )
 
-from cem_contracts.documentos import EstadoVersion, Titulo
+from cem_contracts.documentos import CategoriaDocumento, EstadoVersion, Titulo
 
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
 """El tope de `bigint` en la base."""
@@ -321,6 +321,13 @@ class DatosOrdenPago(BaseModel):
         default=None,
         description="El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
     )
+    documento_id: UUID | None = Field(
+        default=None,
+        description="La factura que respalda la orden: un documento vigente del consorcio,"
+        " cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y"
+        " comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de"
+        " un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
+    )
 
 
 class OrdenPagoNueva(DatosOrdenPago):
@@ -451,6 +458,12 @@ class VersionOrdenPago(BaseModel):
     )
     umbral_moneda: str | None
     contrato_id: UUID | None = Field(description="El contrato que la hace rutinaria.")
+    documento_id: UUID | None = Field(
+        default=None,
+        description="La factura que respalda la versión, si tiene. Se abre con"
+        " `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de"
+        " documentos)."
+    )
 
 
 class OrdenPagoConVersiones(BaseModel):
@@ -1371,4 +1384,106 @@ class ConsultaPagos(BaseModel):
     elementos: list[ElementoConsultaPagos]
     siguiente: int | None = Field(
         description="El `saltar` de la página siguiente; sin él, no hay más."
+    )
+
+
+# --- Lectura con IA de un documento para cargar datos --------------------------------------------
+#
+# «Donde sea input de datos de un documento debe realizarse la subida y después IA completa y humano
+# confirma» (pedido del propietario, 08-11-2026). Se sube el documento, la IA propone los datos y la
+# persona los confirma mandando el formulario de siempre (orden de pago o alta de proveedor): la
+# lectura no guarda nada en órdenes ni proveedores. RN21: la IA propone, no decide.
+
+
+class TipoCarga(StrEnum):
+    """Para qué se sube el documento: elige qué se lee y adónde van los datos."""
+
+    FACTURA = "factura"
+    """La factura de un proveedor, para preparar una orden de pago."""
+    PROVEEDOR = "proveedor"
+    """Un documento que respalda los datos de un proveedor (una factura, una constancia de
+    inscripción), para darlo de alta."""
+
+
+CATEGORIA_DE_CARGA: dict[TipoCarga, CategoriaDocumento] = {
+    TipoCarga.FACTURA: CategoriaDocumento.FACTURAS_Y_COMPROBANTES,
+    TipoCarga.PROVEEDOR: CategoriaDocumento.FACTURAS_Y_COMPROBANTES,
+}
+"""La categoría con que nace el documento. Las dos se leen con `documentos.ver` (no son
+restringidas), como cualquier factura del consorcio. Es `CATEGORIA` de `0088`."""
+
+
+class DocumentoParaCarga(BaseModel):
+    """`POST …/documentos/para-carga`: un documento sin archivos, como `DocumentoNuevo`, que se lee
+    con IA cuando su archivo pasa el antivirus. El archivo se sube después a
+    `…/documentos/{id}/versiones`."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tipo: TipoCarga
+    titulo: Titulo
+    fecha: date = Field(description="Fecha del documento (no la de la carga).")
+
+
+class EstadoLecturaCarga(StrEnum):
+    """En qué quedó la lectura con IA de una versión."""
+
+    LEYENDO = "leyendo"
+    """El trabajo está en la cola o corriendo: volver a preguntar en unos segundos."""
+    LEIDA = "leida"
+    NO_LEIDA = "no_leida"
+    """No se pudo leer (ilegible, el modelo falló o respondió algo inválido): se carga a mano."""
+    SIN_LECTURA = "sin_lectura"
+    """No hay lectura ni trabajo: el archivo todavía está en el antivirus (ver `estado_version`),
+    o la lectura está apagada, o el antivirus lo rechazó. Con `estado_version` en `disponible`
+    no va a cambiar: se carga a mano."""
+
+
+class ProveedorSugerido(BaseModel):
+    """El proveedor activo del consorcio con el CUIT leído."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    razon_social: str
+
+
+class LecturaCarga(BaseModel):
+    """`GET …/documentos/{d}/versiones/{v}/lectura-carga`: lo que la IA leyó del archivo. Solo
+    propone: la persona revisa cada campo y confirma con el formulario de la orden o del proveedor.
+    Nunca trae cuentas bancarias: no se piden al modelo y una respuesta que trae una no se
+    acepta."""
+
+    model_config = ConfigDict(frozen=True)
+
+    documento_id: UUID
+    version_documento_id: UUID
+    tipo: TipoCarga
+    estado_version: EstadoVersion = Field(
+        description="Mientras sea `en_cuarentena`, la lectura todavía no empezó: volver a"
+        " preguntar."
+    )
+    estado: EstadoLecturaCarga
+    cuit: str | None = Field(
+        description="El CUIT del emisor, 11 dígitos, con el dígito verificador comprobado."
+    )
+    cuit_invalido: bool = Field(
+        description="Se leyó un CUIT cuyo dígito verificador no cierra: no se propone (queda"
+        " `cuit` nulo) y conviene avisar que se revise el documento."
+    )
+    razon_social: str | None = Field(description="La del emisor del documento.")
+    domicilio: str | None
+    telefono: str | None
+    correo: str | None
+    numero_comprobante: str | None = Field(
+        description="Tipo y número de la factura, como figura. Ejemplo: «A 0001-00001234». Sirve"
+        " para el campo `comprobante` de la orden."
+    )
+    fecha: date | None
+    importe_centavos: int | None = Field(description="El importe total.")
+    moneda: str | None
+    concepto: str | None = Field(description="Lo facturado, en una línea corta.")
+    proveedor_sugerido: ProveedorSugerido | None = Field(
+        description="El proveedor activo del consorcio con ese CUIT, si hay uno: la orden se"
+        " prepara a su nombre. Sin él, se ofrece el alta con lo leído."
     )

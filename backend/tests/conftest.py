@@ -236,6 +236,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "      where documento_id is not null;"
                 "     alter table nucleo.proveedor_version enable trigger user;"
                 "   end if;"
+                # Lo que leyó la IA de un documento para carga (0088) cita sus versiones.
+                "   if to_regclass('nucleo.lectura_carga') is not null then"
+                "     alter table nucleo.lectura_carga disable trigger user;"
+                "     delete from nucleo.lectura_carga;"
+                "     alter table nucleo.lectura_carga enable trigger user;"
+                "   end if;"
                 "   delete from nucleo.version_documento;"
                 "   delete from nucleo.documento;"
                 " end if;"

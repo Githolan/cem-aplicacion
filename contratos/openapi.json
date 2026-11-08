@@ -2756,6 +2756,33 @@
         "title": "DocumentoNuevo",
         "type": "object"
       },
+      "DocumentoParaCarga": {
+        "additionalProperties": false,
+        "description": "`POST …/documentos/para-carga`: un documento sin archivos, como `DocumentoNuevo`, que se lee\ncon IA cuando su archivo pasa el antivirus. El archivo se sube después a\n`…/documentos/{id}/versiones`.",
+        "properties": {
+          "fecha": {
+            "description": "Fecha del documento (no la de la carga).",
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoCarga"
+          },
+          "titulo": {
+            "maxLength": 200,
+            "title": "Titulo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tipo",
+          "titulo",
+          "fecha"
+        ],
+        "title": "DocumentoParaCarga",
+        "type": "object"
+      },
       "EjecucionManual": {
         "properties": {
           "creada_en": {
@@ -3278,6 +3305,17 @@
           "no_leida"
         ],
         "title": "EstadoLectura",
+        "type": "string"
+      },
+      "EstadoLecturaCarga": {
+        "description": "En qué quedó la lectura con IA de una versión.",
+        "enum": [
+          "leyendo",
+          "leida",
+          "no_leida",
+          "sin_lectura"
+        ],
+        "title": "EstadoLecturaCarga",
         "type": "string"
       },
       "EstadoMandato": {
@@ -4888,6 +4926,184 @@
         ],
         "title": "LeTocaA",
         "type": "string"
+      },
+      "LecturaCarga": {
+        "description": "`GET …/documentos/{d}/versiones/{v}/lectura-carga`: lo que la IA leyó del archivo. Solo\npropone: la persona revisa cada campo y confirma con el formulario de la orden o del proveedor.\nNunca trae cuentas bancarias: no se piden al modelo y una respuesta que trae una no se\nacepta.",
+        "properties": {
+          "concepto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lo facturado, en una línea corta.",
+            "title": "Concepto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El CUIT del emisor, 11 dígitos, con el dígito verificador comprobado.",
+            "title": "Cuit"
+          },
+          "cuit_invalido": {
+            "description": "Se leyó un CUIT cuyo dígito verificador no cierra: no se propone (queda `cuit` nulo) y conviene avisar que se revise el documento.",
+            "title": "Cuit Invalido",
+            "type": "boolean"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "domicilio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoLecturaCarga"
+          },
+          "estado_version": {
+            "$ref": "#/components/schemas/EstadoVersion",
+            "description": "Mientras sea `en_cuarentena`, la lectura todavía no empezó: volver a preguntar."
+          },
+          "fecha": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fecha"
+          },
+          "importe_centavos": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El importe total.",
+            "title": "Importe Centavos"
+          },
+          "moneda": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moneda"
+          },
+          "numero_comprobante": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tipo y número de la factura, como figura. Ejemplo: «A 0001-00001234». Sirve para el campo `comprobante` de la orden.",
+            "title": "Numero Comprobante"
+          },
+          "proveedor_sugerido": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProveedorSugerido"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El proveedor activo del consorcio con ese CUIT, si hay uno: la orden se prepara a su nombre. Sin él, se ofrece el alta con lo leído."
+          },
+          "razon_social": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La del emisor del documento.",
+            "title": "Razon Social"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoCarga"
+          },
+          "version_documento_id": {
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "documento_id",
+          "version_documento_id",
+          "tipo",
+          "estado_version",
+          "estado",
+          "cuit",
+          "cuit_invalido",
+          "razon_social",
+          "domicilio",
+          "telefono",
+          "correo",
+          "numero_comprobante",
+          "fecha",
+          "importe_centavos",
+          "moneda",
+          "concepto",
+          "proveedor_sugerido"
+        ],
+        "title": "LecturaCarga",
+        "type": "object"
       },
       "LecturaComprobante": {
         "description": "Lo que la IA leyó de `comprobante_actual`. Propone, no decide: llena campos y avisa. La\ncomparación la hace el servidor. La cuenta leída no se guarda ni viaja: solo sus últimos dígitos\ny si coincide con la de la orden.",
@@ -6696,6 +6912,19 @@
             "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
             "title": "Contrato Id"
           },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La factura que respalda la orden: un documento vigente del consorcio, cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
+            "title": "Documento Id"
+          },
           "importe_centavos": {
             "description": "En centavos.",
             "exclusiveMinimum": 0.0,
@@ -6768,6 +6997,19 @@
             ],
             "description": "El contrato o abono confirmado que respalda la orden: solo así es rutinaria.",
             "title": "Contrato Id"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La factura que respalda la orden: un documento vigente del consorcio, cargado para preparar una orden (`DocumentoParaCarga` con `factura`) o de «Facturas y comprobantes», con su archivo aprobado por el antivirus. No puede ser el comprobante de un pago. Entra en la huella: aprobar la versión aprueba también esta factura.",
+            "title": "Documento Id"
           },
           "importe_centavos": {
             "description": "En centavos.",
@@ -7853,6 +8095,26 @@
         "title": "ProveedorNuevo",
         "type": "object"
       },
+      "ProveedorSugerido": {
+        "description": "El proveedor activo del consorcio con el CUIT leído.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "razon_social"
+        ],
+        "title": "ProveedorSugerido",
+        "type": "object"
+      },
       "ProveedorVersionNueva": {
         "additionalProperties": false,
         "description": "`POST …/proveedores/{id}/versiones`. Cambiar la cuenta es una versión nueva: las órdenes ya\npreparadas siguen apuntando a la anterior. El CUIT no cambia.\n\nQuien prepara nunca recibe la cuenta completa, así que no puede reenviarla:\n`conservar_cuenta` deja la de la versión esperada, y entonces `cuenta_destino` no viene.\nSin `conservar_cuenta`, `cuenta_destino` es la cuenta nueva o ninguna.",
@@ -8742,6 +9004,15 @@
         "title": "TipoArchivo",
         "type": "string"
       },
+      "TipoCarga": {
+        "description": "Para qué se sube el documento: elige qué se lee y adónde van los datos.",
+        "enum": [
+          "factura",
+          "proveedor"
+        ],
+        "title": "TipoCarga",
+        "type": "string"
+      },
       "TipoContrato": {
         "enum": [
           "contrato",
@@ -9182,6 +9453,19 @@
             ],
             "title": "Cuit"
           },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La factura que respalda la versión, si tiene. Se abre con `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de documentos).",
+            "title": "Documento Id"
+          },
           "franja": {
             "$ref": "#/components/schemas/Franja"
           },
@@ -9367,6 +9651,19 @@
               }
             ],
             "title": "Cuit"
+          },
+          "documento_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La factura que respalda la versión, si tiene. Se abre con `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de documentos).",
+            "title": "Documento Id"
           },
           "franja": {
             "$ref": "#/components/schemas/Franja"
@@ -12146,6 +12443,75 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/documentos/para-carga": {
+      "post": {
+        "description": "Como `POST …/documentos`, en «Facturas y comprobantes», para quien prepara órdenes y\nproveedores y además carga documentos. El archivo se sube después a\n`…/documentos/{id}/versiones`; cuando el antivirus lo aprueba, con la lectura encendida, la IA\nlo lee (`GET …/lectura-carga`). Sin gesto: no mueve dinero, y confirmar lo leído es mandar el\nformulario de la orden o del proveedor, que pide lo suyo.",
+        "operationId": "crear_documento_para_carga_api_v1_consorcios__consorcio_id__documentos_para_carga_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentoParaCarga"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentoId"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Crear un documento para cargar datos con IA: la factura de una orden o lo que respalda los datos de un proveedor",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones": {
       "post": {
         "operationId": "subir_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones_post",
@@ -12405,6 +12771,76 @@
         "summary": "Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
         "tags": [
           "documentos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/lectura-carga": {
+      "get": {
+        "description": "Con las reglas del archivo (quien no puede abrir la versión no sabe qué dice: 404) y solo\npara quien prepara. Mientras `estado_version` es `en_cuarentena` o `estado` es `leyendo`, se\nvuelve a preguntar.",
+        "operationId": "lectura_para_carga_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones__version_id__lectura_carga_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LecturaCarga"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "La versión o el documento no existen en este consorcio; su categoría es restringida y la persona no tiene la facultad `documentos.ver`; o respalda un pago manual, la persona no subió esa versión y no es del Consejo (`egresos.aprobar_orden`) o preparó esa orden. O no es un documento para carga."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que la IA leyó de un documento para carga: propone, la persona confirma",
+        "tags": [
+          "egresos"
         ]
       }
     },
