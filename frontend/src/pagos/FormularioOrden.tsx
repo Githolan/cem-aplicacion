@@ -3,7 +3,7 @@ import { Link } from "react-router";
 
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
-import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, useVersionVisible } from "../CargaConLectura";
+import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO_ESPERA_PARA_GUARDAR, useVersionVisible } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
 import { CampoImporte } from "../egresos/CampoImporte";
 import {
@@ -172,6 +172,8 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<Campo>>(new Set());
   /** La lectura con un proveedor que no está cargado: se ofrece darlo de alta. */
   const [sinProveedor, setSinProveedor] = useState<AltaDesdeLaFactura | null>(null);
+  /** Un archivo de factura subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
+  const [facturaEnEspera, setFacturaEnEspera] = useState(false);
   /** La factura subida en este formulario, ya aprobada por el antivirus. */
   const [subida, setSubida] = useState<Cargado | null>(null);
 
@@ -288,7 +290,8 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
 
   function guardar(evento: FormEvent) {
     evento.preventDefault();
-    if (datos === null) return;
+    // Guardar ahora mandaría la orden sin el archivo que todavía no terminó (o sin la factura anterior).
+    if (datos === null || facturaEnEspera) return;
     const centavos = aCentavos(datos.importe);
     if (centavos === null) {
       setAviso({ texto: "Escribí el importe en pesos, por ejemplo 12345,50.", ok: false });
@@ -381,7 +384,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           setSubida(c);
           cargarFactura(c);
         }}
-        alLeer={leerFactura} />
+        alLeer={leerFactura} alEsperar={setFacturaEnEspera} />
       {alAlta !== null && (
         <div className="aviso-info" role="note">
           <p>
@@ -449,8 +452,14 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           {AVISO_MODIFICAR}
         </p>
       )}
+      {facturaEnEspera && (
+        <p id={`${id}-espera`} className="aviso-info">
+          {TEXTO_ESPERA_PARA_GUARDAR}
+        </p>
+      )}
       <div className="acciones">
-        <button type="submit" disabled={enviando || datos.proveedor === ""}>
+        <button type="submit" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
+          aria-describedby={facturaEnEspera ? `${id}-espera` : undefined}>
           {confirmar ? "Sí, crear la versión nueva" : "Guardar la orden"}
         </button>
         <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>

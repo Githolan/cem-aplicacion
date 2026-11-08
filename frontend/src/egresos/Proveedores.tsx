@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router";
 import { CabeceraInterna } from "../CabeceraInterna";
 import { CampoCuit, cuitConError } from "../CampoCuit";
 import { FilaDeRegistro, useFichas } from "../FichaDeRegistro";
-import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura } from "../CargaConLectura";
+import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO_ESPERA_PARA_GUARDAR } from "../CargaConLectura";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
@@ -203,6 +203,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [datos, setDatos] = useState<Datos>(factura === null ? VACIO : { ...VACIO, ...factura.datos });
   /** El documento que respalda el alta (0088), ya aprobado por el antivirus. */
   const [respaldo, setRespaldo] = useState<Cargado | null>(factura?.documento ?? null);
+  /** El documento del alta subiéndose, en el antivirus o leyéndose: hasta que termine no se guarda. */
+  const [respaldoEnEspera, setRespaldoEnEspera] = useState(false);
   /** Los campos que completó la lectura y la persona todavía no revisó. */
   const [deLaLectura, setDeLaLectura] = useState<ReadonlySet<CampoLeido>>(
     new Set(factura === null ? [] : (Object.keys(factura.datos) as CampoLeido[])),
@@ -316,7 +318,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   function enviar(evento: FormEvent) {
     evento.preventDefault();
-    if (formulario === null) return;
+    // Dar de alta ahora mandaría el proveedor sin el documento que todavía no terminó.
+    if (formulario === null || (formulario.modo === "alta" && respaldoEnEspera)) return;
     // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
     if (formulario.modo !== "cambio" && cuitConError(datos.cuit.trim())) return;
     const cambiaCuenta = formulario.modo === "cambio" && !conservaCuenta(formulario, datos);
@@ -571,7 +574,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       clave.current = null;
                       setRespaldo(c);
                     }}
-                    alLeer={leerDocumento} />
+                    alLeer={leerDocumento} alEsperar={setRespaldoEnEspera} />
                   <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
                   {marca("cuit")}
                 </>
@@ -631,8 +634,14 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   {AVISO_CUENTA}
                 </p>
               )}
+              {formulario.modo === "alta" && respaldoEnEspera && (
+                <p id={`${id}-espera`} className="aviso-info">
+                  {TEXTO_ESPERA_PARA_GUARDAR}
+                </p>
+              )}
               <div className="acciones">
-                <button type="submit" disabled={enviando}>
+                <button type="submit" disabled={enviando || (formulario.modo === "alta" && respaldoEnEspera)}
+                  aria-describedby={formulario.modo === "alta" && respaldoEnEspera ? `${id}-espera` : undefined}>
                   {confirmarCuenta ? "Sí, cambiar la cuenta" : formulario.modo === "alta" ? "Dar de alta el proveedor" : "Guardar los cambios"}
                 </button>
                 <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>

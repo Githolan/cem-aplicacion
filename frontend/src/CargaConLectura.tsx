@@ -15,7 +15,10 @@ import { VisorDocumento } from "./VisorDocumento";
 // confirma» (pedido del propietario, 08-11-2026; app 0088). Elegir el archivo es el único paso: se
 // crea el documento para carga, se sube el archivo, el antivirus lo revisa y la IA lo lee. Lo leído
 // solo llena campos del formulario de quien lo usa, que los marca para revisar; guardar es confirmar.
-// Sin archivo, el formulario se completa a mano como siempre.
+// Sin archivo, el formulario se completa a mano como siempre. Mientras un archivo se sube, se revisa
+// o se lee, el formulario no se guarda (`alEsperar`): guardar sin el archivo lo perdería. El archivo
+// anterior sigue valiendo hasta que el nuevo pasa el antivirus; «Seguir sin este archivo» deja de
+// esperarlo y vuelve al anterior, si había.
 
 export type LecturaCarga = components["schemas"]["LecturaCarga"];
 export type TipoCarga = components["schemas"]["TipoCarga"];
@@ -33,7 +36,9 @@ type Fase =
   | { tipo: "no_leida" }
   | { tipo: "sin_lectura" }
   | { tipo: "rechazado" }
-  | { tipo: "no_subio" };
+  | { tipo: "no_subio" }
+  /** La persona dejó de esperar: sin el archivo nuevo (antivirus) o sin su lectura (a mano). */
+  | { tipo: "dejado"; conArchivo: boolean };
 
 export const TEXTO_SUBIENDO = "Subiendo…";
 export const TEXTO_REVISANDO = "El antivirus lo está revisando…";
@@ -46,6 +51,13 @@ export const TEXTO_ANTIVIRUS_TARDA = "El antivirus está tardando. Se puede comp
 export const TEXTO_CUIT_INVALIDO =
   "El CUIT que figura en el documento no es válido: hay que revisar el CUIT del proveedor antes de seguir.";
 export const MARCA_LECTURA = "Lo completó la lectura: revisar";
+export const TEXTO_SIGUE_ANTERIOR = "Sigue adjunto el archivo anterior.";
+export const TEXTO_DEJADO_SIN_ARCHIVO = "Se dejó de esperar ese archivo: no queda adjunto.";
+export const TEXTO_DEJADO_SIN_LECTURA = "Se dejó de esperar la lectura: el archivo queda adjunto y los datos se completan a mano.";
+export const SEGUIR_SIN_ESPERAR = "Seguir sin este archivo";
+export const SEGUIR_SIN_LECTURA = "Seguir sin la lectura";
+/** Lo que dice el formulario mientras no se puede guardar. */
+export const TEXTO_ESPERA_PARA_GUARDAR = "Hay que esperar a que termine el archivo, o elegir seguir sin él, para guardar.";
 
 const hoy = () => {
   const ahora = new Date();
@@ -76,9 +88,11 @@ type Props = {
   alCargar: (cargado: Cargado | null) => void;
   /** Una sola vez por versión, cuando la lectura terminó con datos. */
   alLeer: (lectura: LecturaCarga) => void;
+  /** Si hay un archivo subiéndose, en el antivirus o leyéndose: mientras tanto no se guarda. */
+  alEsperar: (esperando: boolean) => void;
 };
 
-export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabilitada = false, inicial = null, aEntrar, alCargar, alLeer }: Props) {
+export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabilitada = false, inicial = null, aEntrar, alCargar, alLeer, alEsperar }: Props) {
   const [fase, setFase] = useState<Fase>({ tipo: "nada" });
   const [texto, setTexto] = useState<string | null>(null);
   /** El subido acá; mientras no se subió nada, vale el inicial (que puede llegar después). */
@@ -93,8 +107,8 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   const claveDocumento = useRef<string | null>(null);
   const claveArchivo = useRef<string | null>(null);
   const leidas = useRef(new Set<string>());
-  const ultimas = useRef({ alCargar, alLeer });
-  ultimas.current = { alCargar, alLeer };
+  const ultimas = useRef({ alCargar, alLeer, alEsperar });
+  ultimas.current = { alCargar, alLeer, alEsperar };
 
   const ponerCargado = useCallback((nuevo: Cargado | null) => {
     setTocado(true);
@@ -152,7 +166,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
     setFase({ tipo: "subiendo" });
     setTexto(null);
     enEspera.current = null;
-    ponerCargado(null);
+    // El archivo anterior sigue adjunto hasta que el nuevo pase el antivirus.
     const nombre = tituloDe(archivo, titulo);
     try {
       if (sinArchivo.current === null) {
@@ -210,6 +224,17 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
   }
 
   const ocupada = fase.tipo === "subiendo" || fase.tipo === "revisando" || fase.tipo === "leyendo";
+  useEffect(() => {
+    ultimas.current.alEsperar(ocupada);
+  }, [ocupada]);
+  // Si el formulario se cierra en medio de la espera, ya no hay nada que esperar.
+  useEffect(() => () => ultimas.current.alEsperar(false), []);
+
+  /** Dejar de esperar: sin el archivo nuevo (vuelve el anterior, si había) o sin su lectura. */
+  function dejarDeEsperar() {
+    enEspera.current = null;
+    setFase({ tipo: "dejado", conArchivo: fase.tipo === "leyendo" });
+  }
   const progreso = fase.tipo === "subiendo" ? TEXTO_SUBIENDO : fase.tipo === "revisando" ? TEXTO_REVISANDO : fase.tipo === "leyendo" ? TEXTO_LEYENDO : null;
   const resultado =
     fase.tipo === "leida" ? TEXTO_LEIDA
@@ -228,6 +253,18 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
         </p>
       )}
       {fase.tipo === "revisando" && antivirusTarda && <p className="aviso-info">{TEXTO_ANTIVIRUS_TARDA}</p>}
+      {(fase.tipo === "revisando" || fase.tipo === "leyendo") && (
+        <div className="acciones">
+          <button type="button" className="secundario" onClick={dejarDeEsperar}>
+            {fase.tipo === "leyendo" ? SEGUIR_SIN_LECTURA : SEGUIR_SIN_ESPERAR}
+          </button>
+        </div>
+      )}
+      {fase.tipo === "dejado" && (
+        <p role="status" className="aviso-info">
+          {fase.conArchivo ? TEXTO_DEJADO_SIN_LECTURA : TEXTO_DEJADO_SIN_ARCHIVO}
+        </p>
+      )}
       {resultado !== null && (
         <p role="status" className={fase.tipo === "leida" ? "aviso-info" : "aviso-error"}>
           {resultado}
@@ -243,6 +280,9 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
           {TEXTO_RECHAZADO}
         </p>
       )}
+      {(fase.tipo === "rechazado" || fase.tipo === "no_subio" || (fase.tipo === "dejado" && !fase.conArchivo) ||
+        fase.tipo === "subiendo" || fase.tipo === "revisando") &&
+        cargado !== null && <p className="aviso-info">{TEXTO_SIGUE_ANTERIOR}</p>}
       {fase.tipo === "no_subio" && texto !== null && (
         <p className="aviso-error" role="alert">
           {texto}

@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import type { components } from "../api/tipos";
 import { App } from "../App";
-import { MARCA_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_LEIDA, TEXTO_LEYENDO, TEXTO_RECHAZADO, TEXTO_REVISANDO } from "../CargaConLectura";
+import {
+  MARCA_LECTURA, SEGUIR_SIN_ESPERAR, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
+  TEXTO_ESPERA_PARA_GUARDAR, TEXTO_LEIDA, TEXTO_LEYENDO, TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR,
+} from "../CargaConLectura";
 import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
 import { ContextoVersion } from "../version";
 import { cambiosDeVersion } from "./Ficha";
@@ -3189,6 +3192,206 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(((await screen.findByLabelText(/CUIT/)) as HTMLInputElement).value).toBe("");
     expect(screen.getByLabelText("Archivo del proveedor")).toBeTruthy();
     expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+  });
+
+  describe("mientras el archivo no termina, no se guarda", () => {
+    it("con la factura en el antivirus, guardar está bloqueado y dice por qué; al terminar, guarda con ella", async () => {
+      conEsperaManual();
+      const api = conFactura([EN_CUARENTENA, lectura()]);
+      fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      await subirFactura();
+      const guardarOrden = screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement;
+      expect(guardarOrden.disabled).toBe(true);
+      expect(screen.getByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeTruthy();
+      // Ni con Enter: el formulario no manda nada.
+      fireEvent.submit(guardarOrden.closest("form") as HTMLFormElement);
+      expect(pedidos(api, "POST", ORDENES)).toHaveLength(0);
+      await vuelta();
+      expect(screen.getByText(TEXTO_REVISANDO)).toBeTruthy();
+      await vuelta();
+      expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+      // Control: terminado, se guarda y lleva el archivo.
+      expect(screen.queryByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeNull();
+      expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
+    });
+
+    it("«Seguir sin este archivo» deja de esperarlo y se guarda sin factura", async () => {
+      conEsperaManual();
+      const api = conFactura([EN_CUARENTENA]);
+      fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      await subirFactura();
+      fireEvent.click(await boton(SEGUIR_SIN_ESPERAR));
+      expect(await screen.findByText(TEXTO_DEJADO_SIN_ARCHIVO)).toBeTruthy();
+      const lecturas = pedidos(api, "GET", LECTURA).length;
+      await vuelta();
+      expect(pedidos(api, "GET", LECTURA)).toHaveLength(lecturas);
+      expect(await guardar(api)).toMatchObject({ factura_version_id: null });
+    });
+
+    it("«Seguir sin la lectura» deja el archivo adjunto y los datos a mano", async () => {
+      conEsperaManual();
+      const api = conFactura([LEYENDO]);
+      fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      await subirFactura();
+      await vuelta();
+      expect(await screen.findByText(TEXTO_LEYENDO)).toBeTruthy();
+      expect((screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(await boton(SEGUIR_SIN_LECTURA));
+      expect(await screen.findByText(TEXTO_DEJADO_SIN_LECTURA)).toBeTruthy();
+      expect(await guardar(api)).toMatchObject({ factura_version_id: VF, concepto: "Limpieza" });
+    });
+
+    describe("reemplazar la factura de una versión", () => {
+      const FAC2 = "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2";
+      const VF2 = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2";
+      const CON_FACTURA = { ...BORRADOR, versiones: [version({ aprobada_por: [], documento_id: FAC, factura_version_id: VF })] };
+      const VERSIONES = `${BASE}/ordenes-pago/${O1}/versiones`;
+      const DOCUMENTOS = () =>
+        Response.json({
+          documentos: [{
+            id: FAC, categoria: "facturas_y_comprobantes", titulo: "factura-octubre", fecha: "2026-10-01", cargado_en: "2026-10-01T12:00:00Z",
+            versiones: [{ id: VF, estado: "disponible", motivo_rechazo: null, tipo: "application/pdf", tamano: 18, sha256: H1, subida_en: "2026-10-01T12:00:00Z" }],
+          }],
+        });
+
+      function modificarCon(estadoNuevo: Lectura["estado_version"]) {
+        return abrirFicha(CON_FACTURA, {
+          [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+          [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+          [`GET ${BASE}/documentos`]: DOCUMENTOS,
+          [`POST ${PARA_CARGA}`]: () => Response.json({ id: FAC2 }, { status: 201 }),
+          [`POST ${BASE}/documentos/${FAC2}/versiones`]: () =>
+            Response.json({ id: VF2, estado: "en_cuarentena", tipo: "pdf", tamano: 18, sha256: H2 }, { status: 201 }),
+          [`GET ${BASE}/documentos/${FAC2}/versiones/${VF2}/lectura-carga`]: () =>
+            Response.json({ ...lectura({ documento_id: FAC2, version_documento_id: VF2 }), estado_version: estadoNuevo,
+              ...(estadoNuevo === "disponible" ? {} : { estado: "sin_lectura" }) }),
+          [`POST ${VERSIONES}`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
+        });
+      }
+
+      async function reemplazar() {
+        fireEvent.click(await boton("Modificar"));
+        // La factura de la versión se ve desde el principio.
+        expect(await boton("Ver la factura")).toBeTruthy();
+        fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Otro concepto" } });
+        fireEvent.change(screen.getByLabelText("Archivo de la factura"), { target: { files: [FACTURA] } });
+        expect(await screen.findByText(TEXTO_REVISANDO)).toBeTruthy();
+        // Mientras el nuevo está en el antivirus, la anterior sigue adjunta y a la vista.
+        expect(screen.getByText(TEXTO_SIGUE_ANTERIOR)).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Ver la factura" })).toBeTruthy();
+      }
+
+      async function guardarVersion(api: ReturnType<typeof vi.fn>) {
+        fireEvent.click(await boton("Guardar la orden"));
+        await waitFor(() => expect(pedidos(api, "POST", VERSIONES)).toHaveLength(1));
+        return cuerpo(pedidos(api, "POST", VERSIONES)[0]);
+      }
+
+      it("si el archivo nuevo no pasa el antivirus, sigue la factura anterior", async () => {
+        conEsperaManual();
+        const api = modificarCon("rechazado");
+        await reemplazar();
+        await vuelta();
+        expect(await screen.findByText(TEXTO_RECHAZADO)).toBeTruthy();
+        expect(screen.getByText(TEXTO_SIGUE_ANTERIOR)).toBeTruthy();
+        expect(await guardarVersion(api)).toMatchObject({ factura_version_id: VF, concepto: "Otro concepto" });
+      });
+
+      it("control: si el archivo nuevo pasa, la versión lleva el nuevo", async () => {
+        conEsperaManual();
+        const api = modificarCon("disponible");
+        await reemplazar();
+        await vuelta();
+        expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+        expect(screen.queryByText(TEXTO_SIGUE_ANTERIOR)).toBeNull();
+        expect(await guardarVersion(api)).toMatchObject({ factura_version_id: VF2 });
+      });
+    });
+
+    it("el alta del proveedor tampoco se guarda mientras su documento no termina", async () => {
+      conEsperaManual();
+      const PROV = "d3d3d3d3-d3d3-4d3d-8d3d-d3d3d3d3d3d3";
+      const VP = "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3";
+      let vuelta2 = 0;
+      const api = backend({
+        [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+        [`POST ${PARA_CARGA}`]: () => Response.json({ id: PROV }, { status: 201 }),
+        [`POST ${BASE}/documentos/${PROV}/versiones`]: () =>
+          Response.json({ id: VP, estado: "en_cuarentena", tipo: "pdf", tamano: 18, sha256: H1 }, { status: 201 }),
+        [`GET ${BASE}/documentos/${PROV}/versiones/${VP}/lectura-carga`]: () =>
+          Response.json(vuelta2++ === 0 ? { ...EN_CUARENTENA, documento_id: PROV, version_documento_id: VP, tipo: "proveedor" }
+            : lectura({ documento_id: PROV, version_documento_id: VP, tipo: "proveedor", proveedor_sugerido: null })),
+        [`POST ${BASE}/proveedores`]: () => Response.json({ id: P1, version: 1 }, { status: 201 }),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/egresos/proveedores");
+      fireEvent.click(await boton("Dar de alta un proveedor"));
+      fireEvent.change(await screen.findByLabelText("Archivo del proveedor"), { target: { files: [FACTURA] } });
+      expect(await screen.findByText(TEXTO_REVISANDO)).toBeTruthy();
+      const alta = screen.getByRole("button", { name: "Dar de alta el proveedor" }) as HTMLButtonElement;
+      expect(alta.disabled).toBe(true);
+      expect(screen.getByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeTruthy();
+      fireEvent.submit(alta.closest("form") as HTMLFormElement);
+      expect(pedidos(api, "POST", `${BASE}/proveedores`)).toHaveLength(0);
+      await vuelta();
+      await vuelta();
+      expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+      // Control: terminado, el alta sale con su documento.
+      expect(alta.disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText(/CBU|Cuenta/), { target: { value: CUENTA } });
+      fireEvent.submit(alta.closest("form") as HTMLFormElement);
+      await waitFor(() => expect(pedidos(api, "POST", `${BASE}/proveedores`)).toHaveLength(1));
+      expect(await cuerpo(pedidos(api, "POST", `${BASE}/proveedores`)[0])).toMatchObject({ documento_id: PROV });
+    });
+  });
+
+  describe("lo que trae la llegada a «Preparar una orden» es de su edificio", () => {
+    const C3 = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4";
+    const P3 = "a3a3a3a3-a3a3-4a3a-8a3a-a3a3a3a3a3a3";
+    const LLEGADA = {
+      pathname: "/pagos/nueva",
+      state: {
+        consorcio: C1, proveedor: P1, importe: "23456,00", moneda: "ARS", concepto: "Limpieza de noviembre", comprobante: "B 0001-00000077",
+        factura: { documento: FAC, version: VF, nombre: "factura-noviembre" },
+      },
+    };
+    const dosEdificios = () =>
+      backend({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [] }]),
+        [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+        [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+        [`GET /api/v1/consorcios/${C3}/proveedores`]: () => Response.json({ elementos: [proveedor({ id: P3, razon_social: "Pintura Ficticia SA" })] }),
+        [`GET /api/v1/consorcios/${C3}/contratos`]: () => Response.json({ elementos: [] }),
+        [`POST /api/v1/consorcios/${C3}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      });
+
+    it("en su edificio abre con el proveedor, los datos y la factura", async () => {
+      vi.stubGlobal("fetch", dosEdificios());
+      abrir(LLEGADA);
+      expect(((await screen.findByLabelText("Concepto")) as HTMLInputElement).value).toBe("Limpieza de noviembre");
+      expect(await boton("Ver la factura")).toBeTruthy();
+    });
+
+    it("al elegir otro edificio no queda nada del primero, ni la factura", async () => {
+      const api = dosEdificios();
+      vi.stubGlobal("fetch", api);
+      abrir(LLEGADA);
+      await screen.findByLabelText("Concepto");
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C3 } });
+      await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P3));
+      expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("");
+      expect((screen.getByLabelText("Comprobante (opcional)") as HTMLInputElement).value).toBe("");
+      sinBoton("Ver la factura");
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Pintura" } });
+      fireEvent.click(await boton("Guardar la orden"));
+      await waitFor(() => expect(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)).toHaveLength(1));
+      expect(await cuerpo(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)[0])).toMatchObject({ factura_version_id: null, proveedor_id: P3 });
+    });
   });
 
   describe("«Ver la factura» en la ficha", () => {

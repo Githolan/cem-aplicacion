@@ -15,9 +15,17 @@ import { useActo } from "./useActo";
 // `/pagos/nueva`: preparar una orden. Al guardar sigue a su ficha, donde está el paso que falta.
 
 /** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella; al
- * volver del alta del proveedor de una factura, también su número y la factura ya subida. */
-function inicialDe(estado: unknown): OrdenInicial {
-  if (typeof estado !== "object" || estado === null) return {};
+ * volver del alta del proveedor de una factura, también su número y la factura ya subida. Todo es
+ * del edificio que trae la navegación (`consorcio`): en otro edificio no se usa. */
+type Inicial = { consorcio: string | null; orden: OrdenInicial };
+
+function inicialDe(estado: unknown): Inicial {
+  if (typeof estado !== "object" || estado === null) return { consorcio: null, orden: {} };
+  const consorcio = (estado as Record<string, unknown>).consorcio;
+  return { consorcio: typeof consorcio === "string" ? consorcio : null, orden: ordenDe(estado) };
+}
+
+function ordenDe(estado: object): OrdenInicial {
   const texto = (campo: string) => {
     const valor = (estado as Record<string, unknown>)[campo];
     return typeof valor === "string" ? valor : undefined;
@@ -41,11 +49,15 @@ function facturaDe(valor: unknown): Cargado | undefined {
     : undefined;
 }
 
+const SIN_DATOS: OrdenInicial = {};
+
 export function PrepararOrden() {
   const elegido = useConsorcio(REQUISITOS.ordenes);
   // Se lee una vez, al llegar: `AvisoLlegada` borra el `state` apenas lo ve.
   const inicial = useRef(inicialDe(useLocation().state));
-  return <PrepararEnElEdificio key={elegido.consorcio} {...elegido} inicial={inicial.current} />;
+  // El proveedor, los importes y la factura de la llegada son de su edificio: al elegir otro, nada.
+  const deEsteEdificio = inicial.current.consorcio === elegido.consorcio ? inicial.current.orden : SIN_DATOS;
+  return <PrepararEnElEdificio key={elegido.consorcio} {...elegido} inicial={deEsteEdificio} />;
 }
 
 type Props = ReturnType<typeof useConsorcio> & { inicial: OrdenInicial };
