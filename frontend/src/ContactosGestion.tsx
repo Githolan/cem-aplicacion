@@ -540,6 +540,7 @@ export function ContactosGestion() {
                           alAbrir={() => abrirFicha(c)}
                           refFila={refFila(c.id)}
                           abierta={fichaAbierta === c.id}
+                          deshabilitada={enviando}
                         />
                       </li>
                     ))}

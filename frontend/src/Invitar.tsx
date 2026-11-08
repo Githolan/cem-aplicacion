@@ -549,6 +549,7 @@ export function Invitar() {
           alAbrir={() => abrirFicha(i)}
           refFila={fichas.refFila(i.id)}
           abierta={fichas.abierta === i.id}
+          deshabilitada={enviando}
         />
       </li>
     );

@@ -439,6 +439,32 @@ describe("página /contactos/gestion", () => {
     });
   });
 
+  it("mientras se agrega un contacto, las filas no abren otra ficha; al terminar, sí", async () => {
+    let soltar: () => void = () => undefined;
+    const simulado = conLista({
+      [`POST ${BASE}`]: () =>
+        new Promise<Response>((listo) => {
+          soltar = () => listo(Response.json({ id: K1 }, { status: 201 }));
+        }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
+    fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
+    escribir("Nombre", "Seguros del Plata");
+    escribir(/^Teléfono/, "0810-222-3333");
+    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    const fila = await screen.findByRole("button", { name: /Encargado\/a: Marta Ruiz/ });
+    await waitFor(() => expect((fila as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(fila);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("button", { name: "Agregar el contacto" })).toBeTruthy();
+    soltar();
+    await screen.findByText("Listo: agregamos el contacto Seguros del Plata.");
+    // Control: terminado el pedido, la fila vuelve a abrir la ficha.
+    expect(await abrirFicha("Encargado/a: Marta Ruiz")).toBeTruthy();
+  });
+
   it("después de un cambio, la lista vieja no se puede usar hasta que llega la nueva", async () => {
     let soltar: () => void = () => undefined;
     let vueltas = 0;

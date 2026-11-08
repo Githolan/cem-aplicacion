@@ -478,6 +478,7 @@ export function Padron() {
                       alAbrir={() => abrirFicha(f)}
                       refFila={fichas.refFila(f.vinculo_id)}
                       abierta={fichas.abierta === f.vinculo_id}
+                      deshabilitada={enviando}
                     />
                   </li>
                 ))}
