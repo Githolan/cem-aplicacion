@@ -25,9 +25,11 @@ aprueba también su factura. Sin factura la huella es la de antes, así que las 
 guardadas no cambian. Modificar cambiando solo la factura es un cambio; renovar la conserva.
 `preparar_orden_pago` y `modificar_orden_pago` la suman al final con `DEFAULT NULL`.
 
-**Exportación (`0069`):** `orden_version` suma `documento_id` y `documento`, `lectura_carga`. Las
-filas de `nucleo.lectura_carga` no van al paquete todavía (pendiente: decidir si van, como
-`lectura_comprobante`, y sin qué datos de contacto).
+**Exportación (`0069`):** `orden_version` suma `documento_id` y `documento`, `lectura_carga`.
+`exportar_ordenes_pago` suma la entidad `lectura_carga`, como `exportar_pagos` suma
+`lectura_comprobante` (`0077`): cada fila con el modelo, el prompt y lo leído, los textos pasados
+por `texto_sin_cuenta`. Va en la parte de órdenes porque la lee quien prepara (la factura de una
+orden o lo que respalda un proveedor).
 
 Downgrade: se niega (`downgrade_con_datos`) si hay alguna lectura, algún documento para carga o
 alguna versión de orden con factura. Sin eso, vuelve a las definiciones anteriores.
@@ -397,6 +399,33 @@ EXPORTAR_ORDENES_CAMBIOS = (
         "                                'contrato_id', v.contrato_id,\n",
         "                                'contrato_id', v.contrato_id,\n"
         "                                'documento_id', v.documento_id,\n",
+    ),
+    (
+        "        from nucleo.aprobaciones_orden_pago x\n       where x.consorcio_id = c\n"
+        "       order by x.vigente_desde, x.id;\n",
+        "        from nucleo.aprobaciones_orden_pago x\n       where x.consorcio_id = c\n"
+        "       order by x.vigente_desde, x.id;\n"
+        "    return query\n"
+        "      select 'lectura_carga'::text,\n"
+        "             jsonb_build_object('id', l.id,\n"
+        "                                'version_documento_id', l.version_documento_id,\n"
+        "                                'documento_id', l.documento_id, 'tipo', l.tipo,\n"
+        "                                'modelo', l.modelo, 'version_prompt', l.version_prompt,\n"
+        "                                'legible', l.legible, 'error', l.error, 'cuit', l.cuit,\n"
+        "                                'cuit_invalido', l.cuit_invalido,\n"
+        "                                'razon_social', nucleo.texto_sin_cuenta(l.razon_social),\n"
+        "                                'domicilio', nucleo.texto_sin_cuenta(l.domicilio),\n"
+        "                                'telefono', nucleo.texto_sin_cuenta(l.telefono),\n"
+        "                                'correo', nucleo.texto_sin_cuenta(l.correo),\n"
+        "                                'numero_comprobante',"
+        " nucleo.texto_sin_cuenta(l.numero_comprobante),\n"
+        "                                'fecha', l.fecha, 'importe', l.importe,\n"
+        "                                'moneda', l.moneda,\n"
+        "                                'concepto', nucleo.texto_sin_cuenta(l.concepto),\n"
+        "                                'leida_en', l.leida_en)\n"
+        "        from nucleo.lectura_carga l\n"
+        "       where l.consorcio_id = c\n"
+        "       order by l.leida_en, l.id;\n",
     ),
 )
 EXPORTAR_DOCUMENTOS_CAMBIOS = (

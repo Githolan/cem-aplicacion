@@ -166,6 +166,10 @@ CLAVES_POR_ENTIDAD = {
                             "version_prompt", "legible", "error", "importe", "moneda",
                             "cuenta_ultimos_digitos", "cuenta_coincide", "titular_destino",
                             "numero_operacion", "fecha", "leida_en"},
+    "lectura_carga": {"id", "version_documento_id", "documento_id", "tipo", "modelo",
+                      "version_prompt", "legible", "error", "cuit", "cuit_invalido",
+                      "razon_social", "domicilio", "telefono", "correo", "numero_comprobante",
+                      "fecha", "importe", "moneda", "concepto", "leida_en"},
     "liquidacion": {"id", "periodo", "version", "estado", "preparada_por_nombre", "creada_en",
                     "descartada_en", "descartada_por_nombre", "motivo_descarte"},
     "gasto": {"id", "liquidacion_id", "orden_id", "ejecucion_id", "importe_centavos", "moneda",
@@ -1288,6 +1292,7 @@ TABLA_DE_LA_ENTIDAD = {
     "movimiento_extracto": "nucleo.movimiento_extracto",
     "columnas_extracto": "nucleo.columnas_extracto",
     "lectura_comprobante": "nucleo.lectura_comprobante",
+    "lectura_carga": "nucleo.lectura_carga",
     "liquidacion": "nucleo.liquidacion",
     "gasto": "nucleo.liquidacion_gasto",
     "gasto_quitado": "nucleo.liquidacion_gasto_quitado",
@@ -1360,6 +1365,27 @@ def leida(motor_migrate, motor_app, s, o) -> None:
         )  # fmt: skip
 
 
+def leida_para_carga(motor_migrate, motor_app, s) -> None:
+    """Una factura para carga (`0088`) y lo que leyó la IA, como lo guarda `cem-trabajos`."""
+    documento = llamar(
+        motor_migrate, s, s.adm,
+        "select nucleo.crear_documento_para_carga('factura', 'Factura SINTETICA', current_date,"
+        " :actor, :origen, :sesion)",
+    )  # fmt: skip
+    with transaccion(motor_app, persona_id=s.adm, consorcio_id=s.cons) as c:
+        version = c.execute(
+            text("select id from nucleo.nueva_version(:d, 'application/pdf', 1, repeat('d', 64),"
+                 " :actor, 'api')"), {"d": documento, "actor": s.adm},
+        ).scalar_one()  # fmt: skip
+    with transaccion(motor_app, persona_id=None, consorcio_id=s.cons) as c:
+        c.execute(
+            text("select nucleo.guardar_lectura_carga(:v, 'modelo-sintetico', 'prompt-sintetico',"
+                 " true, null, null, true, 'SINTETICA SRL', null, null, null, 'A 0001-00000001',"
+                 " null, 10.00, 'ARS', :concepto)"),
+            {"v": version, "concepto": "Reparación SINTETICA"},
+        )  # fmt: skip
+
+
 def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     """La escena de egresos con una fila, al menos, en cada entidad económica: dos contratos (uno
     de baja), una orden en borrador, una rechazada, dos pagadas y conciliadas, una con «no se
@@ -1384,6 +1410,7 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
+    leida_para_carga(motor_migrate, motor_app, s)
     no_pagada = emitida(motor_migrate, s)
     ver(motor_migrate, s, s.adm, no_pagada)
     declaracion = llamar(motor_migrate, s, s.adm, DECLARAR, orden=no_pagada, version=1,
@@ -1472,6 +1499,10 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
     [lectura] = datos["lectura_comprobante"]
     assert (lectura["modelo"], lectura["legible"]) == ("modelo-sintetico", True)
     assert lectura["cuenta_ultimos_digitos"] == cbu_sintetico(1)[-4:]
+    [carga] = datos["lectura_carga"]
+    assert (carga["tipo"], carga["cuit_invalido"], carga["concepto"]) == (
+        "factura", True, "Reparación SINTETICA",
+    )  # fmt: skip
 
 
 def test_el_nombre_sale_solo_con_el_criterio_del_paquete(economico, motor_migrate):

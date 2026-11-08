@@ -356,6 +356,11 @@ ERRORES_CONFIRMACION = {
 RESPUESTAS_LECTURA = {
     403: {"description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."}
 }
+DESCRIPCION_422_ORDEN = (
+    "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un"
+    " documento vigente del consorcio con su archivo aprobado, para carga como factura o de"
+    " «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+)
 RESPUESTAS_ESCRITURA = RESPUESTAS_LECTURA | {
     404: {"description": "No existe en este consorcio."},
     409: {"description": "Otra versión, sin cambios, o el estado no lo admite."},
@@ -863,7 +868,7 @@ def _datos_orden(d: DatosOrdenPago) -> dict:
     status_code=201,
     response_model=OrdenPagoCambiada,
     summary="Preparar una orden de pago (queda en borrador, versión 1)",
-    responses=RESPUESTAS_ESCRITURA | {422: {"description": "El proveedor no existe."}},
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": DESCRIPCION_422_ORDEN}},
 )
 def preparar_orden(
     nueva: OrdenPagoNueva,
@@ -887,7 +892,7 @@ def preparar_orden(
     "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/versiones",
     response_model=OrdenPagoCambiada,
     summary="Modificar una orden: crea una versión nueva y la vuelve a revisión si hacía falta",
-    responses=RESPUESTAS_ESCRITURA | {422: {"description": "El proveedor no existe."}},
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": DESCRIPCION_422_ORDEN}},
 )
 def modificar_orden(
     orden_id: UUID,

@@ -462,7 +462,7 @@ class VersionOrdenPago(BaseModel):
         default=None,
         description="La factura que respalda la versión, si tiene. Se abre con"
         " `…/documentos/{documento_id}/versiones/{v}/contenido` (las versiones salen de la lista de"
-        " documentos)."
+        " documentos).",
     )
 
 

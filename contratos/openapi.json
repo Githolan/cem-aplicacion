@@ -14413,7 +14413,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un documento vigente del consorcio con su archivo aprobado, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
           }
         },
         "summary": "Preparar una orden de pago (queda en borrador, versión 1)",
@@ -16097,7 +16097,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o la factura de `documento_id` no es un documento vigente del consorcio con su archivo aprobado, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
           }
         },
         "summary": "Modificar una orden: crea una versión nueva y la vuelve a revisión si hacía falta",
