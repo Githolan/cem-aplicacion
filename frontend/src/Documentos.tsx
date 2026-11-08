@@ -3,12 +3,15 @@ import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { AlInicioSinEdificios, REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
+import { SubirArchivo } from "./SubirArchivo";
+import { VisorDocumento } from "./VisorDocumento";
 
 // Página /documentos (H2c 2c-2; doc/diseno/H2c_Diseno.md §2 a §4 del repositorio CEM): los
 // documentos del edificio por categoría, con sus versiones, y la carga en dos pasos (se crea el
@@ -46,14 +49,12 @@ const ESTADO = {
 const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 /** Cada cuánto se vuelve a pedir la lista mientras un archivo sigue en revisión. */
 export const REFRESCO_CUARENTENA_MS = 10_000;
-/** Los mismos topes que el contrato (`LARGO_MAXIMO_TITULO`, `TOPE_BYTES`). */
+/** El mismo tope que el contrato (`LARGO_MAXIMO_TITULO`); el del archivo está en `archivos.ts`. */
 const LARGO_TITULO = 200;
-export const TOPE_BYTES = 20 * 1024 * 1024;
 const BYTES_POR_KB = 1024;
 const BYTES_POR_MB = 1024 * 1024;
 /** Un texto con algo más que espacios. */
 const PATRON_TEXTO = ".*\\S.*";
-export const ACEPTA = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
 export const TEXTO_CATEGORIA: Record<Categoria, string> = {
   institucional: "Institucional",
@@ -104,17 +105,6 @@ function estadoEnPalabras(v: Version): string {
   return `Rechazado: ${v.motivo_rechazo ? TEXTO_MOTIVO[v.motivo_rechazo] : "sin el motivo"}`;
 }
 
-function esTipoAdmitido(tipo: string): tipo is TipoArchivo {
-  return tipo in TEXTO_TIPO;
-}
-
-/** Por qué el archivo no sale, antes de mandarlo; nulo si se puede mandar (el servidor decide igual). */
-export function problemaDelArchivo(archivo: File): string | null {
-  if (!esTipoAdmitido(archivo.type)) return "Solo se aceptan archivos PDF, JPEG o PNG. Elegí otro archivo.";
-  if (archivo.size > TOPE_BYTES) return "El archivo pasa de 20 MB, el máximo. Elegí uno más chico.";
-  return null;
-}
-
 /** Los campos que la API marcó en un 422 (`detalle.campos`, p. ej. `body.titulo`). */
 function camposDe(error: unknown): string[] {
   const campos = (error as { detalle?: { campos?: unknown } } | undefined)?.detalle?.campos;
@@ -135,7 +125,7 @@ export function mensajeDeError(
   if (estado === ESTADO.sinPermiso) return "No tenés permiso para cargar documentos de esa categoría.";
   if (estado === ESTADO.noEncontrado) return "Ese documento ya no está en este edificio.";
   if (estado === ESTADO.demasiadoLento) return "El archivo tardó demasiado en llegar y no se guardó. Probá de nuevo con una conexión más firme.";
-  if (estado === ESTADO.demasiadoGrande) return "El archivo pasa de 20 MB y no se guardó. Elegí uno más chico.";
+  if (estado === ESTADO.demasiadoGrande) return "El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.";
   if (estado === ESTADO.tipoNoAdmitido)
     return "Solo se aceptan archivos PDF, JPEG o PNG, y el contenido tiene que coincidir con el tipo. El archivo no se guardó.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
@@ -242,11 +232,10 @@ export function Documentos() {
   const formulario = abierto ?? (soloCarga ? NUEVO : null);
   const [datos, setDatos] = useState<Datos>(VACIO);
   const [archivo, setArchivo] = useState<File | null>(null);
-  // Cada formulario cerrado: el navegador no vacía solo el campo del archivo, y quien solo carga
-  // sigue con el mismo formulario a la vista.
-  const [tanda, setTanda] = useState(0);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** La versión que se está mirando en la hoja de «Ver». */
+  const [viendo, setViendo] = useState<{ documento: string; version: string; titulo: string } | null>(null);
   const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
   // Una clave por intento lógico de cada paso: se conserva si el pedido se cae y se renueva al
@@ -404,7 +393,6 @@ export function Documentos() {
     claveSubir.current = null;
     setDatos(VACIO);
     setArchivo(null);
-    setTanda((t) => t + 1);
     setAbierto(null);
   }
 
@@ -413,7 +401,7 @@ export function Documentos() {
     setDatos((d) => ({ ...d, [campo]: valor }));
   }
 
-  function elegirArchivo(elegido: File | null) {
+  function elegirArchivo(elegido: File) {
     claveSubir.current = null;
     setArchivo(elegido);
   }
@@ -421,12 +409,11 @@ export function Documentos() {
   function enviar(evento: FormEvent) {
     evento.preventDefault();
     if (formulario === null) return;
-    // El archivo se revisa antes de crear nada: un archivo que no va a entrar no deja un documento
-    // vacío. El servidor vuelve a controlar el tipo real y el tamaño.
-    const problema = archivo === null ? "Elegí el archivo." : problemaDelArchivo(archivo);
-    if (archivo === null || problema !== null) {
+    // El tipo y el tamaño ya los controló `SubirArchivo` al elegirlo: un archivo que no va a entrar
+    // no llega acá ni deja un documento vacío. El servidor vuelve a controlar el tipo real y el tamaño.
+    if (archivo === null) {
       alAviso.current = true;
-      setAviso({ texto: problema ?? "Elegí el archivo.", ok: false });
+      setAviso({ texto: "Hay que elegir el archivo.", ok: false });
       return;
     }
     alAviso.current = true;
@@ -596,6 +583,11 @@ export function Documentos() {
         </>
       )}
 
+      {viendo !== null && (
+        <VisorDocumento consorcio={consorcio} documento={viendo.documento} version={viendo.version} nombre={viendo.titulo}
+          alCerrar={() => setViendo(null)} aEntrar={aEntrar} />
+      )}
+
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>
         {pantalla.tipo === "cargando" && <p>Consultando…</p>}
         {pantalla.tipo === "sin_servicio" && (
@@ -665,6 +657,10 @@ export function Documentos() {
                 {v.estado === "disponible" && (
                   <>
                     {" "}
+                    <button type="button" className="secundario" aria-describedby={titulo}
+                      onClick={() => setViendo({ documento: d.id, version: v.id, titulo: d.titulo })}>
+                      Ver
+                    </button>{" "}
                     <a className="enlace-boton" href={descarga(consorcio, d.id, v.id)} aria-describedby={titulo} onClick={(e) => bajar(e, d.id, v.id)}>
                       Descargar
                     </a>
@@ -699,34 +695,27 @@ export function Documentos() {
     return lectura.tipo === "ok" && lectura.documentos.some((d) => d.id === documento);
   }
 
-  /** El campo del archivo, con la ayuda de qué se acepta. */
-  function campoArchivo(titulo: string) {
-    const ayuda = `${titulo}-ayuda-archivo`;
+  /** Elegir el archivo: se manda con el botón del formulario, que también reintenta con la misma clave. */
+  function campoArchivo() {
     return (
-      <>
-        <label htmlFor={`${titulo}-archivo`}>Archivo</label>
-        <input
-          key={tanda}
-          id={`${titulo}-archivo`}
-          type="file"
-          accept={ACEPTA}
-          required={archivo === null}
-          disabled={enviando}
-          aria-describedby={ayuda}
-          ref={
-            abierto?.tipo === "subir"
-              ? (e) => {
-                  primerCampo.current = e;
-                }
-              : undefined
-          }
-          onChange={(e) => elegirArchivo(e.target.files?.[0] ?? null)}
-        />
-        <p id={ayuda}>
-          PDF, JPEG o PNG de hasta 20 MB. Antes de mostrarlo lo revisa el antivirus.
-          {archivo !== null && ` Elegido: ${archivo.name} (${tamano(archivo.size)}).`}
-        </p>
-      </>
+      <SubirArchivo
+        titulo="Archivo"
+        de="del documento"
+        tipos={TIPOS_DE_DOCUMENTO}
+        tope={TOPE_BYTES}
+        reemplaza={archivo !== null}
+        deshabilitada={enviando}
+        nota="Antes de mostrarlo lo revisa el antivirus."
+        elegido={archivo === null ? null : `${archivo.name} (${tamano(archivo.size)})`}
+        refPrimero={
+          abierto?.tipo === "subir"
+            ? (e) => {
+                primerCampo.current = e;
+              }
+            : undefined
+        }
+        alElegir={elegirArchivo}
+      />
     );
   }
 
@@ -735,7 +724,7 @@ export function Documentos() {
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
         <Nivel id={`${titulo}-accion`}>{encabezado}</Nivel>
-        {campoArchivo(titulo)}
+        {campoArchivo()}
         <p>
           <button type="submit" disabled={enviando}>
             Subir el archivo
@@ -794,7 +783,7 @@ export function Documentos() {
           value={datos.fecha}
           onChange={(e) => cambiar("fecha", e.target.value)}
         />
-        {campoArchivo(titulo)}
+        {campoArchivo()}
         <p>
           <button type="submit" disabled={enviando}>
             Cargar el documento

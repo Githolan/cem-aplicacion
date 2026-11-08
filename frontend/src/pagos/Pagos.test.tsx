@@ -44,7 +44,6 @@ const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
 const CONSULTA_AL_LADO = "(min-width: 64.0625em)";
-const CONSULTA_TELEFONO = "(max-width: 30em)";
 const CONTENIDO = `${BASE}/documentos/${DOC}/versiones/${ARCHIVO}/contenido`;
 const RUTA_REVISION = `${BASE}/ordenes-pago/${O1}/revision`;
 const REVISION = `GET ${RUTA_REVISION}`;
@@ -245,9 +244,9 @@ function abrir(ruta: string) {
 }
 
 /** El ancho: en PC la ficha va al lado de la bandeja. */
-function ancho(alLado: boolean, telefono = false) {
+function ancho(alLado: boolean) {
   vi.stubGlobal("matchMedia", (consulta: string) => {
-    const matches = (consulta === CONSULTA_AL_LADO && alLado) || (consulta === CONSULTA_TELEFONO && telefono);
+    const matches = consulta === CONSULTA_AL_LADO && alLado;
     return { matches, addEventListener: () => undefined, removeEventListener: () => undefined };
   });
 }
@@ -638,7 +637,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     ["volver_a_pagar", ficha({ situacion: "no_se_pago", paso: "volver_a_pagar", puede_modificar: true }), "Enviar a aprobar de nuevo", "puede_modificar"],
     ["aprobar", APROBAR, "Aprobar esta versión", "puede_aprobar"],
     ["pagar", PAGAR, "Ver la cuenta para pagar", "puede_pagar"],
-    ["subir_comprobante", SUBIR, "Elegir el archivo", "puede_subir_comprobante"],
+    ["subir_comprobante", SUBIR, "Elegir un archivo", "puede_subir_comprobante"],
     ["corregir", CORREGIR, "Guardar la corrección", "puede_corregir"],
     ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "No se pudo pagar", "puede_declarar"],
     ["conciliar", CONCILIAR, "Conforme", "puede_conciliar"],
@@ -801,7 +800,7 @@ describe("pagar", () => {
     const [emision] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/emitir`);
     expect(await cuerpo(emision)).toEqual({ version: 1, huella: H1 });
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)[0])).toEqual({ version: 1, huella: H1 });
-    expect(await boton("Elegir el archivo")).toBeTruthy();
+    expect(await boton("Elegir un archivo")).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
   });
 
@@ -1137,6 +1136,7 @@ describe("registrar y corregir", () => {
     });
     expect((await screen.findByText(/no transfieras de nuevo/)).textContent).toContain("No coincide el número");
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
+    expect(await boton("Ver más grande")).toBeTruthy();
     expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("0001234567");
     expect(screen.getByLabelText<HTMLInputElement>("Fecha de la transferencia").value).toBe("2026-10-31");
     expect(screen.getByLabelText<HTMLInputElement>(/^Importe transferido/).value).toBe("15.000,00");
@@ -1205,8 +1205,8 @@ describe("el comprobante en un paso", () => {
 
   it("elegir el archivo dispara todo, sin un botón de subir ni una lista", async () => {
     const api = abrirFicha(SUBIR, COMPROBANTE);
-    expect(await boton("Elegir el archivo")).toBeTruthy();
-    expect(screen.getByText("Soltá acá el comprobante")).toBeTruthy();
+    expect(await boton("Elegir un archivo")).toBeTruthy();
+    expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
     expect(screen.queryByRole("combobox")).toBeNull();
     sinBoton("Subir");
     sinBoton("Registrar el pago");
@@ -1220,25 +1220,41 @@ describe("el comprobante en un paso", () => {
 
   it("soltar un archivo en la zona también lo sube", async () => {
     const api = abrirFicha(SUBIR, COMPROBANTE);
-    const zona = (await screen.findByText("Soltá acá el comprobante")).parentElement as HTMLElement;
+    const zona = (await screen.findByText("Soltar el archivo acá")).parentElement as HTMLElement;
     fireEvent.drop(zona, { dataTransfer: { files: [PDF] } });
     await waitFor(() => expect(escrituras(api)).toEqual([CREAR, SUBIDA]));
   });
 
-  it("en el teléfono ofrece la cámara y la galería, y no la zona para soltar", async () => {
-    ancho(false, true);
+  it.each([
+    ["angosto", false],
+    ["ancho", true],
+  ])("en un ancho %s ofrece a la vez soltar, la cámara, la galería y el archivo", async (_, alLado) => {
+    ancho(alLado);
     abrirFicha(SUBIR);
     expect(await boton("Sacar una foto")).toBeTruthy();
     expect(await boton("Elegir de la galería")).toBeTruthy();
+    expect(await boton("Elegir un archivo")).toBeTruthy();
+    expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
     expect(screen.getByLabelText("Foto del comprobante").getAttribute("capture")).toBe("environment");
-    expect(screen.queryByText("Soltá acá el comprobante")).toBeNull();
+    // Control: la galería y el archivo no abren la cámara.
+    expect(screen.getByLabelText("Imagen de la galería del comprobante").hasAttribute("capture")).toBe(false);
+    expect(screen.getByLabelText("Archivo del comprobante").hasAttribute("capture")).toBe(false);
   });
 
-  it("control: fuera del teléfono no hay cámara", async () => {
-    abrirFicha(SUBIR);
-    await boton("Elegir el archivo");
-    sinBoton("Sacar una foto");
-    expect(screen.queryByLabelText("Foto del comprobante")).toBeNull();
+  it("una foto de la cámara también se sube sola", async () => {
+    const { cambiar } = conSubida();
+    fireEvent.change(await screen.findByLabelText("Foto del comprobante"), { target: { files: [FOTO] } });
+    expect((await screen.findByRole("img", { name: "Vista previa de foto.jpg" })).getAttribute("src")).toBe("blob:sintetico");
+    cambiar(SUBIR);
+  });
+
+  it("un archivo de otro tipo se rechaza en la zona, sin mandar nada", async () => {
+    const api = abrirFicha(SUBIR, COMPROBANTE);
+    fireEvent.change(await screen.findByLabelText("Archivo del comprobante"), {
+      target: { files: [new File(["hola"], "notas.txt", { type: "text/plain" })] },
+    });
+    expect(await screen.findByText("Solo se aceptan archivos PDF, JPEG o PNG. Hay que elegir otro archivo.")).toBeTruthy();
+    expect(escrituras(api)).toEqual([]);
   });
 
   it("una imagen se ve enseguida desde el archivo local y un PDF dice su nombre", async () => {
@@ -1334,7 +1350,7 @@ describe("el comprobante en un paso", () => {
     cambiar(RECHAZADO);
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect((await screen.findByRole("alert")).textContent).toBe(AVISO_ARCHIVO_RECHAZADO);
-    expect(await boton("Elegir el archivo")).toBeTruthy();
+    expect(await boton("Elegir un archivo")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 
@@ -1351,7 +1367,8 @@ describe("el comprobante en un paso", () => {
     });
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    await boton("Elegir otro archivo");
+    await boton("Elegir un archivo");
+    expect(screen.getByText("Soltar otro archivo acá")).toBeTruthy();
     await elegir();
     await screen.findByText("Estamos revisando el comprobante");
     // Mientras se revisa el nuevo, no se registra con el anterior.
@@ -1408,7 +1425,7 @@ describe("el comprobante en un paso", () => {
     await elegir(new File(["x"], "a.exe", { type: "application/x-msdownload" }));
     expect((await screen.findByRole("alert")).textContent).toContain("PDF, JPEG o PNG");
     expect(escrituras(api)).toEqual([]);
-    expect(await boton("Elegir el archivo")).toBeTruthy();
+    expect(await boton("Elegir un archivo")).toBeTruthy();
   });
 
   it("una lectura que falla mientras se espera se dice y se va con la siguiente", async () => {
@@ -1457,7 +1474,7 @@ describe("la lectura con IA del comprobante", () => {
     const api = abrirFicha(() => actual);
     expect(await screen.findByText("Leyendo los datos…")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
-    expect(screen.queryByText("Soltá acá otro comprobante")).toBeNull();
+    expect(screen.queryByText("Soltar otro archivo acá")).toBeNull();
     actual = COINCIDE;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect(await screen.findByText("Importe, cuenta y titular coinciden con la orden.")).toBeTruthy();
@@ -1550,9 +1567,9 @@ describe("la lectura con IA del comprobante", () => {
   it("es otro comprobante: recién ahí aparece dónde subirlo", async () => {
     abrirFicha(OTRO_IMPORTE);
     await boton("Es otro comprobante: cambiarlo");
-    expect(screen.queryByText("Soltá acá otro comprobante")).toBeNull();
+    expect(screen.queryByText("Soltar otro archivo acá")).toBeNull();
     fireEvent.click(await boton("Es otro comprobante: cambiarlo"));
-    expect(await screen.findByText("Soltá acá otro comprobante")).toBeTruthy();
+    expect(await screen.findByText("Soltar otro archivo acá")).toBeTruthy();
   });
 
   it("pagué otra cosa arranca con lo leído", async () => {
@@ -2608,6 +2625,22 @@ describe("conciliar", () => {
     fireEvent.click(await boton("Dar el pago por conforme"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme", motivo: "Lo autorizó el Consejo" });
+  });
+
+  it("«Ver más grande» abre el mismo comprobante en una hoja, sin volver a pedirlo, y Escape la cierra", async () => {
+    const api = abrirFicha(CONCILIAR);
+    await boton("Conforme");
+    await screen.findByRole("img", { name: "Comprobante de la transferencia" });
+    const pedidosAntes = pedidos(api, "GET", CONTENIDO).length;
+    fireEvent.click(await boton("Ver más grande"));
+    const hoja = await screen.findByRole("dialog", { name: "Comprobante de la transferencia" });
+    expect(hoja.className).toContain("hoja--ancha");
+    expect(within(hoja).getByRole("img", { name: "Comprobante de la transferencia" }).getAttribute("src")).toBe("blob:sintetico");
+    expect(pedidos(api, "GET", CONTENIDO)).toHaveLength(pedidosAntes);
+    fireEvent.keyDown(within(hoja).getByRole("button", { name: "Cerrar" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Control: el comprobante sigue a la vista en la ficha.
+    expect(screen.getByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
   });
 
   it("muestra el comprobante y, al lado, la orden contra lo registrado, con la cuenta y quién registró", async () => {

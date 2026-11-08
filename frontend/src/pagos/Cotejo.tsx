@@ -1,6 +1,7 @@
-import { type DragEvent, type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 
+import { CSV } from "../archivos";
 import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
@@ -12,6 +13,7 @@ import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
+import { SubirArchivo } from "../SubirArchivo";
 import { CargandoPagos } from "./CargandoPagos";
 import { MONEDAS } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
@@ -37,7 +39,6 @@ type Extracto =
   | { tipo: "resultado"; archivo: File; vista: Vista; resultado: Resultado };
 
 const TIPO_CSV = "text/csv";
-const BYTES_POR_MB = 1024 * 1024;
 const SIN_NUMERO = "";
 /** Las respuestas que se resuelven eligiendo otras columnas. */
 const VUELVE_A_ELEGIR = new Set(["columnas_no_encontradas", "columnas_sin_elegir", "extracto_sin_movimientos"]);
@@ -72,7 +73,6 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
   const [moneda, setMoneda] = useState<string | null>(null);
   const [tildados, setTildados] = useState<ReadonlySet<string>>(new Set());
   const [extracto, setExtracto] = useState<Extracto>({ tipo: "sin_archivo" });
-  const [entrada, setEntrada] = useState(0);
   const [cotejos, setCotejos] = useState(0);
   const acto = useActo(aEntrar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -183,12 +183,8 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
     });
   }
 
+  /** El tipo y el tamaño ya los controló `SubirArchivo` al elegirlo. */
   async function elegirArchivo(archivo: File) {
-    setEntrada((v) => v + 1);
-    if (tope !== null && archivo.size > tope) {
-      setAviso({ texto: `El archivo pasa de ${tope / BYTES_POR_MB} MB, el máximo. Elegí uno más chico.`, ok: false });
-      return;
-    }
     setAviso(null);
     setExtracto({ tipo: "leyendo" });
     const falla = (texto: string) => {
@@ -291,7 +287,6 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
               />
             ) : (
               <SubirExtracto
-                key={entrada}
                 tope={tope}
                 ocupado={enviando || extracto.tipo === "leyendo"}
                 moneda={moneda}
@@ -353,14 +348,9 @@ type PropsSubir = { tope: number | null; ocupado: boolean; moneda: string | null
 
 function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: PropsSubir) {
   const id = useId();
-  function soltar(evento: DragEvent) {
-    evento.preventDefault();
-    const archivo = evento.dataTransfer.files[0];
-    if (archivo !== undefined && !ocupado) alElegir(archivo);
-  }
   return (
     <section className="tarjeta" aria-labelledby={`${id}-titulo`}>
-      <h2 id={`${id}-titulo`}>Subí el extracto</h2>
+      <h2 id={`${id}-titulo`}>Subir el extracto</h2>
       {moneda !== null && (
         <div className="formulario">
           <label htmlFor={`${id}-moneda`}>Moneda del extracto</label>
@@ -372,25 +362,7 @@ function SubirExtracto({ tope, ocupado, moneda, alCambiarMoneda, alElegir }: Pro
           <p>El archivo del banco no la dice: un débito solo coincide con un pago en la misma moneda.</p>
         </div>
       )}
-      <div className="zona-archivo formulario" onDragOver={(e) => e.preventDefault()} onDrop={soltar}>
-        <p className="zona-archivo__soltar">Soltá acá el extracto</p>
-        {/* El campo va antes que su rótulo: el foco del teclado se ve en el botón (estilos.css). */}
-        <input
-          id={`${id}-archivo`}
-          className="solo-lector elegir-archivo"
-          type="file"
-          accept=".csv,text/csv"
-          disabled={ocupado}
-          onChange={(e) => {
-            const elegido = e.target.files?.[0];
-            if (elegido !== undefined) alElegir(elegido);
-          }}
-        />
-        <label htmlFor={`${id}-archivo`} className="boton-archivo">
-          Elegir el archivo
-        </label>
-        {tope !== null && <p className="zona-archivo__nota">CSV, hasta {tope / BYTES_POR_MB} MB</p>}
-      </div>
+      <SubirArchivo de="del extracto" tipos={[CSV]} tope={tope} deshabilitada={ocupado} alElegir={alElegir} />
       <details className="historial">
         <summary>Ver el ejemplo</summary>
         <p>La primera línea trae los nombres de las columnas y cada una de las demás, un movimiento:</p>
