@@ -155,7 +155,8 @@ test.describe("mandatos", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
     // Con el detalle abierto (y su formulario de baja) tampoco hay desplazamiento horizontal.
-    await page.getByRole("button", { name: "Ver detalle", exact: true }).first().click();
+    // La fila entera abre el detalle (comentario 21).
+    await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
     await expect(page.getByRole("heading", { level: 3, name: "Dar de baja" })).toBeVisible();
     await page.getByLabel("Causa").selectOption("remocion");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
@@ -214,7 +215,7 @@ test.describe("mandatos", () => {
     const envios = await simularApi(page, baseURL!, "consejo");
     await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
-    await page.getByRole("button", { name: "Ver detalle", exact: true }).first().click();
+    await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
     await expect(page.getByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeFocused();
     await page.getByLabel("Causa").selectOption("remocion");
     await page.getByLabel("Por qué termina").fill("Remoción por asamblea");

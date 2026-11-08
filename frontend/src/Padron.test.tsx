@@ -29,6 +29,7 @@ const BASE = `/api/v1/consorcios/${C1}`;
 const RUTA_PADRON = `${BASE}/padron`;
 const confirmarRuta = (v: string) => `${BASE}/vinculos/${v}/confirmar`;
 const finalizarRuta = (v: string) => `${BASE}/vinculos/${v}/finalizar`;
+const anularRuta = (v: string) => `${BASE}/vinculos/${v}/anular`;
 
 type Fila = components["schemas"]["FilaPadron"];
 
@@ -102,10 +103,29 @@ function abrir(ruta = "/padron") {
   );
 }
 
-/** La tarjeta del vínculo cuyo título es `titulo`. */
-async function tarjeta(titulo: string): Promise<HTMLElement> {
-  return (await screen.findByRole("heading", { level: 3, name: titulo })).closest("tbody") as HTMLElement;
+const comoTexto = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** El nombre de la fila: empieza con el título y sigue con el resumen. */
+const nombreDeFila = (titulo: string) => new RegExp(`^${comoTexto(titulo)}( |$)`);
+
+/** La fila del vínculo cuyo título es `titulo`: un botón que abre su ficha. */
+async function filaDe(titulo: string): Promise<HTMLElement> {
+  return screen.findByRole("button", { name: nombreDeFila(titulo) });
 }
+
+/** Abre la ficha del vínculo desde su fila (con el foco en la fila, como al tocarla) y la devuelve. */
+async function abrirFicha(titulo: string): Promise<HTMLElement> {
+  const boton = await filaDe(titulo);
+  boton.focus();
+  fireEvent.click(boton);
+  return screen.getByRole("dialog", { name: titulo });
+}
+
+function cerrarFicha(ficha: HTMLElement) {
+  fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
+}
+
+/** Los botones de la ficha, por su nombre. */
+const botonesDe = (ficha: HTMLElement) => within(ficha).queryAllByRole("button").map((b) => b.textContent);
 
 function escribir(etiqueta: string, valor: string) {
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } });
@@ -113,9 +133,7 @@ function escribir(etiqueta: string, valor: string) {
 
 /** Los vínculos en el orden en que se ven. */
 function titulos() {
-  return within(screen.getByRole("table", { name: "Padrón" }))
-    .getAllByRole("heading", { level: 3 })
-    .map((h) => h.textContent);
+  return [...screen.getByRole("list", { name: "Padrón" }).querySelectorAll(".fila-registro__titulo")].map((t) => t.textContent);
 }
 
 beforeEach(() => {
@@ -159,7 +177,7 @@ describe("página /padron", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Entrar a Consorcio en Mano" })).toBeTruthy();
   });
 
-  it("muestra unidad, nombre, carácter, vigencia y confirmación de cada vínculo, sin correo ni teléfono", async () => {
+  it("cada fila abre la ficha con unidad, nombre, carácter, vigencia y confirmación, sin correo ni teléfono", async () => {
     // Aunque una respuesta trajera correo o teléfono (el contrato no los tiene), la pantalla solo
     // pinta los datos de D6.
     const conPrivados = {
@@ -167,15 +185,24 @@ describe("página /padron", () => {
     };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(conPrivados) }));
     const { container } = abrir();
-    const ana = await tarjeta("1° A: Ana Ruiz");
+    // La fila resume; la ficha tiene todo.
+    expect((await filaDe("1° A: Ana Ruiz")).textContent).toBe("1° A: Ana Ruiz Propietario/a · Confirmado");
+    expect((await filaDe("2° B: Carla Gómez")).textContent).toBe("2° B: Carla Gómez Propietario/a · Sin confirmar · Todavía no empezó");
+    const ana = await abrirFicha("1° A: Ana Ruiz");
+    expect(within(ana).getByText("1° A")).toBeTruthy();
+    expect(within(ana).getByText("Ana Ruiz")).toBeTruthy();
     expect(within(ana).getByText("Propietario/a")).toBeTruthy();
     expect(within(ana).getByText("Desde el 1 de marzo de 2024, sin fecha de fin")).toBeTruthy();
     expect(within(ana).getByText("Confirmado con el título")).toBeTruthy();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    cerrarFicha(ana);
+    const beto = await abrirFicha("1° A: Beto Pérez");
     expect(within(beto).getByText("Inquilino/a")).toBeTruthy();
     // `vigente_hasta` es exclusivo: el último día es el anterior.
     expect(within(beto).getByText("Desde el 1 de marzo de 2024; último día: 31 de diciembre de 2026")).toBeTruthy();
     expect(within(beto).getByText("Sin confirmar")).toBeTruthy();
+    // Ni correo ni teléfono en la ficha.
+    expect(beto.innerHTML).not.toMatch(/@|privado|9876/);
+    cerrarFicha(beto);
     // Quien puede confirmar ve primero lo que espera su confirmación.
     expect(titulos()).toEqual(["1° A: Beto Pérez", "2° B: Carla Gómez", "1° A: Ana Ruiz"]);
     // Ni correo ni teléfono en el texto, los atributos ni los campos de la página (la cabecera
@@ -185,19 +212,35 @@ describe("página /padron", () => {
     expect(principal.querySelector('input[type="email"], input[type="tel"], a[href^="mailto:"], a[href^="tel:"]')).toBeNull();
   });
 
-  it("ofrece confirmar solo sin confirmar, y finalizar solo si el vínculo ya empezó", async () => {
+  it("la fila es un solo control: abre la ficha, Escape la cierra y el foco vuelve a la fila", async () => {
     vi.stubGlobal("fetch", conPadron());
     abrir();
-    const ana = await tarjeta("1° A: Ana Ruiz");
-    expect(within(ana).queryByRole("button", { name: "Confirmar" })).toBeNull();
-    expect(within(ana).getByRole("button", { name: "Finalizar" })).toBeTruthy();
-    const beto = await tarjeta("1° A: Beto Pérez");
-    expect(within(beto).getByRole("button", { name: "Confirmar" })).toBeTruthy();
-    expect(within(beto).getByRole("button", { name: "Finalizar" })).toBeTruthy();
-    const carla = await tarjeta("2° B: Carla Gómez");
+    const fila = await filaDe("1° A: Beto Pérez");
+    // Sin botones adentro: la fila entera es el botón.
+    expect(within(fila).queryAllByRole("button")).toEqual([]);
+    const ficha = await abrirFicha("1° A: Beto Pérez");
+    expect(ficha.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(ficha, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(fila);
+    // Control: «Cerrar» hace lo mismo.
+    cerrarFicha(await abrirFicha("1° A: Beto Pérez"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(fila);
+  });
+
+  it("la ficha ofrece confirmar solo sin confirmar, finalizar solo si empezó y anular solo si no empezó ni está confirmado", async () => {
+    vi.stubGlobal("fetch", conPadron());
+    abrir();
+    const ana = await abrirFicha("1° A: Ana Ruiz");
+    expect(botonesDe(ana)).toEqual(["Finalizar", "Cerrar"]);
+    cerrarFicha(ana);
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    expect(botonesDe(beto)).toEqual(["Confirmar", "Finalizar", "Cerrar"]);
+    cerrarFicha(beto);
+    const carla = await abrirFicha("2° B: Carla Gómez");
     expect(within(carla).getByText(/todavía no empezó/)).toBeTruthy();
-    expect(within(carla).getByRole("button", { name: "Confirmar" })).toBeTruthy();
-    expect(within(carla).queryByRole("button", { name: "Finalizar" })).toBeNull();
+    expect(botonesDe(carla)).toEqual(["Confirmar", "Anular", "Cerrar"]);
   });
 
   it("si el vínculo empezó lo dice la API con la fecha del consorcio, no Buenos Aires ni el reloj", async () => {
@@ -213,21 +256,22 @@ describe("página /padron", () => {
     };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     expect(within(beto).queryByText(/todavía no empezó/)).toBeNull();
     expect(within(beto).getByRole("button", { name: "Finalizar" })).toBeTruthy();
+    cerrarFicha(beto);
     // Control inverso: todavía futuro en la fecha del consorcio.
-    const carla = await tarjeta("2° B: Carla Gómez");
+    const carla = await abrirFicha("2° B: Carla Gómez");
     expect(within(carla).getByText(/todavía no empezó/)).toBeTruthy();
     expect(within(carla).queryByRole("button", { name: "Finalizar" })).toBeNull();
   });
 
-  it("un vínculo futuro y confirmado no tiene acciones", async () => {
+  it("un vínculo futuro y confirmado no tiene acciones: la ficha solo se cierra", async () => {
     const padron = { elementos: [fila(V_FUT, "Carla Gómez", { vigente_desde: "2099-01-01", confirmado: true, iniciado: false })] };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
     abrir();
-    const carla = await tarjeta("1° A: Carla Gómez");
-    expect(within(carla).queryAllByRole("button")).toEqual([]);
+    const carla = await abrirFicha("1° A: Carla Gómez");
+    expect(botonesDe(carla)).toEqual(["Cerrar"]);
   });
 
   it("un 403 al leer el padrón lleva al inicio, sin una pantalla de «sin permiso»", async () => {
@@ -235,7 +279,7 @@ describe("página /padron", () => {
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Padrón del edificio" })).toBeNull();
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(screen.queryByText(/No tenés permiso|No hay permiso/)).toBeNull();
   });
 
   it("confirma con CSRF, una clave de reintento y la referencia; actualiza la fila y vuelve a pedir el padrón", async () => {
@@ -248,7 +292,7 @@ describe("página /padron", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     const campo = screen.getByLabelText("Referencia del título");
     expect(document.activeElement).toBe(campo);
@@ -263,7 +307,7 @@ describe("página /padron", () => {
     expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await pedido?.json()).toEqual({ referencia: "Contrato de locación del 01-03-2024" });
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThanOrEqual(2));
-    const actualizada = await tarjeta("1° A: Beto Pérez");
+    const actualizada = await abrirFicha("1° A: Beto Pérez");
     expect(within(actualizada).getByText("Confirmado con el título")).toBeTruthy();
     expect(within(actualizada).queryByRole("button", { name: "Confirmar" })).toBeNull();
   });
@@ -279,7 +323,7 @@ describe("página /padron", () => {
       }),
     );
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -300,7 +344,7 @@ describe("página /padron", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     expect(within(beto).getByText(/La persona pierde el acceso que le daba este vínculo. No se puede deshacer./)).toBeTruthy();
     escribir("Motivo", "Fin del contrato de locación");
@@ -320,14 +364,14 @@ describe("página /padron", () => {
     expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await pedido?.json()).toEqual({ motivo: "Fin del contrato de locación" });
-    await waitFor(() => expect(screen.queryByRole("heading", { level: 3, name: "1° A: Beto Pérez" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Beto Pérez") })).toBeNull());
   });
 
   it("«No» en la pregunta de finalizar vuelve al formulario sin enviar", async () => {
     const simulado = conPadron();
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
@@ -339,16 +383,16 @@ describe("página /padron", () => {
   });
 
   it.each([
-    [403, "sin_permiso", "No tenés permiso para confirmar este vínculo: hace falta la facultad sobre la unidad."],
+    [403, "sin_permiso", "No hay permiso para confirmar este vínculo: hace falta la facultad sobre la unidad."],
     [404, "no_encontrado", "Ese vínculo ya no está en el padrón de este edificio."],
     [409, "vinculo_ya_confirmado", "Ese vínculo ya estaba confirmado."],
     [409, "vinculo_finalizado", "Ese vínculo ya terminó."],
-    [422, "datos_invalidos", "Revisá la referencia:"],
+    [422, "datos_invalidos", "Hay que revisar la referencia:"],
   ])("un %i (%s) al confirmar se explica sin inventar detalles", async (estado, codigo, texto) => {
     const simulado = conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error(codigo, estado) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -362,7 +406,7 @@ describe("página /padron", () => {
     const simulado = conPadron({ [`POST ${finalizarRuta(V_INQ)}`]: () => error("vinculo_no_iniciado", 409) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
@@ -374,12 +418,12 @@ describe("página /padron", () => {
   it("un rechazo al finalizar deja el foco en el aviso, no en el campo del motivo", async () => {
     vi.stubGlobal("fetch", conPadron({ [`POST ${finalizarRuta(V_INQ)}`]: () => error("sin_permiso", 403) }));
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, finalizar" }));
-    const aviso = await screen.findByText(/^No tenés permiso para finalizar este vínculo/);
+    const aviso = await screen.findByText(/^No hay permiso para finalizar este vínculo/);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     // jsdom no agrupa los renders como el navegador: el orden de los efectos lo vigila padron.e2e.ts.
     // El formulario sigue abierto con el motivo, para corregir o cancelar.
@@ -394,12 +438,12 @@ describe("página /padron", () => {
   it("un rechazo queda dentro del formulario abierto, junto a lo escrito", async () => {
     vi.stubGlobal("fetch", conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("datos_invalidos", 422) }));
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     const aviso = await within(beto).findByRole("alert");
-    expect(aviso.textContent).toMatch(/^Revisá la referencia/);
+    expect(aviso.textContent).toMatch(/^Hay que revisar la referencia/);
     expect(aviso.closest("form")).toBeTruthy();
     expect(estadoDePantalla().textContent).toBe("");
     expect((screen.getByLabelText("Referencia del título") as HTMLInputElement).value).toBe("Escritura 1234");
@@ -408,7 +452,7 @@ describe("página /padron", () => {
   it("control: un rechazo que cierra el formulario queda en el estado de la página", async () => {
     vi.stubGlobal("fetch", conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("vinculo_ya_confirmado", 409) }));
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -420,8 +464,8 @@ describe("página /padron", () => {
   it("el estado de la página va arriba de la lista", async () => {
     vi.stubGlobal("fetch", conPadron());
     abrir();
-    await tarjeta("1° A: Ana Ruiz");
-    const lista = screen.getByRole("table", { name: "Padrón" });
+    await filaDe("1° A: Ana Ruiz");
+    const lista = screen.getByRole("list", { name: "Padrón" });
     expect(lista.compareDocumentPosition(estadoDePantalla()) & Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
   });
 
@@ -430,7 +474,7 @@ describe("página /padron", () => {
     const simulado = conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => respuesta() });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     const enviar = () => fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -441,7 +485,7 @@ describe("página /padron", () => {
     respuesta = () => error("datos_invalidos", 422);
     enviar();
     await waitFor(() => expect(pedidos(simulado, "POST", confirmarRuta(V_INQ))).toHaveLength(3));
-    await screen.findByText(/^Revisá la referencia/);
+    await screen.findByText(/^Hay que revisar la referencia/);
     enviar();
     await waitFor(() => expect(pedidos(simulado, "POST", confirmarRuta(V_INQ))).toHaveLength(4));
     const claves = pedidos(simulado, "POST", confirmarRuta(V_INQ)).map((p) => p.headers.get("Idempotency-Key"));
@@ -454,7 +498,7 @@ describe("página /padron", () => {
     const simulado = conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("servicio_no_disponible", 503) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -486,12 +530,12 @@ describe("página /padron", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.change(await screen.findByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await tarjeta("PB: Dora Sosa")).toBeTruthy();
+    expect(await filaDe("PB: Dora Sosa")).toBeTruthy();
     soltarC1();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThanOrEqual(1));
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByRole("heading", { level: 3, name: "PB: Dora Sosa" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 3, name: "1° A: Ana Ruiz" })).toBeNull();
+    expect(screen.getByRole("button", { name: nombreDeFila("PB: Dora Sosa") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Ana Ruiz") })).toBeNull();
   });
 
   it("con dos edificios se elige el edificio y cada uno trae su padrón", async () => {
@@ -504,10 +548,10 @@ describe("página /padron", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await tarjeta("1° A: Ana Ruiz");
+    await filaDe("1° A: Ana Ruiz");
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await tarjeta("PB: Dora Sosa")).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 3, name: "1° A: Ana Ruiz" })).toBeNull();
+    expect(await filaDe("PB: Dora Sosa")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: nombreDeFila("1° A: Ana Ruiz") })).toBeNull();
   });
 
   it("sin edificios lo dice", async () => {
@@ -516,19 +560,77 @@ describe("página /padron", () => {
     expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
   });
 
-  it("no tiene faltas de accesibilidad detectables por axe, con la lista y con cada formulario abierto", async () => {
+  it("no tiene faltas de accesibilidad detectables por axe, con la lista, la ficha y cada formulario abierto", async () => {
     vi.stubGlobal("fetch", conPadron());
     const { container } = abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    await filaDe("1° A: Beto Pérez");
     const reglas = { rules: { "color-contrast": { enabled: false } } };
     expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    // La ficha va en un portal, fuera del contenedor: se revisa la página entera.
+    const beto = await abrirFicha("1° A: Beto Pérez");
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     fireEvent.click(within(beto).getByRole("button", { name: "Finalizar" }));
     escribir("Motivo", "Venta");
     fireEvent.click(screen.getByRole("button", { name: "Finalizar el vínculo" }));
-    expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "No" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    cerrarFicha(beto);
+    const carla = await abrirFicha("2° B: Carla Gómez");
+    fireEvent.click(within(carla).getByRole("button", { name: "Anular" }));
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("anular un vínculo futuro pide el motivo y una confirmación, y lo saca del padrón", async () => {
+    const anulado = { vinculo_id: V_FUT, unidad_id: U2, tipo: "propietario" };
+    const despues = { elementos: PADRON.elementos.filter((f) => f.vinculo_id !== V_FUT) };
+    let vueltas = 0;
+    const simulado = conPadron({
+      [`GET ${RUTA_PADRON}`]: () => Response.json(vueltas++ === 0 ? PADRON : despues),
+      [`POST ${anularRuta(V_FUT)}`]: () => Response.json(anulado),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const carla = await abrirFicha("2° B: Carla Gómez");
+    fireEvent.click(within(carla).getByRole("button", { name: "Anular" }));
+    expect(within(carla).getByText(/borra un vínculo cargado por error/)).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Motivo"));
+    escribir("Motivo", "Fecha de inicio cargada por error");
+    fireEvent.click(screen.getByRole("button", { name: "Anular el vínculo" }));
+    expect(pedidos(simulado, "POST", anularRuta(V_FUT))).toEqual([]);
+    const pregunta = screen.getByRole("group", { name: "¿Anular el vínculo de Carla Gómez con la unidad 2° B? No se puede deshacer." });
+    const si = within(pregunta).getByRole("button", { name: "Sí, anular" });
+    expect(document.activeElement).toBe(si);
+    fireEvent.click(si);
+
+    const aviso = await screen.findByText("Listo: anulamos el vínculo de Carla Gómez con la unidad 2° B.");
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const [pedido] = pedidos(simulado, "POST", anularRuta(V_FUT));
+    expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
+    expect(await pedido?.json()).toEqual({ motivo: "Fecha de inicio cargada por error" });
+    await waitFor(() => expect(screen.queryByRole("button", { name: nombreDeFila("2° B: Carla Gómez") })).toBeNull());
+  });
+
+  it.each([
+    ["vinculo_confirmado", "Ese vínculo está confirmado: lo anula el equipo de soporte, con el respaldo."],
+    ["vinculo_iniciado", "Ese vínculo ya empezó: no se anula, se finaliza."],
+  ])("un 409 %s al anular lo explica en la página, cierra la ficha y recarga el padrón", async (codigo, texto) => {
+    const simulado = conPadron({ [`POST ${anularRuta(V_FUT)}`]: () => error(codigo, 409) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const carla = await abrirFicha("2° B: Carla Gómez");
+    fireEvent.click(within(carla).getByRole("button", { name: "Anular" }));
+    escribir("Motivo", "Error de carga");
+    fireEvent.click(screen.getByRole("button", { name: "Anular el vínculo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, anular" }));
+    expect(await within(estadoDePantalla()).findByText(texto)).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThanOrEqual(2));
   });
 
   it("las rutas, el encabezado de reintento y los cuerpos son los del contrato", () => {
@@ -541,6 +643,7 @@ describe("página /padron", () => {
     for (const [accion, esquema] of [
       ["confirmar", "ConfirmacionVinculo"],
       ["finalizar", "FinVinculo"],
+      ["anular", "AnulacionVinculo"],
     ] as const) {
       const op = rutas[`/api/v1/consorcios/{consorcio_id}/vinculos/{vinculo_id}/${accion}`]?.post;
       expect(op?.parameters?.find((p) => p.name === "Idempotency-Key")?.required).toBe(true);
@@ -552,6 +655,7 @@ describe("página /padron", () => {
     );
     expect(esquemas.ConfirmacionVinculo?.properties?.referencia?.maxLength).toBe(300);
     expect(esquemas.FinVinculo?.properties?.motivo?.maxLength).toBe(300);
+    expect(esquemas.AnulacionVinculo?.properties?.motivo?.maxLength).toBe(300);
     expect(mensajeDeError(500, undefined, "confirmar")).toMatch(/No pudimos completar|servicio/);
   });
 });
@@ -579,7 +683,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     abrir();
     expect(estadoDePantalla().textContent).toBe("Consultando…");
     soltar();
-    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
     expect(screen.queryByText("Consultando…")).toBeNull();
   });
 
@@ -597,15 +701,15 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json({ elementos: [] }) }));
     abrir();
     expect(await screen.findByText("El padrón no tiene vínculos vigentes ni futuros.")).toBeTruthy();
-    expect(screen.queryByRole("table", { name: "Padrón" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Padrón" })).toBeNull();
   });
 
   it("una sola unidad: la lista muestra solo sus vínculos", async () => {
     const padron = { elementos: [fila(V_PROP, "Ana Ruiz")] };
     vi.stubGlobal("fetch", conPadron({ [`GET ${RUTA_PADRON}`]: () => Response.json(padron) }));
     abrir();
-    const lista = await screen.findByRole("table", { name: "Padrón" });
-    expect(within(lista).getAllByRole("rowheader")).toHaveLength(1);
+    const lista = await screen.findByRole("list", { name: "Padrón" });
+    expect(within(lista).getAllByRole("button")).toHaveLength(1);
   });
 
   it("error al consultar el padrón: lo dice y deja de decir «Consultando…»", async () => {
@@ -628,7 +732,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     expect(await within(seccion).findByText("No pudimos mostrar el padrón.")).toBeTruthy();
     caido = false;
     fireEvent.click(within(seccion).getByRole("button", { name: "Consultar de nuevo" }));
-    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
     expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2);
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
     // Control: con el padrón a la vista no hay nada que reintentar.
@@ -657,7 +761,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
-    expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+    expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
     expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
   });
@@ -685,7 +789,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       await screen.findByText("No pudimos mostrar el padrón.");
       caido = false;
       volvioLaRed();
-      expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+      expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
       expect(within(estadoDePantalla()).getByText(VOLVIO_LA_RED)).toBeTruthy();
       expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
     });
@@ -706,7 +810,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       const simulado = conPadron({ [`POST ${confirmarRuta(V_INQ)}`]: () => error("servicio_no_disponible", 503) });
       vi.stubGlobal("fetch", simulado);
       abrir();
-      const beto = await tarjeta("1° A: Beto Pérez");
+      const beto = await abrirFicha("1° A: Beto Pérez");
       fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
       escribir("Referencia del título", "Escritura 1234");
       fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
@@ -729,7 +833,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       await screen.findByText(/No pudimos consultar tus edificios/);
       caido = false;
       volvioLaRed();
-      expect(await tarjeta("1° A: Ana Ruiz")).toBeTruthy();
+      expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
       expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
     });
   });
@@ -743,14 +847,28 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
       [`GET ${BASE}/mis-acciones`]: alcanza("padron.ver", ...acciones),
       ...(acciones.includes("padron.confirmar_vinculo") ? {} : { [`GET ${RUTA_PADRON}`]: () => Response.json(sinConfirmables) }),
     });
-  const nombres = (nombre: string) => screen.queryAllByRole("button", { name: nombre }).length;
+  /** Abre la ficha de cada vínculo y junta sus botones de acción («Cerrar» va siempre). */
+  async function accionesEnLasFichas(): Promise<Record<string, (string | null)[]>> {
+    const acciones: Record<string, (string | null)[]> = {};
+    for (const titulo of ["1° A: Ana Ruiz", "1° A: Beto Pérez", "2° B: Carla Gómez"]) {
+      const ficha = await abrirFicha(titulo);
+      const botones = botonesDe(ficha);
+      expect(botones.at(-1)).toBe("Cerrar");
+      acciones[titulo] = botones.slice(0, -1);
+      cerrarFicha(ficha);
+    }
+    return acciones;
+  }
 
-  it("«Confirmar» se ve con `padron.confirmar_vinculo`, y «Finalizar» no", async () => {
+  it("«Confirmar» se ve con `padron.confirmar_vinculo`, y «Finalizar» y «Anular» no", async () => {
     vi.stubGlobal("fetch", conAcciones("padron.confirmar_vinculo"));
     abrir();
-    await tarjeta("1° A: Beto Pérez");
-    expect(nombres("Confirmar")).toBeGreaterThan(0);
-    expect(nombres("Finalizar")).toBe(0);
+    await filaDe("1° A: Beto Pérez");
+    expect(await accionesEnLasFichas()).toEqual({
+      "1° A: Ana Ruiz": [],
+      "1° A: Beto Pérez": ["Confirmar"],
+      "2° B: Carla Gómez": ["Confirmar"],
+    });
     expect(screen.getByText(/Confirmar acredita el carácter/)).toBeTruthy();
   });
 
@@ -767,32 +885,39 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
       }),
     );
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     expect(within(beto).getByText("Sin confirmar")).toBeTruthy();
     expect(within(beto).queryAllByRole("button", { name: "Confirmar" })).toHaveLength(veces);
   });
 
-  it("«Finalizar» se ve con `padron.gestionar`, y «Confirmar» no", async () => {
+  it("control: con `padron.gestionar` la ficha tiene «Finalizar» (y «Anular» en el futuro sin confirmar), y «Confirmar» no", async () => {
     vi.stubGlobal("fetch", conAcciones("padron.gestionar"));
     abrir();
-    await tarjeta("1° A: Beto Pérez");
-    expect(nombres("Finalizar")).toBeGreaterThan(0);
-    expect(nombres("Confirmar")).toBe(0);
+    await filaDe("1° A: Beto Pérez");
+    expect(await accionesEnLasFichas()).toEqual({
+      "1° A: Ana Ruiz": ["Finalizar"],
+      "1° A: Beto Pérez": ["Finalizar"],
+      "2° B: Carla Gómez": ["Anular"],
+    });
     expect(screen.queryByText(/Confirmar acredita el carácter/)).toBeNull();
   });
 
   it("control: sin `padron.confirmar_vinculo` queda el orden de la API, porque nada espera a quien mira", async () => {
     vi.stubGlobal("fetch", conAcciones("padron.gestionar"));
     abrir();
-    await tarjeta("1° A: Beto Pérez");
+    await filaDe("1° A: Beto Pérez");
     expect(titulos()).toEqual(["1° A: Ana Ruiz", "1° A: Beto Pérez", "2° B: Carla Gómez"]);
   });
 
-  it("control: solo con `padron.ver` se lee el padrón sin ningún botón", async () => {
+  it("solo con `padron.ver` se lee el padrón: las filas abren la ficha, y la ficha no tiene ningún botón de acción", async () => {
     vi.stubGlobal("fetch", conAcciones());
     abrir();
-    await tarjeta("1° A: Beto Pérez");
-    expect(screen.queryAllByRole("button")).toEqual(screen.queryAllByRole("button", { name: /Letra grande/ }));
+    await filaDe("1° A: Beto Pérez");
+    // En la página, nada más que las filas (y el botón común de la letra grande).
+    const filas = within(screen.getByRole("list", { name: "Padrón" })).getAllByRole("button");
+    expect(filas).toHaveLength(3);
+    expect(screen.queryAllByRole("button").filter((b) => !filas.includes(b))).toEqual(screen.queryAllByRole("button", { name: /Letra grande/ }));
+    expect(await accionesEnLasFichas()).toEqual({ "1° A: Ana Ruiz": [], "1° A: Beto Pérez": [], "2° B: Carla Gómez": [] });
   });
 
   it("un 403 al confirmar sigue siendo un error en el lugar: la separación depende del caso", async () => {
@@ -804,11 +929,11 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
       }),
     );
     abrir();
-    const beto = await tarjeta("1° A: Beto Pérez");
+    const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
     escribir("Referencia del título", "Escritura 123");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar el vínculo" }));
-    expect(await screen.findByText(/No tenés permiso para confirmar este vínculo/)).toBeTruthy();
+    expect(await screen.findByText(/No hay permiso para confirmar este vínculo/)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Padrón del edificio" })).toBeTruthy();
   });
 });

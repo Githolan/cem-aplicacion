@@ -240,25 +240,29 @@ test.describe("invitar", () => {
   test("retirar pide confirmación y manda el CSRF", async ({ page, baseURL }) => {
     const { retiros } = await simularApi(page, baseURL!, "propietaria");
     await page.goto("/invitaciones");
-    const fila = page.locator(".sesiones li", { hasText: "Beto Pérez, 1° A" });
-    await fila.getByRole("button", { name: "Retirar" }).click();
-    await expect(fila.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeVisible();
+    // La fila abre la ficha de la invitación (comentario 21); «Retirar» va adentro.
+    const fila = page.locator(".filas-registro li", { hasText: "Beto Pérez, 1° A" });
+    await fila.getByRole("button").click();
+    const ficha = page.getByRole("dialog", { name: "Beto Pérez, 1° A" });
+    await ficha.getByRole("button", { name: "Retirar" }).click();
+    await expect(ficha.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
-    await fila.getByRole("button", { name: "No" }).click();
+    await ficha.getByRole("button", { name: "No" }).click();
     expect(retiros).toEqual([]);
 
-    await fila.getByRole("button", { name: "Retirar" }).click();
+    await ficha.getByRole("button", { name: "Retirar" }).click();
     // Con el teclado, como quien no usa el mouse (E46): el foco termina en el aviso del resultado.
-    await fila.getByRole("button", { name: "Sí, retirarla" }).focus();
+    await ficha.getByRole("button", { name: "Sí, retirarla" }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeVisible();
     await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeFocused();
     // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
     await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
-    await expect(fila.getByText("Retirada", { exact: true })).toHaveCount(1);
-    await expect(fila.getByText("Retirada", { exact: true })).toBeHidden();
+    await expect(ficha).toHaveCount(0);
+    await expect(fila).toContainText("Retirada");
+    await expect(fila).toBeHidden();
     await page.getByText("Historial: aceptadas, retiradas y vencidas (2)").click();
-    await expect(fila.getByText("Retirada", { exact: true })).toBeVisible();
+    await expect(fila).toBeVisible();
     expect(retiros).toEqual([CSRF]);
   });
 

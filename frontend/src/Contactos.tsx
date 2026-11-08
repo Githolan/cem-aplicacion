@@ -15,6 +15,7 @@ import {
 } from "./copiaContactos";
 import { type PedidoDeGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { RUTA_INICIO } from "./enlace";
+import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 import { AlInicioSinEdificios, REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
@@ -26,6 +27,9 @@ import { AlInicioSinEdificios, REQUISITOS, useEdificioElegido, usePuede } from "
 // ya no figuran. Si la API no
 // responde (sin red o caída), se muestra la copia con su fecha, volviendo a aplicar la vigencia con
 // el día del consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
+// Cada contacto es una fila que abre su ficha (comentario 21); el teléfono queda a un toque al lado
+// de la fila, porque son números de emergencia. Corregir y retirar van en la ficha, con
+// `contactos.gestionar` y con conexión, y se hacen en la gestión.
 
 export const RUTA_CONTACTOS = "/contactos";
 
@@ -77,6 +81,7 @@ export function Contactos() {
   );
   const puede = usePuede(consorcio);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
+  const fichas = useFichas<string>();
   // Cada reintento vuelve a pedir la lista del edificio.
   const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
@@ -191,6 +196,7 @@ export function Contactos() {
             id={`${id}-consorcio`}
             value={consorcio}
             onChange={(e) => {
+              fichas.cerrar(false);
               setLectura({ tipo: "cargando" });
               setConsorcio(e.target.value);
             }}
@@ -271,6 +277,7 @@ export function Contactos() {
     const { lista: datos } = copia;
     // Sin conexión, un contacto cuyo fin ya llegó no se muestra aunque la copia sea anterior.
     const contactos = sinConexion ? vigentes(datos.elementos, hoyEn(datos.zona_horaria)) : datos.elementos;
+    const enFicha = contactos.find((c) => c.id === fichas.abierta);
     return (
       <section aria-labelledby={`${id}-lista`} className="tarjeta">
         <h2 id={`${id}-lista`}>{copia.nombre}</h2>
@@ -279,52 +286,66 @@ export function Contactos() {
         {contactos.length === 0 ? (
           <p>El edificio no tiene contactos de emergencia cargados.</p>
         ) : (
-          <ul className="sesiones sesiones--grilla" aria-label="Contactos de emergencia">
+          <ul className="filas-registro" aria-label="Contactos de emergencia">
             {contactos.map((c) => (
-              <li key={c.id}>
-                <h3 id={`${id}-${c.id}`}>
-                  {TEXTO_FUNCION[c.funcion]}: {c.nombre}
-                </h3>
-                <dl className="detalles">
-                  {c.telefono !== null && (
-                    <>
-                      <dt>Teléfono</dt>
-                      <dd>
-                        <a className="enlace-telefono" href={`tel:${c.telefono.replace(/[^+0-9]/g, "")}`}>{c.telefono}</a>
-                      </dd>
-                    </>
-                  )}
-                  {c.indicaciones !== null && (
-                    <>
-                      <dt>Indicaciones</dt>
-                      <dd>{c.indicaciones}</dd>
-                    </>
-                  )}
-                  {c.observado && (
-                    <>
-                      <dt>Aviso</dt>
-                      <dd>Alguien señaló un dato como incorrecto; la administración lo está revisando.</dd>
-                    </>
-                  )}
-                </dl>
-                {/* Sin conexión no se ofrece: corregir y retirar necesitan la lista en línea. */}
-                {!sinConexion && consorcio !== "" && puede("contactos.gestionar") && (
-                  <p>
-                    <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "corregir", contacto: c.id } satisfies PedidoDeGestion}
-                      className="enlace-boton" aria-describedby={`${id}-${c.id}`}>
-                      Corregir
-                    </Link>{" "}
-                    <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "retirar", contacto: c.id } satisfies PedidoDeGestion}
-                      className="enlace-boton peligro" aria-describedby={`${id}-${c.id}`}>
-                      Retirar
-                    </Link>
-                  </p>
-                )}
+              <li key={c.id} className="fila-con-atajo">
+                <FilaDeRegistro
+                  titulo={titulo(c)}
+                  resumen={c.observado ? "Dato señalado como incorrecto" : undefined}
+                  alAbrir={() => fichas.abrir(c.id)}
+                  refFila={fichas.refFila(c.id)}
+                  abierta={fichas.abierta === c.id}
+                />
+                {c.telefono !== null && llamar(c.telefono)}
               </li>
             ))}
           </ul>
         )}
+        {enFicha !== undefined && ficha(enFicha, sinConexion)}
       </section>
+    );
+  }
+  function titulo(c: Contacto) {
+    return `${TEXTO_FUNCION[c.funcion]}: ${c.nombre}`;
+  }
+
+  /** El teléfono como enlace para llamar, sin separadores en el número. */
+  function llamar(telefono: string) {
+    return (
+      <a className="enlace-telefono" href={`tel:${telefono.replace(/[^+0-9]/g, "")}`}>
+        {telefono}
+      </a>
+    );
+  }
+
+  /** La ficha de un contacto. Sin conexión no ofrece corregir ni retirar: necesitan la lista en línea. */
+  function ficha(c: Contacto, sinConexion: boolean) {
+    const gestiona = !sinConexion && consorcio !== "" && puede("contactos.gestionar");
+    return (
+      <FichaDeRegistro
+        titulo={titulo(c)}
+        alCerrar={() => fichas.cerrar()}
+        datos={[
+          { etiqueta: "Función", valor: TEXTO_FUNCION[c.funcion] },
+          { etiqueta: "Nombre", valor: c.nombre },
+          { etiqueta: "Teléfono", valor: c.telefono === null ? "Sin teléfono" : llamar(c.telefono) },
+          ...(c.indicaciones === null ? [] : [{ etiqueta: "Indicaciones", valor: c.indicaciones }]),
+          ...(c.observado
+            ? [{ etiqueta: "Aviso", valor: "Alguien señaló un dato como incorrecto; la administración lo está revisando." }]
+            : []),
+        ]}
+      >
+        {gestiona && (
+          <p className="ficha-registro__acciones">
+            <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "corregir", contacto: c.id } satisfies PedidoDeGestion} className="enlace-boton">
+              Corregir
+            </Link>
+            <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "retirar", contacto: c.id } satisfies PedidoDeGestion} className="enlace-boton peligro">
+              Retirar
+            </Link>
+          </p>
+        )}
+      </FichaDeRegistro>
     );
   }
 }

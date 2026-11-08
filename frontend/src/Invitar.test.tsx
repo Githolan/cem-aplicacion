@@ -113,6 +113,19 @@ async function completar(nombre = "Dora Ruiz", correo = "dora@ejemplo.com") {
 
 const invitarBoton = () => screen.getByRole("button", { name: "Invitar" });
 
+/** Abre la ficha de la invitación desde su fila (con el foco en la fila, como al tocarla) y la devuelve. */
+async function abrirFicha(titulo: string): Promise<HTMLElement> {
+  const fila = await screen.findByRole("button", { name: new RegExp(`^${titulo}( |$)`) });
+  fila.focus();
+  fireEvent.click(fila);
+  return screen.getByRole("dialog", { name: titulo });
+}
+
+/** «Retirar» en la ficha de la invitación. */
+async function retirarDe(titulo: string): Promise<HTMLElement> {
+  return within(await abrirFicha(titulo)).getByRole("button", { name: "Retirar" });
+}
+
 /** Si `a` está antes que `b` en la página. */
 const antes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
 
@@ -165,8 +178,10 @@ describe("página /invitaciones", () => {
     expect(screen.getByText(/Invitar no acredita el carácter de propietario, inquilino u ocupante/)).toBeTruthy();
     const unidades = within(screen.getByLabelText("Unidad")).getAllByRole("option");
     expect(unidades.map((o) => o.textContent)).toEqual(["1° A", "2° B"]);
-    expect(screen.getByText("beto@ejemplo.com")).toBeTruthy();
-    const aceptada = screen.getByText("Carla Gómez, 1° A").closest("li") as HTMLElement;
+    const beto = await abrirFicha("Beto Pérez, 1° A");
+    expect(within(beto).getByText("beto@ejemplo.com")).toBeTruthy();
+    fireEvent.click(within(beto).getByRole("button", { name: "Cerrar" }));
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
     expect(within(aceptada).queryByText("Correo")).toBeNull();
     expect(within(aceptada).queryByRole("button", { name: "Retirar" })).toBeNull();
   });
@@ -184,25 +199,28 @@ describe("página /invitaciones", () => {
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
     const pendientes = screen.getByRole("list", { name: "Pendientes" });
-    expect(within(pendientes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Beto Pérez, 1° A"]);
+    expect([...pendientes.querySelectorAll(".fila-registro__titulo")].map((t) => t.textContent)).toEqual(["Beto Pérez, 1° A"]);
     const historial = document.querySelector("details.historial") as HTMLDetailsElement;
     expect(historial).toBeTruthy();
     expect(historial.open).toBe(false);
     expect(historial.querySelector("summary")?.textContent).toBe("Historial: aceptadas, retiradas y vencidas (3)");
-    const enHistorial = [...historial.querySelectorAll("h3")].map((h) => h.textContent);
+    const enHistorial = [...historial.querySelectorAll(".fila-registro__titulo")].map((t) => t.textContent);
     expect(enHistorial).toEqual(["Carla Gómez, 1° A", "Dante Ríos, 1° A", "Elsa Sosa, 1° A"]);
-    const retirada = within(historial).getByText("Dante Ríos, 1° A").closest("li") as HTMLElement;
+    fireEvent.click(historial.querySelector("summary") as HTMLElement);
+    expect(historial.open).toBe(true);
+    const cerrar = (ficha: HTMLElement) => fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
+    const retirada = await abrirFicha("Dante Ríos, 1° A");
     expect(within(retirada).getByText("Retirada")).toBeTruthy();
     expect(within(retirada).getByText("Retirada el")).toBeTruthy();
     expect(within(retirada).queryByText("Vence")).toBeNull();
-    const aceptada = within(historial).getByText("Carla Gómez, 1° A").closest("li") as HTMLElement;
+    cerrar(retirada);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
     expect(within(aceptada).getByText("Aceptada el")).toBeTruthy();
+    cerrar(aceptada);
     // Una vencida se puede retirar desde el historial, como antes.
-    const vencida = within(historial).getByText("Elsa Sosa, 1° A").closest("li") as HTMLElement;
+    const vencida = await abrirFicha("Elsa Sosa, 1° A");
     expect(within(vencida).getByText("Venció")).toBeTruthy();
     expect(within(vencida).getByRole("button", { name: "Retirar" })).toBeTruthy();
-    fireEvent.click(historial.querySelector("summary") as HTMLElement);
-    expect(historial.open).toBe(true);
   });
 
   it("sin pendientes lo dice, y el historial sigue plegado", async () => {
@@ -421,7 +439,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error(codigo, 403) }));
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText(texto)).toBeTruthy();
   });
@@ -466,17 +484,17 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     expect(screen.getByText("¿Retirar la invitación de Beto Pérez a la unidad 1° A?")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "No" }));
     expect(pedidos(simulado, "POST", ruta)).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
     expect(en(pedidos(simulado, "POST", ruta), 0).headers.get("X-CSRF-Token")).toBe("abc123");
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2));
     const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
-    expect(within(fila).getByText("Retirada")).toBeTruthy();
+    expect(fila.textContent).toContain("Retirada");
   });
 
   it("retirar una que ya se aceptó (409) lo explica y la marca aceptada", async () => {
@@ -492,12 +510,12 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText(/ya se aceptó/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2));
     const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
-    expect(within(fila).getByText("Aceptada")).toBeTruthy();
+    expect(fila.textContent).toContain("Aceptada");
   });
 
   it("E46: al retirar, el foco va al aviso del resultado y no cae al principio de la página", async () => {
@@ -505,7 +523,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => new Response(null, { status: 204 }) }));
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
@@ -519,7 +537,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("invitacion_no_pendiente", 409) }));
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
@@ -539,7 +557,7 @@ describe("página /invitaciones", () => {
     );
     abrir();
     await completar();
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
@@ -647,16 +665,16 @@ describe("página /invitaciones", () => {
     fireEvent.click(invitarBoton());
     await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
     await waitFor(() => expect(listas).toBe(2));
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     await screen.findByText(/Listo: retiramos la invitación de Beto Pérez/);
     await waitFor(() => expect(listas).toBe(3));
     soltarVieja(Response.json(LISTA));
     await new Promise((r) => setTimeout(r, 0));
     const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
-    await waitFor(() => expect(within(fila).getByText("Retirada")).toBeTruthy());
-    expect(within(fila).queryByText("Pendiente")).toBeNull();
-    expect(within(fila).queryByRole("button", { name: "Retirar" })).toBeNull();
+    await waitFor(() => expect(fila.textContent).toContain("Retirada"));
+    expect(fila.textContent).not.toContain("Pendiente");
+    expect(within(await abrirFicha("Beto Pérez, 1° A")).queryByRole("button", { name: "Retirar" })).toBeNull();
   });
 
   it("E34: la primera carga con un 503 de la aplicación dice servicio; sin respuesta, conexión", async () => {
@@ -684,7 +702,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("demasiadas_peticiones", 429) }));
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText(/Llegaste al límite de pedidos/)).toBeTruthy();
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
@@ -703,7 +721,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     await waitFor(() => expect(listas).toBe(2));
     await new Promise((r) => setTimeout(r, 0));
@@ -725,7 +743,7 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     await waitFor(() => expect(listas).toBe(2));
     await new Promise((r) => setTimeout(r, 0));
@@ -738,11 +756,11 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error("error_interno", 500) }));
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
-    expect(within(fila).getByText("Pendiente")).toBeTruthy();
+    expect(fila.textContent).toContain("Pendiente");
   });
 
   it("con dos edificios se elige cuál, y cambia unidades e invitaciones", async () => {
@@ -788,12 +806,14 @@ describe("página /invitaciones", () => {
     vi.stubGlobal("fetch", conConsorcio());
     const { container } = abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    fireEvent.click(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" }));
-    // Con el historial abierto, para que axe revise también sus tarjetas.
+    // Con el historial abierto, para que axe revise también sus filas.
     fireEvent.click(screen.getByText(/^Historial:/));
     expect((document.querySelector("details.historial") as HTMLDetailsElement).open).toBe(true);
-    const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
-    expect(resultado.violations.map((v) => v.id)).toEqual([]);
+    const reglas = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    // La ficha va en un portal, fuera del contenedor: con ella y su pregunta, la página entera.
+    fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
+    expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
   });
 
   it("las rutas y el encabezado de reintento son los del contrato", () => {
@@ -1042,7 +1062,7 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     );
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
-    expect(screen.getByRole("button", { name: "Retirar", description: "Beto Pérez, 1° A" })).toBeTruthy();
+    expect(await retirarDe("Beto Pérez, 1° A")).toBeTruthy();
   });
 
   it("control: sin `invitaciones.revocar` la invitación se ve y «Retirar» no", async () => {
@@ -1050,6 +1070,8 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
     expect(screen.queryByRole("button", { name: "Retirar" })).toBeNull();
+    const ficha = await abrirFicha("Beto Pérez, 1° A");
+    expect(within(ficha).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cerrar"]);
   });
 
   it.each([
