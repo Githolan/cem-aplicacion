@@ -138,7 +138,6 @@ const PAGO = "f8888888-8888-4888-8888-888888888888";
 const COMPROBANTE = "f9999999-9999-4999-8999-999999999999";
 const ARCHIVO = "fa000000-0000-4000-8000-000000000000";
 const ANCHO_PC_PX = 1025;
-const ANCHO_CON_CAMARA_PX = 480;
 const ACCIONES_EN_FALSO = {
   puede_enviar: false, puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false,
   puede_reabrir_cuenta: false, puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false,
@@ -472,17 +471,12 @@ test.describe("circuito de pagos", () => {
     const hechos = await simularPagos(page, baseURL!, SUBIENDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
     await page.goto(`/pagos/${ORDEN}`);
-    const telefono = anchoDe(page) <= ANCHO_CON_CAMARA_PX;
-    if (telefono) {
-      await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Elegir de la galería" })).toBeVisible();
-      await expect(page.getByText("Soltá acá el comprobante")).toBeHidden();
-      await expect(page.getByLabel("Foto del comprobante")).toHaveAttribute("capture", "environment");
-    } else {
-      await expect(page.getByText("Soltá acá el comprobante")).toBeVisible();
-      await expect(page.getByRole("button", { name: "Elegir el archivo" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeHidden();
-    }
+    // En todos los anchos, a la vez: soltar, la cámara, la galería y el archivo (comentario 32).
+    await expect(page.getByText("Soltar el archivo acá")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sacar una foto" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Elegir de la galería" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Elegir un archivo" })).toBeVisible();
+    await expect(page.getByLabel("Foto del comprobante")).toHaveAttribute("capture", "environment");
     await sinDesbordar(page);
     await page.getByLabel("Archivo del comprobante").setInputFiles({ name: "transferencia.png", mimeType: "image/png", buffer: PNG_SINTETICO });
     await expect(page.getByRole("img", { name: "Vista previa de transferencia.png" })).toBeVisible();

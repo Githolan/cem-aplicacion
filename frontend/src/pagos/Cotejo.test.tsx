@@ -102,7 +102,7 @@ function abrir(ruta = "/pagos/cotejo") {
 }
 
 async function subir(nombre = "extracto.csv", contenido = CSV) {
-  const entrada = await screen.findByLabelText(/Elegir el archivo/);
+  const entrada = await screen.findByLabelText("Archivo del extracto");
   const archivo = new File([contenido], nombre, { type: "text/csv" });
   fireEvent.change(entrada, { target: { files: [archivo] } });
   return archivo;
@@ -152,9 +152,15 @@ describe("el botón del archivo y el ejemplo", () => {
     vi.stubGlobal("fetch", backend({}));
     abrir();
 
-    const entrada = await screen.findByLabelText("Elegir el archivo");
+    const entrada = await screen.findByLabelText("Archivo del extracto");
     expect(entrada.getAttribute("type")).toBe("file");
-    expect(await screen.findByText(/^CSV, hasta [0-9]+ MB$/)).toBeTruthy();
+    expect(entrada.getAttribute("accept")).toBe(".csv,text/csv");
+    expect(await screen.findByText(/^CSV, hasta [0-9]+ MB.$/)).toBeTruthy();
+    // Soltar o elegir el archivo, en todos los anchos; sin imágenes no hay cámara ni galería.
+    expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Elegir un archivo" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sacar una foto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Elegir de la galería" })).toBeNull();
     const ejemplo = screen.getByText("Ver el ejemplo").closest("details") as HTMLElement;
     expect(ejemplo.querySelector("pre")?.textContent).toBe(EJEMPLO_EXTRACTO);
   });
@@ -599,7 +605,7 @@ describe("con el extracto", () => {
     abrir();
     await subir();
     expect((await screen.findByRole("alert")).textContent).toContain("No pudimos leer el archivo");
-    expect(((await screen.findByLabelText(/Elegir el archivo/)) as HTMLInputElement).disabled).toBe(false);
+    expect(((await screen.findByLabelText("Archivo del extracto")) as HTMLInputElement).disabled).toBe(false);
   });
 
   it("un archivo con demasiadas líneas lo dice así", async () => {
@@ -615,7 +621,7 @@ describe("con el extracto", () => {
     abrir();
     await screen.findByText("No falta cotejar ningún pago.");
     await subir();
-    expect((await screen.findByRole("alert")).textContent).toContain("Elegí uno más chico");
+    expect((await screen.findByRole("alert")).textContent).toContain("Hay que elegir uno más chico");
     expect(pedidos(simulado, VISTA)).toEqual([]);
   });
 
@@ -644,7 +650,7 @@ describe("con el extracto", () => {
     abrir();
     await subir();
     await screen.findByRole("alert");
-    await waitFor(async () => expect(((await screen.findByLabelText(/Elegir el archivo/)) as HTMLInputElement).disabled).toBe(false));
+    await waitFor(async () => expect(((await screen.findByLabelText("Archivo del extracto")) as HTMLInputElement).disabled).toBe(false));
   });
 
   it("«Elegir otras columnas» vuelve al formulario con lo guardado", async () => {

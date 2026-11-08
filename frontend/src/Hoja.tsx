@@ -17,9 +17,11 @@ type Props = {
   alEscapar?: () => void;
   /** Queda arriba de las demás aunque otra se monte después: sin resolverla no se puede seguir. */
   encima?: boolean;
+  /** Más ancha en PC y tablet: para mirar un documento, no para un formulario corto. */
+  ancha?: boolean;
 };
 
-export function Hoja({ titulo, children, alEscapar, encima = false }: Props) {
+export function Hoja({ titulo, children, alEscapar, encima = false, ancha = false }: Props) {
   const id = useId();
   const fondo = useRef<HTMLDivElement>(null);
   const hoja = useRef<HTMLDivElement>(null);
@@ -36,7 +38,7 @@ export function Hoja({ titulo, children, alEscapar, encima = false }: Props) {
 
   return createPortal(
     <div ref={fondo} className={encima ? "hoja-fondo hoja-fondo-encima" : "hoja-fondo"} onKeyDown={(e) => e.key === "Escape" && alEscapar?.()}>
-      <div ref={hoja} className="hoja" role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1}>
+      <div ref={hoja} className={ancha ? "hoja hoja--ancha" : "hoja"} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1}>
         <h2 id={id}>{titulo}</h2>
         {children}
       </div>
