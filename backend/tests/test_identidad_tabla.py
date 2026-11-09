@@ -22,7 +22,7 @@ pytestmark = pytest.mark.db
 
 VIGENCIA_ENLACE = timedelta(minutes=15)
 """La del diseño (§10.3); la migración la impone como tope."""
-VIGENCIA_SESION = timedelta(days=30)
+VIGENCIA_SESION = timedelta(days=45)
 """La del diseño (§10.4); la migración la impone como tope."""
 RENOVAR_CADA = timedelta(minutes=5)
 IP = "198.51.100.7"

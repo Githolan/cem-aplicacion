@@ -307,9 +307,26 @@ def test_las_vigencias_de_r10_son_las_de_la_api(motor_migrate):
                 "'nucleo.exigir_sesion_operativa(uuid, uuid, uuid, text, boolean)'::regprocedure)"
             )
         ).scalar_one()
-    assert sesiones.VIGENCIA_SESION_ECONOMICA.total_seconds() == 12 * 3600
     assert sesiones.VIGENCIA_SEGUNDO_FACTOR_RECIENTE.total_seconds() == 10 * 60
-    assert "interval '12 hours'" in definicion and "interval '10 minutes'" in definicion
+    assert "interval '10 minutes'" in definicion
+    # La sesión de 12 horas salió el 09-11-2026 (0091, comentario 28): ni en la API ni en la base.
+    assert not hasattr(sesiones, "VIGENCIA_SESION_ECONOMICA")
+    assert "interval '12 hours'" not in definicion and "requiere_sesion_reciente" not in definicion
+    # Y el tope de la sesión es el de la API: 45 días desde el último uso.
+    assert sesiones.VIGENCIA_SESION.days == 45
+    with motor_migrate.connect() as c:
+        topes = (
+            c.execute(
+                text(
+                    "select pg_get_constraintdef(oid) from pg_constraint"
+                    " where conrelid = 'nucleo.sesion'::regclass and contype = 'c'"
+                    " and pg_get_constraintdef(oid) like '%ultimo_uso_en%'"
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert len(topes) == 1 and "45 days" in topes[0], topes
 
 
 def test_sin_un_modo_que_admita_egresos_no_se_prepara(motor_migrate, motor_app):
@@ -328,26 +345,27 @@ def test_en_modo_consejo_no_se_prepara(motor_migrate, motor_app):
 @pytest.mark.parametrize(
     ("horas", "totp", "motivo"),
     [
-        (13, 0, "requiere_sesion_reciente"),
         (0, None, "requiere_segundo_factor_reciente"),
+        (20 * 24, 11, "requiere_segundo_factor_reciente"),
         (1, 11, "requiere_segundo_factor_reciente"),
     ],
 )
 def test_r10_la_sesion_y_el_segundo_factor(motor_migrate, e, horas, totp, motivo):
     s = nueva_sesion(motor_migrate, e.adm, horas_atras=horas, totp_min_atras=totp)
     niega(motor_migrate, e, e.adm, ACTO_CON_GESTO, motivo, sesion=s, cons=e.cons)
-    # Control en el borde de adentro: 11 horas y TOTP de hace 9 minutos.
-    ok = nueva_sesion(motor_migrate, e.adm, horas_atras=11, totp_min_atras=9)
+    # Control en el borde de adentro: TOTP de hace 9 minutos, con una sesión de 20 días (0091).
+    ok = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=9)
     assert llamar(motor_migrate, e, e.adm, ACTO_CON_GESTO, sesion=ok, cons=e.cons) is not None
 
 
 @pytest.mark.parametrize("totp", [None, 11])
-def test_preparar_no_pide_el_gesto_pero_si_la_sesion_reciente(motor_migrate, e, totp):
+def test_preparar_no_pide_el_gesto_ni_una_sesion_reciente(motor_migrate, e, totp):
     """Decisión del propietario del 04-11-2026 (`0071`): preparar no mueve dinero."""
     s = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=totp)
     assert llamar(motor_migrate, e, e.adm, PREPARAR, sesion=s) is not None
-    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13, totp_min_atras=totp)
-    niega(motor_migrate, e, e.adm, PREPARAR, "requiere_sesion_reciente", sesion=larga)
+    # Sin sesión de 12 horas desde 0091.
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=totp)
+    assert llamar(motor_migrate, e, e.adm, PREPARAR, sesion=larga) is not None
 
 
 def test_una_sesion_vencida_revocada_o_ajena_no_sirve(motor_migrate, e):

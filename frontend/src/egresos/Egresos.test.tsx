@@ -727,7 +727,7 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 
-  it("la sesión de más de 12 horas no lleva a otra pantalla ni deja un aviso viejo: la pide la hoja", async () => {
+  it("la sesión que ya no sirve no lleva a otra pantalla ni deja un aviso viejo: la pide la hoja", async () => {
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/proveedores`]: () => error("sesion_reciente_requerida", 403),

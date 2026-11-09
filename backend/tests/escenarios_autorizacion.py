@@ -15,8 +15,9 @@ El CSV es legible para el propietario; acá se traduce cada fila a tipos puros:
   Identidad humana (A13-C): por omisión `yo`, `otro` y `otro2` son tres seres humanos
   verificados en el consorcio; `sin_identidad=otro|yo` les quita la verificación y
   `misma_identidad=otro` hace a `otro` el mismo ser humano que `yo` (otra cuenta). Controles
-  económicos (R10): por omisión la sesión tiene el segundo factor reciente y menos de 12 horas;
-  `controles=sin_segundo_factor`, `sesion_vieja` o `ninguno` los quitan.
+  económicos (R10): por omisión la sesión tiene el segundo factor reciente;
+  `controles=sin_segundo_factor` o `ninguno` lo quitan. La sesión de 12 horas salió el
+  09-11-2026 (comentario 28 de la revisión de pantallas).
 
 Los símbolos (`3A`, `5B`, `X`, `X2`…) se reemplazan por UUID canónicos fijos.
 """
@@ -54,12 +55,11 @@ IDENTIDADES: dict[str, UUID] = {
     "otro2": UUID("0192f0c4-0000-7000-8000-0000000000e3"),
 }
 CONTROLES = {
-    None: (True, True),
-    "sin_segundo_factor": (False, True),
-    "sesion_vieja": (True, False),
-    "ninguno": (False, False),
+    None: True,
+    "sin_segundo_factor": False,
+    "ninguno": False,
 }
-"""`controles` → (segundo factor reciente, sesión de menos de 12 horas)."""
+"""`controles` → segundo factor reciente."""
 
 PERSONAS: dict[str, UUID | None] = {
     "yo": UUID("0192f0c4-0000-7000-8000-000000000001"),
@@ -331,7 +331,7 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         raise ValueError(f"{fila}: hay_administrador debe ser si o no")
 
     entidad, valores = _entidad(fila.entidad, _recursos(fila.recurso))
-    segundo_factor, sesion = CONTROLES[valores.get("controles")]
+    segundo_factor = CONTROLES[valores.get("controles")]
     contexto = ContextoAutorizacion(
         persona_id=None if valores.get("actor") == "nadie" else PERSONAS["yo"],
         consorcio_id=CONSORCIO,
@@ -343,6 +343,5 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         hay_administrador_vigente=fila.hay_administrador == "si",
         identidades=_identidades(valores),
         segundo_factor_reciente=segundo_factor,
-        sesion_reciente=sesion,
     )
     return contexto, entidad

@@ -246,18 +246,11 @@ def test_sin_identidad_lo_que_no_es_economico_se_alcanza_igual():
     assert alcanza("fondo_reserva.solicitar", ctx)
 
 
-@pytest.mark.parametrize(
-    "controles,motivo",
-    [
-        ({"segundo_factor_reciente": False}, "requiere_segundo_factor_reciente"),
-        ({"sesion_reciente": False}, "requiere_sesion_reciente"),
-    ],
-)
-def test_el_gesto_y_la_sesion_se_renuevan_y_no_quitan_nada(controles, motivo):
-    ctx = con_facultad(None, **controles)
+def test_el_gesto_se_renueva_y_no_quita_nada():
+    ctx = con_facultad(None, segundo_factor_reciente=False)
     assert alcanza(ECONOMICA, ctx)
     # Control: la ruta, en cambio, lo pide.
-    assert evaluar(ECONOMICA, ctx, TODO_PASA).motivo_interno == motivo
+    assert evaluar(ECONOMICA, ctx, TODO_PASA).motivo_interno == "requiere_segundo_factor_reciente"
 
 
 def test_lo_que_depende_de_la_entidad_no_se_mira():

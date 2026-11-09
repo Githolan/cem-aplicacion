@@ -30,11 +30,12 @@ export const LARGO_TITULO = 200;
 
 /** R10: falta verificar el segundo factor en esta sesión (se pide el código y se reintenta). */
 export const SEGUNDO_FACTOR_REQUERIDO = "segundo_factor_requerido";
-/** R10: la sesión tiene más de 12 horas (hay que volver a entrar). */
+/** La sesión de la petición ya no sirve (vencida o revocada): hay que volver a entrar. La sesión de
+ *  12 horas para lo económico salió el 09-11-2026 (comentario 28). */
 export const SESION_RECIENTE_REQUERIDA = "sesion_reciente_requerida";
 const CAMBIO_LA_ORDEN = new Set(["version_desactualizada", "huella_distinta"]);
 /** Lo que se anota ante R10 por sesión vieja. `AvisoPantalla` no lo muestra: lo pide la hoja encima. */
-export const TEXTO_SESION_VENCIDA = "Tu sesión tiene más de 12 horas: volvé a entrar para seguir.";
+export const TEXTO_SESION_VENCIDA = "La sesión venció: hay que volver a entrar para seguir.";
 
 /** El resultado de lo último que se hizo o se intentó en una pantalla. */
 export type Aviso = { texto: string; ok: boolean };

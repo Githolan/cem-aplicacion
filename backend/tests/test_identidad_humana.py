@@ -469,21 +469,24 @@ def _sesion(motor_migrate, persona: UUID, creada: str, segundo_factor: str | Non
 @pytest.mark.parametrize(
     ("creada", "segundo_factor", "esperado"),
     [
-        ("1 hour", "5 minutes", (True, True)),
-        ("1 hour", "11 minutes", (False, True)),
-        ("1 hour", None, (False, True)),
-        ("12 hours 1 minute", "5 minutes", (True, False)),
-        ("11 hours 59 minutes", "5 minutes", (True, True)),
+        ("1 hour", "5 minutes", True),
+        ("1 hour", "11 minutes", False),
+        ("1 hour", None, False),
+        # La sesión de 12 horas salió el 09-11-2026 (comentario 28): una sesión larga con el
+        # segundo factor reciente sirve.
+        ("20 days", "5 minutes", True),
+        ("20 days", "11 minutes", False),
     ],
 )
-def test_r10_el_contexto_mide_el_segundo_factor_y_la_sesion(
+def test_r10_el_contexto_mide_el_segundo_factor(
     motor_migrate, motor_app, creada, segundo_factor, esperado
 ):
     cons, _, ana = consorcio_con_persona(motor_migrate, verificada=False)
     identidad = verificar_identidad(motor_app, cons, ana)
     sesion = _sesion(motor_migrate, ana, creada, segundo_factor)
     ctx = require_scope(cons, Identidad(ana, sesion), motor_app)
-    assert (ctx.segundo_factor_reciente, ctx.sesion_reciente) == esperado
+    assert ctx.segundo_factor_reciente == esperado
+    assert not hasattr(ctx, "sesion_reciente")
     assert ctx.autorizacion.identidades == {ana: identidad}
 
 

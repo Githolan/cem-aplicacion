@@ -130,7 +130,8 @@ def test_haber_visto_la_cuenta_de_otra_orden_no_alcanza(motor_migrate, motor_app
     [
         (1, 11, "requiere_segundo_factor_reciente"),
         (1, None, "requiere_segundo_factor_reciente"),
-        (13, 0, "requiere_sesion_reciente"),
+        # Sin sesión de 12 horas desde 0091: una sesión larga también pide el gesto.
+        (20 * 24, 11, "requiere_segundo_factor_reciente"),
     ],
 )
 def test_sin_la_facultad_la_declaracion_exige_r10(

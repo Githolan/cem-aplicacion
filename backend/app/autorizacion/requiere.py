@@ -46,13 +46,11 @@ RENOVAR = {
         CodigoError.SEGUNDO_FACTOR_REQUERIDO,
         sesiones.CONFIRMAR_QUE_SOS_VOS,
     ),
-    Motivo.REQUIERE_SESION_RECIENTE: (
-        CodigoError.SESION_RECIENTE_REQUERIDA,
-        "Para esto tenés que volver a entrar.",
-    ),
 }
 """Las negaciones de R10 que la persona resuelve renovando la sesión. Se dicen tal cual porque el
 evaluador las mira al final (`_filtrar`): solo llegan acá si todo lo demás ya concedía."""
+VOLVER_A_ENTRAR = (CodigoError.SESION_RECIENTE_REQUERIDA, "Para esto tenés que volver a entrar.")
+"""La sesión de la petición ya no sirve (vencida o revocada): se resuelve entrando de nuevo."""
 
 
 @dataclass(frozen=True)
@@ -204,6 +202,6 @@ class Requiere:
 
 def requiere(accion: str, *, al_entrar: bool = False, sin_gesto: bool = False) -> Requiere:
     """`al_entrar=True` para las acciones que no dependen de la entidad. `sin_gesto=True` para las
-    rutas económicas que solo leen o preparan (`0071`): siguen pidiendo la facultad, el modo, la
-    sesión de 12 horas y la identidad humana, y la base aplica lo mismo."""
+    rutas económicas que solo leen o preparan (`0071`): siguen pidiendo la facultad, el modo, una
+    sesión válida y la identidad humana, y la base aplica lo mismo."""
     return Requiere(accion, al_entrar=al_entrar, sin_gesto=sin_gesto)

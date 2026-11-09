@@ -452,9 +452,9 @@ def test_una_sesion_vencida_no_entra(app, motor_migrate):
     with motor_migrate.begin() as conn:
         conn.execute(
             text(
-                "update nucleo.sesion set creada_en = creada_en - interval '31 days',"
-                " ultimo_uso_en = ultimo_uso_en - interval '31 days',"
-                " vence_en = vence_en - interval '31 days' where token_hash = :t"
+                "update nucleo.sesion set creada_en = creada_en - interval '46 days',"
+                " ultimo_uso_en = ultimo_uso_en - interval '46 days',"
+                " vence_en = vence_en - interval '46 days' where token_hash = :t"
             ),
             {"t": h(c.cookies[sesiones.COOKIE_SESION])},
         )

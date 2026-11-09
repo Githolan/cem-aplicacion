@@ -225,7 +225,7 @@ R9,decisiones.registrar,MC,C,,vigente,si,respaldo=no,403,sin_respaldo,decisión 
 R9,padron.confirmar_vinculo,AD,C,unidad:3A,vigente,si,objetivo=otro;registrado=otro;respaldo=no,403,sin_respaldo,confirmar sin título de referencia
 R9,coeficientes.proponer,AD,C,grupo:agua,vigente,si,respaldo=no,403,sin_respaldo,propuesta sin fuente documental (D4)
 R10,fondo_reserva.autorizar,MC,C,,vigente,si,solicito=otro;controles=sin_segundo_factor,403,requiere_segundo_factor_reciente,sin TOTP en los últimos 10 minutos se niega
-R10,liquidacion.aprobar,Fac(liquidacion.aprobar),AG,,vigente,si,preparo=otro;controles=sesion_vieja,403,requiere_sesion_reciente,una sesión de más de 12 horas se niega aunque el TOTP sea reciente
+R10,liquidacion.aprobar,Fac(liquidacion.aprobar),AG,,vigente,si,preparo=otro;controles=sin_segundo_factor,403,requiere_segundo_factor_reciente,sin el segundo factor reciente se niega; la sesión de 12 horas salió el 09-11-2026 (comentario 28)
 R10,egresos.preparar_orden,AD,AA,cuenta:X,vigente,si,controles=ninguno,403,requiere_segundo_factor_reciente,sin ningún control se niega por el segundo factor primero
 R10,egresos.aprobar_orden,Fac(egresos.aprobar_orden),AA,cuenta:X,vigente,si,preparo=otro;sin_identidad=yo,403,identidad_no_verificada,quien aprueba sin identidad verificada se niega
 R10,egresos.ejecutar_pago,AD,AA,cuenta:X,vigente,si,aprobaron=otro;respaldo=si;sin_identidad=otro,403,identidad_no_verificada,el aprobador sin identidad verificada: no se sabe si es otro ser humano

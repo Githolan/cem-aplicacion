@@ -149,7 +149,7 @@ describe("Pagos en el inicio de quien revisa", () => {
     abrir();
 
     const hero = within(await tarjeta());
-    expect(await hero.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await hero.findByText("Nada pendiente.")).toBeTruthy();
     expect(hero.queryByText("Para hacer")).toBeNull();
   });
 
@@ -162,7 +162,7 @@ describe("Pagos en el inicio de quien revisa", () => {
 
     const hero = within(await tarjeta());
     expect(await hero.findByRole("alert")).toBeTruthy();
-    expect(hero.queryByText("No tenés nada para hacer.")).toBeNull();
+    expect(hero.queryByText("Nada pendiente.")).toBeNull();
     caido = false;
     fireEvent.click(hero.getByRole("button", { name: "Reintentar" }));
     expect((await hero.findByText("cosa para hacer", { exact: false })).textContent).toBe("1 cosa para hacer");
@@ -221,7 +221,7 @@ describe("aviso de que la aplicación no mueve dinero", () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos() } }));
     abrir();
 
-    await within(await tarjeta()).findByText("No tenés nada para hacer.");
+    await within(await tarjeta()).findByText("Nada pendiente.");
     expect(screen.queryByText(AVISO)).toBeNull();
   });
 });
@@ -307,7 +307,7 @@ describe("volver del alta de la verificación", () => {
 
   async function darDeAltaYVolver() {
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
-    await screen.findByText("No tenés nada para hacer.");
+    await screen.findByText("Nada pendiente.");
     fireEvent.click(screen.getByRole("link", { name: "Ir al alta" }));
     fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
@@ -319,7 +319,7 @@ describe("volver del alta de la verificación", () => {
     vi.stubGlobal("fetch", simulado);
     abrir({ pathname: "/pagos", state: { consorcio: C2 } });
 
-    await screen.findByText("No tenés nada para hacer.");
+    await screen.findByText("Nada pendiente.");
     const antes = pedidosA(simulado, bandejaDe(C2));
     expect(antes).toBeGreaterThan(0);
     await darDeAltaYVolver();
@@ -332,7 +332,7 @@ describe("volver del alta de la verificación", () => {
     vi.stubGlobal("fetch", simulado);
     abrir("/pagos");
 
-    await screen.findByText("No tenés nada para hacer.");
+    await screen.findByText("Nada pendiente.");
     const antes = pedidosA(simulado, bandejaDe(C1));
     expect(antes).toBeGreaterThan(0);
     await darDeAltaYVolver();
@@ -343,7 +343,10 @@ describe("volver del alta de la verificación", () => {
 
 describe("salidas de la bandeja según el rol", () => {
   // «Proveedores» también está en la navegación: se mira el de la bandeja, que es el último.
-  const sutil = (nombre: string) => screen.getAllByRole("link", { name: nombre }).at(-1)?.classList.contains("enlace-boton--sutil");
+  const clase = (nombre: string) => screen.getAllByRole("link", { name: nombre }).at(-1)?.classList;
+  // Comentario 24 (09-11-2026): un solo botón lleno; los demás con borde, sin relleno.
+  const principal = (nombre: string) => clase(nombre)?.contains("enlace-boton--principal");
+  const conBorde = (nombre: string) => clase(nombre)?.contains("enlace-boton--borde");
 
   it("quien prepara: «Preparar una orden» manda; consultar y proveedores van detrás", async () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: conElementos() } }));
@@ -351,9 +354,11 @@ describe("salidas de la bandeja según el rol", () => {
 
     await screen.findByRole("link", { name: "Consultar pagos" });
     await screen.findByRole("link", { name: "Preparar una orden" });
-    expect(sutil("Preparar una orden")).toBe(false);
-    expect(sutil("Consultar pagos")).toBe(true);
-    expect(sutil("Proveedores")).toBe(true);
+    expect(principal("Preparar una orden")).toBe(true);
+    expect(conBorde("Preparar una orden")).toBe(false);
+    expect(conBorde("Consultar pagos")).toBe(true);
+    expect(conBorde("Proveedores")).toBe(true);
+    expect(principal("Consultar pagos")).toBe(false);
     await waitFor(() => expect(screen.queryByRole("link", { name: "Cotejar con el banco" })).toBeNull());
   });
 
@@ -362,8 +367,8 @@ describe("salidas de la bandeja según el rol", () => {
     abrir("/pagos");
 
     await screen.findByRole("link", { name: "Cotejar con el banco" });
-    expect(sutil("Cotejar con el banco")).toBe(false);
-    expect(sutil("Consultar pagos")).toBe(true);
+    expect(principal("Cotejar con el banco")).toBe(true);
+    expect(conBorde("Consultar pagos")).toBe(true);
     await waitFor(() => expect(screen.queryByRole("link", { name: "Preparar una orden" })).toBeNull());
   });
 });

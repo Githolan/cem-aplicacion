@@ -20,8 +20,8 @@ sigue el paquete vigente, y la franja de cada versión dice si pide aprobación 
   quien registró el pago ni quien preparó la orden. «No se pagó» lo declara quien ejecuta y lo
   confirma el Consejo, con la misma separación.
 
-Toda acción es económica (R10): sesión de menos de 12 horas, segundo factor de menos de 10
-minutos e identidad humana verificada. Las funciones de la base vuelven a exigir todo eso con la
+Toda acción es económica (R10): segundo factor de menos de 10 minutos e identidad humana
+verificada. Las funciones de la base vuelven a exigir todo eso con la
 sesión de la petición. Si la base niega lo que el evaluador concedió, es una discrepancia (500),
 nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 """
@@ -127,7 +127,7 @@ from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad, alcanza
-from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
+from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, VOLVER_A_ENTRAR, Permiso, requiere
 from app.consorcios import circuito_pagos, lectura_comprobantes
 from app.consorcios.documentos import (
     ERRORES_BAJA,
@@ -338,8 +338,7 @@ ERRORES = {
         " declaración.",
     ),
     "requiere_segundo_factor_reciente": (403, *RENOVAR["requiere_segundo_factor_reciente"]),
-    "requiere_sesion_reciente": (403, *RENOVAR["requiere_sesion_reciente"]),
-    "sesion_invalida": (403, *RENOVAR["requiere_sesion_reciente"]),
+    "sesion_invalida": (403, *VOLVER_A_ENTRAR),
 }  # fmt: skip
 """Motivos de las funciones de `0045` a `0055`. Los que el contrato ya impide (razón social,
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de

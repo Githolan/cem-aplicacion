@@ -283,7 +283,7 @@ describe("entrar encima", () => {
     expect(claves[0]).toBe(claves[1]);
   });
 
-  it("la sesión de más de 12 horas también pide entrar encima, y la sesión vieja no la cierra", async () => {
+  it("la sesión que ya no sirve para el acto también pide entrar encima, y la sesión vieja no la cierra", async () => {
     const { estado } = backend({
       [`POST ${RUTA}`]: () => error("sesion_reciente_requerida", 403),
       "POST /api/v1/auth/codigo": () => {

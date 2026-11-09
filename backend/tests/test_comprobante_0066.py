@@ -21,15 +21,15 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
 pytestmark = pytest.mark.db
 
 
-def test_sin_sesion_reciente_no_se_carga_el_comprobante(motor_migrate, e):
-    # Desde 0073 subir no pide gesto (registrar sí): lo que sigue pidiendo es la sesión reciente.
+def test_con_una_sesion_larga_se_carga_el_comprobante(motor_migrate, e):
+    # Desde 0073 subir no pide gesto (registrar sí). Sin sesión de 12 horas desde 0091.
     o = emitida(motor_migrate, e)
     ver_version(motor_migrate, e, e.adm, o, 1)  # vio la cuenta de la ejecución abierta
-    vieja = nueva_sesion(motor_migrate, e.adm, horas_atras=13, totp_min_atras=0)
-    niega(motor_migrate, e, e.adm, CREAR, "requiere_sesion_reciente", sesion=vieja, orden=o,
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=0)
+    assert llamar(motor_migrate, e, e.adm, CREAR, sesion=larga, orden=o, titulo=TITULO) is not None
+    # Control: con la sesión de otra persona, no.
+    niega(motor_migrate, e, e.adm, CREAR, "sesion_invalida", sesion=e.sesion[e.mc2], orden=o,
           titulo=TITULO)  # fmt: skip
-    # Control: la misma persona, con su sesión reciente, sí lo carga.
-    assert llamar(motor_migrate, e, e.adm, CREAR, orden=o, titulo=TITULO) is not None
 
 
 def test_con_la_sesion_de_otra_persona_no_se_carga(motor_migrate, e):

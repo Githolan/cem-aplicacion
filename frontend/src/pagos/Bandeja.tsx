@@ -64,7 +64,7 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
           <p className="etiqueta-situacion" data-tono="bien">
             Al día
           </p>
-          <p>No tenés nada para hacer.</p>
+          <p>Nada pendiente.</p>
         </div>
       )}
       {grupos.map((g) => (
@@ -82,22 +82,23 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
           </ul>
         </details>
       )}
+      {/* Un solo botón lleno: el del rol; el resto con borde y sin relleno (comentario 24, 09-11-2026). */}
       <p className="salidas-pago">
         {prepara && (
-          <Link to={RUTA_NUEVA} state={{ consorcio }} className="enlace-boton">
+          <Link to={RUTA_NUEVA} state={{ consorcio }} className="enlace-boton enlace-boton--principal">
             Preparar una orden
           </Link>
         )}
         {coteja && (
-          <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton">
+          <Link to={RUTA_COTEJO} state={{ consorcio }} className={`enlace-boton ${prepara ? "enlace-boton--borde" : "enlace-boton--principal"}`}>
             Cotejar con el banco
           </Link>
         )}
-        <Link to={RUTA_CONSULTA} state={{ consorcio }} className="enlace-boton enlace-boton--sutil">
+        <Link to={RUTA_CONSULTA} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
           Consultar pagos
         </Link>
         {prepara && (
-          <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton enlace-boton--sutil">
+          <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
             Proveedores
           </Link>
         )}
