@@ -933,8 +933,10 @@ RUTAS = {
     "emitir_orden_pago", "renovar_orden_vencida", "orden_pago_evaluaciones_lectura",
     "registrar_contrato_proveedor", "confirmar_contrato_proveedor", "baja_contrato_proveedor",
     "contratos_proveedor_lectura",
+    # 0093: retirar una orden que nadie aprobó y leer quién la retiró (comentario 23).
+    "retirar_orden_pago", "retiro_orden_pago_lectura",
 }  # fmt: skip
-"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049` y `0050`)."""
+"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050` y `0093`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
