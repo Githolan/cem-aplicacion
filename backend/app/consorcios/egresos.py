@@ -130,6 +130,7 @@ from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, Permiso, requiere
 from app.consorcios import circuito_pagos, lectura_comprobantes
 from app.consorcios.documentos import (
+    ERRORES_BAJA,
     RESPUESTAS_SUBIDA,
     RESPUESTAS_VERSION,
     SUBIDA_OPENAPI,
@@ -731,6 +732,43 @@ def crear_documento_para_carga(
             {"tipo": nuevo.tipo.value, "titulo": nuevo.titulo, "fecha": nuevo.fecha},
         ).scalar_one()  # fmt: skip
         return 201, DocumentoId(id=doc)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/quitar",
+    response_model=DocumentoId,
+    summary="Quitar un archivo subido por error en un formulario, antes de guardar: el documento"
+    " para carga deja de aparecer. No se borra nada",
+    responses=RESPUESTAS_LECTURA | {
+        403: {"description": RESPUESTAS_LECTURA[403]["description"] + " O no es quien creó el"
+              " documento y subió todos sus archivos (`no_es_quien_lo_subio`)."},
+        404: {"description": "No existe en este consorcio, ya no está vigente o no es un documento"
+              " para carga."},
+        409: {"description": "Algo guardado lo cita (`documento_referenciado`): la versión de una"
+              " orden o de un proveedor, por ejemplo."},
+    },
+)  # fmt: skip
+def quitar_documento_para_carga(
+    documento_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Con lo mismo que pide crearlo, y solo quien lo creó y subió todos sus archivos, mientras nada
+    lo cite (`0089`). El documento queda `descartado`: sale de la lista y de la descarga, el archivo
+    queda en el almacén y el acto, en la auditoría."""
+    cargar.verificar(Entidad())
+
+    def efecto(conn: Connection) -> tuple[int, DocumentoId]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.quitar_documento(:d, :actor, 'api', :sesion)",
+            {"d": documento_id}, ERRORES_BAJA,
+        )  # fmt: skip
+        return 200, DocumentoId(id=documento_id)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 

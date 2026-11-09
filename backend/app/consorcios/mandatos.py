@@ -107,6 +107,10 @@ ERRORES = {
         409, CodigoError.REVISION_DUPLICADA, "El mandato ya tiene una revisión desde ese día.",
     ),
     # 422: lo que se envió.
+    "acta_dada_de_baja": (
+        422, CodigoError.DOCUMENTO_INVALIDO,
+        "La huella del acta es la de un documento quitado o retirado: no respalda una decisión.",
+    ),
     "decision_invalida": (
         422, CodigoError.DECISION_INVALIDA,
         "La decisión no existe en este consorcio o no corresponde (la remoción y la revisión"
@@ -162,7 +166,8 @@ ERRORES = {
         "La fecha de la decisión no puede ser posterior a hoy en el consorcio.",
     ),
 }  # fmt: skip
-"""Motivos de las funciones de `0014`, `0016`, `0018`, `0019` y `0023`. Los de separación
+"""Motivos de las funciones de `0014`, `0016`, `0018`, `0019` y `0023`, y del disparador del acta
+de `0089`. Los de separación
 (`alta_de_si_mismo`, `baja_de_si_mismo`, `revision_de_si_mismo`,
 `decision_registrada_por_el_actor`) y los de actor u
 origen los niega antes el evaluador o los fija esta ruta: si llegan a la base, es una
@@ -213,8 +218,9 @@ def _sobre_decision(conn: Connection, consorcio_id: UUID, decision_id: UUID | No
     responses={
         403: {"description": "Sin `decisiones.registrar` en el consorcio."},
         422: {
-            "description": "Faltan datos, la referencia no es válida o la fecha es posterior a"
-            " hoy en el consorcio (`fecha_futura`)."
+            "description": "Faltan datos, la referencia no es válida, la fecha es posterior a"
+            " hoy en el consorcio (`fecha_futura`), o la huella del acta es la de un documento"
+            " quitado o retirado (`documento_invalido`, `0089`)."
         },
     },
 )

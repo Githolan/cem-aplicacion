@@ -24,6 +24,11 @@ import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 // navegación común, porque el 302 lleva a una URL firmada de otro origen
 // que un `fetch` no puede seguir (CSP `connect-src 'self'`); antes se pregunta con `redirect:
 // "manual"` para decir un error acá, en vez de dejar a la persona frente al JSON.
+//
+// «Retirar el documento» (app 0089): en la ficha, para quien carga esa categoría y además tiene la
+// facultad `documentos.ver` (`documentos.ver_restringidos`), con un motivo obligatorio. No se borra
+// nada: el documento sale de la lista y queda en la exportación y en la auditoría. El servidor lo
+// niega si el documento respalda algo guardado.
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Documento = components["schemas"]["DocumentoEnLista"];
@@ -52,6 +57,11 @@ const ENCABEZADO_IDEMPOTENCIA = "Idempotency-Key" as const;
 export const REFRESCO_CUARENTENA_MS = 10_000;
 /** El mismo tope que el contrato (`LARGO_MAXIMO_TITULO`); el del archivo está en `archivos.ts`. */
 const LARGO_TITULO = 200;
+/** El tope del motivo de un retiro (`LARGO_MAXIMO_MOTIVO_RETIRO` del contrato). */
+export const LARGO_MOTIVO_RETIRO = 300;
+export const RETIRAR_DOCUMENTO = "Retirar el documento";
+export const AYUDA_RETIRO =
+  "El documento deja de aparecer en la lista. No se borra: queda en la exportación del edificio y en la auditoría. Si respalda una orden, un pago, un proveedor, un contrato o el acta de una decisión, no se puede retirar.";
 const BYTES_POR_KB = 1024;
 const BYTES_POR_MB = 1024 * 1024;
 /** Un texto con algo más que espacios. */
@@ -141,6 +151,19 @@ export function mensajeDeError(
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   // Un 503 con `Retry-After` es el tope de cargas a la vez; sin él, el servicio no está.
   if (estado === ESTADO.noDisponible && conEspera) return "Hay muchas cargas en curso. Probá de nuevo en un momento.";
+  return mensajeDeFalla(estado, codigo);
+}
+
+/** Qué decir si el documento no se pudo retirar. */
+export function mensajeDeRetiro(estado: number, codigo: string | undefined): string {
+  if (codigo === "documento_referenciado")
+    return "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.";
+  if (codigo === "motivo_con_cuenta") return "El motivo no puede llevar el número de una cuenta.";
+  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No se pudo verificar el pedido. Hay que recargar la página.";
+  if (estado === ESTADO.sinPermiso) return "No hay permiso para retirar documentos de esa categoría.";
+  if (estado === ESTADO.noEncontrado) return "Ese documento ya no está en este edificio.";
+  if (estado === ESTADO.invalido) return "Hay que escribir el motivo, sin teléfonos ni correos.";
+  if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   return mensajeDeFalla(estado, codigo);
 }
 
@@ -262,6 +285,9 @@ export function Documentos() {
   // cambiar los datos o el archivo.
   const claveCrear = useRef<string | null>(null);
   const claveSubir = useRef<string | null>(null);
+  /** El retiro abierto en la ficha: el documento y el motivo escrito. */
+  const [retiro, setRetiro] = useState<{ documento: string; motivo: string } | null>(null);
+  const claveRetiro = useRef<string | null>(null);
   const primerCampo = useRef<HTMLElement | null>(null);
   const textoAviso = useRef<HTMLParagraphElement | null>(null);
   const alAviso = useRef(false);
@@ -664,9 +690,93 @@ export function Documentos() {
     );
   }
 
+  /** Retirar el documento: con el motivo, por la API, que lo niega si algo guardado lo cita. */
+  async function retirar(evento: FormEvent, documento: string, titulo: string) {
+    evento.preventDefault();
+    if (retiro === null) return;
+    claveRetiro.current ??= crypto.randomUUID();
+    alAviso.current = true;
+    setEnviando(true);
+    setAviso(null);
+    try {
+      const { error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/retiro", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio, documento_id: documento }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveRetiro.current } },
+        body: { motivo: retiro.motivo.trim() },
+      });
+      exigirSesion(response);
+      if (!response.ok) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) claveRetiro.current = null;
+        setAviso({ texto: `El documento no se retiró. ${mensajeDeRetiro(response.status, codigo)}`, ok: false });
+        cerrarFichaDe(false);
+        return;
+      }
+      claveRetiro.current = null;
+      setRetiro(null);
+      cerrarFichaDe(false);
+      setAviso({ texto: `Listo: se retiró «${titulo}». Ya no aparece en la lista.`, ok: true });
+      actualizarLista();
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else {
+        setAviso({ texto: `El documento no se retiró. ${SIN_CONEXION}`, ok: false });
+        cerrarFichaDe(false);
+      }
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  /** El formulario del retiro, en la ficha: el motivo y la confirmación. */
+  function formularioRetiro(d: Documento) {
+    const base = `${id}-retiro-${d.id}`;
+    if (retiro?.documento !== d.id)
+      return (
+        <p>
+          <button type="button" className="secundario peligro" disabled={enviando}
+            onClick={() => {
+              claveRetiro.current = null;
+              setRetiro({ documento: d.id, motivo: "" });
+            }}>
+            {RETIRAR_DOCUMENTO}
+          </button>
+        </p>
+      );
+    return (
+      <form className="formulario formulario-movil" onSubmit={(e) => void retirar(e, d.id, d.titulo)} aria-labelledby={`${base}-accion`}>
+        <h3 id={`${base}-accion`}>{RETIRAR_DOCUMENTO}</h3>
+        <p id={`${base}-ayuda`}>{AYUDA_RETIRO}</p>
+        <label htmlFor={`${base}-motivo`}>Motivo del retiro</label>
+        <textarea
+          id={`${base}-motivo`}
+          required
+          maxLength={LARGO_MOTIVO_RETIRO}
+          disabled={enviando}
+          aria-describedby={`${base}-ayuda ${base}-ayuda-motivo`}
+          value={retiro.motivo}
+          onChange={(e) => {
+            claveRetiro.current = null;
+            setRetiro({ documento: d.id, motivo: e.target.value });
+          }}
+        />
+        <p id={`${base}-ayuda-motivo`}>Obligatorio. Sin teléfonos, correos ni números de cuenta.</p>
+        <p>
+          <button type="submit" className="secundario peligro" disabled={enviando || retiro.motivo.trim() === ""}>
+            {RETIRAR_DOCUMENTO}
+          </button>{" "}
+          <button type="button" className="secundario" disabled={enviando} onClick={() => setRetiro(null)}>
+            No retirar
+          </button>
+        </p>
+      </form>
+    );
+  }
+
   /** Cerrar la ficha también deja el archivo a medio elegir de ese documento. */
   function cerrarFicha() {
     if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cerrar();
+    setRetiro(null);
     cerrarFichaDe();
   }
 
@@ -735,6 +845,8 @@ export function Documentos() {
                 </button>
               </p>
             )}
+        {/* Retirar: quien carga la categoría y además tiene la facultad de ver (`0089`). */}
+        {!subiendo && puede(...accionesDeCarga(d.categoria)) && puede("documentos.ver_restringidos") && formularioRetiro(d)}
       </FichaDeRegistro>
     );
   }

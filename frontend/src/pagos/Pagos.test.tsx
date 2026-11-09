@@ -9,7 +9,7 @@ import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import type { components } from "../api/tipos";
 import { App } from "../App";
 import {
-  MARCA_LECTURA, SEGUIR_SIN_ESPERAR, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
+  CONFIRMAR_QUITAR, MARCA_LECTURA, NO_QUITAR, preguntaQuitar, QUITAR_ARCHIVO, SEGUIR_SIN_ESPERAR, TEXTO_QUITADO, SEGUIR_SIN_LECTURA, TEXTO_A_MANO, TEXTO_CUIT_INVALIDO, TEXTO_DEJADO_SIN_ARCHIVO, TEXTO_DEJADO_SIN_LECTURA,
   TEXTO_ESPERA_PARA_GUARDAR, TEXTO_LEIDA, TEXTO_LEYENDO, TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR,
 } from "../CargaConLectura";
 import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
@@ -3145,6 +3145,95 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(0);
     expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(0);
     expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
+  });
+
+  describe("«Quitar el archivo» (0089)", () => {
+    const QUITAR = `${BASE}/documentos/${FAC}/quitar`;
+
+    async function conFacturaSubida(extra: Respuestas) {
+      conEsperaManual();
+      const api = conFactura([{ ...LEYENDO, estado: "no_leida" }], extra);
+      await subirFactura();
+      await vuelta();
+      expect(await screen.findByText(TEXTO_A_MANO)).toBeTruthy();
+      return api;
+    }
+
+    it("pregunta antes, lo quita en el servidor con su clave y la orden se guarda sin factura", async () => {
+      const api = await conFacturaSubida({ [`POST ${QUITAR}`]: () => Response.json({ id: FAC }) });
+      const quitar = await boton(QUITAR_ARCHIVO);
+      expect(quitar.className).toBe("secundario peligro");
+      fireEvent.click(quitar);
+      // Primero pregunta: todavía no se mandó nada.
+      expect(screen.getByText(preguntaQuitar("factura-noviembre"))).toBeTruthy();
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+      fireEvent.click(await boton(CONFIRMAR_QUITAR));
+      expect(await screen.findByText(TEXTO_QUITADO)).toBeTruthy();
+      const [pedido] = pedidos(api, "POST", QUITAR);
+      expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+      sinBoton("Ver la factura");
+      sinBoton(QUITAR_ARCHIVO);
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      expect(await guardar(api)).toMatchObject({ factura_version_id: null });
+    });
+
+    it("con la pregunta de quitar abierta no se elige otro archivo: ni se sube ni se suelta su espera", async () => {
+      const api = await conFacturaSubida({ [`POST ${QUITAR}`]: () => Response.json({ id: FAC }) });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByLabelText("Archivo de la factura") as HTMLInputElement).disabled).toBe(true);
+      // Aunque llegue un archivo (soltado o por el campo), no se manda nada.
+      const otra = new File(["%PDF-1.4 OTRA SINTETICA"], "otra-factura.pdf", { type: "application/pdf" });
+      fireEvent.change(screen.getByLabelText("Archivo de la factura"), { target: { files: [otra] } });
+      expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(1);
+      expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
+      expect(screen.queryByText(TEXTO_REVISANDO)).toBeNull();
+      // Control: al cerrar la pregunta se puede elegir otro archivo de nuevo.
+      fireEvent.click(await boton(NO_QUITAR));
+      expect((screen.getByRole("button", { name: "Elegir un archivo" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+    });
+
+    it("si el formulario empieza a guardar con la pregunta abierta, la pregunta se cierra y no se quita nada", async () => {
+      let soltar: (r: Response) => void = () => undefined;
+      const guardando = new Promise<Response>((resolver) => {
+        soltar = resolver;
+      });
+      const api = await conFacturaSubida({ [`POST ${ORDENES}`]: () => guardando });
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      expect(await boton(CONFIRMAR_QUITAR)).toBeTruthy();
+      fireEvent.click(await boton("Guardar la orden"));
+      await waitFor(() => expect(pedidos(api, "POST", ORDENES)).toHaveLength(1));
+      await waitFor(() => sinBoton(CONFIRMAR_QUITAR));
+      expect(await cuerpo(pedidos(api, "POST", ORDENES)[0])).toMatchObject({ factura_version_id: VF });
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+      soltar(Response.json({ id: O1, version: 1 }, { status: 201 }));
+    });
+
+    it("«No, dejarlo» no manda nada y la factura sigue adjunta", async () => {
+      const api = await conFacturaSubida({});
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      fireEvent.click(await boton(NO_QUITAR));
+      expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
+      expect(await boton("Ver la factura")).toBeTruthy();
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
+    });
+
+    it("si el servidor no lo quita, lo dice y la factura sigue adjunta", async () => {
+      const api = await conFacturaSubida({ [`POST ${QUITAR}`]: () => error("documento_referenciado", 409) });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      fireEvent.click(await boton(CONFIRMAR_QUITAR));
+      expect(await screen.findByText(/^El archivo no se quitó\. Este documento respalda algo guardado/)).toBeTruthy();
+      expect(await boton("Ver la factura")).toBeTruthy();
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
+    });
   });
 
   describe("lo leído de la factura es de su edificio", () => {

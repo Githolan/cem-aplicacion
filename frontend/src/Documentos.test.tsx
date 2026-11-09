@@ -1031,3 +1031,93 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
   });
 });
+
+describe("«Retirar el documento» (0089)", () => {
+  const RETIRO = `${BASE}/${D3}/retiro`;
+  const MOTIVO = "Contrato terminado: lo reemplaza el nuevo";
+  const conAcciones = (acciones: string[], extra: Respuestas = {}) =>
+    conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza(...acciones), ...extra });
+  const ADMINISTRA = ["documentos.ver", "documentos.ver_restringidos", "documentos.cargar"];
+
+  async function abrirRetiro(titulo = "Contrato de limpieza"): Promise<HTMLElement> {
+    const ficha = await tarjeta(titulo);
+    fireEvent.click(within(ficha).getByRole("button", { name: "Retirar el documento" }));
+    return within(ficha).getByRole("form", { name: "Retirar el documento" });
+  }
+
+  it("pide el motivo, avisa qué pasa, manda el retiro con su clave y vuelve a pedir la lista", async () => {
+    const simulado = conAcciones(ADMINISTRA, { [`POST ${RETIRO}`]: () => Response.json({ id: D3 }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const formulario = await abrirRetiro();
+    expect(within(formulario).getByText(/No se borra: queda en la exportación del edificio y en la auditoría/)).toBeTruthy();
+    const enviar = within(formulario).getByRole("button", { name: "Retirar el documento" }) as HTMLButtonElement;
+    // Sin motivo no se manda: es obligatorio.
+    expect(enviar.disabled).toBe(true);
+    escribir("Motivo del retiro", "   ");
+    expect(enviar.disabled).toBe(true);
+    expect((screen.getByLabelText("Motivo del retiro") as HTMLTextAreaElement).maxLength).toBe(300);
+    escribir("Motivo del retiro", `  ${MOTIVO} `);
+    expect(enviar.className).toBe("secundario peligro");
+    fireEvent.click(enviar);
+    expect(await screen.findByText("Listo: se retiró «Contrato de limpieza». Ya no aparece en la lista.")).toBeTruthy();
+    const [pedido] = pedidos(simulado, "POST", RETIRO);
+    expect(await (pedido as Request).json()).toEqual({ motivo: MOTIVO });
+    expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
+    await waitFor(() => expect(pedidos(simulado, "GET", BASE).length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByRole("dialog", { name: "Contrato de limpieza" })).toBeNull();
+  });
+
+  it("«No retirar» cierra el formulario sin mandar nada", async () => {
+    const simulado = conAcciones(ADMINISTRA);
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const formulario = await abrirRetiro();
+    escribir("Motivo del retiro", MOTIVO);
+    fireEvent.click(within(formulario).getByRole("button", { name: "No retirar" }));
+    expect(screen.queryByLabelText("Motivo del retiro")).toBeNull();
+    expect(pedidos(simulado, "POST", RETIRO)).toHaveLength(0);
+  });
+
+  it("si el documento respalda algo guardado, lo dice y no lo da por retirado", async () => {
+    vi.stubGlobal("fetch", conAcciones(ADMINISTRA, { [`POST ${RETIRO}`]: () => error("documento_referenciado", 409) }));
+    abrir();
+    const formulario = await abrirRetiro();
+    escribir("Motivo del retiro", MOTIVO);
+    fireEvent.click(within(formulario).getByRole("button", { name: "Retirar el documento" }));
+    expect(
+      await screen.findByText(
+        "El documento no se retiró. Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede retirar.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/^Listo: se retiró/)).toBeNull();
+  });
+
+  it("solo para quien carga la categoría y además tiene `documentos.ver`", async () => {
+    // Control: con las tres, se ofrece.
+    vi.stubGlobal("fetch", conAcciones(ADMINISTRA));
+    abrir();
+    expect(within(await tarjeta("Contrato de limpieza")).getByRole("button", { name: "Retirar el documento" })).toBeTruthy();
+    cleanup();
+    // Sin la facultad de ver (`documentos.ver_restringidos`): no.
+    vi.stubGlobal("fetch", conAcciones(["documentos.ver", "documentos.cargar"]));
+    abrir();
+    expect(within(await tarjeta("Contrato de limpieza")).queryByRole("button", { name: "Retirar el documento" })).toBeNull();
+    cleanup();
+    // El Consejo que carga solo lo operativo: el acta sí, el contrato no.
+    vi.stubGlobal("fetch", conAcciones(["documentos.ver", "documentos.ver_restringidos", "documentos.cargar_operativos"]));
+    abrir();
+    expect(within(await tarjeta("Acta de asamblea ordinaria")).getByRole("button", { name: "Retirar el documento" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(within(await tarjeta("Contrato de limpieza")).queryByRole("button", { name: "Retirar el documento" })).toBeNull();
+  });
+
+  it("sin faltas de accesibilidad detectables por axe con el formulario abierto, y sin voseo", async () => {
+    vi.stubGlobal("fetch", conAcciones(ADMINISTRA));
+    const { container } = abrir();
+    const formulario = await abrirRetiro();
+    const reglas = { rules: { "color-contrast": { enabled: false } } };
+    expect((await axe.run(container, reglas)).violations.map((v) => v.id)).toEqual([]);
+    expect(formulario.textContent).not.toMatch(/\b(tenés|podés|escribí|elegí|tocá|subí|soltá|retirá)\b/);
+  });
+});

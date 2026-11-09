@@ -262,6 +262,9 @@ const MENSAJES: Record<string, string> = {
   sin_esquema: "Ese grupo no tiene un esquema de coeficientes vigente en el período.",
   version_no_disponible: "Este archivo todavía se está revisando o fue rechazado: no se puede descargar.",
   archivo_vencido: "Este archivo ya no está disponible.",
+  documento_referenciado:
+    "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede quitar ni retirar.",
+  no_es_quien_lo_subio: "Solo quien subió el archivo lo puede quitar.",
   idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
   idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",
 };
