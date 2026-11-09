@@ -572,10 +572,16 @@ class Ensayo:
             " en mandatos y modos"
         )
 
-        # Después del arranque: AG -> Consejo no está en el diagrama 12.
+        # Después del arranque: AG -> Consejo está en el diagrama 12 desde 0090, pero con el
+        # administrador vigente se niega (la baja no se infiere).
         otra = self.arranque(cons, acta, h, "consejo", h, [])
-        otra["decision"]["descripcion"] += " [negativo: AG -> Consejo]"
-        self.negado(cons, otra, "transicion_no_admitida", "A: Autogestión -> Consejo")
+        otra["decision"]["descripcion"] += " [negativo: AG -> Consejo con administrador]"
+        self.negado(
+            cons,
+            otra,
+            "transicion_requiere_fin_de_mandato",
+            "A: Autogestión -> Consejo con el administrador vigente",
+        )
         otra = self.arranque(cons, acta, h, "autogestion", h, [])
         self.negado(cons, otra, "mismo_modo", "A: Autogestión -> Autogestión")
 
@@ -850,8 +856,8 @@ class Ensayo:
             "B: por la API el administrador nuevo ve la historia de dos modos y los tres mandatos"
         )
 
-        # Autogestión rige desde hoy: cualquier cambio de hoy choca primero con la fecha (la
-        # transición AG -> Consejo, que el diagrama no admite, se prueba en el camino A).
+        # Autogestión rige desde hoy: cualquier cambio de hoy choca primero con la fecha (AG ->
+        # Consejo con el administrador vigente se prueba en el camino A).
         otra = self.arranque(cons, a2, h, "consejo", h, [])
         self.negado(cons, otra, "fecha_invalida", "B: después del cambio, otro cambio el mismo día")
 
