@@ -5,6 +5,7 @@ SINTETICOS / PRUEBA / NO REAL. Cada negación tiene su control: con la orden ter
 consorcio o hacia otro modo, el mismo cambio pasa.
 """
 
+import threading
 from uuid import UUID
 
 import pytest
@@ -30,6 +31,7 @@ from tests.test_orden_pago_neutra import (
     cbu_sintetico,
     nueva_sesion,
     nuevo_proveedor,
+    otorgar,
 )
 from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (fixture)
 
@@ -175,6 +177,93 @@ def test_hacia_otro_modo_la_orden_abierta_no_frena(motor_migrate, motor_app):
     cambiar(motor_app, e["cons"], "administrador_aumentado",
             decidir(motor_app, e["cons"], e["prop"]), hoy)  # fmt: skip
     assert periodos(motor_migrate, e["cons"])[-1] == ("administrador_aumentado", hoy, None)
+
+
+# Concurrencia (revisión de Codex en #227, P2) -------------------------------------------------
+
+
+def _con_transaccion_abierta(motor_migrate, persona, cons, sentencia, params, segundo,
+                            entre=None) -> dict:  # fmt: skip
+    """Corre `sentencia` en una transacción que queda abierta, corre `entre()` aparte, lanza
+    `segundo()` en un hilo, comprueba que espera, confirma la primera y devuelve lo que pasó con
+    el segundo."""
+    conn = motor_migrate.connect()
+    tx = conn.begin()
+    conn.execute(text("select set_config('app.persona_id', :p, true),"
+                      " set_config('app.consorcio_id', :c, true)"),
+                 {"p": str(persona) if persona else "", "c": str(cons)})  # fmt: skip
+    conn.execute(text(sentencia), params)
+    if entre is not None:
+        entre()
+    resultado: dict = {}
+
+    def correr():
+        try:
+            resultado["ok"] = segundo()
+        except DBAPIError as error:
+            resultado["motivo"] = error.orig.diag.message_hint
+
+    hilo = threading.Thread(target=correr)
+    hilo.start()
+    hilo.join(1.0)
+    resultado["esperaba"] = hilo.is_alive()
+    tx.commit()
+    conn.close()
+    hilo.join(10)
+    return resultado
+
+
+def test_la_orden_que_llega_durante_el_cambio_a_consejo_espera_y_se_niega(motor_migrate,
+                                                                          motor_app):  # fmt: skip
+    """El cambio va primero: la orden espera al candado del modo y después lee Consejo. Sin el
+    candado, la clave foránea también la hacía esperar, pero después se insertaba.
+
+    Prepara un consejero con la facultad otorgada: su mandato no frena el cambio de modo, así que
+    llega a la barrera del modo con la facultad vigente (la carrera que señaló Codex)."""
+    e = consorcio_en(motor_migrate, motor_app, "autogestion")
+    termina_la_administracion(motor_app, e)
+    hoy = hoy_de(motor_app, e["cons"])
+    nueva = decidir(motor_app, e["cons"], e["prop"])
+    mc = otra_persona(motor_migrate, e["cons"])
+    acta = decidir_equipo(motor_app, e["cons"])
+    m = alta(motor_app, e["cons"], e["prop"], acta, tipo="miembro_consejo", persona=mc)
+    otorgar(motor_migrate, e["cons"], m, acta, "egresos.preparar_orden")
+    params = {**ESENCIALES, "proveedor": e["proveedor"], "actor": mc, "origen": "api",
+              "sesion": nueva_sesion(motor_migrate, mc)}  # fmt: skip
+
+    def preparar():
+        with transaccion(motor_app, persona_id=mc, consorcio_id=e["cons"]) as c:
+            return c.execute(text(PREPARAR), params).scalar_one()
+
+    r = _con_transaccion_abierta(
+        motor_migrate, None, e["cons"],
+        "select nucleo.cambiar_modo('consejo', :d, :h, null, 'soporte')",
+        {"d": nueva, "h": hoy}, preparar,
+    )  # fmt: skip
+    assert r == {"esperaba": True, "motivo": "modo_no_admitido"}
+    assert periodos(motor_migrate, e["cons"])[-1] == ("consejo", hoy, None)
+    with motor_migrate.connect() as c:
+        ordenes = c.execute(text("select count(*) from nucleo.orden_pago where consorcio_id = :c"),
+                            {"c": e["cons"]}).scalar_one()  # fmt: skip
+    assert ordenes == 0
+
+
+def test_el_cambio_a_consejo_durante_una_orden_espera_y_se_niega(motor_migrate, motor_app):
+    """La orden va primero: el cambio espera y después la ve sin terminar."""
+    e = consorcio_en(motor_migrate, motor_app, "autogestion")
+    hoy = hoy_de(motor_app, e["cons"])
+    nueva = decidir(motor_app, e["cons"], e["prop"])
+    params = {**ESENCIALES, "proveedor": e["proveedor"], "actor": e["adm"], "origen": "api",
+              "sesion": e["sesion"]}  # fmt: skip
+    # El administrador prepara la orden (sin confirmar), renuncia aparte, y soporte cambia el
+    # modo mientras la orden sigue abierta.
+    r = _con_transaccion_abierta(
+        motor_migrate, e["adm"], e["cons"], PREPARAR, params,
+        lambda: cambiar(motor_app, e["cons"], "consejo", nueva, hoy),
+        entre=lambda: termina_la_administracion(motor_app, e),
+    )  # fmt: skip
+    assert r == {"esperaba": True, "motivo": "transicion_con_ordenes_abiertas"}
+    assert periodos(motor_migrate, e["cons"]) == [("autogestion", DESDE, None)]
 
 
 def test_0090_ida_y_vuelta(base_aparte):  # noqa: F811

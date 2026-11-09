@@ -16,10 +16,19 @@ con las marcas S2b de `0043`), leída de la base como hace `0043`, sin copiarla 
   `rechazada` ni `conciliada` (`transicion_con_ordenes_abiertas`). Una `pagada` sin conciliar
   también frena: el dinero salió y falta la conciliación. Nunca se cierra ni se rechaza una orden
   de oficio. Arregla también AA → Consejo, que ya existía.
+- **D2 sin carrera** (revisión de Codex en #227, P2). Una orden que se prepara mientras soporte
+  pasa a Consejo podía comprobar el modo antes del cambio e insertarse después. La barrera del modo
+  de los actos económicos (`nucleo.exigir_sesion_operativa`, `0071`) toma un candado de aviso
+  compartido por consorcio antes de leer el modo, y `cambiar_modo` lo toma exclusivo **antes** de
+  bloquear la fila del consorcio. Si el cambio va primero, la orden espera y después lee Consejo
+  (`modo_no_admitido`). Si va primero la orden, el cambio espera y después la ve
+  (`transicion_con_ordenes_abiertas`). Es un candado de aviso y no `for share` sobre la fila
+  porque `cem_app` no tiene `update` sobre `nucleo.consorcio` (`0043`), y porque el insert de la
+  orden toma la fila con su clave foránea: con la fila primero se cruzarían.
 - D3 (agenda y delegaciones de AG) y D4 (lectura del saliente) no cambian la base: no hay agenda
   ni delegaciones construidas, y el saliente conserva los vínculos que ya tenga.
 
-Downgrade: deshace los dos reemplazos sobre la definición vigente. No hay datos nuevos.
+Downgrade: deshace los reemplazos sobre las definiciones vigentes. No hay datos nuevos.
 
 Revisión: 0090
 Anterior: 0089
@@ -34,6 +43,7 @@ branch_labels = None
 depends_on = None
 
 MODO = "nucleo.cambiar_modo(nucleo.tipo_modo, uuid, date, uuid, text)"
+OPERATIVA = "nucleo.exigir_sesion_operativa(uuid, uuid, uuid, text, boolean)"
 ESTADOS_TERMINADOS = ("rechazada", "conciliada")
 
 TRANSICIONES_0027 = """\
@@ -70,25 +80,62 @@ CIERRE_0090 = f"""\
 {CIERRE_0027}"""
 
 
-def _definicion() -> str:
+CANDADO = "hashtextextended('modo:' || c::text, 0)"
+
+SERIALIZA_0027 = """\
+    -- Serializa los cambios de modo del consorcio.
+    perform 1 from nucleo.consorcio x where x.id = c for update;"""
+
+SERIALIZA_0090 = f"""\
+    -- Serializa los cambios de modo del consorcio. El candado de aviso va antes que la fila: el
+    -- insert de una orden toma la fila con su clave foránea (0090).
+    perform pg_advisory_xact_lock({CANDADO});
+    perform 1 from nucleo.consorcio x where x.id = c for update;"""
+
+MODO_ECONOMICO_0067 = """\
+    if not exists (
+         select 1 from nucleo.modo_operacion m
+"""
+
+MODO_ECONOMICO_0090 = f"""\
+    -- 0090: comparte con cambiar_modo el candado del modo; un cambio en curso termina antes de
+    -- que esto lea el modo, y no empieza hasta que este acto termine.
+    perform pg_advisory_xact_lock_shared({CANDADO});
+{MODO_ECONOMICO_0067}"""
+
+
+def _definicion(firma: str) -> str:
     return (
         op.get_bind()
-        .execute(text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": MODO})
+        .execute(text("select pg_get_functiondef(cast(:f as regprocedure))"), {"f": firma})
         .scalar_one()
     )
 
 
-def _reemplazar_una_vez(definicion: str, antes: str, despues: str) -> str:
-    if definicion.count(antes) != 1:
-        raise RuntimeError(f"0090: {MODO} no tiene exactamente una vez {antes!r}")
-    return definicion.replace(antes, despues)
+def _cambiar(firma: str, *pares: tuple[str, str]) -> None:
+    definicion = _definicion(firma)
+    for antes, despues in pares:
+        if definicion.count(antes) != 1:
+            raise RuntimeError(f"0090: {firma} no tiene exactamente una vez {antes!r}")
+        definicion = definicion.replace(antes, despues)
+    op.execute(definicion)
 
 
 def upgrade() -> None:
-    d = _reemplazar_una_vez(_definicion(), TRANSICIONES_0027, TRANSICIONES_0090)
-    op.execute(_reemplazar_una_vez(d, CIERRE_0027, CIERRE_0090))
+    _cambiar(
+        MODO,
+        (TRANSICIONES_0027, TRANSICIONES_0090),
+        (CIERRE_0027, CIERRE_0090),
+        (SERIALIZA_0027, SERIALIZA_0090),
+    )
+    _cambiar(OPERATIVA, (MODO_ECONOMICO_0067, MODO_ECONOMICO_0090))
 
 
 def downgrade() -> None:
-    d = _reemplazar_una_vez(_definicion(), CIERRE_0090, CIERRE_0027)
-    op.execute(_reemplazar_una_vez(d, TRANSICIONES_0090, TRANSICIONES_0027))
+    _cambiar(OPERATIVA, (MODO_ECONOMICO_0090, MODO_ECONOMICO_0067))
+    _cambiar(
+        MODO,
+        (SERIALIZA_0090, SERIALIZA_0027),
+        (CIERRE_0090, CIERRE_0027),
+        (TRANSICIONES_0090, TRANSICIONES_0027),
+    )
