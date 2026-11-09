@@ -81,7 +81,7 @@ def test_el_ensayo_recorre_los_dos_caminos_y_queda_como_fixture(
     controles = resumen["controles"]
     assert len(controles) == 31, controles
     for motivo in ("decision_ya_usada", "transicion_requiere_fin_de_mandato", "fecha_futura",
-                   "decision_invalida", "vigencia_invalida", "transicion_no_admitida",
+                   "decision_invalida", "vigencia_invalida",
                    "administracion_ocupada", "mismo_modo"):  # fmt: skip
         assert any(motivo in c for c in controles), motivo
     a = datos["caminos"]["A"]["consorcio_id"]

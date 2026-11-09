@@ -206,15 +206,19 @@ def test_camino_a_dos_administradores_a_la_vez_se_niega(correr, motor_migrate):
     assert filas(motor_migrate, cons) == (0, 0, 0)
 
 
-def test_camino_a_no_vuelve_a_consejo(correr, motor_migrate):
-    """AG → Consejo no está en el diagrama 12."""
+def test_camino_a_no_vuelve_a_consejo_con_el_administrador_vigente(correr, motor_migrate):
+    """AG → Consejo está en el diagrama 12 desde 0090, pero el mandato del propietario
+    administrador tiene que haber terminado: la baja no se infiere."""
     cons, _, prop = consorcio_con_persona(motor_migrate)
     h = hoy(motor_migrate, cons)
     acta = h - timedelta(days=10)
     inicial = arranque(cons, ACTA_1, acta, "autogestion", acta, [administrador(prop, acta)])
     assert correr(inicial)[0] == 0
     otra = otra_persona(motor_migrate, cons)
-    negado(correr(arranque(cons, ACTA_2, h, "consejo", h, [consejero(otra, h)])), "diagrama 12")
+    negado(
+        correr(arranque(cons, ACTA_2, h, "consejo", h, [consejero(otra, h)])),
+        "transicion_requiere_fin_de_mandato",
+    )
     assert periodos(motor_migrate, cons) == [("autogestion", acta, None)]
     assert filas(motor_migrate, cons) == (1, 1, 1)
 

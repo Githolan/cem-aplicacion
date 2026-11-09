@@ -34,6 +34,7 @@ DIAGRAMA_12 = {
     ("administrador_aumentado", "autogestion"),
     ("autogestion", "administrador_aumentado"),
     ("administrador_aumentado", "consejo"),
+    ("autogestion", "consejo"),  # 0090 (D1)
 }
 
 
@@ -117,21 +118,18 @@ def test_el_primer_modo_va_de_su_decision_a_hoy(motor_migrate, motor_app):
     assert periodos(motor_migrate, cons) == [("administrador_aumentado", DESDE, None)]
 
 
-@pytest.mark.parametrize(("origen", "destino"), list(permutations(MODOS, 2)))
-def test_solo_las_transiciones_del_diagrama_12(motor_migrate, motor_app, origen, destino):
+def test_desde_0090_el_diagrama_12_tiene_las_seis_transiciones():
+    """D1 (0090): con AG → Consejo, todo par de modos distintos es una transición."""
+    assert DIAGRAMA_12 == set(permutations(MODOS, 2))
+
+
+@pytest.mark.parametrize(("origen", "destino"), sorted(DIAGRAMA_12))
+def test_las_transiciones_del_diagrama_12(motor_migrate, motor_app, origen, destino):
     cons, _, per = consorcio_con_persona(motor_migrate)
     cambiar(motor_app, cons, origen, decidir(motor_app, cons, per))
     hoy = hoy_de(motor_app, cons)
-    nueva = decidir(motor_app, cons, per)
-    if (origen, destino) in DIAGRAMA_12:
-        cambiar(motor_app, cons, destino, nueva, hoy)
-        assert periodos(motor_migrate, cons) == [(origen, DESDE, hoy), (destino, hoy, None)]
-    else:
-        assert (origen, destino) == ("autogestion", "consejo")  # la única que falta
-        with pytest.raises(DBAPIError) as err:
-            cambiar(motor_app, cons, destino, nueva, hoy)
-        assert _hint(err) == "transicion_no_admitida"
-        assert periodos(motor_migrate, cons) == [(origen, DESDE, None)]
+    cambiar(motor_app, cons, destino, decidir(motor_app, cons, per), hoy)
+    assert periodos(motor_migrate, cons) == [(origen, DESDE, hoy), (destino, hoy, None)]
 
 
 # Mandatos al salir de un modo -------------------------------------------------------------------
@@ -151,6 +149,8 @@ def mandatos_terminados(motor_migrate, cons: UUID) -> int:
         ("administrador_aumentado", "administrador", "consejo"),
         ("administrador_aumentado", "administrador", "autogestion"),
         ("autogestion", "administrador", "administrador_aumentado"),
+        ("autogestion", "administrador", "consejo"),  # 0090 (D1)
+        ("autogestion", "administrador_externo", "consejo"),
         ("consejo", "administrador_externo", "administrador_aumentado"),
         ("consejo", "administrador_externo", "autogestion"),
         # Comparten el lugar único de la administración (0012): también el externo en AA.
