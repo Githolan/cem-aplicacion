@@ -13,8 +13,9 @@ import {
   TEXTO_ESPERA_PARA_GUARDAR, TEXTO_LEIDA, TEXTO_LEYENDO, TEXTO_RECHAZADO, TEXTO_REVISANDO, TEXTO_SIGUE_ANTERIOR,
 } from "../CargaConLectura";
 import { TEXTO_ALERTA_FRACCIONAMIENTO, VOLVIO_LA_RED } from "../egresos/comun";
+import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
-import { cambiosDeVersion } from "./Ficha";
+import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, type Paso, VERBO } from "./textos";
 
@@ -763,6 +764,13 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     await boton("Ver la cuenta para pagar");
     expect(screen.queryByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeNull();
     expect(screen.getByText("Más datos").closest("details")?.textContent).toContain("Cuenta cambiada: pidió aprobación");
+  });
+
+  it("entre dos versiones, solo lo que cambió; nada si es igual (comentario 25)", () => {
+    expect(cambiosEntreVersiones(version(), version({ numero: 2 }))).toEqual([]);
+    expect(cambiosEntreVersiones(version(), version({ numero: 2, concepto: "Limpieza de noviembre" }))).toEqual([
+      "concepto «Limpieza de octubre» → «Limpieza de noviembre»",
+    ]);
   });
 
   it("con una versión nueva se ve lo que cambió, sin repetir lo demás", () => {
@@ -2086,6 +2094,23 @@ describe("preparar, enviar y renovar", () => {
     expect(await screen.findByText(/Listo: la orden se envió/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/enviar-a-revision`)[0])).toEqual({ version_esperada: 1 });
+  });
+
+  it("si «Enviar a aprobar» no llega al servidor, lo dice con el foco en el aviso y la orden sigue ahí (comentario 27)", async () => {
+    // Un pedido que no sale del navegador (sin red, o el acceso de Cloudflare vencido redirige y
+    // el navegador lo corta): el servidor no ve nada, y el aviso tiene que verse igual.
+    abrirFicha(BORRADOR, {
+      [`POST ${BASE}/ordenes-pago/${O1}/enviar-a-revision`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    fireEvent.click(await boton("Enviar a aprobar"));
+    const aviso = await screen.findByRole("alert");
+    expect(aviso.textContent).toBe(SIN_CONEXION);
+    await waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(lugar()).toBe(`/pagos/${O1}`);
+    // Control: el botón sigue para reintentar.
+    expect(((await boton("Enviar a aprobar")) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("renovar lleva a la bandeja con el resultado", async () => {

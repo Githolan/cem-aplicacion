@@ -659,16 +659,17 @@ def test_la_base_no_contesta_por_otra_persona(motor_app, e):
     assert error.value.orig.sqlstate == "42501"
 
 
-def test_mirar_no_pide_el_gesto_y_si_la_sesion_de_12_horas(motor_migrate, e):
+def test_mirar_no_pide_el_gesto_ni_una_sesion_reciente(motor_migrate, e):
     o = emitida(motor_migrate, e)
     sin_gesto = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=11)
     r = get(e, e.adm, "pagos/bandeja", sesion=sin_gesto)
     assert r.status_code == 200, r.json()
     # Una falta transitoria no oculta nada: el gesto se pide al actuar.
     assert str(o) in [x["orden_id"] for x in r.json()["elementos"]]
-    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13)
+    # Sin sesión de 12 horas desde 0091: una sesión de 20 días sigue sirviendo para mirar.
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=None)
     for ruta in ("pagos/bandeja", "pagos/consulta", f"pagos/{o}"):
-        assert codigo(get(e, e.adm, ruta, sesion=larga)) == (403, "sesion_reciente_requerida")
+        assert get(e, e.adm, ruta, sesion=larga).status_code == 200
 
 
 def test_cem_app_no_ejecuta_las_internas(motor_migrate):

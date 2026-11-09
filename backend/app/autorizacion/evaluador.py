@@ -21,8 +21,9 @@ solo cuentas: la otra parte es cualquier propietario y el propietario decide apa
 verifica a todos.
 
 **Económicas (R10, 2b-6a).** Ya no se niegan siempre: piden la sesión con el segundo factor
-verificado hace poco (`segundo_factor_reciente`), la sesión de menos de 12 horas
-(`sesion_reciente`) y la identidad humana verificada de quien actúa.
+verificado hace poco (`segundo_factor_reciente`) y la identidad humana verificada de quien actúa.
+La sesión de menos de 12 horas salió el 09-11-2026 (decisión del propietario, comentario 28 de la
+revisión de pantallas): la sesión vence a los 45 días sin uso.
 
 **`alcanza` (documento 13, §10.5)** responde otra pregunta, sin entidad: si la interfaz le muestra
 la acción a la persona. Es solo para mostrar: no concede nada y toda ruta decide con `evaluar`.
@@ -71,7 +72,6 @@ class Motivo(StrEnum):
     SIN_ADMINISTRADOR_VIGENTE = "sin_administrador_vigente"
     IDENTIDAD_NO_VERIFICADA = "identidad_no_verificada"
     REQUIERE_SEGUNDO_FACTOR_RECIENTE = "requiere_segundo_factor_reciente"
-    REQUIERE_SESION_RECIENTE = "requiere_sesion_reciente"
 
 
 HUMANAS = frozenset(CodigoSeparacion) - {
@@ -148,8 +148,6 @@ class ContextoAutorizacion:
     de las personas de la entidad. Una persona que no está, no tiene identidad verificada."""
     segundo_factor_reciente: bool = False
     """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
-    sesion_reciente: bool = False
-    """La sesión empezó hace menos de 12 horas (R10: sesión de 12 h para lo económico)."""
 
 
 @dataclass(frozen=True)
@@ -352,15 +350,13 @@ def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entida
     # una solicitud formal, emite la segunda firma, es decir, cuando ya hay una.
     if politica.destinatario_unico and entidad.firmas and not contexto.hay_administrador_vigente:
         return Motivo.SIN_ADMINISTRADOR_VIGENTE
-    # Económicas (R10): segundo factor reciente, sesión de 12 h e identidad humana de quien
-    # actúa (interviene en una separación económica, como quien actúa o como la otra parte).
+    # Económicas (R10): segundo factor reciente e identidad humana de quien actúa (interviene
+    # en una separación económica, como quien actúa o como la otra parte).
     if politica.economica:
         if contexto.persona_id not in contexto.identidades:
             return Motivo.IDENTIDAD_NO_VERIFICADA
         if not contexto.segundo_factor_reciente:
             return Motivo.REQUIERE_SEGUNDO_FACTOR_RECIENTE
-        if not contexto.sesion_reciente:
-            return Motivo.REQUIERE_SESION_RECIENTE
     return None
 
 

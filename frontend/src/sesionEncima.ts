@@ -9,7 +9,7 @@ import { RUTA_ENTRAR, RUTA_INICIO } from "./enlace";
 // vence, la entrada se pide sobre la misma pantalla, que sigue montada con lo escrito.
 //
 // Todo pedido pasa por `pedirConSesion`, así que ninguna pantalla tiene que acordarse. Un 401 de una
-// sesión que este navegador conocía, o una sesión de más de 12 horas para el acto, abre la hoja. Una
+// sesión que este navegador conocía, o una sesión que ya no sirve para el acto, abre la hoja. Una
 // lectura espera a que la persona entre y se repite sola: la pantalla nunca se entera. Un pedido que
 // escribe devuelve la respuesta y no se manda de nuevo: lo repite la persona, con la misma clave de
 // idempotencia que ya tenía su pantalla.

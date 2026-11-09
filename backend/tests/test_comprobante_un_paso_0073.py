@@ -240,9 +240,9 @@ def test_en_la_base_subir_no_pide_el_gesto_y_sigue_pidiendo_todo_lo_demas(
           titulo=TITULO)  # fmt: skip
     ver(motor_migrate, e, e.adm, o)
     assert llamar(motor_migrate, e, e.adm, CREAR, sesion=sin_gesto, orden=o, titulo=TITULO)
-    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13)
-    niega(motor_migrate, e, e.adm, CREAR, "requiere_sesion_reciente", sesion=larga, orden=o,
-          titulo=TITULO)  # fmt: skip
+    # La sesión de 12 horas salió el 09-11-2026 (comentario 28): una sesión de 20 días también sube.
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=11)
+    assert llamar(motor_migrate, e, e.adm, CREAR, sesion=larga, orden=o, titulo=TITULO)
     # Registrar sigue en la base, no solo en la ruta.
     niega(motor_migrate, e, e.adm, REGISTRAR, "requiere_segundo_factor_reciente", sesion=sin_gesto,
           **evidencia(motor_migrate, e, o))  # fmt: skip
@@ -256,9 +256,9 @@ def test_quien_ya_no_ejecuta_tampoco_necesita_el_gesto_para_subir(motor_migrate,
     doc = llamar(motor_migrate, e, e.adm, CREAR, sesion=sin_gesto, orden=o, titulo=TITULO)
     v = llamar(motor_migrate, e, e.adm, VERSION, sesion=sin_gesto, orden=o, documento=doc)
     assert v is not None
-    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13)
-    niega(motor_migrate, e, e.adm, VERSION, "requiere_sesion_reciente", sesion=larga, orden=o,
-          documento=doc)  # fmt: skip
+    # La sesión de 12 horas salió el 09-11-2026 (comentario 28): con una sesión de 20 días, también.
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=11)
+    assert llamar(motor_migrate, e, e.adm, VERSION, sesion=larga, orden=o, documento=doc)
     # Control: registrar, sin la facultad, sigue pidiendo el gesto.
     niega(motor_migrate, e, e.adm, REGISTRAR, "requiere_segundo_factor_reciente", sesion=sin_gesto,
           **evidencia(motor_migrate, e, o, documento=doc))  # fmt: skip

@@ -332,16 +332,14 @@ def test_sin_liquidacion_preparar_no_se_prepara_ni_se_lee(motor_migrate, e):
     assert get(e, e.adm, "liquidaciones").status_code == 200  # control
 
 
-def test_r10_armar_no_pide_el_gesto_pero_si_la_sesion_reciente(motor_migrate, e):
+def test_r10_armar_no_pide_el_gesto_ni_una_sesion_reciente(motor_migrate, e):
     """Decisión del propietario del 04-11-2026 (`0071`): una liquidación en borrador no mueve
     dinero."""
     vieja_totp = nueva_sesion(motor_migrate, e.adm, horas_atras=1, totp_min_atras=11)
     assert get(e, e.adm, "liquidaciones", sesion=vieja_totp).status_code == 200
-    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=13)
-    assert codigo(get(e, e.adm, "liquidaciones", sesion=larga)) == (
-        403,
-        "sesion_reciente_requerida",
-    )
+    # La sesión de 12 horas salió el 09-11-2026 (comentario 28).
+    larga = nueva_sesion(motor_migrate, e.adm, horas_atras=20 * 24, totp_min_atras=11)
+    assert get(e, e.adm, "liquidaciones", sesion=larga).status_code == 200
     assert get(e, e.adm, "liquidaciones").status_code == 200  # control
 
 

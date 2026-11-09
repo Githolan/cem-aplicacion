@@ -50,7 +50,6 @@ def contexto(
     persona: UUID | None = YO,
     identidades: dict[UUID, UUID] = IDENTIDADES,
     segundo_factor_reciente: bool = True,
-    sesion_reciente: bool = True,
 ) -> ContextoAutorizacion:
     """`facultades=None`: sin mandato; `()`: un mandato vigente sin ninguna facultad."""
     mandatos = () if facultades is None else (mandato(consorcio_mandato),)
@@ -65,7 +64,6 @@ def contexto(
         hay_administrador_vigente=administrador,
         identidades=identidades,
         segundo_factor_reciente=segundo_factor_reciente,
-        sesion_reciente=sesion_reciente,
     )
 
 
@@ -139,7 +137,6 @@ def test_toda_economica_exige_identidad_y_los_controles_de_r10(accion):
         "requiere_segundo_factor_reciente": contexto(
             facultades=todas, modo=modo, segundo_factor_reciente=False
         ),
-        "requiere_sesion_reciente": contexto(facultades=todas, modo=modo, sesion_reciente=False),
     }
     for motivo, ctx in casos.items():
         d = evaluar(accion, ctx, TODO_PASA)
@@ -154,7 +151,7 @@ def test_r10_no_alcanza_a_las_que_no_son_economicas():
     assert not p.economica
     ctx = contexto(
         facultades=(p.facultad,), modo=modo_que_pasa(p), identidades={},
-        segundo_factor_reciente=False, sesion_reciente=False,
+        segundo_factor_reciente=False,
     )  # fmt: skip
     assert evaluar("fondo_reserva.solicitar", ctx, TODO_PASA).motivo_interno == (
         "concedido_por_facultad"

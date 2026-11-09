@@ -5,7 +5,7 @@ subdominio las puede fijar ni pisar):
 
 | Cookie | Qué guarda | `HttpOnly` | Vida |
 |---|---|---|---|
-| `__Host-cem_sesion` | Token opaco de la sesión | sí | 30 días, renovada con el uso |
+| `__Host-cem_sesion` | Token opaco de la sesión | sí | 45 días, renovada con el uso |
 | `__Host-cem_csrf` | Token CSRF, derivado de la sesión | no: el frontend lo lee | la de la sesión |
 | `__Host-cem_nonce` | Nonce que liga el enlace al navegador que lo pidió | sí | 15 minutos |
 | `__Host-cem_dispositivo` | Identificador del navegador (no es secreto) | sí | 400 días |
@@ -49,12 +49,11 @@ INTENTOS_CODIGO = 5
 """Intentos fallidos que agotan un código (§10.3). La migración 0006 impone el mismo tope."""
 DIGITOS_CODIGO = 6
 FORMATO_CODIGO = re.compile(rf"^[0-9]{{{DIGITOS_CODIGO}}}$")
-VIGENCIA_SESION = timedelta(days=30)
-"""Vencimiento deslizante (§10.4)."""
-VIGENCIA_SESION_ECONOMICA = timedelta(hours=12)
-"""R10 (D2, decisión del propietario del 24-10-2026): una acción económica pide una sesión que
-empezó hace menos de 12 horas, sin importar cuánto se usó. La sesión sigue sirviendo para lo
-demás; para lo económico hay que volver a entrar."""
+VIGENCIA_SESION = timedelta(days=45)
+"""Vencimiento deslizante (§10.4): la sesión vence a los 45 días sin usar la aplicación (decisión
+del propietario del 09-11-2026, comentario 28; antes 30 días). Ya no hay sesión de 12 horas para
+lo económico: lo que mueve dinero pide el segundo factor de los últimos 10 minutos. La migración
+0091 impone el mismo tope."""
 VIGENCIA_SEGUNDO_FACTOR_RECIENTE = timedelta(minutes=10)
 CONFIRMAR_QUE_SOS_VOS = "Para esto tenés que confirmar que sos vos."
 """Lo que se le dice a quien le falta la verificación reciente, sea cual sea su medio."""

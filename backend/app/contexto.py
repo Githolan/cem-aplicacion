@@ -59,8 +59,6 @@ class Contexto:
     """La identidad humana verificada de la persona en este consorcio (A13-C, 0026)."""
     segundo_factor_reciente: bool = False
     """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
-    sesion_reciente: bool = False
-    """La sesión empezó hace menos de 12 horas (R10)."""
     identidades: Mapping[UUID, UUID] = field(default_factory=dict)
     """Las identidades de otras personas que necesita la acción; las agrega `Permiso`."""
     sesion_id: UUID | None = None
@@ -83,7 +81,6 @@ class Contexto:
             hay_administrador_vigente=self.hay_administrador_vigente,
             identidades=identidades,
             segundo_factor_reciente=self.segundo_factor_reciente,
-            sesion_reciente=self.sesion_reciente,
         )
 
 
@@ -205,13 +202,12 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         if identidad.sesion_id is not None:
             controles = conn.execute(
                 text(
-                    "select coalesce(segundo_factor_en > now() - :v, false) as segundo_factor,"
-                    " creada_en > now() - :d as reciente from nucleo.sesion where id = :s"
+                    "select coalesce(segundo_factor_en > now() - :v, false) as segundo_factor"
+                    " from nucleo.sesion where id = :s"
                 ),
                 {
                     "s": identidad.sesion_id,
                     "v": sesiones.VIGENCIA_SEGUNDO_FACTOR_RECIENTE,
-                    "d": sesiones.VIGENCIA_SESION_ECONOMICA,
                 },
             ).one()
     return Contexto(
@@ -225,7 +221,6 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         hay_administrador_vigente=hay_administrador,
         identidad_humana=identidad_humana,
         segundo_factor_reciente=controles is not None and controles.segundo_factor,
-        sesion_reciente=controles is not None and controles.reciente,
         sesion_id=identidad.sesion_id,
     )
 

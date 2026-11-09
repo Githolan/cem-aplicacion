@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 import { SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "../fallas";
 import { type Aviso, conLaRedDeVuelta, TEXTO_SESION_VENCIDA } from "./comun";
@@ -7,11 +7,19 @@ import { type PantallaConsorcio, useAlVolverLaRed } from "./useConsorcio";
 // Lo que las pantallas de egresos muestran cuando algo salió o no salió (regla de fricción del
 // 05-11-2026): el resultado en la misma pantalla y, si falló, una salida a mano para reintentar.
 
-/** El resultado de lo último. Una sesión de más de 12 horas no se dice acá: la pide la hoja encima. */
+/** El resultado de lo último. Una sesión vencida no se dice acá: la pide la hoja encima. Un error
+ *  toma el foco: el navegador lo trae a la vista aunque el botón que lo causó esté más abajo
+ *  (comentario 27, 09-11-2026: «Enviar a aprobar» falló sin que se viera ningún mensaje). */
 export function AvisoPantalla({ aviso }: { aviso: Aviso | null }) {
-  if (aviso === null || aviso.texto === TEXTO_SESION_VENCIDA) return null;
+  const lugar = useRef<HTMLParagraphElement>(null);
+  const visible = aviso !== null && aviso.texto !== TEXTO_SESION_VENCIDA;
+  const error = visible && !aviso.ok;
+  useEffect(() => {
+    if (error) lugar.current?.focus();
+  }, [aviso, error]);
+  if (!visible) return null;
   return (
-    <p className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
+    <p ref={lugar} tabIndex={error ? -1 : undefined} className={aviso.ok ? "aviso-ok" : "aviso-error"} role={aviso.ok ? "status" : "alert"}>
       {aviso.texto}
     </p>
   );
