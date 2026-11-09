@@ -10,6 +10,8 @@ const LUGAR: Record<Situacion, Lugar | null> = {
   borrador: { hechos: 0, actual: "ahora" },
   en_revision: { hechos: 0, actual: "ahora" },
   rechazada: { hechos: 0, actual: "alerta" },
+  // La retiró quien la preparó antes de que nadie la aprobara: no sigue ningún camino.
+  retirada: null,
   para_pagar: { hechos: 1, actual: "ahora" },
   pagando: { hechos: 1, actual: "ahora" },
   no_pago_declarado: { hechos: 1, actual: "alerta" },

@@ -17,7 +17,7 @@ import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, type Paso, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, NO_RETIRAR, type Paso, PREGUNTA_RETIRAR, RETIRAR, TEXTO_RETIRADA, VERBO } from "./textos";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
 // banco 999, y nada se transfiere. La API está simulada: que el servidor mande el `paso` correcto lo
@@ -108,7 +108,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
   return {
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
-    puede_modificar: false, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
+    puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
     puede_corregir: false, puede_conciliar: false, puede_confirmar: false, puede_resolver_diferencia: false,
     puede_recuperar: false, puede_preparar_faltante: false, ejecucion: null, comprobante_actual: null,
     comprobante_subido: null, lectura_comprobante: null, observacion_vigente: null, declaracion_vigente: null, diferencia_vigente: null, ...extra,
@@ -2111,6 +2111,66 @@ describe("preparar, enviar y renovar", () => {
     expect(lugar()).toBe(`/pagos/${O1}`);
     // Control: el botón sigue para reintentar.
     expect(((await boton("Enviar a aprobar")) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  describe("«Retirar la orden» (comentario 23)", () => {
+    const RUTA_RETIRO = `${BASE}/ordenes-pago/${O1}/retirar`;
+    const ESPERANDO = ficha({
+      orden: orden({ estado: "en_revision", aprobaciones: 0 }), versiones: [version({ aprobada_por: [] })], situacion: "en_revision",
+      paso: "espera_aprobar", le_toca_a: "consejo", puede_modificar: true, puede_retirar: true,
+    });
+
+    it("pregunta antes, retira con su clave y lleva a la bandeja con el resultado", async () => {
+      const api = abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => Response.json({ id: O1, version: 1 }) });
+      expect(await screen.findByText(AVISO_SE_PUEDE_RETIRAR)).toBeTruthy();
+      const retirar = await boton(RETIRAR);
+      expect(retirar.className).toBe("secundario peligro");
+      fireEvent.click(retirar);
+      // Primero pregunta: todavía no se mandó nada.
+      expect(screen.getByText(PREGUNTA_RETIRAR)).toBeTruthy();
+      expect(pedidos(api, "POST", RUTA_RETIRO)).toHaveLength(0);
+      fireEvent.click(await boton(CONFIRMAR_RETIRAR));
+      expect(await screen.findByText(TEXTO_RETIRADA)).toBeTruthy();
+      expect(lugar()).toBe("/pagos");
+      const [pedido] = pedidos(api, "POST", RUTA_RETIRO);
+      expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+      expect(await cuerpo(pedido)).toEqual({ version_esperada: 1 });
+    });
+
+    it("«No, dejarla» no manda nada y la orden sigue", async () => {
+      const api = abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => Response.json({ id: O1, version: 1 }) });
+      fireEvent.click(await boton(RETIRAR));
+      fireEvent.click(await boton(NO_RETIRAR));
+      expect(screen.queryByText(PREGUNTA_RETIRAR)).toBeNull();
+      expect(await boton(RETIRAR)).toBeTruthy();
+      expect(pedidos(api, "POST", RUTA_RETIRO)).toHaveLength(0);
+    });
+
+    it("si alguien ya la aprobó, lo dice y no se va de la ficha", async () => {
+      abrirFicha(ESPERANDO, { [`POST ${RUTA_RETIRO}`]: () => error("orden_con_aprobaciones", 409) });
+      fireEvent.click(await boton(RETIRAR));
+      fireEvent.click(await boton(CONFIRMAR_RETIRAR));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/ya no se retira/);
+      expect(lugar()).toBe(`/pagos/${O1}`);
+    });
+
+    it("control: sin `puede_retirar` no se ofrece", async () => {
+      abrirFicha({ ...ESPERANDO, puede_retirar: false });
+      await boton("Modificar");
+      sinBoton(RETIRAR);
+      expect(screen.queryByText(AVISO_SE_PUEDE_RETIRAR)).toBeNull();
+    });
+
+    it("una orden retirada dice quién la retiró y cuándo, y no ofrece nada", async () => {
+      abrirFicha(ficha({
+        orden: orden({ estado: "retirada" }), versiones: [version({ aprobada_por: [] })], situacion: "retirada",
+        retiro: { retirada_por: PERSONA, retirada_por_nombre: "Marta Ficticia", retirada_en: "2026-11-09T15:00:00Z" },
+      }));
+      expect(await screen.findByText(/La retiró Marta Ficticia el .*No se aprueba ni se paga\./)).toBeTruthy();
+      expect(screen.getByText("Retirada")).toBeTruthy();
+      sinBoton(RETIRAR);
+      sinBoton("Modificar");
+    });
   });
 
   it("renovar lleva a la bandeja con el resultado", async () => {

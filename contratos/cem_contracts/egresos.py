@@ -133,6 +133,8 @@ class EstadoOrdenPago(StrEnum):
     BORRADOR = "borrador"
     EN_REVISION = "en_revision"
     RECHAZADA = "rechazada"
+    RETIRADA = "retirada"
+    """Quien la preparó la sacó antes de que nadie la aprobara (`0093`, comentario 23)."""
     APROBADA = "aprobada"
     EN_EJECUCION = "en_ejecucion"
     EN_VERIFICACION = "en_verificacion"
@@ -356,6 +358,24 @@ class Aprobacion(BaseModel):
 
     version: Version
     huella: str = Field(pattern=FORMATO_HUELLA)
+
+
+class Retiro(BaseModel):
+    """Retirar una orden que nadie aprobó (`0093`): la versión que se vio, por si cambió."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version_esperada: Version
+
+
+class RetiroOrdenPago(BaseModel):
+    """Quién retiró la orden y cuándo (`0093`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    retirada_por: UUID
+    retirada_por_nombre: str
+    retirada_en: datetime
 
 
 class Rechazo(BaseModel):
@@ -1148,6 +1168,7 @@ class SituacionPago(StrEnum):
     BORRADOR = "borrador"
     EN_REVISION = "en_revision"
     RECHAZADA = "rechazada"
+    RETIRADA = "retirada"
     PARA_PAGAR = "para_pagar"
     PAGANDO = "pagando"
     NO_PAGO_DECLARADO = "no_pago_declarado"
@@ -1164,6 +1185,7 @@ class FiltroConsultaPagos(StrEnum):
     PAGADOS = "pagados"
     NO_SE_PAGARON = "no_se_pagaron"
     RECHAZADOS = "rechazados"
+    RETIRADOS = "retirados"
     EN_CURSO = "en_curso"
 
 
@@ -1309,6 +1331,10 @@ class FichaPago(BaseModel):
         description="Desde cuándo se puede tomar el pago, si espera a otra persona."
     )
     puede_modificar: bool = Field(description="Si puede guardar una versión nueva de la orden.")
+    puede_retirar: bool = Field(
+        description="Si puede retirar la orden: la preparó y nadie aprobó la versión vigente."
+    )
+    retiro: RetiroOrdenPago | None = Field(description="Quién la retiró y cuándo, si se retiró.")
     puede_subir_comprobante: bool
     puede_registrar: bool
     puede_declarar: bool

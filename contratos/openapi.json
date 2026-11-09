@@ -664,6 +664,8 @@
           "orden_no_admite",
           "huella_distinta",
           "aprobacion_repetida",
+          "retirar_solo_quien_preparo",
+          "orden_con_aprobaciones",
           "no_es_quien_preparo",
           "no_es_quien_cargo_la_cuenta",
           "identidad_no_verificada",
@@ -3339,6 +3341,7 @@
           "borrador",
           "en_revision",
           "rechazada",
+          "retirada",
           "aprobada",
           "en_ejecucion",
           "en_verificacion",
@@ -3703,6 +3706,11 @@
             "title": "Puede Resolver Diferencia",
             "type": "boolean"
           },
+          "puede_retirar": {
+            "description": "Si puede retirar la orden: la preparó y nadie aprobó la versión vigente.",
+            "title": "Puede Retirar",
+            "type": "boolean"
+          },
           "puede_subir_comprobante": {
             "title": "Puede Subir Comprobante",
             "type": "boolean"
@@ -3711,6 +3719,17 @@
             "description": "Si puede tomar el pago de quien vio la cuenta: pasó el plazo y no dijo nada.",
             "title": "Puede Tomar",
             "type": "boolean"
+          },
+          "retiro": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RetiroOrdenPago"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién la retiró y cuándo, si se retiró."
           },
           "situacion": {
             "$ref": "#/components/schemas/SituacionPago"
@@ -3762,6 +3781,8 @@
           "puede_tomar",
           "tomar_desde",
           "puede_modificar",
+          "puede_retirar",
+          "retiro",
           "puede_subir_comprobante",
           "puede_registrar",
           "puede_declarar",
@@ -3977,6 +3998,7 @@
           "pagados",
           "no_se_pagaron",
           "rechazados",
+          "retirados",
           "en_curso"
         ],
         "title": "FiltroConsultaPagos",
@@ -8640,6 +8662,23 @@
         "title": "ResultadoCotejo",
         "type": "object"
       },
+      "Retiro": {
+        "additionalProperties": false,
+        "description": "Retirar una orden que nadie aprobó (`0093`): la versión que se vio, por si cambió.",
+        "properties": {
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_esperada"
+        ],
+        "title": "Retiro",
+        "type": "object"
+      },
       "RetiroDocumento": {
         "additionalProperties": false,
         "description": "`POST …/documentos/{id}/retiro`: el documento sale de las listas y queda en la exportación,\ncon este motivo. No se borra nada.",
@@ -8655,6 +8694,32 @@
           "motivo"
         ],
         "title": "RetiroDocumento",
+        "type": "object"
+      },
+      "RetiroOrdenPago": {
+        "description": "Quién retiró la orden y cuándo (`0093`).",
+        "properties": {
+          "retirada_en": {
+            "format": "date-time",
+            "title": "Retirada En",
+            "type": "string"
+          },
+          "retirada_por": {
+            "format": "uuid",
+            "title": "Retirada Por",
+            "type": "string"
+          },
+          "retirada_por_nombre": {
+            "title": "Retirada Por Nombre",
+            "type": "string"
+          }
+        },
+        "required": [
+          "retirada_por",
+          "retirada_por_nombre",
+          "retirada_en"
+        ],
+        "title": "RetiroOrdenPago",
         "type": "object"
       },
       "RevisionMandato": {
@@ -8992,6 +9057,7 @@
           "borrador",
           "en_revision",
           "rechazada",
+          "retirada",
           "para_pagar",
           "pagando",
           "no_pago_declarado",
@@ -16162,6 +16228,91 @@
           }
         },
         "summary": "Renovar una orden aprobada hace más de 7 días: versión nueva, de nuevo a revisión",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/retirar": {
+      "post": {
+        "description": "Comentario 23 de la revisión de pantallas (09-11-2026, `0093`): solo quien la preparó y\nsolo mientras nadie aprobó la versión vigente. No mueve dinero: sin el gesto.",
+        "operationId": "retirar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__retirar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Retiro"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retirar una orden que nadie aprobó: queda retirada, con quién y cuándo, fuera de la bandeja",
         "tags": [
           "egresos"
         ]

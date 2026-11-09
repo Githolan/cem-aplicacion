@@ -47,11 +47,18 @@ import {
   AVISO_NO_TRANSFIERAS,
   AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
+  AVISO_SE_PUEDE_RETIRAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
   AVISO_TOMAR,
   AVISO_VER_LA_CUENTA,
+  CONFIRMAR_RETIRAR,
+  NO_RETIRAR,
   type Paso,
+  PREGUNTA_RETIRAR,
+  RETIRAR,
+  TEXTO_RETIRADA,
+  textoRetiro,
   TEXTO_LE_TOCA_A,
   VERBO,
   VERBO_PASA_SOLA,
@@ -184,6 +191,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
   const [vuelta, setVuelta] = useState(0);
   const [cuenta, setCuenta] = useState<Cuenta | null>(null);
   const [modificando, setModificando] = useState(false);
+  const [retirando, setRetirando] = useState(false);
   const [conMotivo, setConMotivo] = useState<ConMotivo | null>(null);
   const [motivo, setMotivo] = useState("");
   /** La cuenta que se decide, con la versión que muestra; `cuenta` nula si no hay qué mostrar. */
@@ -404,6 +412,24 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
       alTerminar: () =>
         terminar(v.alerta_fraccionamiento ? "Listo: la orden se envió. La aprueba el Consejo." : "Listo: la orden se envió. Si su franja no pide aprobación, ya quedó aprobada."),
       alFallar: siCambio,
+    });
+  }
+
+  function retirar() {
+    void acto.hacer({
+      quePide: ["retirar", orden, v.numero],
+      nombre: "retirar la orden",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/retirar", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version_esperada: v.numero },
+        }),
+      alTerminar: () => terminar(TEXTO_RETIRADA),
+      alFallar: (estado, codigo) => {
+        setRetirando(false);
+        siCambio(estado, codigo);
+      },
     });
   }
 
@@ -738,6 +764,12 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
             </p>
           )}
           {ficha.le_toca_a !== null && ficha.le_toca_a !== "vos" && <p>{TEXTO_LE_TOCA_A[ficha.le_toca_a]}</p>}
+          {situacion === "en_revision" && ficha.puede_retirar && <p>{AVISO_SE_PUEDE_RETIRAR}</p>}
+          {situacion === "retirada" && ficha.retiro !== null && (
+            <p className="aviso-info" role="note">
+              {textoRetiro(ficha.retiro.retirada_por_nombre, momento(ficha.retiro.retirada_en))}
+            </p>
+          )}
 
           {cuentaVista !== null && (
             <div className="tarjeta">
@@ -1109,8 +1141,27 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
                           Modificar
                         </button>
                       )}
+                      {ficha.puede_retirar && !retirando && (
+                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setRetirando(true)}>
+                          {RETIRAR}
+                        </button>
+                      )}
                     </div>
                   </div>
+                  {/* Primero pregunta: retirar no se deshace (comentario 23, 09-11-2026). */}
+                  {ficha.puede_retirar && retirando && (
+                    <div className="formulario">
+                      <p>{PREGUNTA_RETIRAR}</p>
+                      <div className="acciones">
+                        <button type="button" className="peligro" disabled={enviando} onClick={retirar}>
+                          {CONFIRMAR_RETIRAR}
+                        </button>
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setRetirando(false)}>
+                          {NO_RETIRAR}
+                        </button>
+                      </div>
+                    </div>
+                  )}
               </div>
               {motivoAbierto !== null && (
                 <form className="formulario" onSubmit={enviarMotivo}>

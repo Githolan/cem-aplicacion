@@ -41,6 +41,7 @@ ESTADOS = (
     "borrador",
     "en_revision",
     "rechazada",
+    "retirada",
     "aprobada",
     "en_ejecucion",
     "en_verificacion",
@@ -48,7 +49,7 @@ ESTADOS = (
     "fallida",
     "conciliada",
 )
-TERMINADOS = {"rechazada", "conciliada"}
+TERMINADOS = {"rechazada", "retirada", "conciliada"}
 
 
 def consorcio_en(motor_migrate, motor_app, modo: str) -> dict:
@@ -88,8 +89,10 @@ def orden_en(motor_migrate, motor_app, e: dict, estado: str) -> UUID:
             text("update nucleo.orden_pago set estado = cast(:e as nucleo.estado_orden_pago),"
                  " motivo_rechazo = case when :e = 'rechazada'"
                  " then 'Rechazo SINTETICO de prueba' end,"
-                 " aprobada_en = case when :e in ('borrador', 'en_revision', 'rechazada')"
-                 " then null else now() end where id = :o"),
+                 " retirada_por = case when :e = 'retirada' then preparada_por end,"
+                 " retirada_en = case when :e = 'retirada' then now() end,"
+                 " aprobada_en = case when :e in ('borrador', 'en_revision', 'rechazada',"
+                 " 'retirada') then null else now() end where id = :o"),
             {"e": estado, "o": orden},
         )  # fmt: skip
         c.execute(text("alter table nucleo.orden_pago enable trigger transicion_orden_pago"))
