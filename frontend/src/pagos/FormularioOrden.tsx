@@ -222,7 +222,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
         const elegido = lectura.proveedores.find((p) => p.id === inicial?.proveedor && p.estado === "activo");
         const { importe: importeInicial, moneda, concepto, comprobante } = inicial ?? {};
         return {
-          ...datosVacios((elegido ?? lectura.proveedores.find((p) => p.estado === "activo"))?.id ?? ""),
+          ...datosVacios(elegido?.id ?? ""),
           ...(importeInicial === undefined ? {} : { importe: importeInicial }),
           ...(moneda === undefined ? {} : { moneda }),
           ...(concepto === undefined ? {} : { concepto }),
@@ -400,7 +400,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <select id={`${id}-proveedor`} required value={datos.proveedor} disabled={enviando}
         onChange={(e) => cambiar("proveedor", e.target.value)}>
         <option value="" disabled>
-          Elegí un proveedor
+          Elegir un proveedor
         </option>
         {lectura.proveedores
           .filter((p) => p.estado === "activo" || p.id === datos.proveedor)

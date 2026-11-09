@@ -325,7 +325,7 @@ describe("bandeja", () => {
     expect(within(pagar).getByRole("link").textContent).toContain("Pagar");
     expect(screen.getByRole("region", { name: /^Para aprobar/ }).textContent).toContain("Ascensores Ficticios SA");
     expect(screen.queryByRole("region", { name: /^Para conciliar/ })).toBeNull();
-    expect(screen.queryByText("No tenés nada para hacer.")).toBeNull();
+    expect(screen.queryByText("Nada pendiente.")).toBeNull();
     expect(screen.queryByText("Al día")).toBeNull();
     expect(container.textContent).not.toContain(CUENTA);
     await sinFaltasDeAccesibilidad(container);
@@ -343,7 +343,7 @@ describe("bandeja", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("espera_conciliar", "esperando", { le_toca_a: "consejo" })),
     }));
     abrir("/pagos");
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     const plegado = screen.getByText("Esperando a otra persona (1)").closest("details") as HTMLElement;
     expect(plegado.textContent).toContain("Falta conciliar");
     expect(plegado.textContent).toContain("Le toca al Consejo.");
@@ -352,7 +352,7 @@ describe("bandeja", () => {
   it("control: sin nada, tampoco aparece «Esperando a otra persona»", async () => {
     vi.stubGlobal("fetch", backend({}));
     abrir("/pagos");
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     expect(screen.queryByText(/Esperando a otra persona/)).toBeNull();
     expect(screen.getByText("Al día")).toBeTruthy();
   });
@@ -383,7 +383,7 @@ describe("bandeja", () => {
     expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
     caido = false;
     fireEvent.click(reintentar);
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -399,7 +399,7 @@ describe("bandeja", () => {
     await boton("Reintentar");
     caido = false;
     volvioLaRed();
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     expect(screen.getByText(VOLVIO_LA_RED)).toBeTruthy();
   });
 
@@ -438,7 +438,7 @@ describe("bandeja", () => {
     abrir(`/pagos/${O1}`);
     await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(screen.queryByRole("heading", { name: "Limpieza Ficticia SRL" })).toBeNull();
   });
@@ -701,6 +701,36 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     expect(mas.hasAttribute("open")).toBe(false);
     expect(mas.textContent).toContain("20000000001");
     expect(mas.textContent).toContain("Cuenta cambiada");
+  });
+
+  it("«Más datos» no repite lo habitual ni los números de versión (comentario 25)", async () => {
+    abrirFicha({ ...APROBAR, versiones: [version({ condicion_beneficiario: "conocido", franja: "bajo_umbral", aprobada_por: [] })] });
+    await boton("Aprobar esta versión");
+    const mas = (screen.getByText("Más datos").closest("details") as HTMLElement).textContent ?? "";
+    expect(mas).toContain("20000000001");
+    for (const fuera of ["Beneficiario", "Franja", "Fondo de reserva", "Versión de la orden", "Versión del proveedor", "Cambios anteriores"])
+      expect(mas).not.toContain(fuera);
+  });
+
+  it("control: lo que no es habitual sí se ve en «Más datos»", async () => {
+    abrirFicha({ ...APROBAR, versiones: [version({ usa_fondo_reserva: true, franja: "sobre_umbral", condicion_beneficiario: "nuevo", aprobada_por: [] })] });
+    await boton("Aprobar esta versión");
+    const mas = (screen.getByText("Más datos").closest("details") as HTMLElement).textContent ?? "";
+    expect(mas).toContain("Fondo de reserva");
+    expect(mas).toContain("Supera el umbral");
+    expect(mas).toContain("Proveedor nuevo");
+  });
+
+  it("las versiones anteriores muestran solo lo que cambió, y nada si no cambió nada visible (comentario 25)", async () => {
+    const v1 = version({ numero: 1, importe_centavos: 4_000_000, aprobada_por: [] });
+    const v2 = version({ numero: 2, importe_centavos: 4_000_000, aprobada_por: [] });
+    const v3 = version({ numero: 3, importe_centavos: 4_500_000, aprobada_por: [] });
+    abrirFicha({ ...APROBAR, orden: { ...APROBAR.orden, version_vigente: 3 }, versiones: [v1, v2, v3] });
+    await boton("Aprobar esta versión");
+    const mas = screen.getByText("Más datos").closest("details") as HTMLElement;
+    const filas = [...mas.querySelectorAll("h3 + ol.versiones li")].map((li) => li.textContent);
+    // v1 → v2 no cambió nada visible; v2 → v3 cambió el importe.
+    expect(filas).toEqual([expect.stringMatching(/^importe \$\s?40\.000,00 → \$\s?45\.000,00$/)]);
   });
 
   it("la alerta de fraccionamiento se ve al decidir", async () => {
@@ -1962,6 +1992,7 @@ describe("preparar, enviar y renovar", () => {
     vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     fireEvent.change(screen.getByLabelText("Contrato o abono (opcional)"), { target: { value: K1 } });
     fireEvent.click(await boton("Guardar la orden"));
@@ -1969,6 +2000,19 @@ describe("preparar, enviar y renovar", () => {
     expect(lugar()).toBe(`/pagos/${O1}`);
     expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago`)[0])).toMatchObject({ importe_centavos: 1_500_000, contrato_id: K1, proveedor_id: P1 });
+  });
+
+  it("el proveedor arranca en blanco y sin elegirlo no se guarda (comentario 26)", async () => {
+    vi.stubGlobal("fetch", backend(LECTURAS));
+    abrir("/pagos/nueva");
+    const elegir = (await screen.findByLabelText("Proveedor")) as HTMLSelectElement;
+    expect(elegir.value).toBe("");
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    expect(((await boton("Guardar la orden")) as HTMLButtonElement).disabled).toBe(true);
+    // Control: al elegirlo, se puede guardar.
+    fireEvent.change(elegir, { target: { value: P1 } });
+    expect(((await boton("Guardar la orden")) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("cambiar la moneda descarta el contrato elegido", async () => {
@@ -1985,6 +2029,7 @@ describe("preparar, enviar y renovar", () => {
     vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     const envios = () => pedidos(api, "POST", `${BASE}/ordenes-pago`);
     fireEvent.click(await boton("Guardar la orden"));
@@ -2004,6 +2049,7 @@ describe("preparar, enviar y renovar", () => {
     vi.stubGlobal("fetch", backend({ ...LECTURAS, [`POST ${BASE}/ordenes-pago`]: () => error("proveedor_inactivo", 409) }));
     abrir("/pagos/nueva");
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "1234,50" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Arreglo del portón" } });
     fireEvent.click(await boton("Guardar la orden"));
     expect(await screen.findByText(/está suspendido o de baja/)).toBeTruthy();
@@ -2960,7 +3006,7 @@ describe("rutas y navegación", () => {
     await waitFor(() => expect(lugar()).toBe("/"));
     cleanup();
     abrir("/pagos");
-    expect(await screen.findByText("No tenés nada para hacer.")).toBeTruthy();
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
   });
 });
 
@@ -3066,8 +3112,8 @@ describe("la factura arriba de la orden (0088)", () => {
     await subirFactura();
     await vuelta();
     expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
-    // Sin el proveedor sugerido, el que estaba elegido no cambia ni se marca.
-    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P2);
+    // Sin el proveedor sugerido, el proveedor sigue en blanco y no se marca (comentario 26, 09-11-2026).
+    expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe("");
     expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(4);
     expect(screen.getByText(/no está cargado en este edificio/)).toBeTruthy();
     fireEvent.click(screen.getByRole("link", { name: "Dar de alta el proveedor" }));
@@ -3121,6 +3167,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(screen.queryByText(MARCA_LECTURA)).toBeNull();
     expect(valor("Concepto")).toBe("");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     expect(await guardar(api)).toMatchObject({ factura_version_id: VF, importe_centavos: 1_500_000, concepto: "Limpieza" });
   });
@@ -3133,6 +3180,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(await screen.findByText(TEXTO_RECHAZADO)).toBeTruthy();
     sinBoton("Ver la factura");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     expect(await guardar(api)).toMatchObject({ factura_version_id: null });
   });
@@ -3140,6 +3188,7 @@ describe("la factura arriba de la orden (0088)", () => {
   it("control: sin factura el formulario es el de siempre y no sube nada", async () => {
     const api = conFactura([lectura()]);
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     expect(await guardar(api)).toMatchObject({ factura_version_id: null, importe_centavos: 1_500_000 });
     expect(pedidos(api, "POST", PARA_CARGA)).toHaveLength(0);
@@ -3174,6 +3223,7 @@ describe("la factura arriba de la orden (0088)", () => {
       sinBoton("Ver la factura");
       sinBoton(QUITAR_ARCHIVO);
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       expect(await guardar(api)).toMatchObject({ factura_version_id: null });
     });
@@ -3202,6 +3252,7 @@ describe("la factura arriba de la orden (0088)", () => {
       });
       const api = await conFacturaSubida({ [`POST ${ORDENES}`]: () => guardando });
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       fireEvent.click(await boton(QUITAR_ARCHIVO));
       expect(await boton(CONFIRMAR_QUITAR)).toBeTruthy();
@@ -3220,6 +3271,7 @@ describe("la factura arriba de la orden (0088)", () => {
       expect(pedidos(api, "POST", QUITAR)).toHaveLength(0);
       expect(await boton("Ver la factura")).toBeTruthy();
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
     });
@@ -3231,6 +3283,7 @@ describe("la factura arriba de la orden (0088)", () => {
       expect(await screen.findByText(/^El archivo no se quitó\. Este documento respalda algo guardado/)).toBeTruthy();
       expect(await boton("Ver la factura")).toBeTruthy();
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
     });
@@ -3288,6 +3341,7 @@ describe("la factura arriba de la orden (0088)", () => {
       conEsperaManual();
       const api = conFactura([EN_CUARENTENA, lectura()]);
       fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       await subirFactura();
       const guardarOrden = screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement;
@@ -3309,6 +3363,7 @@ describe("la factura arriba de la orden (0088)", () => {
       conEsperaManual();
       const api = conFactura([EN_CUARENTENA]);
       fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       await subirFactura();
       fireEvent.click(await boton(SEGUIR_SIN_ESPERAR));
@@ -3323,6 +3378,7 @@ describe("la factura arriba de la orden (0088)", () => {
       conEsperaManual();
       const api = conFactura([LEYENDO]);
       fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       await subirFactura();
       await vuelta();
@@ -3471,11 +3527,13 @@ describe("la factura arriba de la orden (0088)", () => {
       abrir(LLEGADA);
       await screen.findByLabelText("Concepto");
       fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C3 } });
-      await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P3));
+      // El proveedor del primer edificio no pasa al segundo: queda en blanco (comentario 26).
+      await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(""));
       expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("");
       expect((screen.getByLabelText("Comprobante (opcional)") as HTMLInputElement).value).toBe("");
       sinBoton("Ver la factura");
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P3 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Pintura" } });
       fireEvent.click(await boton("Guardar la orden"));
       await waitFor(() => expect(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)).toHaveLength(1));

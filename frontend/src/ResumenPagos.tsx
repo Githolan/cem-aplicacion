@@ -17,7 +17,7 @@ import {
 // Lo que el inicio dice de Pagos, de un edificio por vez: la bandeja es de un edificio. Cuenta lo
 // mismo que la bandeja muestra para hacer: lo que espera a otra persona no es para hacer.
 
-const NADA_PARA_HACER = "No tenés nada para hacer.";
+const NADA_PARA_HACER = "Nada pendiente.";
 const DETALLE_SIN_DATO = "Lo que tenés para hacer";
 const DETALLE_SIN_LECTURA = "No pudimos leer lo que tenés para hacer";
 

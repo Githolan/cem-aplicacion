@@ -524,6 +524,22 @@ button.secundario.peligro:not(:disabled),
   text-decoration: none;
 }
 
+/* El único botón principal de la pantalla, lleno con el color de acción (comentario 24, 09-11-2026). */
+.enlace-boton--principal {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: var(--shadow-button);
+  color: var(--on-accent);
+}
+
+/* Las otras salidas de la bandeja: con borde y sin relleno, del mismo tamaño que el principal. */
+.enlace-boton--borde {
+  border-color: var(--accent);
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
 /* Lo que sigue en importancia a lo del rol: sin caja, para que no compita con él. */
 .enlace-boton--sutil,
 button.sutil {

@@ -147,6 +147,19 @@ export function cambiosDeVersion(v: Version, anterior: Version): string[] {
   return cambios;
 }
 
+/** Qué cambió de una versión a la siguiente, para «Más datos»: «importe $ 40.000 → $ 45.000». Vacío si
+ *  no cambió nada que se vea (comentario 25, 09-11-2026). */
+export function cambiosEntreVersiones(antes: Version, despues: Version): string[] {
+  const cambios: string[] = [];
+  if (antes.importe_centavos !== despues.importe_centavos || antes.moneda !== despues.moneda)
+    cambios.push(`importe ${importe(antes.importe_centavos, antes.moneda)} → ${importe(despues.importe_centavos, despues.moneda)}`);
+  if (antes.proveedor_id !== despues.proveedor_id) cambios.push(`proveedor ${antes.razon_social} → ${despues.razon_social}`);
+  if (antes.cuenta_ultimos_digitos !== despues.cuenta_ultimos_digitos)
+    cambios.push(`cuenta ${cuentaEnmascarada(antes.cuenta_ultimos_digitos)} → ${cuentaEnmascarada(despues.cuenta_ultimos_digitos)}`);
+  if (antes.concepto !== despues.concepto) cambios.push(`concepto «${antes.concepto}» → «${despues.concepto}»`);
+  return cambios;
+}
+
 /** A qué paso se sigue, y si la ficha que lo pide sigue abierta cuando llega la bandeja. */
 export type Seguir = { paso: Paso; abierta: RefObject<boolean> };
 
@@ -304,6 +317,15 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
   const cuentaVista = cuenta?.version === v.numero ? cuenta : null;
   const cuentaDecidida = decide && decision?.version === v.numero ? decision : null;
   const anterior = ficha.versiones.find((x) => x.numero === v.numero - 1);
+  // Cada versión anterior, con lo que cambió en la que le siguió; sin las que no cambiaron nada visible.
+  const cambiosPorVersion = [...ficha.versiones]
+    .sort((x, y) => x.numero - y.numero)
+    .flatMap((x, i, todas) => {
+      const siguiente = todas[i + 1];
+      if (siguiente === undefined || x.numero >= v.numero) return [];
+      const cambios = cambiosEntreVersiones(x, siguiente);
+      return cambios.length === 0 ? [] : [{ numero: x.numero, cambios }];
+    });
   const enDecision = situacion === "borrador" || situacion === "en_revision";
   const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
   const declara = ficha.puede_declarar && SE_DECLARA.has(paso);
@@ -1144,33 +1166,41 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
           <details className="historial">
             <summary>Más datos</summary>
             <dl className="detalles">
-              <dt>CUIT</dt>
-              <dd>{v.cuit ?? "Sin CUIT"}</dd>
-              <dt>Beneficiario</dt>
-              <dd>{TEXTO_CONDICION[v.condicion_beneficiario]}</dd>
-              <dt>Franja</dt>
-              <dd>{textoFranja(v.franja, ficha.orden.estado)}</dd>
-              <dt>Fondo de reserva</dt>
-              <dd>{v.usa_fondo_reserva ? "Sí" : "No"}</dd>
-              <dt>Versión de la orden</dt>
-              <dd>{v.numero}</dd>
-              <dt>Versión del proveedor</dt>
-              <dd>{v.proveedor_version}</dd>
+              {/* Sin repetir lo que ya se ve arriba ni lo habitual (comentario 25, 09-11-2026). */}
+              {cuentaVista === null && (
+                <>
+                  <dt>CUIT</dt>
+                  <dd>{v.cuit ?? "Sin CUIT"}</dd>
+                </>
+              )}
+              {v.condicion_beneficiario !== "conocido" && (
+                <>
+                  <dt>Beneficiario</dt>
+                  <dd>{TEXTO_CONDICION[v.condicion_beneficiario]}</dd>
+                </>
+              )}
+              {v.franja !== "bajo_umbral" && (
+                <>
+                  <dt>Franja</dt>
+                  <dd>{textoFranja(v.franja, ficha.orden.estado)}</dd>
+                </>
+              )}
+              {v.usa_fondo_reserva && (
+                <>
+                  <dt>Fondo de reserva</dt>
+                  <dd>Sí</dd>
+                </>
+              )}
               <dt>Preparada</dt>
               <dd>{momento(v.creada_en)}</dd>
             </dl>
-            {ficha.versiones.length > 1 && (
+            {cambiosPorVersion.length > 0 && (
               <>
-                <h3>Versiones anteriores</h3>
+                <h3>Cambios anteriores</h3>
                 <ol className="versiones">
-                  {ficha.versiones
-                    .filter((x) => x.numero !== v.numero)
-                    .map((x) => (
-                      <li key={x.numero}>
-                        Versión {x.numero}: {importe(x.importe_centavos, x.moneda)}, {x.razon_social}, cuenta{" "}
-                        {cuentaEnmascarada(x.cuenta_ultimos_digitos)}
-                      </li>
-                    ))}
+                  {cambiosPorVersion.map(({ numero, cambios }) => (
+                    <li key={numero}>{cambios.join("; ")}</li>
+                  ))}
                 </ol>
               </>
             )}
