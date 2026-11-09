@@ -169,7 +169,8 @@ class CodigoError(StrEnum):
     confirmado para entregar la copia, no es un pedido de copia, o falta la corroboración de la
     administración o del Consejo (2d-2)."""
     SESION_RECIENTE_REQUERIDA = "sesion_reciente_requerida"
-    """Una acción económica pide una sesión de menos de 12 horas: hay que volver a entrar (R10)."""
+    """La sesión ya no sirve para el acto (vencida o revocada): hay que volver a entrar. La sesión
+    de 12 horas para lo económico salió el 09-11-2026 (`0091`)."""
     VERSION_DESACTUALIZADA = "version_desactualizada"
     """La orden o el proveedor ya tienen otra versión: hay que volver a leerlos (H3)."""
     SIN_CAMBIOS = "sin_cambios"
@@ -180,6 +181,10 @@ class CodigoError(StrEnum):
     """Lo que se aprobó no es la versión vigente: la orden cambió mientras se revisaba (RN12)."""
     APROBACION_REPETIDA = "aprobacion_repetida"
     """La misma persona, con una o con dos cuentas, ya aprobó esa versión."""
+    RETIRAR_SOLO_QUIEN_PREPARO = "retirar_solo_quien_preparo"
+    """Una orden la retira solo quien preparó alguna de sus versiones (`0093`)."""
+    ORDEN_CON_APROBACIONES = "orden_con_aprobaciones"
+    """La versión vigente ya tiene una aprobación: la orden ya no se retira (`0093`)."""
     NO_ES_QUIEN_PREPARO = "no_es_quien_preparo"
     """Quien preparó alguna versión de la orden no la aprueba ni la rechaza (D2)."""
     NO_ES_QUIEN_CARGO_LA_CUENTA = "no_es_quien_cargo_la_cuenta"

@@ -49,6 +49,7 @@ export const TEXTO_SITUACION: Record<Situacion, string> = {
   borrador: "Borrador",
   en_revision: "Esperando aprobación",
   rechazada: "Rechazada",
+  retirada: "Retirada",
   para_pagar: "Aprobada",
   pagando: "Para pagar",
   no_pago_declarado: "Falta confirmar",
@@ -65,6 +66,7 @@ export const TONO_SITUACION: Record<Situacion, "pendiente" | "bien" | "mal" | "n
   borrador: "pendiente",
   en_revision: "pendiente",
   rechazada: "mal",
+  retirada: "neutro",
   para_pagar: "bien",
   pagando: "pendiente",
   no_pago_declarado: "pendiente",
@@ -89,8 +91,19 @@ export const FILTROS: readonly { valor: Filtro; texto: string }[] = [
   { valor: "pagados", texto: "Pagados" },
   { valor: "no_se_pagaron", texto: "No se pagaron" },
   { valor: "rechazados", texto: "Rechazados" },
+  { valor: "retirados", texto: "Retirados" },
   { valor: "en_curso", texto: "En curso" },
 ];
+
+// Retirar una orden que nadie aprobó (comentario 23, 09-11-2026): queda, con quién y cuándo.
+export const RETIRAR = "Retirar la orden";
+export const CONFIRMAR_RETIRAR = "Sí, retirar la orden";
+export const NO_RETIRAR = "No, dejarla";
+export const PREGUNTA_RETIRAR =
+  "¿Retirar esta orden? Sale de la bandeja de todos y ya no se aprueba ni se paga. Queda registrado quién la retiró y cuándo, y se ve en la consulta.";
+export const TEXTO_RETIRADA = "Listo: la orden se retiró. Ya no está en la bandeja.";
+export const AVISO_SE_PUEDE_RETIRAR = "Mientras nadie la apruebe, se puede modificar o retirar.";
+export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando}. No se aprueba ni se paga.`;
 
 export const PASOS_DEL_CAMINO = ["Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
 

@@ -110,6 +110,8 @@ from cem_contracts.egresos import (
     RegistroPagoManual,
     Renovacion,
     ResolucionDiferenciaPago,
+    Retiro,
+    RetiroOrdenPago,
     TipoCarga,
     TipoDiferencia,
     TomaPagoManual,
@@ -160,6 +162,8 @@ RESPALDADAS = {
 }  # fmt: skip
 """Las órdenes que ya pasaron una aprobación completa y, después, su emisión (también la que
 falló): el reintento de la emisión con la misma clave devuelve la respuesta guardada."""
+RETIRABLES = {EstadoOrdenPago.BORRADOR, EstadoOrdenPago.EN_REVISION}
+"""Los estados en que `retirar_orden_pago` (`0093`) acepta retirar la orden."""
 ESPERAN_PAGO = {EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION}
 """Las órdenes con su ejecución manual abierta (`nucleo.ejecucion_manual_abierta`)."""
 EN_CURSO = ESPERAN_PAGO | {EstadoOrdenPago.EN_REVISION, EstadoOrdenPago.APROBADA}
@@ -187,6 +191,13 @@ ERRORES = {
     "no_es_quien_preparo": (
         403, CodigoError.NO_ES_QUIEN_PREPARO,
         "Quien preparó la orden no la aprueba ni la rechaza.",
+    ),
+    "retirar_solo_quien_preparo": (
+        403, CodigoError.RETIRAR_SOLO_QUIEN_PREPARO, "La orden la retira solo quien la preparó.",
+    ),
+    "orden_con_aprobaciones": (
+        409, CodigoError.ORDEN_CON_APROBACIONES,
+        "Alguien ya aprobó esta versión: la orden ya no se retira.",
     ),
     "no_es_quien_cargo_la_cuenta": (
         403, CodigoError.NO_ES_QUIEN_CARGO_LA_CUENTA,
@@ -1043,6 +1054,34 @@ def rechazar_orden(
             {"o": orden_id, "version": rechazo.version, "motivo": rechazo.motivo},
         )  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=rechazo.version)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/retirar",
+    response_model=OrdenPagoCambiada,
+    summary="Retirar una orden que nadie aprobó: queda retirada, con quién y cuándo, fuera de la"
+    " bandeja",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def retirar_orden(
+    orden_id: UUID,
+    retiro: Retiro,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Comentario 23 de la revisión de pantallas (09-11-2026, `0093`): solo quien la preparó y
+    solo mientras nadie aprobó la versión vigente. No mueve dinero: sin el gesto."""
+
+    def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.retirar_orden_pago(:o, :esperada, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": retiro.version_esperada},
+        )  # fmt: skip
+        return 200, OrdenPagoCambiada(id=orden_id, version=retiro.version_esperada)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -1909,6 +1948,7 @@ ESTADOS_DE_FILTRO = {
     FiltroConsultaPagos.PAGADOS: [EstadoOrdenPago.PAGADA, EstadoOrdenPago.CONCILIADA],
     FiltroConsultaPagos.NO_SE_PAGARON: [EstadoOrdenPago.FALLIDA],
     FiltroConsultaPagos.RECHAZADOS: [EstadoOrdenPago.RECHAZADA],
+    FiltroConsultaPagos.RETIRADOS: [EstadoOrdenPago.RETIRADA],
     FiltroConsultaPagos.EN_CURSO: [EstadoOrdenPago.BORRADOR, *EN_CURSO],
 }
 HECHOS = ("manual", "pago_sin_conciliar", "pago_observado", "declaracion_vigente",
@@ -2071,6 +2111,34 @@ def _lectura_del_comprobante(
     )  # fmt: skip
 
 
+def _retiro(c: Connection, lector: Permiso, orden: UUID) -> RetiroOrdenPago | None:
+    fila = (
+        _ejecutar(
+            c,
+            lector,
+            "select * from nucleo.retiro_orden_pago_lectura(:o, :f, :actor, 'api', :sesion)",
+            {"o": orden, "f": LEE_COMO[lector.accion]},
+        )  # fmt: skip
+        .mappings()
+        .one_or_none()
+    )
+    if fila is None:
+        return None
+    return RetiroOrdenPago(
+        retirada_por=fila["retirada_por"], retirada_por_nombre=fila["retirada_por_nombre"],
+        retirada_en=fila["retirada_en"],
+    )  # fmt: skip
+
+
+def _puede_retirar(c: Connection, lector: Permiso, orden: OrdenPago, vigente) -> bool:
+    """Lo que `nucleo.retirar_orden_pago` va a aceptar, para mostrar: quien prepara, la orden sin
+    aprobar, nadie aprobó la versión vigente y quien lee preparó alguna versión (por la identidad
+    guardada, `lee_quien_preparo_la_orden`)."""
+    if lector.accion != PREPARAR or orden.estado not in RETIRABLES or vigente.aprobada_por:
+        return False
+    return bool(_ejecutar(c, lector, PREPARO, {"o": orden.id}).scalar_one())
+
+
 def _toma_vigente(
     c: Connection, lector: Permiso, orden: UUID, ejecucion: UUID
 ) -> TomaVigente | None:
@@ -2183,6 +2251,8 @@ def ficha_pago(
         vigente = next(x for x in detalle.versiones if x.numero == orden.version_vigente)
         lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
         toma = None if ejecucion is None else _toma_vigente(c, lector, orden_id, ejecucion.id)
+        retiro = _retiro(c, lector, orden_id) if orden.estado == EstadoOrdenPago.RETIRADA else None
+        puede_retirar = _puede_retirar(c, lector, orden, vigente)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     observacion = None
@@ -2202,6 +2272,7 @@ def ficha_pago(
         puede_reabrir_cuenta=circuito_pagos.reabre_cuenta(situacion, a),
         puede_tomar=a.puede_tomar, tomar_desde=a.tomar_desde,
         puede_modificar=prepara and orden.estado in circuito_pagos.MODIFICABLES,
+        puede_retirar=puede_retirar, retiro=retiro,
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
         puede_declarar=a.puede_declarar,
         puede_corregir=a.puede_corregir, puede_conciliar=a.puede_conciliar,

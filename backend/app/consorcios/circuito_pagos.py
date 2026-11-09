@@ -98,6 +98,7 @@ SITUACION_POR_ESTADO = {
     EstadoOrdenPago.BORRADOR: SituacionPago.BORRADOR,
     EstadoOrdenPago.EN_REVISION: SituacionPago.EN_REVISION,
     EstadoOrdenPago.RECHAZADA: SituacionPago.RECHAZADA,
+    EstadoOrdenPago.RETIRADA: SituacionPago.RETIRADA,
     EstadoOrdenPago.APROBADA: SituacionPago.PARA_PAGAR,
     EstadoOrdenPago.PAGADA: SituacionPago.PAGADA,
     EstadoOrdenPago.FALLIDA: SituacionPago.NO_SE_PAGO,
@@ -153,6 +154,9 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
             return PasoPago.APROBAR if a.puede_aprobar else PasoPago.ESPERA_APROBAR
         case SituacionPago.RECHAZADA:
             return PasoPago.RECHAZADA if prepara else None
+        case SituacionPago.RETIRADA:
+            # Sale de la bandeja de todos (comentario 23): no le toca ni espera nada a nadie.
+            return None
         case SituacionPago.PARA_PAGAR:
             if a.puede_renovar:
                 return PasoPago.RENOVAR
