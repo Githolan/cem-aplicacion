@@ -135,7 +135,8 @@ def test_un_extrano_con_el_segundo_factor_viejo_recibe_lo_mismo(motor_migrate, m
 
 @pytest.mark.parametrize(
     ("horas_atras", "totp_min_atras", "motivo"),
-    [(1, 11, "requiere_segundo_factor_reciente"), (13, 0, "requiere_sesion_reciente")],
+    # Sin sesión de 12 horas desde 0091: una sesión larga también pide el gesto para registrar.
+    [(1, 11, "requiere_segundo_factor_reciente"), (480, 11, "requiere_segundo_factor_reciente")],
 )
 def test_sin_la_facultad_cargar_y_registrar_exigen_r10(
     motor_migrate, motor_app, e, horas_atras, totp_min_atras, motivo
@@ -144,11 +145,6 @@ def test_sin_la_facultad_cargar_y_registrar_exigen_r10(
     datos = comprobante_sin_facultad(motor_migrate, e, o)
     vieja = nueva_sesion(motor_migrate, e.adm, horas_atras=horas_atras,
                          totp_min_atras=totp_min_atras)  # fmt: skip
-    # Subir ya no pide el gesto (`0073`): la sesión de 12 horas, sí.
-    if motivo == "requiere_sesion_reciente":
-        niega(motor_migrate, e, e.adm, CREAR, motivo, sesion=vieja, orden=o, titulo=TITULO)
-        niega(motor_migrate, e, e.adm, VERSION, motivo, sesion=vieja, orden=o,
-              documento=datos["documento"])  # fmt: skip
     niega(motor_migrate, e, e.adm, REGISTRAR, motivo, sesion=vieja,
           **evidencia(motor_migrate, e, o, documento=datos["documento"]))  # fmt: skip
     llamar(
