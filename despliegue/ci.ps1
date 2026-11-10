@@ -47,6 +47,17 @@
 #                                              (la constancia queda sin imágenes y
 #                                              cd.ps1 no despliega esa SHA)
 #   pwsh despliegue/ci.ps1 -ConservarCopia     no borra la copia temporal
+#   pwsh despliegue/ci.ps1 -SinHeredar         corre todas las etapas aunque haya pruebas heredadas
+#   pwsh despliegue/ci.ps1 -PartesBackend 1    pytest del backend en una sola parte (por defecto 4
+#                                              a la vez, cada una con su proyecto de compose
+#                                              <proyecto>-p<k>; la suma de las partes tiene que dar
+#                                              el total recolectado o la etapa es roja)
+#
+# Pruebas heredadas (regla del propietario, 09-11-2026): si otro commit con el MISMO árbol
+# (`git rev-parse <sha>^{tree}`) ya tiene una constancia en verde que corrió las pruebas, las
+# etapas 1 a 6 no se repiten (etapa 'pruebas-heredadas', campo pruebas_de de la constancia) y
+# solo se construyen y suben las imágenes de esta SHA. Uso: `ci.ps1 -Sha <punta del PR>
+# -SinSubirImagenes` antes de fusionar y `ci.ps1 -Sha <fusión>` después, con el PR al día.
 # Requiere: git, Docker en marcha (con buildx y emulación arm64), pnpm 10 y Node 22,
 # bash de Git for Windows (o $env:CEM_BASH con la ruta de otro bash que no sea el
 # de WSL) y, para subir, CEM_GHCR_TOKEN como variable de usuario de Windows.
@@ -55,7 +66,10 @@
 param(
     [string]$Sha = 'HEAD',
     [switch]$ConservarCopia,
-    [switch]$SinSubirImagenes
+    [switch]$SinSubirImagenes,
+    [switch]$SinHeredar,
+    # Partes de las pruebas del backend que corren a la vez, cada una con sus servicios.
+    [ValidateRange(1, 8)][int]$PartesBackend = 4
 )
 
 $ErrorActionPreference = 'Stop'
@@ -118,11 +132,59 @@ function Correr([string]$etapa, [scriptblock]$comando) {
 
 function Get-BashDeGit {
     if ($env:CEM_BASH) { return $env:CEM_BASH }
+    # git puede resolver a <Git>\cmd\git.exe o a <Git>\mingw64\bin\git.exe; el bash está en
+    # <Git>\bin\bash.exe, uno o dos niveles más arriba según cuál.
     $git = (Get-Command git -ErrorAction Stop).Source
-    $raizGit = Split-Path -Parent (Split-Path -Parent $git)
-    $bash = Join-Path $raizGit 'bin\bash.exe'
-    if (-not (Test-Path $bash)) { throw "no encontré el bash de Git for Windows en $bash; definí CEM_BASH" }
-    $bash
+    $nivel1 = Split-Path -Parent (Split-Path -Parent $git)
+    $candidatos = @((Join-Path $nivel1 'bin\bash.exe'), (Join-Path (Split-Path -Parent $nivel1) 'bin\bash.exe'))
+    foreach ($bash in $candidatos) { if (Test-Path $bash) { return $bash } }
+    throw "no encontré el bash de Git for Windows en $($candidatos -join ' ni en '); definí CEM_BASH"
+}
+
+# Etapa 1: pytest del backend en $PartesBackend partes a la vez (CEM_PRUEBAS_PARTE=k/n, ver
+# tests/conftest.py), cada una en su proyecto de compose con sus servicios. Antes se cuenta lo
+# recolectado sin servicios (--no-deps); la etapa es verde solo si todas las partes salen con 0 y
+# sus pruebas suman exactamente ese total (una parte que pierde archivos no pasa por verde).
+function Probar-BackendEnPartes {
+    $f = Join-Path $copia $ComposeRelativo
+    $recoleccion = @(docker @composeArgs run --rm --build --no-deps $ServicioPruebas pytest --collect-only -q -p no:cacheprovider 2>&1 | ForEach-Object { "$_" })
+    $recoleccion | Select-Object -Last 3 | Tee-Object -FilePath $log -Append | Out-Host
+    $m = [regex]::Match(($recoleccion -join "`n"), '(?m)^(\d+) tests? collected')
+    if ($LASTEXITCODE -ne 0 -or -not $m.Success) {
+        $etapas['backend'] = 'falla (no se pudo contar lo recolectado)'
+        Escribir '  backend: FALLA (no se pudo contar lo recolectado)' 'Red'
+        return
+    }
+    $total = [int]$m.Groups[1].Value
+    Escribir "  $total pruebas recolectadas; van en $PartesBackend partes"
+    $trabajos = foreach ($k in 1..$PartesBackend) {
+        $p = "$ProyectoCompose-p$k"
+        $salida = Join-Path ([IO.Path]::GetTempPath()) "$p.log"
+        Start-ThreadJob -ArgumentList $p, $f, $k, $PartesBackend, $ServicioPruebas, $salida -ScriptBlock {
+            param($p, $f, $k, $n, $servicio, $salida)
+            docker compose -p $p -f $f run --rm --build -e "CEM_PRUEBAS_PARTE=$k/$n" $servicio pytest -p no:cacheprovider *> $salida
+            [pscustomobject]@{ Proyecto = $p; Parte = $k; Codigo = $LASTEXITCODE; Salida = $salida }
+        }
+    }
+    $resultados = @($trabajos | Wait-Job | Receive-Job)
+    $trabajos | Remove-Job
+    $suma = 0
+    foreach ($r in ($resultados | Sort-Object Parte)) {
+        $texto = Get-Content -Raw $r.Salida
+        "=== Parte $($r.Parte) de $PartesBackend ($($r.Proyecto)) ===`n$texto" | Out-File -Append -Encoding utf8 $log
+        Remove-Item $r.Salida
+        $resumen = [regex]::Matches($texto, '(?m)^=+ (.+) in [\d.]+s')
+        $linea = if ($resumen.Count) { $resumen[$resumen.Count - 1].Groups[1].Value } else { 'sin resumen' }
+        foreach ($c in [regex]::Matches($linea, '(\d+) (passed|skipped|failed|errors?|xfailed|xpassed)')) { $suma += [int]$c.Groups[1].Value }
+        $color = if ($r.Codigo -eq 0) { 'Green' } else { 'Red' }
+        Escribir "  parte $($r.Parte): código $($r.Codigo); $linea" $color
+        if ($r.Codigo -ne 0) { $script:partesEnRojo += $r.Proyecto }
+    }
+    if ($partesEnRojo.Count) { $etapas['backend'] = "falla ($($partesEnRojo.Count) de $PartesBackend partes en rojo)" }
+    elseif ($suma -ne $total) { $etapas['backend'] = "falla (las partes suman $suma pruebas y se recolectaron $total)" }
+    else { $etapas['backend'] = 'ok' }
+    $color = if ($etapas['backend'] -eq 'ok') { 'Green' } else { 'Red' }
+    Escribir "  backend: $($etapas['backend']) ($suma de $total pruebas en $PartesBackend partes)" $color
 }
 
 function Test-TodoVerde { ($etapas.Count -gt 0) -and -not ($etapas.Values | Where-Object { $_ -ne 'ok' }) }
@@ -222,6 +284,8 @@ function Guardar-Resultado {
         imagenes   = if ($ok -and $imagenes.Count -gt 0) { $imagenes } else { $null }
         # PA del P0-piloto cubiertas y faltantes; $null si la etapa no llegó a correr o falló.
         cobertura_pa = $coberturaPa
+        # Commit cuyas pruebas se heredaron por tener el mismo árbol, o $null si corrieron acá.
+        pruebas_de = $pruebasDe
         fecha_utc  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         minutos    = [math]::Round(((Get-Date) - $inicio).TotalMinutes, 1)
         equipo     = $env:COMPUTERNAME
@@ -235,6 +299,8 @@ function Guardar-Resultado {
 $copia = Join-Path ([IO.Path]::GetTempPath()) "$PrefijoCopia$sha7-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
 $composeArgs = @('compose', '-p', $ProyectoCompose, '-f', (Join-Path $copia $ComposeRelativo))
 $ok = $false
+$pruebasDe = $null
+$partesEnRojo = @()
 $composeUsado = $false
 $e2eUsado = $false
 $sufijoE2e = "ci-$idCorrida"
@@ -280,81 +346,89 @@ try {
     $etapas['copia-lf'] = 'ok'
     Escribir "  copia en $copia; $($shs.Count) archivos .sh sin CR" 'Green'
 
-    # --- 1-3. backend, ruff y contratos en Linux ------------------------------
-    Etapa 'Backend (pytest, PostgreSQL 18 y Redis 7)'
-    $composeUsado = $true
-    Correr 'backend' { docker @composeArgs run --rm --build $ServicioPruebas } | Out-Null
-    Etapa 'ruff'
-    Correr 'ruff' { docker @composeArgs run --rm $ServicioPruebas sh -c 'ruff check .. && ruff format --check ..' } | Out-Null
-    Etapa 'Contratos (pytest)'
-    Correr 'contratos' { docker @composeArgs run --rm $ServicioPruebas sh -c 'cd /src/contratos && pytest' } | Out-Null
-    Etapa 'Cobertura de PA (documento 14, §11)'
-    Medir-CoberturaPa
-
-    # --- 3c. seguridad ----------------------------------------------------------
-    Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks)'
-    $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos && /entorno/bin/pip uninstall -q -y pip " +
-        "&& pip install -q pip-audit==$VersionPipAudit && pip-audit --path /entorno/lib/python3.12/site-packages"
-    Correr 'seguridad-dependencias-python' {
-        docker run --rm -v "${copia}:/copia:ro" -w /tmp/auditoria $ImagenPython sh -c "cp -r /copia/backend /copia/contratos . && $auditoriaPip"
-    } | Out-Null
-    Push-Location (Join-Path $copia 'frontend')
-    try { Correr 'seguridad-dependencias-frontend' { pnpm audit --prod --audit-level high } | Out-Null }
-    finally { Pop-Location }
-    Correr 'seguridad-secretos-arbol' {
-        docker run --rm -v "${copia}:/copia:ro" $ImagenGitleaks dir /copia -c /copia/.gitleaks.toml --no-banner --redact=100
-    } | Out-Null
-    $gitComun = (Resolve-Path (git -C $repo rev-parse --path-format=absolute --git-common-dir)).Path
-    Correr 'seguridad-secretos-historial' {
-        docker run --rm -v "${copia}:/copia:ro" -v "${gitComun}:/repo.git:ro" $ImagenGitleaks git /repo.git -c /copia/.gitleaks.toml `
-            --no-banner --redact=100 --log-opts="-n $CommitsGitleaks $shaCompleta"
-    } | Out-Null
-
-    # --- 4. frontend ------------------------------------------------------------
-    Etapa 'Frontend (pnpm)'
-    Push-Location (Join-Path $copia 'frontend')
-    try {
-        if (Correr 'frontend-install' { pnpm install --frozen-lockfile }) {
-            Correr 'frontend-lint' { pnpm lint } | Out-Null
-            Correr 'frontend-test' { pnpm test } | Out-Null
-            Correr 'frontend-build' { pnpm build } | Out-Null
-        }
-    } finally { Pop-Location }
-
-    # --- 5. imagen del frontend -----------------------------------------------
-    Etapa 'Imagen del frontend'
-    $imagenFrontendUsada = $true
-    if (Correr 'frontend-imagen-build' { docker build -f (Join-Path $copia 'frontend/Dockerfile') -t $ImagenFrontend $copia }) {
-        $bash = Get-BashDeGit
-        $env:MSYS_NO_PATHCONV = '1'
-        Push-Location $copia
-        try { Correr 'frontend-imagen-prueba' { & $bash $PruebaImagen $ImagenFrontend } | Out-Null }
-        finally { Pop-Location; Remove-Item Env:\MSYS_NO_PATHCONV }
-    }
-
-    # --- 6. extremo a extremo (Playwright contra las imágenes reales) ---------
-    Etapa 'Extremo a extremo (pnpm e2e)'
-    if ($etapas['frontend-install'] -ne 'ok') {
-        $etapas['frontend-e2e'] = 'falla (sin pnpm install)'
-        Escribir '  frontend-e2e: FALLA (no hay dependencias instaladas)' 'Red'
+    # --- pruebas heredadas: otro commit con el mismo árbol ya pasó todo ------------
+    $pruebasDe = if ($SinHeredar) { $null } else { Find-CemPruebasMismoArbol -Repo $repo -Sha $shaCompleta }
+    if ($pruebasDe) {
+        Etapa 'Pruebas heredadas (mismo árbol)'
+        $etapas['pruebas-heredadas'] = 'ok'
+        Escribir "  $sha7 tiene el mismo árbol que $pruebasDe, que pasó todas las etapas (constancia $(Join-Path (Get-CemCarpetaEstado ci) "$pruebasDe.json")); no se repiten" 'Green'
     } else {
-        $e2eUsado = $true
-        $rutaGit = Join-Path (Split-Path -Parent (Split-Path -Parent (Get-BashDeGit))) 'usr\bin'
-        if (-not (Test-Path (Join-Path $rutaGit 'sh.exe'))) { throw "no encontré sh.exe de Git for Windows en $rutaGit" }
-        $pathAnterior = $env:PATH
-        # `pnpm e2e` llama a `sh`: el de Git for Windows (el bash.exe de System32 es WSL).
-        $env:PATH = "$rutaGit;$pathAnterior"
-        $env:CEM_E2E_SUFIJO = $sufijoE2e
-        $env:CEM_E2E_SHA = $shaCompleta
-        # La copia no tiene .git: la versión anterior del frontend (e2e/versiones.e2e.ts) se
-        # construye desde el repositorio.
-        $env:CEM_E2E_REPO = $repo
+        # --- 1-3. backend, ruff y contratos en Linux ------------------------------
+        Etapa "Backend (pytest, PostgreSQL 18 y Redis 7, $PartesBackend partes a la vez)"
+        $composeUsado = $true
+        Probar-BackendEnPartes
+        Etapa 'ruff'
+        Correr 'ruff' { docker @composeArgs run --rm $ServicioPruebas sh -c 'ruff check .. && ruff format --check ..' } | Out-Null
+        Etapa 'Contratos (pytest)'
+        Correr 'contratos' { docker @composeArgs run --rm $ServicioPruebas sh -c 'cd /src/contratos && pytest' } | Out-Null
+        Etapa 'Cobertura de PA (documento 14, §11)'
+        Medir-CoberturaPa
+
+        # --- 3c. seguridad ----------------------------------------------------------
+        Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks)'
+        $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos && /entorno/bin/pip uninstall -q -y pip " +
+            "&& pip install -q pip-audit==$VersionPipAudit && pip-audit --path /entorno/lib/python3.12/site-packages"
+        Correr 'seguridad-dependencias-python' {
+            docker run --rm -v "${copia}:/copia:ro" -w /tmp/auditoria $ImagenPython sh -c "cp -r /copia/backend /copia/contratos . && $auditoriaPip"
+        } | Out-Null
         Push-Location (Join-Path $copia 'frontend')
-        try { Correr 'frontend-e2e' { pnpm e2e } | Out-Null }
-        finally {
-            Pop-Location
-            $env:PATH = $pathAnterior
-            Remove-Item Env:\CEM_E2E_SUFIJO, Env:\CEM_E2E_SHA, Env:\CEM_E2E_REPO
+        try { Correr 'seguridad-dependencias-frontend' { pnpm audit --prod --audit-level high } | Out-Null }
+        finally { Pop-Location }
+        Correr 'seguridad-secretos-arbol' {
+            docker run --rm -v "${copia}:/copia:ro" $ImagenGitleaks dir /copia -c /copia/.gitleaks.toml --no-banner --redact=100
+        } | Out-Null
+        $gitComun = (Resolve-Path (git -C $repo rev-parse --path-format=absolute --git-common-dir)).Path
+        Correr 'seguridad-secretos-historial' {
+            docker run --rm -v "${copia}:/copia:ro" -v "${gitComun}:/repo.git:ro" $ImagenGitleaks git /repo.git -c /copia/.gitleaks.toml `
+                --no-banner --redact=100 --log-opts="-n $CommitsGitleaks $shaCompleta"
+        } | Out-Null
+
+        # --- 4. frontend ------------------------------------------------------------
+        Etapa 'Frontend (pnpm)'
+        Push-Location (Join-Path $copia 'frontend')
+        try {
+            if (Correr 'frontend-install' { pnpm install --frozen-lockfile }) {
+                Correr 'frontend-lint' { pnpm lint } | Out-Null
+                Correr 'frontend-test' { pnpm test } | Out-Null
+                Correr 'frontend-build' { pnpm build } | Out-Null
+            }
+        } finally { Pop-Location }
+
+        # --- 5. imagen del frontend -----------------------------------------------
+        Etapa 'Imagen del frontend'
+        $imagenFrontendUsada = $true
+        if (Correr 'frontend-imagen-build' { docker build -f (Join-Path $copia 'frontend/Dockerfile') -t $ImagenFrontend $copia }) {
+            $bash = Get-BashDeGit
+            $env:MSYS_NO_PATHCONV = '1'
+            Push-Location $copia
+            try { Correr 'frontend-imagen-prueba' { & $bash $PruebaImagen $ImagenFrontend } | Out-Null }
+            finally { Pop-Location; Remove-Item Env:\MSYS_NO_PATHCONV }
+        }
+
+        # --- 6. extremo a extremo (Playwright contra las imágenes reales) ---------
+        Etapa 'Extremo a extremo (pnpm e2e)'
+        if ($etapas['frontend-install'] -ne 'ok') {
+            $etapas['frontend-e2e'] = 'falla (sin pnpm install)'
+            Escribir '  frontend-e2e: FALLA (no hay dependencias instaladas)' 'Red'
+        } else {
+            $e2eUsado = $true
+            $rutaGit = Join-Path (Split-Path -Parent (Split-Path -Parent (Get-BashDeGit))) 'usr\bin'
+            if (-not (Test-Path (Join-Path $rutaGit 'sh.exe'))) { throw "no encontré sh.exe de Git for Windows en $rutaGit" }
+            $pathAnterior = $env:PATH
+            # `pnpm e2e` llama a `sh`: el de Git for Windows (el bash.exe de System32 es WSL).
+            $env:PATH = "$rutaGit;$pathAnterior"
+            $env:CEM_E2E_SUFIJO = $sufijoE2e
+            $env:CEM_E2E_SHA = $shaCompleta
+            # La copia no tiene .git: la versión anterior del frontend (e2e/versiones.e2e.ts) se
+            # construye desde el repositorio.
+            $env:CEM_E2E_REPO = $repo
+            Push-Location (Join-Path $copia 'frontend')
+            try { Correr 'frontend-e2e' { pnpm e2e } | Out-Null }
+            finally {
+                Pop-Location
+                $env:PATH = $pathAnterior
+                Remove-Item Env:\CEM_E2E_SUFIJO, Env:\CEM_E2E_SHA, Env:\CEM_E2E_REPO
+            }
         }
     }
 }
@@ -368,11 +442,11 @@ finally {
         # Con el backend en rojo, las consultas de los dos lados de un deadlock solo quedan en el
         # registro de PostgreSQL, que el `down` borra: se copian antes (deadlock intermitente de
         # las pruebas de migración, tracker).
-        if ($etapas['backend'] -and $etapas['backend'] -ne 'ok') {
+        foreach ($pRojo in $partesEnRojo) {
             # Cada deadlock con todo lo que su proceso escribe a continuación: el DETAIL lista las
             # consultas de los procesos (truncadas en track_activity_query_size) y el STATEMENT trae
             # entera la del abortado. Una línea nueva de otro proceso, o de otro nivel, lo cierra.
-            $registro = @(docker @composeArgs logs --no-color --no-log-prefix $ServicioPostgres 2>&1 | ForEach-Object { "$_" })
+            $registro = @(docker compose -p $pRojo -f (Join-Path $copia $ComposeRelativo) logs --no-color --no-log-prefix $ServicioPostgres 2>&1 | ForEach-Object { "$_" })
             $leido = $LASTEXITCODE
             $lineas = @(); $pid_ = $null; $cuantos = 0
             foreach ($l in $registro) {
@@ -385,17 +459,21 @@ finally {
                 if ($pid_) { $lineas += $l }
             }
             $titulo = if ($leido -eq 0) { "$cuantos deadlock(s)" } else { "no se pudo leer (código $leido)" }
-            (@("=== Registro de $ServicioPostgres`: $titulo ===") + $lineas) |
+            (@("=== Registro de $ServicioPostgres de $pRojo`: $titulo ===") + $lineas) |
                 Tee-Object -FilePath $log -Append | Out-Host
         }
-        # Un `compose run` todavía vivo (corrida interrumpida) no lo saca `down`: va primero.
-        $suyos = @(docker ps -aq --filter "label=com.docker.compose.project=$ProyectoCompose")
-        if ($suyos) { docker rm -f @suyos 2>&1 | Out-File -Append -Encoding utf8 $log }
-        # --rmi local: también la imagen que compose construyó para este proyecto (lleva su nombre).
-        docker @composeArgs down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
-        $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$ProyectoCompose")
-        if ($quedan) { $etapas['limpieza-compose'] = "falla (quedan $($quedan.Count) contenedores de $ProyectoCompose)" }
-        else { $etapas['limpieza-compose'] = 'ok'; Escribir "  limpieza-compose: sin contenedores de $ProyectoCompose" 'Green' }
+        $quedanTodos = 0
+        foreach ($p in @($ProyectoCompose) + @(1..$PartesBackend | ForEach-Object { "$ProyectoCompose-p$_" })) {
+            $args_ = @('compose', '-p', $p, '-f', (Join-Path $copia $ComposeRelativo))
+            # Un `compose run` todavía vivo (corrida interrumpida) no lo saca `down`: va primero.
+            $suyos = @(docker ps -aq --filter "label=com.docker.compose.project=$p")
+            if ($suyos) { docker rm -f @suyos 2>&1 | Out-File -Append -Encoding utf8 $log }
+            # --rmi local: también la imagen que compose construyó para este proyecto (lleva su nombre).
+            docker @args_ down --remove-orphans --rmi local 2>&1 | Out-File -Append -Encoding utf8 $log
+            $quedanTodos += @(docker ps -aq --filter "label=com.docker.compose.project=$p").Count
+        }
+        if ($quedanTodos) { $etapas['limpieza-compose'] = "falla (quedan $quedanTodos contenedores de $ProyectoCompose y sus partes)" }
+        else { $etapas['limpieza-compose'] = 'ok'; Escribir "  limpieza-compose: sin contenedores de $ProyectoCompose ni de sus $PartesBackend partes" 'Green' }
     }
     if ($imagenFrontendUsada) { docker rmi $ImagenFrontend 2>&1 | Out-File -Append -Encoding utf8 $log }
     # El script de e2e borra lo suyo con un trap; si lo cortaron antes, se borra acá

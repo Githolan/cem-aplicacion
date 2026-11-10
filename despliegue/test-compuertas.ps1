@@ -17,6 +17,8 @@
 # 10. Cobertura de PA: la constancia guarda cubiertas y faltantes; un informe roto falla.
 # 11. Proyecto de compose por corrida: formato, dos corridas distintas, y solo las corridas
 #     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato).
+# 12. Pruebas heredadas: una fusión hereda las de la punta de su PR (mismo árbol); no hereda
+#     sin constancia, de una en rojo, de una que a su vez heredó, ni con otro árbol.
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -339,8 +341,36 @@ $proyectos = @('cem-ci-abc1234-100-aaaaaa', 'cem-ci-abc1234-300-bbbbbb', 'cem-ci
                'cem-ci', 'cem-h3d', 'cem-ci-abc1234-x-cccccc', 'cem-ci-def5678-200-dddddd')
 $abandonados = @(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo $esVivo)
 Comprobar 'solo la corrida de un proceso muerto, una vez' (($abandonados -join ',') -eq 'cem-ci-abc1234-300-bbbbbb') ($abandonados -join ',')
+$conPartes = @(Get-CemProyectosCiAbandonados -Proyectos @('cem-ci-abc1234-300-bbbbbb-p2', 'cem-ci-abc1234-100-aaaaaa-p1', 'cem-ci-abc1234-300-bbbbbb-px') -ProcesoVivo $esVivo)
+Comprobar 'la parte de una corrida muerta también se toma por abandonada (y una viva no)' (($conPartes -join ',') -eq 'cem-ci-abc1234-300-bbbbbb-p2') ($conPartes -join ',')
 Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo { $true }).Count -eq 0) 'hay'
 Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
+
+Write-Host "`n=== 12. Pruebas heredadas por árbol idéntico (commits reales) ===" -ForegroundColor Cyan
+$repoReal = Split-Path -Parent $PSScriptRoot
+# Una fusión de main con el mismo árbol que la punta de su PR, y otra cuyo árbol difiere.
+$fusiones = @(git -C $repoReal rev-list --merges -n 200 HEAD)
+$igual = $fusiones | Where-Object { (git -C $repoReal rev-parse "$_^{tree}") -eq (git -C $repoReal rev-parse "$_^2^{tree}") } | Select-Object -First 1
+Comprobar 'hay una fusión con el árbol de la punta del PR' ($null -ne $igual) 'no hay'
+if ($igual) {
+    $punta = (git -C $repoReal rev-parse "$igual^2").Trim()
+    $primer = (git -C $repoReal rev-parse "$igual^1").Trim()
+    Comprobar 'control: sin constancia de la punta no hereda' ($null -eq (Find-CemPruebasMismoArbol -Repo $repoReal -Sha $igual)) 'heredó'
+    Write-CemResultadoCi -Sha $punta -Resultado @{ sha = $punta; resultado = 'falla'; etapas = @{ backend = 'falla' } } | Out-Null
+    Comprobar 'control: la punta en rojo no se hereda' ($null -eq (Find-CemPruebasMismoArbol -Repo $repoReal -Sha $igual)) 'heredó'
+    Write-CemResultadoCi -Sha $punta -Resultado @{ sha = $punta; resultado = 'ok'; etapas = @{ 'pruebas-heredadas' = 'ok' } } | Out-Null
+    Comprobar 'control: una constancia que heredó no se vuelve a heredar' ($null -eq (Find-CemPruebasMismoArbol -Repo $repoReal -Sha $igual)) 'heredó'
+    Write-CemResultadoCi -Sha $punta -Resultado @{ sha = $punta; resultado = 'ok'; etapas = @{ backend = 'ok' } } | Out-Null
+    # Una constancia de un commit que ya no existe no corta la búsqueda.
+    $inexistente = 'c' * 40
+    Write-CemResultadoCi -Sha $inexistente -Resultado @{ sha = $inexistente; resultado = 'ok'; etapas = @{ backend = 'ok' } } | Out-Null
+    $h = Find-CemPruebasMismoArbol -Repo $repoReal -Sha $igual
+    Comprobar "la fusión $($igual.Substring(0, 7)) hereda las pruebas de la punta $($punta.Substring(0, 7))" ($h -eq $punta) "dio '$h'"
+    $distinto = (git -C $repoReal rev-parse "$primer^{tree}") -ne (git -C $repoReal rev-parse "$igual^{tree}")
+    Comprobar 'control: el primer padre tiene otro árbol' $distinto 'mismo árbol'
+    Comprobar 'control: el primer padre no hereda de la punta' ($null -eq (Find-CemPruebasMismoArbol -Repo $repoReal -Sha $primer)) 'heredó'
+    Comprobar 'control: la punta no se hereda a sí misma' ($null -eq (Find-CemPruebasMismoArbol -Repo $repoReal -Sha $punta)) 'heredó'
+}
 
 Remove-Item Env:\CEM_DESPLIEGUE_ESTADO
 if ((Split-Path -Leaf $raiz) -like "$prefijo*" -and $raiz.StartsWith([IO.Path]::GetTempPath())) { Remove-Item -Recurse -Force $raiz }

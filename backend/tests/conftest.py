@@ -40,6 +40,44 @@ CLAVES = {
 }
 
 
+def repartir(archivos: dict[str, int], partes: int) -> list[set[str]]:
+    """Reparte los archivos de prueba en `partes` grupos de cantidad de pruebas parecida.
+
+    Determinista: de mayor a menor cantidad (y por nombre a igual cantidad), cada archivo va al
+    grupo con menos pruebas hasta ahí. Un archivo entero va a un solo grupo: sus fixtures de
+    módulo y su orden no cambian.
+    """
+    grupos: list[set[str]] = [set() for _ in range(partes)]
+    cargas = [0] * partes
+    for archivo, cantidad in sorted(archivos.items(), key=lambda x: (-x[1], x[0])):
+        i = min(range(partes), key=lambda j: (cargas[j], j))
+        grupos[i].add(archivo)
+        cargas[i] += cantidad
+    return grupos
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """`CEM_PRUEBAS_PARTE=k/n` corre solo la parte k de n (ci.ps1 corre las n a la vez, cada una
+    con su PostgreSQL, Redis y demás servicios: los roles de PostgreSQL son del clúster y dos
+    partes en el mismo clúster se pisarían). Sin la variable corre todo."""
+    parte = os.environ.get("CEM_PRUEBAS_PARTE")
+    if not parte:
+        return
+    k_texto, _, n_texto = parte.partition("/")
+    if not (k_texto.isdigit() and n_texto.isdigit() and 1 <= int(k_texto) <= int(n_texto)):
+        raise pytest.UsageError(f"CEM_PRUEBAS_PARTE tiene que ser k/n con 1 <= k <= n: {parte!r}")
+    k, n = int(k_texto), int(n_texto)
+    archivos: dict[str, int] = {}
+    for item in items:
+        archivos[item.nodeid.split("::")[0]] = archivos.get(item.nodeid.split("::")[0], 0) + 1
+    mios = repartir(archivos, n)[k - 1]
+    quedan = [i for i in items if i.nodeid.split("::")[0] in mios]
+    fuera = [i for i in items if i.nodeid.split("::")[0] not in mios]
+    if fuera:
+        config.hook.pytest_deselected(items=fuera)
+    items[:] = quedan
+
+
 def url_rol(rol: str) -> str:
     return (
         make_url(ADMIN_URL)

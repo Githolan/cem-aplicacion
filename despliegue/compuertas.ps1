@@ -46,7 +46,8 @@ $CemVentanaProhibidaHasta = [timespan]'03:10:59'
 # y sus contenedores de e2e, así dos corridas a la vez no se pisan y cada una borra solo lo
 # suyo. Lleva el PID del proceso para reconocer después una corrida cortada (proceso muerto).
 $CemPrefijoProyectoCi = 'cem-ci-'
-$CemFormatoProyectoCi = '^cem-ci-(?<sha>[0-9a-f]{7})-(?<pid>\d+)-(?<azar>[0-9a-f]{6})$'
+# El sufijo -p<k> es la parte k de las pruebas del backend, que corren a la vez.
+$CemFormatoProyectoCi = '^cem-ci-(?<sha>[0-9a-f]{7})-(?<pid>\d+)-(?<azar>[0-9a-f]{6})(-p\d+)?$'
 
 function New-CemIdCorrida {
     param([Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{7}$')][string]$Sha7,
@@ -107,6 +108,33 @@ function Test-CemCiAprobado {
     param([Parameter(Mandatory)][string]$Sha)
     $r = Read-CemResultadoCi -Sha $Sha
     ($null -ne $r) -and ($r.sha -eq $Sha) -and ($r.resultado -eq 'ok')
+}
+
+# Regla del propietario (09-11-2026): las pruebas de un commit valen para otro con el MISMO
+# árbol (`git rev-parse <sha>^{tree}`), p. ej. el commit de fusión de un PR al día con main, que
+# tiene exactamente los archivos de la punta del PR. Devuelve la SHA de una constancia en verde
+# que corrió las pruebas ella misma (etapa backend en ok, no heredada) sobre un commit con el
+# árbol de $Sha, o $null. La imagen se construye igual para $Sha: su etiqueta y su label
+# `revision` siguen siendo los de $Sha y cd.ps1 no cambia.
+function Find-CemPruebasMismoArbol {
+    param([Parameter(Mandatory)][string]$Repo, [Parameter(Mandatory)][string]$Sha)
+    Assert-CemShaCompleta $Sha
+    $arbol = (git -C $Repo rev-parse --verify "$Sha^{tree}" 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $arbol) { throw "no pude leer el árbol de $Sha" }
+    $arbol = $arbol.Trim()
+    $candidatas = @(Get-ChildItem -Path (Get-CemCarpetaEstado ci) -Filter '*.json' | ForEach-Object {
+        $r = Get-Content -Raw $_.FullName | ConvertFrom-Json
+        if ($r.sha -and $r.sha -ne $Sha -and $r.resultado -eq 'ok' -and $r.etapas.backend -eq 'ok' -and
+            "$($r.sha)" -match '^[0-9a-f]{40}$' -and $_.BaseName -eq $r.sha) { $r.sha }
+    })
+    if (-not $candidatas) { return $null }
+    # Un commit que ya no existe (rama borrada sin fusionar) sale como "missing", no corta.
+    $lineas = @($candidatas | ForEach-Object { "$_^{tree}" } | git -C $Repo cat-file --batch-check)
+    if ($LASTEXITCODE -ne 0 -or $lineas.Count -ne $candidatas.Count) { throw "git cat-file no leyó los árboles de las constancias" }
+    for ($i = 0; $i -lt $candidatas.Count; $i++) {
+        if ($lineas[$i] -eq "$arbol tree $(($lineas[$i] -split ' ')[2])") { return $candidatas[$i] }
+    }
+    $null
 }
 
 function Write-CemVerificadoStaging {
