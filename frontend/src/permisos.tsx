@@ -231,4 +231,6 @@ export const REQUISITOS = {
   /** Las reglas de conciliar: la base separa pago por pago. */
   cotejo: [["egresos.conciliar_pago"]],
   liquidacion: [["liquidacion.preparar"]],
+  /** El panel completo del Consejo y la administración (RF48). */
+  panel: [["fiscalizacion.ver_panel"]],
 } as const satisfies Record<string, Requisito>;
