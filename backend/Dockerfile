@@ -4,10 +4,14 @@
 FROM python:3.12-slim AS dependencias
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
-COPY contratos/ contratos/
+# Las dependencias van en su propia capa, antes de copiar contratos/: en la CI la imagen arm64
+# se construye emulada y esta capa tarda unos 40 minutos; así solo se rehace cuando cambia
+# requirements.prod.txt. contratos/ (puro Python, sus dependencias ya están arriba) va después.
 COPY backend/requirements.prod.txt backend/requirements.prod.txt
 RUN python -m venv /venv \
- && /venv/bin/pip install -r backend/requirements.prod.txt ./contratos \
+ && /venv/bin/pip install -r backend/requirements.prod.txt
+COPY contratos/ contratos/
+RUN /venv/bin/pip install --no-deps ./contratos \
  && /venv/bin/pip uninstall -y pip
 
 FROM python:3.12-slim
