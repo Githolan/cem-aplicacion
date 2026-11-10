@@ -4,10 +4,11 @@ Todo real: PostgreSQL 18 con los roles `cem_backup` (lee) y `cem_app` (`REINDEX`
 y el push de Kuma de `test_copias` (un servidor HTTP de verdad en el proceso de la prueba).
 
 Para probar la reparación hace falta un índice que no coincida con su tabla. El fallo de
-PostgreSQL que motivó el control no se provoca a pedido, así que el desajuste se hace con una
-causa legítima del mismo efecto: un índice GiST sobre una función declarada `immutable` que en
-realidad depende de una tabla. Al cambiar esa tabla, la lectura secuencial calcula la clave nueva
-y el índice sigue guardando la vieja, hasta que un `REINDEX` la recalcula.
+PostgreSQL que motivó el control (filas vivas que un escaneo por índice se saltea) no se provoca a
+pedido, así que el desajuste se hace con una causa legítima del mismo efecto: un GiST parcial cuyo
+predicado es una función declarada `immutable` que en realidad depende de una tabla. Al cambiar
+esa tabla, la lectura secuencial ve una fila que el índice no tiene, hasta que un `REINDEX` la
+agrega.
 """
 
 from datetime import UTC, datetime
@@ -59,9 +60,9 @@ def gist_de_nucleo(motor_migrate) -> int:
 
 @pytest.fixture
 def desajustable(motor_migrate, base_de_prueba):
-    """Tabla con un GiST de exclusión sobre una clave que se puede desajustar a pedido. Tres
-    filas de dos consorcios, con vigencias que no se solapan entre ninguna (así el `REINDEX`
-    sobre la clave común no choca con la exclusión)."""
+    """Tabla con un GiST de exclusión parcial que se puede desajustar a pedido. Tres filas de
+    dos consorcios; el predicado deja afuera la de B hasta `desajustar`, y entonces la lectura
+    secuencial la cuenta y el índice no la tiene."""
     with motor_migrate.begin() as c:
         c.execute(
             text(
@@ -69,13 +70,14 @@ def desajustable(motor_migrate, base_de_prueba):
                 create schema {ESQUEMA};
                 create table {ESQUEMA}.ajuste (corrido boolean not null);
                 insert into {ESQUEMA}.ajuste values (false);
-                create function {ESQUEMA}.clave(c uuid) returns uuid language sql immutable as $$
-                  select case when (select corrido from {ESQUEMA}.ajuste)
-                              then '00000000-0000-0000-0000-000000000000'::uuid else c end $$;
+                create function {ESQUEMA}.incluida(c uuid) returns boolean language sql
+                  immutable as $$
+                  select c <> '{CONSORCIO_B}'::uuid or (select corrido from {ESQUEMA}.ajuste) $$;
                 create table {ESQUEMA}.relacion (
                   consorcio_id uuid not null, desde date not null, hasta date not null,
                   constraint relacion_clave_vigencia_excl exclude using gist (
-                    {ESQUEMA}.clave(consorcio_id) with =, daterange(desde, hasta) with &&));
+                    consorcio_id with =, daterange(desde, hasta) with &&)
+                    where ({ESQUEMA}.incluida(consorcio_id)));
                 insert into {ESQUEMA}.relacion values
                   ('{CONSORCIO_A}', '2024-01-01', '2024-02-01'),
                   ('{CONSORCIO_A}', '2024-03-01', '2024-04-01'),
@@ -142,18 +144,17 @@ def test_un_indice_desajustado_se_reconstruye_y_avisa_down(
     kuma,  # noqa: F811
 ):
     antes = indices.controlar(url_rol("app"), entorno, esquemas=[ESQUEMA])
-    assert (antes["indices"], antes["valores"], antes["diferencias"]) == (1, 2, [])
+    assert (antes["indices"], antes["valores"], antes["diferencias"]) == (1, 1, [])
 
     desajustar(motor_migrate)
     r = indices.controlar(url_rol("app"), entorno, esquemas=[ESQUEMA])
-    cero = "00000000-0000-0000-0000-000000000000"
     assert r["diferencias"] == [
-        {"indice": INDICE, "tabla": f"{ESQUEMA}.relacion", "valor": cero, "secuencial": 3,
+        {"indice": INDICE, "tabla": f"{ESQUEMA}.relacion", "valor": CONSORCIO_B, "secuencial": 1,
          "por_indice": 0}
     ]  # fmt: skip
     assert r["reconstruidos"] == [INDICE]
     assert avisos(kuma)[-1] == ("down", f"reparado con REINDEX: {INDICE}")
-    # Después del REINDEX el índice ve las tres filas con la clave nueva.
+    # Después del REINDEX el índice tiene también la fila de B.
     assert indices.verificar(url_rol("backup"), [ESQUEMA]).diferencias == []
 
 
@@ -181,6 +182,53 @@ def test_si_el_planificador_no_usa_el_gist_el_control_falla(desajustable, entorn
     admin.dispose()
     with pytest.raises(cola.ErrorDefinitivo, match=r"no_verificable: .* usó \[\]"):
         indices.controlar(url_rol("app"), entorno, esquemas=[ESQUEMA])
+
+
+@pytest.fixture
+def btree_mas_barato(motor_migrate, base_de_prueba):
+    """Lo de staging del 10-11-2026 en `nucleo.modo_operacion`: un GiST de exclusión y un B-tree
+    de la misma columna, con el GiST inflado (20 000 filas borradas sin `VACUUM`) y el B-tree
+    recién reconstruido, para que buscar un consorcio de 2 filas sea más barato por el B-tree."""
+    with motor_migrate.begin() as c:
+        c.execute(
+            text(
+                f"""
+                create schema {ESQUEMA};
+                create table {ESQUEMA}.modo (
+                  consorcio_id uuid not null, desde date not null, hasta date,
+                  constraint modo_excl exclude using gist (
+                    consorcio_id with =, daterange(desde, hasta) with &&))
+                  with (autovacuum_enabled = false);
+                create index modo_consorcio on {ESQUEMA}.modo (consorcio_id, desde desc);
+                insert into {ESQUEMA}.modo values
+                  ('{CONSORCIO_A}', '2024-01-01', '2024-02-01'),
+                  ('{CONSORCIO_A}', '2024-02-01', null);
+                insert into {ESQUEMA}.modo
+                  select gen_random_uuid(), '2024-01-01', null from generate_series(1, 20000);
+                delete from {ESQUEMA}.modo where consorcio_id <> '{CONSORCIO_A}';
+                reindex index {ESQUEMA}.modo_consorcio;
+                analyze {ESQUEMA}.modo;
+                """
+            )
+        )
+    yield
+    with motor_migrate.begin() as c:
+        c.execute(text(f"drop schema {ESQUEMA} cascade"))
+
+
+@pytest.mark.db
+def test_un_btree_de_la_misma_columna_no_deja_sin_probar_el_gist(btree_mas_barato, motor_migrate):
+    # Control: la consulta de antes (valor por valor) el planificador la resuelve por el B-tree.
+    with motor_migrate.begin() as c:
+        c.exec_driver_sql(indices.SOLO_INDICE)
+        plan = c.exec_driver_sql(
+            f"explain (format json) select count(*) from {ESQUEMA}.modo"
+            f" where consorcio_id = '{CONSORCIO_A}' and daterange(desde, hasta) <@ '(,)'::daterange"
+        ).scalar_one()
+    assert indices._indices_en_el_plan(plan) == {"modo_consorcio"}
+    # El control prueba el GiST igual, y no encuentra diferencias.
+    v = indices.verificar(url_rol("backup"), [ESQUEMA])
+    assert (v.indices, v.valores, v.diferencias) == (1, 1, [])
 
 
 def test_sin_url_de_backup_es_error_definitivo():
