@@ -75,6 +75,14 @@ function Get-CemProyectosCiAbandonados {
 # formato viejo (cem-ci-<sha7>-<azar>, sin PID) no se reconocen: nunca se borran solas.
 $CemPrefijoCopiaCi = 'cem-ci-copia-'
 $CemFormatoCopiaCi = "^$([regex]::Escape($CemPrefijoCopiaCi))(?<sha>[0-9a-f]{7})-(?<pid>\d+)-(?<azar>[0-9a-f]{8})$"
+# Dos corridas que arrancan a la vez verían las mismas copias abandonadas y sus Remove-Item se
+# pisarían (uno falla y corta su corrida). La limpieza entera (listar y borrar) va bajo este mutex
+# con nombre: la segunda corrida espera y, al listar, ya no ve lo que borró la primera. Un renombre
+# a un nombre propio NO sirve de reclamo en Windows: medido el 10-11-2026, dos Directory.Move del
+# mismo origen pueden terminar los dos sin error (MoveFileEx renombra por handle).
+$CemMutexLimpiezaCopiasCi = 'Global\cem-ci-limpieza-copias'
+# Espera máxima por el mutex; vencida, la corrida falla (no se limpia a ciegas).
+$CemEsperaLimpiezaCopiasCi = [timespan]'00:10:00'
 # Con -ConservarCopia la copia lleva otro prefijo, fuera del formato: no se borra nunca sola.
 $CemPrefijoCopiaConservada = 'cem-ci-conservada-'
 
@@ -103,6 +111,32 @@ function Get-CemCopiasCiAbandonadas {
         $m = [regex]::Match((Split-Path -Leaf $c), $CemFormatoCopiaCi)
         if (-not (& $ProcesoVivo ([int]$m.Groups['pid'].Value))) { [IO.Path]::GetFullPath($c) }
     }
+}
+
+# Borra las copias abandonadas, con el mutex de limpieza tomado: lista ($Listar devuelve rutas de
+# carpetas; por defecto, las de la carpeta temporal con el prefijo), filtra con
+# Get-CemCopiasCiAbandonadas, reafirma el límite y borra. Devuelve las rutas borradas. Una copia
+# que una corrida cortada dejó a medio borrar conserva su nombre: la toma la corrida siguiente.
+function Remove-CemCopiasCiAbandonadas {
+    param([scriptblock]$Listar = { @(Get-ChildItem -Directory -LiteralPath ([IO.Path]::GetTempPath()) -Filter "$CemPrefijoCopiaCi*" | ForEach-Object FullName) },
+          [scriptblock]$ProcesoVivo = $CemProcesoVivo)
+    $mutex = [Threading.Mutex]::new($false, $CemMutexLimpiezaCopiasCi)
+    try {
+        try { $tomado = $mutex.WaitOne($CemEsperaLimpiezaCopiasCi) }
+        # Lo tenía un proceso que murió sin soltarlo (corrida cortada a mitad de la limpieza): el
+        # mutex pasa a este proceso; lo que quedó a medio borrar se vuelve a listar abajo.
+        catch [Threading.AbandonedMutexException] { $tomado = $true }
+        if (-not $tomado) { throw "la limpieza de copias de otra corrida no soltó $CemMutexLimpiezaCopiasCi en $CemEsperaLimpiezaCopiasCi" }
+        try {
+            foreach ($c in @(Get-CemCopiasCiAbandonadas -Carpetas (& $Listar) -ProcesoVivo $ProcesoVivo)) {
+                if (-not (Test-CemCopiaCi -Carpeta $c)) { throw "no se borra $c`: no es una copia de ci.ps1 dentro de la carpeta temporal" }
+                Remove-Item -LiteralPath $c -Recurse -Force
+                $c
+            }
+        }
+        finally { $mutex.ReleaseMutex() }
+    }
+    finally { $mutex.Dispose() }
 }
 
 function Get-CemCarpetaEstado {

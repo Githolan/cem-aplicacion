@@ -333,14 +333,10 @@ try {
         if ($quedan) { throw "la corrida cortada $abandonado dejó $($quedan.Count) contenedores" }
     }
     # Sus copias LF en la carpeta temporal también quedaron (el `finally` no corrió): se borran
-    # las de procesos muertos. Las del formato viejo, sin PID, no se tocan.
-    $candidatas = @(Get-ChildItem -Directory -LiteralPath ([IO.Path]::GetTempPath()) -Filter "$CemPrefijoCopiaCi*" | ForEach-Object FullName)
-    $copiasAbandonadas = @(Get-CemCopiasCiAbandonadas -Carpetas $candidatas)
-    foreach ($abandonada in $copiasAbandonadas) {
-        if (-not (Test-CemCopiaCi -Carpeta $abandonada)) { throw "no se borra $abandonada`: no es una copia de ci.ps1 dentro de la carpeta temporal" }
-        Remove-Item -LiteralPath $abandonada -Recurse -Force
-    }
-    Escribir "  copias de corridas cortadas borradas: $($copiasAbandonadas.Count) (de $($candidatas.Count) con el prefijo $CemPrefijoCopiaCi)" $(if ($copiasAbandonadas.Count) { 'Yellow' } else { 'Gray' })
+    # las de procesos muertos, bajo el mutex de limpieza (dos corridas que arrancan a la vez no se
+    # pisan: la segunda ya no ve lo que borró la primera). Las del formato viejo, sin PID, no se tocan.
+    $copiasBorradas = @(Remove-CemCopiasCiAbandonadas)
+    Escribir "  copias de corridas cortadas borradas: $($copiasBorradas.Count)" $(if ($copiasBorradas.Count) { 'Yellow' } else { 'Gray' })
 
     # --- 0. copia LF del commit -------------------------------------------------
     Etapa 'Copia LF del commit'
