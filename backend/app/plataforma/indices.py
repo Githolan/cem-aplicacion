@@ -12,11 +12,15 @@ Cómo compara, en una sola foto (`REPEATABLE READ`, rol `cem_backup`, que lee to
 1. Por cada índice GiST de `nucleo`, cuenta las filas de la tabla por cada valor de la primera
    columna del índice (`consorcio_id` en todos los de hoy), con una lectura secuencial. Si el
    índice es parcial, solo las filas de su predicado.
-2. Cuenta lo mismo forzando un escaneo por índice (no `index only`), valor por valor. Para que el
-   planificador elija ese índice y no un B-tree de la misma columna, la condición suma su columna
-   de rango con `<@ '(,)'`, que toda fila cumple (también un rango vacío) y que un B-tree no
-   resuelve. El `EXPLAIN` de cada consulta tiene que nombrar el índice controlado: si nombra otro,
-   el control no probó nada y falla (`ErrorDefinitivo`), en vez de pasar en silencio.
+2. Cuenta lo mismo forzando un escaneo por índice (no `index only`), en una sola consulta por
+   índice: la única condición es su columna de rango con `<@ '(,)'`, que toda fila cumple (también
+   un rango vacío) y que solo un índice sobre ese rango resuelve, y el conteo por valor se hace
+   afuera, sobre las filas que devolvió el índice (CTE `materialized`, para que el agrupamiento no
+   le pida orden a un B-tree). Antes la consulta iba valor por valor con `clave = valor`, y un
+   B-tree de la misma columna podía ganarle en costo al GiST (staging, 10-11-2026:
+   `modo_operacion_consorcio` para un consorcio de 2 filas). El `EXPLAIN` tiene que nombrar el
+   índice controlado: si nombra otro, el control no probó nada y falla (`ErrorDefinitivo`), en vez
+   de pasar en silencio. Un GiST sin columna de rango tampoco se puede probar así y falla igual.
 3. Si algún conteo difiere, reconstruye ese índice con `REINDEX` en una conexión de `cem_app`
    (permiso `MAINTAIN`, migración 0022) y vuelve a comparar. Son índices de restricciones de
    exclusión: PostgreSQL no los reconstruye con `CONCURRENTLY`, así que el `REINDEX` frena las
@@ -58,17 +62,21 @@ LISTAR = text(
     select format('%I.%I', n.nspname, i.relname) as indice, i.relname as nombre,
            format('%I.%I', n.nspname, t.relname) as tabla,
            pg_get_indexdef(x.indexrelid, 1, true) as clave,
-           (select pg_get_indexdef(x.indexrelid, k, true)
-              from generate_series(2, x.indnkeyatts) k
-              join pg_opclass o on o.oid = x.indclass[k - 1]
-             where o.opcname = 'range_ops'
-             order by k limit 1) as rango,
+           r.rango, r.tipo_rango,
            pg_get_expr(x.indpred, x.indrelid, true) as predicado
       from pg_index x
       join pg_class i on i.oid = x.indexrelid
       join pg_am a on a.oid = i.relam
       join pg_class t on t.oid = x.indrelid
       join pg_namespace n on n.oid = t.relnamespace
+      left join lateral (
+            select pg_get_indexdef(x.indexrelid, k, true) as rango,
+                   format_type(ia.atttypid, ia.atttypmod) as tipo_rango
+              from generate_series(2, x.indnkeyatts) k
+              join pg_opclass o on o.oid = x.indclass[k - 1]
+              join pg_attribute ia on ia.attrelid = x.indexrelid and ia.attnum = k
+             where o.opcname = 'range_ops'
+             order by k limit 1) r on true
      where a.amname = 'gist' and n.nspname = any(:esquemas)
      order by 1
     """
@@ -110,31 +118,35 @@ def _indices_en_el_plan(plan: Any) -> set[str]:
 
 
 def _verificar_indice(c: Connection, fila: Any) -> tuple[int, list[Diferencia]]:
-    c.exec_driver_sql(SIN_INDICES)
-    tipo_rango = f"pg_typeof({fila.rango})::text" if fila.rango else "null::text"
+    if not fila.rango:
+        raise cola.ErrorDefinitivo(f"no_verificable: {fila.indice} no tiene columna de rango")
     # Un índice parcial solo cubre las filas de su predicado, y el planificador solo lo usa si
     # la consulta lo repite: las dos lecturas llevan el mismo predicado.
     parcial = f"({fila.predicado})" if fila.predicado else "true"
-    secuencial = c.exec_driver_sql(
-        f"select pg_typeof({fila.clave})::text, ({fila.clave})::text, count(*), {tipo_rango}"
-        f" from {fila.tabla} where {parcial} group by 1, 2, 4"
-    ).all()
+    c.exec_driver_sql(SIN_INDICES)
+    secuencial = dict(
+        c.exec_driver_sql(
+            f"select ({fila.clave})::text, count(*) from {fila.tabla} where {parcial} group by 1"
+        ).all()
+    )
     c.exec_driver_sql(SOLO_INDICE)
-    diferencias = []
-    for tipo, valor, cantidad, tipo_rango in secuencial:
-        condicion = f"{parcial} and ({fila.clave}) = cast(%(v)s as {tipo})"
-        if fila.rango:
-            condicion += f" and ({fila.rango}) <@ '(,)'::{tipo_rango}"
-        consulta = f"select count(*) from {fila.tabla} where {condicion}"
-        plan = c.exec_driver_sql(f"explain (format json) {consulta}", {"v": valor}).scalar_one()
-        usados = _indices_en_el_plan(json.loads(plan) if isinstance(plan, str) else plan)
-        if usados != {fila.nombre}:
-            raise cola.ErrorDefinitivo(
-                f"no_verificable: para {fila.indice} el planificador usó {sorted(usados)}"
-            )
-        por_indice = c.exec_driver_sql(consulta, {"v": valor}).scalar_one()
-        if por_indice != cantidad:
-            diferencias.append(Diferencia(fila.indice, fila.tabla, valor, cantidad, por_indice))
+    consulta = (
+        f"with filas as materialized (select ({fila.clave})::text as v from {fila.tabla}"
+        f" where {parcial} and ({fila.rango}) <@ '(,)'::{fila.tipo_rango})"
+        f" select v, count(*) from filas group by 1"
+    )
+    plan = c.exec_driver_sql(f"explain (format json) {consulta}").scalar_one()
+    usados = _indices_en_el_plan(json.loads(plan) if isinstance(plan, str) else plan)
+    if usados != {fila.nombre}:
+        raise cola.ErrorDefinitivo(
+            f"no_verificable: para {fila.indice} el planificador usó {sorted(usados)}"
+        )
+    por_indice = dict(c.exec_driver_sql(consulta).all())
+    diferencias = [
+        Diferencia(fila.indice, fila.tabla, v, secuencial.get(v, 0), por_indice.get(v, 0))
+        for v in sorted(secuencial.keys() | por_indice.keys())
+        if secuencial.get(v, 0) != por_indice.get(v, 0)
+    ]
     return len(secuencial), diferencias
 
 
