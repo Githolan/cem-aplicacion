@@ -19,6 +19,8 @@
 #     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato).
 # 12. Pruebas heredadas: una fusión hereda las de la punta de su PR (mismo árbol); no hereda
 #     sin constancia, de una en rojo, de una que a su vez heredó, ni con otro árbol.
+# 13. Copias LF de ci.ps1 en %TEMP%: llevan el PID; solo las de procesos muertos se toman por
+#     abandonadas (nunca una viva, el formato viejo sin PID, otro nombre ni otra carpeta).
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -345,6 +347,32 @@ $conPartes = @(Get-CemProyectosCiAbandonados -Proyectos @('cem-ci-abc1234-300-bb
 Comprobar 'la parte de una corrida muerta también se toma por abandonada (y una viva no)' (($conPartes -join ',') -eq 'cem-ci-abc1234-300-bbbbbb-p2') ($conPartes -join ',')
 Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo { $true }).Count -eq 0) 'hay'
 Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
+
+Write-Host "`n=== 13. Copias LF de corridas cortadas de ci.ps1 ===" -ForegroundColor Cyan
+$tmpSis = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$nueva = New-CemCarpetaCopiaCi -Sha7 'abc1234'
+Comprobar 'la copia nueva sigue el formato y está en la carpeta temporal' (Test-CemCopiaCi -Carpeta $nueva) $nueva
+Comprobar "la copia lleva el PID de la corrida ($PID)" ((Split-Path -Leaf $nueva) -match "^$([regex]::Escape($CemPrefijoCopiaCi))abc1234-$PID-") $nueva
+$conservada = New-CemCarpetaCopiaCi -Sha7 'abc1234' -Conservada
+Comprobar 'la copia conservada queda fuera del formato' (-not (Test-CemCopiaCi -Carpeta $conservada)) $conservada
+$muerta = Join-Path $tmpSis 'cem-ci-copia-abc1234-300-0123abcd'
+$casosCopia = [ordered]@{
+    'PID vivo'                         = Join-Path $tmpSis 'cem-ci-copia-abc1234-100-0123abcd'
+    'formato viejo, sin PID'           = Join-Path $tmpSis 'cem-ci-abc1234-0123abcd'
+    'sufijo extra'                     = Join-Path $tmpSis 'cem-ci-copia-abc1234-300-0123abcd-x'
+    'otro prefijo'                     = Join-Path $tmpSis 'otro-cem-ci-copia-abc1234-300-0123abcd'
+    'conservada'                       = Join-Path $tmpSis 'cem-ci-conservada-abc1234-300-0123abcd'
+    'proyecto de compose (azar de 6)'  = Join-Path $tmpSis 'cem-ci-abc1234-300-0123ab'
+    'dentro de una subcarpeta de temp' = Join-Path (Join-Path $tmpSis 'otra') 'cem-ci-copia-abc1234-300-0123abcd'
+    'fuera de temp'                    = Join-Path $PSScriptRoot 'cem-ci-copia-abc1234-300-0123abcd'
+}
+$copiasAb = @(Get-CemCopiasCiAbandonadas -Carpetas (@($muerta, $muerta) + @($casosCopia.Values)) -ProcesoVivo $esVivo)
+Comprobar 'solo la copia de un proceso muerto, una vez' (($copiasAb -join ',') -eq $muerta) ($copiasAb -join ',')
+foreach ($k in $casosCopia.Keys) {
+    Comprobar "copia con $k -> no abandonada" ($casosCopia[$k] -notin $copiasAb) $casosCopia[$k]
+}
+Comprobar 'control: con todos vivos no hay copias abandonadas' (@(Get-CemCopiasCiAbandonadas -Carpetas (@($muerta) + @($casosCopia.Values)) -ProcesoVivo { $true }).Count -eq 0) 'hay'
+Comprobar "control: la copia de esta prueba ($PID) se ve viva" (@(Get-CemCopiasCiAbandonadas -Carpetas @($nueva)).Count -eq 0) 'se tomó por abandonada'
 
 Write-Host "`n=== 12. Pruebas heredadas por árbol idéntico (commits reales) ===" -ForegroundColor Cyan
 $repoReal = Split-Path -Parent $PSScriptRoot

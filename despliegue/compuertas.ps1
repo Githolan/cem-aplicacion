@@ -55,14 +55,53 @@ function New-CemIdCorrida {
     "$Sha7-$Proceso-$([guid]::NewGuid().ToString('N').Substring(0, 6))"
 }
 
+# $true si el proceso con ese PID existe.
+$CemProcesoVivo = { param($p) [bool](Get-Process -Id $p -ErrorAction SilentlyContinue) }
+
 # De los proyectos de compose dados, los de corridas de ci.ps1 cuyo proceso ya no existe. Nunca
 # el de un proceso vivo (podría ser otra corrida en curso) ni un nombre con otro formato.
 # Si el PID lo reusó otro proceso, la corrida no se toma por abandonada: queda, no se borra.
 function Get-CemProyectosCiAbandonados {
-    param([string[]]$Proyectos, [scriptblock]$ProcesoVivo = { param($p) [bool](Get-Process -Id $p -ErrorAction SilentlyContinue) })
+    param([string[]]$Proyectos, [scriptblock]$ProcesoVivo = $CemProcesoVivo)
     foreach ($p in ($Proyectos | Sort-Object -Unique)) {
         $m = [regex]::Match($p, $CemFormatoProyectoCi)
         if ($m.Success -and -not (& $ProcesoVivo ([int]$m.Groups['pid'].Value))) { $p }
+    }
+}
+
+# Copia LF del commit que hace ci.ps1, directamente dentro de la carpeta temporal del sistema.
+# Lleva el PID de la corrida, como el proyecto de compose, para reconocer después la copia de una
+# corrida cortada (TaskStop, cierre de la terminal), cuyo `finally` no llegó a borrarla. Las del
+# formato viejo (cem-ci-<sha7>-<azar>, sin PID) no se reconocen: nunca se borran solas.
+$CemPrefijoCopiaCi = 'cem-ci-copia-'
+$CemFormatoCopiaCi = "^$([regex]::Escape($CemPrefijoCopiaCi))(?<sha>[0-9a-f]{7})-(?<pid>\d+)-(?<azar>[0-9a-f]{8})$"
+# Con -ConservarCopia la copia lleva otro prefijo, fuera del formato: no se borra nunca sola.
+$CemPrefijoCopiaConservada = 'cem-ci-conservada-'
+
+function New-CemCarpetaCopiaCi {
+    param([Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{7}$')][string]$Sha7,
+          [int]$Proceso = $PID, [switch]$Conservada)
+    $prefijo = if ($Conservada) { $CemPrefijoCopiaConservada } else { $CemPrefijoCopiaCi }
+    Join-Path ([IO.Path]::GetTempPath()) "$prefijo$Sha7-$Proceso-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+}
+
+# $true solo si la carpeta está directamente dentro de la carpeta temporal del sistema y su nombre
+# cumple exactamente $CemFormatoCopiaCi. Es el límite de todo borrado de copias.
+function Test-CemCopiaCi {
+    param([Parameter(Mandatory)][string]$Carpeta)
+    $completa = [IO.Path]::GetFullPath($Carpeta)
+    $tmp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    ([IO.Path]::GetDirectoryName($completa) -eq $tmp) -and ([IO.Path]::GetFileName($completa) -cmatch $CemFormatoCopiaCi)
+}
+
+# De las carpetas dadas, las copias de corridas de ci.ps1 cuyo proceso ya no existe (ruta completa).
+# Nunca la de un proceso vivo, ni una fuera de la carpeta temporal, ni un nombre con otro formato.
+function Get-CemCopiasCiAbandonadas {
+    param([string[]]$Carpetas, [scriptblock]$ProcesoVivo = $CemProcesoVivo)
+    foreach ($c in ($Carpetas | Sort-Object -Unique)) {
+        if (-not (Test-CemCopiaCi -Carpeta $c)) { continue }
+        $m = [regex]::Match((Split-Path -Leaf $c), $CemFormatoCopiaCi)
+        if (-not (& $ProcesoVivo ([int]$m.Groups['pid'].Value))) { [IO.Path]::GetFullPath($c) }
     }
 }
 
