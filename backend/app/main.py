@@ -25,7 +25,7 @@ from app.identidad.privacidad import router as privacidad
 from app.identidad.router import router as identidad
 from app.identidad.router import validar_origen
 from app.identidad.segundo_factor import router as segundo_factor
-from app.plataforma.router import SIN_LIMITE_DE_TASA
+from app.plataforma.router import SIN_LIMITE_DE_TASA, CacheDependencias
 from app.plataforma.router import router as plataforma
 from app.soporte.router import router as soporte
 
@@ -55,6 +55,7 @@ def crear_app(config: Config | None = None) -> FastAPI:
         else None
     )
     app.state.access = crear_verificador(config.access_equipo, config.access_aud)
+    app.state.salud_dependencias = CacheDependencias(config.salud_cache_segundos)
     errores.instalar(app)
     app.state.limitador = limite.crear_limitador(config.redis_url)
     app.add_middleware(

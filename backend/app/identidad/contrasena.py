@@ -349,15 +349,17 @@ def _resolver_desafio(
         if persona is None:
             return "vencido", None
         fijar_ambito(conn, persona_id=persona)
-        medio = sf.comprobar_codigo(conn, claves, persona, codigo)
+        prueba = sf.prueba_de(conn, claves, persona, codigo)
+        # La base decide el acierto gastando la prueba (`0094`); sin prueba es un intento fallido.
         r = conn.execute(
             text(
                 "select resultado, persona, sesion, vence from nucleo.resolver_desafio_contrasena("
-                ":t, :ok, :s, :d, :a, cast(:ip as inet), :v, :m)"
+                ":t, :paso, :rec, :s, :d, :a, cast(:ip as inet), :v, :m)"
             ),
             {
                 "t": sesiones.hash_token(token),
-                "ok": medio is not None,
+                "paso": None if prueba is None else prueba.paso,
+                "rec": None if prueba is None else prueba.recuperacion,
                 "s": sesiones.hash_token(token_sesion),
                 "d": dispositivo,
                 "a": agente,
@@ -368,10 +370,12 @@ def _resolver_desafio(
         ).one()
         if r.resultado != "ok":
             return r.resultado, None
+        if prueba is None:
+            raise RuntimeError("la base abrió la sesión sin una prueba del segundo factor")
         nombre, correo_persona = rutas_auth.persona_de(conn, persona)
     log.info(
         "sesión creada con contraseña y segundo factor",
-        extra={"campos": {"persona_id": str(persona), "medio": medio}},
+        extra={"campos": {"persona_id": str(persona), "medio": prueba.medio}},
     )
     return "ok", SesionActual(
         persona_id=persona, nombre=nombre, correo=correo_persona, sesion_id=r.sesion,

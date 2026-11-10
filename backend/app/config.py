@@ -15,6 +15,10 @@ PAGOS_HORAS_TOMAR = 24
 """Decisión 1 del propietario (07-11-2026). `CEM_PAGOS_HORAS_TOMAR` la cambia."""
 COTEJO_MAXIMO_LINEAS = 50_000
 """Más que el extracto de varios años de un edificio."""
+SALUD_CACHE_SEGUNDOS = 10
+"""Cuánto se reutiliza el resultado de `/api/v1/health/deps` (revisión de seguridad H3, P3): la
+ruta es pública y sin límite de tasa, y sin caché cada llamada toma una conexión. Kuma la consulta
+cada minuto, así que 10 segundos no le esconden nada. `CEM_SALUD_CACHE_SEGUNDOS` la cambia."""
 
 
 @dataclass(frozen=True)
@@ -47,6 +51,8 @@ class Config:
     (`cem-frontend.conf.template`): más que eso pide cambiarlo también ahí."""
     cotejo_maximo_lineas: int = COTEJO_MAXIMO_LINEAS
     """Líneas máximas de un extracto."""
+    salud_cache_segundos: int = SALUD_CACHE_SEGUNDOS
+    """Segundos durante los que `/api/v1/health/deps` reutiliza su última comprobación."""
 
 
 def _dias(variable: str, por_defecto: int) -> int:
@@ -83,4 +89,5 @@ def cargar() -> Config:
         pagos_horas_tomar=_positivo("CEM_PAGOS_HORAS_TOMAR", PAGOS_HORAS_TOMAR),
         cotejo_tope_bytes=_positivo("CEM_COTEJO_TOPE_BYTES", TOPE_BYTES),
         cotejo_maximo_lineas=_positivo("CEM_COTEJO_MAXIMO_LINEAS", COTEJO_MAXIMO_LINEAS),
+        salud_cache_segundos=_positivo("CEM_SALUD_CACHE_SEGUNDOS", SALUD_CACHE_SEGUNDOS),
     )

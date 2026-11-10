@@ -2,7 +2,10 @@
 aunque Redis esté caído, justamente para informarlo."""
 
 import logging
+import threading
+import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from cem_contracts import VERSION_CONTRATO
 from cem_contracts.salud import EstadoCola, EstadoDependencia, Salud, SaludDependencias
@@ -52,6 +55,35 @@ def salud_cola(motor: MotorDep) -> EstadoCola:
     )
 
 
+@dataclass(frozen=True)
+class Comprobacion:
+    db: EstadoDependencia
+    redis: EstadoDependencia
+
+
+class CacheDependencias:
+    """Reutiliza la última comprobación de las dependencias durante `segundos` (revisión de
+    seguridad H3, P3: la ruta es pública y sin límite, y cada llamada tomaba una conexión).
+
+    El candado se tiene mientras se comprueba: las llamadas que llegan a la vez esperan a esa
+    única comprobación y reciben su resultado, en lugar de abrir una cada una. Se guarda tanto el
+    «ok» como la «falla»: una dependencia caída tampoco se vuelve a sondear antes de tiempo."""
+
+    def __init__(self, segundos: int) -> None:
+        self._segundos = segundos
+        self._candado = threading.Lock()
+        self._ultima: Comprobacion | None = None
+        self._vence = 0.0
+
+    def obtener(self, comprobar: Callable[[], Comprobacion]) -> Comprobacion:
+        with self._candado:
+            ahora = time.monotonic()
+            if self._ultima is None or ahora >= self._vence:
+                self._ultima = comprobar()
+                self._vence = time.monotonic() + self._segundos
+            return self._ultima
+
+
 def _probar(nombre: str, prueba: Callable[[], object]) -> EstadoDependencia:
     try:
         prueba()
@@ -83,10 +115,15 @@ def _redis(request: Request) -> None:
 )
 def dependencias(request: Request) -> JSONResponse:
     """PostgreSQL (`select 1` con `cem_app`) y Redis (`PING`)."""
-    db = _probar("db", lambda: _db(request))
-    redis = _probar("redis", lambda: _redis(request))
-    falla = EstadoDependencia.FALLA in (db, redis)
+    # El resultado se reutiliza durante `CEM_SALUD_CACHE_SEGUNDOS` (`CacheDependencias`); la
+    # respuesta no cambia. El texto de arriba es la descripción del contrato: no se toca.
+    c = request.app.state.salud_dependencias.obtener(
+        lambda: Comprobacion(
+            db=_probar("db", lambda: _db(request)), redis=_probar("redis", lambda: _redis(request))
+        )
+    )
+    falla = EstadoDependencia.FALLA in (c.db, c.redis)
     cuerpo = SaludDependencias(
-        estado=EstadoDependencia.FALLA if falla else EstadoDependencia.OK, db=db, redis=redis
+        estado=EstadoDependencia.FALLA if falla else EstadoDependencia.OK, db=c.db, redis=c.redis
     )
     return JSONResponse(cuerpo.model_dump(mode="json"), status_code=503 if falla else 200)

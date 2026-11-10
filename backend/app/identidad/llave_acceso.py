@@ -1,7 +1,8 @@
 """Llave de acceso: el PIN, la huella o la cara del dispositivo (WebAuthn; migración 0070).
 
-Es otro medio de escribir `nucleo.sesion.segundo_factor_en`, así que las reglas de dinero (R10) y
-las separaciones no cambian. CEM guarda la clave pública: el gesto nunca sale del dispositivo.
+Es otro medio de marcar `nucleo.sesion.segundo_factor_en` (siempre por las funciones de `0094`),
+así que las reglas de dinero (R10) y las separaciones no cambian. CEM guarda la clave pública: el
+gesto nunca sale del dispositivo.
 
 **El desafío** es de un solo uso y va ligado a la sesión. Se gasta en su propia transacción, antes
 de comprobar la firma: una respuesta inválida revierte lo demás, y el desafío no puede volver.
@@ -251,7 +252,11 @@ async def alta(
             },
         ).scalar_one()
         codigos = None if sf.restantes(conn) else sf.emitir_codigos(conn, claves, persona)
-        sf.marcar_verificada(conn, identidad)
+        marcada = conn.execute(
+            text("select nucleo.confirmar_llave(:s, :l)"), {"s": sf.sesion_de(identidad), "l": id_}
+        ).scalar_one()
+        if marcada is None:
+            raise RuntimeError("la base no reconoció la llave recién registrada")
         sf.avisar(conn, persona, ASUNTO_ALTA, "Se agregó una llave de acceso a")
     log.info("llave de acceso agregada", extra={"campos": {"persona_id": str(persona)}})
     return LlaveRegistrada(id=id_, codigos_recuperacion=codigos)
@@ -307,7 +312,7 @@ async def verificar(
         fila = conn.execute(
             text(
                 "select id, clave_publica, contador from nucleo.llave_acceso"
-                " where credencial_id = :c for update"
+                " where credencial_id = :c"
             ),
             {"c": _identificador(pedido.credencial)},
         ).one_or_none()
@@ -327,13 +332,17 @@ async def verificar(
         except WebAuthnException as e:
             log.info("llave rechazada", extra={"campos": {"motivo": type(e).__name__}})
             raise llave_invalida() from e
-        conn.execute(
-            text(
-                "update nucleo.llave_acceso set contador = :n, ultimo_uso_en = now() where id = :i"
-            ),
-            {"n": verificada.new_sign_count, "i": fila.id},
-        )
-        verificado_en = sf.marcar_verificada(conn, identidad)
+        # La base registra el uso y marca la sesión en la misma sentencia (`0094`): el UPDATE
+        # vuelve a mirar el contador con la fila bloqueada, así que de dos verificaciones a la vez
+        # con el mismo contador solo una marca (por eso aquí no hace falta `for update`, que
+        # `cem_app` ya no puede pedir sin un permiso de UPDATE en la tabla).
+        verificado_en = conn.execute(
+            text("select nucleo.verificar_sesion_con_llave(:s, :l, :n)"),
+            {"s": sf.sesion_de(identidad), "l": fila.id, "n": verificada.new_sign_count},
+        ).scalar_one()
+        if verificado_en is None:
+            log.info("llave rechazada: contador_no_avanza")
+            raise llave_invalida()
         restantes = sf.restantes(conn)
     log.info(
         "segundo factor verificado",
@@ -368,10 +377,7 @@ def baja(llave_id: UUID, identidad: sf.SegundoFactorRecienteDep, motor: MotorDep
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos esa llave.")
         if not sf.tiene_medio(conn):
             conn.execute(text("delete from nucleo.codigo_recuperacion"))
-        conn.execute(
-            text("update nucleo.sesion set segundo_factor_en = null where persona_id = :p"),
-            {"p": persona},
-        )
+        sf.olvidar_verificaciones(conn)
         sf.avisar(conn, persona, ASUNTO_BAJA, "Se quitó una llave de acceso de")
     log.info("llave de acceso quitada", extra={"campos": {"persona_id": str(persona)}})
     return Response(status_code=204, headers=sf.SIN_CACHE)
