@@ -1,6 +1,7 @@
 """Reparto de los archivos de prueba en partes para correrlas a la vez (ci.ps1)."""
 
 import pytest
+
 from tests.conftest import repartir
 
 ARCHIVOS = {f"tests/test_{i:03}.py": (i * 37) % 53 + 1 for i in range(120)}
