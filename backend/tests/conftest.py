@@ -498,6 +498,21 @@ def volver_a_subir(cfg, motor_migrate: Engine) -> None:
     faltan = sin_procedencia(motor_migrate)
     assert not faltan, f"vínculos sin procedencia antes de subir a 0014 (E58): {faltan}"
     command.upgrade(cfg, "head")
+    descartar_conexiones_de_la_sesion()
+
+
+MOTORES_DE_LA_SESION: list[Engine] = []
+"""Los motores que viven toda la sesión (`motor_migrate`, `motor_app`)."""
+
+
+def descartar_conexiones_de_la_sesion() -> None:
+    """Bajar y volver a subir la base recrea sus tipos y funciones con OID nuevos. Las conexiones
+    que quedaron en los pools de la sesión tienen sentencias preparadas (psycopg prepara una
+    consulta desde su quinta ejecución) con los OID viejos, y la próxima falla con «cache lookup
+    failed for type» según qué pruebas hayan corrido antes en esa parte. Se cierran: las siguientes
+    pruebas abren conexiones nuevas."""
+    for motor in MOTORES_DE_LA_SESION:
+        motor.dispose()
 
 
 @pytest.fixture
@@ -517,12 +532,16 @@ def redis_limpio() -> Iterator[Redis]:
 
 @pytest.fixture(scope="session")
 def motor_migrate(base_de_prueba) -> Engine:
-    return create_engine(url_rol("migrate"))
+    motor = create_engine(url_rol("migrate"))
+    MOTORES_DE_LA_SESION.append(motor)
+    return motor
 
 
 @pytest.fixture(scope="session")
 def motor_app(base_de_prueba) -> Engine:
-    return create_engine(url_rol("app"))
+    motor = create_engine(url_rol("app"))
+    MOTORES_DE_LA_SESION.append(motor)
+    return motor
 
 
 @dataclass(frozen=True)
