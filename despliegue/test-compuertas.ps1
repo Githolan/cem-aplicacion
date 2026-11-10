@@ -19,6 +19,10 @@
 #     de procesos muertos se toman por abandonadas (nunca una viva ni otro formato).
 # 12. Pruebas heredadas: una fusión hereda las de la punta de su PR (mismo árbol); no hereda
 #     sin constancia, de una en rojo, de una que a su vez heredó, ni con otro árbol.
+# 13. Copias LF de ci.ps1 en %TEMP%: llevan el PID; solo las de procesos muertos se toman por
+#     abandonadas (nunca una viva, el formato viejo sin PID, otro nombre ni otra carpeta); el
+#     borrado real bajo el mutex, con el mutex abandonado, y dos procesos que limpian a la vez
+#     las mismas copias: los dos terminan bien y no queda ninguna.
 #
 # Usa una carpeta de estado temporal (CEM_DESPLIEGUE_ESTADO); no toca la real.
 # Uso:  pwsh despliegue/test-compuertas.ps1      código 0 = todo verde
@@ -345,6 +349,80 @@ $conPartes = @(Get-CemProyectosCiAbandonados -Proyectos @('cem-ci-abc1234-300-bb
 Comprobar 'la parte de una corrida muerta también se toma por abandonada (y una viva no)' (($conPartes -join ',') -eq 'cem-ci-abc1234-300-bbbbbb-p2') ($conPartes -join ',')
 Comprobar 'control: con todos vivos no hay abandonadas' (@(Get-CemProyectosCiAbandonados -Proyectos $proyectos -ProcesoVivo { $true }).Count -eq 0) 'hay'
 Comprobar "control: el proceso de esta prueba ($PID) se ve vivo" (@(Get-CemProyectosCiAbandonados -Proyectos @("cem-ci-abc1234-$PID-eeeeee")).Count -eq 0) 'se tomó por abandonada'
+
+Write-Host "`n=== 13. Copias LF de corridas cortadas de ci.ps1 ===" -ForegroundColor Cyan
+$tmpSis = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$nueva = New-CemCarpetaCopiaCi -Sha7 'abc1234'
+Comprobar 'la copia nueva sigue el formato y está en la carpeta temporal' (Test-CemCopiaCi -Carpeta $nueva) $nueva
+Comprobar "la copia lleva el PID de la corrida ($PID)" ((Split-Path -Leaf $nueva) -match "^$([regex]::Escape($CemPrefijoCopiaCi))abc1234-$PID-") $nueva
+$conservada = New-CemCarpetaCopiaCi -Sha7 'abc1234' -Conservada
+Comprobar 'la copia conservada queda fuera del formato' (-not (Test-CemCopiaCi -Carpeta $conservada)) $conservada
+$muerta = Join-Path $tmpSis 'cem-ci-copia-abc1234-300-0123abcd'
+$casosCopia = [ordered]@{
+    'PID vivo'                         = Join-Path $tmpSis 'cem-ci-copia-abc1234-100-0123abcd'
+    'formato viejo, sin PID'           = Join-Path $tmpSis 'cem-ci-abc1234-0123abcd'
+    'sufijo extra'                     = Join-Path $tmpSis 'cem-ci-copia-abc1234-300-0123abcd-x'
+    'otro prefijo'                     = Join-Path $tmpSis 'otro-cem-ci-copia-abc1234-300-0123abcd'
+    'conservada'                       = Join-Path $tmpSis 'cem-ci-conservada-abc1234-300-0123abcd'
+    'proyecto de compose (azar de 6)'  = Join-Path $tmpSis 'cem-ci-abc1234-300-0123ab'
+    'dentro de una subcarpeta de temp' = Join-Path (Join-Path $tmpSis 'otra') 'cem-ci-copia-abc1234-300-0123abcd'
+    'fuera de temp'                    = Join-Path $PSScriptRoot 'cem-ci-copia-abc1234-300-0123abcd'
+}
+$copiasAb = @(Get-CemCopiasCiAbandonadas -Carpetas (@($muerta, $muerta) + @($casosCopia.Values)) -ProcesoVivo $esVivo)
+Comprobar 'solo la copia de un proceso muerto, una vez' (($copiasAb -join ',') -eq $muerta) ($copiasAb -join ',')
+foreach ($k in $casosCopia.Keys) {
+    Comprobar "copia con $k -> no abandonada" ($casosCopia[$k] -notin $copiasAb) $casosCopia[$k]
+}
+Comprobar 'control: con todos vivos no hay copias abandonadas' (@(Get-CemCopiasCiAbandonadas -Carpetas (@($muerta) + @($casosCopia.Values)) -ProcesoVivo { $true }).Count -eq 0) 'hay'
+Comprobar "control: la copia de esta prueba ($PID) se ve viva" (@(Get-CemCopiasCiAbandonadas -Carpetas @($nueva)).Count -eq 0) 'se tomó por abandonada'
+
+# Borrado real bajo el mutex: solo la copia del PID muerto; la viva y la del formato viejo quedan.
+$muertoReal = 999999; while (Get-Process -Id $muertoReal -ErrorAction SilentlyContinue) { $muertoReal++ }
+function Nueva-CopiaDePrueba([string]$Ruta) {
+    New-Item -ItemType Directory -Path (Join-Path $Ruta 'frontend\node_modules\paquete') | Out-Null
+    1..30 | ForEach-Object { "$_" | Out-File (Join-Path $Ruta "frontend\node_modules\paquete\$_.txt") }
+    $Ruta
+}
+$realMuerta = Nueva-CopiaDePrueba (New-CemCarpetaCopiaCi -Sha7 'abc1234' -Proceso $muertoReal)
+$realViva   = Nueva-CopiaDePrueba (New-CemCarpetaCopiaCi -Sha7 'abc1234')
+$realVieja  = Nueva-CopiaDePrueba (Join-Path $tmpSis "cem-ci-abc1234-$([guid]::NewGuid().ToString('N').Substring(0, 8))")
+$borradasReal = @(Remove-CemCopiasCiAbandonadas -Listar { @($realMuerta, $realViva, $realVieja) })
+Comprobar 'borra solo la copia del PID muerto y la devuelve' ((($borradasReal -join ',') -eq $realMuerta) -and -not (Test-Path -LiteralPath $realMuerta)) ($borradasReal -join ',')
+Comprobar 'control: la copia viva y la del formato viejo siguen ahí' ((Test-Path -LiteralPath $realViva) -and (Test-Path -LiteralPath $realVieja)) 'falta alguna'
+
+# Mutex abandonado (una corrida murió a mitad de la limpieza): la siguiente lo toma y limpia.
+$asa = [Threading.Mutex]::new($false, $CemMutexLimpiezaCopiasCi)   # mantiene vivo el objeto
+$hijo = Start-Process pwsh -PassThru -NoNewWindow -ArgumentList @('-NoProfile', '-Command',
+    "`$m = [Threading.Mutex]::new(`$false, '$CemMutexLimpiezaCopiasCi'); if (-not `$m.WaitOne(5000)) { exit 2 }; exit 0")
+$hijo | Wait-Process
+$abandonadaReal = Nueva-CopiaDePrueba (New-CemCarpetaCopiaCi -Sha7 'abc1234' -Proceso $muertoReal)
+$e = $null; $tras = @(); try { $tras = @(Remove-CemCopiasCiAbandonadas -Listar { @($abandonadaReal) }) } catch { $e = $_ }
+Comprobar 'con el mutex abandonado por un proceso muerto, la limpieza sigue y borra' (($hijo.ExitCode -eq 0) -and ($null -eq $e) -and ($tras.Count -eq 1) -and -not (Test-Path -LiteralPath $abandonadaReal)) "hijo=$($hijo.ExitCode) error=$e"
+$asa.Dispose()
+
+# Dos procesos limpian a la vez las mismas 20 copias: los dos terminan bien, entre los dos borran
+# 20 (cada una una sola vez) y no queda ninguna.
+$concurrentes = @(1..20 | ForEach-Object { Nueva-CopiaDePrueba (New-CemCarpetaCopiaCi -Sha7 'abc1234' -Proceso $muertoReal) })
+$lista = Join-Path $raiz 'copias-concurrentes.txt'; $concurrentes | Out-File $lista
+$trabajador = Join-Path $raiz 'limpiar-copias.ps1'
+@'
+param($Compuertas, $Lista, $Inicio, $Salida)
+$ErrorActionPreference = 'Stop'
+. $Compuertas
+while ([datetime]::UtcNow -lt [datetime]::Parse($Inicio).ToUniversalTime()) { Start-Sleep -Milliseconds 2 }
+$r = @(Remove-CemCopiasCiAbandonadas -Listar { @(Get-Content $Lista | Where-Object { Test-Path -LiteralPath $_ }) })
+$r | Out-File $Salida
+'@ | Out-File $trabajador
+$inicio = [datetime]::UtcNow.AddSeconds(4).ToString('o')
+$procesos = @(1, 2 | ForEach-Object {
+    Start-Process pwsh -PassThru -NoNewWindow -ArgumentList @('-NoProfile', '-File', $trabajador, (Join-Path $PSScriptRoot 'compuertas.ps1'), $lista, $inicio, (Join-Path $raiz "salida-$_.txt")) })
+$procesos | Wait-Process
+$res = @(1, 2 | ForEach-Object { $s = Join-Path $raiz "salida-$_.txt"; if (Test-Path $s) { @(Get-Content $s) } })
+Write-Host "  (concurrente: borradas por cada proceso: $((1, 2 | ForEach-Object { $s = Join-Path $raiz "salida-$_.txt"; if (Test-Path $s) { @(Get-Content $s).Count } else { 'sin salida' } }) -join ' y '))"
+Comprobar 'concurrente: los dos procesos terminan con código 0' (@($procesos | Where-Object ExitCode -ne 0).Count -eq 0) (($procesos | ForEach-Object ExitCode) -join ',')
+Comprobar 'concurrente: entre los dos borran las 20, cada una una vez' (($res.Count -eq 20) -and (@($res | Sort-Object -Unique).Count -eq 20)) "$($res.Count) borradas"
+Comprobar 'concurrente: no queda ninguna copia' (@($concurrentes | Where-Object { Test-Path -LiteralPath $_ }).Count -eq 0) 'quedan'
+foreach ($r in @($realViva, $realVieja)) { if ((Split-Path -Leaf $r) -like 'cem-ci-*' -and $r.StartsWith($tmpSis)) { Remove-Item -LiteralPath $r -Recurse -Force } }
 
 Write-Host "`n=== 12. Pruebas heredadas por árbol idéntico (commits reales) ===" -ForegroundColor Cyan
 $repoReal = Split-Path -Parent $PSScriptRoot

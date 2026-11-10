@@ -5,7 +5,9 @@
 # commit (git archive con core.autocrlf=false), nunca desde la carpeta de trabajo:
 #
 #   0. copia: ningún .sh con CR (con CRLF la imagen no arranca: trampa de Windows
-#      con core.autocrlf=true)
+#      con core.autocrlf=true). La copia va a %TEMP%\cem-ci-copia-<sha7>-<pid>-<azar>
+#      (compuertas.ps1) y se borra al final; al empezar se borran las de corridas
+#      cortadas cuyo proceso ya no existe (las del formato viejo, sin PID, no se tocan)
 #   1. backend: pytest en Linux contra PostgreSQL 18 y Redis 7 reales
 #      (backend/pruebas/compose.yml, proyecto de compose propio de la corrida,
 #      cem-ci-<sha7>-<pid>-<azar>: dos corridas a la vez no se pisan y cada una baja solo
@@ -46,7 +48,9 @@
 #   pwsh despliegue/ci.ps1 -SinSubirImagenes   corrida local: prueba y no sube nada
 #                                              (la constancia queda sin imágenes y
 #                                              cd.ps1 no despliega esa SHA)
-#   pwsh despliegue/ci.ps1 -ConservarCopia     no borra la copia temporal
+#   pwsh despliegue/ci.ps1 -ConservarCopia     no borra la copia temporal (se llama
+#                                              cem-ci-conservada-<sha7>-<pid>-<azar> y
+#                                              ninguna corrida la borra después)
 #   pwsh despliegue/ci.ps1 -SinHeredar         corre todas las etapas aunque haya pruebas heredadas
 #   pwsh despliegue/ci.ps1 -PartesBackend 1    pytest del backend en una sola parte (por defecto 4
 #                                              a la vez, cada una con su proyecto de compose
@@ -83,7 +87,6 @@ $ServicioPruebas   = 'cem-backend-pruebas'
 $ServicioPostgres  = 'cem-postgres-pruebas'
 $ComposeRelativo   = 'backend/pruebas/compose.yml'
 $PruebaImagen      = 'frontend/scripts/probar-imagen.sh'
-$PrefijoCopia      = 'cem-ci-'
 # Un .sh que se sabe que existe: si la búsqueda no lo encuentra, la búsqueda está mal.
 $ShConocido        = 'frontend/scripts/probar-imagen.sh'
 # Prefijo de los contenedores y la red de frontend/scripts/probar-extremo-a-extremo.sh.
@@ -304,7 +307,7 @@ function Guardar-Resultado {
     $ok
 }
 
-$copia = Join-Path ([IO.Path]::GetTempPath()) "$PrefijoCopia$sha7-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+$copia = New-CemCarpetaCopiaCi -Sha7 $sha7 -Conservada:$ConservarCopia
 $composeArgs = @('compose', '-p', $ProyectoCompose, '-f', (Join-Path $copia $ComposeRelativo))
 $ok = $false
 $pruebasDe = $null
@@ -329,6 +332,11 @@ try {
         $quedan = @(docker ps -aq --filter "label=com.docker.compose.project=$abandonado")
         if ($quedan) { throw "la corrida cortada $abandonado dejó $($quedan.Count) contenedores" }
     }
+    # Sus copias LF en la carpeta temporal también quedaron (el `finally` no corrió): se borran
+    # las de procesos muertos, bajo el mutex de limpieza (dos corridas que arrancan a la vez no se
+    # pisan: la segunda ya no ve lo que borró la primera). Las del formato viejo, sin PID, no se tocan.
+    $copiasBorradas = @(Remove-CemCopiasCiAbandonadas)
+    Escribir "  copias de corridas cortadas borradas: $($copiasBorradas.Count)" $(if ($copiasBorradas.Count) { 'Yellow' } else { 'Gray' })
 
     # --- 0. copia LF del commit -------------------------------------------------
     Etapa 'Copia LF del commit'
@@ -510,8 +518,7 @@ finally {
         Subir-Imagenes
     }
     $ok = Guardar-Resultado
-    $tmp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
-    $esCopia = $copia.StartsWith($tmp) -and ((Split-Path -Leaf $copia) -like "$PrefijoCopia$sha7-*")
+    $esCopia = (Test-CemCopiaCi -Carpeta $copia) -and ((Split-Path -Leaf $copia) -like "$CemPrefijoCopiaCi$sha7-$PID-*")
     if ($ConservarCopia) { Escribir "Copia conservada en $copia" }
     elseif ($esCopia -and (Test-Path $copia)) { Remove-Item -Recurse -Force $copia }
 }
