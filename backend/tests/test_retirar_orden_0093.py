@@ -2,8 +2,12 @@
 revisión de pantallas, decisión del propietario del 09-11-2026: «solo mientras nadie la aprobó,
 queda registrado quién y cuándo, y sale de la bandeja». Datos SINTETICOS / PRUEBA / NO REAL."""
 
+import importlib.util
+from pathlib import Path
+
 import pytest
 from alembic import command
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -172,12 +176,30 @@ def test_la_ruta_dice_por_que_no(motor_migrate, motor_app, e):
 # Migración -------------------------------------------------------------------------------------
 
 
+def _migracion_0093():
+    ruta = Path(__file__).parents[1] / "migrations" / "versions" / "0093_retirar_orden_pago.py"
+    spec = importlib.util.spec_from_file_location("migracion_0093", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
 def test_0093_no_baja_con_ordenes_retiradas(motor_migrate, e):
+    """La guarda del downgrade, corrida en una transacción que se revierte. No se baja la base
+    compartida con `command.downgrade`: con migraciones posteriores a 0093, bajar a 0091 primero
+    bajaría esas (cada una en su transacción) y dejaría la base de las demás pruebas sin ellas."""
     o = preparada(motor_migrate, e)
     llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1)
-    with pytest.raises(DBAPIError) as error:
-        command.downgrade(alembic_config(), "0091")
-    assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+    guarda = _migracion_0093().GUARDA_DOWNGRADE
+    with motor_migrate.connect() as c, c.begin() as tx:
+        with pytest.raises(DBAPIError) as error, c.begin_nested():
+            c.execute(text(guarda))
+        assert error.value.orig.diag.message_hint == "downgrade_con_datos"
+        tx.rollback()
+    # Control: la base compartida sigue en la última migración.
+    with motor_migrate.connect() as c:
+        actual = c.execute(text("select version_num from plataforma.alembic_version")).scalar_one()
+    assert actual == ScriptDirectory.from_config(alembic_config()).get_current_head()
     # Control: la migración no bajó y la orden sigue retirada.
     assert orden(motor_migrate, o)["estado"] == "retirada"
 

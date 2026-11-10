@@ -55,8 +55,8 @@ FUNCIONES = (
     "nucleo.entrar_con_contrasena(uuid, text, bytea, uuid, text, inet, interval)",
     "nucleo.pedir_desafio_contrasena(uuid, text, bytea, interval)",
     "nucleo.desafio_contrasena_de(bytea, integer)",
-    "nucleo.resolver_desafio_contrasena(bytea, boolean, bytea, uuid, text, inet, interval,"
-    " integer)",
+    "nucleo.resolver_desafio_contrasena(bytea, bigint, bytea, bytea, uuid, text, inet,"
+    " interval, integer)",
 )
 
 

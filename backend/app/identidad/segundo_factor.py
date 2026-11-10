@@ -27,6 +27,7 @@ import logging
 import secrets
 import struct
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated
 from urllib.parse import quote, urlencode
@@ -220,14 +221,33 @@ def exigir_permiso_de_alta(conn: Connection, identidad: Identidad) -> None:
         raise ErrorApi(403, CodigoError.SEGUNDO_FACTOR_REQUERIDO, sesiones.CONFIRMAR_QUE_SOS_VOS)
 
 
-def marcar_verificada(conn: Connection, identidad: Identidad) -> datetime:
-    return conn.execute(
-        text(
-            "update nucleo.sesion set segundo_factor_en = now() where id = :s"
-            " returning segundo_factor_en"
-        ),
-        {"s": sesion_de(identidad)},
-    ).scalar_one()
+@dataclass(frozen=True)
+class Prueba:
+    """Lo que la base gasta para marcar la sesión (`0095`): el paso TOTP aceptado o el hash de un
+    código de recuperación. La base nunca recibe un «el código sirvió»."""
+
+    medio: str
+    """'totp' o 'recuperacion', para los registros."""
+    paso: int | None = None
+    recuperacion: bytes | None = None
+
+
+def marcar_verificada(conn: Connection, identidad: Identidad, prueba: Prueba) -> datetime | None:
+    """Marca la sesión gastando la prueba (`0095`): avanza `ultimo_paso` o consume el código de
+    recuperación en la misma sentencia. None: la prueba no se pudo gastar (código repetido o
+    inexistente) y no se marcó nada."""
+    if prueba.paso is not None:
+        sql, valor = "select nucleo.verificar_sesion_con_totp(:s, :v)", prueba.paso
+    else:
+        sql = "select nucleo.verificar_sesion_con_recuperacion(:s, :v)"
+        valor = prueba.recuperacion
+    return conn.execute(text(sql), {"s": sesion_de(identidad), "v": valor}).scalar_one()
+
+
+def olvidar_verificaciones(conn: Connection) -> None:
+    """Las sesiones de la persona del ámbito dejan de contar como verificadas (al dar de baja un
+    medio)."""
+    conn.execute(text("select nucleo.olvidar_segundo_factor()")).scalar_one()
 
 
 def emitir_codigos(conn: Connection, claves: Claves, persona_id: UUID) -> list[str]:
@@ -287,11 +307,12 @@ def avisar(conn: Connection, persona_id: UUID, asunto: str, que: str) -> None:
     correo.solicitar(conn, para=para, asunto=asunto, texto=TEXTO_AVISO.format(que=que))
 
 
-def _comprobar_totp(
+def _paso_totp(
     conn: Connection, claves: Claves, persona_id: UUID, codigo: str, *, confirmado: bool
-) -> bool:
-    """Comprueba el código contra el factor (confirmado o pendiente) y, si sirve, registra su
-    paso para que no se repita. Bloquea la fila: dos intentos a la vez no usan el mismo código."""
+) -> int | None:
+    """Comprueba el código contra el factor (confirmado o pendiente) y devuelve su paso si sirve.
+    No escribe: el paso lo registra la función de la base que marca la sesión (`0095`), en la
+    misma transacción. Bloquea la fila: dos intentos a la vez no usan el mismo código."""
     fila = conn.execute(
         text(
             "select secreto_cifrado, ultimo_paso from nucleo.factor_totp"
@@ -306,35 +327,24 @@ def _comprobar_totp(
             "No hay una aplicación de autenticación"
             + (" activa." if confirmado else " esperando confirmación. Empezá el alta de nuevo."),
         )
-    paso = paso_valido(claves.descifrar(persona_id, fila.secreto_cifrado), codigo, fila.ultimo_paso)
-    if paso is None:
-        return False
-    conn.execute(text("update nucleo.factor_totp set ultimo_paso = :p"), {"p": paso})
-    return True
+    return paso_valido(claves.descifrar(persona_id, fila.secreto_cifrado), codigo, fila.ultimo_paso)
 
 
-def comprobar_codigo(conn: Connection, claves: Claves, persona_id: UUID, codigo: str) -> str | None:
-    """Comprueba un código de la aplicación o uno de recuperación (que queda gastado) contra el
-    factor confirmado de la persona del ámbito. Devuelve el medio ('totp' o 'recuperacion') si
-    sirve; None si no. Sin factor confirmado responde 409."""
+def prueba_de(conn: Connection, claves: Claves, persona_id: UUID, codigo: str) -> Prueba | None:
+    """La prueba que corresponde a un código de la aplicación o a uno de recuperación de la
+    persona del ámbito. Un código de la aplicación se comprueba acá (el secreto no se puede
+    descifrar en la base): None si no sirve. Uno de recuperación se compara en la base al
+    gastarlo. Sin medio activo responde 409."""
     if "-" not in codigo:
-        return (
-            "totp" if _comprobar_totp(conn, claves, persona_id, codigo, confirmado=True) else None
-        )
+        paso = _paso_totp(conn, claves, persona_id, codigo, confirmado=True)
+        return None if paso is None else Prueba("totp", paso=paso)
     if not tiene_medio(conn):
         raise ErrorApi(
             409,
             CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
             "No hay una aplicación de autenticación activa.",
         )
-    usado = conn.execute(
-        text(
-            "update nucleo.codigo_recuperacion set usado_en = now()"
-            " where codigo_hash = :h and usado_en is null returning id"
-        ),
-        {"h": claves.hash_recuperacion(persona_id, codigo)},
-    ).one_or_none()
-    return "recuperacion" if usado is not None else None
+    return Prueba("recuperacion", recuperacion=claves.hash_recuperacion(persona_id, codigo))
 
 
 def restantes(conn: Connection) -> int:
@@ -396,7 +406,7 @@ def alta(
             text(
                 "insert into nucleo.factor_totp (persona_id, secreto_cifrado) values (:p, :s)"
                 " on conflict (persona_id) do update set"
-                " secreto_cifrado = excluded.secreto_cifrado, creado_en = now(), ultimo_paso = 0"
+                " secreto_cifrado = excluded.secreto_cifrado, creado_en = now()"
             ),
             {"p": identidad.persona_id, "s": claves.cifrar(identidad.persona_id, secreto)},
         )
@@ -433,11 +443,15 @@ async def confirmar(
     await consumir_intento(request, identidad.persona_id)
     with transaccion(motor, persona_id=identidad.persona_id) as conn:
         exigir_permiso_de_alta(conn, identidad)
-        if not _comprobar_totp(conn, claves, identidad.persona_id, pedido.codigo, confirmado=False):
+        paso = _paso_totp(conn, claves, identidad.persona_id, pedido.codigo, confirmado=False)
+        if paso is None:
             raise codigo_invalido()
-        conn.execute(text("update nucleo.factor_totp set confirmado_en = now()"))
+        confirmada = conn.execute(
+            text("select nucleo.confirmar_totp(:s, :p)"), {"s": sesion_de(identidad), "p": paso}
+        ).scalar_one()
+        if confirmada is None:
+            raise codigo_invalido()
         codigos = emitir_codigos(conn, claves, identidad.persona_id)
-        marcar_verificada(conn, identidad)
         avisar(conn, identidad.persona_id, ASUNTO_ALTA, "Se activó la verificación en dos pasos de")
     log.info("segundo factor activado", extra={"campos": {"persona_id": str(identidad.persona_id)}})
     return CodigosRecuperacion(codigos=codigos)
@@ -466,18 +480,18 @@ async def verificar(
     await consumir_intento(request, identidad.persona_id)
     persona = identidad.persona_id
     with transaccion(motor, persona_id=persona) as conn:
-        medio = comprobar_codigo(conn, claves, persona, pedido.codigo)
-        if medio is None:
+        prueba = prueba_de(conn, claves, persona, pedido.codigo)
+        verificado_en = None if prueba is None else marcar_verificada(conn, identidad, prueba)
+        if prueba is None or verificado_en is None:
             log.info(
                 "verificación de segundo factor rechazada",
                 extra={"campos": {"persona_id": str(persona)}},
             )
             raise codigo_invalido()
-        verificado_en = marcar_verificada(conn, identidad)
         quedan = restantes(conn)
     log.info(
         "segundo factor verificado",
-        extra={"campos": {"persona_id": str(persona), "medio": medio, "restantes": quedan}},
+        extra={"campos": {"persona_id": str(persona), "medio": prueba.medio, "restantes": quedan}},
     )
     return SegundoFactorVerificado(
         verificado_en=verificado_en,
@@ -504,10 +518,7 @@ def baja(identidad: SegundoFactorRecienteDep, motor: MotorDep) -> Response:
         conn.execute(text("delete from nucleo.factor_totp"))
         if not tiene_medio(conn):
             conn.execute(text("delete from nucleo.codigo_recuperacion"))
-        conn.execute(
-            text("update nucleo.sesion set segundo_factor_en = null where persona_id = :p"),
-            {"p": identidad.persona_id},
-        )
+        olvidar_verificaciones(conn)
         avisar(
             conn, identidad.persona_id, ASUNTO_BAJA, "Se desactivó la verificación en dos pasos de"
         )
