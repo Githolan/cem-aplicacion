@@ -1782,3 +1782,64 @@ button.fila-registro:disabled {
 .ficha-registro__cerrar {
   margin: 1rem 0 0;
 }
+
+/* Panel del Consejo (/panel): barras horizontales en SVG propio. El nombre y el valor van escritos
+   arriba de cada barra, así que en el teléfono entran sin achicar la letra. */
+.panel-consejo {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
+  gap: 0 var(--space-5);
+  align-items: start;
+}
+
+.grafico__base {
+  margin-top: 0;
+  color: var(--ink-soft);
+}
+
+.grafico__barras {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grafico__fila {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-1) var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.grafico__etiqueta {
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.grafico__valor {
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.grafico__dibujo {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
+  height: 0.75rem;
+}
+
+.grafico__fondo {
+  fill: var(--surface-sunken);
+}
+
+.grafico__barra {
+  fill: var(--accent);
+}
+
+.grafico__tabla summary {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  color: var(--accent);
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -34,6 +34,7 @@ import { Cotejo } from "./pagos/Cotejo";
 import { PrepararOrden } from "./pagos/PrepararOrden";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
 import { Padron, RUTA_PADRON } from "./Padron";
+import { Panel, RUTA_PANEL } from "./panel/Panel";
 import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -102,6 +103,13 @@ const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeIni
         detalle: "Simular el reparto por período",
         icono: "calculadora",
         requisito: REQUISITOS.liquidacion,
+      },
+      {
+        ruta: RUTA_PANEL,
+        texto: "Panel del Consejo",
+        detalle: "Órdenes, gasto pagado y comprobantes faltantes",
+        icono: "grafico",
+        requisito: REQUISITOS.panel,
       },
     ],
   },
@@ -335,6 +343,7 @@ export function App() {
             <Route key={vieja} path={vieja} element={<Navigate to={nueva} replace />} />
           ))}
           <Route path={RUTA_LIQUIDACION} element={<Exige requisito={REQUISITOS.liquidacion}><Liquidacion /></Exige>} />
+          <Route path={RUTA_PANEL} element={<Exige requisito={REQUISITOS.panel}><Panel /></Exige>} />
           <Route path={RUTA_POR_ACLARAR} element={<PagosPorAclarar />} />
           <Route path="*" element={<NoEncontrada />} />
         </Routes>

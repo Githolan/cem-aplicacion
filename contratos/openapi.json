@@ -933,6 +933,52 @@
         "title": "ComprobanteActual",
         "type": "object"
       },
+      "ComprobanteFaltante": {
+        "description": "Una orden aprobada o más adelante cuya versión vigente no tiene archivo de factura.",
+        "properties": {
+          "actualizada_en": {
+            "format": "date-time",
+            "title": "Actualizada En",
+            "type": "string"
+          },
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "proveedor": {
+            "description": "La razón social, como figura en la versión vigente.",
+            "title": "Proveedor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "estado",
+          "proveedor",
+          "concepto",
+          "importe_centavos",
+          "moneda",
+          "actualizada_en"
+        ],
+        "title": "ComprobanteFaltante",
+        "type": "object"
+      },
       "ComprobantePagoNuevo": {
         "additionalProperties": false,
         "description": "`POST …/ordenes-pago/{id}/pago-manual/comprobante`: el documento del comprobante, cargado\ndesde el pago (`0063`). Lo crea quien vio la cuenta en el acto de ejecución de esa orden. Nace\nen «Facturas y comprobantes» y restringido: lo ven quien sube cada versión y el Consejo que no\npreparó la orden. El archivo se sube después a `…/documentos/{id}/versiones`.",
@@ -4168,6 +4214,58 @@
         "title": "GastoNuevo",
         "type": "object"
       },
+      "GastoPagado": {
+        "description": "Lo pagado en un mes, con un rubro, con o sin el fondo de reserva, en una moneda.\n\nImporte y fecha son los que usa la liquidación: lo real si el Consejo lo dio por pagado, y la\nfecha de la operación conciliada o el día del consorcio en que se pagó.",
+        "properties": {
+          "cantidad": {
+            "minimum": 1.0,
+            "title": "Cantidad",
+            "type": "integer"
+          },
+          "fondo_reserva": {
+            "description": "Si la versión pagada usaba el fondo de reserva.",
+            "title": "Fondo Reserva",
+            "type": "boolean"
+          },
+          "importe_centavos": {
+            "minimum": 1.0,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "periodo": {
+            "description": "El primer día del mes del pago, en el calendario del consorcio.",
+            "format": "date",
+            "title": "Periodo",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El rubro del proveedor en la versión con que se pagó; null si no tenía.",
+            "title": "Rubro"
+          }
+        },
+        "required": [
+          "periodo",
+          "rubro",
+          "fondo_reserva",
+          "moneda",
+          "cantidad",
+          "importe_centavos"
+        ],
+        "title": "GastoPagado",
+        "type": "object"
+      },
       "GrupoLiquidable": {
         "description": "Un grupo con su esquema vigente el último día del período.",
         "properties": {
@@ -7077,6 +7175,36 @@
         "title": "OrdenPagoVersionNueva",
         "type": "object"
       },
+      "OrdenesPorEstado": {
+        "description": "Órdenes de un estado y una moneda, por el importe de su versión vigente. Sin borradores.",
+        "properties": {
+          "cantidad": {
+            "minimum": 1.0,
+            "title": "Cantidad",
+            "type": "integer"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "importe_centavos": {
+            "minimum": 1.0,
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          }
+        },
+        "required": [
+          "estado",
+          "moneda",
+          "cantidad",
+          "importe_centavos"
+        ],
+        "title": "OrdenesPorEstado",
+        "type": "object"
+      },
       "OrigenEvento": {
         "description": "De dónde vino el evento, en términos funcionales.",
         "enum": [
@@ -7601,6 +7729,41 @@
           "cotejados"
         ],
         "title": "PagosCotejados",
+        "type": "object"
+      },
+      "PanelFiscalizacion": {
+        "description": "`GET …/panel`: las tres lecturas, de una misma foto de la base.",
+        "properties": {
+          "comprobantes_faltantes": {
+            "description": "De lo último que cambió a lo más viejo.",
+            "items": {
+              "$ref": "#/components/schemas/ComprobanteFaltante"
+            },
+            "title": "Comprobantes Faltantes",
+            "type": "array"
+          },
+          "gasto_pagado": {
+            "description": "Por período, de lo más viejo a lo más nuevo.",
+            "items": {
+              "$ref": "#/components/schemas/GastoPagado"
+            },
+            "title": "Gasto Pagado",
+            "type": "array"
+          },
+          "ordenes_por_estado": {
+            "items": {
+              "$ref": "#/components/schemas/OrdenesPorEstado"
+            },
+            "title": "Ordenes Por Estado",
+            "type": "array"
+          }
+        },
+        "required": [
+          "ordenes_por_estado",
+          "gasto_pagado",
+          "comprobantes_faltantes"
+        ],
+        "title": "PanelFiscalizacion",
         "type": "object"
       },
       "PasoPago": {
@@ -17892,6 +18055,52 @@
         "summary": "La ficha de una orden en cualquier estado: en qué anda y qué puede hacer quien pide, sin la cuenta",
         "tags": [
           "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/panel": {
+      "get": {
+        "operationId": "ver_panel_api_v1_consorcios__consorcio_id__panel_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanelFiscalizacion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `fiscalizacion.ver_panel` en el consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Panel del Consejo: órdenes por estado, gasto pagado y comprobantes faltantes",
+        "tags": [
+          "consorcios"
         ]
       }
     },

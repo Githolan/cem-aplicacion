@@ -1062,12 +1062,13 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
     # `condicion_beneficiario` (0048) solo la lee: cuenta las órdenes que ya pasaron una
     # aprobación completa. Las de `0072` solo la leen: dicen sí o no y no escriben ninguna tabla.
     # `proveedor_cambio_tras_aprobar` (0080) tampoco escribe: es `stable` y dice sí o no.
+    # `panel_comprobantes_faltantes` (0094) es una lectura `stable` del panel del Consejo.
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
         "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
         "nucleo.aprobar_por_franja", "nucleo.renovar_orden_vencida",
         "nucleo.admite_pagar", "nucleo.admite_renovar", "nucleo.acciones_de_ordenes_lectura",
-        "nucleo.proveedor_cambio_tras_aprobar",
+        "nucleo.proveedor_cambio_tras_aprobar", "nucleo.panel_comprobantes_faltantes",
     }  # fmt: skip
 
 
