@@ -1,6 +1,6 @@
 """Llave de acceso: el PIN, la huella o la cara del dispositivo (WebAuthn; migración 0070).
 
-Es otro medio de marcar `nucleo.sesion.segundo_factor_en` (siempre por las funciones de `0094`),
+Es otro medio de marcar `nucleo.sesion.segundo_factor_en` (siempre por las funciones de `0095`),
 así que las reglas de dinero (R10) y las separaciones no cambian. CEM guarda la clave pública: el
 gesto nunca sale del dispositivo.
 
@@ -332,7 +332,7 @@ async def verificar(
         except WebAuthnException as e:
             log.info("llave rechazada", extra={"campos": {"motivo": type(e).__name__}})
             raise llave_invalida() from e
-        # La base registra el uso y marca la sesión en la misma sentencia (`0094`): el UPDATE
+        # La base registra el uso y marca la sesión en la misma sentencia (`0095`): el UPDATE
         # vuelve a mirar el contador con la fila bloqueada, así que de dos verificaciones a la vez
         # con el mismo contador solo una marca (por eso aquí no hace falta `for update`, que
         # `cem_app` ya no puede pedir sin un permiso de UPDATE en la tabla).

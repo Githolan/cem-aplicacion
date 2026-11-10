@@ -48,14 +48,14 @@ booleano recibe la prueba y la gasta.
 Downgrade: vuelve `resolver_desafio_contrasena` con el booleano (la definición de `0009`), borra las
 funciones nuevas y devuelve los permisos de `0008` y `0070`.
 
-Revisión: 0094
-Anterior: 0093
+Revisión: 0095
+Anterior: 0094
 """
 
 from alembic import op
 
-revision = "0094"
-down_revision = "0093"
+revision = "0095"
+down_revision = "0094"
 branch_labels = None
 depends_on = None
 

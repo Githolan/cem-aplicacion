@@ -350,7 +350,7 @@ def _resolver_desafio(
             return "vencido", None
         fijar_ambito(conn, persona_id=persona)
         prueba = sf.prueba_de(conn, claves, persona, codigo)
-        # La base decide el acierto gastando la prueba (`0094`); sin prueba es un intento fallido.
+        # La base decide el acierto gastando la prueba (`0095`); sin prueba es un intento fallido.
         r = conn.execute(
             text(
                 "select resultado, persona, sesion, vence from nucleo.resolver_desafio_contrasena("

@@ -223,7 +223,7 @@ def exigir_permiso_de_alta(conn: Connection, identidad: Identidad) -> None:
 
 @dataclass(frozen=True)
 class Prueba:
-    """Lo que la base gasta para marcar la sesión (`0094`): el paso TOTP aceptado o el hash de un
+    """Lo que la base gasta para marcar la sesión (`0095`): el paso TOTP aceptado o el hash de un
     código de recuperación. La base nunca recibe un «el código sirvió»."""
 
     medio: str
@@ -233,7 +233,7 @@ class Prueba:
 
 
 def marcar_verificada(conn: Connection, identidad: Identidad, prueba: Prueba) -> datetime | None:
-    """Marca la sesión gastando la prueba (`0094`): avanza `ultimo_paso` o consume el código de
+    """Marca la sesión gastando la prueba (`0095`): avanza `ultimo_paso` o consume el código de
     recuperación en la misma sentencia. None: la prueba no se pudo gastar (código repetido o
     inexistente) y no se marcó nada."""
     if prueba.paso is not None:
@@ -311,7 +311,7 @@ def _paso_totp(
     conn: Connection, claves: Claves, persona_id: UUID, codigo: str, *, confirmado: bool
 ) -> int | None:
     """Comprueba el código contra el factor (confirmado o pendiente) y devuelve su paso si sirve.
-    No escribe: el paso lo registra la función de la base que marca la sesión (`0094`), en la
+    No escribe: el paso lo registra la función de la base que marca la sesión (`0095`), en la
     misma transacción. Bloquea la fila: dos intentos a la vez no usan el mismo código."""
     fila = conn.execute(
         text(

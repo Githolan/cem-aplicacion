@@ -1,4 +1,4 @@
-"""`0094`: la marca del segundo factor la pone solo la base, gastando la prueba que la justifica.
+"""`0095`: la marca del segundo factor la pone solo la base, gastando la prueba que la justifica.
 
 Revisión de seguridad transversal de H3, P3: R10 confiaba en `nucleo.sesion.segundo_factor_en`,
 que `cem_app` podía escribir con un UPDATE, y en el booleano de `resolver_desafio_contrasena`.
@@ -308,12 +308,12 @@ def _permisos(motor) -> tuple:
         ).one()
 
 
-def test_0094_ida_y_vuelta(base_aparte):  # noqa: F811
+def test_0095_ida_y_vuelta(base_aparte):  # noqa: F811
     cfg, motor = base_aparte
-    command.upgrade(cfg, "0093")
+    command.upgrade(cfg, "0094")
     antes = _permisos(motor)
     assert tuple(antes) == (True,) * 7 + (False,)
-    command.upgrade(cfg, "0094")
+    command.upgrade(cfg, "0095")
     assert tuple(_permisos(motor)) == (False,) * 7 + (True,)
-    command.downgrade(cfg, "0093")
+    command.downgrade(cfg, "0094")
     assert _permisos(motor) == antes
