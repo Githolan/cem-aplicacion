@@ -55,7 +55,8 @@
 #
 # Pruebas heredadas (regla del propietario, 09-11-2026): si otro commit con el MISMO árbol
 # (`git rev-parse <sha>^{tree}`) ya tiene una constancia en verde que corrió las pruebas, las
-# etapas 1 a 6 no se repiten (etapa 'pruebas-heredadas', campo pruebas_de de la constancia) y
+# etapas 1 a 6 no se repiten (etapa 'pruebas-heredadas', campo pruebas_de de la constancia), salvo
+# los secretos del historial, que dependen de la historia y no del árbol y corren siempre; y
 # solo se construyen y suben las imágenes de esta SHA. Uso: `ci.ps1 -Sha <punta del PR>
 # -SinSubirImagenes` antes de fusionar y `ci.ps1 -Sha <fusión>` después, con el PR al día.
 # Requiere: git, Docker en marcha (con buildx y emulación arm64), pnpm 10 y Node 22,
@@ -147,6 +148,13 @@ function Get-BashDeGit {
 # sus pruebas suman exactamente ese total (una parte que pierde archivos no pasa por verde).
 function Probar-BackendEnPartes {
     $f = Join-Path $copia $ComposeRelativo
+    # Un commit anterior al reparto (su conftest.py no lee CEM_PRUEBAS_PARTE) correría la suite
+    # entera en cada parte: se prueba en una sola, y se dice.
+    $partes = $PartesBackend
+    if (-not (Select-String -Path (Join-Path $copia 'backend/tests/conftest.py') -SimpleMatch 'CEM_PRUEBAS_PARTE' -Quiet)) {
+        $partes = 1
+        Escribir "  backend/tests/conftest.py de $sha7 no reparte por CEM_PRUEBAS_PARTE: va en 1 parte, no en $PartesBackend" 'Yellow'
+    }
     $recoleccion = @(docker @composeArgs run --rm --build --no-deps $ServicioPruebas pytest --collect-only -q -p no:cacheprovider 2>&1 | ForEach-Object { "$_" })
     $recoleccion | Select-Object -Last 3 | Tee-Object -FilePath $log -Append | Out-Host
     $m = [regex]::Match(($recoleccion -join "`n"), '(?m)^(\d+) tests? collected')
@@ -156,11 +164,11 @@ function Probar-BackendEnPartes {
         return
     }
     $total = [int]$m.Groups[1].Value
-    Escribir "  $total pruebas recolectadas; van en $PartesBackend partes"
-    $trabajos = foreach ($k in 1..$PartesBackend) {
+    Escribir "  $total pruebas recolectadas; van en $partes partes"
+    $trabajos = foreach ($k in 1..$partes) {
         $p = "$ProyectoCompose-p$k"
         $salida = Join-Path ([IO.Path]::GetTempPath()) "$p.log"
-        Start-ThreadJob -ArgumentList $p, $f, $k, $PartesBackend, $ServicioPruebas, $salida -ScriptBlock {
+        Start-ThreadJob -ArgumentList $p, $f, $k, $partes, $ServicioPruebas, $salida -ScriptBlock {
             param($p, $f, $k, $n, $servicio, $salida)
             docker compose -p $p -f $f run --rm --build -e "CEM_PRUEBAS_PARTE=$k/$n" $servicio pytest -p no:cacheprovider *> $salida
             [pscustomobject]@{ Proyecto = $p; Parte = $k; Codigo = $LASTEXITCODE; Salida = $salida }
@@ -171,7 +179,7 @@ function Probar-BackendEnPartes {
     $suma = 0
     foreach ($r in ($resultados | Sort-Object Parte)) {
         $texto = Get-Content -Raw $r.Salida
-        "=== Parte $($r.Parte) de $PartesBackend ($($r.Proyecto)) ===`n$texto" | Out-File -Append -Encoding utf8 $log
+        "=== Parte $($r.Parte) de $partes ($($r.Proyecto)) ===`n$texto" | Out-File -Append -Encoding utf8 $log
         Remove-Item $r.Salida
         $resumen = [regex]::Matches($texto, '(?m)^=+ (.+) in [\d.]+s')
         $linea = if ($resumen.Count) { $resumen[$resumen.Count - 1].Groups[1].Value } else { 'sin resumen' }
@@ -180,11 +188,11 @@ function Probar-BackendEnPartes {
         Escribir "  parte $($r.Parte): código $($r.Codigo); $linea" $color
         if ($r.Codigo -ne 0) { $script:partesEnRojo += $r.Proyecto }
     }
-    if ($partesEnRojo.Count) { $etapas['backend'] = "falla ($($partesEnRojo.Count) de $PartesBackend partes en rojo)" }
+    if ($partesEnRojo.Count) { $etapas['backend'] = "falla ($($partesEnRojo.Count) de $partes partes en rojo)" }
     elseif ($suma -ne $total) { $etapas['backend'] = "falla (las partes suman $suma pruebas y se recolectaron $total)" }
     else { $etapas['backend'] = 'ok' }
     $color = if ($etapas['backend'] -eq 'ok') { 'Green' } else { 'Red' }
-    Escribir "  backend: $($etapas['backend']) ($suma de $total pruebas en $PartesBackend partes)" $color
+    Escribir "  backend: $($etapas['backend']) ($suma de $total pruebas en $partes partes)" $color
 }
 
 function Test-TodoVerde { ($etapas.Count -gt 0) -and -not ($etapas.Values | Where-Object { $_ -ne 'ok' }) }
@@ -346,15 +354,25 @@ try {
     $etapas['copia-lf'] = 'ok'
     Escribir "  copia en $copia; $($shs.Count) archivos .sh sin CR" 'Green'
 
+    # --- secretos en el historial: siempre, también con pruebas heredadas ------------
+    # Depende de la historia de $shaCompleta, no de su árbol: dos commits con el mismo árbol
+    # pueden tener historias distintas (un secreto agregado y después borrado).
+    Etapa 'Secretos en el historial (gitleaks)'
+    $gitComun = (Resolve-Path (git -C $repo rev-parse --path-format=absolute --git-common-dir)).Path
+    Correr 'seguridad-secretos-historial' {
+        docker run --rm -v "${copia}:/copia:ro" -v "${gitComun}:/repo.git:ro" $ImagenGitleaks git /repo.git -c /copia/.gitleaks.toml `
+            --no-banner --redact=100 --log-opts="-n $CommitsGitleaks $shaCompleta"
+    } | Out-Null
+
     # --- pruebas heredadas: otro commit con el mismo árbol ya pasó todo ------------
     $pruebasDe = if ($SinHeredar) { $null } else { Find-CemPruebasMismoArbol -Repo $repo -Sha $shaCompleta }
     if ($pruebasDe) {
         Etapa 'Pruebas heredadas (mismo árbol)'
         $etapas['pruebas-heredadas'] = 'ok'
-        Escribir "  $sha7 tiene el mismo árbol que $pruebasDe, que pasó todas las etapas (constancia $(Join-Path (Get-CemCarpetaEstado ci) "$pruebasDe.json")); no se repiten" 'Green'
+        Escribir "  $sha7 tiene el mismo árbol que $pruebasDe, que pasó todas las etapas (constancia $(Join-Path (Get-CemCarpetaEstado ci) "$pruebasDe.json")); no se repiten (salvo los secretos del historial, que corrieron arriba)" 'Green'
     } else {
         # --- 1-3. backend, ruff y contratos en Linux ------------------------------
-        Etapa "Backend (pytest, PostgreSQL 18 y Redis 7, $PartesBackend partes a la vez)"
+        Etapa "Backend (pytest, PostgreSQL 18 y Redis 7, en partes a la vez)"
         $composeUsado = $true
         Probar-BackendEnPartes
         Etapa 'ruff'
@@ -365,7 +383,7 @@ try {
         Medir-CoberturaPa
 
         # --- 3c. seguridad ----------------------------------------------------------
-        Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks)'
+        Etapa 'Seguridad (pip-audit, pnpm audit, gitleaks del árbol)'
         $auditoriaPip = "python -m venv /entorno && /entorno/bin/pip install -q -r backend/requirements.prod.txt ./contratos && /entorno/bin/pip uninstall -q -y pip " +
             "&& pip install -q pip-audit==$VersionPipAudit && pip-audit --path /entorno/lib/python3.12/site-packages"
         Correr 'seguridad-dependencias-python' {
@@ -376,11 +394,6 @@ try {
         finally { Pop-Location }
         Correr 'seguridad-secretos-arbol' {
             docker run --rm -v "${copia}:/copia:ro" $ImagenGitleaks dir /copia -c /copia/.gitleaks.toml --no-banner --redact=100
-        } | Out-Null
-        $gitComun = (Resolve-Path (git -C $repo rev-parse --path-format=absolute --git-common-dir)).Path
-        Correr 'seguridad-secretos-historial' {
-            docker run --rm -v "${copia}:/copia:ro" -v "${gitComun}:/repo.git:ro" $ImagenGitleaks git /repo.git -c /copia/.gitleaks.toml `
-                --no-banner --redact=100 --log-opts="-n $CommitsGitleaks $shaCompleta"
         } | Out-Null
 
         # --- 4. frontend ------------------------------------------------------------
