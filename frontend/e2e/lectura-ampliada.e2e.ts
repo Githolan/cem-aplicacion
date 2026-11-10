@@ -413,6 +413,35 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     },
   },
   {
+    ruta: "/panel",
+    url: "/panel",
+    cargada: ["Comprobantes faltantes", "Gasto pagado por rubro"],
+    api: {
+      "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/consorcios/11111111-1111-4111-8111-111111111111/panel": {
+        ordenes_por_estado: [
+          { estado: "en_verificacion", moneda: "ARS", cantidad: 12, importe_centavos: 123_456_789_00 },
+          { estado: "pagada", moneda: "ARS", cantidad: 3, importe_centavos: 300_000 },
+        ],
+        gasto_pagado: [
+          { periodo: "2026-10-01", rubro: "Mantenimiento de ascensores y montacargas del edificio", fondo_reserva: true, moneda: "ARS", cantidad: 1, importe_centavos: 98_765_432_10 },
+          { periodo: "2026-11-01", rubro: null, fondo_reserva: false, moneda: "ARS", cantidad: 2, importe_centavos: 150_000 },
+        ],
+        comprobantes_faltantes: [
+          {
+            orden_id: "33333333-3333-4333-8333-333333333333",
+            estado: "en_verificacion",
+            proveedor: "Ascensores, Montacargas y Escaleras Mecánicas del Río de la Plata Sociedad Anónima",
+            concepto: "Abono mensual de mantenimiento preventivo y correctivo de noviembre",
+            importe_centavos: 98_765_432_10,
+            moneda: "ARS",
+            actualizada_en: "2026-11-05T12:00:00Z",
+          },
+        ],
+      },
+    },
+  },
+  {
     ruta: "/invitacion",
     url: `/invitacion#token=${TOKEN_ENLACE}`,
     cargada: "Aceptar la invitación",

@@ -66,6 +66,7 @@ const TRAZOS = {
       <path d="M8 6h8M16 14v4M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01" />
     </>
   ),
+  grafico: <path d="M3 3v18h18M7 16v-4M12 16V8M17 16v-7" />,
   flecha: <path d="m9 18 6-6-6-6" />,
   volver: <path d="m15 18-6-6 6-6" />,
 } satisfies Record<string, ReactNode>;
