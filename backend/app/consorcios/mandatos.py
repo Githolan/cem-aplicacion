@@ -64,7 +64,7 @@ from app.autorizacion.evaluador import Entidad
 from app.autorizacion.requiere import NO_ENCONTRADO, Permiso, requiere
 from app.contexto import MotorDep
 from app.db import transaccion
-from app.errores import ErrorApi, sin_cache
+from app.errores import ErrorApi, detalle_de_campo, sin_cache
 from app.plataforma.idempotencia import IdempotenciaDep, responder_una_vez
 
 router = APIRouter(prefix="/api/v1", tags=["mandatos"], dependencies=[Depends(sin_cache)])
@@ -174,6 +174,23 @@ origen los niega antes el evaluador o los fija esta ruta: si llegan a la base, e
 discrepancia (500)."""
 
 
+CAMPO_DEL_MOTIVO = {
+    "fecha_futura": "fecha",
+    "cuit_requerido": "cuit",
+    "cuit_invalido": "cuit",
+    "nombre_invalido": "nombre",
+    "matricula_invalida": "matricula",
+    "descripcion_invalida": "descripcion",
+    "referencia_invalida": "referencia",
+    "sha256_invalido": "sha256",
+    "decision_invalida": "decision_id",
+    "persona_sin_vinculo": "persona_id",
+    "mandato_sin_cuenta": "persona_id",
+}
+"""El campo del cuerpo que motiva cada error que tiene uno (`detalle.campos`): la pantalla lo
+marca. Los que dependen de dos campos (vigencia, respaldo) no nombran ninguno."""
+
+
 def _llamar(conn: Connection, sql: str, parametros: dict):
     """Ejecuta una función de la base y traduce sus motivos a errores de la API."""
     try:
@@ -182,7 +199,8 @@ def _llamar(conn: Connection, sql: str, parametros: dict):
         motivo = e.orig.diag.message_hint
         if motivo in ERRORES:
             estado, codigo, mensaje = ERRORES[motivo]
-            raise ErrorApi(estado, codigo, mensaje) from e
+            detalle = detalle_de_campo(CAMPO_DEL_MOTIVO.get(motivo))
+            raise ErrorApi(estado, codigo, mensaje, detalle=detalle) from e
         raise
 
 
@@ -236,7 +254,7 @@ def registrar_decision(
     permiso.verificar(Entidad(respaldo_presente=True))  # el contrato exige la referencia
     # Un acto ya tomado (2b-4b §7.4): hasta hoy en el consorcio. La base lo repite (`0019`).
     if nueva.fecha > ctx.hoy:
-        raise ErrorApi(*ERRORES["fecha_futura"])
+        raise ErrorApi(*ERRORES["fecha_futura"], detalle=detalle_de_campo("fecha"))
 
     def efecto(conn: Connection) -> tuple[int, DecisionRegistrada]:
         nueva_id = _llamar(

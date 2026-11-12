@@ -35,7 +35,8 @@ type Paso =
   | { tipo: "leyendo" }
   | { tipo: "llave" }
   | { tipo: "codigo"; clase: Clase }
-  | { tipo: "fallo"; mensaje: string }
+  /** `sinReintento`: probar de nuevo no puede salir distinto (la llave está en otro dispositivo, AC-35). */
+  | { tipo: "fallo"; mensaje: string; sinReintento?: true }
   | { tipo: "otro" }
   | { tipo: "sin_alta" };
 
@@ -81,7 +82,7 @@ async function primerMetodo(activos: Activos): Promise<MetodoConfirmar | null> {
 function SinAlta() {
   const { pathname } = useLocation();
   return (
-    <p role="alert">
+    <p role="alert" className="aviso-error">
       Todavía no la activaste.{" "}
       <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
         Activala ahora
@@ -141,7 +142,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
         if (!vigente) return;
         setActivos(leidos);
         if (primero !== null) usar(primero);
-        else if (llaves > 0) setPaso({ tipo: "fallo", mensaje: LLAVE_EN_OTRO_LADO });
+        else if (llaves > 0) setPaso({ tipo: "fallo", mensaje: LLAVE_EN_OTRO_LADO, sinReintento: true });
         else setPaso({ tipo: "sin_alta" });
       })
       .catch((falla: unknown) => {
@@ -227,16 +228,20 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   if (paso.tipo === "fallo")
     return (
       <Hoja key="fallo" titulo="No se pudo confirmar" alEscapar={alCancelar}>
-        <p role="alert">{paso.mensaje}</p>
+        <p role="alert" className="aviso-error">
+          {paso.mensaje}
+        </p>
         <div className="formulario">
           <div className="acciones">
-            <button
-              type="button"
-              data-foco
-              onClick={() => (activos?.llave === true ? confirmar() : setVuelta((v) => v + 1))}
-            >
-              Probar de nuevo
-            </button>
+            {paso.sinReintento !== true && (
+              <button
+                type="button"
+                data-foco
+                onClick={() => (activos?.llave === true ? confirmar() : setVuelta((v) => v + 1))}
+              >
+                Probar de nuevo
+              </button>
+            )}
             {usarOtro}
             {cancelar}
           </div>
@@ -290,7 +295,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
           onChange={(e) => escribir(e.target.value, clase)}
         />
         {error !== null && (
-          <p id={`${id}-error`} role="alert">
+          <p id={`${id}-error`} role="alert" className="aviso-error">
             {error}
           </p>
         )}

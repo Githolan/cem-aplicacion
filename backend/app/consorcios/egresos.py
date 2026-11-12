@@ -142,7 +142,7 @@ from app.consorcios.documentos import (
 from app.consorcios.padron import Discrepancia
 from app.contexto import Contexto, IdentidadDep, MotorDep
 from app.db import transaccion
-from app.errores import ErrorApi, sin_cache
+from app.errores import ErrorApi, detalle_de_campo, sin_cache
 from app.plataforma.idempotencia import (
     ClaveIdempotenciaDep,
     IdempotenciaDep,
@@ -355,6 +355,17 @@ ERRORES = {
 cuenta) y los que fija esta ruta (origen, modo) no están: si llegan, son un defecto (500). Los de
 R10 pueden llegar si la sesión venció entre el evaluador y la base."""
 
+CAMPO_DEL_MOTIVO = {
+    "cuit_invalido": "cuit",
+    "cuit_repetido": "cuit",
+    "cuit_ya_cargado": "cuit",
+    "numero_operacion_invalido": "numero_operacion",
+    "fecha_operacion_invalida": "fecha_operacion",
+    "motivo_con_cuenta": "motivo",
+}
+"""El campo del cuerpo que motiva cada error de negocio que tiene uno (`detalle.campos`): la
+pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos."""
+
 ERRORES_CONFIRMACION = {
     "proveedor_cambiado": (
         409, CodigoError.PROVEEDOR_CAMBIADO,
@@ -392,7 +403,8 @@ def _ejecutar(conn: Connection, permiso: Permiso, sql: str, parametros: dict, er
             raise Discrepancia(f"la base niega {permiso.accion} y el evaluador lo concede") from e
         motivo = e.orig.diag.message_hint
         if motivo in errores:
-            raise ErrorApi(*errores[motivo]) from e
+            detalle = detalle_de_campo(CAMPO_DEL_MOTIVO.get(motivo))
+            raise ErrorApi(*errores[motivo], detalle=detalle) from e
         raise
 
 

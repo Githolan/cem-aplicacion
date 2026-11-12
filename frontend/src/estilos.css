@@ -256,6 +256,31 @@ button:disabled {
   font: inherit;
 }
 
+/* El campo con un error (tanda 3): el borde lo marca y el motivo va debajo, junto al campo. */
+.formulario [aria-invalid="true"] {
+  border-color: var(--danger-text);
+}
+
+.error-de-campo {
+  margin: 0;
+}
+
+/* Un dato que se elige en varias partes (el período: mes y año) va agrupado, sin el borde del
+   navegador. */
+.formulario fieldset:not(.formulario) {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.formulario fieldset:not(.formulario) legend {
+  padding: 0;
+  font-weight: 600;
+}
+
 /* Textos largos de una línea (mandatos): se agrandan solo hacia abajo. */
 .formulario textarea {
   resize: vertical;

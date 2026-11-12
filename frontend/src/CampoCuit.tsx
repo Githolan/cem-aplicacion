@@ -26,11 +26,15 @@ type Props = {
   id: string;
   valor: string;
   deshabilitado: boolean;
+  /** Lo que dijo la API del CUIT (inválido o repetido), si lo marcó (tanda 3). */
+  error?: string | undefined;
   alCambiar: (valor: string) => void;
 };
 
-export function CampoCuit({ id, valor, deshabilitado, alCambiar }: Props) {
+export function CampoCuit({ id, valor, deshabilitado, error, alCambiar }: Props) {
   const conError = cuitConError(valor);
+  // El verificador mal se dice al escribir; si no, lo que dijo la API al guardar.
+  const mensaje = conError ? CUIT_INVALIDO : error;
   return (
     <>
       <label htmlFor={id}>CUIT (11 números, sin guiones)</label>
@@ -43,13 +47,13 @@ export function CampoCuit({ id, valor, deshabilitado, alCambiar }: Props) {
         pattern={PATRON_CUIT}
         disabled={deshabilitado}
         value={valor}
-        aria-invalid={conError}
-        aria-describedby={conError ? `${id}-error` : undefined}
+        aria-invalid={mensaje !== undefined}
+        aria-describedby={mensaje === undefined ? undefined : `${id}-error`}
         onChange={(e) => alCambiar(e.target.value)}
       />
-      {conError && (
-        <p className="aviso-error" id={`${id}-error`} role="alert">
-          {CUIT_INVALIDO}
+      {mensaje !== undefined && (
+        <p className="aviso-error" id={`${id}-error`} role={conError ? "alert" : undefined}>
+          {mensaje}
         </p>
       )}
     </>

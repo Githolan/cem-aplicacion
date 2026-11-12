@@ -132,10 +132,16 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
         </p>
       )}
       {listo !== null && <p className="aviso-ok">{listo}</p>}
-      {aviso !== null && <p role="alert">{aviso}</p>}
+      {aviso !== null && (
+        <p role="alert" className="aviso-error">
+          {aviso}
+        </p>
+      )}
       {fallaConsulta !== null && (
         <>
-          <p role="alert">{fallaConsulta}</p>
+          <p role="alert" className="aviso-error">
+            {fallaConsulta}
+          </p>
           <button type="button" onClick={consultar}>
             Reintentar
           </button>

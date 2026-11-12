@@ -184,6 +184,29 @@ describe("confirmar en el momento", () => {
     expect(get).toHaveBeenCalledTimes(2);
   });
 
+  it("AC-35: el error de confirmar se ve como error", async () => {
+    recordarMetodo("llave");
+    backend(conLlave());
+    dispositivo(async (): Promise<unknown> => {
+      throw new DOMException("cancelado", "NotAllowedError");
+    });
+    mostrar();
+    await titulo("No se pudo confirmar");
+    expect(screen.getByRole("alert").className).toContain("aviso-error");
+  });
+
+  it("AC-35: con la llave en otro dispositivo no ofrece «Probar de nuevo», que no cambiaría nada", async () => {
+    // Solo la llave, y este navegador no puede usar llaves de acceso.
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 1) });
+    mostrar();
+    await titulo("No se pudo confirmar");
+    expect(screen.getByRole("alert").textContent).toMatch(/^Este navegador no puede usar/);
+    expect(screen.getByRole("alert").className).toContain("aviso-error");
+    expect(screen.queryByRole("button", { name: "Probar de nuevo" })).toBeNull();
+    // Control: «Cancelar» sigue ahí para salir.
+    expect(screen.getByRole("button", { name: "Cancelar" })).toBeTruthy();
+  });
+
   it("si el backend rechaza la firma, no sigue", async () => {
     recordarMetodo("llave");
     backend(

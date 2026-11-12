@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "./api/cliente";
+import { useListoHastaOtroActo } from "./listoHastaOtroActo";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
@@ -108,6 +109,9 @@ export function Cuenta() {
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  // El «Listo» de las sesiones se va al empezar otro acto en otra tarjeta (AC-41).
+  const tarjetaSesiones = useRef<HTMLElement | null>(null);
+  useListoHastaOtroActo(tarjetaSesiones, () => setAviso((actual) => (actual?.ok === true ? null : actual)));
   const consultado = useRef(false);
   const textoAviso = useRef<HTMLParagraphElement>(null);
 
@@ -272,7 +276,7 @@ export function Cuenta() {
             </button>
           </section>
 
-          <section aria-labelledby={`${id}-sesiones`} className="tarjeta">
+          <section ref={tarjetaSesiones} aria-labelledby={`${id}-sesiones`} className="tarjeta">
             <h2 id={`${id}-sesiones`}>Dónde tenés la sesión abierta</h2>
             <div role="status" aria-live="polite">
               {aviso && (

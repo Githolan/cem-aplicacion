@@ -248,6 +248,16 @@ describe("página /cuenta", () => {
     expect(screen.queryByText("No está activado.")).toBeNull();
   });
 
+  it("AC-41: el «Listo» de cerrar una sesión se va al empezar otro acto de la página", async () => {
+    vi.stubGlobal("fetch", conSesion({ [`POST /api/v1/auth/sesiones/${OTRA}/revocar`]: sinCuerpo(204) }, TOTP_ACTIVO, CON_CONTRASENA));
+    abrir();
+    fireEvent.click(await botonCerrar("Chrome en Android"));
+    // Control: el «Listo» se ve.
+    expect(await screen.findByText(/Listo: cerramos/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cambiar la contraseña" }));
+    expect(screen.queryByText(/Listo: cerramos/)).toBeNull();
+  });
+
   it("cierra otra sesión con CSRF y la saca de la lista", async () => {
     const simulado = conSesion({ [`POST /api/v1/auth/sesiones/${OTRA}/revocar`]: sinCuerpo(204) });
     vi.stubGlobal("fetch", simulado);

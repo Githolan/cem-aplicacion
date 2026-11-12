@@ -114,6 +114,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Elige el período con los dos desplegables (AC-51). */
+async function elegirPeriodo(anio: string, mes: string) {
+  fireEvent.change(await screen.findByLabelText("Año"), { target: { value: anio } });
+  fireEvent.change(screen.getByLabelText("Mes"), { target: { value: mes } });
+}
+
 describe("liquidación (borrador)", () => {
   it("dice el período en palabras", () => {
     expect(periodo("2026-10-01")).toBe("octubre de 2026");
@@ -147,7 +153,7 @@ describe("liquidación (borrador)", () => {
     const { container } = abrir();
 
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Período"), { target: { value: "2026-10" } });
+    await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText("Listo: abriste el borrador del período.")).toBeTruthy();
     const [preparar] = pedidos(api, "POST", `${BASE}/liquidaciones`);
@@ -310,7 +316,7 @@ describe("liquidación (borrador)", () => {
       .toEqual(["2026-11-01", "2027-01-01", "2027-02-01"]);
   });
 
-  it("un período mal escrito se explica sin ir al backend", async () => {
+  it("AC-51: el período se elige con «Mes» y «Año», con el mes anterior ya elegido", async () => {
     const api = backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
       [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
@@ -318,12 +324,18 @@ describe("liquidación (borrador)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir();
-    const campo = await screen.findByLabelText("Período");
-    // Donde el navegador no tiene `type="month"`, el campo es texto libre.
-    campo.setAttribute("type", "text");
-    fireEvent.change(campo, { target: { value: "10/2026" } });
-    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
-    expect(await screen.findByText(/Escribí el período como año y mes/)).toBeTruthy();
+    // AC-51: el período se elige con dos desplegables, sin escribir «2026-10», y empieza en el mes anterior.
+    const mes = (await screen.findByLabelText("Mes")) as HTMLSelectElement;
+    const anio = screen.getByLabelText("Año") as HTMLSelectElement;
+    expect(mes.tagName).toBe("SELECT");
+    expect(anio.tagName).toBe("SELECT");
+    const hoy = new Date();
+    const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    expect(mes.value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
+    expect(anio.value).toBe(String(anterior.getFullYear()));
+    expect(mes.options[0]?.textContent).toBe("Enero");
+    // Ya no hay un campo de texto con formato técnico ni un error de formato que mostrar arriba.
+    expect(screen.queryByPlaceholderText("AAAA-MM")).toBeNull();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
   });
 
@@ -366,7 +378,7 @@ describe("liquidación (borrador)", () => {
       [`POST ${BASE}/liquidaciones`]: () => error("liquidacion_no_admite", 409),
     }));
     abrir();
-    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByText(/ya hay un borrador de ese período/)).toBeTruthy();
   });
@@ -381,7 +393,7 @@ describe("liquidación (borrador)", () => {
     const api = backend({ ...LISTAS, [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS) });
     vi.stubGlobal("fetch", api);
     abrir();
-    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toEqual([]);
@@ -398,7 +410,7 @@ describe("liquidación (borrador)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir();
-    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(1));
   });
@@ -412,13 +424,13 @@ describe("liquidación (borrador)", () => {
     const intentos = () => pedidos(api, "POST", `${BASE}/liquidaciones`);
     vi.stubGlobal("fetch", api);
     abrir();
-    fireEvent.change(await screen.findByLabelText("Período"), { target: { value: "2026-10" } });
+    await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     await screen.findByText(/El servicio no está disponible/);
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(2));
     await screen.findByText(/El servicio no está disponible/);
-    fireEvent.change(screen.getByLabelText("Período"), { target: { value: "2026-11" } });
+    await elegirPeriodo("2026", "11");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
     await waitFor(() => expect(intentos()).toHaveLength(3));
     const [primera, segunda, tercera] = intentos().map((q) => q.headers.get("Idempotency-Key"));
