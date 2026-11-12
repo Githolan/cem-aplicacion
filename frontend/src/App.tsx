@@ -188,10 +188,6 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       {barra !== null && createPortal(<PuntoServicio />, barra)}
       <h1>Tu consorcio, en tu mano</h1>
       <AvisoServicio />
-      <p>
-        Estamos construyendo la aplicación. Pronto vas a poder ver tus expensas, documentos y
-        avisos desde acá.
-      </p>
       {porEdificio?.size === 0 && (
         <section className="resumen-inicio" aria-label="Tu edificio">
           <div className="resumen-inicio__arriba">
@@ -257,9 +253,6 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           );
         })}
       </div>
-      {pagos.prepara && (
-        <p className="aviso-info">La aplicación no mueve dinero: el pago se hace por home banking y acá registrás la evidencia.</p>
-      )}
       <EnlaceInstalar />
     </>
   );

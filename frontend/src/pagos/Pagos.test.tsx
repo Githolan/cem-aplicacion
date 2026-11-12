@@ -487,7 +487,7 @@ describe("el ancho de la pantalla", () => {
     expect(lugar()).toBe("/pagos");
   });
 
-  it("control: en PC, al terminar el acto se suelta y se abre la primera de la bandeja nueva", async () => {
+  it("en PC, al terminar el acto se suelta, y la primera de la bandeja nueva se abre recién con «Seguir con lo pendiente»", async () => {
     ancho(true);
     let terminado = false;
     const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
@@ -506,42 +506,33 @@ describe("el ancho de la pantalla", () => {
     const aprobar = (await boton("Aprobar esta versión")) as HTMLButtonElement;
     await waitFor(() => expect(aprobar.disabled).toBe(false));
     fireEvent.click(aprobar);
+    expect(await screen.findByRole("region", { name: "Lo que pasó con la orden" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeNull();
+    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
   });
 
-  it("si mientras se busca el pago siguiente se abrió otra orden, esa queda y la bandeja se relee", async () => {
+  it("en PC, después del acto, elegir otra fila la abre y deja atrás lo que pasó con la anterior", async () => {
     ancho(true);
-    let colgar = false;
-    const colgadas: ((r: Response) => void)[] = [];
     const OTRA: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
     const lista = bandejaCon(elemento("conciliar", "para_conciliar"), elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" }));
     const api = backend({
-      [`GET ${BASE}/pagos/bandeja`]: () => (colgar ? new Promise<Response>((r) => colgadas.push(r)) : lista()),
+      [`GET ${BASE}/pagos/bandeja`]: lista,
       [`GET ${BASE}/pagos/${O1}`]: () => Response.json(CONCILIAR),
       [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
-      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () => {
-        colgar = true;
-        return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
-      },
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
+    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
     fireEvent.click(await boton("Conforme"));
-    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`)).toHaveLength(1));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    expect(await screen.findByText(/Listo: quedó conciliado/)).toBeTruthy();
+    expect(lugar()).toBe("/pagos");
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas));
     fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
-    const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
-    colgar = false;
-    await act(async () => {
-      for (const soltar of colgadas) soltar(lista());
-      await new Promise((r) => setTimeout(r, 20));
-    });
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(screen.queryByText(/Listo: quedó conciliado/)).toBeNull();
-    expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
   });
 
   it("la subida que termina con la ficha ya cerrada no mueve la que se abrió después", async () => {
@@ -600,11 +591,12 @@ describe("ficha: la línea de pasos sale de lo que dice el servidor", () => {
   const estado = (lista: HTMLElement, paso: string) => within(lista).getByText(paso).closest("li")?.getAttribute("data-estado");
 
   it.each([
-    ["en_revision", "aprobar", "Aprobar", "ahora", 0],
-    ["para_pagar", "pagar", "Pagar", "ahora", 1],
-    ["para_pagar", "renovar", "Pagar", "alerta", 1],
-    ["falta_conciliar", "conciliar", "Conciliar", "ahora", 2],
-    ["observado", "corregir", "Conciliar", "alerta", 2],
+    ["borrador", "enviar", "Preparar", "ahora", 0],
+    ["en_revision", "aprobar", "Aprobar", "ahora", 1],
+    ["para_pagar", "pagar", "Pagar", "ahora", 2],
+    ["para_pagar", "renovar", "Pagar", "alerta", 2],
+    ["falta_conciliar", "conciliar", "Conciliar", "ahora", 3],
+    ["observado", "corregir", "Conciliar", "alerta", 3],
   ] as const)("%s con %s: el paso actual es %s", async (situacion, paso, nombre, tono, hechos) => {
     abrirFicha(ficha({ situacion, paso }));
     const lista = await camino();
@@ -613,11 +605,11 @@ describe("ficha: la línea de pasos sale de lo que dice el servidor", () => {
     expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(hechos);
   });
 
-  it("pagada: tres hechos y «Cotejar» sin marcar, porque la ficha no sabe si se cotejó", async () => {
+  it("pagada: cuatro hechos y «Cotejar» sin marcar, porque la ficha no sabe si se cotejó", async () => {
     abrirFicha(ficha({ situacion: "pagada", paso: null }));
     const lista = await camino();
     expect(actual(lista)).toBeNull();
-    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(3);
+    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(4);
     expect(estado(lista, "Cotejar")).toBeNull();
   });
 
@@ -739,23 +731,35 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     expect(await screen.findByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
   });
 
-  it("en borrador la alerta dice que la aprueba el Consejo, y al enviar lo repite", async () => {
+  it("en borrador la alerta dice que la aprueba el Consejo, y al enviar el aviso dice que le toca al Consejo", async () => {
     const RUTA_ENVIO = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
-    abrirFicha({ ...BORRADOR, versiones: [version({ alerta_fraccionamiento: true, aprobada_por: [], franja: "bajo_umbral" })] }, {
-      [`POST ${RUTA_ENVIO}`]: () => Response.json({ id: O1, version: 1 }),
+    const conAlerta = { ...BORRADOR, versiones: [version({ alerta_fraccionamiento: true, aprobada_por: [], franja: "bajo_umbral" })] };
+    let enviada = false;
+    abrirFicha(() => (enviada ? { ...conAlerta, orden: orden({ estado: "en_revision" }), situacion: "en_revision", le_toca_a: "consejo" } : conAlerta), {
+      [`POST ${RUTA_ENVIO}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
     });
     expect(await screen.findByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
     expect(screen.getByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeTruthy();
     fireEvent.click(await boton("Enviar a aprobar"));
-    expect(await screen.findByText("Listo: la orden se envió. La aprueba el Consejo.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
   });
 
-  it("control: sin la alerta, ni el aviso ni ese texto", async () => {
+  it("control: sin la alerta, ni el aviso ni ese texto; si la base no pide aprobación, lo dice", async () => {
     const RUTA_ENVIO = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
-    abrirFicha(BORRADOR, { [`POST ${RUTA_ENVIO}`]: () => Response.json({ id: O1, version: 1 }), [`GET ${BASE}/pagos/bandeja`]: bandejaCon() });
+    let enviada = false;
+    abrirFicha(() => (enviada ? ficha({ le_toca_a: "vos", paso: "pagar" }) : BORRADOR), {
+      [`POST ${RUTA_ENVIO}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+    });
     fireEvent.click(await boton("Enviar a aprobar"));
-    expect(await screen.findByText(/Si su franja no pide aprobación, ya quedó aprobada/)).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden no pide aprobación y quedó lista para pagar.")).toBeTruthy();
     expect(screen.queryByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeNull();
   });
 
@@ -2003,7 +2007,7 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     fireEvent.change(screen.getByLabelText("Contrato o abono (opcional)"), { target: { value: K1 } });
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     expect(await boton("Enviar a aprobar")).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O1}`);
     expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
@@ -2017,10 +2021,10 @@ describe("preparar, enviar y renovar", () => {
     expect(elegir.value).toBe("");
     fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
-    expect(((await boton("Guardar la orden")) as HTMLButtonElement).disabled).toBe(true);
+    expect(((await boton("Guardar como borrador")) as HTMLButtonElement).disabled).toBe(true);
     // Control: al elegirlo, se puede guardar.
     fireEvent.change(elegir, { target: { value: P1 } });
-    expect(((await boton("Guardar la orden")) as HTMLButtonElement).disabled).toBe(false);
+    expect(((await boton("Guardar como borrador")) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("cambiar la moneda descarta el contrato elegido", async () => {
@@ -2040,13 +2044,13 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
     const envios = () => pedidos(api, "POST", `${BASE}/ordenes-pago`);
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     await screen.findByRole("alert");
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     await waitFor(() => expect(envios()).toHaveLength(2));
-    await waitFor(() => expect((screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Guardar como borrador" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza de tanques" } });
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     await waitFor(() => expect(envios()).toHaveLength(3));
     const [a, b, c] = claves(envios());
     expect(a).toBe(b);
@@ -2059,7 +2063,7 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "1234,50" } });
     fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
     fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Arreglo del portón" } });
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     expect(await screen.findByText(/está suspendido o de baja/)).toBeTruthy();
     expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Arreglo del portón");
     expect(lugar()).toBe("/pagos/nueva");
@@ -2091,7 +2095,7 @@ describe("preparar, enviar y renovar", () => {
   it("enviar lleva a la bandeja con el resultado", async () => {
     const api = abrirFicha(BORRADOR, { [`POST ${BASE}/ordenes-pago/${O1}/enviar-a-revision`]: () => Response.json({ id: O1, version: 1 }) });
     fireEvent.click(await boton("Enviar a aprobar"));
-    expect(await screen.findByText(/Listo: la orden se envió/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: la orden quedó/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/enviar-a-revision`)[0])).toEqual({ version_esperada: 1 });
   });
@@ -3146,7 +3150,7 @@ describe("la factura arriba de la orden (0088)", () => {
   const vuelta = () => act(() => vi.advanceTimersByTimeAsync(ESPERA));
   const valor = (etiqueta: string | RegExp) => (screen.getByLabelText(etiqueta) as HTMLInputElement).value;
   async function guardar(api: ReturnType<typeof vi.fn>) {
-    fireEvent.click(await boton("Guardar la orden"));
+    fireEvent.click(await boton("Guardar como borrador"));
     await waitFor(() => expect(pedidos(api, "POST", ORDENES)).toHaveLength(1));
     return cuerpo(pedidos(api, "POST", ORDENES)[0]);
   }
@@ -3341,7 +3345,7 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       fireEvent.click(await boton(QUITAR_ARCHIVO));
       expect(await boton(CONFIRMAR_QUITAR)).toBeTruthy();
-      fireEvent.click(await boton("Guardar la orden"));
+      fireEvent.click(await boton("Guardar como borrador"));
       await waitFor(() => expect(pedidos(api, "POST", ORDENES)).toHaveLength(1));
       await waitFor(() => sinBoton(CONFIRMAR_QUITAR));
       expect(await cuerpo(pedidos(api, "POST", ORDENES)[0])).toMatchObject({ factura_version_id: VF });
@@ -3429,7 +3433,7 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       await subirFactura();
-      const guardarOrden = screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement;
+      const guardarOrden = screen.getByRole("button", { name: "Guardar y enviar a aprobar" }) as HTMLButtonElement;
       expect(guardarOrden.disabled).toBe(true);
       expect(screen.getByText(TEXTO_ESPERA_PARA_GUARDAR)).toBeTruthy();
       // Ni con Enter: el formulario no manda nada.
@@ -3468,7 +3472,7 @@ describe("la factura arriba de la orden (0088)", () => {
       await subirFactura();
       await vuelta();
       expect(await screen.findByText(TEXTO_LEYENDO)).toBeTruthy();
-      expect((screen.getByRole("button", { name: "Guardar la orden" }) as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByRole("button", { name: "Guardar y enviar a aprobar" }) as HTMLButtonElement).disabled).toBe(true);
       fireEvent.click(await boton(SEGUIR_SIN_LECTURA));
       expect(await screen.findByText(TEXTO_DEJADO_SIN_LECTURA)).toBeTruthy();
       expect(await guardar(api)).toMatchObject({ factura_version_id: VF, concepto: "Limpieza" });
@@ -3620,7 +3624,7 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
       fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P3 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Pintura" } });
-      fireEvent.click(await boton("Guardar la orden"));
+      fireEvent.click(await boton("Guardar como borrador"));
       await waitFor(() => expect(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)).toHaveLength(1));
       expect(await cuerpo(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)[0])).toMatchObject({ factura_version_id: null, proveedor_id: P3 });
     });
@@ -3670,5 +3674,321 @@ describe("la factura arriba de la orden (0088)", () => {
       expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(0);
       sinBoton("Ver la factura");
     });
+  });
+});
+
+// Tanda 1 del informe de fricción (decisiones del propietario del 12-11-2026). Cada prueba falla con
+// el código de 7480810.
+describe("tanda 1 de fricción: después de un acto y al preparar", () => {
+  const ENVIO_O1 = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
+  const ESPERANDO_AL_CONSEJO: Ficha = {
+    ...BORRADOR, orden: orden({ estado: "en_revision", aprobaciones: 0 }), situacion: "en_revision", paso: "espera_aprobar",
+    le_toca_a: "consejo", puede_enviar: false,
+  };
+  const OTRO_BORRADOR: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
+  const FILA_O2 = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
+
+  /** PC, dos borradores en la bandeja: se envía el primero, que la pantalla abrió sola. */
+  function dosBorradoresEnPC() {
+    ancho(true);
+    let enviada = false;
+    const api = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (enviada
+          ? bandejaCon(FILA_O2, elemento("espera_aprobar", "esperando", { le_toca_a: "consejo" }))
+          : bandejaCon(elemento("enviar", "para_preparar"), FILA_O2))(),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(enviada ? ESPERANDO_AL_CONSEJO : BORRADOR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRO_BORRADOR),
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos");
+    return api;
+  }
+
+  it("P-01: en PC, después de enviar, no se abre otra orden sola: queda el «Listo» de esa orden", async () => {
+    dosBorradoresEnPC();
+    await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" });
+    fireEvent.click(await boton("Enviar a aprobar"));
+    const listo = await screen.findByRole("region", { name: "Lo que pasó con la orden" });
+    expect(await within(listo).findByText("Esperando aprobación")).toBeTruthy();
+    expect(within(listo).getByText("Le toca al Consejo.")).toBeTruthy();
+    expect(within(listo).getByText(/Limpieza Ficticia SRL/)).toBeTruthy();
+    // Ninguna ficha de otra orden, y ningún «Enviar a aprobar» hasta que la persona elija.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    sinBoton("Enviar a aprobar");
+    expect(screen.queryByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeNull();
+    expect(lugar()).toBe("/pagos");
+  });
+
+  it("P-01: «Seguir con lo pendiente» recién ahí abre la siguiente", async () => {
+    dosBorradoresEnPC();
+    fireEvent.click(await boton("Enviar a aprobar"));
+    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(lugar()).toBe(`/pagos/${O2}`);
+    expect(await boton("Enviar a aprobar")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Lo que pasó con la orden" })).toBeNull();
+  });
+
+  it("P-01: en PC, sin nada más pendiente, el «Listo» lo dice y no ofrece seguir", async () => {
+    ancho(true);
+    let enviada = false;
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (enviada ? bandejaCon(elemento("espera_aprobar", "esperando", { le_toca_a: "consejo" })) : bandejaCon(elemento("enviar", "para_preparar")))(),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(enviada ? ESPERANDO_AL_CONSEJO : BORRADOR),
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    }));
+    abrir("/pagos");
+    fireEvent.click(await boton("Enviar a aprobar"));
+    expect(await screen.findByText("No queda nada pendiente.")).toBeTruthy();
+    sinBoton(/Seguir con lo pendiente/);
+  });
+
+  it("P-01: en PC, después de conciliar, la siguiente para conciliar tampoco se abre sola", async () => {
+    ancho(true);
+    let conciliado = false;
+    const OTRA: Ficha = { ...CONCILIAR, orden: orden({ id: O2, estado: "en_verificacion" }), versiones: [version({ razon_social: "Ascensores Ficticios SA" })] };
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (conciliado
+          ? bandejaCon(elemento("conciliar", "para_conciliar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" }))
+          : bandejaCon(elemento("conciliar", "para_conciliar"), elemento("conciliar", "para_conciliar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" })))(),
+      [`GET ${BASE}/pagos/${O1}`]: () =>
+        Response.json(conciliado ? ficha({ situacion: "pagada", paso: null, le_toca_a: null, orden: orden({ estado: "pagada" }) }) : CONCILIAR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRA),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/${PAGO}/conciliacion`]: () => {
+        conciliado = true;
+        return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
+      },
+    }));
+    abrir("/pagos");
+    fireEvent.click(await boton("Conforme"));
+    expect(await screen.findByText("No hay nada más que hacer con ella.")).toBeTruthy();
+    sinBoton("Conforme");
+    fireEvent.click(await boton("Seguir con lo pendiente (1)"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+  });
+
+  it("P-12: el aviso después de enviar dice en qué quedó, sin «franja»", async () => {
+    let enviada = false;
+    abrirFicha(() => (enviada ? ESPERANDO_AL_CONSEJO : BORRADOR), {
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    });
+    fireEvent.click(await boton("Enviar a aprobar"));
+    expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
+    expect(screen.queryByText(/franja/)).toBeNull();
+    expect(lugar()).toBe("/pagos");
+  });
+
+  it("P-12: si no pide aprobación, dice que quedó lista para pagar", async () => {
+    let enviada = false;
+    abrirFicha(() => (enviada ? ficha({ le_toca_a: "vos", paso: "pagar" }) : BORRADOR), {
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    });
+    fireEvent.click(await boton("Enviar a aprobar"));
+    expect(await screen.findByText("Listo: la orden no pide aprobación y quedó lista para pagar.")).toBeTruthy();
+  });
+
+  describe("P-10: «Guardar y enviar a aprobar» es el botón principal", () => {
+    const LECTURAS = {
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+    };
+    const CREAR = `${BASE}/ordenes-pago`;
+
+    async function completar() {
+      fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "150000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Cambio de cerraduras" } });
+    }
+
+    it("un toque guarda y envía: dos pedidos, y el aviso no dice «borrador»", async () => {
+      let enviada = false;
+      const api = backend({
+        ...LECTURAS,
+        [`POST ${CREAR}`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+        [`POST ${ENVIO_O1}`]: () => {
+          enviada = true;
+          return Response.json({ id: O1, version: 1 });
+        },
+        [`GET ${BASE}/pagos/${O1}`]: () => Response.json(enviada ? ESPERANDO_AL_CONSEJO : BORRADOR),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await completar();
+      const principal = await boton("Guardar y enviar a aprobar");
+      expect(principal.classList.contains("secundario")).toBe(false);
+      expect((await boton("Guardar como borrador")).classList.contains("secundario")).toBe(true);
+      fireEvent.click(principal);
+      expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
+      expect(escrituras(api)).toEqual([CREAR, ENVIO_O1]);
+      expect(await cuerpo(pedidos(api, "POST", ENVIO_O1)[0])).toEqual({ version_esperada: 1 });
+      expect(lugar()).toBe(`/pagos/${O1}`);
+      expect(screen.queryByText(/borrador/)).toBeNull();
+    });
+
+    it("control: «Guardar como borrador» guarda sin enviar", async () => {
+      const api = backend({
+        ...LECTURAS,
+        [`POST ${CREAR}`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+        [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await completar();
+      fireEvent.click(await boton("Guardar como borrador"));
+      expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
+      expect(escrituras(api)).toEqual([CREAR]);
+    });
+
+    it("si el envío pide el segundo factor, lo pide en el mismo acto y no vuelve a guardar", async () => {
+      let conFactor = false;
+      const api = backend({
+        ...LECTURAS,
+        "POST /api/v1/auth/totp/verificar": () => {
+          conFactor = true;
+          return VERIFICADO();
+        },
+        [`POST ${CREAR}`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+        [`POST ${ENVIO_O1}`]: () => (conFactor ? Response.json({ id: O1, version: 1 }) : error("segundo_factor_requerido", 403)),
+        [`GET ${BASE}/pagos/${O1}`]: () => Response.json(conFactor ? ESPERANDO_AL_CONSEJO : BORRADOR),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await completar();
+      fireEvent.click(await boton("Guardar y enviar a aprobar"));
+      await verificarCodigo();
+      expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
+      expect(pedidos(api, "POST", CREAR)).toHaveLength(1);
+      const envios = pedidos(api, "POST", ENVIO_O1);
+      expect(envios).toHaveLength(2);
+      expect(new Set(claves(envios)).size).toBe(1);
+    });
+
+    it("si el envío falla, la orden ya guardada no se duplica: su ficha lo dice y ofrece enviarla", async () => {
+      const api = backend({
+        ...LECTURAS,
+        [`POST ${CREAR}`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+        [`POST ${ENVIO_O1}`]: () => error("error_interno", 500),
+        [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+      });
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await completar();
+      fireEvent.click(await boton("Guardar y enviar a aprobar"));
+      expect(await screen.findByText(/La orden quedó guardada como borrador, pero no se envió a aprobar\./)).toBeTruthy();
+      expect(lugar()).toBe(`/pagos/${O1}`);
+      expect(await boton("Enviar a aprobar")).toBeTruthy();
+      expect(pedidos(api, "POST", CREAR)).toHaveLength(1);
+    });
+  });
+
+  it("P-06: la barra tiene cinco pasos y distingue un borrador de una orden enviada", async () => {
+    const nombres = (lista: HTMLElement) => within(lista).getAllByRole("listitem").map((li) => li.querySelector("span")?.firstChild?.textContent);
+    abrirFicha(BORRADOR);
+    let lista = await screen.findByRole("list", { name: "Por dónde va la orden" });
+    expect(nombres(lista)).toEqual(["Preparar", "Aprobar", "Pagar", "Conciliar", "Cotejar"]);
+    expect(lista.querySelector('[aria-current="step"]')?.textContent).toBe("Preparar");
+    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(0);
+    cleanup();
+    abrirFicha(ESPERANDO_AL_CONSEJO);
+    lista = await screen.findByRole("list", { name: "Por dónde va la orden" });
+    expect(lista.querySelector('[aria-current="step"]')?.textContent).toBe("Aprobar");
+    expect(within(lista).getByText("Preparar").closest("li")?.getAttribute("data-estado")).toBe("hecho");
+  });
+
+  it("P-35: «Preparar una orden» está arriba, antes del primer grupo", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("pagar", "para_pagar"), FILA_O2) }));
+    abrir("/pagos");
+    const preparar = await screen.findByRole("link", { name: "Preparar una orden" });
+    const primerGrupo = (await screen.findAllByRole("region"))[0] as HTMLElement;
+    expect(preparar.compareDocumentPosition(primerGrupo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Las consultas quedan abajo, después de la lista.
+    const consultar = screen.getByRole("link", { name: "Consultar pagos" });
+    expect(primerGrupo.compareDocumentPosition(consultar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("P-36: la frase de que CEM no transfiere está donde se paga", async () => {
+    abrirFicha(PAGAR, {
+      [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => Response.json({ id: O1, version: 1 }),
+      [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO),
+    });
+    fireEvent.click(await boton("Ver la cuenta para pagar"));
+    expect(await screen.findByText(CUENTA)).toBeTruthy();
+    expect(screen.getByText("CEM no transfiere: la transferencia se hace en el banco.")).toBeTruthy();
+  });
+});
+
+// Hallazgos P2 de Codex sobre el PR #235 (f5d2ec0).
+describe("tanda 1 de fricción: revisión de Codex", () => {
+  const O3 = "35353535-3535-4535-8535-353535353535";
+  const ENVIO_O1 = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
+
+  it("en PC, después de enviar un borrador, «Seguir con lo pendiente» abre el otro borrador y no el pago que va primero", async () => {
+    ancho(true);
+    let enviada = false;
+    const PAGO_O3 = elemento("pagar", "para_pagar", { orden_id: O3, proveedor: "Pinturas Ficticias SA" });
+    const BORRADOR_O2 = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
+    const OTRO_BORRADOR: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (enviada
+          ? bandejaCon(PAGO_O3, BORRADOR_O2, elemento("espera_aprobar", "esperando", { le_toca_a: "consejo" }))
+          : bandejaCon(PAGO_O3, elemento("enviar", "para_preparar"), BORRADOR_O2))(),
+      [`GET ${BASE}/pagos/${O1}`]: () =>
+        Response.json(enviada ? { ...BORRADOR, orden: orden({ estado: "en_revision" }), situacion: "en_revision", paso: "espera_aprobar", le_toca_a: "consejo", puede_enviar: false } : BORRADOR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRO_BORRADOR),
+      [`GET ${BASE}/pagos/${O3}`]: () => Response.json({ ...PAGAR, orden: orden({ id: O3 }), versiones: [version({ razon_social: "Pinturas Ficticias SA" })] }),
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    }));
+    abrir(`/pagos/${O1}`);
+    fireEvent.click(await boton("Enviar a aprobar"));
+    fireEvent.click(await boton("Seguir con lo pendiente (2)"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(lugar()).toBe(`/pagos/${O2}`);
+  });
+
+  it("si se sale de «Preparar una orden» mientras se envía y la red cae, no vuelve a la orden", async () => {
+    let soltar: (e: Error) => void = () => undefined;
+    const api = backend({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`POST ${ENVIO_O1}`]: () => new Promise<Response>((_, rechazar) => (soltar = rechazar)),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "150000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Cambio de cerraduras" } });
+    fireEvent.click(await boton("Guardar y enviar a aprobar"));
+    await waitFor(() => expect(pedidos(api, "POST", ENVIO_O1)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+    await waitFor(() => expect(lugar()).toBe("/pagos"));
+    await act(async () => {
+      soltar(new TypeError("Failed to fetch"));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(lugar()).toBe("/pagos");
+    expect(screen.queryByText(/no se envió a aprobar/)).toBeNull();
   });
 });

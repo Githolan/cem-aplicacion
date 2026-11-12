@@ -59,6 +59,15 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
   const esperando = elementos.filter((e) => e.grupo === "esperando");
   return (
     <div className="bandeja">
+      {/* Lo que más hace quien prepara va arriba, antes de la lista (P-35, 12-11-2026); las consultas,
+          abajo. Un solo botón lleno: el del rol (comentario 24, 09-11-2026). */}
+      {prepara && (
+        <p className="salidas-pago salidas-pago--arriba">
+          <Link to={RUTA_NUEVA} state={{ consorcio }} className="enlace-boton enlace-boton--principal">
+            Preparar una orden
+          </Link>
+        </p>
+      )}
       {grupos.length === 0 && (
         <div className="tarjeta bandeja-al-dia">
           <p className="etiqueta-situacion" data-tono="bien">
@@ -82,13 +91,7 @@ export function Bandeja({ elementos, consorcio, abierta }: Props) {
           </ul>
         </details>
       )}
-      {/* Un solo botón lleno: el del rol; el resto con borde y sin relleno (comentario 24, 09-11-2026). */}
       <p className="salidas-pago">
-        {prepara && (
-          <Link to={RUTA_NUEVA} state={{ consorcio }} className="enlace-boton enlace-boton--principal">
-            Preparar una orden
-          </Link>
-        )}
         {coteja && (
           <Link to={RUTA_COTEJO} state={{ consorcio }} className={`enlace-boton ${prepara ? "enlace-boton--borde" : "enlace-boton--principal"}`}>
             Cotejar con el banco

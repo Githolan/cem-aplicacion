@@ -6,16 +6,20 @@ import { useLocation, useNavigate, useNavigationType } from "react-router";
 // borra del historial apenas se lee, para que una recarga no lo repita, y sigue a la vista si una
 // redirección (`replace`) lleva a otra pantalla; se va con la navegación siguiente.
 
-function avisoDe(estado: unknown): string | null {
+type Aviso = { texto: string; ok: boolean };
+
+/** `falla: true` cuando el acto terminó a medias: lo hecho quedó, pero algo no salió (P-10). */
+function avisoDe(estado: unknown): Aviso | null {
   if (typeof estado !== "object" || estado === null || !("aviso" in estado)) return null;
-  return typeof estado.aviso === "string" ? estado.aviso : null;
+  if (typeof estado.aviso !== "string") return null;
+  return { texto: estado.aviso, ok: !("falla" in estado && estado.falla === true) };
 }
 
 export function AvisoLlegada() {
   const lugar = useLocation();
   const tipo = useNavigationType();
   const navegar = useNavigate();
-  const [aviso, setAviso] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<Aviso | null>(null);
 
   useEffect(() => {
     const nuevo = avisoDe(lugar.state);
@@ -28,7 +32,7 @@ export function AvisoLlegada() {
 
   return (
     <div role="status" aria-live="polite">
-      {aviso !== null && <p className="aviso-ok">{aviso}</p>}
+      {aviso !== null && <p className={aviso.ok ? "aviso-ok" : "aviso-error"}>{aviso.texto}</p>}
     </div>
   );
 }

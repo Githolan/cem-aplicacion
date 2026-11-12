@@ -506,6 +506,25 @@ describe("página /egresos/proveedores", () => {
     await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1));
   });
 
+  it("P-25: «Cancelar» se lleva el error del formulario (tanda 1, 12-11-2026)", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => error("validacion", 422),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    // Control: el error se ve mientras el formulario está abierto.
+    expect(await screen.findByText("Revisá los datos del formulario.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("button", { name: "Dar de alta el proveedor" })).toBeNull();
+    expect(screen.queryByText("Revisá los datos del formulario.")).toBeNull();
+  });
+
   it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {
     const conDocumento = proveedor({ documento_id: DOC });
     const simulado = backend({

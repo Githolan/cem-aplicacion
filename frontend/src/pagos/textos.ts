@@ -105,10 +105,12 @@ export const TEXTO_RETIRADA = "Listo: la orden se retiró. Ya no está en la ban
 export const AVISO_SE_PUEDE_RETIRAR = "Mientras nadie la apruebe, se puede modificar o retirar.";
 export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando}. No se aprueba ni se paga.`;
 
-export const PASOS_DEL_CAMINO = ["Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
+export const PASOS_DEL_CAMINO = ["Preparar", "Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
 
 /** Inventado: muestra la forma del archivo, que el servidor lee (`extracto.py`). */
 export const EJEMPLO_EXTRACTO = "Fecha;Débito;Número de operación\n05/11/2026;-184.350,00;0048213377";
+/** Se dice una vez, donde se paga, y no en cada visita al inicio (P-36, AC-04, 12-11-2026). */
+export const AVISO_NO_TRANSFIERE = "CEM no transfiere: la transferencia se hace en el banco.";
 export const AVISO_VER_LA_CUENTA =
   "Para pagar hay que ver la cuenta. Queda registrado quién la vio, y esa persona no puede conciliar este pago.";
 export const AVISO_ANTIVIRUS_TARDA =

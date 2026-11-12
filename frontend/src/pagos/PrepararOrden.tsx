@@ -8,11 +8,12 @@ import { AvisoPantalla, ConsorcioSinServicio } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { useConsorcio } from "../egresos/useConsorcio";
 import { REQUISITOS } from "../permisos";
-import { FormularioOrden, type OrdenInicial } from "./FormularioOrden";
+import { FormularioOrden, noSeEnvio, type OrdenInicial } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { useActo } from "./useActo";
 
-// `/pagos/nueva`: preparar una orden. Al guardar sigue a su ficha, donde está el paso que falta.
+// `/pagos/nueva`: preparar una orden. Lo normal es guardarla y enviarla a aprobar en un solo acto
+// (decisión del propietario del 12-11-2026); al terminar sigue a su ficha, con lo que pasó.
 
 /** Con qué abre: el proveedor recién dado de alta o el de otra orden, y lo que falta de ella; al
  * volver del alta del proveedor de una factura, también su número y la factura ya subida. Todo es
@@ -66,6 +67,10 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
   const navegar = useNavigate();
   const acto = useActo(aEntrar);
   const { aviso, pendiente, setPendiente, enviando } = acto;
+  /** La orden ya guardada mientras falta enviarla: si se cancela el código, se va a su ficha. */
+  const creada = useRef<string | null>(null);
+  const aLaFicha = (orden: string, texto: string, falla = false) =>
+    navegar(rutaFicha(orden), { state: { aviso: texto, falla, consorcio } });
   return (
     <>
       <CabeceraInterna titulo="Preparar una orden" volver={RUTA_PAGOS} destino="Pagos" />
@@ -82,13 +87,16 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
             setPendiente(null);
             repetir();
           }}
-          alCancelar={() => setPendiente(null)}
+          alCancelar={() => {
+            setPendiente(null);
+            if (creada.current !== null) aLaFicha(creada.current, noSeEnvio("No se confirmó el código."), true);
+          }}
         />
       )}
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <div hidden={pendiente !== null}>
           <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio} inicial={inicial}
-            alGuardar={(orden, texto) => navegar(rutaFicha(orden), { state: { aviso: texto, consorcio } })}
+            alGuardar={aLaFicha} alCrear={(orden) => (creada.current = orden)}
             alCancelar={() => navegar(RUTA_PAGOS, { state: { consorcio } })} />
         </div>
       )}

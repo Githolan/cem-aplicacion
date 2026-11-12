@@ -764,6 +764,10 @@ main:has(.cotejo) {
   margin-top: 1.5rem;
 }
 
+.salidas-pago--arriba {
+  margin: 0 0 1rem;
+}
+
 .filtros-pago button {
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -984,8 +988,10 @@ main:has(.cotejo) {
   min-width: 0;
   gap: 0.375rem;
   color: var(--ink-muted);
-  font-size: 0.875rem;
+  /* Cinco pasos en un teléfono de 375 px: la letra baja un poco antes de partir una palabra. */
+  font-size: clamp(0.75rem, 3.4vw, 0.875rem);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .camino-orden i {

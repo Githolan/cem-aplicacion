@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 04-11-2026 (noche).
+**Actualizado:** 12-11-2026 (tanda 1 del informe de fricción, rama `friccion/tanda-1-pagos`).
 
 ## Qué existe
 
@@ -1104,3 +1104,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **`0070`** y **`0071`** (rama `feat/llave-de-acceso`, contrato `0.42.0`): llave de acceso (WebAuthn: PIN, huella o cara) como otro medio de escribir `nucleo.sesion.segundo_factor_en`, y el gesto solo en lo que mueve dinero o cambia a quién se le paga. Mirar, preparar órdenes y armar liquidaciones ya no lo piden. Reemplaza la decisión del 30-10 sobre lecturas. Diseño: `doc/diseno/Llave_de_Acceso_Diseno.md` del repositorio CEM.
    - **No hace:** revisión, aprobación ni publicación, ni cargos. Depende de las decisiones 4.1, 4.2 y 5.
    - **Lista para el piloto:** `doc/diseno/Piloto_Lista_Ready_for_Pilot_2026-10-31.md` del repositorio CEM.
+43. **Tanda 1 del informe de fricción, solo frontend** (rama `friccion/tanda-1-pagos`, 12-11-2026; sin fusionar ni desplegar). Informe: `C:\Users\holan\cem-pruebas\informe-friccion-fable.md`, parte 5.
+   - **Decisiones del propietario (12-11):** (1) en PC, terminado un acto, no se abre ninguna orden sola: al lado queda el «Listo» con el estado de esa orden y a quién le toca, y «Seguir con lo pendiente (N)» abre la siguiente (`pagos/ListoDelActo.tsx`); (2) al preparar, el botón principal es «Guardar y enviar a aprobar» y «Guardar como borrador» queda secundario; si el envío no sale, la orden ya guardada no se duplica: se va a su ficha con el motivo; (3) barra de cinco pasos: Preparar → Aprobar → Pagar → Conciliar → Cotejar.
+   - **Además:** el aviso de enviar lee en qué quedó la orden (P-12, `pagos/comoQuedo.ts`); «Cancelar» en Proveedores se lleva el error (P-25); «Preparar una orden» arriba de la bandeja (P-35); sin «Estamos construyendo…» ni el aviso fijo de que la aplicación no mueve dinero en el inicio, que pasa al paso de pagar (P-36, AC-03, AC-04); sin pendientes, el inicio de quien revisa no muestra la tarjeta de Pagos y Pagos queda como fila (AC-01).
+   - **Sin cambios en backend ni contrato.** En teléfono y tablet el acto sigue llevando a la bandeja (o, al conciliar, al pago siguiente) con el aviso.
