@@ -15,6 +15,7 @@ import { Bandeja } from "./Bandeja";
 import { Ficha, type Seguir } from "./Ficha";
 import { ListoDelActo } from "./ListoDelActo";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
+import type { Paso } from "./textos";
 import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 
 // `/pagos` y `/pagos/:orden`: una bandeja y una ficha (§1). En PC la ficha se abre al lado de la
@@ -25,7 +26,7 @@ import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[] };
 /** El acto que se acaba de terminar en PC: sobre qué orden, qué dijo y a qué paso seguía. */
-type Hecho = { orden: string; texto: string; paso: Seguir["paso"] | null };
+type Hecho = { orden: string; texto: string; paso: Paso | null };
 
 export function CircuitoPagos() {
   const elegido = useConsorcio(REQUISITOS.pagos);
@@ -87,10 +88,10 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   const alCambiar = useCallback(() => setVuelta((v) => v + 1), []);
 
   const terminar = useCallback(
-    (desde: string, texto: string, seguir?: Seguir) => {
+    (desde: string, texto: string, seguir?: Seguir, paso: Paso | null = null) => {
       if (alLado) {
         navegar(RUTA_PAGOS, { state: { consorcio } });
-        setHecho({ orden: desde, texto, paso: seguir?.paso ?? null });
+        setHecho({ orden: desde, texto, paso: seguir?.paso ?? paso });
         setPrimera(null);
         setVuelta((v) => v + 1);
         setActo((a) => a + 1);
@@ -170,7 +171,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
       {listo === null && abierta !== null && consorcio !== "" && conPantalla && (
         <div>
           <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} orden={abierta}
-            aEntrar={aEntrar} aInicio={aInicio} terminar={(texto, seguir) => terminar(abierta, texto, seguir)} alCambiar={alCambiar} />
+            aEntrar={aEntrar} aInicio={aInicio} terminar={(texto, seguir, paso) => terminar(abierta, texto, seguir, paso)} alCambiar={alCambiar} />
         </div>
       )}
     </div>

@@ -48,7 +48,8 @@ export function useActo(aEntrar: () => void, alDescartar?: () => void) {
     } catch (e: unknown) {
       setEnviando(false);
       if (e instanceof SinSesion) aEntrar();
-      else {
+      // La pantalla ya se cerró: la caída de la red no mueve la que se abrió después.
+      else if (montado.current) {
         setAviso({ texto: SIN_CONEXION, ok: false });
         acto.alNoLlegar?.();
       }

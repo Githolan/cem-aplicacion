@@ -177,13 +177,14 @@ type Props = {
   orden: string;
   aEntrar: () => void;
   aInicio: () => void;
-  /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguir`, al próximo de ese paso. */
-  terminar: (texto: string, seguir?: Seguir) => void;
+  /** El acto terminó: pasa a la pantalla siguiente con el aviso; `seguir`, al próximo de ese paso.
+   * `paso`: el paso que se acaba de hacer, para que en PC «Seguir con lo pendiente» siga por ahí. */
+  terminar: (texto: string, seguir?: Seguir, paso?: Paso | null) => void;
   /** Algo cambió sin dejar la ficha: la bandeja de al lado se vuelve a leer. */
   alCambiar: () => void;
 };
 
-export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar }: Props) {
+export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarActo, alCambiar }: Props) {
   const id = useId();
   const acto = useActo(aEntrar, alCambiar);
   const { enviando, aviso, setAviso, pendiente, setPendiente, montado } = acto;
@@ -318,6 +319,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
 
   const { ficha } = lectura;
   const { situacion, paso, ejecucion, declaracion_vigente: declaracion, observacion_vigente: observacion, diferencia_vigente: diferencia } = ficha;
+  // Todo acto dice qué paso se hizo: el de la ficha que se tenía a la vista al hacerlo.
+  const terminar = (texto: string, seguir?: Seguir) => terminarActo(texto, seguir, paso);
   const v = vigenteDe(ficha);
   const ruta = { consorcio_id: consorcio, orden_id: orden };
   // Lo que se espera con los mismos datos: decide la base, y el aviso final dice lo que pasó.

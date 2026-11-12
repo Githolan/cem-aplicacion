@@ -3934,3 +3934,61 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
     expect(screen.getByText("CEM no transfiere: la transferencia se hace en el banco.")).toBeTruthy();
   });
 });
+
+// Hallazgos P2 de Codex sobre el PR #235 (f5d2ec0).
+describe("tanda 1 de fricción: revisión de Codex", () => {
+  const O3 = "35353535-3535-4535-8535-353535353535";
+  const ENVIO_O1 = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
+
+  it("en PC, después de enviar un borrador, «Seguir con lo pendiente» abre el otro borrador y no el pago que va primero", async () => {
+    ancho(true);
+    let enviada = false;
+    const PAGO_O3 = elemento("pagar", "para_pagar", { orden_id: O3, proveedor: "Pinturas Ficticias SA" });
+    const BORRADOR_O2 = elemento("enviar", "para_preparar", { orden_id: O2, proveedor: "Ascensores Ficticios SA" });
+    const OTRO_BORRADOR: Ficha = { ...BORRADOR, orden: orden({ id: O2, estado: "borrador" }), versiones: [version({ razon_social: "Ascensores Ficticios SA", aprobada_por: [] })] };
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () =>
+        (enviada
+          ? bandejaCon(PAGO_O3, BORRADOR_O2, elemento("espera_aprobar", "esperando", { le_toca_a: "consejo" }))
+          : bandejaCon(PAGO_O3, elemento("enviar", "para_preparar"), BORRADOR_O2))(),
+      [`GET ${BASE}/pagos/${O1}`]: () =>
+        Response.json(enviada ? { ...BORRADOR, orden: orden({ estado: "en_revision" }), situacion: "en_revision", paso: "espera_aprobar", le_toca_a: "consejo", puede_enviar: false } : BORRADOR),
+      [`GET ${BASE}/pagos/${O2}`]: () => Response.json(OTRO_BORRADOR),
+      [`GET ${BASE}/pagos/${O3}`]: () => Response.json({ ...PAGAR, orden: orden({ id: O3 }), versiones: [version({ razon_social: "Pinturas Ficticias SA" })] }),
+      [`POST ${ENVIO_O1}`]: () => {
+        enviada = true;
+        return Response.json({ id: O1, version: 1 });
+      },
+    }));
+    abrir(`/pagos/${O1}`);
+    fireEvent.click(await boton("Enviar a aprobar"));
+    fireEvent.click(await boton("Seguir con lo pendiente (2)"));
+    expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
+    expect(lugar()).toBe(`/pagos/${O2}`);
+  });
+
+  it("si se sale de «Preparar una orden» mientras se envía y la red cae, no vuelve a la orden", async () => {
+    let soltar: (e: Error) => void = () => undefined;
+    const api = backend({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`POST ${ENVIO_O1}`]: () => new Promise<Response>((_, rechazar) => (soltar = rechazar)),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "150000" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Cambio de cerraduras" } });
+    fireEvent.click(await boton("Guardar y enviar a aprobar"));
+    await waitFor(() => expect(pedidos(api, "POST", ENVIO_O1)).toHaveLength(1));
+    fireEvent.click(screen.getByRole("link", { name: "Volver a Pagos" }));
+    await waitFor(() => expect(lugar()).toBe("/pagos"));
+    await act(async () => {
+      soltar(new TypeError("Failed to fetch"));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(lugar()).toBe("/pagos");
+    expect(screen.queryByText(/no se envió a aprobar/)).toBeNull();
+  });
+});
