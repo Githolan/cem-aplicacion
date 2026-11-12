@@ -13,14 +13,19 @@ import { REQUISITOS } from "../permisos";
 import { CargandoPagos } from "./CargandoPagos";
 import { Bandeja } from "./Bandeja";
 import { Ficha, type Seguir } from "./Ficha";
+import { ListoDelActo } from "./ListoDelActo";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
 import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 
 // `/pagos` y `/pagos/:orden`: una bandeja y una ficha (§1). En PC la ficha se abre al lado de la
-// bandeja, con la primera orden si no se eligió otra; en tablet y teléfono, aparte (§15).
+// bandeja, con la primera orden si no se eligió otra; en tablet y teléfono, aparte (§15). En PC,
+// terminado un acto, no se abre ninguna orden sola: al lado queda lo que pasó con esa orden y
+// «Seguir con lo pendiente» (decisión del propietario del 12-11-2026, P-01).
 
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[] };
+/** El acto que se acaba de terminar en PC: sobre qué orden, qué dijo y a qué paso seguía. */
+type Hecho = { orden: string; texto: string; paso: Seguir["paso"] | null };
 
 export function CircuitoPagos() {
   const elegido = useConsorcio(REQUISITOS.pagos);
@@ -40,6 +45,12 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   /** La orden que se abrió sola en PC. Queda fija: la bandeja se reordena al releerse (emitir mueve
    * `actualizada_en`) y cambiar de ficha perdería la cuenta recién abierta. Se suelta al terminar. */
   const [primera, setPrimera] = useState<string | null>(null);
+  const [hecho, setHecho] = useState<Hecho | null>(null);
+
+  // Abrir una orden (una fila, «Seguir con lo pendiente») deja atrás lo que pasó con la anterior.
+  useEffect(() => {
+    if (orden !== null) setHecho(null);
+  }, [orden]);
 
   useEffect(() => {
     if (consorcio === "" || !veBandeja) return;
@@ -76,7 +87,15 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   const alCambiar = useCallback(() => setVuelta((v) => v + 1), []);
 
   const terminar = useCallback(
-    (texto: string, seguir?: Seguir) => {
+    (desde: string, texto: string, seguir?: Seguir) => {
+      if (alLado) {
+        navegar(RUTA_PAGOS, { state: { consorcio } });
+        setHecho({ orden: desde, texto, paso: seguir?.paso ?? null });
+        setPrimera(null);
+        setVuelta((v) => v + 1);
+        setActo((a) => a + 1);
+        return;
+      }
       const irA = (destino: string, aviso = texto) => {
         navegar(destino, { state: { aviso, consorcio } });
         setPrimera(null);
@@ -98,7 +117,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         })
         .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : irSiSigue(RUTA_PAGOS)));
     },
-    [aEntrar, consorcio, navegar],
+    [aEntrar, alLado, consorcio, navegar],
   );
 
   function elegir(id: string) {
@@ -106,12 +125,17 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
     if (orden !== null) navegar(RUTA_PAGOS);
   }
 
-  const abierta = orden ?? (alLado ? primera : null);
-  const conFicha = abierta !== null && consorcio !== "";
+  const abierta = orden ?? (alLado && hecho === null ? primera : null);
   const conPantalla = pantalla.tipo === "lista" && consorcio !== "";
+  const listo = alLado && orden === null && conPantalla ? hecho : null;
+  const conFicha = abierta !== null && consorcio !== "";
+  // Lo pendiente que queda, sin la orden recién hecha: primero lo del mismo paso que se venía haciendo.
+  const pendientes =
+    listo === null || lectura.tipo !== "ok" ? [] : lectura.elementos.filter((e) => e.grupo !== "esperando" && e.orden_id !== listo.orden);
+  const siguiente = pendientes.find((e) => e.paso === listo?.paso) ?? pendientes[0];
 
   return (
-    <div className={alLado && conFicha ? "circuito-pagos circuito-pagos--al-lado" : "circuito-pagos"}>
+    <div className={alLado && (conFicha || listo !== null) ? "circuito-pagos circuito-pagos--al-lado" : "circuito-pagos"}>
       <div>
         {veBandeja && <h1>Pagos</h1>}
         {!veBandeja && <CabeceraInterna titulo="Orden de pago" volver={RUTA_PAGOS} destino="Pagos" />}
@@ -137,10 +161,16 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
           </>
         )}
       </div>
-      {conFicha && conPantalla && (
+      {listo !== null && (
+        <div>
+          <ListoDelActo key={acto} consorcio={consorcio} orden={listo.orden} texto={listo.texto}
+            siguiente={siguiente?.orden_id ?? null} quedan={pendientes.length} aEntrar={aEntrar} />
+        </div>
+      )}
+      {listo === null && abierta !== null && consorcio !== "" && conPantalla && (
         <div>
           <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} orden={abierta}
-            aEntrar={aEntrar} aInicio={aInicio} terminar={terminar} alCambiar={alCambiar} />
+            aEntrar={aEntrar} aInicio={aInicio} terminar={(texto, seguir) => terminar(abierta, texto, seguir)} alCambiar={alCambiar} />
         </div>
       )}
     </div>

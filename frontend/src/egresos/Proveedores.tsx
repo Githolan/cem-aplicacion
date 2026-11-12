@@ -309,6 +309,12 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setFormulario(null);
   }
 
+  /** «Cancelar»: el error era del formulario y se va con él; un «Listo» anterior queda (P-25). */
+  function cancelar() {
+    setAviso(sinLaFalla);
+    cerrar();
+  }
+
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     revisado(campo);
     clave.current = null;
@@ -554,7 +560,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <button type="submit" disabled={enviando}>
                   Guardar el CUIT
                 </button>
-                <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
+                <button type="button" className="secundario peligro" disabled={enviando} onClick={cancelar}>
                   Cancelar
                 </button>
               </div>
@@ -644,7 +650,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   aria-describedby={formulario.modo === "alta" && respaldoEnEspera ? `${id}-espera` : undefined}>
                   {confirmarCuenta ? "Sí, cambiar la cuenta" : formulario.modo === "alta" ? "Dar de alta el proveedor" : "Guardar los cambios"}
                 </button>
-                <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
+                <button type="button" className="secundario peligro" disabled={enviando} onClick={cancelar}>
                   Cancelar
                 </button>
               </div>

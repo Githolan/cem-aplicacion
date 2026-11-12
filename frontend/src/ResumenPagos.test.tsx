@@ -144,13 +144,15 @@ describe("Pagos en el inicio de quien revisa", () => {
     expect((await within(await tarjeta()).findByText("cosa para hacer", { exact: false })).textContent).toBe("1 cosa para hacer");
   });
 
-  it("sin nada para hacer lo dice, sin cifra ni estado", async () => {
+  it("AC-01: sin nada para hacer no hay tarjeta ni «Ver los pagos»: Pagos queda como una fila más", async () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos("esperando") } }));
     abrir();
 
-    const hero = within(await tarjeta());
-    expect(await hero.findByText("Nada pendiente.")).toBeTruthy();
-    expect(hero.queryByText("Para hacer")).toBeNull();
+    const fila = await filaDePagos();
+    expect(fila.getAttribute("href")).toBe("/pagos");
+    expect(within(fila).getByText("Nada pendiente.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Ver los pagos" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Pagos" })).toBeNull();
   });
 
   it("si no se pudo leer lo dice y deja reintentar, sin inventar un cero", async () => {
@@ -207,22 +209,25 @@ describe("Pagos en el inicio de quien prepara", () => {
   });
 });
 
-describe("aviso de que la aplicación no mueve dinero", () => {
-  const AVISO = /^La aplicación no mueve dinero/;
-
-  it("lo ve quien prepara", async () => {
+describe("inicio sin textos fijos (tanda 1, 12-11-2026)", () => {
+  it("AC-04: quien prepara, sin pendientes, no tiene el aviso fijo de que la aplicación no mueve dinero", async () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: conElementos() } }));
-    abrir();
+    const { container } = abrir();
 
-    expect(await screen.findByText(AVISO)).toBeTruthy();
+    expect(await within(await filaDePagos()).findByText("Nada pendiente.")).toBeTruthy();
+    expect(screen.queryByText(/no mueve dinero/)).toBeNull();
+    expect(container.querySelector(".aviso-info")).toBeNull();
   });
 
-  it("control: quien revisa no lo ve", async () => {
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos() } }));
+  it.each([
+    ["quien prepara", ADMINISTRA],
+    ["quien revisa", CONSEJO],
+  ])("AC-03: %s no ve «Estamos construyendo la aplicación»", async (_, acciones) => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: acciones }, bandejas: { [C1]: conElementos("para_aprobar") } }));
     abrir();
 
-    await within(await tarjeta()).findByText("Nada pendiente.");
-    expect(screen.queryByText(AVISO)).toBeNull();
+    await screen.findByRole("link", { name: "Contactos de emergencia" });
+    expect(screen.queryByText(/Estamos construyendo/)).toBeNull();
   });
 });
 

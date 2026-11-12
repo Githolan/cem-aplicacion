@@ -32,6 +32,7 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
 import { BotonCopiar } from "./BotonCopiar";
 import { CaminoOrden } from "./CaminoOrden";
+import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA } from "./rutas";
@@ -45,6 +46,7 @@ import {
   AVISO_PASA_SOLA,
   AVISO_VUELVE_A_APROBACION,
   AVISO_NO_TRANSFIERAS,
+  AVISO_NO_TRANSFIERE,
   AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
   AVISO_SE_PUEDE_RETIRAR,
@@ -409,10 +411,22 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version_esperada: v.numero },
         }),
-      alTerminar: () =>
-        terminar(v.alerta_fraccionamiento ? "Listo: la orden se envió. La aprueba el Consejo." : "Listo: la orden se envió. Si su franja no pide aprobación, ya quedó aprobada."),
+      alTerminar: decirComoQuedoAlEnviar,
       alFallar: siCambio,
     });
+  }
+
+  /** Después de enviar, el aviso dice en qué quedó la orden: lo decide la base, y se lee (P-12). */
+  function decirComoQuedoAlEnviar() {
+    const decir = (texto: string) => (montado.current ? terminar(texto) : alCambiar());
+    acto.setEnviando(true);
+    void leerComoQuedo(consorcio, orden)
+      .then(decir)
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion && montado.current) aEntrar();
+        else decir(TEXTO_ENVIADA);
+      })
+      .finally(() => acto.setEnviando(false));
   }
 
   function retirar() {
@@ -774,6 +788,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar, alCambiar 
           {cuentaVista !== null && (
             <div className="tarjeta">
               <h3>Transferí desde tu banco</h3>
+              <p>{AVISO_NO_TRANSFIERE}</p>
               <dl className="detalles">
                 <dt>CBU/CVU</dt>
                 <dd>

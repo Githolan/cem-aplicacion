@@ -14,6 +14,7 @@ import {
   ENCABEZADO_IDEMPOTENCIA,
   ESTADO,
   importe,
+  mensajeDeActo,
   mensajeDeError,
   sinLaFalla,
   sinPisarLoHecho,
@@ -23,6 +24,7 @@ import { FallaDeLectura } from "../egresos/EstadoPantalla";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
+import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { AVISO_MODIFICAR } from "./textos";
 import type { ActoEnCurso } from "./useActo";
 
@@ -35,6 +37,11 @@ import type { ActoEnCurso } from "./useActo";
 // moneda, número, concepto y el CUIT del proveedor. Lo que completa la lectura queda marcado hasta que
 // la persona lo cambia o lo da por revisado; guardar manda la versión exacta del archivo que se vio
 // (`factura_version_id`): otro archivo subido después al mismo documento no cambia lo aprobado.
+//
+// Una orden nueva se guarda y se envía a aprobar en un solo acto (decisión del propietario del
+// 12-11-2026, P-10): son dos pedidos seguidos, y si el envío pide el segundo factor se pide ahí
+// mismo. «Guardar como borrador» queda como salida secundaria. Si el envío no sale, la orden ya
+// quedó guardada: se va a su ficha, que lo dice y tiene «Enviar a aprobar».
 
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
@@ -140,14 +147,23 @@ type Props = {
   modificar?: Modificar;
   /** Con qué abre una orden nueva; el proveedor, si sigue activo. */
   inicial?: OrdenInicial;
-  alGuardar: (orden: string, texto: string) => void;
+  /** `falla`: la orden quedó guardada, pero el envío a aprobar no salió. */
+  alGuardar: (orden: string, texto: string, falla?: boolean) => void;
+  /** La orden nueva ya existe, aunque falte enviarla: quien pide el código sabe adónde ir si se cancela. */
+  alCrear?: (orden: string) => void;
   alCancelar: () => void;
   /** La orden cambió: la ficha la vuelve a leer y el formulario sigue sobre lo nuevo. */
   alCambiarLaOrden?: () => void;
 };
 
-export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, inicial, alGuardar, alCancelar, alCambiarLaOrden }: Props) {
+/** Lo que dice la ficha cuando la orden quedó guardada y el envío no salió. */
+export const noSeEnvio = (motivo: string) =>
+  `La orden quedó guardada como borrador, pero no se envió a aprobar. ${motivo} Para enviarla, usar «Enviar a aprobar».`;
+
+export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, inicial, alGuardar, alCrear, alCancelar, alCambiarLaOrden }: Props) {
   const id = useId();
+  /** Qué botón se tocó: una orden nueva se envía a aprobar salvo que se pida guardarla como borrador. */
+  const destino = useRef<"enviar" | "borrador">("enviar");
   const { enviando, setAviso } = acto;
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
@@ -328,8 +344,14 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
               body: { ...esencial, version_esperada: modificar.version.numero },
             });
       },
-      alTerminar: (data) =>
-        alGuardar(data.id, modificar === undefined ? "Listo: la orden quedó en borrador." : "Listo: guardamos la versión nueva."),
+      alTerminar: (data) => {
+        if (modificar !== undefined) alGuardar(data.id, "Listo: guardamos la versión nueva.");
+        else if (destino.current === "borrador") alGuardar(data.id, "Listo: la orden quedó en borrador.");
+        else {
+          alCrear?.(data.id);
+          enviarLaNueva(data);
+        }
+      },
       alFallar: (estado, codigo) => {
         if (cambioLaOrden(codigo)) alCambiarLaOrden?.();
         else if (cambioLoVisto(estado, codigo) && !SE_CORRIGE_EN_EL_FORMULARIO.has(codigo ?? "")) {
@@ -337,6 +359,35 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           alCancelar();
         }
       },
+    });
+  }
+
+  /** El segundo pedido de «Guardar y enviar a aprobar», sobre la versión recién guardada. */
+  function enviarLaNueva(nueva: { id: string; version: number }) {
+    const siSigueAbierto = (hacer: () => void) => {
+      if (acto.montado.current) hacer();
+    };
+    void acto.hacer({
+      quePide: ["enviar", nueva.id, nueva.version],
+      nombre: "enviar la orden a aprobar",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/enviar-a-revision", {
+          headers: encabezadoCsrf(),
+          params: { path: { consorcio_id: consorcio, orden_id: nueva.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version_esperada: nueva.version },
+        }),
+      alTerminar: () => {
+        // Hasta saber en qué quedó, el botón no se vuelve a tocar: la orden ya existe.
+        acto.setEnviando(true);
+        void leerComoQuedo(consorcio, nueva.id)
+          .then((texto) => siSigueAbierto(() => alGuardar(nueva.id, texto)))
+          .catch((e: unknown) =>
+            siSigueAbierto(() => (e instanceof SinSesion ? aEntrar() : alGuardar(nueva.id, TEXTO_ENVIADA))),
+          )
+          .finally(() => acto.setEnviando(false));
+      },
+      alFallar: (estado, codigo) => alGuardar(nueva.id, noSeEnvio(mensajeDeActo(estado, codigo)), true),
+      alNoLlegar: () => alGuardar(nueva.id, noSeEnvio(SIN_CONEXION), true),
     });
   }
 
@@ -459,9 +510,15 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       )}
       <div className="acciones">
         <button type="submit" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
-          aria-describedby={facturaEnEspera ? `${id}-espera` : undefined}>
-          {confirmar ? "Sí, crear la versión nueva" : "Guardar la orden"}
+          aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "enviar")}>
+          {modificar === undefined ? "Guardar y enviar a aprobar" : confirmar ? "Sí, crear la versión nueva" : "Guardar la orden"}
         </button>
+        {modificar === undefined && (
+          <button type="submit" className="secundario" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
+            aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "borrador")}>
+            Guardar como borrador
+          </button>
+        )}
         <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
           Cancelar
         </button>

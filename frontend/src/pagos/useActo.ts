@@ -20,6 +20,8 @@ export type Acto<T> = {
   pedir: (clave: string) => Promise<Respuesta<T>>;
   alTerminar: (data: T) => void;
   alFallar?: (estado: number, codigo: string | undefined) => void;
+  /** El pedido no llegó al servidor (sin red): el aviso ya lo dice; esto, si hay algo más que hacer. */
+  alNoLlegar?: () => void;
 };
 
 export type Pendiente = { acto: string; reintentar: () => void };
@@ -46,7 +48,10 @@ export function useActo(aEntrar: () => void, alDescartar?: () => void) {
     } catch (e: unknown) {
       setEnviando(false);
       if (e instanceof SinSesion) aEntrar();
-      else setAviso({ texto: SIN_CONEXION, ok: false });
+      else {
+        setAviso({ texto: SIN_CONEXION, ok: false });
+        acto.alNoLlegar?.();
+      }
       return;
     }
     setEnviando(false);

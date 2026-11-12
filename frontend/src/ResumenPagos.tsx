@@ -53,9 +53,10 @@ export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string
     edificios,
     consorcio,
     setConsorcio,
-    /** Quien revisa y no prepara tiene Pagos como tarjeta; quien prepara, como fila entre las demás. */
-    enTarjeta: porEdificio !== null && consorcio !== "" && !cumple(porEdificio.get(consorcio) ?? [], REQUISITOS.ordenes),
-    prepara: porEdificio !== null && cumple(porEdificio.get(consorcio) ?? [], REQUISITOS.ordenes),
+    /** Quien revisa y no prepara tiene Pagos como tarjeta; quien prepara, como fila entre las demás.
+     * Sin nada pendiente no hay tarjeta: Pagos queda como una fila más, «Nada pendiente.» (AC-01). */
+    enTarjeta:
+      porEdificio !== null && consorcio !== "" && cantidad !== 0 && !cumple(porEdificio.get(consorcio) ?? [], REQUISITOS.ordenes),
     detalle,
     cantidad,
     falla: consulta.isError ? mensajeDeLectura(consulta.error) : null,
@@ -82,7 +83,6 @@ export function TarjetaPagos({ cantidad, falla, reintentar, reintentando, edific
           Reintentar
         </button>
       )}
-      {cantidad === 0 && <p>{NADA_PARA_HACER}</p>}
       {cantidad !== null && cantidad > 0 && (
         <p>
           <span className="resumen-inicio__cifra">{cantidad}</span> {cosas(cantidad)} para hacer
