@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
+import { ACTIVAR_CON_LLAVE } from "./ActivarLlave";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { Hoja } from "./Hoja";
 import {
   esDeEsteDispositivo,
   llaveDisponible,
@@ -22,6 +24,10 @@ import {
 // sumar otra. Los códigos de recuperación salen de acá apenas llegan (`alCodigos`): los muestra la
 // página, que no los suelta hasta que la persona dice que los guardó, y hasta entonces no se
 // consulta nada más.
+//
+// Informe de fricción (tanda 7): quitar una llave pide confirmarlo en una hoja (AC-14). Si en la
+// lista ya hay una llave con el nombre de este equipo, no se invita a agregarlo otra vez: puede ser
+// otro navegador del mismo equipo, que la usa igual (AC-12).
 
 type Llave = components["schemas"]["LlaveResumen"];
 
@@ -32,9 +38,12 @@ interface Props {
   alCodigos: (codigos: string[]) => void;
   /** Terminó la acción: la página sigue a la pantalla siguiente con este aviso. */
   alTerminar: (aviso: string) => void;
+  /** Empieza (true) o termina (false) el alta de una llave: con ella en camino, la página no deja
+   * salir, porque los códigos de recuperación llegan una sola vez (revisión de #237). */
+  alOcupar?: (ocupado: boolean) => void;
 }
 
-export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
+export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Props) {
   const id = useId();
   const [llaves, setLlaves] = useState<Llave[] | null>(null);
   const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
@@ -42,6 +51,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [listo, setListo] = useState<string | null>(null);
   const [pendiente, setPendiente] = useState<(() => void) | null>(null);
+  const [aQuitar, setAQuitar] = useState<Llave | null>(null);
   const consultado = useRef(false);
 
   const consultar = useCallback(() => {
@@ -65,14 +75,17 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   if (!llaveDisponible()) return null;
 
   /** Corre un pedido; si falta confirmar, lo deja pendiente hasta que la persona confirme. */
-  function intentar<T>(pedido: () => Promise<Resultado<T>>, alListo: (valor: T) => void) {
+  function intentar<T>(pedido: () => Promise<Resultado<T>>, alListo: (valor: T) => void, alta = false) {
     setEnviando(true);
     setAviso(null);
     setListo(null);
+    if (alta) alOcupar?.(true);
     void pedido()
       .then((r) => {
+        // En el mismo paso: la página deja de esperar y ya tiene los códigos a la vista.
+        if (alta) alOcupar?.(false);
         if (r.ok) alListo(r.valor);
-        else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo));
+        else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo, alta));
         else if (r.yaEstaAca !== true || !reconocerEste()) setAviso(r.mensaje);
       })
       .finally(() => setEnviando(false));
@@ -87,10 +100,14 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   }
 
   function activar() {
-    intentar(registrarLlave, (nuevos) => {
-      if (nuevos !== null) alCodigos(nuevos);
-      else alTerminar("Listo: tu llave quedó activada.");
-    });
+    intentar(
+      registrarLlave,
+      (nuevos) => {
+        if (nuevos !== null) alCodigos(nuevos);
+        else alTerminar("Listo: tu llave quedó activada.");
+      },
+      true,
+    );
   }
 
   function quitar(llave: Llave) {
@@ -117,6 +134,9 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
     );
 
   const enEste = llaves?.some((k) => esDeEsteDispositivo(k.credencial_id)) ?? false;
+  const nombreDeEste = nombreDelDispositivo(navigator.userAgent);
+  // Sin la marca de este navegador, una llave con el nombre de este equipo puede ser la suya.
+  const conSuNombre = !enEste && (llaves?.some((k) => k.nombre === nombreDeEste) ?? false);
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
@@ -157,7 +177,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
                 type="button"
                 className="secundario peligro"
                 disabled={enviando}
-                onClick={() => quitar(k)}
+                onClick={() => setAQuitar(k)}
               >
                 Quitar
               </button>
@@ -165,13 +185,38 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
           ))}
         </ul>
       )}
-      {llaves !== null && llaves.length > 0 && !enEste && (
-        <p>Si este dispositivo no está en la lista, agregalo.</p>
+      {conSuNombre && (
+        <p>Si este equipo es «{nombreDeEste}», no hace falta hacer nada: la llave se confirma al usarla.</p>
+      )}
+      {llaves !== null && llaves.length > 0 && !enEste && !conSuNombre && (
+        <p>Si este dispositivo no está en la lista, agregarlo.</p>
       )}
       {llaves !== null && !enEste && (
-        <button type="button" onClick={activar} disabled={enviando}>
-          {llaves.length === 0 ? "Activar en este dispositivo" : "Agregar este dispositivo"}
+        <button type="button" className={conSuNombre ? "secundario" : undefined} onClick={activar} disabled={enviando}>
+          {llaves.length === 0 ? ACTIVAR_CON_LLAVE : conSuNombre ? "Es otro equipo: agregarlo" : "Agregar este dispositivo"}
         </button>
+      )}
+      {aQuitar !== null && (
+        <Hoja titulo={`¿Quitar la llave de ${aQuitar.nombre}?`} alEscapar={() => setAQuitar(null)}>
+          <p>Para confirmar pagos desde ese equipo habrá que activarla de nuevo.</p>
+          <div className="formulario">
+            <div className="acciones">
+              <button
+                type="button"
+                className="peligro"
+                onClick={() => {
+                  setAQuitar(null);
+                  quitar(aQuitar);
+                }}
+              >
+                Quitar la llave
+              </button>
+              <button type="button" className="secundario" data-foco onClick={() => setAQuitar(null)}>
+                Volver
+              </button>
+            </div>
+          </div>
+        </Hoja>
       )}
     </section>
   );

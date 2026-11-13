@@ -62,7 +62,13 @@ test.describe("segundo factor", () => {
     await simularApi(page);
     await page.goto("/cuenta/segundo-factor");
 
-    await page.getByRole("button", { name: "Activar el segundo factor" }).click();
+    // Chromium sabe usar llaves: la aplicación de códigos es la otra opción (AC-15).
+    await page.getByRole("button", { name: "Usar una aplicación de códigos" }).click();
+    // En una pantalla táctil el QR va plegado y primero se ofrece abrir la aplicación (AC-17).
+    if (await page.evaluate(() => window.matchMedia("(pointer: coarse)").matches)) {
+      await expect(page.getByRole("link", { name: "Abrir mi aplicación de códigos" })).toBeVisible();
+      await page.getByText("Estoy en otra pantalla: mostrar el código QR").click();
+    }
     const qr = page.getByRole("img", { name: /Código QR/ });
     await expect(qr).toBeVisible();
     const caja = await qr.boundingBox();
@@ -123,7 +129,7 @@ test.describe("segundo factor", () => {
     const direccion = new URL("/cuenta/segundo-factor", baseURL);
     direccion.hostname = "localhost";
     await page.goto(direccion.href);
-    await page.getByRole("button", { name: "Activar en este dispositivo" }).click();
+    await page.getByRole("button", { name: "Activar con PIN, huella o cara" }).click();
 
     await expect(page.getByText("Listo: tu llave quedó activada.")).toBeVisible();
     await expect(page.getByRole("list", { name: "Códigos de recuperación" }).getByRole("listitem")).toHaveCount(10);
@@ -137,7 +143,7 @@ test.describe("segundo factor", () => {
     const errores = vigilarErrores(page);
     await simularApi(page);
     await page.goto("/cuenta/segundo-factor");
-    await expect(page.getByRole("button", { name: "Activar el segundo factor" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Usar una aplicación de códigos" })).toBeVisible();
 
     await page.evaluate(() => {
       const elemento = document.createElement("style");

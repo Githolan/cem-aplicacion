@@ -69,11 +69,11 @@ function abrirCodigo() {
 }
 
 function elegirCodigo() {
-  fireEvent.click(screen.getByRole("button", { name: "Entrar con un código" }));
+  fireEvent.click(screen.getByRole("button", { name: "Ya tengo un código" }));
 }
 
 function seccionCodigo() {
-  return within(screen.getByRole("region", { name: "Entrar con un código" }));
+  return within(screen.getByRole("region", { name: "Escribir el código del correo" }));
 }
 
 function completar(correo: string, codigo: string) {
@@ -97,6 +97,8 @@ async function sinFaltas(contenedor: HTMLElement) {
 
 afterEach(() => {
   cleanup();
+  // La última forma de entrar queda en este dispositivo (AC-30): cada prueba empieza sin ella.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
@@ -111,7 +113,7 @@ describe("entrar con el código del correo", () => {
 
     expect(await screen.findByText("Entraste.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Entrar con un código" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Escribir el código del correo" })).toBeNull();
     const [canje, ...otros] = postsDe(pedido);
     expect(otros).toEqual([]);
     if (canje === undefined) throw new Error("no hubo pedido");
@@ -152,7 +154,7 @@ describe("entrar con el código del correo", () => {
   });
 
   it.each([
-    [error("codigo_invalido", 401), /No pudimos hacerte entrar con ese código/],
+    [error("codigo_invalido", 401), /Ese código no sirve/],
     [error("demasiadas_peticiones", 429), /demasiados intentos con este correo/],
     [error("servicio_no_disponible", 503), /El servicio no está disponible/],
   ])("ante un rechazo muestra un mensaje genérico (%#)", async (respuesta, mensaje) => {
@@ -180,17 +182,17 @@ describe("entrar con el código del correo", () => {
   it("con un enlace válido no muestra el formulario; con uno rechazado, sí", async () => {
     vi.stubGlobal("fetch", backend({ canje: () => Response.json(SESION) }));
     abrir(`/entrar#token=${TOKEN}`);
-    expect(screen.queryByRole("heading", { name: "Entrar con un código" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
     expect(await screen.findByText("Entraste.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Entrar con un código" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend({ canje: () => error("enlace_invalido", 401) }));
     abrir(`/entrar#token=${TOKEN}`);
-    expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
-    elegirCodigo();
-    expect(screen.getByRole("heading", { name: "Entrar con un código" })).toBeTruthy();
+    expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
+    // Sin elegir nada: el enlace rechazado abre el código del mismo correo (AC-29).
+    expect(screen.getByRole("heading", { name: "Escribir el código del correo" })).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, vacío ni con error", async () => {
@@ -202,7 +204,7 @@ describe("entrar con el código del correo", () => {
     await sinFaltas(container);
 
     completar(CORREO, CODIGO);
-    await screen.findByText(/No pudimos hacerte entrar con ese código/);
+    await screen.findByText(/Ese código no sirve/);
     await sinFaltas(container);
   });
 });

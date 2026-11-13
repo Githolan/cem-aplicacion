@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
+import { CabeceraInterna } from "../CabeceraInterna";
+import { RUTA_INICIO } from "../enlace";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { FilaDeRegistro } from "../FichaDeRegistro";
@@ -293,7 +295,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   return (
     <>
-      <h1>Liquidación</h1>
+      <CabeceraInterna titulo="Liquidación (borrador)" volver={RUTA_INICIO} destino="Inicio" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}

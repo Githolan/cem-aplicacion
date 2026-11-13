@@ -3,12 +3,17 @@ import { useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { CabeceraInterna } from "./CabeceraInterna";
 import { CodigoQr } from "./CodigoQr";
+import { CodigosRecuperacion } from "./CodigosRecuperacion";
+import { useAvisoAlSalir } from "./avisoAlSalir";
 import { borrarCopias } from "./copiaContactos";
 import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { CODIGO_ENTRAR_DE_NUEVO, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { Hoja } from "./Hoja";
+import { llaveDisponible } from "./llaveAcceso";
 import { SeccionLlave } from "./SeccionLlave";
 import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
 
@@ -20,6 +25,11 @@ import { pidiendoEntrar, useAEntrar } from "./sesionEncima";
 // /cuenta, o a `state.volver` si se llegó desde otra pantalla. Los códigos de recuperación, los de
 // la aplicación y los de la llave, son la única pantalla que no se va sola: ninguna respuesta la
 // reemplaza hasta que la persona dice que los guardó. Diseño provisorio: el definitivo llega con G3.
+//
+// Informe de fricción (tanda 7): la página tiene su cabecera de volver (AC-10); la llave es la única
+// acción principal y la aplicación queda como otra opción (AC-15); en un teléfono, el alta empieza
+// por abrir la aplicación y el QR queda plegado (AC-17); los códigos se pueden copiar o guardar, y
+// con pocos se dice cómo tener otros (AC-18); desactivar pide confirmarlo en una hoja (AC-14).
 
 type EstadoFactor = components["schemas"]["EstadoSegundoFactor"];
 type Alta = components["schemas"]["AltaTotp"];
@@ -28,6 +38,14 @@ export const RUTA_SEGUNDO_FACTOR = "/cuenta/segundo-factor";
 
 /** Con la llave, el segundo factor ya está: se informa, no se pide nada (comentario 23). */
 export const ACTIVADO_CON_LLAVE = "Está activado con la llave de acceso: no hace falta hacer nada más.";
+
+/** Con esta cantidad o menos de códigos sin usar, se avisa cómo tener otros (AC-18). */
+export const POCOS_CODIGOS = 3;
+
+/** Una pantalla táctil (el teléfono donde está la aplicación de códigos) no puede escanear su propio QR. */
+function pantallaTactil(): boolean {
+  return window.matchMedia?.("(pointer: coarse)").matches === true;
+}
 
 const ESTADO_SIN_SESION = 401;
 const ESTADO_DEMASIADOS = 429;
@@ -113,6 +131,12 @@ export function SegundoFactor() {
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
+  const [confirmarBaja, setConfirmarBaja] = useState(false);
+  // Un alta en camino (llave o aplicación): su respuesta trae los códigos de recuperación, que llegan
+  // una sola vez. Hasta que se muestran y la persona dice que los guardó, no se puede salir de la
+  // página (revisión de #237).
+  const [altaEnCurso, setAltaEnCurso] = useState(false);
+  useAvisoAlSalir(altaEnCurso);
   const consultado = useRef(false);
 
   /** Cambia de pantalla, salvo que estén a la vista códigos que no se pueden volver a mostrar. */
@@ -211,9 +235,11 @@ export function SegundoFactor() {
     }
     setEnviando(true);
     setAviso(null);
+    setAltaEnCurso(true);
     void api
       .POST("/api/v1/auth/totp/confirmar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
       .then(({ data, error, response }) => {
+        setAltaEnCurso(false);
         if (data !== undefined) {
           setCodigo("");
           setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
@@ -222,11 +248,15 @@ export function SegundoFactor() {
           setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
         } else rechazar(response.status, error);
       })
-      .catch(() => setAviso(fallo(SIN_CONEXION)))
+      .catch(() => {
+        setAltaEnCurso(false);
+        setAviso(fallo(SIN_CONEXION));
+      })
       .finally(() => setEnviando(false));
   }
 
   function desactivar() {
+    setConfirmarBaja(false);
     setEnviando(true);
     setAviso(null);
     void api
@@ -248,48 +278,50 @@ export function SegundoFactor() {
   }
 
   const conMensaje = aviso !== null || ["cargando", "sin_servicio"].includes(pantalla.tipo);
+  // La llave ya se ofrece arriba como la acción principal: la aplicación queda como otra opción.
+  const llaveArriba = llaveDisponible();
 
+  // Los códigos no se sueltan hasta «Ya los guardé»: van en una hoja que deja inerte el resto de la
+  // aplicación (la marca de la cabecera, el aviso de versión nueva) y no se cierra con Escape.
   if (pantalla.tipo === "codigos")
     return (
       <>
         <h1>Segundo factor</h1>
-        <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Guardá tus códigos de recuperación</h2>
+        <Hoja titulo="Guardar los códigos de recuperación">
           <p className="aviso-ok">{ACTIVADO[pantalla.medio]}</p>
-          <p>
-            {pantalla.medio === "llave" ? "Si perdés este dispositivo" : "Si perdés el teléfono"}, cada uno
-            de estos códigos sirve <strong>una sola vez</strong>{" "}
-            {pantalla.medio === "llave" ? "para entrar en su lugar" : "en lugar del de la aplicación"}.
-            Guardalos en un lugar seguro: no los vamos a volver a mostrar.
-          </p>
-          <ul className="codigos-recuperacion" aria-label="Códigos de recuperación" translate="no">
-            {pantalla.codigos.map((c) => (
-              <li key={c}>
-                <code>{c}</code>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            onClick={() => setPantalla({ tipo: "terminado", aviso: ACTIVADO[pantalla.medio] })}
-          >
-            Ya los guardé
-          </button>
-        </section>
+          <CodigosRecuperacion
+            codigos={pantalla.codigos}
+            medio={pantalla.medio}
+            alGuardar={() => setPantalla({ tipo: "terminado", aviso: ACTIVADO[pantalla.medio] })}
+          />
+        </Hoja>
       </>
     );
 
   return (
     <>
-      <h1>Segundo factor</h1>
-      {["inactivo", "alta", "activo"].includes(pantalla.tipo) && (
-        <SeccionLlave alCambiar={consultar} alCodigos={mostrarCodigosDeLlave} alTerminar={terminar} />
+      {altaEnCurso ? (
+        <h1>Segundo factor</h1>
+      ) : (
+        <CabeceraInterna
+          titulo="Segundo factor"
+          volver={volver ?? RUTA_CUENTA}
+          destino={volver === null ? "Mi cuenta" : "la pantalla anterior"}
+        />
       )}
-      <p>
-        Otra opción: con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
-        Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
-        números que cambia cada 30 segundos.
-      </p>
+      {altaEnCurso && (
+        <Hoja titulo="Activando">
+          <p role="status">Esperando la respuesta. Los códigos de recuperación aparecen acá.</p>
+        </Hoja>
+      )}
+      {["inactivo", "alta", "activo"].includes(pantalla.tipo) && (
+        <SeccionLlave
+          alCambiar={consultar}
+          alCodigos={mostrarCodigosDeLlave}
+          alTerminar={terminar}
+          alOcupar={setAltaEnCurso}
+        />
+      )}
 
       {pendiente !== null && (
         <PedirCodigo
@@ -307,34 +339,69 @@ export function SegundoFactor() {
       {pantalla.tipo === "inactivo" && pendiente === null && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
           {conLlave && <p className="aviso-info">{ACTIVADO_CON_LLAVE}</p>}
-          <h2 id={`${id}-titulo`}>{conLlave ? "Otro método, opcional" : "Todavía no está activado"}</h2>
-          <button type="button" className={conLlave ? "secundario" : undefined} onClick={empezarAlta} disabled={enviando}>
-            {conLlave ? "Agregar también la aplicación" : "Activar el segundo factor"}
+          <h2 id={`${id}-titulo`}>
+            {conLlave ? "Otro método, opcional" : llaveArriba ? "Otra opción: una aplicación de códigos" : "Todavía no está activado"}
+          </h2>
+          <p>
+            Con una aplicación de autenticación en el teléfono (Google Authenticator, Microsoft
+            Authenticator, Aegis u otra), las acciones delicadas piden además un código de seis
+            números que cambia cada 30 segundos.
+          </p>
+          <button
+            type="button"
+            className={conLlave || llaveArriba ? "secundario" : undefined}
+            onClick={empezarAlta}
+            disabled={enviando}
+          >
+            {conLlave ? "Agregar también la aplicación" : llaveArriba ? "Usar una aplicación de códigos" : "Activar el segundo factor"}
           </button>
         </section>
       )}
 
       {pantalla.tipo === "alta" && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Cargá la cuenta en la aplicación</h2>
-          <ol className="pasos">
-            <li>
-              Abrí la aplicación de autenticación y elegí agregar una cuenta escaneando un código
-              QR.
-              <CodigoQr
-                texto={pantalla.alta.uri}
-                descripcion="Código QR para cargar Consorcio en Mano en la aplicación de autenticación"
-              />
-            </li>
-            <li>
-              Si no podés escanearlo, <a href={pantalla.alta.uri}>abrí la aplicación desde acá</a>{" "}
-              o escribí esta clave a mano:{" "}
-              <code className="secreto" translate="no">
-                {secretoEnBloques(pantalla.alta.secreto)}
-              </code>
-            </li>
-            <li>Escribí el código de seis números que muestra la aplicación.</li>
-          </ol>
+          <h2 id={`${id}-titulo`}>Cargar la cuenta en la aplicación</h2>
+          {pantallaTactil() ? (
+            // En el teléfono de la aplicación, el QR no se puede escanear: primero, abrirla desde acá.
+            <ol className="pasos">
+              <li>
+                <a href={pantalla.alta.uri} className="enlace-suelto">
+                  Abrir mi aplicación de códigos
+                </a>{" "}
+                y aceptar la cuenta nueva. Si no se abre, escribir esta clave a mano en la aplicación:{" "}
+                <code className="secreto" translate="no">
+                  {secretoEnBloques(pantalla.alta.secreto)}
+                </code>
+                <details className="historial">
+                  <summary>Estoy en otra pantalla: mostrar el código QR</summary>
+                  <CodigoQr
+                    texto={pantalla.alta.uri}
+                    descripcion="Código QR para cargar Consorcio en Mano en la aplicación de autenticación"
+                  />
+                </details>
+              </li>
+              <li>Escribir el código de seis números que muestra la aplicación.</li>
+            </ol>
+          ) : (
+            <ol className="pasos">
+              <li>
+                Abrir la aplicación de autenticación en el teléfono y elegir agregar una cuenta
+                escaneando un código QR.
+                <CodigoQr
+                  texto={pantalla.alta.uri}
+                  descripcion="Código QR para cargar Consorcio en Mano en la aplicación de autenticación"
+                />
+              </li>
+              <li>
+                Si no se puede escanear, <a href={pantalla.alta.uri}>abrir la aplicación desde acá</a>{" "}
+                o escribir esta clave a mano:{" "}
+                <code className="secreto" translate="no">
+                  {secretoEnBloques(pantalla.alta.secreto)}
+                </code>
+              </li>
+              <li>Escribir el código de seis números que muestra la aplicación.</li>
+            </ol>
+          )}
           <form className="formulario" onSubmit={confirmar} noValidate>
             <label htmlFor={`${id}-codigo`}>Código de la aplicación</label>
             <input
@@ -366,14 +433,44 @@ export function SegundoFactor() {
             <dt>Códigos de recuperación sin usar</dt>
             <dd>{pantalla.estado.codigos_recuperacion_restantes}</dd>
           </dl>
+          {pantalla.estado.codigos_recuperacion_restantes <= POCOS_CODIGOS && (
+            <p className="aviso-info">
+              {pantalla.estado.codigos_recuperacion_restantes === 1
+                ? "Queda 1 código de recuperación."
+                : `Quedan ${pantalla.estado.codigos_recuperacion_restantes} códigos de recuperación.`}{" "}
+              Para tener otros, desactivar la aplicación y volver a activarla: al activarla llegan
+              diez nuevos.
+            </p>
+          )}
           <h3>Desactivar</h3>
           <p>
             Borra la aplicación cargada y los códigos de recuperación. Se avisa por correo.
           </p>
-          <button type="button" className="peligro" onClick={desactivar} disabled={enviando}>
+          <button type="button" className="peligro" onClick={() => setConfirmarBaja(true)} disabled={enviando}>
             Desactivar el segundo factor
           </button>
         </section>
+      )}
+
+      {confirmarBaja && (
+        <Hoja titulo="¿Desactivar la aplicación de códigos?" alEscapar={() => setConfirmarBaja(false)}>
+          <p>
+            Se borran la aplicación cargada y los códigos de recuperación.
+            {conLlave
+              ? " Las acciones delicadas se siguen confirmando con la llave de acceso."
+              : " Para aprobar, pagar o conciliar habrá que activar de nuevo un método de confirmación."}
+          </p>
+          <div className="formulario">
+            <div className="acciones">
+              <button type="button" className="peligro" onClick={desactivar}>
+                Desactivar
+              </button>
+              <button type="button" className="secundario" data-foco onClick={() => setConfirmarBaja(false)}>
+                Volver
+              </button>
+            </div>
+          </div>
+        </Hoja>
       )}
 
       <div role="status" aria-live="polite" className={conMensaje ? "tarjeta" : undefined}>

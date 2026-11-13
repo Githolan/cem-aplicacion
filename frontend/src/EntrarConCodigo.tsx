@@ -2,15 +2,18 @@ import { type FormEvent, useId, useState } from "react";
 
 import { api } from "./api/cliente";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { recordarFormaDeEntrar } from "./formaDeEntrar";
 import { useIrTrasEntrar } from "./sesion";
 
-// Entrar con el código de seis dígitos del correo (documento 13, §10.3): para quien pidió la
-// entrada en un dispositivo y lee el correo en otro, donde el enlace no sirve (está ligado al
-// navegador que lo pidió), o para quien no puede abrir enlaces. El código llega en el mismo
-// correo que el enlace. Va en el cuerpo de un POST, nunca en la URL. Diseño provisorio: el
-// definitivo llega con G3.
+// Entrar con el código de seis dígitos del correo (documento 13, §10.3): el camino principal para
+// entrar (decisión del propietario del 12-11-2026, pregunta 16). Sirve en cualquier dispositivo; el
+// enlace del mismo correo, solo en el navegador que lo pidió. Va en el cuerpo de un POST, nunca en
+// la URL. Después de pedirlo, el aviso de qué hacer si no llega es el mismo con cuenta o sin ella:
+// no dice si el correo está registrado (AC-28). Diseño provisorio: el definitivo llega con G3.
 
 export const DIGITOS_CODIGO = 6;
+/** Cuánto esperar el correo antes de buscar otra causa. */
+export const MINUTOS_ESPERA_CORREO = 5;
 const ESTADO_RECHAZADO = 401;
 const ESTADO_DEMASIADOS = 429;
 
@@ -56,7 +59,10 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Pr
     void api
       .POST("/api/v1/auth/codigo", { body: { correo: correo.trim(), codigo: limpio } })
       .then(({ error, response }) => {
-        if (error === undefined) terminarEntrada("Entraste.");
+        if (error === undefined) {
+          recordarFormaDeEntrar("correo");
+          terminarEntrada("Entraste.");
+        }
         else if (response.status === ESTADO_RECHAZADO) setEstado("rechazado");
         else if (response.status === ESTADO_DEMASIADOS) setEstado("demasiados");
         else {
@@ -72,12 +78,18 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Pr
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-      <h2 id={`${id}-titulo`}>Entrar con un código</h2>
-      {aviso !== null && <p className="aviso-ok">{aviso}</p>}
-      <p>
-        ¿Leés el correo en otro dispositivo, o no podés abrir el enlace? Escribí tu correo y el
-        código de {DIGITOS_CODIGO} números que llegó en el mismo correo.
-      </p>
+      <h2 id={`${id}-titulo`}>Escribir el código del correo</h2>
+      {aviso !== null && (
+        <>
+          <p className="aviso-ok">{aviso}</p>
+          <p>
+            Si en {MINUTOS_ESPERA_CORREO} minutos no llegó, revisar la carpeta de correo no deseado.
+            Si tampoco está ahí, puede que ese correo no esté registrado: la cuenta se crea con la
+            invitación que envía la administración del edificio.
+          </p>
+        </>
+      )}
+      <p>Escribir el correo y el código de {DIGITOS_CODIGO} números que llegó.</p>
       <form className="formulario" onSubmit={enviar}>
         <label htmlFor={`${id}-correo`}>Correo</label>
         <input
@@ -114,13 +126,13 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Pr
         {estado === "enviando" && <p>Entrando…</p>}
         {estado === "rechazado" && (
           <p className="aviso-error">
-            No pudimos hacerte entrar con ese código. Revisá el correo y el código; si venció,
-            se usó o se equivocó varias veces, pedí uno nuevo.
+            Ese código no sirve. Revisar el correo y el código; si venció, ya se usó o se escribió
+            mal varias veces, pedir uno nuevo.
           </p>
         )}
         {estado === "demasiados" && (
           <p className="aviso-error">
-            Hubo demasiados intentos con este correo. Esperá un rato y probá de nuevo.
+            Hubo demasiados intentos con este correo. Esperar un rato y probar de nuevo.
           </p>
         )}
         {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}

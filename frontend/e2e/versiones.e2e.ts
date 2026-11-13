@@ -68,7 +68,7 @@ test.describe("versiones en caché", () => {
       const respuesta = await pedido.response();
       expect(respuesta?.status()).toBe(401);
       expect(((await respuesta?.json()) as { codigo: string }).codigo).toBe("enlace_invalido");
-      await expect(page.getByText(/No pudimos hacerte entrar con este enlace/)).toBeVisible();
+      await expect(page.getByText(/Este enlace no sirve acá/)).toBeVisible();
       // Primero respondió la caché de la versión anterior; después, la red (versión actual).
       expect(navegaciones).toEqual([true, false]);
       expect(page.url()).not.toContain(TOKEN);
@@ -159,7 +159,7 @@ test.describe("recarga a mitad del canje", () => {
     await page.reload();
     expect((await respuesta).status()).toBe(401);
     expect(pedidos).toEqual([{ token: TOKEN }, { token: TOKEN }]);
-    await expect(page.getByText(/No pudimos hacerte entrar con este enlace/)).toBeVisible();
+    await expect(page.getByText(/Este enlace no sirve acá/)).toBeVisible();
     expect(await page.evaluate((clave) => sessionStorage.getItem(clave), CLAVE_GUARDADO)).toBeNull();
     expect(new URL(page.url()).hash).toBe("");
     await sinFaltasDeAccesibilidad(page);

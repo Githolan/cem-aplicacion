@@ -13,6 +13,7 @@ import { RUTA_INVITACIONES } from "./Invitar";
 import { RUTA_MANDATOS } from "./Mandatos";
 import { RUTA_PADRON } from "./Padron";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS } from "./pagos/rutas";
+import { RUTA_PANEL } from "./panel/Panel";
 import { cumpleEnAlguno, REQUISITOS, type Requisito, useAccionesPorEdificio } from "./permisos";
 import { useSesionConNombre } from "./sesion";
 
@@ -42,6 +43,8 @@ const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_PADRON, texto: "Padrón del edificio", icono: "personas", requisito: REQUISITOS.padron },
   { ruta: RUTA_PROVEEDORES, texto: "Proveedores", icono: "proveedor", requisito: REQUISITOS.proveedores },
   { ruta: RUTA_LIQUIDACION, texto: "Liquidación (borrador)", icono: "calculadora", requisito: REQUISITOS.liquidacion },
+  // Con la navegación a la vista también en el Panel (informe de fricción, AC-09).
+  { ruta: RUTA_PANEL, texto: "Panel del Consejo", icono: "grafico", requisito: REQUISITOS.panel },
 ];
 
 // Las pantallas de la aplicación. Las demás (entrar, instalar, invitaciones, el alta del segundo

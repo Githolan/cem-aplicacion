@@ -1,6 +1,8 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
+import { CabeceraInterna } from "../CabeceraInterna";
+import { RUTA_INICIO } from "../enlace";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
 import { useAEntrar } from "../sesionEncima";
@@ -380,7 +382,7 @@ export function PagosPorAclarar() {
 
   return (
     <>
-      <h1>Pagos para aclarar</h1>
+      <CabeceraInterna titulo="Pagos para aclarar" volver={RUTA_INICIO} destino="Inicio" />
       <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
         <PedirCodigo

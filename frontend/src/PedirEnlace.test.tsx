@@ -11,7 +11,7 @@ const CORREO = "ana@ejemplo.com";
 const TOKEN = "A".repeat(43);
 // El texto lo arma el backend (router.py, MENSAJE_PEDIDO); la página muestra el que llega.
 const MENSAJE =
-  "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar.";
+  "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para entrar.";
 
 function aceptado() {
   return Response.json({ estado: "pedido", mensaje: MENSAJE }, { status: 202 });
@@ -22,7 +22,7 @@ function error(codigo: string, estado: number) {
 }
 
 const RUTA_ENLACE = "/api/v1/auth/enlace";
-const CODIGO = { name: "Entrar con un código" };
+const CODIGO = { name: "Escribir el código del correo" };
 const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
 
 /**
@@ -61,12 +61,12 @@ function abrir(url = "/entrar") {
 
 // El pedido del enlace es una de las formas de /entrar: se busca en su sección.
 function seccion() {
-  return within(screen.getByRole("region", { name: "Pedir el enlace para entrar" }));
+  return within(screen.getByRole("region", { name: "Pedir un código para entrar" }));
 }
 
 function pedir(correo: string) {
   fireEvent.change(seccion().getByLabelText("Correo"), { target: { value: correo } });
-  const formulario = seccion().getByRole("button", { name: "Pedir el enlace" }).closest("form");
+  const formulario = seccion().getByRole("button", { name: "Enviar el código" }).closest("form");
   if (formulario === null) throw new Error("el botón no está en un formulario");
   fireEvent.submit(formulario);
 }
@@ -83,6 +83,8 @@ async function sinFaltas(contenedor: HTMLElement) {
 
 afterEach(() => {
   cleanup();
+  // La última forma de entrar queda en este dispositivo (AC-30): cada prueba empieza sin ella.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
@@ -98,7 +100,7 @@ describe("pedir el enlace para entrar", () => {
     // Con el pedido hecho, la pantalla pasa al código: el mensaje se lee ahí.
     const codigo = within(await screen.findByRole("region", CODIGO));
     expect(codigo.getByText(MENSAJE)).toBeTruthy();
-    expect(screen.queryByRole("region", { name: "Pedir el enlace para entrar" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Pedir un código para entrar" })).toBeNull();
     const [enviado, ...otros] = postsDe(pedido);
     expect(otros).toEqual([]);
     if (enviado === undefined) throw new Error("no hubo pedido");
@@ -117,14 +119,15 @@ describe("pedir el enlace para entrar", () => {
     expect(window.location.href).not.toContain(CORREO);
   });
 
-  it("explica que en otro dispositivo sirve el código del mismo correo", () => {
+  it("explica que el código sirve en cualquier dispositivo y el enlace solo en este navegador", () => {
     vi.stubGlobal("fetch", backend());
     abrir();
-    expect(seccion().getByText(/en otro dispositivo, usá el código de 6 números que llega en el mismo correo/)).toBeTruthy();
+    expect(seccion().getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeTruthy();
+    expect(seccion().getByText(/un enlace, que sirve solo en este dispositivo y en este navegador/)).toBeTruthy();
   });
 
   it.each([
-    [error("validacion", 422), /Revisá el correo: no parece una dirección válida/],
+    [error("validacion", 422), /El correo no parece una dirección válida/],
     [error("demasiadas_peticiones", 429), /demasiados pedidos con este correo/],
     [error("servicio_no_disponible", 503), /El servicio no está disponible/],
   ])("ante un rechazo muestra un mensaje en español y no el del 202 (%#)", async (respuesta, mensaje) => {
@@ -165,16 +168,19 @@ describe("pedir el enlace para entrar", () => {
   it("con un enlace válido no se ofrece pedir otro; con uno rechazado, sí", async () => {
     vi.stubGlobal("fetch", backend(aceptado, () => Response.json({})));
     abrir(`/entrar#token=${TOKEN}`);
-    expect(screen.queryByRole("heading", { name: "Pedir el enlace para entrar" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
     expect(await screen.findByText("Entraste.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Pedir el enlace para entrar" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
     cleanup();
 
     vi.stubGlobal("fetch", backend(aceptado, () => error("enlace_invalido", 401)));
     abrir(`/entrar#token=${TOKEN}`);
-    expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Pedir el enlace para entrar" })).toBeTruthy();
+    expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
+    // El enlace rechazado lleva al código del mismo correo (AC-29); pedir otro queda a un toque.
+    expect(screen.getByRole("heading", { name: "Escribir el código del correo" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pedir un código por correo" }));
+    expect(screen.getByRole("heading", { name: "Pedir un código para entrar" })).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, vacío, pedido ni con error", async () => {
@@ -187,7 +193,7 @@ describe("pedir el enlace para entrar", () => {
     await within(await screen.findByRole("region", CODIGO)).findByText(MENSAJE);
     await sinFaltas(container);
 
-    fireEvent.click(screen.getByRole("button", { name: "Pedir el enlace por correo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pedir un código por correo" }));
     respuesta = () => error("validacion", 422);
     pedir(CORREO);
     await seccion().findByText(/no parece una dirección válida/);
