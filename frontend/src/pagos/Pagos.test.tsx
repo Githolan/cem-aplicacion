@@ -18,7 +18,7 @@ import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoRepetida, TITULO_GRUPO, VERBO } from "./textos";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION } from "./textosDeAcciones";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
@@ -237,6 +237,8 @@ function backend(respuestas: Respuestas) {
     "GET /api/v1/auth/totp": () =>
       Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
     [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+    // Antes de guardar se mira si hay una orden parecida (decisión 4 del 13-11): por defecto, no.
+    [`GET ${BASE}/pagos/parecida`]: () => Response.json({ parecida: null }),
   };
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
@@ -4134,6 +4136,92 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     const plegado = screen.getByText(`${TITULO_GRUPO.borradores_viejos} (1)`).closest("details") as HTMLDetailsElement;
     expect(plegado.open).toBe(false);
     expect(plegado.textContent).toContain("Limpieza Ficticia SRL");
+  });
+
+  it("sin pagos por cotejar, quien coteja llega igual a lo cotejado; quien no coteja, no (Codex en #238)", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon() }));
+    abrir("/pagos");
+    const enlace = await screen.findByRole("link", { name: VER_LO_COTEJADO });
+    expect(enlace.getAttribute("href")).toBe("/pagos/cotejo");
+    expect(enlace.classList.contains("enlace-boton--principal")).toBe(false);
+    expect(screen.queryByRole("link", { name: TEXTO_ACCION.cotejar })).toBeNull();
+    cleanup();
+    // Control: quien solo prepara no ve ni el uno ni el otro.
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
+      [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden"),
+    }));
+    abrir("/pagos");
+    await screen.findByRole("link", { name: "Consultar pagos" });
+    expect(screen.queryByRole("link", { name: VER_LO_COTEJADO })).toBeNull();
+  });
+
+  describe("orden parecida antes de guardar (decisión 4 del 13-11)", () => {
+    const OTRA = { orden_id: O2, creada_en: "2026-11-02T15:00:00Z", estado_visible: "pagada" as const };
+    const LEER = {
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
+      [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [contrato(K1)] }),
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+      [`GET ${BASE}/pagos/parecida`]: () => Response.json({ parecida: OTRA }),
+    };
+
+    async function llenar(conContrato = false) {
+      fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+      fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+      fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+      if (conContrato) fireEvent.change(screen.getByLabelText("Contrato o abono (opcional)"), { target: { value: K1 } });
+      fireEvent.click(await boton("Guardar como borrador"));
+    }
+
+    it("avisa antes de guardar con la fecha de la otra; «Guardar igual» guarda y «Ver la otra» la abre", async () => {
+      const api = backend(LEER);
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await llenar();
+      const aviso = await screen.findByText(textoParecidaAntes(fechaCorta(OTRA.creada_en)));
+      const consulta = new URL(pedidos(api, "GET", `${BASE}/pagos/parecida`)[0]?.url ?? "");
+      expect(Object.fromEntries(consulta.searchParams)).toEqual({ proveedor_id: P1, importe_centavos: "1500000", moneda: "ARS" });
+      expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(0);
+      const zona = aviso.closest("[role=alert]") as HTMLElement;
+      expect(within(zona).getByRole("link", { name: VER_LA_OTRA }).getAttribute("href")).toBe(`/pagos/${O2}`);
+      fireEvent.click(within(zona).getByRole("button", { name: GUARDAR_IGUAL }));
+      await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+      expect(await screen.findByText("Listo: la orden quedó en borrador.")).toBeTruthy();
+    });
+
+    it("control: sin otra parecida guarda de una", async () => {
+      const api = backend({ ...LEER, [`GET ${BASE}/pagos/parecida`]: () => Response.json({ parecida: null }) });
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await llenar();
+      await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+      expect(screen.queryByText(/^Ya hay una orden parecida/)).toBeNull();
+    });
+
+    it("control: una orden rutinaria (con contrato o abono) no se compara", async () => {
+      const api = backend(LEER);
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await llenar(true);
+      await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+      expect(pedidos(api, "GET", `${BASE}/pagos/parecida`)).toHaveLength(0);
+      expect(screen.queryByText(/^Ya hay una orden parecida/)).toBeNull();
+    });
+
+    it("cambiar un dato saca el aviso y vuelve a mirar", async () => {
+      const api = backend(LEER);
+      vi.stubGlobal("fetch", api);
+      abrir("/pagos/nueva");
+      await llenar();
+      await screen.findByText(/^Ya hay una orden parecida/);
+      fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "16000" } });
+      expect(screen.queryByText(/^Ya hay una orden parecida/)).toBeNull();
+      fireEvent.click(await boton("Guardar como borrador"));
+      await screen.findByText(/^Ya hay una orden parecida/);
+      expect(pedidos(api, "GET", `${BASE}/pagos/parecida`)).toHaveLength(2);
+      expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(0);
+    });
   });
 
   it("control: el mismo borrador, si no es viejo, está en «Para preparar» y cuenta", async () => {

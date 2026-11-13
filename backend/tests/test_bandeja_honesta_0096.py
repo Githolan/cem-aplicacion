@@ -19,6 +19,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.config import PAGOS_DIAS_BORRADOR_VIEJO
 from app.db import transaccion
 from tests.conftest import alembic_config
 from tests.test_circuito_pagos_0072 import (
@@ -31,7 +32,15 @@ from tests.test_circuito_pagos_0072 import (
     ids,
     rechazada,
 )
-from tests.test_egresos_1a import RENOVAR, aprobada, envejecer, enviada
+from tests.test_egresos_1a import (
+    RENOVAR,
+    aprobada,
+    confirmado,
+    conocido,
+    envejecer,
+    enviada,
+    franja,
+)
 from tests.test_mandatos import otra_persona
 from tests.test_mandatos_0012 import alta
 from tests.test_orden_pago_neutra import (
@@ -60,7 +69,10 @@ pytestmark = pytest.mark.db
 
 MARCAR = "select nucleo.marcar_rechazo_visto(:orden, :actor, :origen, :sesion)"
 CERRAR = "select nucleo.cerrar_orden_sin_pago(:orden, :version, :motivo, :actor, :origen, :sesion)"
-RETIRAR = "select nucleo.retirar_orden_pago(:orden, :version, :actor, :origen, :sesion)"
+RETIRAR = "select nucleo.retirar_orden_pago(:orden, :version, :dias, :actor, :origen, :sesion)"
+VIEJO = PAGOS_DIAS_BORRADOR_VIEJO + 1
+"""Días sin movimiento de un borrador que ya es viejo con la configuración por defecto."""
+PARECIDA = "pagos/parecida"
 
 
 @pytest.fixture
@@ -215,12 +227,42 @@ def test_el_rechazo_visto_no_lo_ve_otro_consorcio_ni_lo_escribe_cem_app(
         )  # fmt: skip
 
 
-# Decisión 4: el borrador lo retira cualquiera que prepara y envejece plegado ----------------
+# Decisiones 4 y 7: un borrador ajeno se retira solo si es viejo; envejece plegado ---------------
 
 
-def test_un_borrador_lo_retira_otro_que_prepara_con_constancia(motor_migrate, motor_app, e):
+def test_un_borrador_ajeno_nuevo_no_lo_retira_otro_que_prepara(motor_migrate, motor_app, e):
+    """Decisión 7 del 13-11: el ajeno, solo viejo. La pantalla no lo ofrece y la base lo niega."""
     o = preparada(motor_migrate, e)
     otro = otro_que_prepara(motor_migrate, motor_app, e)
+    assert ficha(e, otro, o)["puede_retirar"] is False
+    assert "retirar" not in acciones(e, otro, o)
+    niega(motor_migrate, e, otro, RETIRAR, "retirar_solo_quien_preparo", orden=o, version=1,
+          dias=PAGOS_DIAS_BORRADOR_VIEJO)  # fmt: skip
+    r = post(e, otro, f"ordenes-pago/{o}/retirar", {"version_esperada": 1})
+    assert r.status_code != 200 and orden(motor_migrate, o)["estado"] == "borrador"
+
+
+def test_el_borrador_propio_nuevo_lo_retira_quien_lo_preparo(motor_migrate, e):
+    o = preparada(motor_migrate, e)
+    assert ficha(e, e.adm, o)["puede_retirar"] is True
+    llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1, dias=PAGOS_DIAS_BORRADOR_VIEJO)
+    assert orden(motor_migrate, o)["estado"] == "retirada"
+
+
+def test_la_base_no_acepta_dias_sin_sentido(motor_migrate, e):
+    """La API pasa `CEM_PAGOS_DIAS_BORRADOR_VIEJO`: cero haría viejo cualquier borrador."""
+    o = preparada(motor_migrate, e)
+    with pytest.raises(DBAPIError) as error:
+        llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1, dias=0)
+    assert error.value.orig.diag.sqlstate == "22023"
+
+
+def test_un_borrador_ajeno_viejo_lo_retira_otro_que_prepara_con_constancia(
+    motor_migrate, motor_app, e
+):
+    o = preparada(motor_migrate, e)
+    otro = otro_que_prepara(motor_migrate, motor_app, e)
+    mover(motor_migrate, o, VIEJO)
     assert ficha(e, otro, o)["puede_retirar"] is True
     assert "retirar" in acciones(e, otro, o)
     r = post(e, otro, f"ordenes-pago/{o}/retirar", {"version_esperada": 1})
@@ -235,15 +277,18 @@ def test_en_revision_la_sigue_retirando_solo_quien_la_preparo(motor_migrate, mot
     o = preparada(motor_migrate, e, en_revision=True)
     otro = otro_que_prepara(motor_migrate, motor_app, e)
     assert ficha(e, otro, o)["puede_retirar"] is False
-    niega(motor_migrate, e, otro, RETIRAR, "retirar_solo_quien_preparo", orden=o, version=1)
-    llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1)  # control
+    mover(motor_migrate, o, VIEJO)  # viejo o no, en revisión no cambia
+    niega(motor_migrate, e, otro, RETIRAR, "retirar_solo_quien_preparo", orden=o, version=1,
+          dias=PAGOS_DIAS_BORRADOR_VIEJO)  # fmt: skip
+    llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1,
+           dias=PAGOS_DIAS_BORRADOR_VIEJO)  # control  # fmt: skip
 
 
 def test_un_borrador_sin_movimiento_va_a_borradores_viejos_y_no_cuenta(motor_migrate, e):
     o = preparada(motor_migrate, e)
     x = fila(e, e.adm, o)
     assert (x["grupo"], x["pendiente"], x["principal"]) == ("para_preparar", True, "enviar")
-    mover(motor_migrate, o, 8)
+    mover(motor_migrate, o, VIEJO)
     x = fila(e, e.adm, o)
     assert (x["grupo"], x["pendiente"]) == ("borradores_viejos", False)
     assert orden(motor_migrate, o)["estado"] == "borrador"  # nada se borra
@@ -262,6 +307,43 @@ def test_dos_ordenes_iguales_se_avisan_con_la_fecha_y_el_estado_de_la_otra(motor
     assert ficha(e, e.adm, b)["posible_duplicada_de"]["orden_id"] == str(a)
     # La segunda se envía igual: el aviso no bloquea.
     llamar(motor_migrate, e, e.adm, ENVIAR, orden=b, version=1)
+
+
+def parecida(e, quien, **params) -> dict | None:
+    consulta_ = "&".join(f"{k}={v}" for k, v in params.items())
+    r = get(e, quien, f"{PARECIDA}?{consulta_}")
+    assert r.status_code == 200, r.json()
+    return r.json()["parecida"]
+
+
+def test_antes_de_guardar_avisa_la_parecida_no_rutinaria(motor_migrate, e):
+    """Decisión 4 del 13-11: el aviso sale antes de guardar, con la fecha de la otra."""
+    a = enviada(motor_migrate, e)
+    datos = {"proveedor_id": e.proveedor, "importe_centavos": 1_234_500, "moneda": "ARS"}
+    x = parecida(e, e.adm, **datos)
+    assert x["orden_id"] == str(a)
+    assert x["creada_en"] == ficha(e, e.adm, a)["orden"]["creada_en"]
+    assert x["estado_visible"] == "esperando_aprobacion"
+    # La versión nueva de esa misma orden no se compara con ella.
+    assert parecida(e, e.adm, **datos, orden_id=a) is None
+    # Controles: con contrato (rutinaria) no se avisa; con otro importe tampoco.
+    k = confirmado(motor_migrate, e)
+    assert parecida(e, e.adm, **datos, contrato_id=k) is None
+    assert parecida(e, e.adm, **(datos | {"importe_centavos": 2_345_600})) is None
+
+
+def test_una_orden_rutinaria_guardada_no_cuenta_como_parecida(motor_migrate, e):
+    conocido(motor_migrate, e)
+    r = enviada(motor_migrate, e, contrato=confirmado(motor_migrate, e))
+    assert franja(motor_migrate, r) == "rutinaria"
+    datos = {"proveedor_id": e.proveedor, "importe_centavos": 1_234_500, "moneda": "ARS"}
+    assert parecida(e, e.adm, **datos) is None
+    b = preparada(motor_migrate, e)  # mismo proveedor e importe, sin contrato
+    assert fila(e, e.adm, b)["posible_duplicada_de"] is None
+    # Control: una no rutinaria igual sí la ve.
+    a = enviada(motor_migrate, e)
+    assert fila(e, e.adm, b)["posible_duplicada_de"]["orden_id"] == str(a)
+    assert parecida(e, e.adm, **datos)["orden_id"] in (str(a), str(b))
 
 
 def test_control_otro_importe_no_se_avisa(motor_migrate, e):
@@ -433,7 +515,7 @@ def test_no_repetir_al_rechazar_retirar_renovar_conciliar(motor_migrate, e):
     # Retirar (T6).
     r = enviada(motor_migrate, e)
     assert "retirar" in acciones(e, e.adm, r)
-    llamar(motor_migrate, e, e.adm, RETIRAR, orden=r, version=1)
+    llamar(motor_migrate, e, e.adm, RETIRAR, orden=r, version=1, dias=PAGOS_DIAS_BORRADOR_VIEJO)
     assert acciones(e, e.adm, r) == []
     coherente(e, r, *gente)
     # Renovar (T7).

@@ -7,8 +7,8 @@ import re
 import pytest
 from pydantic import ValidationError
 
-from cem_contracts.egresos import AccionPago, EstadoVisible, GrupoPago, SituacionPago
-from cem_contracts.pantalla_pagos import ARCHIVO, PantallaPagos, cargar
+from cem_contracts.egresos import AccionPago, EstadoVisible, GrupoPago, PasoPago, SituacionPago
+from cem_contracts.pantalla_pagos import ARCHIVO, EXCEPCIONES_REGLA_3, PantallaPagos, cargar
 
 NEGATIVAS = {
     AccionPago.RETIRAR,
@@ -121,9 +121,49 @@ def test_regla_3_lo_terminado_no_tiene_principal_ni_lista():
         SituacionPago.RETIRADA,
         SituacionPago.PAGADA_Y_COTEJADA,
     }
+    excepciones = []
     for f in tabla.filas:
-        if f.situacion in finales:
+        if f.situacion in finales and f.excepcion_regla_3 is None:
             assert f.principal is None and f.lista is None, (f.situacion, f.paso)
+        elif f.excepcion_regla_3 is not None:
+            excepciones.append((f.situacion, f.paso, f.principal))
+    # La única excepción, la de la decisión 2 del 13-11, y explícita.
+    assert excepciones == [
+        (SituacionPago.PAGADA_Y_COTEJADA, PasoPago.PREPARAR_FALTANTE, AccionPago.PREPARAR_FALTANTE)
+    ]
+    assert EXCEPCIONES_REGLA_3 == {(SituacionPago.PAGADA_Y_COTEJADA, PasoPago.PREPARAR_FALTANTE)}
+
+
+def _fila(datos: dict, situacion: str, paso: str | None) -> dict:
+    return next(f for f in datos["filas"] if f["situacion"] == situacion and f["paso"] == paso)
+
+
+def test_regla_3_control_sin_la_marca_la_excepcion_no_entra():
+    _rompe(lambda d: _fila(d, "pagada_y_cotejada", "preparar_faltante").pop("excepcion_regla_3"))
+
+
+def test_regla_3_control_la_marca_no_abre_otra_fila_terminada():
+    """No es un agujero general: marcar otra fila terminada no la deja tener acción principal."""
+
+    def otra(d: dict) -> None:
+        f = _fila(d, "rechazada", "rechazada")
+        f["principal"] = "preparar_otra"
+        f["secundarias"] = []
+        f["excepcion_regla_3"] = "SINTETICO"
+
+    _rompe(otra)
+
+
+def test_regla_3_control_la_marca_sobra_en_una_fila_que_no_la_necesita():
+    _rompe(lambda d: _fila(d, "pagada", "preparar_faltante").update(excepcion_regla_3="SINTETICO"))
+
+
+def test_regla_3_control_una_terminada_con_principal_y_sin_marca_no_entra():
+    def con_principal(d: dict) -> None:
+        f = _fila(d, "retirada", None)
+        f["principal"] = "preparar_otra"
+
+    _rompe(con_principal)
 
 
 def test_regla_4_estado_y_barra_son_de_la_situacion():

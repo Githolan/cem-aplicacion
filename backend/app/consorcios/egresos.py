@@ -98,11 +98,13 @@ from cem_contracts.egresos import (
     OrdenPagoConVersionesRevision,
     OrdenPagoNueva,
     OrdenPagoVersionNueva,
+    OrdenParecida,
     PagoManual,
     PagoManualCambiado,
     PagoManualRegistrado,
     PagoNoRealizado,
     PagoPorAclarar,
+    ParecidaAntesDeGuardar,
     PasoPago,
     PedidoCuentaPagoManual,
     Proveedor,
@@ -1087,6 +1089,7 @@ def rechazar_orden(
     responses=RESPUESTAS_ESCRITURA,
 )
 def retirar_orden(
+    request: Request,
     orden_id: UUID,
     retiro: Retiro,
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
@@ -1094,15 +1097,17 @@ def retirar_orden(
     motor: MotorDep,
 ) -> Response:
     """Comentario 23 de la revisión de pantallas (09-11-2026, `0093`) y decisión 4 del
-    propietario (12-11-2026, `0096`): un borrador lo retira cualquiera que prepara; una orden en
-    revisión, solo quien la preparó. Las dos, solo mientras nadie aprobó la versión vigente. No
+    propietario (12-11-2026, `0096`), con la 7 del 13-11: quien la preparó la retira siempre;
+    otra persona que prepara, solo un borrador sin movimiento hace más de
+    `CEM_PAGOS_DIAS_BORRADOR_VIEJO` días. Solo mientras nadie aprobó la versión vigente. No
     mueve dinero: sin el gesto."""
+    dias = request.app.state.config.pagos_dias_borrador_viejo
 
     def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.retirar_orden_pago(:o, :esperada, :actor, 'api', :sesion)",
-            {"o": orden_id, "esperada": retiro.version_esperada},
+            "select nucleo.retirar_orden_pago(:o, :esperada, :dias, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": retiro.version_esperada, "dias": dias},
         )  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=retiro.version_esperada)
 
@@ -2207,14 +2212,16 @@ def _retiro(c: Connection, lector: Permiso, orden: UUID) -> RetiroOrdenPago | No
     )  # fmt: skip
 
 
-def _puede_retirar(c: Connection, lector: Permiso, orden: OrdenPago, vigente) -> bool:
+def _puede_retirar(
+    c: Connection, lector: Permiso, orden: OrdenPago, vigente, viejos_desde: datetime
+) -> bool:
     """Lo que `nucleo.retirar_orden_pago` va a aceptar, para mostrar: quien prepara, la orden sin
-    aprobar y nadie aprobó la versión vigente. Un borrador lo retira cualquiera que prepara
-    (decisión 4, `0096`); en revisión, quien preparó alguna versión (por la identidad guardada,
-    `lee_quien_preparo_la_orden`)."""
+    aprobar y nadie aprobó la versión vigente. Quien preparó alguna versión la retira siempre
+    (por la identidad guardada, `lee_quien_preparo_la_orden`); otra persona, solo un borrador
+    sin movimiento desde antes de `viejos_desde` (decisiones 4 y 7, `0096`)."""
     if lector.accion != PREPARAR or orden.estado not in RETIRABLES or vigente.aprobada_por:
         return False
-    if orden.estado == EstadoOrdenPago.BORRADOR:
+    if orden.estado == EstadoOrdenPago.BORRADOR and orden.actualizada_en < viejos_desde:
         return True
     return bool(_ejecutar(c, lector, PREPARO, {"o": orden.id}).scalar_one())
 
@@ -2383,6 +2390,50 @@ def consulta_pagos(
 
 
 @router.get(
+    "/consorcios/{consorcio_id}/pagos/parecida",
+    response_model=ParecidaAntesDeGuardar,
+    summary="Antes de guardar una orden: si hay otra parecida (mismo proveedor e importe, en los"
+    " últimos días). No bloquea",
+    responses=RESPUESTAS_LECTURA,
+)
+def parecida_antes_de_guardar(
+    request: Request,
+    preparar: Preparar,
+    motor: MotorDep,
+    proveedor_id: UUID,
+    importe_centavos: Annotated[int, Query(gt=0)],
+    moneda: Annotated[str, Query(min_length=3, max_length=3)],
+    contrato_id: UUID | None = None,
+    orden_id: UUID | None = None,
+) -> ParecidaAntesDeGuardar:
+    """Decisión 4 del propietario (13-11-2026). Con un contrato o abono la orden es rutinaria: no
+    se compara. `orden_id` es la orden que se modifica, que no cuenta como otra."""
+    if contrato_id is not None:
+        return ParecidaAntesDeGuardar(parecida=None)
+    config = request.app.state.config
+    clave = circuito_pagos.clave_parecida(proveedor_id, importe_centavos, moneda)
+    with _lectura(preparar, _una_foto(motor)) as c:
+        ordenes = _ordenes(c, preparar, None)
+        otra = circuito_pagos.parecida_a(
+            clave, datetime.now(UTC), ordenes, config.pagos_dias_repetida, salvo=orden_id
+        )
+        if otra is None:
+            return ParecidaAntesDeGuardar(parecida=None)
+        hechos = _con_hechos(
+            [otra], _acciones(c, preparar, otra.id, _plazo_para_tomar(request)),
+            _cotejadas(c, preparar, otra.id), _cierres(c, preparar, otra.id),
+        )  # fmt: skip
+    situacion = circuito_pagos.situacion_de(otra.estado, hechos[otra.id])
+    return ParecidaAntesDeGuardar(
+        parecida=OrdenParecida(
+            orden_id=otra.id,
+            creada_en=otra.creada_en,
+            estado_visible=circuito_pagos.estado_visible(situacion),
+        )
+    )
+
+
+@router.get(
     "/consorcios/{consorcio_id}/pagos/{orden_id}",
     response_model=FichaPago,
     summary="La ficha de una orden en cualquier estado: en qué anda y qué puede hacer quien pide,"
@@ -2424,7 +2475,8 @@ def ficha_pago(
         lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
         toma = None if ejecucion is None else _toma_vigente(c, lector, orden_id, ejecucion.id)
         retiro = _retiro(c, lector, orden_id) if orden.estado == EstadoOrdenPago.RETIRADA else None
-        puede_retirar = _puede_retirar(c, lector, orden, vigente)
+        viejos_desde = datetime.now(UTC) - timedelta(days=config.pagos_dias_borrador_viejo)
+        puede_retirar = _puede_retirar(c, lector, orden, vigente, viejos_desde)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     situaciones = {

@@ -11,6 +11,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from app.config import PAGOS_DIAS_BORRADOR_VIEJO
 from app.db import transaccion
 from tests.conftest import alembic_config
 from tests.test_circuito_pagos_0072 import con, consulta, ficha, fila, ids
@@ -37,7 +38,11 @@ from tests.test_vinculo_0014 import base_aparte  # noqa: F401  (es un fixture)
 
 pytestmark = pytest.mark.db
 
-RETIRAR = "select nucleo.retirar_orden_pago(:orden, :version, :actor, :origen, :sesion)"
+# Desde `0096` la función recibe los días de un borrador viejo (decisión 7 del 13-11).
+RETIRAR = (
+    "select nucleo.retirar_orden_pago(:orden, :version,"
+    f" {PAGOS_DIAS_BORRADOR_VIEJO}, :actor, :origen, :sesion)"
+)
 
 
 @pytest.fixture

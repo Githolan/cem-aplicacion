@@ -4,6 +4,7 @@ Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §2 y §3. Cada caso lleva su 
 el dato que lo decide da otra cosa. Contra PostgreSQL real: `test_circuito_pagos_0072.py`.
 """
 
+import random
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -42,9 +43,11 @@ from app.consorcios.circuito_pagos import (
     avisos_de_rechazo,
     bandeja,
     barra_de,
+    clave_parecida,
     fila_de,
     le_toca_a,
     ofrece_pagar,
+    parecida_a,
     parecidas,
     paso_de,
     reabre_cuenta,
@@ -242,6 +245,7 @@ def orden(
     importe: int = 100,
     motivo_rechazo: str | None = None,
     aprobacion_vence_en: datetime | None = None,
+    franja: Franja = Franja.BENEFICIARIO_NUEVO,
 ) -> OrdenPago:
     return OrdenPago(
         id=uuid4(), estado=estado, version_vigente=1, preparada_por=uuid4(), creada_en=creada_en,
@@ -249,7 +253,7 @@ def orden(
         moneda="ARS", concepto="SINTETICO", proveedor_id=proveedor or uuid4(),
         razon_social="Proveedor SINTETICO",
         condicion_beneficiario=CondicionBeneficiario.NUEVO, usa_fondo_reserva=False,
-        aprobaciones_requeridas=1, aprobaciones=0, franja=Franja.BENEFICIARIO_NUEVO,
+        aprobaciones_requeridas=1, aprobaciones=0, franja=franja,
         alerta_fraccionamiento=False, aprobada_en=None, aprobacion_vence_en=aprobacion_vence_en,
         aprobada_por_vos=False,
     )  # fmt: skip
@@ -424,6 +428,7 @@ def test_aviso_de_orden_repetida_con_la_fecha_y_el_estado_de_la_otra():
         {"creada_en": AHORA - timedelta(days=PAGOS_DIAS_REPETIDA, seconds=1)},
         {"estado": E.RECHAZADA},
         {"estado": E.RETIRADA},
+        {"franja": Franja.RUTINARIA},
     ],
 )
 def test_control_no_avisa_si_cambia_lo_que_la_hace_igual(cambio):
@@ -440,6 +445,75 @@ def test_control_no_avisa_si_cambia_lo_que_la_hace_igual(cambio):
     assert parecidas([previa, copia], situaciones, PAGOS_DIAS_REPETIDA) == {}
 
 
+def test_una_orden_rutinaria_no_avisa_ni_recibe_aviso():
+    """Decisión 4 del 13-11: con contrato o abono (franja rutinaria) no se compara, de ningún lado.
+    Control: las mismas dos sin la franja rutinaria sí se avisan."""
+    p = uuid4()
+    previa = orden(E.PAGADA, creada_en=AHORA - timedelta(days=3), proveedor=p, importe=9_000)
+    rutinaria = orden(E.BORRADOR, proveedor=p, importe=9_000, franja=Franja.RUTINARIA)
+    situaciones = {previa.id: S.PAGADA, rutinaria.id: S.BORRADOR}
+    assert parecidas([previa, rutinaria], situaciones, PAGOS_DIAS_REPETIDA) == {}
+    clave = clave_parecida(p, 9_000, "ARS")
+    assert parecida_a(clave, AHORA, [rutinaria], PAGOS_DIAS_REPETIDA) is None
+    comun = orden(E.BORRADOR, proveedor=p, importe=9_000)
+    situaciones[comun.id] = S.BORRADOR
+    assert (
+        parecidas([previa, comun], situaciones, PAGOS_DIAS_REPETIDA)[comun.id].orden_id == previa.id
+    )
+
+
+def test_antes_de_guardar_la_mas_cercana_de_su_grupo_y_no_la_misma():
+    p = uuid4()
+    lejos = orden(E.PAGADA, creada_en=AHORA - timedelta(days=20), proveedor=p, importe=5_000)
+    cerca = orden(E.PAGADA, creada_en=AHORA - timedelta(days=2), proveedor=p, importe=5_000)
+    otra_moneda = orden(E.PAGADA, creada_en=AHORA, proveedor=p, importe=5_000).model_copy(
+        update={"moneda": "USD"}
+    )
+    todas = [lejos, cerca, otra_moneda]
+    clave = clave_parecida(p, 5_000, "ARS")
+    assert parecida_a(clave, AHORA, todas, PAGOS_DIAS_REPETIDA) == cerca
+    # La versión nueva de `cerca` no se compara con ella misma.
+    assert parecida_a(clave, AHORA, todas, PAGOS_DIAS_REPETIDA, salvo=cerca.id) == lejos
+    # Control: fuera de la ventana no hay.
+    assert parecida_a(clave, AHORA + timedelta(days=60), todas, PAGOS_DIAS_REPETIDA) is None
+
+
+def test_parecidas_por_grupos_da_lo_mismo_que_comparar_todos_los_pares():
+    """Codex en #238: se agrupa y se miran las vecinas en vez de todos los pares. El resultado es
+    el de la comparación de todos con todos (control con un historial armado al azar, fijo)."""
+    azar = random.Random(238)
+    proveedores = [uuid4() for _ in range(3)]
+    ordenes = [
+        orden(
+            azar.choice([E.BORRADOR, E.PAGADA, E.RECHAZADA, E.CONCILIADA]),
+            creada_en=AHORA - timedelta(days=azar.randint(0, 120), minutes=azar.randint(0, 999)),
+            proveedor=azar.choice(proveedores),
+            importe=azar.choice([1_000, 2_000]),
+        )
+        for _ in range(80)
+    ]
+    situaciones = {o.id: situacion_de(o.estado, HechosPago()) for o in ordenes}
+    ventana = timedelta(days=PAGOS_DIAS_REPETIDA)
+    vivas = [o for o in ordenes if o.estado not in (E.RECHAZADA, E.RETIRADA)]
+    esperado = {}
+    for o in vivas:
+        otras = [
+            x for x in vivas
+            if x.id != o.id and x.proveedor_id == o.proveedor_id
+            and x.importe_centavos == o.importe_centavos
+            and abs(x.creada_en - o.creada_en) <= ventana
+        ]  # fmt: skip
+        if otras:
+            esperado[o.id] = min(
+                otras, key=lambda y: (abs(y.creada_en - o.creada_en), str(y.id))
+            ).id
+    obtenido = {
+        k: v.orden_id for k, v in parecidas(ordenes, situaciones, PAGOS_DIAS_REPETIDA).items()
+    }
+    assert obtenido == esperado
+    assert len(esperado) > 10  # el control tiene casos
+
+
 def test_la_rechazada_se_avisa_a_quien_la_preparo_hasta_entendido():
     """Decisión 3: aviso arriba de la bandeja, no en una lista de pendientes."""
     o = orden(E.RECHAZADA, motivo_rechazo="Falta la factura SINTETICA")
@@ -451,7 +525,7 @@ def test_la_rechazada_se_avisa_a_quien_la_preparo_hasta_entendido():
     assert avisos_de_rechazo([orden(E.BORRADOR)], True, {o.id}) == []  # control: solo rechazadas
 
 
-def test_pagada_y_cotejada_completa_la_barra_y_no_tiene_paso():
+def test_pagada_y_cotejada_completa_la_barra_y_conserva_lo_que_falta():
     """P-05: hoy «Cotejar» no se marca nunca."""
     cotejada = HechosPago(cotejada=True)
     assert situacion_de(E.PAGADA, cotejada) == S.PAGADA_Y_COTEJADA
@@ -462,8 +536,13 @@ def test_pagada_y_cotejada_completa_la_barra_y_no_tiene_paso():
     assert barra_de(S.PAGADA_Y_COTEJADA, o, AHORA).actual is None
     assert barra_de(S.PAGADA, o, AHORA).hechos == 4
     assert barra_de(S.PAGADA, o, AHORA).actual == "ahora"
+    # Decisión 2 del 13-11: pagada de menos, cotejada, conserva preparar lo que falta.
     falta = AccionesOrden(pagada_de_menos=True, cotejada=True)
-    assert paso_de(S.PAGADA_Y_COTEJADA, falta, True) is None
+    assert paso_de(S.PAGADA_Y_COTEJADA, falta, True) == P.PREPARAR_FALTANTE
+    assert fila_de(S.PAGADA_Y_COTEJADA, P.PREPARAR_FALTANTE).principal == "preparar_faltante"
+    # Controles: sin faltante no tiene paso, y quien no prepara tampoco.
+    assert paso_de(S.PAGADA_Y_COTEJADA, AccionesOrden(cotejada=True), True) is None
+    assert paso_de(S.PAGADA_Y_COTEJADA, falta, False) is None
 
 
 def test_la_barra_es_de_la_orden_y_avisa_la_aprobacion_vencida():

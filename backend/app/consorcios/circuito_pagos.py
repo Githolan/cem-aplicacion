@@ -39,6 +39,7 @@ from cem_contracts.egresos import (
     ElementoBandejaPagos,
     EstadoOrdenPago,
     EstadoVisible,
+    Franja,
     GrupoPago,
     LeTocaA,
     LugarEnLaBarra,
@@ -213,11 +214,10 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
             return PasoPago.ESPERA_CONFIRMAR
         case SituacionPago.NO_SE_PAGO:
             return PasoPago.VOLVER_A_PAGAR if prepara and not a.cerrada_sin_pago else None
-        case SituacionPago.PAGADA:
+        case SituacionPago.PAGADA | SituacionPago.PAGADA_Y_COTEJADA:
+            # Cotejada es terminada (§4.2, regla 3), con una excepción explícita en la tabla
+            # (decisión 2 del 13-11): pagada de menos conserva preparar lo que falta.
             return PasoPago.PREPARAR_FALTANTE if prepara and a.pagada_de_menos else None
-        case SituacionPago.PAGADA_Y_COTEJADA:
-            # Terminada (§4.2, regla 3): lo que falte se prepara como una orden nueva.
-            return None
         case SituacionPago.CON_DIFERENCIA | SituacionPago.RECLAMO:
             return (
                 PasoPago.RESOLVER_DIFERENCIA
@@ -283,33 +283,72 @@ def acciones_ofrecidas(
     return ofrecidas
 
 
+def cuenta_para_parecidas(o: OrdenPago) -> bool:
+    """Lo que se compara al buscar órdenes parecidas (decisiones 5 y 4 del propietario, 12 y
+    13-11-2026). Lo que no se va a pagar no cuenta, como en el fraccionamiento. Una orden rutinaria,
+    respaldada por un contrato o abono, tampoco: repetirse es lo que se espera de ella."""
+    return o.estado not in SIN_PARECIDAS and o.franja != Franja.RUTINARIA
+
+
+type ClaveParecida = tuple[UUID, int, str]
+
+
+def clave_parecida(proveedor_id: UUID, importe_centavos: int, moneda: str) -> ClaveParecida:
+    return (proveedor_id, importe_centavos, moneda)
+
+
+def _la_mas_cercana(momento: datetime, candidatas: list[OrdenPago], ventana: timedelta):
+    cerca = [x for x in candidatas if abs(x.creada_en - momento) <= ventana]
+    return min(cerca, key=lambda y: (abs(y.creada_en - momento), str(y.id)), default=None)
+
+
 def parecidas(
     ordenes: list[OrdenPago], situaciones: dict[UUID, SituacionPago], dias: int
 ) -> dict[UUID, OrdenParecida]:
-    """Decisión 5 del propietario (12-11-2026): otra orden del mismo proveedor y el mismo importe
-    preparada con menos de `dias` días de diferencia. De varias, la más cercana en el tiempo. Solo
-    avisa: dos pagos iguales pueden ser legítimos."""
+    """Decisión 5 del propietario (12-11-2026): otra orden del mismo proveedor, el mismo importe y
+    la misma moneda preparada con menos de `dias` días de diferencia. De varias, la más cercana en
+    el tiempo. Solo avisa: dos pagos iguales pueden ser legítimos.
+
+    Se agrupa por proveedor, importe y moneda y, dentro de cada grupo ordenado por fecha, la más
+    cercana a una orden es su vecina de un lado o del otro: n log n, no todos los pares."""
     ventana = timedelta(days=dias)
-    vivas = [o for o in ordenes if o.estado not in SIN_PARECIDAS]
+    grupos: dict[ClaveParecida, list[OrdenPago]] = {}
+    for o in ordenes:
+        if cuenta_para_parecidas(o):
+            clave = clave_parecida(o.proveedor_id, o.importe_centavos, o.moneda)
+            grupos.setdefault(clave, []).append(o)
     resultado = {}
-    for o in vivas:
-        otras = [
-            x
-            for x in vivas
-            if x.id != o.id
-            and x.proveedor_id == o.proveedor_id
-            and x.importe_centavos == o.importe_centavos
-            and x.moneda == o.moneda
-            and abs(x.creada_en - o.creada_en) <= ventana
-        ]
-        if otras:
-            x = min(otras, key=lambda y: (abs(y.creada_en - o.creada_en), str(y.id)))
-            resultado[o.id] = OrdenParecida(
-                orden_id=x.id,
-                creada_en=x.creada_en,
-                estado_visible=estado_visible(situaciones[x.id]),
-            )
+    for grupo in grupos.values():
+        grupo.sort(key=lambda y: (y.creada_en, str(y.id)))
+        for i, o in enumerate(grupo):
+            vecinas = grupo[max(i - 1, 0) : i] + grupo[i + 1 : i + 2]
+            x = _la_mas_cercana(o.creada_en, vecinas, ventana)
+            if x is not None:
+                resultado[o.id] = OrdenParecida(
+                    orden_id=x.id,
+                    creada_en=x.creada_en,
+                    estado_visible=estado_visible(situaciones[x.id]),
+                )
     return resultado
+
+
+def parecida_a(
+    clave: ClaveParecida,
+    momento: datetime,
+    ordenes: list[OrdenPago],
+    dias: int,
+    salvo: UUID | None = None,
+) -> OrdenPago | None:
+    """La orden parecida a una que todavía no se guardó (o a una versión nueva de `salvo`), para
+    avisar antes de guardar (decisión 4 del 13-11). Solo mira las de su grupo."""
+    candidatas = [
+        o
+        for o in ordenes
+        if o.id != salvo
+        and cuenta_para_parecidas(o)
+        and clave_parecida(o.proveedor_id, o.importe_centavos, o.moneda) == clave
+    ]
+    return _la_mas_cercana(momento, candidatas, timedelta(days=dias))
 
 
 def avisos_de_rechazo(

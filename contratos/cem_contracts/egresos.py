@@ -1301,6 +1301,16 @@ class OrdenParecida(BaseModel):
     estado_visible: EstadoVisible
 
 
+class ParecidaAntesDeGuardar(BaseModel):
+    """Antes de guardar una orden: si hay otra parecida (decisión 4 del propietario, 13-11-2026).
+    Mismo proveedor, importe y moneda, a menos de `CEM_PAGOS_DIAS_REPETIDA` días. Una orden
+    rutinaria (con contrato o abono) no se compara. Es un aviso: guardar igual se puede."""
+
+    model_config = ConfigDict(frozen=True)
+
+    parecida: OrdenParecida | None
+
+
 class FiltroConsultaPagos(StrEnum):
     TODOS = "todos"
     PAGADOS = "pagados"

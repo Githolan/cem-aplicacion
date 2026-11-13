@@ -5,9 +5,11 @@
   escribe solo `nucleo.marcar_rechazo_visto` (con `egresos.preparar_orden`, sin el gesto: no mueve
   dinero; solo una orden en Rechazada; repetirla no hace nada). `nucleo.rechazos_vistos_lectura`
   dice cuáles vio quien pide. RLS habilitada y forzada; `cem_app` no toca la tabla.
-- **Borrador que nadie envió** (decisión 4, cambia la del 09-11): un borrador lo retira
-  cualquiera con `egresos.preparar_orden`; en EnRevision sigue retirándola solo quien la preparó.
-  Las dos, solo mientras nadie aprobó la versión vigente, y quedan quién y cuándo (`0093`).
+- **Borrador que nadie envió** (decisión 4, y la 7 del 13-11): quien lo preparó lo retira
+  siempre; otra persona con `egresos.preparar_orden`, solo si es un borrador sin movimiento hace
+  más de `dias_borrador_viejo` días (`CEM_PAGOS_DIAS_BORRADOR_VIEJO`, que pasa la API; la
+  función agrega ese parámetro). En EnRevision sigue retirándola solo quien la preparó. Las dos,
+  solo mientras nadie aprobó la versión vigente, y quedan quién y cuándo (`0093`).
 - **Cerrar sin pagar** (decisión 12). `nucleo.orden_pago` suma `cerrada_sin_pago_por`,
   `cerrada_sin_pago_en` y `motivo_cierre_sin_pago`, que van juntas y solo en Fallida (el estado
   no cambia: sigue siendo «No se pagó»). `nucleo.cerrar_orden_sin_pago`, con
@@ -45,10 +47,88 @@ CIERRE = "nucleo.cierre_sin_pago_lectura(uuid, text, uuid, text, uuid)"
 COTEJOS = "nucleo.cotejo_de_ordenes_lectura(uuid, text, uuid, text, uuid)"
 RUTAS = (MARCAR, VISTOS, CERRAR, CIERRE, COTEJOS)
 
-RETIRAR = "nucleo.retirar_orden_pago(uuid, integer, uuid, text, uuid)"
-SOLO_QUIEN_PREPARO = "    if not exists (select 1 from nucleo.orden_pago_version x\n"
-BORRADOR_CUALQUIERA = (
-    "    if o.estado <> 'borrador' and not exists (select 1 from nucleo.orden_pago_version x\n"
+RETIRAR_0093 = "nucleo.retirar_orden_pago(uuid, integer, uuid, text, uuid)"
+RETIRAR = "nucleo.retirar_orden_pago(uuid, integer, integer, uuid, text, uuid)"
+
+# Quién retira. En `0093`, solo quien preparó alguna versión. Desde acá (decisión 7 del 13-11):
+# también otra persona que prepara, pero solo un borrador viejo, sin movimiento hace más de
+# `dias_borrador_viejo` días (`CEM_PAGOS_DIAS_BORRADOR_VIEJO`, que pasa la API).
+QUIEN_RETIRA_0093 = """
+    if not exists (select 1 from nucleo.orden_pago_version x
+                    where x.orden_id = o.id and x.identidad_preparo = identidad) then
+      raise exception 'solo la retira quien la preparó' using errcode = 'P0001',
+        hint = 'retirar_solo_quien_preparo';
+    end if;"""
+QUIEN_RETIRA = """
+    if not exists (select 1 from nucleo.orden_pago_version x
+                    where x.orden_id = o.id and x.identidad_preparo = identidad)
+       and not (o.estado = 'borrador'
+                and o.actualizada_en < now() - make_interval(days => dias_borrador_viejo)) then
+      raise exception 'solo la retira quien la preparó, o un borrador viejo' using
+        errcode = 'P0001', hint = 'retirar_solo_quien_preparo';
+    end if;"""
+DIAS_VALIDOS = """
+    if dias_borrador_viejo is null or dias_borrador_viejo < 1 then
+      raise exception 'dias_borrador_viejo inválido: %', dias_borrador_viejo
+        using errcode = '22023';
+    end if;"""
+
+
+def _funcion_retirar(firma: str, parametros: str, validar: str, quien_retira: str) -> str:
+    """`nucleo.retirar_orden_pago` como la dejó `0093`, con quién la retira según la versión."""
+    return f"""
+create function {firma.split("(")[0]}({parametros})
+  returns void
+  language plpgsql
+  security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+    o nucleo.orden_pago;
+    identidad uuid;
+  begin{validar}
+    identidad := nucleo.exigir_acto_sin_gesto(c, actor, sesion, 'egresos.preparar_orden',
+                                              origen_pedido);
+    o := nucleo.orden_pago_bloqueada(c, orden);
+    if o.estado not in ('borrador', 'en_revision') then
+      raise exception 'solo se retira una orden que nadie aprobó' using errcode = 'P0001',
+        hint = 'estado_invalido';
+    end if;
+    if version_esperada is distinct from o.version_vigente then
+      raise exception 'la orden cambió mientras tanto' using errcode = 'P0001',
+        hint = 'version_desactualizada';
+    end if;{quien_retira}
+    if exists (select 1 from nucleo.orden_pago_aprobacion x
+                where x.orden_id = o.id and x.version = o.version_vigente) then
+      raise exception 'alguien ya la aprobó' using errcode = 'P0001',
+        hint = 'orden_con_aprobaciones';
+    end if;
+    update nucleo.orden_pago
+       set estado = 'retirada', retirada_por = actor, retirada_en = now(), actualizada_en = now()
+     where id = orden;
+    perform nucleo.auditar_orden_pago(c, 'consorcio.orden_pago.retirar', orden, actor,
+      jsonb_build_object('estado', o.estado),
+      jsonb_build_object('estado', 'retirada', 'version', o.version_vigente));
+  end
+  $$;
+revoke all on function {firma} from public;
+grant execute on function {firma} to cem_app;
+"""
+
+
+RETIRAR_NUEVA = _funcion_retirar(
+    RETIRAR,
+    "orden uuid, version_esperada integer, dias_borrador_viejo integer, actor uuid,"
+    " origen_pedido text, sesion uuid",
+    DIAS_VALIDOS,
+    QUIEN_RETIRA,
+)
+RETIRAR_VIEJA = _funcion_retirar(
+    RETIRAR_0093,
+    "orden uuid, version_esperada integer, actor uuid, origen_pedido text, sesion uuid",
+    "",
+    QUIEN_RETIRA_0093,
 )
 
 CONSULTA = "nucleo.pagos_consulta_lectura(text, text[], integer, integer, text, uuid, text, uuid)"
@@ -278,13 +358,6 @@ def _definicion(firma: str) -> str:
     )
 
 
-def _reemplazar(firma: str, antes: str, despues: str) -> None:
-    vigente = _definicion(firma)
-    if vigente.count(antes) != 1:
-        raise RuntimeError(f"0096: {firma} no tiene una sola vez «{antes}»")
-    op.execute(vigente.replace(antes, despues))
-
-
 def _consulta(*, al_reves: bool = False) -> None:
     """Lo que devuelve cambia: se borra y se crea de nuevo, con su permiso."""
     definicion = _definicion(CONSULTA)
@@ -305,12 +378,14 @@ def upgrade() -> None:
     for funcion in RUTAS:
         op.execute(f"revoke all on function {funcion} from public")
         op.execute(f"grant execute on function {funcion} to cem_app")
-    _reemplazar(RETIRAR, SOLO_QUIEN_PREPARO, BORRADOR_CUALQUIERA)
+    op.execute(f"drop function {RETIRAR_0093}")
+    op.execute(RETIRAR_NUEVA)
     _consulta()
 
 
 def downgrade() -> None:
     op.execute(GUARDA_DOWNGRADE)
     _consulta(al_reves=True)
-    _reemplazar(RETIRAR, BORRADOR_CUALQUIERA, SOLO_QUIEN_PREPARO)
+    op.execute(f"drop function {RETIRAR}")
+    op.execute(RETIRAR_VIEJA)
     op.execute(DOWNGRADE)

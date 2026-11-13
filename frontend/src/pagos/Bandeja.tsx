@@ -22,6 +22,7 @@ import {
   textoRechazada,
   textoRepetida,
   TITULO_GRUPO,
+  VER_LO_COTEJADO,
   VERBO,
 } from "./textos";
 
@@ -158,6 +159,9 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar }: Pro
   const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar } = bandeja;
   const puede = usePuede(consorcio);
   const prepara = puede("egresos.preparar_orden");
+  /** Quien coteja llega al cotejo aunque no quede nada por cotejar: ahí está lo ya cotejado y
+   * «Deshacer el cotejo» (Codex en #238). El mismo requisito que la ruta (`REQUISITOS.cotejo`). */
+  const coteja = puede("egresos.conciliar_pago");
   const grupos = [...new Set(elementos.map((e) => e.grupo))];
   const paraHacer = grupos.filter((g) => elementos.some((e) => e.grupo === g && e.pendiente));
   const plegados = grupos.filter((g) => !paraHacer.includes(g));
@@ -209,6 +213,11 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar }: Pro
         {prepara && (
           <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
             Proveedores
+          </Link>
+        )}
+        {coteja && porCotejar === 0 && (
+          <Link to={RUTA_COTEJO} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+            {VER_LO_COTEJADO}
           </Link>
         )}
       </p>

@@ -8181,6 +8181,26 @@
         "title": "PanelFiscalizacion",
         "type": "object"
       },
+      "ParecidaAntesDeGuardar": {
+        "description": "Antes de guardar una orden: si hay otra parecida (decisión 4 del propietario, 13-11-2026).\nMismo proveedor, importe y moneda, a menos de `CEM_PAGOS_DIAS_REPETIDA` días. Una orden\nrutinaria (con contrato o abono) no se compara. Es un aviso: guardar igual se puede.",
+        "properties": {
+          "parecida": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrdenParecida"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "parecida"
+        ],
+        "title": "ParecidaAntesDeGuardar",
+        "type": "object"
+      },
       "PasoPago": {
         "description": "El próximo paso de una orden para quien mira (§2). Sale solo si la base va a aceptar la\nacción; los `espera_*` son de quien la ve y no le toca.",
         "enum": [
@@ -16999,7 +17019,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/retirar": {
       "post": {
-        "description": "Comentario 23 de la revisión de pantallas (09-11-2026, `0093`) y decisión 4 del\npropietario (12-11-2026, `0096`): un borrador lo retira cualquiera que prepara; una orden en\nrevisión, solo quien la preparó. Las dos, solo mientras nadie aprobó la versión vigente. No\nmueve dinero: sin el gesto.",
+        "description": "Comentario 23 de la revisión de pantallas (09-11-2026, `0093`) y decisión 4 del\npropietario (12-11-2026, `0096`), con la 7 del 13-11: quien la preparó la retira siempre;\notra persona que prepara, solo un borrador sin movimiento hace más de\n`CEM_PAGOS_DIAS_BORRADOR_VIEJO` días. Solo mientras nadie aprobó la versión vigente. No\nmueve dinero: sin el gesto.",
         "operationId": "retirar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__retirar_post",
         "parameters": [
           {
@@ -18595,6 +18615,118 @@
           }
         },
         "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/parecida": {
+      "get": {
+        "description": "Decisión 4 del propietario (13-11-2026). Con un contrato o abono la orden es rutinaria: no\nse compara. `orden_id` es la orden que se modifica, que no cuenta como otra.",
+        "operationId": "parecida_antes_de_guardar_api_v1_consorcios__consorcio_id__pagos_parecida_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "importe_centavos",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Importe Centavos",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "moneda",
+            "required": true,
+            "schema": {
+              "maxLength": 3,
+              "minLength": 3,
+              "title": "Moneda",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "contrato_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contrato Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orden_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Orden Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParecidaAntesDeGuardar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Antes de guardar una orden: si hay otra parecida (mismo proveedor e importe, en los últimos días). No bloquea",
         "tags": [
           "egresos"
         ]

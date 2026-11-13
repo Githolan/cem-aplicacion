@@ -96,6 +96,12 @@ export const textoRepetida = (fecha: string, estado: EstadoVisible) =>
   `Hay otra orden del mismo proveedor y el mismo importe, del ${fecha} (${NOMBRE_ESTADO[estado]}). Revisar que no sea la misma factura.`;
 
 /** El aviso arriba de la bandeja de quien preparó una orden rechazada (decisión 3). */
+/** Para quien coteja, sin pagos por cotejar: el cotejo sigue a mano (lo ya cotejado, deshacer). */
+export const VER_LO_COTEJADO = "Ver lo cotejado";
+/** El aviso antes de guardar una orden parecida a otra (decisión 4 del 13-11-2026). */
+export const textoParecidaAntes = (fecha: string) => `Ya hay una orden parecida del ${fecha}.`;
+export const GUARDAR_IGUAL = "Guardar igual";
+export const VER_LA_OTRA = "Ver la otra";
 export const ENTENDIDO = "Entendido";
 export const PREPARAR_OTRA = "Preparar otra orden";
 export const textoRechazada = (proveedor: string, importe: string, fecha: string) =>

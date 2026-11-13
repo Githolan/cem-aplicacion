@@ -580,6 +580,18 @@
       "despues": "listo"
     },
     {
+      "situacion": "pagada_y_cotejada",
+      "paso": "preparar_faltante",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "preparar_faltante",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Está pagada y cotejada, pero se pagó menos de lo aprobado: se puede preparar otra orden por lo que falta.",
+      "despues": "listo",
+      "excepcion_regla_3": "Decisión 2 del propietario (13-11-2026): una orden pagada de menos, ya cotejada, conserva «Preparar la orden por lo que falta». Es la única fila terminada con acción principal."
+    },
+    {
       "situacion": "no_se_pago",
       "paso": "volver_a_pagar",
       "lista": "para_preparar",

@@ -36,6 +36,11 @@ from cem_contracts.egresos import (
 
 ARCHIVO = Path(__file__).resolve().parent / "pantallas_datos" / "pagos.json"
 
+EXCEPCIONES_REGLA_3 = frozenset({(SituacionPago.PAGADA_Y_COTEJADA, PasoPago.PREPARAR_FALTANTE)})
+"""Las únicas filas terminadas que pueden tener acción principal y lista (§4.2, regla 3). Decisión
+2 del propietario (13-11-2026): una orden pagada de menos, ya cotejada, conserva «Preparar la orden
+por lo que falta». Agregar otra pide una decisión, no solo marcar la fila."""
+
 
 class _Estricto(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -75,6 +80,9 @@ class FilaPantalla(Botones):
     si_el_comprobante_no_coincide: Botones | None = None
     """Al conciliar, si la lectura del comprobante difiere de lo registrado: observar pasa a ser
     lo principal."""
+    excepcion_regla_3: str | None = None
+    """Por qué esta fila, de una situación terminada, tiene acción principal y lista. Solo la
+    admiten los pares de `EXCEPCIONES_REGLA_3`; en cualquier otra fila invalida la tabla."""
 
 
 class PantallaPagos(_Estricto):
@@ -98,6 +106,15 @@ class PantallaPagos(_Estricto):
         if repetidas:
             raise ValueError(f"filas repetidas: {repetidas}")
         for f in self.filas:
+            terminada = self.situaciones[f.situacion].final
+            con_algo = f.principal is not None or f.lista is not None
+            par = (f.situacion, f.paso)
+            if f.excepcion_regla_3 is not None and par not in EXCEPCIONES_REGLA_3:
+                raise ValueError(f"{par}: no es una excepción admitida a la regla 3")
+            if f.excepcion_regla_3 is not None and not (terminada and con_algo):
+                raise ValueError(f"{par}: marcada como excepción a la regla 3 sin necesitarlo")
+            if terminada and con_algo and f.excepcion_regla_3 is None:
+                raise ValueError(f"{par}: terminada, con acción principal o lista (regla 3)")
             esperado = f.lista is not None and self.listas[f.lista].pendiente
             if f.cuenta_como_pendiente != esperado:
                 raise ValueError(
