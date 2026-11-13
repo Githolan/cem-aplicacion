@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
+import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe as resumenDeErrores, REVISAR_DATO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
@@ -92,11 +93,16 @@ const TEXTO_TIPO: Record<TipoArchivo, string> = {
   "image/png": "PNG",
 };
 
+/** Cómo se nombra cada campo del formulario en el resumen del error (tanda 3). */
 const TEXTO_CAMPO: Record<string, string> = {
   categoria: "la categoría",
   titulo: "el título",
   fecha: "la fecha",
 };
+/** El largo y el blanco los frena el propio campo: lo único que la API puede rechazar del título
+ *  son los teléfonos y correos (G-08). */
+const MENSAJES_PROPIOS: Record<string, string> = { titulo: "El título no puede llevar teléfonos ni correos." };
+const FALTA_ARCHIVO = "Falta elegir el archivo.";
 
 const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeZone: "UTC" });
 const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeStyle: "short" });
@@ -114,12 +120,6 @@ function estadoEnPalabras(v: Version): string {
   if (v.estado === "disponible") return "Disponible";
   if (v.estado === "en_cuarentena") return "En revisión";
   return `Rechazado: ${v.motivo_rechazo ? TEXTO_MOTIVO[v.motivo_rechazo] : "sin el motivo"}`;
-}
-
-/** Los campos que la API marcó en un 422 (`detalle.campos`, p. ej. `body.titulo`). */
-function camposDe(error: unknown): string[] {
-  const campos = (error as { detalle?: { campos?: unknown } } | undefined)?.detalle?.campos;
-  return Array.isArray(campos) ? campos.filter((c): c is string => typeof c === "string") : [];
 }
 
 type Paso = "crear" | "subir";
@@ -143,11 +143,9 @@ export function mensajeDeError(
     return "El pedido se está procesando. Probá de nuevo en unos segundos.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
     return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
-  if (estado === ESTADO.invalido && paso === "crear") {
-    const nombres = [...new Set(campos.map((c) => TEXTO_CAMPO[c.split(".").pop() ?? ""]).filter((t) => t !== undefined))];
-    const que = nombres.length > 0 ? nombres.join(", ") : "los datos";
-    return `Revisá ${que}. El título no puede llevar teléfonos ni correos.`;
-  }
+  // Cada campo marcado lleva su motivo al lado (`ErrorDeCampo`); el resumen solo los nombra (G-08).
+  if (estado === ESTADO.invalido && paso === "crear")
+    return resumenDeErrores(Object.fromEntries(campos.map((c) => [c.split(".").pop() ?? "", REVISAR_DATO])), TEXTO_CAMPO);
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   // Un 503 con `Retry-After` es el tope de cargas a la vez; sin él, el servicio no está.
   if (estado === ESTADO.noDisponible && conEspera) return "Hay muchas cargas en curso. Probá de nuevo en un momento.";
@@ -275,6 +273,8 @@ export function Documentos() {
   const [archivo, setArchivo] = useState<File | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** Los campos del documento nuevo que rechazó la API, con su motivo (G-08). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** La versión que se está mirando en la hoja de «Ver». */
   const [viendo, setViendo] = useState<{ documento: string; version: string; titulo: string } | null>(null);
   const [vuelta, setVuelta] = useState(0);
@@ -433,6 +433,7 @@ export function Documentos() {
     if (nuevo.tipo === "nuevo") setDatos(VACIO);
     setArchivo(null);
     setAviso(null);
+    setErrores(SIN_ERRORES);
     setAbierto(nuevo);
   }
 
@@ -441,16 +442,25 @@ export function Documentos() {
     claveSubir.current = null;
     setDatos(VACIO);
     setArchivo(null);
+    setErrores(SIN_ERRORES);
     setAbierto(null);
+  }
+
+  /** «Cancelar»: el error era del formulario y se va con él; un «Listo» anterior queda (G-13). */
+  function cancelar() {
+    setAviso((actual) => (actual?.ok === true ? actual : null));
+    cerrar();
   }
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     claveCrear.current = null;
+    setErrores((e) => sinElDe(e, campo));
     setDatos((d) => ({ ...d, [campo]: valor }));
   }
 
   function elegirArchivo(elegido: File) {
     claveSubir.current = null;
+    setAviso((actual) => (actual?.texto === FALTA_ARCHIVO ? null : actual));
     setArchivo(elegido);
   }
 
@@ -461,7 +471,7 @@ export function Documentos() {
     // no llega acá ni deja un documento vacío. El servidor vuelve a controlar el tipo real y el tamaño.
     if (archivo === null) {
       alAviso.current = true;
-      setAviso({ texto: "Hay que elegir el archivo.", ok: false });
+      setAviso({ texto: FALTA_ARCHIVO, ok: false });
       return;
     }
     alAviso.current = true;
@@ -490,7 +500,9 @@ export function Documentos() {
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveCrear.current = null;
-        setAviso({ texto: mensajeDeError(response.status, codigo, "crear", camposDe(error)), ok: false });
+        const marcados = soloDe(erroresDe(error, REVISAR_DATO, MENSAJES_PROPIOS), TEXTO_CAMPO);
+        setErrores(marcados);
+        setAviso({ texto: mensajeDeError(response.status, codigo, "crear", Object.keys(marcados).map((c) => `body.${c}`)), ok: false });
         return null;
       }
       claveCrear.current = null;
@@ -554,7 +566,10 @@ export function Documentos() {
     }
   }
 
-  const conMensaje = aviso !== null || pantalla.tipo !== "lista";
+  // El error de subir el archivo desde la ficha se dice en la ficha: la página de atrás queda
+  // inerte mientras está abierta (G-01).
+  const avisoEnFicha = aviso !== null && !aviso.ok && abierto?.tipo === "subir" && enSuFicha(abierto.documento);
+  const conMensaje = (aviso !== null && !avisoEnFicha) || pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -661,7 +676,7 @@ export function Documentos() {
             </button>
           </>
         )}
-        {aviso && (
+        {aviso && !avisoEnFicha && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
           </p>
@@ -775,7 +790,7 @@ export function Documentos() {
 
   /** Cerrar la ficha también deja el archivo a medio elegir de ese documento. */
   function cerrarFicha() {
-    if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cerrar();
+    if (abierto?.tipo === "subir" && abierto.documento === fichaAbierta) cancelar();
     setRetiro(null);
     cerrarFichaDe();
   }
@@ -835,7 +850,7 @@ export function Documentos() {
         ]}
       >
         {subiendo
-          ? formularioArchivo(`${id}-${d.id}`, `Subir el archivo de «${d.titulo}»`, "h3")
+          ? formularioArchivo(`${id}-${d.id}`, `Subir el archivo de «${d.titulo}»`, "h3", true)
           : subir !== null &&
             puede(...accionesDeCarga(d.categoria)) && (
               <p>
@@ -876,16 +891,21 @@ export function Documentos() {
   }
 
   /** Subir el archivo de un documento que ya existe (o reintentar el segundo paso). */
-  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h3" | "h5" = "h5") {
+  function formularioArchivo(titulo: string, encabezado: string, Nivel: "h3" | "h5" = "h5", enFicha = false) {
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
         <Nivel id={`${titulo}-accion`}>{encabezado}</Nivel>
         {campoArchivo()}
+        {enFicha && aviso !== null && !aviso.ok && (
+          <p className="aviso-error" role="alert">
+            {aviso.texto}
+          </p>
+        )}
         <p>
           <button type="submit" disabled={enviando}>
             Subir el archivo
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={cancelar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -906,6 +926,7 @@ export function Documentos() {
           ref={(e) => {
             primerCampo.current = e;
           }}
+          {...marcaDe(`${titulo}-categoria`, errores.categoria)}
           value={datos.categoria}
           disabled={enviando}
           onChange={(e) => cambiar("categoria", e.target.value as Categoria)}
@@ -916,6 +937,7 @@ export function Documentos() {
             </option>
           ))}
         </select>
+        <ErrorDeCampo idCampo={`${titulo}-categoria`} mensaje={errores.categoria} />
         <label htmlFor={`${titulo}-titulo`}>Título</label>
         <input
           id={`${titulo}-titulo`}
@@ -925,20 +947,23 @@ export function Documentos() {
           pattern={PATRON_TEXTO}
           required
           disabled={enviando}
-          aria-describedby={ayudaTitulo}
+          {...marcaDe(`${titulo}-titulo`, errores.titulo, ayudaTitulo)}
           value={datos.titulo}
           onChange={(e) => cambiar("titulo", e.target.value)}
         />
         <p id={ayudaTitulo}>Sin teléfonos ni correos en el título.</p>
+        <ErrorDeCampo idCampo={`${titulo}-titulo`} mensaje={errores.titulo} />
         <label htmlFor={`${titulo}-fecha`}>Fecha del documento</label>
         <input
           id={`${titulo}-fecha`}
           type="date"
           required
           disabled={enviando}
+          {...marcaDe(`${titulo}-fecha`, errores.fecha)}
           value={datos.fecha}
           onChange={(e) => cambiar("fecha", e.target.value)}
         />
+        <ErrorDeCampo idCampo={`${titulo}-fecha`} mensaje={errores.fecha} />
         {campoArchivo()}
         <p>
           <button type="submit" disabled={enviando}>
@@ -947,7 +972,7 @@ export function Documentos() {
           {!soloCarga && (
             <>
               {" "}
-              <button type="button" className="secundario peligro" onClick={cerrar} disabled={enviando}>
+              <button type="button" className="secundario peligro" onClick={cancelar} disabled={enviando}>
                 Cancelar
               </button>
             </>

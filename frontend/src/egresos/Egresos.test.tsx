@@ -26,6 +26,7 @@ import {
 } from "./comun";
 import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO } from "./Proveedores";
 import { CUIT_INVALIDO } from "../CampoCuit";
+import { CUENTA_INVALIDA } from "../cuentaBancaria";
 
 // Pantallas de egresos (H3, aprobadas el 30-10-2026). Todos los datos son ficticios: CUIT y CBU
 // inventados, sin ningún proveedor ni cuenta real.
@@ -36,8 +37,11 @@ const P1 = "22222222-2222-4222-8222-222222222222";
 const O1 = "33333333-3333-4333-8333-333333333333";
 const PERSONA = "66666666-6666-4666-8666-666666666666";
 const DOC = "77777777-7777-4777-8777-777777777777";
-const CUENTA = "0000003100000000001234";
-const CUENTA_NUEVA = "0000003100000000009876";
+// Con los dos dígitos verificadores bien: la pantalla los comprueba al escribir (tanda 3, P-26).
+const CUENTA = "0000003160000000001234";
+const CUENTA_NUEVA = "0000003140000000009876";
+/** 22 números con el segundo verificador mal. */
+const CUENTA_MALA = "0000003160000000001235";
 const H1 = "a".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
 const C2 = "abababab-abab-4bab-8bab-abababababab";
@@ -96,8 +100,8 @@ function orden(extra: Partial<Orden> = {}): Orden {
   };
 }
 
-function error(codigo: string, status: number) {
-  return Response.json({ codigo, mensaje: "x", detalle: null, id_correlacion: "c" }, { status });
+function error(codigo: string, status: number, detalle: Record<string, unknown> | null = null) {
+  return Response.json({ codigo, mensaje: "x", detalle, id_correlacion: "c" }, { status });
 }
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
@@ -313,6 +317,28 @@ describe("página /egresos/proveedores", () => {
     expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
   });
 
+  it("Codex en #236: si otra sesión ya cargó el CUIT (409 con campo), cierra y recarga en vez de marcar el campo", async () => {
+    const CARGA = `${BASE}/proveedores/${P1}/cuit`;
+    const sinCuit = proveedor({ cuit: null });
+    const api = conLista({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuit] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [] }),
+      [`POST ${CARGA}`]: () => error("cuit_ya_cargado", 409, { campos: ["body.cuit"] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
+    const listasAntes = pedidos(api, "GET", `${BASE}/proveedores`).length;
+    fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
+    expect(await screen.findByText("Ese proveedor ya tiene CUIT, y un CUIT no cambia.")).toBeTruthy();
+    // Lo que se veía cambió: el formulario se cierra y la lista se vuelve a pedir.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar el CUIT" })).toBeNull());
+    expect(screen.queryByText(/^Hay que corregir el CUIT/)).toBeNull();
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/proveedores`).length).toBeGreaterThan(listasAntes));
+  });
+
   it("la fila entera abre la ficha, sin un botón aparte, y al volver el foco queda en la fila", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");
@@ -519,10 +545,97 @@ describe("página /egresos/proveedores", () => {
     fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
     fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
     // Control: el error se ve mientras el formulario está abierto.
-    expect(await screen.findByText("Revisá los datos del formulario.")).toBeTruthy();
+    expect(await screen.findByText("Hay que revisar los datos del formulario.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByRole("button", { name: "Dar de alta el proveedor" })).toBeNull();
-    expect(screen.queryByText("Revisá los datos del formulario.")).toBeNull();
+    expect(screen.queryByText("Hay que revisar los datos del formulario.")).toBeNull();
+  });
+
+  it("P-26: la cuenta con el dígito verificador mal se marca al escribirla y no se manda", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => Response.json({ id: P1, version: 1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    const cuenta = screen.getByLabelText(/^Cuenta destino/);
+    fireEvent.change(cuenta, { target: { value: CUENTA_MALA } });
+    expect(cuenta.getAttribute("aria-invalid")).toBe("true");
+    const mensaje = document.getElementById(cuenta.getAttribute("aria-describedby") ?? "");
+    expect(mensaje?.textContent).toBe(CUENTA_INVALIDA);
+    // El mensaje nunca repite la cuenta escrita.
+    expect(mensaje?.textContent).not.toContain(CUENTA_MALA.slice(-4));
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(0);
+    // Control: con los verificadores bien, la marca se va y el alta sale.
+    fireEvent.change(cuenta, { target: { value: CUENTA } });
+    expect(cuenta.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.queryByText(CUENTA_INVALIDA)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/proveedores`)).toHaveLength(1));
+  });
+
+  it("P-26: el 422 marca el campo que nombra, con su mensaje al lado, y se va al corregirlo", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () =>
+        error("peticion_invalida", 422, {
+          campos: ["body.cuenta_destino"],
+          mensajes: { "body.cuenta_destino": "La cuenta no es un CBU o CVU válido." },
+        }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "30000000007" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    const cuenta = screen.getByLabelText(/^Cuenta destino/);
+    fireEvent.change(cuenta, { target: { value: CUENTA } });
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    expect(await screen.findByText("Hay que corregir la cuenta destino: el motivo está junto a cada campo.")).toBeTruthy();
+    expect(screen.queryByText("Hay que revisar los datos del formulario.")).toBeNull();
+    expect(cuenta.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(cuenta.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "La cuenta no es un CBU o CVU válido.",
+    );
+    // El resumen, que toma el foco, nombra el campo; el campo dice qué hacer.
+    // Control: los otros campos no quedan marcados.
+    expect(screen.getByLabelText("Razón social").getAttribute("aria-invalid")).toBeNull();
+    // Al corregir la cuenta, su marca se va.
+    fireEvent.change(cuenta, { target: { value: CUENTA_NUEVA } });
+    expect(cuenta.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.queryByText("La cuenta no es un CBU o CVU válido.")).toBeNull();
+  });
+
+  it("P-26: el CUIT repetido se dice junto al CUIT", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
+      [`POST ${BASE}/proveedores`]: () => error("cuit_repetido", 409, { campos: ["body.cuit"] }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    const cuit = screen.getByLabelText(/^CUIT/);
+    fireEvent.change(cuit, { target: { value: "30000000007" } });
+    fireEvent.change(screen.getByLabelText("Razón social"), { target: { value: "Plomería Ficticia SRL" } });
+    fireEvent.click(screen.getByRole("button", { name: "Dar de alta el proveedor" }));
+    expect(await screen.findByText("Hay que corregir el CUIT: el motivo está junto a cada campo.")).toBeTruthy();
+    expect(cuit.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(cuit.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Ya hay un proveedor con ese CUIT en este edificio.",
+    );
+    // El formulario sigue abierto para corregirlo; «Cancelar» se lleva la marca y el aviso.
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/Hay que corregir el CUIT/)).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Dar de alta un proveedor" }));
+    expect(screen.getByLabelText(/^CUIT/).getAttribute("aria-invalid")).not.toBe("true");
   });
 
   it("cambiar los datos conserva el documento de respaldo del proveedor", async () => {

@@ -163,6 +163,8 @@ describe("sección de la llave", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("Este dispositivo ya tiene una llave en tu cuenta.");
+    // AC-35: el error se ve como error, no como texto común.
+    expect(screen.getByRole("alert").className).toContain("aviso-error");
     expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(false);
   });
 
@@ -185,6 +187,7 @@ describe("sección de la llave", () => {
     mostrar();
 
     expect((await screen.findByRole("alert")).textContent).toBe(mensaje);
+    expect(screen.getByRole("alert").className).toContain("aviso-error");
     expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
 

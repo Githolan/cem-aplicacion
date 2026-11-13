@@ -8,6 +8,17 @@ import { type Cargado, CargaConLectura, type LecturaCarga, MarcaDeLectura, TEXTO
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
+import { CUENTA_INVALIDA, cuentaConError } from "../cuentaBancaria";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  marcaDe,
+  resumenDe,
+  SIN_ERRORES,
+  sinElDe,
+  soloDe,
+} from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import {
   type Aviso,
@@ -103,6 +114,42 @@ const datosDe = (p: Proveedor): Datos => ({
 });
 
 type CampoLeido = "cuit" | "razon" | "domicilio" | "telefono" | "correo";
+
+/** El campo de la API de cada dato del formulario: un 422 o un error de negocio lo nombra así. */
+const CAMPO_API: Record<keyof Datos, string> = {
+  cuit: "cuit",
+  razon: "razon_social",
+  rubro: "rubro",
+  contacto: "contacto",
+  telefono: "telefono",
+  whatsapp: "whatsapp",
+  correo: "correo",
+  domicilio: "domicilio",
+  emergencias: "atiende_emergencias",
+  cuenta: "cuenta_destino",
+  estado: "estado",
+};
+
+/** Cómo se nombra cada campo en el resumen del error («Hay que corregir el CUIT: …»). */
+const NOMBRES: Record<string, string> = {
+  cuit: "el CUIT",
+  razon_social: "la razón social",
+  rubro: "el rubro",
+  contacto: "el contacto",
+  telefono: "el teléfono",
+  whatsapp: "el WhatsApp",
+  correo: "el correo",
+  domicilio: "el domicilio",
+  cuenta_destino: "la cuenta destino",
+  estado: "el estado",
+};
+
+/** Los campos que muestra cada formulario: solo esos se pueden marcar. */
+function nombresDe(f: Formulario): Record<string, string> {
+  if (f.modo === "cuit") return { cuit: "el CUIT" };
+  const { cuit, estado, ...comunes } = NOMBRES;
+  return f.modo === "alta" ? { ...comunes, cuit: cuit ?? "" } : { ...comunes, estado: estado ?? "" };
+}
 
 /** Lo que trae la orden al dar de alta el proveedor de su factura (`AltaDesdeLaFactura`), con el
  * edificio de esa factura: en otro edificio no se usa. */
@@ -212,6 +259,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [confirmarCuenta, setConfirmarCuenta] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** Los campos que la API rechazó, con qué hacer en cada uno (tanda 3, P-26). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const clave = useRef<string | null>(null);
   const montado = useMontado();
@@ -281,6 +330,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     clave.current = null;
     setConfirmarCuenta(false);
     setAviso(null);
+    setErrores(SIN_ERRORES);
     setDatos(f.modo === "alta" ? VACIO : datosDe(f.proveedor));
     setRespaldo(null);
     setDeLaLectura(new Set());
@@ -306,6 +356,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   function cerrar() {
     clave.current = null;
     setConfirmarCuenta(false);
+    setErrores(SIN_ERRORES);
     setFormulario(null);
   }
 
@@ -319,6 +370,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     revisado(campo);
     clave.current = null;
     setConfirmarCuenta(false);
+    // Lo que se corrige deja de estar marcado; los otros campos siguen con su aviso.
+    setErrores((e) => sinElDe(e, CAMPO_API[campo]));
     setDatos((d) => ({ ...d, [campo]: valor }));
   }
 
@@ -328,6 +381,8 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     if (formulario === null || (formulario.modo === "alta" && respaldoEnEspera)) return;
     // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
     if (formulario.modo !== "cambio" && cuitConError(datos.cuit.trim())) return;
+    // Lo mismo con la cuenta (P-26): el verificador mal ya se ve junto al campo.
+    if (formulario.modo !== "cuit" && cuentaConError(datos.cuenta.trim())) return;
     const cambiaCuenta = formulario.modo === "cambio" && !conservaCuenta(formulario, datos);
     if (cambiaCuenta && !confirmarCuenta) {
       setConfirmarCuenta(true);
@@ -433,8 +488,19 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           setVuelta((v) => v + 1);
           return;
         }
+        // Lo que se veía cambió (p. ej. `cuit_ya_cargado`: otra sesión ya cargó el CUIT): el formulario
+        // viejo se cierra y la lista se vuelve a pedir, aunque la API nombre un campo (Codex en #236).
+        const cambioLoQueSeVe = cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && codigo !== "cuit_repetido";
+        // Si no, el rechazo que nombra campos del formulario se dice junto a cada uno (tanda 3, P-26).
+        const nombres = nombresDe(f);
+        const marcados = cambioLoQueSeVe ? SIN_ERRORES : soloDe(erroresDe(error, mensajeDeError(response.status, codigo)), nombres);
+        if (Object.keys(marcados).length > 0) {
+          setErrores(marcados);
+          setAviso({ texto: resumenDe(marcados, nombres), ok: false });
+          return;
+        }
         setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
-        if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && codigo !== "cuit_repetido") {
+        if (cambioLoQueSeVe) {
           cerrar();
           volverAPedir();
         }
@@ -442,6 +508,9 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
       .finally(() => setEnviando(false));
   }
+
+  /** La cuenta con el verificador mal se marca apenas tiene los 22 números; si no, lo que dijo la API. */
+  const errorDeCuenta = cuentaConError(datos.cuenta.trim()) ? CUENTA_INVALIDA : errores.cuenta_destino;
 
   const marca = (campo: CampoLeido) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
 
@@ -555,7 +624,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             <form className="formulario tarjeta" onSubmit={enviar} aria-labelledby={`${id}-form`}>
               <h2 id={`${id}-form`}>Cargar el CUIT de {formulario.proveedor.razon_social}</h2>
               <p>Se carga una sola vez y después no cambia: revisalo antes de guardar. Deja una versión nueva del proveedor.</p>
-              <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
+              <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} error={errores.cuit} alCambiar={(v) => cambiar("cuit", v)} />
               <div className="acciones">
                 <button type="submit" disabled={enviando}>
                   Guardar el CUIT
@@ -581,34 +650,41 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       setRespaldo(c);
                     }}
                     alLeer={leerDocumento} alEsperar={setRespaldoEnEspera} />
-                  <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} alCambiar={(v) => cambiar("cuit", v)} />
+                  <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} error={errores.cuit} alCambiar={(v) => cambiar("cuit", v)} />
                   {marca("cuit")}
                 </>
               )}
               <label htmlFor={`${id}-razon`}>Razón social</label>
-              <input id={`${id}-razon`} required maxLength={200} value={datos.razon} disabled={enviando}
+              <input {...marcaDe(`${id}-razon`, errores.razon_social)} id={`${id}-razon`} required maxLength={200} value={datos.razon} disabled={enviando}
                 onChange={(e) => cambiar("razon", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-razon`} mensaje={errores.razon_social} />
               {marca("razon")}
               <label htmlFor={`${id}-rubro`}>Rubro (opcional)</label>
-              <input id={`${id}-rubro`} maxLength={100} value={datos.rubro} disabled={enviando}
+              <input {...marcaDe(`${id}-rubro`, errores.rubro)} id={`${id}-rubro`} maxLength={100} value={datos.rubro} disabled={enviando}
                 onChange={(e) => cambiar("rubro", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-rubro`} mensaje={errores.rubro} />
               <label htmlFor={`${id}-contacto`}>Contacto (opcional)</label>
-              <input id={`${id}-contacto`} maxLength={200} value={datos.contacto} disabled={enviando}
+              <input {...marcaDe(`${id}-contacto`, errores.contacto)} id={`${id}-contacto`} maxLength={200} value={datos.contacto} disabled={enviando}
                 onChange={(e) => cambiar("contacto", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-contacto`} mensaje={errores.contacto} />
               <label htmlFor={`${id}-telefono`}>Teléfono (opcional)</label>
-              <input id={`${id}-telefono`} type="tel" autoComplete="off" maxLength={50} value={datos.telefono} disabled={enviando}
+              <input {...marcaDe(`${id}-telefono`, errores.telefono)} id={`${id}-telefono`} type="tel" autoComplete="off" maxLength={50} value={datos.telefono} disabled={enviando}
                 onChange={(e) => cambiar("telefono", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-telefono`} mensaje={errores.telefono} />
               {marca("telefono")}
               <label htmlFor={`${id}-whatsapp`}>WhatsApp (opcional)</label>
-              <input id={`${id}-whatsapp`} type="tel" autoComplete="off" maxLength={50} value={datos.whatsapp} disabled={enviando}
+              <input {...marcaDe(`${id}-whatsapp`, errores.whatsapp)} id={`${id}-whatsapp`} type="tel" autoComplete="off" maxLength={50} value={datos.whatsapp} disabled={enviando}
                 onChange={(e) => cambiar("whatsapp", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-whatsapp`} mensaje={errores.whatsapp} />
               <label htmlFor={`${id}-correo`}>Correo (opcional)</label>
-              <input id={`${id}-correo`} type="email" autoComplete="off" maxLength={254} value={datos.correo} disabled={enviando}
+              <input {...marcaDe(`${id}-correo`, errores.correo)} id={`${id}-correo`} type="email" autoComplete="off" maxLength={254} value={datos.correo} disabled={enviando}
                 onChange={(e) => cambiar("correo", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-correo`} mensaje={errores.correo} />
               {marca("correo")}
               <label htmlFor={`${id}-domicilio`}>Domicilio (opcional)</label>
-              <input id={`${id}-domicilio`} autoComplete="off" maxLength={200} value={datos.domicilio} disabled={enviando}
+              <input {...marcaDe(`${id}-domicilio`, errores.domicilio)} id={`${id}-domicilio`} autoComplete="off" maxLength={200} value={datos.domicilio} disabled={enviando}
                 onChange={(e) => cambiar("domicilio", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-domicilio`} mensaje={errores.domicilio} />
               {marca("domicilio")}
               <label className="opcion">
                 <input type="checkbox" checked={datos.emergencias} disabled={enviando}
@@ -622,17 +698,20 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               </label>
               {/* La cuenta que tiene va dentro del campo (comentario 27): vacío la conserva. */}
               <input id={`${id}-cuenta`} inputMode="numeric" pattern={CBU} value={datos.cuenta} disabled={enviando}
+                {...marcaDe(`${id}-cuenta`, errorDeCuenta)}
                 placeholder={formulario.modo === "cambio" ? cuentaEnmascarada(formulario.proveedor.cuenta_ultimos_digitos) : undefined}
                 onChange={(e) => cambiar("cuenta", e.target.value)} />
+              <ErrorDeCampo idCampo={`${id}-cuenta`} mensaje={errorDeCuenta} />
               {formulario.modo === "cambio" && (
                 <>
                   <label htmlFor={`${id}-estado`}>Estado</label>
-                  <select id={`${id}-estado`} value={datos.estado} disabled={enviando}
+                  <select id={`${id}-estado`} value={datos.estado} disabled={enviando} {...marcaDe(`${id}-estado`, errores.estado)}
                     onChange={(e) => cambiar("estado", e.target.value as EstadoProveedor)}>
                     {(Object.keys(TEXTO_ESTADO_PROVEEDOR) as EstadoProveedor[]).map((e) => (
                       <option key={e} value={e}>{TEXTO_ESTADO_PROVEEDOR[e]}</option>
                     ))}
                   </select>
+                  <ErrorDeCampo idCampo={`${id}-estado`} mensaje={errores.estado} />
                 </>
               )}
               {confirmarCuenta && (

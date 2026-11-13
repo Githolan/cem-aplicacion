@@ -46,7 +46,8 @@ const DECL = "99999999-9999-4999-8999-999999999999";
 const NUEVO = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const K1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const DIF = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-const CUENTA = "9990003100000000001234";
+// Con los dos dígitos verificadores bien: el alta del proveedor los comprueba al escribir (P-26).
+const CUENTA = "9990003202000000001234";
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
 const BASE = `/api/v1/consorcios/${C1}`;
@@ -2568,7 +2569,7 @@ describe("aprobar y rechazar", () => {
   });
 
   it("con una versión nueva, la cuenta de la anterior se va y se pide la de la nueva", async () => {
-    const OTRA = "9990003100000000009876";
+    const OTRA = "9990003208000000009876";
     let actual = APROBAR;
     abrirFicha(() => actual, {
       [REVISION]: () =>
@@ -3438,6 +3439,18 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
       fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
       expect(await guardar(api)).toMatchObject({ factura_version_id: VF });
+    });
+
+    it("G-20: tras el rechazo de quitar, «No, dejarlo» se lleva el aviso", async () => {
+      await conFacturaSubida({ [`POST ${QUITAR}`]: () => error("documento_referenciado", 409) });
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      fireEvent.click(await boton(CONFIRMAR_QUITAR));
+      // Control: el rechazo se ve.
+      expect(await screen.findByText(/^El archivo no se quitó\./)).toBeTruthy();
+      fireEvent.click(await boton(QUITAR_ARCHIVO));
+      fireEvent.click(await boton(NO_QUITAR));
+      expect(screen.queryByText(/^El archivo no se quitó\./)).toBeNull();
+      expect(await boton("Ver la factura")).toBeTruthy();
     });
   });
 

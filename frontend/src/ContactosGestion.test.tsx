@@ -575,6 +575,59 @@ describe("página /contactos/gestion", () => {
     expect(await pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)[0]?.json()).toEqual({ motivo: "Cambió de dirección" });
   });
 
+  it("G-58: un 422 del nombre se dice en una frase corta y el motivo va junto al nombre", async () => {
+    const simulado = conLista({
+      [`PUT ${BASE}/${K1}`]: () =>
+        error("peticion_invalida", 422, {
+          campos: ["body.nombre"],
+          mensajes: { "body.nombre": "Sin teléfonos ni correos acá: el número va solo en el teléfono." },
+        }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
+    escribir("Nombre", "Llamar al 11 2345 6789");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
+    const resumen = await screen.findByText(/^Hay que corregir el nombre/);
+    expect((resumen.textContent ?? "").length).toBeLessThan(100);
+    const nombre = screen.getByLabelText("Nombre");
+    expect(nombre.getAttribute("aria-invalid")).toBe("true");
+    const descripciones = (nombre.getAttribute("aria-describedby") ?? "").split(" ").map((i) => document.getElementById(i)?.textContent);
+    expect(descripciones).toContain("Sin teléfonos ni correos acá: el número va solo en el teléfono.");
+    // Control: el teléfono no queda marcado.
+    expect(screen.getByLabelText(/^Teléfono/).getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-57: el teléfono mal escrito lo dice con su propio texto, junto al campo", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
+    const telefono = screen.getByLabelText(/^Teléfono/) as HTMLInputElement;
+    fireEvent.change(telefono, { target: { value: "abc" } });
+    expect(telefono.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("El teléfono va solo con números, espacios, paréntesis o guiones.")).toBeTruthy();
+    expect(telefono.validationMessage).toBe("El teléfono va solo con números, espacios, paréntesis o guiones.");
+    // Control: bien escrito, el aviso se va.
+    fireEvent.change(telefono, { target: { value: "011 4567-8901" } });
+    expect(telefono.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.queryByText("El teléfono va solo con números, espacios, paréntesis o guiones.")).toBeNull();
+    expect(telefono.validationMessage).toBe("");
+  });
+
+  it("G-59: «Cancelar» en «Agregar un contacto» se lleva el error", async () => {
+    vi.stubGlobal("fetch", conLista({ [`POST ${BASE}`]: () => error("peticion_invalida", 422, { campos: ["body.nombre"] }) }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
+    escribir("Nombre", "Cerrajería Ficticia");
+    fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
+    // Control: el error se ve mientras el formulario está abierto.
+    expect(await screen.findByText(/^Hay que corregir el nombre/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("button", { name: "Agregar el contacto" })).toBeNull();
+    expect(screen.queryByText(/^Hay que corregir el nombre/)).toBeNull();
+  });
+
   it("un 422 dice qué campo revisar y por qué; un 409 contacto_terminado lo explica, recarga la lista y lo escrito pasa a Agregar", async () => {
     let respuesta = () => error("peticion_invalida", 422, { campos: ["body.nombre"] });
     const simulado = conLista({
@@ -587,7 +640,7 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
     escribir("Nombre", "Llamar al 11 2345 6789");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    expect(await screen.findByText(/^Revisá el nombre\. Los teléfonos y correos van solo en «Teléfono»/)).toBeTruthy();
+    expect(await screen.findByText("Hay que corregir el nombre: el motivo está junto a cada campo.")).toBeTruthy();
     // El formulario sigue abierto para corregir.
     expect(screen.getByRole("button", { name: "Guardar la corrección" })).toBeTruthy();
     respuesta = () => error("contacto_terminado", 409);
@@ -697,7 +750,7 @@ describe("página /contactos/gestion", () => {
     await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(2));
     respuesta = () => error("peticion_invalida", 422, { campos: ["body.motivo"] });
     enviar();
-    await screen.findByText(/^Revisá el motivo/);
+    await screen.findByText(/^Hay que corregir el motivo/);
     enviar();
     await waitFor(() => expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(4));
     escribir("Motivo", "No atiende nunca");

@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import { CampoCuit, cuitConError } from "./CampoCuit";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, sinElDe, soloDe } from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { FilaDeRegistro } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
@@ -143,8 +144,35 @@ const POR_CODIGO: Record<string, string> = {
     "La administración externa se da de alta sin cuenta: la cuenta se asocia después, por invitación.",
   mandato_sin_cuenta: "Un miembro del Consejo o un administrador necesita su cuenta.",
   cuit_invalido: "El CUIT no es válido.",
-  facultad_fuera_de_paquete: "Alguna facultad no corresponde a ese tipo de mandato.",
-  respaldo_invalido: "La remoción se respalda con una asamblea; cualquier otra causa, con el instrumento.",
+  facultad_fuera_de_paquete: "Algún permiso no corresponde a ese tipo de mandato.",
+  respaldo_invalido: "La remoción se respalda con una asamblea; cualquier otra causa, con el documento que lo prueba.",
+};
+
+/** Cómo se nombra cada campo de cada formulario en el resumen del error (G-49). */
+const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
+  decision: {
+    tipo: "el tipo",
+    fecha: "la fecha del acto",
+    descripcion: "qué se decidió",
+    referencia: "dónde consta",
+    sha256: "la huella del acta",
+  },
+  alta: {
+    tipo: "el tipo de mandato",
+    nombre: "la razón social o nombre",
+    cuit: "el CUIT",
+    persona_id: "la persona",
+    matricula: "la matrícula",
+    decision_id: "la decisión que lo respalda",
+    desde: "la fecha «Desde»",
+    hasta: "la fecha «Hasta»",
+  },
+  baja: {
+    causa: "la causa",
+    descripcion: "por qué termina",
+    decision_id: "la asamblea que lo remueve",
+    instrumento: "el documento que lo prueba",
+  },
 };
 
 /** Qué decir ante el error de un envío, según el estado y el código del cuerpo uniforme. */
@@ -159,8 +187,8 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
     return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
   if ((estado === ESTADO.conflicto || estado === ESTADO.invalido) && codigo !== undefined && codigo in POR_CODIGO)
     return POR_CODIGO[codigo] as string;
-  if (estado === ESTADO.conflicto) return "El pedido choca con el estado actual del edificio. Recargá la página y revisá los datos.";
-  if (estado === ESTADO.invalido) return "Revisá los datos del formulario.";
+  if (estado === ESTADO.conflicto) return "Los datos del edificio cambiaron mientras tanto: recargar la página y revisar el formulario.";
+  if (estado === ESTADO.invalido) return REVISAR_FORMULARIO;
   return mensajeDeFalla(estado, codigo);
 }
 
@@ -277,6 +305,9 @@ export function Mandatos() {
   const [abierto, setAbierto] = useState<FormularioAbierto | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** Los campos del formulario rechazado, con su motivo (G-49). */
+  const [errores, setErrores] = useState<{ accion: Accion; campos: ErroresDeCampo } | null>(null);
+  const errorEn = (accion: Accion, campo: string) => (errores?.accion === accion ? errores.campos[campo] : undefined);
   // Cada envío vuelve a pedir las listas: qué se ve lo decide la API.
   const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
@@ -429,6 +460,7 @@ export function Mandatos() {
 
   function cerrarFormulario() {
     (abierto === "alta" ? botonAlta : botonDecision).current?.focus();
+    setErrores(null);
     setAbierto(null);
   }
 
@@ -451,18 +483,20 @@ export function Mandatos() {
   });
 
   /** Cualquier cambio en los datos de un formulario es otro intento: otra clave. */
-  function cambiar<T>(clave: Clave, fijar: (v: T) => void) {
+  function cambiar<T>(clave: Clave, fijar: (v: T) => void, campo?: string) {
     return (v: T) => {
       clave.current = null;
+      // Lo que se corrige deja de estar marcado (G-49).
+      if (campo !== undefined) setErrores((e) => (e === null ? e : { ...e, campos: sinElDe(e.campos, campo) }));
       fijar(v);
     };
   }
 
   /** En la baja, además, un cambio cierra la confirmación: lo que se confirma es lo que se ve. */
-  function cambiarBaja<T>(fijar: (v: T) => void) {
+  function cambiarBaja<T>(fijar: (v: T) => void, campo?: string) {
     return (v: T) => {
       setConfirmarBaja(false);
-      cambiar(claveBaja, fijar)(v);
+      cambiar(claveBaja, fijar, campo)(v);
     };
   }
 
@@ -478,13 +512,19 @@ export function Mandatos() {
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
+    setErrores(null);
     void pedido(clave.current)
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data === undefined) {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
-          setAviso({ texto: mensajeDeError(response.status, codigo, accion), ok: false, formulario: accion });
+          // Un rechazo que nombra campos del formulario se dice junto a cada uno (G-49).
+          const nombres = NOMBRES_CAMPO[accion];
+          const marcados = soloDe(erroresDe(error, mensajeDeError(response.status, codigo, accion)), nombres);
+          setErrores({ accion, campos: marcados });
+          const texto = Object.keys(marcados).length > 0 ? resumenDe(marcados, nombres) : mensajeDeError(response.status, codigo, accion);
+          setAviso({ texto, ok: false, formulario: accion });
           fallo?.(response.status, codigo);
           return;
         }
@@ -844,9 +884,10 @@ export function Mandatos() {
               <label htmlFor={`${id}-tipo-decision`}>Tipo</label>
               <select
                 id={`${id}-tipo-decision`}
+                {...marcaDe(`${id}-tipo-decision`, errorEn("decision", "tipo"))}
                 value={tipoDecision}
                 disabled={enviando}
-                onChange={(e) => cambiar(claveDecision, setTipoDecision)(e.target.value as TipoDecision)}
+                onChange={(e) => cambiar(claveDecision, setTipoDecision, "tipo")(e.target.value as TipoDecision)}
               >
                 {TIPOS_DECISION.map((t) => (
                   <option key={t} value={t}>
@@ -854,40 +895,48 @@ export function Mandatos() {
                   </option>
                 ))}
               </select>
+              <ErrorDeCampo idCampo={`${id}-tipo-decision`} mensaje={errorEn("decision", "tipo")} />
               <label htmlFor={`${id}-fecha-decision`}>Fecha del acto</label>
               <input
                 id={`${id}-fecha-decision`}
+                {...marcaDe(`${id}-fecha-decision`, errorEn("decision", "fecha"))}
                 type="date"
                 required
                 disabled={enviando}
                 value={fechaDecision}
-                onChange={(e) => cambiar(claveDecision, setFechaDecision)(e.target.value)}
+                onChange={(e) => cambiar(claveDecision, setFechaDecision, "fecha")(e.target.value)}
               />
+              <ErrorDeCampo idCampo={`${id}-fecha-decision`} mensaje={errorEn("decision", "fecha")} />
               <label htmlFor={`${id}-descripcion-decision`}>Qué se decidió</label>
               <TextoDeUnaLinea
                 id={`${id}-descripcion-decision`}
+                {...marcaDe(`${id}-descripcion-decision`, errorEn("decision", "descripcion"))}
                 rows={FILAS_DESCRIPCION}
                 autoComplete="off"
                 maxLength={LARGO_DESCRIPCION}
                 required
                 disabled={enviando}
                 value={descripcionDecision}
-                onValor={cambiar(claveDecision, setDescripcionDecision)}
+                onValor={cambiar(claveDecision, setDescripcionDecision, "descripcion")}
               />
+              <ErrorDeCampo idCampo={`${id}-descripcion-decision`} mensaje={errorEn("decision", "descripcion")} />
               <label htmlFor={`${id}-referencia`}>Dónde consta (libro, acta y folio)</label>
               <TextoDeUnaLinea
                 id={`${id}-referencia`}
+                {...marcaDe(`${id}-referencia`, errorEn("decision", "referencia"))}
                 rows={FILAS_REFERENCIA}
                 autoComplete="off"
                 maxLength={LARGO_REFERENCIA}
                 required
                 disabled={enviando}
                 value={referencia}
-                onValor={cambiar(claveDecision, setReferencia)}
+                onValor={cambiar(claveDecision, setReferencia, "referencia")}
               />
+              <ErrorDeCampo idCampo={`${id}-referencia`} mensaje={errorEn("decision", "referencia")} />
               <label htmlFor={`${id}-sha256`}>Huella SHA-256 del acta escaneada (opcional)</label>
               <input
                 id={`${id}-sha256`}
+                {...marcaDe(`${id}-sha256`, errorEn("decision", "sha256"))}
                 type="text"
                 autoComplete="off"
                 pattern={PATRON_SHA256}
@@ -895,8 +944,9 @@ export function Mandatos() {
                 autoCapitalize="none"
                 disabled={enviando}
                 value={sha256}
-                onChange={(e) => cambiar(claveDecision, setSha256)(e.target.value)}
+                onChange={(e) => cambiar(claveDecision, setSha256, "sha256")(e.target.value)}
               />
+              <ErrorDeCampo idCampo={`${id}-sha256`} mensaje={errorEn("decision", "sha256")} />
               <button type="submit" disabled={enviando}>
                 Registrar decisión
               </button>
@@ -933,9 +983,10 @@ export function Mandatos() {
                 <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
                 <select
                   id={`${id}-tipo-mandato`}
+                  {...marcaDe(`${id}-tipo-mandato`, errorEn("alta", "tipo"))}
                   value={tipoMandato}
                   disabled={enviando}
-                  onChange={(e) => cambiar(claveAlta, setTipoMandato)(e.target.value as TipoMandato)}
+                  onChange={(e) => cambiar(claveAlta, setTipoMandato, "tipo")(e.target.value as TipoMandato)}
                 >
                   {TIPOS_MANDATO.map((t) => (
                     <option key={t} value={t}>
@@ -943,6 +994,7 @@ export function Mandatos() {
                     </option>
                   ))}
                 </select>
+                <ErrorDeCampo idCampo={`${id}-tipo-mandato`} mensaje={errorEn("alta", "tipo")} />
                 {externo ? (
                   <>
                     <p>
@@ -952,6 +1004,7 @@ export function Mandatos() {
                     <label htmlFor={`${id}-nombre`}>Razón social o nombre</label>
                     <input
                       id={`${id}-nombre`}
+                      {...marcaDe(`${id}-nombre`, errorEn("alta", "nombre"))}
                       type="text"
                       autoComplete="off"
                       maxLength={LARGO_NOMBRE}
@@ -959,9 +1012,11 @@ export function Mandatos() {
                       required
                       disabled={enviando}
                       value={nombre}
-                      onChange={(e) => cambiar(claveAlta, setNombre)(e.target.value)}
+                      onChange={(e) => cambiar(claveAlta, setNombre, "nombre")(e.target.value)}
                     />
-                    <CampoCuit id={`${id}-cuit`} valor={cuit} deshabilitado={enviando} alCambiar={cambiar(claveAlta, setCuit)} />
+                    <ErrorDeCampo idCampo={`${id}-nombre`} mensaje={errorEn("alta", "nombre")} />
+                    <CampoCuit id={`${id}-cuit`} valor={cuit} deshabilitado={enviando} error={errorEn("alta", "cuit")}
+                      alCambiar={cambiar(claveAlta, setCuit, "cuit")} />
                   </>
                 ) : elegibles.length === 0 ? (
                   <p>
@@ -974,10 +1029,11 @@ export function Mandatos() {
                     <label htmlFor={`${id}-persona`}>Persona (con vínculo confirmado en el edificio)</label>
                     <select
                       id={`${id}-persona`}
+                      {...marcaDe(`${id}-persona`, errorEn("alta", "persona_id"))}
                       value={personaElegida}
                       required
                       disabled={enviando}
-                      onChange={(e) => cambiar(claveAlta, setPersona)(e.target.value)}
+                      onChange={(e) => cambiar(claveAlta, setPersona, "persona_id")(e.target.value)}
                     >
                       {elegibles.map((c) => (
                         <option key={c.persona_id} value={c.persona_id}>
@@ -985,6 +1041,7 @@ export function Mandatos() {
                         </option>
                       ))}
                     </select>
+                    <ErrorDeCampo idCampo={`${id}-persona`} mensaje={errorEn("alta", "persona_id")} />
                   </>
                 )}
                 {tipoMandato !== "miembro_consejo" && (
@@ -992,14 +1049,16 @@ export function Mandatos() {
                     <label htmlFor={`${id}-matricula`}>Matrícula (opcional)</label>
                     <input
                       id={`${id}-matricula`}
+                      {...marcaDe(`${id}-matricula`, errorEn("alta", "matricula"))}
                       type="text"
                       autoComplete="off"
                       maxLength={LARGO_MATRICULA}
                       pattern={PATRON_TEXTO}
                       disabled={enviando}
                       value={matricula}
-                      onChange={(e) => cambiar(claveAlta, setMatricula)(e.target.value)}
+                      onChange={(e) => cambiar(claveAlta, setMatricula, "matricula")(e.target.value)}
                     />
+                    <ErrorDeCampo idCampo={`${id}-matricula`} mensaje={errorEn("alta", "matricula")} />
                   </>
                 )}
                 {usables.length === 0 ? (
@@ -1013,10 +1072,11 @@ export function Mandatos() {
                     <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
                     <select
                       id={`${id}-decision-alta`}
+                      {...marcaDe(`${id}-decision-alta`, errorEn("alta", "decision_id"))}
                       value={decisionAlta}
                       required
                       disabled={enviando}
-                      onChange={(e) => cambiar(claveAlta, setDecisionAlta)(e.target.value)}
+                      onChange={(e) => cambiar(claveAlta, setDecisionAlta, "decision_id")(e.target.value)}
                     >
                       <option value="">Elegí la decisión</option>
                       {usables.map((d) => (
@@ -1025,27 +1085,31 @@ export function Mandatos() {
                         </option>
                       ))}
                     </select>
+                    <ErrorDeCampo idCampo={`${id}-decision-alta`} mensaje={errorEn("alta", "decision_id")} />
                   </>
                 )}
                 <label htmlFor={`${id}-desde`}>Desde</label>
                 <input
                   id={`${id}-desde`}
+                  {...marcaDe(`${id}-desde`, errorEn("alta", "desde"))}
                   type="date"
                   required
                   disabled={enviando}
                   value={desde}
-                  onChange={(e) => cambiar(claveAlta, setDesde)(e.target.value)}
+                  onChange={(e) => cambiar(claveAlta, setDesde, "desde")(e.target.value)}
                 />
+                <ErrorDeCampo idCampo={`${id}-desde`} mensaje={errorEn("alta", "desde")} />
                 <label htmlFor={`${id}-hasta`}>Hasta (opcional; ese día ya no rige)</label>
                 <input
                   id={`${id}-hasta`}
+                  {...marcaDe(`${id}-hasta`, errorEn("alta", "hasta"), `${id}-vigencia-vacia`)}
                   type="date"
                   min={desde === "" ? undefined : desde}
                   disabled={enviando}
-                  aria-describedby={`${id}-vigencia-vacia`}
                   value={hasta}
-                  onChange={(e) => cambiar(claveAlta, setHasta)(e.target.value)}
+                  onChange={(e) => cambiar(claveAlta, setHasta, "hasta")(e.target.value)}
                 />
+                <ErrorDeCampo idCampo={`${id}-hasta`} mensaje={errorEn("alta", "hasta")} />
                 <p id={`${id}-vigencia-vacia`} aria-live="polite">
                   {hasta !== "" &&
                     hasta === desde &&
@@ -1255,9 +1319,10 @@ export function Mandatos() {
                   <label htmlFor={`${id}-causa`}>Causa</label>
                   <select
                     id={`${id}-causa`}
+                    {...marcaDe(`${id}-causa`, errorEn("baja", "causa"))}
                     value={causa}
                     disabled={enviando}
-                    onChange={(e) => cambiarBaja(setCausa)(e.target.value as CausaBaja)}
+                    onChange={(e) => cambiarBaja(setCausa, "causa")(e.target.value as CausaBaja)}
                   >
                     {(detalle.datos.estado === "terminado" ? CAUSAS_TERMINADO : CAUSAS).filter((c) => c !== "remocion" || !sinRemocion).map((c) => (
                       <option key={c} value={c}>
@@ -1265,9 +1330,11 @@ export function Mandatos() {
                       </option>
                     ))}
                   </select>
+                  <ErrorDeCampo idCampo={`${id}-causa`} mensaje={errorEn("baja", "causa")} />
                   <label htmlFor={`${id}-descripcion-baja`}>Por qué termina</label>
                   <input
                     id={`${id}-descripcion-baja`}
+                    {...marcaDe(`${id}-descripcion-baja`, errorEn("baja", "descripcion"))}
                     type="text"
                     autoComplete="off"
                     maxLength={LARGO_DESCRIPCION}
@@ -1275,17 +1342,19 @@ export function Mandatos() {
                     required
                     disabled={enviando}
                     value={descripcionBaja}
-                    onChange={(e) => cambiarBaja(setDescripcionBaja)(e.target.value)}
+                    onChange={(e) => cambiarBaja(setDescripcionBaja, "descripcion")(e.target.value)}
                   />
+                  <ErrorDeCampo idCampo={`${id}-descripcion-baja`} mensaje={errorEn("baja", "descripcion")} />
                   {causa === "remocion" ? (
                     <>
                       <label htmlFor={`${id}-decision-baja`}>Asamblea que lo remueve</label>
                       <select
                         id={`${id}-decision-baja`}
+                        {...marcaDe(`${id}-decision-baja`, errorEn("baja", "decision_id"))}
                         value={decisionBaja}
                         required
                         disabled={enviando}
-                        onChange={(e) => cambiarBaja(setDecisionBaja)(e.target.value)}
+                        onChange={(e) => cambiarBaja(setDecisionBaja, "decision_id")(e.target.value)}
                       >
                         <option value="">Elegí la asamblea</option>
                         {asambleas.map((d) => (
@@ -1294,12 +1363,14 @@ export function Mandatos() {
                           </option>
                         ))}
                       </select>
+                      <ErrorDeCampo idCampo={`${id}-decision-baja`} mensaje={errorEn("baja", "decision_id")} />
                     </>
                   ) : (
                     <>
                       <label htmlFor={`${id}-instrumento`}>Instrumento (nota, certificado u otro)</label>
                       <input
                         id={`${id}-instrumento`}
+                        {...marcaDe(`${id}-instrumento`, errorEn("baja", "instrumento"))}
                         type="text"
                         autoComplete="off"
                         maxLength={LARGO_REFERENCIA}
@@ -1307,8 +1378,9 @@ export function Mandatos() {
                         required
                         disabled={enviando}
                         value={instrumento}
-                        onChange={(e) => cambiarBaja(setInstrumento)(e.target.value)}
+                        onChange={(e) => cambiarBaja(setInstrumento, "instrumento")(e.target.value)}
                       />
+                      <ErrorDeCampo idCampo={`${id}-instrumento`} mensaje={errorEn("baja", "instrumento")} />
                     </>
                   )}
                   {confirmarBaja ? (

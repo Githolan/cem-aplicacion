@@ -1,6 +1,7 @@
 import type { MutableRefObject } from "react";
 
 import type { components } from "../api/tipos";
+import { REVISAR_FORMULARIO } from "../ErrorDeCampo";
 import { LIMITE_DE_PEDIDOS, mensajeDeFalla } from "../fallas";
 import { NOMBRE_ESTADO } from "../pagos/textos";
 
@@ -282,7 +283,8 @@ export function mensajeDeError(estado: number, codigo: string | undefined): stri
   if (conocido !== undefined) return conocido;
   if (estado === ESTADO.sinPermiso) return "No tenés la facultad para esto en este edificio.";
   if (estado === ESTADO.noEncontrado) return "Eso ya no está en este edificio. Revisá la lista actualizada.";
-  if (estado === ESTADO.invalido) return "Revisá los datos del formulario.";
+  // Un 422 que nombra campos se dice junto a cada uno (`ErrorDeCampo`); este es el que no nombra ninguno.
+  if (estado === ESTADO.invalido) return REVISAR_FORMULARIO;
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   return mensajeDeFalla(estado, codigo);
 }
