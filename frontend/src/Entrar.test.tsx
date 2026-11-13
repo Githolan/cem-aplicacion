@@ -643,8 +643,9 @@ describe("/entrar: una forma por vez", () => {
 
     pedirElEnlace(CORREO);
 
+    // El foco lo mueve un efecto que corre después de pintar la sección: se espera a que llegue.
     const codigo = within(await screen.findByRole("region", CODIGO));
-    expect(document.activeElement).toBe(codigo.getByLabelText(/^Código de 6 números/));
+    await vi.waitFor(() => expect(document.activeElement).toBe(codigo.getByLabelText(/^Código de 6 números/)));
   });
 
   it("con el correo escrito, elegir otra forma lleva el foco a lo que falta", () => {
