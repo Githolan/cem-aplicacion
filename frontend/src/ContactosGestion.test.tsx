@@ -180,6 +180,64 @@ describe("página /contactos/gestion", () => {
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida");
   });
 
+  it("G-53: desde /contactos, retirar termina de vuelta en /contactos con el «Listo»", async () => {
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => Response.json({ ...LISTA, actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" }),
+      [`GET ${GESTION}`]: () => Response.json(LISTA),
+      [`POST ${BASE}/${K1}/retirar`]: () => Response.json({ id: K1 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/contactos");
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("link", { name: "Retirar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí, retirar" }));
+    expect(await screen.findByText("Listo: el contacto Plomería Rápida se retiró.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Gestionar los contactos de emergencia" })).toBeNull();
+    expect(pedidos(simulado, "POST", `${BASE}/${K1}/retirar`)).toHaveLength(1);
+  });
+
+  it("G-52 y G-53: «Marcar como comprobado» desde /contactos abre ese acto y vuelve con el «Listo»; «Cancelar» vuelve sin nada", async () => {
+    const simulado = conLista({
+      [`GET ${BASE}`]: () => Response.json({ ...LISTA, actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" }),
+      [`GET ${GESTION}`]: () => Response.json(LISTA),
+      [`POST ${BASE}/${K1}/verificar`]: () => Response.json({ id: K1 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/contactos");
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("link", { name: "Marcar como comprobado" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Lo comprobé" }));
+    expect(await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
+    expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
+
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("link", { name: "Señalar un error" }));
+    expect(await screen.findByLabelText("Motivo")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Contactos de emergencia" })).toBeTruthy();
+    expect(screen.queryByText(/^Listo:/)).toBeNull();
+    expect(pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)).toHaveLength(0);
+  });
+
+  it("control G-53: abierta directo, la gestión se queda en la gestión después de un acto", async () => {
+    vi.stubGlobal("fetch", conLista({ [`POST ${BASE}/${K1}/retirar`]: () => Response.json({ id: K1 }) }));
+    abrir();
+    fireEvent.click(within(await abrirFicha("Emergencias: Plomería Rápida")).getByRole("button", { name: "Retirar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
+    await screen.findByText("Listo: el contacto Plomería Rápida se retiró.");
+    expect(screen.getByRole("heading", { level: 1, name: "Gestionar los contactos de emergencia" })).toBeTruthy();
+  });
+
+  it("G-54: un contacto ya señalado no ofrece «Señalar un error»; uno sin señalar, sí", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    const marta = await abrirFicha("Encargado/a: Marta Ruiz");
+    expect(within(marta).queryByRole("button", { name: "Señalar un error" })).toBeNull();
+    expect(within(marta).getByRole("button", { name: "Marcar como comprobado" })).toBeTruthy();
+    fireEvent.click(within(marta).getByRole("button", { name: "Cerrar" }));
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
+    expect(within(plomeria).getByRole("button", { name: "Señalar un error" })).toBeTruthy();
+  });
+
   // Recargar la página deja el pedido en la historia pero no el edificio elegido en memoria
   // (`permisos.tsx`): un render nuevo, con su propio QueryClient, es esa recarga.
   const C2 = "22222222-2222-4222-8222-222222222222";
@@ -562,7 +620,7 @@ describe("página /contactos/gestion", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     let plomeria = await abrirFicha("Emergencias: Plomería Rápida");
-    fireEvent.click(within(plomeria).getByRole("button", { name: "Comprobado" }));
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Marcar como comprobado" }));
     fireEvent.click(screen.getByRole("button", { name: "Lo comprobé" }));
     await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.");
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
@@ -775,8 +833,7 @@ describe("página /contactos/gestion", () => {
     expect(await faltas()).toEqual([]);
     for (const [boton, cierre] of [
       ["Corregir", "Cancelar"],
-      ["Comprobado", "Cancelar"],
-      ["Señalar un error", "Cancelar"],
+      ["Marcar como comprobado", "Cancelar"],
       ["Retirar", "No"],
     ] as const) {
       fireEvent.click(within(marta).getByRole("button", { name: boton }));
@@ -784,6 +841,12 @@ describe("página /contactos/gestion", () => {
       fireEvent.click(screen.getByRole("button", { name: cierre }));
     }
     fireEvent.click(within(marta).getByRole("button", { name: "Cerrar" }));
+    // «Señalar un error» solo se ofrece en un contacto sin señalar (G-54): Marta ya lo está.
+    const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
+    expect(await faltas()).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    fireEvent.click(within(plomeria).getByRole("button", { name: "Cerrar" }));
     fireEvent.click(screen.getByRole("button", { name: "Agregar un contacto" }));
     fireEvent.change(screen.getByLabelText("¿De quién es el número?"), { target: { value: "profesional" } });
     expect(await faltas()).toEqual([]);

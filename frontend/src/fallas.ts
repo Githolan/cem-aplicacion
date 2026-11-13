@@ -12,7 +12,8 @@ export const SERVICIO_NO_DISPONIBLE = "El servicio no está disponible en este m
 export const LIMITE_DE_PEDIDOS = "Se llegó al límite de pedidos por ahora. Reintentar más tarde.";
 export const RECARGAR = "No se pudo completar el pedido. Hay que recargar la página y reintentar.";
 
-const SIN_RESPUESTA = 0;
+/** El estado de un pedido que no tuvo respuesta (sin red). */
+export const SIN_RESPUESTA = 0;
 const ESTADO_LIMITE = 429;
 const ESTADO_ERROR_DEL_SERVIDOR = 500;
 
@@ -42,6 +43,12 @@ export function mensajeDeFallaConEnlace(estado: number, codigo: string | undefin
   if (mensaje === SIN_CONEXION) return SIN_CONEXION_ENLACE;
   if (mensaje === RECARGAR) return REABRIR_ENLACE;
   return mensaje;
+}
+
+/** Una falla que puede pasar sola: sin respuesta, el límite de pedidos o el servicio caído. Una
+ * consulta que se repite sola la vuelve a intentar; cualquier otro 4xx es la respuesta definitiva. */
+export function esPasajera(estado: number): boolean {
+  return estado === SIN_RESPUESTA || estado === ESTADO_LIMITE || estado >= ESTADO_ERROR_DEL_SERVIDOR;
 }
 
 /** Si la falla fue de la red (sin respuesta) y no del servicio. */

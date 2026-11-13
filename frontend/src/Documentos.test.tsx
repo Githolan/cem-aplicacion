@@ -10,9 +10,9 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { aceptar, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
-import { mensajeDeError, REFRESCO_CUARENTENA_MS, tamano } from "./Documentos";
-import { SIN_CONEXION } from "./fallas";
+import { aceptar, hoyDelDispositivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
+import { AYUDA_FECHA, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, tamano } from "./Documentos";
+import { LIMITE_DE_PEDIDOS, SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -490,7 +490,7 @@ describe("página /documentos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     expect(await screen.findByText("No se pudo mostrar la lista.")).toBeTruthy();
     const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
-    expect(reintento.tagName).toBe("H3");
+    expect(reintento.tagName).toBe("H2"); // es el título de la tarjeta de arriba (G-05)
     elegir(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
     const listo = await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura»/);
@@ -522,7 +522,7 @@ describe("página /documentos", () => {
     llenarNuevo(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
-    expect(reintento.tagName).toBe("H3"); // bajo el h2 de la sección, sin saltar niveles
+    expect(reintento.tagName).toBe("H2"); // el título de la tarjeta, sin saltar niveles (G-05)
     const reglas = { rules: { "color-contrast": { enabled: false } } };
     expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
     elegir(pdf());
@@ -544,7 +544,9 @@ describe("página /documentos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
-    expect(document.activeElement).toBe(screen.getByLabelText("Categoría"));
+    // G-06: el archivo va primero, y el foco también.
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    expect(document.activeElement).toBe(within(carga).getByRole("button", { name: "Sacar una foto" }));
     expect(screen.getByLabelText("Archivo del documento").getAttribute("accept")).toBe(aceptar(TIPOS_DE_DOCUMENTO));
     // Todos los caminos a la vez: soltar, la cámara, la galería y el archivo.
     expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
@@ -662,7 +664,8 @@ describe("página /documentos", () => {
     expect([...document.querySelectorAll(".aviso-error")].map((e) => e.textContent).join(" ")).not.toMatch(/título/);
     const fecha = screen.getByLabelText("Fecha del documento");
     expect(fecha.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(fecha.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Escribir una fecha válida.");
+    const describe = (fecha.getAttribute("aria-describedby") ?? "").split(" ").map((i) => document.getElementById(i)?.textContent);
+    expect(describe).toContain("Escribir una fecha válida.");
     // Control: el título no queda marcado.
     expect(screen.getByLabelText("Título").getAttribute("aria-invalid")).toBeNull();
   });
@@ -1053,10 +1056,11 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
       const campoArchivo = screen.getByLabelText("Archivo del documento");
       llenarNuevo(pdf());
       fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-      const aviso = await screen.findByText("Listo: el archivo de «Presupuesto de pintura» se subió. Queda «En revisión» mientras el antivirus lo analiza.");
+      const aviso = await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura» se subió\. Queda «En revisión».*esta pantalla avisa cuando termina\.$/);
       await waitFor(() => expect(document.activeElement).toBe(aviso));
       expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("");
-      expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe("");
+      // La fecha vuelve a la de hoy, la que se propone siempre (G-06).
+      expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe(hoyDelDispositivo());
       expect(screen.queryByText(/Elegido:/)).toBeNull();
       // El campo del sistema no guarda el archivo ya elegido: se vacía al elegir.
       expect((screen.getByLabelText("Archivo del documento") as HTMLInputElement).value).toBe("");
@@ -1208,3 +1212,268 @@ describe("«Retirar el documento» (0089)", () => {
     expect(formulario.textContent).not.toMatch(/\b(tenés|podés|escribí|elegí|tocá|subí|soltá|retirá)\b/);
   });
 });
+
+describe("tanda 6 de fricción en /documentos", () => {
+  const ADMINISTRA = ["documentos.ver", "documentos.ver_restringidos", "documentos.cargar"];
+  const conAcciones = (acciones: string[], extra: Respuestas = {}) =>
+    conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza(...acciones), ...extra });
+
+  it("G-02: un documento que respalda algo no ofrece «Retirar el documento»: lo dice en su lugar", async () => {
+    const lista = {
+      documentos: [
+        documento(D1, "Acta de asamblea ordinaria", { versiones: [version(V1)], respalda: true }),
+        documento(D3, "Contrato de limpieza", { categoria: "contratos_proveedores", respalda: false }),
+      ],
+    };
+    vi.stubGlobal("fetch", conAcciones(ADMINISTRA, { [`GET ${BASE}`]: () => Response.json(lista) }));
+    abrir();
+    const acta = await tarjeta("Acta de asamblea ordinaria");
+    expect(within(acta).queryByRole("button", { name: RETIRAR_DOCUMENTO })).toBeNull();
+    expect(within(acta).getByText(RESPALDA_ALGO)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    // Control: el que no respalda nada sigue ofreciéndolo, sin el aviso.
+    const contrato = await tarjeta("Contrato de limpieza");
+    expect(within(contrato).getByRole("button", { name: RETIRAR_DOCUMENTO })).toBeTruthy();
+    expect(within(contrato).queryByText(RESPALDA_ALGO)).toBeNull();
+  });
+
+  it("G-05: «Cargar un documento» está arriba, antes de la lista, y no repite su nombre adentro", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    const boton = await screen.findByRole("button", { name: "Cargar un documento" });
+    const lista = screen.getByRole("heading", { level: 2, name: "Documentos" });
+    expect(boton.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(boton);
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    expect(carga.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Sin el «Datos del documento» del medio; el botón abierto ya no está.
+    expect(within(carga).queryByText("Datos del documento")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
+  });
+
+  it("G-06: el archivo va primero, propone el título y la fecha empieza en hoy, con su ayuda", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    const archivoCampo = within(carga).getByLabelText("Archivo del documento");
+    const categoria = within(carga).getByLabelText("Categoría");
+    expect(archivoCampo.compareDocumentPosition(categoria) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const fecha = within(carga).getByLabelText("Fecha del documento") as HTMLInputElement;
+    expect(fecha.value).toBe(hoyDelDispositivo());
+    const ayuda = document.getElementById((fecha.getAttribute("aria-describedby") ?? "").split(" ")[0] ?? "");
+    expect(ayuda?.textContent).toBe(AYUDA_FECHA);
+    const titulo = within(carga).getByLabelText("Título") as HTMLInputElement;
+    expect(titulo.value).toBe("");
+    elegir(pdf("Acta 12 de asamblea.pdf"));
+    expect(titulo.value).toBe("Acta 12 de asamblea");
+    // Otro archivo cambia lo que propuso el anterior...
+    elegir(pdf("Acta 13.pdf"));
+    expect(titulo.value).toBe("Acta 13");
+    // ...pero nunca lo que escribió la persona (control).
+    escribir("Título", "Acta de la asamblea de octubre");
+    elegir(pdf("otro.pdf"));
+    expect(titulo.value).toBe("Acta de la asamblea de octubre");
+  });
+
+  describe("G-09: quien solo carga se entera de cómo terminó el antivirus", () => {
+    const ESTADO_V4 = `${versiones(D3)}/${V4}/estado`;
+    const subida = () =>
+      Response.json(
+        { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+        { status: 201 },
+      );
+    // Un segundo documento (D2, con su versión V3) que sigue en revisión.
+    const ESTADO_V3 = `${versiones(D2)}/${V3}/estado`;
+    const soloCarga = (estado: () => Response) => {
+      let creados = 0;
+      return conLista({
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`POST ${BASE}`]: () => Response.json({ id: ++creados === 1 ? D3 : D2 }, { status: 201 }),
+        [`POST ${versiones(D3)}`]: subida,
+        [`GET ${ESTADO_V4}`]: estado,
+        [`POST ${versiones(D2)}`]: () =>
+          Response.json(
+            { id: V3, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "c".repeat(64) },
+            { status: 201 },
+          ),
+        [`GET ${ESTADO_V3}`]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+      });
+    };
+    const RECHAZO = "«Rechazado»: el archivo de «Presupuesto de pintura» no pasó la revisión (el PDF tiene contraseña). No se va a mostrar: hay que subir otro.";
+
+    /** Con el formulario nuevo a la vista, llena el de un segundo documento: el plano. */
+    function llenarElPlano() {
+      fireEvent.change(screen.getByLabelText("Categoría"), { target: { value: "presupuestos" } });
+      escribir("Título", "Plano del edificio");
+      elegir(pdf("plano.pdf"));
+    }
+
+    async function subirYEsperar(simulado: ReturnType<typeof soloCarga>) {
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByLabelText("Categoría");
+      llenarNuevo(pdf());
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura» se subió/);
+    }
+
+    it("sigue preguntando mientras está en revisión y dice «Disponible» al terminar, sin recargar", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        Response.json(++vueltas < 2 ? { estado: "en_cuarentena", motivo_rechazo: null } : { estado: "disponible", motivo_rechazo: null }),
+      );
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(
+        await screen.findByText("Listo: el archivo de «Presupuesto de pintura» pasó la revisión del antivirus y quedó «Disponible»."),
+      ).toBeTruthy();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      expect(consultas).toBeGreaterThanOrEqual(2); // la primera dijo «en revisión»
+      // Terminado, no pregunta más (control de que la espera se cortó).
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(consultas);
+    });
+
+    it("si el antivirus lo rechaza, dice «Rechazado» con el motivo y ofrece subir otro para el mismo documento", async () => {
+      const simulado = soloCarga(() => Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // Subir otro es un paso que la persona elige: el formulario no cambia solo.
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Subir otro archivo para «Presupuesto de pintura»" }));
+      expect(screen.getByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeTruthy();
+      // Con su formulario abierto, el botón ya no se ofrece.
+      expect(screen.queryByRole("button", { name: "Subir otro archivo para «Presupuesto de pintura»" })).toBeNull();
+    });
+
+    it("revisión del PR #241: un rechazo que llega con otro documento a medio cargar no le cambia el destino al archivo elegido", async () => {
+      const simulado = soloCarga(() => Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+      await subirYEsperar(simulado);
+      llenarElPlano();
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // El formulario sigue siendo el del documento nuevo, con lo elegido.
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("Plano del edificio");
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Plano del edificio» se subió/);
+      // El plano fue a un documento nuevo; el rechazado recibió un solo archivo, el suyo.
+      expect(pedidos(simulado, "POST", BASE)).toHaveLength(2);
+      expect(pedidos(simulado, "POST", versiones(D2))).toHaveLength(1);
+      expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
+      // El rechazo sigue a la vista: ese documento todavía espera otro archivo.
+      expect(screen.getByText(RECHAZO)).toBeTruthy();
+    });
+
+    it("revisión del PR #241: un 429 pasajero no corta la consulta: la vuelta siguiente trae el rechazo", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        ++vueltas === 1 ? error("limite_de_pedidos", 429) : Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }),
+      );
+      await subirYEsperar(simulado);
+      // Una vuelta, y se espera a que su 429 se procese antes de la siguiente.
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1));
+      await act(() => new Promise((listo) => setTimeout(listo, 100)));
+      // El 429 no es un resultado: ni se dice como error final ni alarma con una sola falla.
+      expect(screen.queryByText(LIMITE_DE_PEDIDOS)).toBeNull();
+      expect(screen.queryByText(/No se pudo consultar cómo va/)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(2);
+    });
+
+    it("revisión del PR #241: si el servicio sigue caído, lo dice y sigue preguntando; al volver, trae el resultado", async () => {
+      let caido = true;
+      const simulado = soloCarga(() =>
+        caido ? error("servicio_no_disponible", 503) : Response.json({ estado: "disponible", motivo_rechazo: null }),
+      );
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(
+        await screen.findByText(
+          "No se pudo consultar cómo va el archivo de «Presupuesto de pintura» (el servicio no está disponible); esta pantalla lo sigue intentando.",
+        ),
+      ).toBeTruthy();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4).length).toBeGreaterThan(consultas);
+      caido = false;
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(
+        await screen.findByText("Listo: el archivo de «Presupuesto de pintura» pasó la revisión del antivirus y quedó «Disponible»."),
+      ).toBeTruthy();
+      expect(screen.queryByText(/No se pudo consultar cómo va/)).toBeNull();
+    });
+
+    it("revisión del PR #241: un 404 es definitivo: lo dice, sin ofrecer subir otro, y deja de preguntar", async () => {
+      const simulado = soloCarga(() => error("no_encontrado", 404));
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(
+        await screen.findByText(
+          "No se puede saber cómo terminó la revisión del archivo de «Presupuesto de pintura»: ese documento o ese archivo ya no está en el edificio.",
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Subir otro archivo/ })).toBeNull();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(consultas);
+    });
+
+    it("revisión del PR #241: lo que responde tarde el edificio anterior no aparece en el nuevo ni le cambia el formulario", async () => {
+      const C2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      let responder: (r: Response) => void = () => undefined;
+      const tarde = new Promise<Response>((listo) => {
+        responder = listo;
+      });
+      const simulado = conLista({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Bordó", vinculos: [] }]),
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`GET /api/v1/consorcios/${C2}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+        [`POST ${versiones(D3)}`]: subida,
+        [`GET ${ESTADO_V4}`]: () => tarde,
+      });
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1));
+      // Con la consulta en vuelo, otro edificio; después llega el rechazo del anterior.
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      await screen.findByLabelText("Categoría");
+      await act(async () => {
+        responder(Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+        await new Promise((listo) => setTimeout(listo, 100));
+      });
+      expect(screen.queryByText(RECHAZO)).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Subir otro archivo/ })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      // Y no se sigue preguntando por el archivo del edificio anterior.
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1);
+    });
+
+    it("revisión del PR #241: subir otro documento antes de que termine el primero no deja de mirar el primero", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        Response.json(++vueltas < 2 ? { estado: "en_cuarentena", motivo_rechazo: null } : { estado: "rechazado", motivo_rechazo: "pdf_cifrado" }),
+      );
+      await subirYEsperar(simulado);
+      llenarElPlano();
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Plano del edificio» se subió/);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // El segundo, todavía en revisión, se sigue mirando (control de que no se cambió uno por otro).
+      const delSegundo = pedidos(simulado, "GET", ESTADO_V3).length;
+      expect(delSegundo).toBeGreaterThanOrEqual(1);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(pedidos(simulado, "GET", ESTADO_V3).length).toBeGreaterThan(delSegundo);
+    });
+  });
+});
+

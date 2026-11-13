@@ -1,11 +1,11 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { codigoDe, mensajeDeFallaConEnlace, SIN_CONEXION_ENLACE } from "./fallas";
-import { RUTA_ENTRAR, RUTA_INVITACION_MANDATO, tokenDelFragmento } from "./enlace";
+import { RUTA_INVITACION_MANDATO, tokenDelFragmento } from "./enlace";
+import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceAlInicio, SalirDeEstaCuenta } from "./SalidaDeInvitacion";
 import { useIrAlInicio } from "./sesion";
 
@@ -14,7 +14,9 @@ import { useIrAlInicio } from "./sesion";
 // de la URL y lo manda en el cuerpo de dos POST: consultar y, cuando la persona confirma, aceptar.
 //
 // La página no decide nada: la base valida el enlace, el mandato, la cuenta y la separación con el
-// Consejo, y la página solo explica la respuesta. Diseño provisorio: el definitivo llega con G3.
+// Consejo, y la página solo explica la respuesta. Si el correo ya tiene cuenta, se entra acá mismo
+// y la aceptación se repite sola con el mismo enlace (G-35): no hace falta volver a abrir el correo.
+// Diseño provisorio: el definitivo llega con G3.
 
 type Recibida = components["schemas"]["InvitacionMandatoRecibida"];
 
@@ -32,6 +34,10 @@ const RECHAZOS: readonly Rechazo[] = [
   "asociacion_incompatible_con_consejo",
   "asociacion_de_si_mismo",
 ];
+
+/** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
+export const YA_HAY_CUENTA_MANDATO =
+  "Ya hay una cuenta con este correo. Para asociarla, entrar con esa cuenta: al entrar, la invitación se acepta sola.";
 
 const ESTADO_INVALIDA = 404;
 const ESTADO_CONFLICTO = 409;
@@ -67,6 +73,8 @@ export function InvitacionMandato() {
   const [nombre, setNombre] = useState("");
   const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
   const [fallaAlAceptar, setFallaAlAceptar] = useState<string | null>(null);
+  /** El correo con el que se entra cuando ya hay una cuenta (la invitación no lo muestra). */
+  const [correoParaEntrar, setCorreoParaEntrar] = useState("");
   const consultada = useRef(false);
   const irAlInicio = useIrAlInicio();
 
@@ -94,6 +102,11 @@ export function InvitacionMandato() {
 
   function aceptar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
+    aceptarConElEnlace();
+  }
+
+  /** Acepta con el token del enlace: al tocar el botón, o sola después de entrar (G-35). */
+  function aceptarConElEnlace() {
     if (!token) return;
     setEstado("aceptando");
     setFallaAlAceptar(null);
@@ -174,12 +187,7 @@ export function InvitacionMandato() {
             <EnlaceAlInicio />
           </>
         )}
-        {estado === "invitacion_requiere_sesion" && (
-          <p className="aviso-error">
-            Ya hay una cuenta con este correo. Hay que <Link to={RUTA_ENTRAR}>entrar</Link> y después abrir de nuevo el
-            enlace del correo.
-          </p>
-        )}
+        {estado === "invitacion_requiere_sesion" && <p>{YA_HAY_CUENTA_MANDATO}</p>}
         {estado === "invitacion_de_otra_persona" && (
           <>
             <p className="aviso-error">
@@ -220,6 +228,12 @@ export function InvitacionMandato() {
           </>
         )}
       </div>
+      {estado === "invitacion_requiere_sesion" && (
+        <section aria-labelledby={`${id}-entrar`} className="tarjeta">
+          <h2 id={`${id}-entrar`}>Entrar para asociar la cuenta</h2>
+          <FormasDeEntrar correo={correoParaEntrar} alCambiarCorreo={setCorreoParaEntrar} alEntrar={aceptarConElEnlace} />
+        </section>
+      )}
     </>
   );
 }

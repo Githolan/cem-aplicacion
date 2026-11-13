@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { PREFIJO_COPIA } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
+import { YA_HAY_CUENTA } from "./Invitacion";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -151,15 +152,40 @@ describe("página /invitacion", () => {
     expect(aceptacionesDe(pedido)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
-  it("si el correo ya tiene cuenta, manda a entrar", async () => {
-    vi.stubGlobal("fetch", backend(() => error("invitacion_requiere_sesion", 409)));
+  it("G-35: si el correo ya tiene cuenta, se entra acá mismo y la invitación se acepta sola, sin otro clic", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    let conSesion = false;
+    const pedido = vi.fn(async (p: Request) => {
+      const camino = new URL(p.url).pathname;
+      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === ACEPTAR) return conSesion ? Response.json({ ...ACEPTADA, cuenta_nueva: false }) : error("invitacion_requiere_sesion", 409);
+      if (camino === "/api/v1/auth/codigo") {
+        conSesion = true;
+        return Response.json({ persona_id: "11111111-1111-4111-8111-111111111111" });
+      }
+      if (camino === "/api/v1/auth/sesion") return Response.json({});
+      if (camino === "/health") return error("servicio_no_disponible", 503);
+      throw new Error(`pedido no previsto: ${p.method} ${camino}`);
+    });
+    vi.stubGlobal("fetch", pedido);
     abrir(`/invitacion#token=${TOKEN}`);
 
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/Ya hay una cuenta con este correo/)).toBeTruthy();
-    expect(screen.getByText(/la invitación aparece en el inicio, lista para aceptar/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "entrar" }).getAttribute("href")).toBe("/entrar");
+    expect(await screen.findByText(YA_HAY_CUENTA)).toBeTruthy();
+    const entrar = screen.getByRole("region", { name: "Entrar para aceptar" });
+    fireEvent.click(within(entrar).getByRole("button", { name: "Ya tengo un código" }));
+    // El correo ya viene puesto: es el de la invitación.
+    expect((within(entrar).getByLabelText("Correo") as HTMLInputElement).value).toBe(RECIBIDA.correo);
+    fireEvent.change(within(entrar).getByLabelText(/Código de/), { target: { value: "042917" } });
+    fireEvent.click(within(entrar).getByRole("button", { name: "Entrar con el código" }));
+
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    // Dos aceptaciones con el mismo enlace: la que pidió entrar y la que salió sola al entrar.
+    const aceptaciones = aceptacionesDe(pedido);
+    expect(aceptaciones).toHaveLength(2);
+    expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: RECIBIDA.nombre });
+    expect(aceptaciones[1]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
   it("si la sesión es de otra persona, lo dice", async () => {
@@ -501,7 +527,7 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
 
-    expect(await screen.findByRole("link", { name: "entrar" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Entrar para aceptar" })).toBeTruthy();
     expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
     expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
   });

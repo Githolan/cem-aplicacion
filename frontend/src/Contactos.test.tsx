@@ -548,7 +548,12 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
   it("con `contactos.gestionar`, «Agregar un contacto» arriba y en la ficha de cada contacto «Corregir» y «Retirar», en rojo", async () => {
     vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
     abrir();
-    expect((await screen.findByRole("link", { name: "Agregar un contacto" })).getAttribute("href")).toBe("/contactos/gestion");
+    const agregar = await screen.findByRole("link", { name: "Agregar un contacto" });
+    expect(agregar.getAttribute("href")).toBe("/contactos/gestion");
+    // G-60: es el botón principal de la pantalla y va antes de la lista, como en la gestión.
+    expect(agregar.className).toBe("enlace-boton enlace-boton--principal");
+    const lista = screen.getByRole("list", { name: "Contactos de emergencia" });
+    expect(agregar.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // El botón dice lo que hace (comentario 25): ya no hay «Gestionar la lista».
     expect(screen.queryByRole("link", { name: "Gestionar la lista" })).toBeNull();
     // En la lista, nada para corregir ni retirar: eso va en la ficha.
@@ -561,6 +566,36 @@ describe("lo que no se puede hacer no aparece en /contactos", () => {
     }
     // Si el enlace se ve, la persona alcanza la acción: no hace falta aclarar para quién es.
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
+  });
+
+  it("G-52: la ficha ofrece también «Marcar como comprobado» y «Señalar un error», que abren ese acto en la gestión", async () => {
+    vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
+    abrir();
+    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
+    expect(within(ficha).getAllByRole("link").map((a) => a.textContent)).toEqual([
+      "0800-555-1234",
+      "Corregir",
+      "Marcar como comprobado",
+      "Señalar un error",
+      "Retirar",
+    ]);
+    expect(within(ficha).getByRole("link", { name: "Marcar como comprobado" }).getAttribute("href")).toBe("/contactos/gestion");
+    expect(within(ficha).getByRole("link", { name: "Señalar un error" }).getAttribute("href")).toBe("/contactos/gestion");
+  });
+
+  it("G-54: un contacto ya señalado no ofrece «Señalar un error» otra vez; sí «Marcar como comprobado»", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+        [`GET ${RUTA(C1)}`]: () => Response.json({ ...LISTA, elementos: [contacto(K1, "Ascensores del Sur", { observado: true })] }),
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", "contactos.gestionar"),
+      }),
+    );
+    abrir();
+    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
+    expect(within(ficha).queryByRole("link", { name: "Señalar un error" })).toBeNull();
+    expect(within(ficha).getByRole("link", { name: "Marcar como comprobado" })).toBeTruthy();
   });
 
   it("control: sin `contactos.gestionar` la lista se ve y ni agregar ni corregir ni retirar", async () => {
