@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
@@ -9,6 +9,7 @@ import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { RUTA_PADRON } from "./Padron";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /invitaciones (H2b 2b-4, PR 3): invitar a una persona a una unidad, ver las invitaciones
@@ -63,12 +64,21 @@ const TEXTO_CAMPO: Record<string, string> = {
   correo: "el correo",
 };
 
+/** La persona ya tiene la invitación que creó el padrón importado: una manual no la reemplaza (G-21). */
+export const INVITACION_DEL_PADRON =
+  "Esa persona ya tiene una invitación pendiente para esta unidad, que salió con el padrón importado. La acepta desde el correo o desde su inicio; otra invitación no hace falta.";
+/** En la ficha de una invitación aceptada: lo que falta y dónde (G-26). */
+export const FALTA_CONFIRMAR =
+  "Aceptada la invitación, el vínculo se confirma en el Padrón, donde figura «Sin confirmar» hasta entonces.";
+
 /** Qué decir ante el error de invitar, según el estado y el código del cuerpo uniforme. Un 422 que
  *  marca campos lo dice el resumen de `ErrorDeCampo`, con el motivo junto a cada campo (G-23). */
 export function mensajeAlInvitar(estado: number, codigo: string | undefined): string {
   if (estado === 403 && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
   if (estado === 403) return "Esta cuenta no tiene permiso para invitar a esa unidad.";
   if (estado === 404) return "Esa unidad ya no está en el consorcio. Hay que elegir otra.";
+  // G-21: el 409 de la invitación del padrón no se arregla reintentando; solo el de un pedido en curso.
+  if (estado === 409 && codigo === "invitacion_importada_pendiente") return INVITACION_DEL_PADRON;
   if (estado === 409) return "La invitación se está procesando. Reintentar en unos segundos.";
   if (estado === 429) return "Se llegó al límite de invitaciones por ahora. Reintentar más tarde.";
   if (estado === 422 && codigo === "idempotencia_reutilizada")
@@ -286,7 +296,8 @@ export function Invitar() {
           // Un 5xx es ambiguo (un proxy puede responder después de que el backend guardó el
           // resultado): igual que con la red caída, el reintento lleva la misma clave para recibir
           // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
-          const ambigua = response.status >= 500 || response.status === 409;
+          // Un 409 de un pedido en curso también: el de la invitación del padrón es definitivo (G-21).
+          const ambigua = response.status >= 500 || (response.status === 409 && codigo === "idempotencia_en_curso");
           if (codigo === "idempotencia_reutilizada" || !ambigua) clave.current = null;
           const marcados = response.status === 422 ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
           setErrores(marcados);
@@ -606,6 +617,12 @@ export function Invitar() {
           ...(cierre ? [{ etiqueta: i.estado === "aceptada" ? "Aceptada el" : "Retirada el", valor: fecha(cierre) }] : []),
         ]}
       >
+        {/* G-26: aceptada, lo que sigue es confirmar el vínculo, en otra pantalla: se dice y se lleva. */}
+        {i.estado === "aceptada" && puede("padron.confirmar_vinculo") && (
+          <p>
+            {FALTA_CONFIRMAR} <Link to={RUTA_PADRON}>Ir al Padrón para confirmar el vínculo</Link>
+          </p>
+        )}
         {retirable &&
           (aRetirar?.id === i.id ? (
             <div role="group" aria-labelledby={`${id}-${i.id}-confirmar`}>

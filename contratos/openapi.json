@@ -2969,6 +2969,18 @@
             "description": "Si es el comprobante de un pago manual cargado desde el pago (`0063`), la orden que respalda.",
             "title": "Orden Pago Id"
           },
+          "respalda": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Si algo guardado lo cita (una orden, un pago, un proveedor, un contrato o el acta de una decisión): entonces no se retira (`0089`). Solo para quien tiene la facultad `documentos.ver` (`documentos.ver_restringidos`), la que pide retirar; nulo para el resto (tanda 6 de fricción, G-02, `0097`).",
+            "title": "Respalda"
+          },
           "titulo": {
             "title": "Titulo",
             "type": "string"
@@ -3604,6 +3616,29 @@
         ],
         "title": "EstadoContrato",
         "type": "string"
+      },
+      "EstadoDeMiVersion": {
+        "description": "`GET …/documentos/{id}/versiones/{v}/estado`: cómo terminó el análisis de un archivo que\nsubió quien pregunta (tanda 6 de fricción, G-09). Es para quien carga sin ver la lista (el\nadministrador externo, documento 08 §4): sin esto, nunca se entera si el antivirus lo rechazó.\nSolo de las versiones propias; de las ajenas, 404 (`0097`).",
+        "properties": {
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion"
+          },
+          "motivo_rechazo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotivoRechazo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "estado"
+        ],
+        "title": "EstadoDeMiVersion",
+        "type": "object"
       },
       "EstadoDependencia": {
         "enum": [
@@ -13868,6 +13903,76 @@
           }
         },
         "summary": "Descargar una versión disponible: 302 a una URL firmada de 5 minutos",
+        "tags": [
+          "documentos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado": {
+      "get": {
+        "description": "Para quien carga sin ver la lista (el administrador externo): después de subir, la pantalla\npregunta hasta que el antivirus termina y dice si quedó disponible o fue rechazado (G-09). Solo\nlas versiones propias: una ajena responde igual que una inexistente.",
+        "operationId": "estado_de_mi_version_api_v1_consorcios__consorcio_id__documentos__documento_id__versiones__version_id__estado_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "documento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Documento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Version Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstadoDeMiVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin ninguna acción de carga de documentos en el consorcio."
+          },
+          "404": {
+            "description": "La versión no existe en este consorcio, no la subió quien pregunta, o su documento ya no está vigente."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cómo terminó el análisis de un archivo que subió quien pregunta",
         "tags": [
           "documentos"
         ]

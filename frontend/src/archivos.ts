@@ -51,3 +51,15 @@ export function problemaDelArchivo(archivo: File, tipos: readonly TipoArchivo[],
   if (tope !== null && archivo.size > tope) return `El archivo pasa de ${enMegas(tope)}, el máximo. Hay que elegir uno más chico.`;
   return null;
 }
+
+/** El título que propone un archivo: su nombre sin la extensión o, si no queda nada, `porOmision`. */
+export function tituloDeArchivo(archivo: File, porOmision: string, largo: number): string {
+  const sinExtension = archivo.name.replace(/\.[^.]+$/, "").trim();
+  return (sinExtension === "" ? porOmision : sinExtension).slice(0, largo);
+}
+
+/** Hoy (AAAA-MM-DD) en el reloj del dispositivo: la fecha que se propone para un documento. */
+export function hoyDelDispositivo(ahora: Date = new Date()): string {
+  const dos = (n: number) => String(n).padStart(2, "0");
+  return `${ahora.getFullYear()}-${dos(ahora.getMonth() + 1)}-${dos(ahora.getDate())}`;
+}

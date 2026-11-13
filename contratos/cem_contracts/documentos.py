@@ -149,6 +149,13 @@ class DocumentoEnLista(BaseModel):
         " orden que respalda.",
     )
     versiones: list[VersionEnLista] = Field(description="De la más nueva a la más vieja.")
+    respalda: bool | None = Field(
+        default=None,
+        description="Si algo guardado lo cita (una orden, un pago, un proveedor, un contrato o el"
+        " acta de una decisión): entonces no se retira (`0089`). Solo para quien tiene la facultad"
+        " `documentos.ver` (`documentos.ver_restringidos`), la que pide retirar; nulo para el resto"
+        " (tanda 6 de fricción, G-02, `0097`).",
+    )
 
 
 class ListaDocumentos(BaseModel):
@@ -172,3 +179,13 @@ class RetiroDocumento(BaseModel):
     motivo: MotivoRetiro = Field(
         description="Por qué se retira (obligatorio): sin teléfonos, correos ni cuentas."
     )
+
+
+class EstadoDeMiVersion(BaseModel):
+    """`GET …/documentos/{id}/versiones/{v}/estado`: cómo terminó el análisis de un archivo que
+    subió quien pregunta (tanda 6 de fricción, G-09). Es para quien carga sin ver la lista (el
+    administrador externo, documento 08 §4): sin esto, nunca se entera si el antivirus lo rechazó.
+    Solo de las versiones propias; de las ajenas, 404 (`0097`)."""
+
+    estado: EstadoVersion
+    motivo_rechazo: MotivoRechazo | None = None

@@ -84,7 +84,10 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
       if (camino === `${BASE}/decisiones`) return ruta.fulfill({ json: { elementos: DECISIONES } });
       if (camino === `${BASE}/mandatos/candidatos`)
         return ruta.fulfill({ json: { elementos: [{ persona_id: VECINA, nombre: "Beto Pérez", unidades: ["1° A"] }] } });
-      // El alta abre el detalle del mandato nuevo.
+      // El detalle de la administración externa sin cuenta pide sus invitaciones (G-40), y el
+      // formulario de decisión, las actas de Documentos (G-15): acá no hay ninguna.
+      if (camino === `${BASE}/mandatos/${M_AE}/invitaciones`) return ruta.fulfill({ json: { elementos: [] } });
+      if (camino === `${BASE}/documentos`) return ruta.fulfill({ json: { documentos: [] } });
       if (camino === `${BASE}/mandatos/${M_AE}` || camino === `${BASE}/mandatos/${M_NUEVO}`)
         return ruta.fulfill({
           json: {
@@ -157,6 +160,8 @@ test.describe("mandatos", () => {
     // Con el detalle abierto (y su formulario de baja) tampoco hay desplazamiento horizontal.
     // La fila entera abre el detalle (comentario 21).
     await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
+    // La baja se despliega a pedido (G-44).
+    await page.getByRole("button", { name: "Dar de baja…" }).click();
     await expect(page.getByRole("heading", { level: 3, name: "Dar de baja" })).toBeVisible();
     await page.getByLabel("Causa").selectOption("remocion");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
@@ -191,7 +196,7 @@ test.describe("mandatos", () => {
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
     await alta.getByLabel("Desde").fill("2026-11-01");
     await alta.getByRole("button", { name: "Dar de alta" }).click();
-    await expect(page.getByText("Listo: el mandato quedó dado de alta.")).toBeVisible();
+    await expect(page.getByText("Listo: el mandato de Beto Pérez quedó dado de alta y ya está en la lista.")).toBeVisible();
     expect(envios).toHaveLength(1);
     expect(envios[0]?.csrf).toBe(CSRF);
     expect(envios[0]?.clave).toMatch(UUID);
@@ -218,6 +223,7 @@ test.describe("mandatos", () => {
     await page.goto("/mandatos");
     await page.getByRole("button", { name: /^Estudio Sur, Administración externa/ }).click();
     await expect(page.getByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeFocused();
+    await page.getByRole("button", { name: "Dar de baja…" }).click();
     await page.getByLabel("Causa").selectOption("remocion");
     await page.getByLabel("Por qué termina").fill("Remoción por asamblea");
     await expect(page.getByLabel("Asamblea que lo remueve").locator(`option[value="${D_PROPIA}"]`)).toHaveCount(0);

@@ -1,5 +1,5 @@
 import { type FormEvent, type MutableRefObject, useCallback, useEffect, useId, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import { CampoCuit, cuitConError } from "./CampoCuit";
@@ -15,6 +15,8 @@ import { nombreDeFacultad } from "./facultades";
 import { codigoDe, esDeConexion, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
+import { RUTA_DOCUMENTOS } from "./Documentos";
+import { VisorDocumento } from "./VisorDocumento";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
 // registrar una decisión y dar de alta o de baja un mandato. Cada lista y cada formulario aparece
@@ -34,6 +36,8 @@ type TipoMandato = components["schemas"]["TipoMandato"];
 type EstadoMandato = components["schemas"]["EstadoMandato"];
 type TipoDecision = components["schemas"]["TipoDecision"];
 type CausaBaja = components["schemas"]["CausaBaja"];
+type Documento = components["schemas"]["DocumentoEnLista"];
+type InvitacionMandato = components["schemas"]["InvitacionMandato"];
 
 export const RUTA_MANDATOS = "/mandatos";
 
@@ -54,6 +58,12 @@ const FILAS_DESCRIPCION = 4;
 const FILAS_REFERENCIA = 2;
 const LARGO_NOMBRE = 200;
 const LARGO_MATRICULA = 100;
+/** El mismo tope que el contrato (`LARGO_MAXIMO_CORREO`). */
+const LARGO_CORREO = 254;
+/** Los estados en que un mandato externo sin cuenta admite la invitación (`mandato_no_vigente`). */
+const ESTADOS_CON_INVITACION: EstadoMandato[] = ["vigente", "futuro"];
+/** La versión de un documento que puede ser el acta: la disponible más nueva. */
+const disponibleDe = (d: Documento) => d.versiones.find((v) => v.estado === "disponible");
 /** Cuánto de la descripción entra en una opción: el ancho de un `<select>` es el de su opción más larga. */
 const LARGO_OPCION = 60;
 /** Un texto con algo más que espacios (la API rechaza el vacío después de recortar). */
@@ -93,8 +103,6 @@ const TEXTO_CAUSA: Record<CausaBaja, string> = {
   otro: "Otra causa",
 };
 const CAUSAS = Object.keys(TEXTO_CAUSA) as CausaBaja[];
-/** Un mandato que ya terminó por su fecha solo admite la baja por error de carga. */
-const CAUSAS_TERMINADO: CausaBaja[] = ["error_carga"];
 const ESTADOS_CON_BAJA: EstadoMandato[] = ["vigente", "pendiente_revision", "futuro", "terminado"];
 /** Respuestas de la baja que dicen que el detalle quedó viejo: se cierra y se vuelve a pedir la lista. */
 const BAJA_SOBRE_ESTADO_VIEJO = ["mandato_ya_dado_de_baja", "mandato_terminado"];
@@ -114,19 +122,39 @@ const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
 const recortar = (texto: string) => (texto.length > LARGO_OPCION ? `${texto.slice(0, LARGO_OPCION - 1)}…` : texto);
 
 /** Qué se estaba haciendo cuando la API respondió con error. */
-export type Accion = "decision" | "alta" | "baja";
+export type Accion = "decision" | "alta" | "baja" | "revision" | "invitar" | "aprobar_invitacion" | "retirar_invitacion";
 
 const SIN_PERMISO: Record<Accion, string> = {
   decision: "Esta cuenta no tiene permiso para registrar decisiones en este edificio.",
   alta: "El mandato de esta cuenta no incluye dar este alta.",
   baja: "El mandato de esta cuenta no incluye dar esta baja.",
+  revision: "El mandato de esta cuenta no incluye mantener este mandato.",
+  invitar: "El mandato de esta cuenta no incluye invitar a la administración.",
+  aprobar_invitacion: "El mandato de esta cuenta no incluye aprobar esta invitación.",
+  retirar_invitacion: "El mandato de esta cuenta no incluye retirar esta invitación.",
 };
 
 const NO_ENCONTRADO: Record<Accion, string> = {
   decision: "No se encontró el edificio, o esta cuenta ya no tiene acceso.",
   alta: "No se encontró el edificio, o esta cuenta ya no tiene acceso.",
   baja: "No se encontró ese mandato en este edificio.",
+  revision: "No se encontró ese mandato en este edificio.",
+  invitar: "No se encontró ese mandato en este edificio.",
+  aprobar_invitacion: "La invitación cambió o se retiró mientras tanto: la lista ya está actualizada.",
+  retirar_invitacion: "La invitación ya no está en este edificio: la lista ya está actualizada.",
 };
+
+/** El estado de un mandato del Consejo que dejó de cumplir la condición para integrarlo (G-41). */
+export const CAUSA_REVISION =
+  "La persona dejó de cumplir las condiciones para integrar el Consejo (por ejemplo, ya no tiene una unidad confirmada en el edificio). Mientras tanto, el mandato no autoriza actos nuevos. Si vuelve a cumplirlas, una asamblea puede decidir mantenerlo desde una fecha; si no, se da de baja.";
+/** Antes del formulario del alta, si no hay una decisión que se pueda usar (G-42). */
+export const ALTA_SIN_DECISION_USABLE =
+  "Para dar de alta un mandato hace falta una decisión registrada por otra persona: quien registra una decisión no la usa para dar el alta.";
+/** En el formulario de la decisión: quién da el alta después (G-42). */
+export const QUIEN_DA_EL_ALTA = "Quien registra la decisión no puede usarla para dar el alta: lo hace otra persona.";
+/** Lo que pasa con la invitación de la administración externa (G-40, A7: cuatro ojos). */
+export const AYUDA_INVITAR =
+  "Después otra persona del Consejo o de la administración la aprueba; recién entonces sale el correo con el enlace.";
 
 /** Los motivos de dominio, por el código del cuerpo uniforme. */
 const POR_CODIGO: Record<string, string> = {
@@ -145,6 +173,16 @@ const POR_CODIGO: Record<string, string> = {
   cuit_invalido: "El CUIT no es válido.",
   facultad_fuera_de_paquete: "Algún permiso no corresponde a ese tipo de mandato.",
   respaldo_invalido: "La remoción se respalda con una asamblea; cualquier otra causa, con el documento que lo prueba.",
+  documento_invalido: "El acta elegida se retiró de Documentos: no respalda una decisión. Elegir otra.",
+  mandato_no_pendiente: "El mandato ya no está pendiente de revisión: la lista ya está actualizada.",
+  revision_duplicada: "El mandato ya tiene una revisión desde ese día.",
+  eficaz_desde_invalida: "La fecha tiene que ser hoy o después, no antes de la asamblea, y dentro del mandato.",
+  sin_condicion_habilitante:
+    "De hoy a esa fecha la persona no cumple sin interrupción una condición para integrar el Consejo.",
+  mandato_ya_asociado: "El mandato ya tiene una cuenta asociada.",
+  mandato_no_vigente: "El mandato terminó o tiene una baja: no admite una cuenta.",
+  mandato_no_asociable: "Solo la cuenta de una administración externa se asocia por invitación.",
+  invitacion_no_pendiente: "La invitación ya se aprobó o se aceptó: la lista ya está actualizada.",
 };
 
 /** Cómo se nombra cada campo de cada formulario en el resumen del error (G-49). */
@@ -154,6 +192,7 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
     fecha: "la fecha del acto",
     descripcion: "qué se decidió",
     referencia: "dónde consta",
+    sha256: "el acta",
   },
   alta: {
     tipo: "el tipo de mandato",
@@ -171,6 +210,10 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
     decision_id: "la asamblea que lo remueve",
     instrumento: "el documento que lo prueba",
   },
+  revision: { decision_id: "la asamblea que lo mantiene", eficaz_desde: "desde cuándo vuelve a operar" },
+  invitar: { correo: "el correo", referencia: "de dónde sale el correo" },
+  aprobar_invitacion: {},
+  retirar_invitacion: {},
 };
 
 /** Qué decir ante el error de un envío, según el estado y el código del cuerpo uniforme. */
@@ -353,6 +396,32 @@ export function Mandatos() {
   const [instrumento, setInstrumento] = useState("");
   const [decisionBaja, setDecisionBaja] = useState("");
   const [confirmarBaja, setConfirmarBaja] = useState(false);
+  /** G-44: el formulario de la baja se despliega a pedido; abrir un detalle no lo muestra. */
+  const [bajaAbierta, setBajaAbierta] = useState(false);
+  const botonAbrirBaja = useRef<HTMLButtonElement | null>(null);
+  const primerCampoBaja = useRef<HTMLElement | null>(null);
+
+  // Mantener un mandato pendiente de revisión (G-41).
+  const [decisionRevision, setDecisionRevision] = useState("");
+  const [eficazDesde, setEficazDesde] = useState("");
+  const claveRevision = useRef<string | null>(null);
+
+  // El acta de la decisión, elegida de Documentos (G-15): la base ya ata el acta por su huella (`0089`).
+  const veActas = puede("documentos.ver");
+  const cargaDocumentos = puede("documentos.cargar", "documentos.cargar_operativos");
+  const [actas, setActas] = useState<Lectura<Documento> | null>(null);
+  const pedidoActas = useRef(0);
+  const [actaElegida, setActaElegida] = useState("");
+  const [viendoActa, setViendoActa] = useState<{ documento: string; version: string; titulo: string } | null>(null);
+
+  // La invitación de la administración externa a asociar su cuenta (G-40; A7, cuatro ojos).
+  const [invitaciones, setInvitaciones] = useState<Lectura<InvitacionMandato> | null>(null);
+  const [correoInvitacion, setCorreoInvitacion] = useState("");
+  const [referenciaInvitacion, setReferenciaInvitacion] = useState("");
+  const [confirmarRetiroInvitacion, setConfirmarRetiroInvitacion] = useState(false);
+  const claveInvitar = useRef<string | null>(null);
+  const claveAprobar = useRef<string | null>(null);
+  const claveRetirarInvitacion = useRef<string | null>(null);
 
   useEffect(() => {
     if (enviando || foco.current === null) return;
@@ -370,6 +439,11 @@ export function Mandatos() {
     if (confirmarBaja) confirmarSi.current?.focus();
     else if (!enviando && document.activeElement === document.body) botonBaja.current?.focus();
   }, [confirmarBaja, enviando]);
+
+  // Al desplegar la baja, el foco va a su primer campo (G-44).
+  useEffect(() => {
+    if (bajaAbierta) primerCampoBaja.current?.focus();
+  }, [bajaAbierta]);
 
   // Al abrir un detalle, el foco va a su título: el lector de pantalla anuncia el resultado.
   useEffect(() => {
@@ -513,7 +587,8 @@ export function Mandatos() {
     void pedido(clave.current)
       .then(({ data, error, response }) => {
         exigirSesion(response);
-        if (data === undefined) {
+        // Retirar una invitación responde 204, sin cuerpo: lo que dice si salió es el estado.
+        if (!response.ok) {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
           // Un rechazo que nombra campos del formulario se dice junto a cada uno (G-49).
@@ -527,7 +602,7 @@ export function Mandatos() {
           return;
         }
         clave.current = null;
-        listo(data);
+        listo(data as T);
         setVuelta((v) => v + 1);
       })
       .catch((e: unknown) => {
@@ -540,6 +615,9 @@ export function Mandatos() {
 
   function registrarDecision(evento: FormEvent) {
     evento.preventDefault();
+    // La huella de la versión disponible del acta elegida: así la decisión la cita (`0089`).
+    const acta = actasElegibles.find((d) => d.id === actaElegida);
+    const actaParaEnviar = acta === undefined ? null : (disponibleDe(acta)?.sha256 ?? null);
     enviar(
       claveDecision,
       "decision",
@@ -552,6 +630,7 @@ export function Mandatos() {
             fecha: fechaDecision,
             descripcion: descripcionDecision.trim(),
             referencia: referencia.trim(),
+            sha256: actaParaEnviar,
           },
         }),
       (datos) => {
@@ -560,6 +639,7 @@ export function Mandatos() {
         setFechaDecision("");
         setDescripcionDecision("");
         setReferencia("");
+        setActaElegida("");
         const hecho = "Listo: la decisión quedó registrada.";
         setAviso({ texto: hecho, ok: true });
         setAbierto(null);
@@ -578,6 +658,7 @@ export function Mandatos() {
     evento.preventDefault();
     // El CUIT con el verificador mal ya se ve marcado en el campo: no se manda.
     if (externo && cuitConError(cuit)) return;
+    const nombreAlta = externo ? nombre.trim() : (elegibles.find((c) => c.persona_id === personaElegida)?.nombre ?? "");
     enviar(
       claveAlta,
       "alta",
@@ -596,7 +677,7 @@ export function Mandatos() {
             matricula: tipoMandato === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
           },
         }),
-      (datos) => {
+      () => {
         // Con el formulario vacío no se puede dar dos veces la misma alta con una clave nueva.
         setTipoMandato(TIPO_MANDATO_INICIAL);
         setPersona("");
@@ -606,11 +687,10 @@ export function Mandatos() {
         setDecisionAlta("");
         setDesde("");
         setHasta("");
-        const hecho = "Listo: el mandato quedó dado de alta.";
-        setAviso({ texto: hecho, ok: true });
+        // G-44: el «Listo» con lo que pasó, sin abrir el detalle (que ofrecería deshacerlo).
+        const asociar = externo ? " Para asociar la cuenta de la administración, abrir su detalle e invitarla." : "";
+        setAviso({ texto: `Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.${asociar}`, ok: true });
         setAbierto(null);
-        origenDetalle.current = botonAlta.current;
-        if (veMandatos) pedirMandato(datos.id, hecho);
       },
     );
   }
@@ -618,6 +698,7 @@ export function Mandatos() {
   function limpiarBaja() {
     claveBaja.current = null;
     setConfirmarBaja(false);
+    setBajaAbierta(false);
     setDescripcionBaja("");
     setInstrumento("");
     setDecisionBaja("");
@@ -702,8 +783,11 @@ export function Mandatos() {
         if (data !== undefined) {
           // Lo escrito para otro mandato no pasa a este.
           limpiarBaja();
+          limpiarRevision();
+          limpiarInvitacion();
           setCausa(data.estado === "terminado" ? "error_carga" : "renuncia");
           setDetalle({ tipo: "mandato", datos: data });
+          if (admiteInvitacion(data)) pedirInvitaciones(data.id);
           return;
         }
         if (response.status === ESTADO.sinPermiso) falloDetalle("Esta cuenta no tiene permiso para ver ese mandato.", hecho);
@@ -738,6 +822,8 @@ export function Mandatos() {
         if (numero !== pedidoDetalle.current) return;
         if (data !== undefined) {
           setDetalle({ tipo: "decision", datos: data });
+          // Con acta, se busca en Documentos para ofrecer verla (G-15).
+          if (data.sha256 !== null) pedirActas();
           return;
         }
         if (response.status === ESTADO.sinPermiso) falloDetalle("Esta cuenta no tiene permiso para ver esa decisión.", hecho);
@@ -752,9 +838,165 @@ export function Mandatos() {
       });
   }
 
+  /** Las actas de Documentos, una vez por edificio: al abrir el formulario de la decisión o un detalle
+   * con acta. Si no se pudieron consultar, se vuelven a pedir la próxima vez. */
+  function pedirActas() {
+    if (!veActas || consorcio === "" || (actas !== null && actas.tipo !== "sin_servicio")) return;
+    const numero = ++pedidoActas.current;
+    setActas(CARGANDO);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (numero !== pedidoActas.current) return;
+        if (data !== undefined) setActas({ tipo: "ok", elementos: data.documentos });
+        else setActas(response.status === ESTADO.sinPermiso ? SIN_PERMISO_DE_LECTURA : SIN_SERVICIO);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (numero === pedidoActas.current) setActas(SIN_SERVICIO);
+      });
+  }
+
+  /** Abre uno de los dos formularios de arriba; el de la decisión pide las actas para elegir. */
+  function abrirFormulario(cual: FormularioAbierto | null) {
+    if (cual === "decision") pedirActas();
+    setAbierto(cual);
+  }
+
+  /** Un mandato externo sin cuenta, que todavía rige o va a regir, admite la invitación (A7). */
+  function admiteInvitacion(m: MandatoDetalle): boolean {
+    return (
+      m.tipo === "administrador_externo" && !m.con_cuenta && ESTADOS_CON_INVITACION.includes(m.estado) && puede("mandatos.ver_asociaciones")
+    );
+  }
+
+  function pedirInvitaciones(mandato: string) {
+    const numero = pedidoDetalle.current;
+    setInvitaciones(CARGANDO);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones", {
+        params: { path: { consorcio_id: consorcio, mandato_id: mandato } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (numero !== pedidoDetalle.current) return;
+        if (data !== undefined) setInvitaciones({ tipo: "ok", elementos: data.elementos });
+        else setInvitaciones(response.status === ESTADO.sinPermiso ? SIN_PERMISO_DE_LECTURA : SIN_SERVICIO);
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (numero === pedidoDetalle.current) setInvitaciones(SIN_SERVICIO);
+      });
+  }
+
+  function limpiarInvitacion() {
+    for (const clave of [claveInvitar, claveAprobar, claveRetirarInvitacion]) clave.current = null;
+    setInvitaciones(null);
+    setCorreoInvitacion("");
+    setReferenciaInvitacion("");
+    setConfirmarRetiroInvitacion(false);
+  }
+
+  function limpiarRevision() {
+    claveRevision.current = null;
+    setDecisionRevision("");
+    setEficazDesde("");
+  }
+
+  /** Emitir la invitación: queda por aprobar, sin correo (A7). */
+  function invitar(evento: FormEvent, mandato: MandatoDetalle) {
+    evento.preventDefault();
+    enviar(
+      claveInvitar,
+      "invitar",
+      (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/invitaciones", {
+          params: { path: { consorcio_id: consorcio, mandato_id: mandato.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          headers: encabezadoCsrf(),
+          body: { correo: correoInvitacion.trim(), referencia: referenciaInvitacion.trim() },
+        }),
+      () => {
+        setCorreoInvitacion("");
+        setReferenciaInvitacion("");
+        setAviso({ texto: `Listo: la invitación a ${mandato.nombre} quedó por aprobar. ${AYUDA_INVITAR}`, ok: true, formulario: "invitar" });
+        pedirInvitaciones(mandato.id);
+      },
+    );
+  }
+
+  /** Aprobar la invitación que emitió otra persona: recién ahí sale el correo con el enlace. */
+  function aprobarInvitacion(invitacion: InvitacionMandato, mandato: MandatoDetalle) {
+    enviar(
+      claveAprobar,
+      "aprobar_invitacion",
+      (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/invitaciones-mandato/{invitacion_id}/aprobar", {
+          params: { path: { consorcio_id: consorcio, invitacion_id: invitacion.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          headers: encabezadoCsrf(),
+        }),
+      (datos) => {
+        setAviso({
+          texto: `Listo: la invitación quedó aprobada y salió el correo con el enlace a ${mandato.nombre}. Vence el ${momento(datos.vence_en)}.`,
+          ok: true,
+          formulario: "aprobar_invitacion",
+        });
+        pedirInvitaciones(mandato.id);
+      },
+      (estado) => {
+        if (estado === ESTADO.noEncontrado || estado === ESTADO.conflicto) pedirInvitaciones(mandato.id);
+      },
+    );
+  }
+
+  /** Retirar la invitación que no se aceptó: el enlace, si salió, deja de servir. */
+  function retirarInvitacion(invitacion: InvitacionMandato, mandato: MandatoDetalle) {
+    enviar(
+      claveRetirarInvitacion,
+      "retirar_invitacion",
+      (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/invitaciones-mandato/{invitacion_id}/revocar", {
+          params: { path: { consorcio_id: consorcio, invitacion_id: invitacion.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          headers: encabezadoCsrf(),
+        }),
+      () => {
+        setConfirmarRetiroInvitacion(false);
+        setAviso({ texto: "Listo: la invitación se retiró. Si el correo ya había salido, su enlace ya no sirve.", ok: true, formulario: "retirar_invitacion" });
+        pedirInvitaciones(mandato.id);
+      },
+      () => setConfirmarRetiroInvitacion(false),
+    );
+  }
+
+  /** Mantener un mandato pendiente de revisión, con una asamblea y desde una fecha (G-41, E62). */
+  function mantener(evento: FormEvent, mandato: MandatoDetalle) {
+    evento.preventDefault();
+    enviar(
+      claveRevision,
+      "revision",
+      (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/revision", {
+          params: { path: { consorcio_id: consorcio, mandato_id: mandato.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          headers: encabezadoCsrf(),
+          body: { decision_id: decisionRevision, eficaz_desde: eficazDesde },
+        }),
+      (datos) => {
+        limpiarRevision();
+        pedidoDetalle.current += 1;
+        setDetalle(null);
+        setAviso({ texto: `Listo: el mandato de ${mandato.nombre} se mantiene y vuelve a operar desde el ${dia(datos.eficaz_desde)}.`, ok: true });
+      },
+    );
+  }
+
   function elegirEdificio(valor: string) {
     // Nada del edificio anterior queda elegible mientras llegan los datos del nuevo.
     for (const clave of [claveDecision, claveAlta, claveBaja]) clave.current = null;
+    pedidoActas.current += 1;
+    setActas(null);
+    setActaElegida("");
+    limpiarInvitacion();
+    limpiarRevision();
     pedidoDetalle.current += 1;
     setMandatos(CARGANDO);
     setDecisiones(CARGANDO);
@@ -778,6 +1020,22 @@ export function Mandatos() {
   // Sin una asamblea que usar no hay remoción. Sin la lista todavía no se sabe y sigue a la vista.
   const sinRemocion = decisiones.tipo === "ok" && asambleas.length === 0 && causa !== "remocion";
   const textoDecision = (d: Decision) => `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}: ${d.descripcion}`;
+  // Las actas que se pueden elegir: las de «Actas y decisiones» con un archivo disponible (G-15).
+  const actasElegibles =
+    actas?.tipo === "ok" ? actas.elementos.filter((d) => d.categoria === "actas_y_decisiones" && disponibleDe(d) !== undefined) : [];
+  /** El documento cuyo archivo disponible tiene esa huella: el acta de la decisión, para verla. */
+  const actaDeLaHuella = (sha256: string) => {
+    if (actas?.tipo !== "ok") return undefined;
+    for (const documento of actas.elementos) {
+      const version = documento.versiones.find((v) => v.estado === "disponible" && v.sha256.toLowerCase() === sha256.toLowerCase());
+      if (version !== undefined) return { documento, version };
+    }
+    return undefined;
+  };
+  // G-42: sin una decisión que se pueda usar, el paso que sigue es registrarla (la registra una
+  // persona y da el alta otra); con alguna, el alta.
+  const altaEsElPaso = !registraDecisiones || decisiones.tipo !== "ok" || usables.length > 0;
+  const nadaAbierto = abierto === null && detalle === null;
   const conMensaje = (aviso !== null && aviso.formulario === undefined) || pantalla.tipo !== "lista";
   /** El aviso en su lugar: arriba el de la página y junto a su formulario el de un envío rechazado. */
   const avisoEn = (formulario?: Accion) =>
@@ -849,10 +1107,10 @@ export function Mandatos() {
                 <button
                   type="button"
                   ref={botonAlta}
-                  className={abierto === null && detalle === null ? undefined : "secundario"}
+                  className={nadaAbierto && altaEsElPaso ? undefined : "secundario"}
                   aria-expanded={abierto === "alta"}
                   disabled={enviando}
-                  onClick={() => setAbierto(abierto === "alta" ? null : "alta")}
+                  onClick={() => abrirFormulario(abierto === "alta" ? null : "alta")}
                 >
                   Dar de alta un mandato
                 </button>
@@ -861,10 +1119,10 @@ export function Mandatos() {
                 <button
                   type="button"
                   ref={botonDecision}
-                  className="secundario"
+                  className={nadaAbierto && ofreceAlta && !altaEsElPaso ? undefined : "secundario"}
                   aria-expanded={abierto === "decision"}
                   disabled={enviando}
-                  onClick={() => setAbierto(abierto === "decision" ? null : "decision")}
+                  onClick={() => abrirFormulario(abierto === "decision" ? null : "decision")}
                 >
                   Registrar una decisión
                 </button>
@@ -930,6 +1188,43 @@ export function Mandatos() {
                 onValor={cambiar(claveDecision, setReferencia, "referencia")}
               />
               <ErrorDeCampo idCampo={`${id}-referencia`} mensaje={errorEn("decision", "referencia")} />
+              {veActas && actas?.tipo !== "sin_permiso" && (
+                <>
+                  {actas?.tipo === "ok" ? (
+                    <>
+                      <label htmlFor={`${id}-acta`}>Acta (opcional)</label>
+                      <select
+                        id={`${id}-acta`}
+                        {...marcaDe(`${id}-acta`, errorEn("decision", "sha256"), `${id}-ayuda-acta`)}
+                        value={actaElegida}
+                        disabled={enviando}
+                        onChange={(e) => cambiar(claveDecision, setActaElegida, "sha256")(e.target.value)}
+                      >
+                        <option value="">Sin un acta de Documentos</option>
+                        {actasElegibles.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {recortar(`${d.titulo} (${dia(d.fecha)})`)}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  ) : actas?.tipo === "sin_servicio" ? (
+                    <p>No se pudieron consultar las actas de Documentos: la decisión se puede registrar sin ella.</p>
+                  ) : (
+                    <p>Consultando las actas de Documentos…</p>
+                  )}
+                  <p id={`${id}-ayuda-acta`}>
+                    El acta se elige de Documentos, categoría «Actas y decisiones», y queda vinculada a la decisión.
+                    {cargaDocumentos && (
+                      <>
+                        {" "}Si todavía no está, cargarla antes en <Link to={RUTA_DOCUMENTOS}>Documentos</Link>.
+                      </>
+                    )}
+                  </p>
+                  <ErrorDeCampo idCampo={`${id}-acta`} mensaje={errorEn("decision", "sha256")} />
+                </>
+              )}
+              <p>{QUIEN_DA_EL_ALTA}</p>
               <div className="acciones">
                 <button type="submit" disabled={enviando}>
                   Registrar decisión
@@ -961,7 +1256,25 @@ export function Mandatos() {
                 {consultarDeNuevo(`${id}-alta`)}
               </>
             )}
-            {candidatos.tipo === "ok" && decisiones.tipo === "ok" && (
+            {candidatos.tipo === "ok" && decisiones.tipo === "ok" && usables.length === 0 && (
+              // G-42: antes del formulario, lo que falta para poder darlo.
+              <>
+                <p>
+                  {ALTA_SIN_DECISION_USABLE}{" "}
+                  {listaDecisiones.length === 0
+                    ? "Todavía no hay ninguna registrada."
+                    : "Las de este edificio las registró esta cuenta: el alta la tiene que dar otra persona del Consejo o de la administración."}
+                </p>
+                {registraDecisiones && (
+                  <p>
+                    <button type="button" onClick={() => abrirFormulario("decision")} disabled={enviando}>
+                      Registrar una decisión
+                    </button>
+                  </p>
+                )}
+              </>
+            )}
+            {candidatos.tipo === "ok" && decisiones.tipo === "ok" && usables.length > 0 && (
               <form className="formulario formulario-movil" onSubmit={darDeAlta}>
                 <label htmlFor={`${id}-tipo-mandato`}>Tipo de mandato</label>
                 <select
@@ -1044,14 +1357,7 @@ export function Mandatos() {
                     <ErrorDeCampo idCampo={`${id}-matricula`} mensaje={errorEn("alta", "matricula")} />
                   </>
                 )}
-                {usables.length === 0 ? (
-                  <p>
-                    {listaDecisiones.length === 0
-                      ? "Todavía no hay decisiones registradas: sin una que lo respalde no se puede dar el mandato."
-                      : "Las decisiones de este edificio las registró esta cuenta, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
-                  </p>
-                ) : (
-                  <>
+                <>
                     <label htmlFor={`${id}-decision-alta`}>Decisión que lo respalda</label>
                     <select
                       id={`${id}-decision-alta`}
@@ -1069,8 +1375,7 @@ export function Mandatos() {
                       ))}
                     </select>
                     <ErrorDeCampo idCampo={`${id}-decision-alta`} mensaje={errorEn("alta", "decision_id")} />
-                  </>
-                )}
+                </>
                 <label htmlFor={`${id}-desde`}>Desde</label>
                 <input
                   id={`${id}-desde`}
@@ -1098,7 +1403,7 @@ export function Mandatos() {
                     hasta === desde &&
                     "Con «hasta» igual a «desde» el mandato nunca rige: el último día es el anterior a «hasta»."}
                 </p>
-                {(externo || elegibles.length > 0) && usables.length > 0 && (
+                {(externo || elegibles.length > 0) && (
                   <button type="submit" disabled={enviando}>
                     Dar de alta
                   </button>
@@ -1188,12 +1493,29 @@ export function Mandatos() {
                 <dd>{detalle.datos.descripcion}</dd>
                 <dt>Dónde consta</dt>
                 <dd>{detalle.datos.referencia}</dd>
-                {detalle.datos.sha256 && (
-                  <>
-                    <dt>Huella del acta</dt>
-                    <dd>{detalle.datos.sha256}</dd>
-                  </>
-                )}
+                {detalle.datos.sha256 !== null &&
+                  ((acta) =>
+                    acta === undefined ? (
+                      <>
+                        <dt>Huella del acta</dt>
+                        <dd>{detalle.datos.sha256}</dd>
+                      </>
+                    ) : (
+                      // G-15: el acta vinculada, para abrirla desde la decisión.
+                      <>
+                        <dt>Acta</dt>
+                        <dd>
+                          {acta.documento.titulo}{" "}
+                          <button
+                            type="button"
+                            className="secundario"
+                            onClick={() => setViendoActa({ documento: acta.documento.id, version: acta.version.id, titulo: acta.documento.titulo })}
+                          >
+                            Ver el acta
+                          </button>
+                        </dd>
+                      </>
+                    ))(actaDeLaHuella(detalle.datos.sha256))}
                 <dt>Quién la registró</dt>
                 <dd>
                   {detalle.datos.registrada_por_vos
@@ -1289,7 +1611,71 @@ export function Mandatos() {
                 )}
               </dl>
 
-              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && (
+              {detalle.datos.estado === "pendiente_revision" && (
+                <section aria-labelledby={`${id}-revision`}>
+                  <h3 id={`${id}-revision`}>Por qué está pendiente de revisión</h3>
+                  <p>{CAUSA_REVISION}</p>
+                  {/* Con la baja desplegada, mantenerlo se pliega: un solo acto a la vista. */}
+                  {puede("mandatos.resolver_revision") && !detalle.datos.es_propio && !bajaAbierta && (
+                    asambleas.length === 0 ? (
+                      <p>
+                        Para mantenerlo hace falta una asamblea registrada por otra persona, y no hay ninguna que esta cuenta
+                        pueda usar.
+                      </p>
+                    ) : (
+                      <form className="formulario formulario-movil" onSubmit={(e) => mantener(e, detalle.datos)}>
+                        <label htmlFor={`${id}-decision-revision`}>Asamblea que lo mantiene</label>
+                        <select
+                          id={`${id}-decision-revision`}
+                          {...marcaDe(`${id}-decision-revision`, errorEn("revision", "decision_id"))}
+                          value={decisionRevision}
+                          required
+                          disabled={enviando}
+                          onChange={(e) => cambiar(claveRevision, setDecisionRevision, "decision_id")(e.target.value)}
+                        >
+                          <option value="">Elegir la asamblea</option>
+                          {asambleas.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {recortar(textoDecision(d))}
+                            </option>
+                          ))}
+                        </select>
+                        <ErrorDeCampo idCampo={`${id}-decision-revision`} mensaje={errorEn("revision", "decision_id")} />
+                        <label htmlFor={`${id}-eficaz-desde`}>Desde cuándo vuelve a operar</label>
+                        <input
+                          id={`${id}-eficaz-desde`}
+                          {...marcaDe(`${id}-eficaz-desde`, errorEn("revision", "eficaz_desde"))}
+                          type="date"
+                          required
+                          disabled={enviando}
+                          value={eficazDesde}
+                          onChange={(e) => cambiar(claveRevision, setEficazDesde, "eficaz_desde")(e.target.value)}
+                        />
+                        <ErrorDeCampo idCampo={`${id}-eficaz-desde`} mensaje={errorEn("revision", "eficaz_desde")} />
+                        <p>
+                          <button type="submit" className={abierto === null ? undefined : "secundario"} disabled={enviando}>
+                            Mantener el mandato
+                          </button>
+                        </p>
+                      </form>
+                    )
+                  )}
+                  {avisoEn("revision")}
+                </section>
+              )}
+
+              {admiteInvitacion(detalle.datos) && !bajaAbierta && invitaciones !== null && invitaciones.tipo !== "sin_permiso" &&
+                seccionInvitacion(detalle.datos, invitaciones)}
+
+              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && !bajaAbierta && (
+                // G-44 y G-45: la baja no se ve desplegada al abrir el detalle; un terminado solo se anula.
+                <p>
+                  <button type="button" className="secundario peligro" ref={botonAbrirBaja} disabled={enviando} onClick={() => setBajaAbierta(true)}>
+                    {detalle.datos.estado === "terminado" ? "Anular por error de carga…" : "Dar de baja…"}
+                  </button>
+                </p>
+              )}
+              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && bajaAbierta && (
                 <form
                   ref={formularioBaja}
                   className="formulario formulario-movil"
@@ -1298,25 +1684,37 @@ export function Mandatos() {
                     setConfirmarBaja(true);
                   }}
                 >
-                  <h3>Dar de baja</h3>
-                  <label htmlFor={`${id}-causa`}>Causa</label>
-                  <select
-                    id={`${id}-causa`}
-                    {...marcaDe(`${id}-causa`, errorEn("baja", "causa"))}
-                    value={causa}
-                    disabled={enviando}
-                    onChange={(e) => cambiarBaja(setCausa, "causa")(e.target.value as CausaBaja)}
-                  >
-                    {(detalle.datos.estado === "terminado" ? CAUSAS_TERMINADO : CAUSAS).filter((c) => c !== "remocion" || !sinRemocion).map((c) => (
-                      <option key={c} value={c}>
-                        {TEXTO_CAUSA[c]}
-                      </option>
-                    ))}
-                  </select>
-                  <ErrorDeCampo idCampo={`${id}-causa`} mensaje={errorEn("baja", "causa")} />
+                  <h3>{detalle.datos.estado === "terminado" ? "Anular por error de carga" : "Dar de baja"}</h3>
+                  {detalle.datos.estado === "terminado" ? (
+                    <p>Un mandato que ya terminó por su fecha solo se anula si se cargó por error: así consta que nunca valió.</p>
+                  ) : (
+                    <>
+                      <label htmlFor={`${id}-causa`}>Causa</label>
+                      <select
+                        id={`${id}-causa`}
+                        ref={(e) => {
+                          primerCampoBaja.current = e;
+                        }}
+                        {...marcaDe(`${id}-causa`, errorEn("baja", "causa"))}
+                        value={causa}
+                        disabled={enviando}
+                        onChange={(e) => cambiarBaja(setCausa, "causa")(e.target.value as CausaBaja)}
+                      >
+                        {CAUSAS.filter((c) => c !== "remocion" || !sinRemocion).map((c) => (
+                          <option key={c} value={c}>
+                            {TEXTO_CAUSA[c]}
+                          </option>
+                        ))}
+                      </select>
+                      <ErrorDeCampo idCampo={`${id}-causa`} mensaje={errorEn("baja", "causa")} />
+                    </>
+                  )}
                   <label htmlFor={`${id}-descripcion-baja`}>Por qué termina</label>
                   <input
                     id={`${id}-descripcion-baja`}
+                    ref={(e) => {
+                      if (detalle.datos.estado === "terminado") primerCampoBaja.current = e;
+                    }}
                     {...marcaDe(`${id}-descripcion-baja`, errorEn("baja", "descripcion"))}
                     type="text"
                     autoComplete="off"
@@ -1369,19 +1767,35 @@ export function Mandatos() {
                   {confirmarBaja ? (
                     <div role="group" aria-labelledby={`${id}-confirmar-baja`}>
                       <p id={`${id}-confirmar-baja`}>
-                        ¿Dar de baja el mandato de {detalle.datos.nombre}? La baja no se puede deshacer.
+                        {detalle.datos.estado === "terminado"
+                          ? `¿Anular el mandato de ${detalle.datos.nombre} por error de carga? No se puede deshacer.`
+                          : `¿Dar de baja el mandato de ${detalle.datos.nombre}? La baja no se puede deshacer.`}
                       </p>
                       <button type="button" className="peligro" ref={confirmarSi} onClick={() => darDeBaja(detalle.datos)} disabled={enviando}>
-                        Sí, dar de baja
+                        {detalle.datos.estado === "terminado" ? "Sí, anular" : "Sí, dar de baja"}
                       </button>{" "}
                       <button type="button" className="secundario" onClick={() => setConfirmarBaja(false)} disabled={enviando}>
                         No
                       </button>
                     </div>
                   ) : (
-                    <button type="submit" className={abierto === null ? "peligro" : "secundario peligro"} ref={botonBaja} disabled={enviando}>
-                      Dar de baja
-                    </button>
+                    <p>
+                      <button type="submit" className={abierto === null ? "peligro" : "secundario peligro"} ref={botonBaja} disabled={enviando}>
+                        {detalle.datos.estado === "terminado" ? "Anular" : "Dar de baja"}
+                      </button>{" "}
+                      <button
+                        type="button"
+                        className="secundario"
+                        disabled={enviando}
+                        onClick={() => {
+                          limpiarBaja();
+                          setErrores(null);
+                          setAviso((actual) => (actual?.formulario === "baja" ? null : actual));
+                        }}
+                      >
+                        Cancelar
+                      </button>
+                    </p>
                   )}
                 </form>
               )}
@@ -1392,8 +1806,149 @@ export function Mandatos() {
             </section>
           )}
 
+          {viendoActa !== null && (
+            <VisorDocumento consorcio={consorcio} documento={viendoActa.documento} version={viendoActa.version} nombre={viendoActa.titulo}
+              alCerrar={() => setViendoActa(null)} aEntrar={aEntrar} />
+          )}
         </>
       )}
     </>
   );
+
+  /** La cuenta de la administración externa: la invitación, con sus cuatro ojos (G-40, A7). */
+  function seccionInvitacion(mandato: MandatoDetalle, lectura: Lectura<InvitacionMandato>) {
+    const titulo = `${id}-invitacion`;
+    const ultima = lectura.tipo === "ok" ? lectura.elementos[0] : undefined;
+    const enCurso = ultima !== undefined && (ultima.estado === "por_aprobar" || ultima.estado === "pendiente") ? ultima : undefined;
+    return (
+      <section aria-labelledby={titulo}>
+        <h3 id={titulo}>Cuenta de la administración</h3>
+        {lectura.tipo === "cargando" && <p>Consultando…</p>}
+        {lectura.tipo === "sin_servicio" && (
+          <>
+            <p>No se pudo consultar la invitación.</p>
+            <button className="secundario" type="button" onClick={() => pedirInvitaciones(mandato.id)} disabled={enviando} aria-describedby={titulo}>
+              Consultar de nuevo
+            </button>
+          </>
+        )}
+        {lectura.tipo === "ok" && enCurso !== undefined && (
+          <>
+            {enCurso.estado === "por_aprobar" ? (
+              <>
+                <p>Invitación por aprobar: todavía no salió ningún correo.</p>
+                <dl className="detalles">
+                  {enCurso.correo !== null && (
+                    <>
+                      <dt>Correo</dt>
+                      <dd>{enCurso.correo}</dd>
+                    </>
+                  )}
+                  {enCurso.referencia !== null && (
+                    <>
+                      <dt>De dónde sale el correo</dt>
+                      <dd>{enCurso.referencia}</dd>
+                    </>
+                  )}
+                  <dt>Emitida el</dt>
+                  <dd>{momento(enCurso.creada_en)}</dd>
+                </dl>
+                {enCurso.emitida_por_mi ? (
+                  <p>La emitió esta cuenta: la aprueba otra persona del Consejo o de la administración.</p>
+                ) : (
+                  puede("mandatos.aprobar_asociacion") && (
+                    <p>
+                      <button
+                        type="button"
+                        className={abierto === null ? undefined : "secundario"}
+                        disabled={enviando}
+                        onClick={() => aprobarInvitacion(enCurso, mandato)}
+                      >
+                        Aprobar la invitación
+                      </button>
+                    </p>
+                  )
+                )}
+              </>
+            ) : (
+              <p>
+                Invitación enviada: el correo con el enlace salió
+                {enCurso.vence_en ? ` y vence el ${momento(enCurso.vence_en)}` : ""}. Falta que la administración la acepte.
+              </p>
+            )}
+            {puede("mandatos.revocar_asociacion") &&
+              (confirmarRetiroInvitacion ? (
+                <div role="group" aria-labelledby={`${titulo}-confirmar`}>
+                  <p id={`${titulo}-confirmar`}>¿Retirar la invitación? Si el correo ya salió, su enlace deja de servir.</p>
+                  <button type="button" className="peligro" disabled={enviando} onClick={() => retirarInvitacion(enCurso, mandato)}>
+                    Sí, retirarla
+                  </button>{" "}
+                  <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmarRetiroInvitacion(false)}>
+                    No
+                  </button>
+                </div>
+              ) : (
+                <p>
+                  <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setConfirmarRetiroInvitacion(true)}>
+                    Retirar la invitación
+                  </button>
+                </p>
+              ))}
+          </>
+        )}
+        {lectura.tipo === "ok" && enCurso === undefined && (
+          <>
+            <p>
+              {ultima?.estado === "vencida"
+                ? "La invitación anterior venció sin que nadie la aceptara."
+                : ultima?.estado === "revocada"
+                  ? "La invitación anterior se retiró."
+                  : "La administración todavía no tiene una cuenta asociada: se asocia por invitación a su correo."}
+            </p>
+            {puede("mandatos.asociar_persona") && (
+              <form className="formulario formulario-movil" onSubmit={(e) => invitar(e, mandato)} aria-labelledby={`${titulo}-invitar`}>
+                <h4 id={`${titulo}-invitar`}>Invitar a la administración a asociar su cuenta</h4>
+                <label htmlFor={`${titulo}-correo`}>Correo de la administración</label>
+                <input
+                  id={`${titulo}-correo`}
+                  {...marcaDe(`${titulo}-correo`, errorEn("invitar", "correo"))}
+                  type="email"
+                  autoComplete="off"
+                  maxLength={LARGO_CORREO}
+                  required
+                  disabled={enviando}
+                  value={correoInvitacion}
+                  onChange={(e) => cambiar(claveInvitar, setCorreoInvitacion, "correo")(e.target.value)}
+                />
+                <ErrorDeCampo idCampo={`${titulo}-correo`} mensaje={errorEn("invitar", "correo")} />
+                <label htmlFor={`${titulo}-referencia`}>De dónde sale ese correo (contrato, nota u otro)</label>
+                <TextoDeUnaLinea
+                  id={`${titulo}-referencia`}
+                  {...marcaDe(`${titulo}-referencia`, errorEn("invitar", "referencia"), `${titulo}-ayuda`)}
+                  rows={FILAS_REFERENCIA}
+                  autoComplete="off"
+                  maxLength={LARGO_REFERENCIA}
+                  required
+                  disabled={enviando}
+                  value={referenciaInvitacion}
+                  onValor={cambiar(claveInvitar, setReferenciaInvitacion, "referencia")}
+                />
+                <ErrorDeCampo idCampo={`${titulo}-referencia`} mensaje={errorEn("invitar", "referencia")} />
+                <p id={`${titulo}-ayuda`}>{AYUDA_INVITAR}</p>
+                <p>
+                  {/* Con un formulario de arriba abierto, el principal es el suyo. */}
+                  <button type="submit" className={abierto === null ? undefined : "secundario"} disabled={enviando}>
+                    Invitar
+                  </button>
+                </p>
+              </form>
+            )}
+          </>
+        )}
+        {avisoEn("invitar")}
+        {avisoEn("aprobar_invitacion")}
+        {avisoEn("retirar_invitacion")}
+      </section>
+    );
+  }
 }

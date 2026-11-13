@@ -62,7 +62,7 @@ cuerpo adentro y se borra lo demás, también `aviso_pendientes` (sin datos del 
 solo reinicia la cuenta del tope).
 
 Revisión: 0098
-Anterior: 0096 (al fusionar, después de la 0097 de la tanda 6)
+Anterior: 0097
 """
 
 import re
@@ -71,7 +71,7 @@ from alembic import op
 from sqlalchemy import text
 
 revision = "0098"
-down_revision = "0096"
+down_revision = "0097"
 branch_labels = None
 depends_on = None
 
