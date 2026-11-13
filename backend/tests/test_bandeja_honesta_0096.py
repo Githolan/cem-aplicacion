@@ -36,7 +36,6 @@ from tests.test_egresos_1a import (
     RENOVAR,
     aprobada,
     confirmado,
-    conocido,
     envejecer,
     enviada,
     franja,
@@ -333,7 +332,8 @@ def test_antes_de_guardar_avisa_la_parecida_no_rutinaria(motor_migrate, e):
 
 
 def test_una_orden_rutinaria_guardada_no_cuenta_como_parecida(motor_migrate, e):
-    conocido(motor_migrate, e)
+    # La orden que hace conocido al proveedor, con otro importe: no rutinaria, sí contaría.
+    aprobada(motor_migrate, e, importe=2_345_600)
     r = enviada(motor_migrate, e, contrato=confirmado(motor_migrate, e))
     assert franja(motor_migrate, r) == "rutinaria"
     datos = {"proveedor_id": e.proveedor, "importe_centavos": 1_234_500, "moneda": "ARS"}
@@ -572,7 +572,7 @@ def test_0096_baja_y_sube(base_aparte):
         "columnas": "select count(*) from information_schema.columns where table_schema = 'nucleo'"
         " and table_name = 'orden_pago' and column_name like '%sin_pago%'",
         "retirar": "select count(*) from pg_proc where proname = 'retirar_orden_pago'"
-        " and prosrc like '%o.estado <> ''borrador'' and not exists%'",
+        " and prosrc like '%make_interval(days => dias_borrador_viejo)%'",
         "consulta": "select count(*) from pg_proc where proname = 'pagos_consulta_lectura'"
         " and 'creada_en' = any(proargnames)",
     }
