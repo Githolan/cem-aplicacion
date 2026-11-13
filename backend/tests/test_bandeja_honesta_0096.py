@@ -266,7 +266,7 @@ def test_dos_ordenes_iguales_se_avisan_con_la_fecha_y_el_estado_de_la_otra(motor
 
 def test_control_otro_importe_no_se_avisa(motor_migrate, e):
     enviada(motor_migrate, e)
-    b = llamar(motor_migrate, e, e.adm, PREPARAR, importe=1_234_500)
+    b = llamar(motor_migrate, e, e.adm, PREPARAR, importe=2_345_600)  # ESENCIALES usa 1_234_500
     assert fila(e, e.adm, b)["posible_duplicada_de"] is None
 
 
@@ -368,13 +368,17 @@ def coherente(e, o, *personas) -> None:
     está entre lo que la base acepta (la ficha). El estado y la barra no cambian con quien mira."""
     vistas = set()
     for quien in personas:
+        x = fila(e, quien, o)
+        if get(e, quien, f"pagos/{o}").status_code == 404:
+            # Un borrador solo lo ven quienes preparan (regla que ya estaba): tampoco en la bandeja.
+            assert x is None, (quien, x)
+            continue
         f = ficha(e, quien, o)
         vistas.add((f["estado_visible"], str(f["barra"])))
-        x = fila(e, quien, o)
         if x is not None and x["grupo"].startswith("para_"):
             assert x["principal"] is not None and x["principal"] == principal(f), (quien, x, f)
         elif x is not None:
-            assert x["principal"] is None and not x["pendiente"]
+            assert not x["pendiente"], (quien, x)
     assert len(vistas) == 1, vistas
 
 

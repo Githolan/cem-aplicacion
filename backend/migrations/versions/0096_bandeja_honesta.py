@@ -55,7 +55,8 @@ CONSULTA = "nucleo.pagos_consulta_lectura(text, text[], integer, integer, text, 
 CONSULTA_CAMBIOS = (
     (
         " importe_pagado_centavos bigint)\n",
-        " importe_pagado_centavos bigint, creada_en timestamptz)\n",
+        # Como lo escribe `pg_get_functiondef`: la bajada busca este mismo texto.
+        " importe_pagado_centavos bigint, creada_en timestamp with time zone)\n",
     ),
     (
         "                  then nucleo.centavos_de(f.importe_real) end\n        from pagina g\n",
