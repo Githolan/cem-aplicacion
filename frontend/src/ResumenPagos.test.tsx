@@ -315,6 +315,7 @@ describe("volver del alta de la verificación", () => {
     await screen.findByText("Nada pendiente.");
     fireEvent.click(screen.getByRole("link", { name: "Ir al alta" }));
     fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar" }));
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
     await screen.findByText("Listo: el segundo factor quedó desactivado.");
   }

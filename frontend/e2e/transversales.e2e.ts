@@ -108,8 +108,8 @@ test.describe("entrar encima", () => {
     if (ventana.width < ANCHO_HOJA_CENTRADA_PX) expect(caja!.y + caja!.height).toBeCloseTo(ventana.height, 0);
     await sinDesborde(page);
 
-    await hoja.getByRole("button", { name: "Entrar con un código" }).click();
-    await expect(hoja.getByLabel("Correo")).toHaveValue("ana@ejemplo.com");
+    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
+    await expect(hoja.getByLabel("Correo", { exact: true })).toHaveValue("ana@ejemplo.com");
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
@@ -133,7 +133,7 @@ test.describe("entrar encima", () => {
     await guardar(page);
 
     const hoja = page.getByRole("dialog", { name: "Tu sesión venció" });
-    await hoja.getByRole("button", { name: "Entrar con un código" }).click();
+    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
@@ -202,7 +202,7 @@ test.describe("hojas superpuestas", () => {
     await expect(entrar).toBeVisible();
     const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
     // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
-    await entrar.getByRole("button", { name: "Entrar con un código" }).click();
+    await entrar.getByRole("button", { name: "Ya tengo un código" }).click();
     await entrar.getByLabel(/Código de/).fill("042917");
     await sinFaltasDeAccesibilidad(page);
     await entrar.getByRole("button", { name: "Entrar con el código" }).click();
@@ -257,7 +257,7 @@ test.describe("entrar encima en mi cuenta", () => {
     await expect(hoja).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/cuenta");
 
-    await hoja.getByRole("button", { name: "Entrar con un código" }).click();
+    await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
     await hoja.getByLabel(/Código de/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 

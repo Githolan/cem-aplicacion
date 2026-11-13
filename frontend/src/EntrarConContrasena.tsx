@@ -4,6 +4,7 @@ import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
 import { codigoVerificacion } from "./SegundoFactor";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { recordarFormaDeEntrar } from "./formaDeEntrar";
 import { useIrTrasEntrar } from "./sesion";
 
 // Entrar con correo y contraseña (documento 13, §10.3: el método de administradores, consejeros
@@ -86,8 +87,10 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         // La contraseña ya cumplió: no queda en memoria más de lo necesario.
         setContrasena("");
         setEstado("listo");
-        if (data.estado === "sesion_abierta") terminarEntrada("Entraste.");
-        else {
+        if (data.estado === "sesion_abierta") {
+          recordarFormaDeEntrar("contrasena");
+          terminarEntrada("Entraste.");
+        } else {
           setCodigo("");
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
         }
@@ -117,6 +120,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         if (data !== undefined) {
           setCodigo("");
           setEstado("listo");
+          recordarFormaDeEntrar("contrasena");
           terminarEntrada("Entraste.");
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
@@ -198,8 +202,8 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         {estado === "enviando" && <p>Entrando…</p>}
         {estado === "rechazado" && (
           <p className="aviso-error">
-            El correo o la contraseña no son correctos. Si no tenés contraseña, entrá con el
-            enlace por correo.
+            El correo o la contraseña no son correctos. Sin contraseña, entrar con un código por
+            correo.
           </p>
         )}
         {estado === "vencida" && (

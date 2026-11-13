@@ -5,13 +5,14 @@ import { DIGITOS_CODIGO } from "./EntrarConCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
 // Pedir la entrada por correo (documento 13, §10.3): `POST /api/v1/auth/enlace` con el correo en
-// el cuerpo, nunca en la URL. La respuesta deja en este navegador la cookie `nonce` a la que
-// queda ligado el enlace (el pedido es del mismo origen, así que fetch la guarda y la manda
-// después en el canje): el enlace solo sirve en el navegador donde se pidió. Para otro
-// dispositivo está el código del mismo correo (EntrarConCodigo). El 202 es igual exista o no la
-// cuenta; se muestra el mensaje que manda el servidor, sin agregarle nada que distinga los casos.
-// Con el pedido hecho, /entrar pasa al código con el correo ya escrito (`alPedir`).
-// Diseño provisorio: el definitivo llega con G3.
+// el cuerpo, nunca en la URL. El correo trae un código de 6 números, que es el camino principal
+// (decisión del propietario del 12-11-2026, pregunta 16), y un enlace como alternativa. La
+// respuesta deja en este navegador la cookie `nonce` a la que queda ligado el enlace (el pedido es
+// del mismo origen, así que fetch la guarda y la manda después en el canje): el enlace solo sirve en
+// el navegador donde se pidió; el código sirve en cualquiera (EntrarConCodigo). El 202 es igual
+// exista o no la cuenta; se muestra el mensaje que manda el servidor, sin agregarle nada que
+// distinga los casos. Con el pedido hecho, /entrar pasa al código con el correo ya escrito
+// (`alPedir`). Diseño provisorio: el definitivo llega con G3.
 
 const ESTADO_INVALIDO = 422;
 const ESTADO_DEMASIADOS = 429;
@@ -51,11 +52,11 @@ export function PedirEnlace({ correo, alCambiarCorreo, alPedir }: Props) {
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-      <h2 id={`${id}-titulo`}>Pedir el enlace para entrar</h2>
+      <h2 id={`${id}-titulo`}>Pedir un código para entrar</h2>
       <p>
-        Escribí tu correo y te mandamos un enlace para entrar. Abrilo en este mismo navegador: el
-        enlace solo sirve donde lo pediste. Si leés el correo en otro dispositivo, usá el código
-        de {DIGITOS_CODIGO} números que llega en el mismo correo.
+        Al correo llega un código de {DIGITOS_CODIGO} números para entrar desde cualquier
+        dispositivo. El mismo correo trae un enlace, que sirve solo en este dispositivo y en este
+        navegador.
       </p>
       <form className="formulario" onSubmit={enviar}>
         <label htmlFor={`${id}-correo`}>Correo</label>
@@ -70,19 +71,19 @@ export function PedirEnlace({ correo, alCambiarCorreo, alPedir }: Props) {
           onChange={(e) => alCambiarCorreo(e.target.value)}
         />
         <button type="submit" disabled={estado.tipo === "enviando"}>
-          Pedir el enlace
+          Enviar el código
         </button>
       </form>
       <div role="status" aria-live="polite">
-        {estado.tipo === "enviando" && <p>Pidiendo el enlace…</p>}
+        {estado.tipo === "enviando" && <p>Enviando el código…</p>}
         {estado.tipo === "invalido" && (
           <p id={`${id}-invalido`} className="aviso-error">
-            Revisá el correo: no parece una dirección válida.
+            El correo no parece una dirección válida. Revisarlo.
           </p>
         )}
         {estado.tipo === "demasiados" && (
           <p className="aviso-error">
-            Hubo demasiados pedidos con este correo. Esperá un rato y probá de nuevo.
+            Hubo demasiados pedidos con este correo. Esperar un rato y probar de nuevo.
           </p>
         )}
         {estado.tipo === "sin_servicio" && <p className="aviso-error">{estado.mensaje}</p>}

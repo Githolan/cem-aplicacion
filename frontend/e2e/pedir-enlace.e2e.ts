@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import { otroCliente, simularSesion, sinFaltasDeAccesibilidad } from "./entorno";
 
-// Pedir el enlace para entrar en /entrar, contra el cem-backend real a través del nginx de la
+// Pedir un código para entrar en /entrar, contra el cem-backend real a través del nginx de la
 // imagen. El backend de la corrida no tiene base de datos ni CEM_ORIGEN_PUBLICO, así que responde
 // 503 antes de registrar nada: el 202 y la cookie nonce se prueban en el backend
 // (tests/test_identidad*.py); aquí, que el formulario manda el correo por POST, en el cuerpo como
@@ -22,11 +22,11 @@ test.describe("pedir el enlace para entrar", () => {
     await page.goto("/entrar");
     await sinFaltasDeAccesibilidad(page);
 
-    const seccion = page.getByRole("region", { name: "Pedir el enlace para entrar" });
-    await expect(seccion.getByText(/en otro dispositivo, usá el código de 6 números/)).toBeVisible();
+    const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
+    await expect(seccion.getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeVisible();
     await seccion.getByLabel("Correo").fill(CORREO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
-    await seccion.getByRole("button", { name: "Pedir el enlace" }).click();
+    await seccion.getByRole("button", { name: "Enviar el código" }).click();
 
     const enviado = await pedido;
     expect(enviado.method()).toBe("POST");
@@ -45,29 +45,29 @@ test.describe("pedir el enlace para entrar", () => {
   test("un correo que el contrato rechaza (422) se explica junto al campo", async ({ page }) => {
     await simularSesion(page, "sin_sesion");
     await page.goto("/entrar");
-    const seccion = page.getByRole("region", { name: "Pedir el enlace para entrar" });
+    const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
     const campo = seccion.getByLabel("Correo");
     await campo.fill(CORREO_SIN_DOMINIO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
-    await seccion.getByRole("button", { name: "Pedir el enlace" }).click();
+    await seccion.getByRole("button", { name: "Enviar el código" }).click();
 
     const respuesta = await (await pedido).response();
     expect(respuesta?.status()).toBe(422);
-    await expect(seccion.getByText("Revisá el correo: no parece una dirección válida.")).toBeVisible();
+    await expect(seccion.getByText("El correo no parece una dirección válida. Revisarlo.")).toBeVisible();
     await expect(campo).toHaveAttribute("aria-invalid", "true");
     await sinFaltasDeAccesibilidad(page);
   });
 
   test("con el pedido hecho (202 simulado) pasa al código, con el correo escrito y el mensaje", async ({ page }) => {
-    const mensaje = "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar.";
+    const mensaje = "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para entrar.";
     await simularSesion(page, "sin_sesion");
     await page.route(`**${RUTA}`, (ruta) => ruta.fulfill({ status: 202, json: { estado: "pedido", mensaje } }));
     await page.goto("/entrar");
-    const seccion = page.getByRole("region", { name: "Pedir el enlace para entrar" });
+    const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
     await seccion.getByLabel("Correo").fill(`  ${CORREO} `);
-    await seccion.getByRole("button", { name: "Pedir el enlace" }).click();
+    await seccion.getByRole("button", { name: "Enviar el código" }).click();
 
-    const codigo = page.getByRole("region", { name: "Entrar con un código" });
+    const codigo = page.getByRole("region", { name: "Escribir el código del correo" });
     await expect(codigo.getByText(mensaje)).toBeVisible();
     await expect(codigo.getByLabel("Correo")).toHaveValue(CORREO);
     // El correo ya está: el foco va a lo que falta, y el código se envía recién con el botón.

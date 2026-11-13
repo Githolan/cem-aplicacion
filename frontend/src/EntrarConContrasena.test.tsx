@@ -107,6 +107,8 @@ async function sinFaltas(contenedor: HTMLElement) {
 
 afterEach(() => {
   cleanup();
+  // La última forma de entrar queda en este dispositivo (AC-30): cada prueba empieza sin ella.
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
@@ -137,6 +139,15 @@ describe("entrar con contraseña", () => {
     expect(entrada.headers.get("content-type")).toBe("application/json");
     expect(await entrada.json()).toEqual({ correo: CORREO, contrasena: CONTRASENA });
     expect(window.location.href).not.toContain(encodeURIComponent(CONTRASENA));
+  });
+
+  it("AC-30: entrar con contraseña la recuerda en este dispositivo para la próxima vez", async () => {
+    vi.stubGlobal("fetch", backend({ [ENTRAR]: [() => Response.json(ABIERTA)] }));
+    abrir();
+    escribirContrasena(CORREO);
+
+    await llegoAlInicio();
+    expect(window.localStorage.getItem("cem.entrar.ultima-forma")).toBe("contrasena");
   });
 
   it("con segundo factor: pide el código, lo manda normalizado a /segundo-factor y entra", async () => {

@@ -64,8 +64,24 @@ FUNCIONES = (
 def ultimo_codigo(motor_migrate, direccion: str) -> str:
     """El código del último correo, como lo ve la persona (`042 917`), sin el espacio."""
     texto = eventos_de(motor_migrate, direccion)[-1]["texto"]
-    [(a, b)] = re.findall(r"este código:\n\n(\d{3}) (\d{3})\n", texto)
+    [(a, b)] = re.findall(r"junto con\neste correo:\n\n(\d{3}) (\d{3})\n", texto)
     return a + b
+
+
+def test_correo_trae_primero_el_codigo_y_el_enlace_como_alternativa():
+    """El código es el camino principal para entrar y el enlace la alternativa (decisión del
+    propietario del 12-11-2026, pregunta 16), en el correo y en la respuesta del pedido. Sin base:
+    solo el texto."""
+    texto = eventos.TEXTO_ENLACE.format(
+        enlace="https://cem.ejemplo.com/entrar#token=T",
+        minutos=15,
+        codigo="042 917",
+        minutos_codigo=10,
+    )
+    assert texto.index("042 917") < texto.index("#token=T")
+    assert "Otra forma: abrir este enlace" in texto
+    assert "código" in router.MENSAJE_PEDIDO
+    assert "enlace" not in router.MENSAJE_PEDIDO
 
 
 def otro_codigo(codigo: str, salto: int = 1) -> str:

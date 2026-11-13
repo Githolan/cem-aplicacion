@@ -107,6 +107,18 @@ function escribirCodigo(etiqueta: string, valor: string) {
   fireEvent.change(screen.getByLabelText(etiqueta), { target: { value: valor } });
 }
 
+/** «Desactivar el segundo factor» abre la hoja de confirmar (AC-14); el pedido sale con «Desactivar». */
+async function desactivarConfirmando() {
+  fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Desactivar" }));
+}
+
+/** «Quitar» abre la hoja de confirmar (AC-14); el pedido sale con «Quitar la llave». */
+async function quitarConfirmando() {
+  fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Quitar la llave" }));
+}
+
 beforeEach(() => {
   // jsdom no guarda cookies __Host- (piden Secure y https): se simula la lectura.
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
@@ -178,7 +190,7 @@ describe("página /cuenta/segundo-factor", () => {
     expect(qr.tagName.toLowerCase()).toBe("svg");
     expect(qr.querySelector("path")?.getAttribute("d")).toBe(trazoQr(URI).trazo);
     expect(screen.getByText("JBSW Y3DP EHPK 3PXP JBSW Y3DP EHPK 3PXP")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "abrí la aplicación desde acá" }).getAttribute("href")).toBe(URI);
+    expect(screen.getByRole("link", { name: "abrir la aplicación desde acá" }).getAttribute("href")).toBe(URI);
 
     escribirCodigo("Código de la aplicación", " 042 917 ");
     fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
@@ -277,7 +289,7 @@ describe("página /cuenta/segundo-factor", () => {
     vi.stubGlobal("fetch", pedido);
     abrir();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await desactivarConfirmando();
     fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
     fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
@@ -299,7 +311,7 @@ describe("página /cuenta/segundo-factor", () => {
       }),
     );
     abrir({ pathname: "/cuenta/segundo-factor", state: { volver: "/instalar" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await desactivarConfirmando();
 
     expect(await screen.findByText("Listo: el segundo factor quedó desactivado.")).toBeTruthy();
     expect(lugar()).toBe("/instalar");
@@ -371,11 +383,11 @@ describe("página /cuenta/segundo-factor", () => {
     vi.stubGlobal("fetch", pedido);
     abrir();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await desactivarConfirmando();
     // Control: cancelar deja la pantalla como estaba y no desactiva nada.
     fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
     expect(screen.getByRole("heading", { name: "Está activado" })).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await desactivarConfirmando();
 
     await screen.findByLabelText("Código");
     escribirCodigo("Código", "042917");
@@ -419,6 +431,8 @@ describe("página /cuenta/segundo-factor", () => {
     abrir();
 
     fireEvent.click(await screen.findByRole("button", { name: "Agregar también la aplicación" }));
+    // La llave está en otro equipo: el código de recuperación se ofrece avisando que se gasta (AC-34).
+    fireEvent.click(await screen.findByRole("button", { name: "Usar un código de recuperación (se gasta uno)" }));
     await screen.findByRole("button", { name: "Verificar y seguir" });
     escribirCodigo("Código", "k7m2q-x9p4t");
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
@@ -634,7 +648,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
       }),
     );
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    await desactivarConfirmando();
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
   });
@@ -659,7 +673,7 @@ describe("página /cuenta/segundo-factor: estados de pantalla mínima (documento
       await screen.findByRole("img", { name: /Código QR/ });
       escribirCodigo("Código de la aplicación", "042917");
       fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
-    } else fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    } else await desactivarConfirmando();
 
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
@@ -714,7 +728,7 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
     vi.stubGlobal("fetch", pedido);
     abrir();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Activar en este dispositivo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
 
     const lista = await screen.findByRole("list", { name: "Códigos de recuperación" });
     await asentar();
@@ -754,7 +768,7 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
     abrir();
 
     // Quitar una llave deja salir la consulta del estado, que se queda en camino.
-    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    await quitarConfirmando();
     await screen.findByText("Listo: quitaste la llave.");
     expect(consultas).toBe(2);
     fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
@@ -785,7 +799,7 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
       }),
     );
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    await quitarConfirmando();
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
   });
@@ -802,7 +816,7 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
       }),
     );
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "Activar en este dispositivo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
     fireEvent.click(await screen.findByRole("button", { name: "Ya los guardé" }));
 
     expect(await screen.findByRole("heading", MI_CUENTA)).toBeTruthy();
@@ -840,9 +854,248 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
       }),
     );
     abrir({ pathname: "/cuenta/segundo-factor", state: { volver: "/instalar" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Activar en este dispositivo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
 
     expect(await screen.findByText("Listo: tu llave quedó activada.")).toBeTruthy();
     expect(lugar()).toBe("/instalar");
+  });
+});
+
+describe("informe de fricción, tanda 7", () => {
+  it("AC-10: la página tiene cómo volver a Mi cuenta", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
+    abrir();
+
+    expect((await screen.findByRole("link", { name: "Volver a Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
+  });
+
+  it("AC-14: desactivar no sale hasta confirmarlo en la hoja, y «Volver» no desactiva nada", async () => {
+    const pedido = backend({
+      "GET /api/v1/auth/totp": () => Response.json(ACTIVO),
+      "POST /api/v1/auth/totp/baja": () => new Response(null, { status: 204 }),
+      ...LECTURAS_DE_CUENTA,
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    expect(await screen.findByRole("dialog", { name: "¿Desactivar la aplicación de códigos?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(rutas(pedido)).not.toContain("POST /api/v1/auth/totp/baja");
+
+    await desactivarConfirmando();
+    expect(await screen.findByText("Listo: el segundo factor quedó desactivado.")).toBeTruthy();
+    expect(rutas(pedido).filter((r) => r === "POST /api/v1/auth/totp/baja")).toHaveLength(1);
+  });
+
+  it("AC-15: sin nada activado y con llave en el navegador, un solo botón principal, el de la llave", async () => {
+    conLlaves();
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }),
+        "GET /api/v1/auth/llave": () => Response.json([]),
+      }),
+    );
+    abrir();
+
+    await screen.findByRole("button", { name: "Activar con PIN, huella o cara" });
+    expect((await screen.findByRole("button", { name: "Usar una aplicación de códigos" })).className).toBe("secundario");
+    const principales = within(screen.getByRole("main"))
+      .getAllByRole("button")
+      .filter((b) => !b.classList.contains("secundario") && !b.classList.contains("peligro"));
+    expect(principales.map((b) => b.textContent)).toEqual(["Activar con PIN, huella o cara"]);
+  });
+
+  it("AC-15: con la aplicación ya activada no queda el párrafo de la otra opción", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
+    abrir();
+
+    await screen.findByRole("heading", { name: "Está activado" });
+    expect(screen.queryByText(/Google Authenticator/)).toBeNull();
+  });
+
+  function altaEnPantalla(tactil: boolean) {
+    vi.stubGlobal("matchMedia", (consulta: string) => ({
+      matches: tactil && consulta === "(pointer: coarse)",
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+      }),
+    );
+    abrir();
+  }
+
+  it("AC-17: en una pantalla táctil, el alta empieza por abrir la aplicación y el QR queda plegado", async () => {
+    altaEnPantalla(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    const abrirAplicacion = await screen.findByRole("link", { name: "Abrir mi aplicación de códigos" });
+    expect(abrirAplicacion.getAttribute("href")).toBe(URI);
+    expect(abrirAplicacion.closest("li")?.firstElementChild).toBe(abrirAplicacion);
+    expect(abrirAplicacion.closest("ol")?.firstElementChild).toBe(abrirAplicacion.closest("li"));
+    expect(screen.getByText("Estoy en otra pantalla: mostrar el código QR").closest("details")?.open).toBe(false);
+  });
+
+  it("AC-17, control: con mouse, el QR va primero", async () => {
+    altaEnPantalla(false);
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+
+    await screen.findByRole("img", { name: /Código QR/ });
+    expect(screen.queryByRole("link", { name: "Abrir mi aplicación de códigos" })).toBeNull();
+    expect(screen.getByRole("img", { name: /Código QR/ }).closest("details")).toBeNull();
+  });
+
+  it("AC-18: los códigos se pueden copiar y guardar como archivo", async () => {
+    const escribir = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: escribir } });
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: vi.fn(() => "blob:local"), revokeObjectURL: vi.fn() }));
+    const descargas: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      descargas.push(this.download);
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => Response.json({ codigos: CODIGOS }),
+      }),
+    );
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(await screen.findByRole("button", { name: "Activar la aplicación" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Copiar los códigos" }));
+    expect(await screen.findByText(/Copiados/)).toBeTruthy();
+    expect(escribir).toHaveBeenCalledWith(CODIGOS.join("\n"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Guardar como archivo" }));
+    expect(descargas).toEqual(["codigos-de-recuperacion-consorcio-en-mano.txt"]);
+    // Siguen a la vista: guardarlos no es decir que se guardaron.
+    expect(screen.getByRole("list", { name: "Códigos de recuperación" })).toBeTruthy();
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("AC-18: con pocos códigos sin usar dice cómo tener otros; con muchos, no", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json({ ...ACTIVO, codigos_recuperacion_restantes: 2 }) }));
+    abrir();
+    expect(await screen.findByText(/Quedan 2 códigos de recuperación\. Para tener otros/)).toBeTruthy();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
+    abrir();
+    await screen.findByRole("heading", { name: "Está activado" });
+    expect(screen.queryByText(/Para tener otros/)).toBeNull();
+  });
+});
+
+describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de la página", () => {
+  /** Una respuesta que llega cuando la prueba la suelta. */
+  function enEspera(respuesta: () => Response) {
+    let soltar: () => void = () => undefined;
+    const promesa = new Promise<Response>((resolver) => {
+      soltar = () => resolver(respuesta());
+    });
+    return { responder: () => promesa as unknown as Response, soltar };
+  }
+
+  async function sinSalidaHastaGuardar(container: HTMLElement) {
+    const hoja = await screen.findByRole("dialog", { name: "Guardar los códigos de recuperación" });
+    expect(container.inert).toBe(true);
+    // La marca de la cabecera (lleva al inicio) queda inerte, y Escape no cierra la hoja.
+    expect(container.contains(screen.getByRole("link", { name: "Consorcio en Mano", hidden: true }))).toBe(true);
+    fireEvent.keyDown(hoja, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Guardar los códigos de recuperación" })).toBeTruthy();
+    // Cerrar la pestaña o recargar pregunta antes; después de guardarlos, ya no.
+    const salida = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(salida);
+    expect(salida.defaultPrevented).toBe(true);
+    fireEvent.click(within(hoja).getByRole("button", { name: "Ya los guardé" }));
+    expect(await screen.findByRole("heading", MI_CUENTA)).toBeTruthy();
+    const despues = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(despues);
+    expect(despues.defaultPrevented).toBe(false);
+  }
+
+  it("llave: desde que empieza el alta, ni volver ni el resto de la aplicación; después, los códigos en una hoja", async () => {
+    conLlaves();
+    const alta = enEspera(() => Response.json({ id: LLAVE.id, codigos_recuperacion: CODIGOS }, { status: 201 }));
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }),
+        "GET /api/v1/auth/llave": () => Response.json([]),
+        ...altaDeLlave(CODIGOS),
+        "POST /api/v1/auth/llave/alta": alta.responder,
+        ...LECTURAS_DE_CUENTA,
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
+    expect(container.inert).toBe(true);
+    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+
+    alta.soltar();
+    await sinSalidaHastaGuardar(container);
+  });
+
+  it("aplicación: con el primer código en camino, ni volver ni el resto de la aplicación; después, los códigos en una hoja", async () => {
+    const confirmacion = enEspera(() => Response.json({ codigos: CODIGOS }));
+    let activo = false;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(activo ? ACTIVO : INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => {
+          activo = true;
+          return confirmacion.responder();
+        },
+        ...LECTURAS_DE_CUENTA,
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
+    expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
+    expect(container.inert).toBe(true);
+    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+
+    confirmacion.soltar();
+    await sinSalidaHastaGuardar(container);
+  });
+
+  it("control: si el primer código no sirve, vuelve la cabecera y la página se puede dejar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => error("segundo_factor_invalido", 400),
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
+    expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
+    expect(container.inert).toBeFalsy();
+    expect(screen.getByRole("link", { name: "Volver a Mi cuenta" })).toBeTruthy();
   });
 });

@@ -39,6 +39,12 @@ function backend(respuestas: Record<string, () => Response>) {
   );
 }
 
+/** «Quitar» abre la hoja de confirmar (AC-14); el pedido sale con «Quitar la llave». */
+async function quitarConfirmando() {
+  fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Quitar la llave" }));
+}
+
 describe("sección de la llave", () => {
   beforeEach(() => {
     document.cookie = "__Host-cem_csrf=x";
@@ -65,7 +71,7 @@ describe("sección de la llave", () => {
     });
     mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    await quitarConfirmando();
     fireEvent.click(await screen.findByRole("button", { name: "Usar otro método" }));
     fireEvent.click(await screen.findByRole("button", { name: "Código de recuperación" }));
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
@@ -83,7 +89,7 @@ describe("sección de la llave", () => {
     });
     mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    await quitarConfirmando();
 
     expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
     expect(borrar).toHaveBeenCalledOnce();
@@ -97,7 +103,7 @@ describe("sección de la llave", () => {
     });
     mostrar();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    await quitarConfirmando();
     // PedirCodigo dispara la llave al leer lo activo: se espera a que falle antes de cancelar.
     await screen.findByRole("button", { name: "Probar de nuevo" });
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
@@ -123,7 +129,7 @@ describe("sección de la llave", () => {
     mostrar();
 
     expect(await screen.findByRole("button", { name: "Agregar este dispositivo" })).not.toBeNull();
-    expect(screen.getByText("Si este dispositivo no está en la lista, agregalo.")).not.toBeNull();
+    expect(screen.getByText("Si este dispositivo no está en la lista, agregarlo.")).not.toBeNull();
     expect(screen.queryByText(/Tu llave ya funciona en este dispositivo/)).toBeNull();
     expect(screen.getByRole("list", { name: "Tus llaves" }).textContent).not.toContain("(este dispositivo)");
   });
@@ -143,11 +149,11 @@ describe("sección de la llave", () => {
   it("si el navegador avisa que ya tiene llave, reconoce la de su mismo nombre", async () => {
     dispositivoConLlave(nombreDelDispositivo(navigator.userAgent));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Es otro equipo: agregarlo" }));
 
     expect(await screen.findByText(/Tu llave ya funciona en este dispositivo/)).not.toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Es otro equipo: agregarlo" })).toBeNull();
     expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(true);
   });
 
@@ -192,7 +198,7 @@ describe("sección de la llave", () => {
     backend({ "GET /api/v1/auth/llave": () => Response.json([]) });
     const sinLlaves = mostrar();
 
-    expect(await screen.findByRole("button", { name: "Activar en este dispositivo" })).not.toBeNull();
+    expect(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Confirmar que soy yo" })).toBeNull();
     sinLlaves.unmount();
 
@@ -201,5 +207,58 @@ describe("sección de la llave", () => {
 
     expect(await screen.findByRole("button", { name: "Quitar" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Confirmar que soy yo" })).toBeNull();
+  });
+});
+
+describe("informe de fricción, tanda 7", () => {
+  beforeEach(() => {
+    document.cookie = "__Host-cem_csrf=x";
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", { value: {}, configurable: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator, "credentials");
+  });
+
+  it("AC-14: «Quitar» no borra la llave hasta confirmarlo en la hoja, y «Volver» no borra nada", async () => {
+    const borrar = vi.fn(() => new Response(null, { status: 204 }));
+    backend({
+      "GET /api/v1/auth/llave": () => Response.json([LLAVE]),
+      [`DELETE /api/v1/auth/llave/${LLAVE.id}`]: borrar,
+    });
+    mostrar();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar" }));
+    expect(await screen.findByRole("dialog", { name: "¿Quitar la llave de Mi PC?" })).not.toBeNull();
+    expect(borrar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(borrar).not.toHaveBeenCalled();
+
+    await quitarConfirmando();
+    expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
+    expect(borrar).toHaveBeenCalledOnce();
+  });
+
+  it("AC-12: con una llave del mismo nombre que este equipo y sin su marca, no invita a agregarlo", async () => {
+    backend({ "GET /api/v1/auth/llave": () => Response.json([{ ...LLAVE, nombre: nombreDelDispositivo(navigator.userAgent) }]) });
+    mostrar();
+
+    expect(await screen.findByText(/no hace falta hacer nada: la llave se confirma al usarla/)).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
+    // Si de verdad es otro equipo, se puede agregar, pero no como la acción principal.
+    expect(screen.getByRole("button", { name: "Es otro equipo: agregarlo" }).className).toBe("secundario");
+  });
+
+  it("AC-12, control: con una llave de otro nombre sigue ofreciendo agregar este dispositivo", async () => {
+    backend({ "GET /api/v1/auth/llave": () => Response.json([{ ...LLAVE, nombre: "Otro nombre" }]) });
+    mostrar();
+
+    expect((await screen.findByRole("button", { name: "Agregar este dispositivo" })).className).toBe("");
+    expect(screen.queryByText(/no hace falta hacer nada/)).toBeNull();
   });
 });

@@ -48,9 +48,11 @@ el navegador nunca lo manda al servidor, así que no queda en el registro de acc
 en `Referer`. La página lo lee, lo borra de la URL y lo manda en el cuerpo de `POST /canje`.
 La misma página tiene el formulario del código por correo."""
 MENSAJE_PEDIDO = (
-    "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar."
-    " Abrilo en este mismo navegador o, desde otro dispositivo, usá el código del mismo correo."
+    "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para"
+    " entrar."
 )
+"""Igual con cuenta o sin ella. El código es el camino principal para entrar (decisión del
+propietario del 12-11-2026); el enlace del mismo correo queda como alternativa."""
 SIN_CACHE = {"Cache-Control": "no-store"}
 ENCABEZADO_SITIO = "Sec-Fetch-Site"
 MISMO_ORIGEN = "same-origin"
