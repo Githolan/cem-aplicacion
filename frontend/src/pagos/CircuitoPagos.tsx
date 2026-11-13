@@ -24,7 +24,8 @@ import { CONSULTA_AL_LADO, useAncho } from "./useAncho";
 // «Seguir con lo pendiente» (decisión del propietario del 12-11-2026, P-01).
 
 type Elemento = components["schemas"]["ElementoBandejaPagos"];
-type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[] };
+type BandejaPagos = components["schemas"]["BandejaPagos"];
+type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; elementos: Elemento[]; bandeja: BandejaPagos };
 /** El acto que se acaba de terminar en PC: sobre qué orden, qué dijo y a qué paso seguía. */
 type Hecho = { orden: string; texto: string; paso: Paso | null };
 
@@ -63,7 +64,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         if (!vigente) return;
         const codigo = codigoDe(error);
         if (data !== undefined) {
-          setLectura({ tipo: "ok", elementos: data.elementos });
+          setLectura({ tipo: "ok", elementos: data.elementos, bandeja: data });
           setPrimera((p) => p ?? data.elementos[0]?.orden_id ?? null);
           setAviso(sinLaFalla);
         } else if (response.status === ESTADO.sinPermiso && codigo === "sin_permiso") aInicio();
@@ -132,7 +133,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
   const conFicha = abierta !== null && consorcio !== "";
   // Lo pendiente que queda, sin la orden recién hecha: primero lo del mismo paso que se venía haciendo.
   const pendientes =
-    listo === null || lectura.tipo !== "ok" ? [] : lectura.elementos.filter((e) => e.grupo !== "esperando" && e.orden_id !== listo.orden);
+    listo === null || lectura.tipo !== "ok" ? [] : lectura.elementos.filter((e) => e.pendiente && e.orden_id !== listo.orden);
   const siguiente = pendientes.find((e) => e.paso === listo?.paso) ?? pendientes[0];
 
   return (
@@ -158,7 +159,9 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                 avisar={setAviso}
               />
             )}
-            {lectura.tipo === "ok" && <Bandeja elementos={lectura.elementos} consorcio={consorcio} abierta={abierta} />}
+            {lectura.tipo === "ok" && (
+              <Bandeja bandeja={lectura.bandeja} consorcio={consorcio} abierta={abierta} aEntrar={aEntrar} alCambiar={alCambiar} />
+            )}
           </>
         )}
       </div>

@@ -12,7 +12,7 @@ import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { CargandoPagos } from "./CargandoPagos";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
-import { FILTROS, type Filtro, TEXTO_SITUACION, TONO_SITUACION } from "./textos";
+import { fechaCorta, FILTROS, type Filtro, NOMBRE_ESTADO, TONO_ESTADO } from "./textos";
 
 // `/pagos/consulta`: lo cerrado y lo que se busca (§11). Abre la misma ficha.
 
@@ -131,7 +131,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                 <thead>
                   <tr>
                     <th scope="col">Proveedor</th>
-                    <th scope="col">Estado</th>
+                    <th scope="col">Estado y fecha</th>
                     <th scope="col">Operación</th>
                     <th scope="col">Importe</th>
                   </tr>
@@ -145,10 +145,14 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
                         </Link>
                         <p className="tabla-lista__dato">{e.concepto}</p>
                       </th>
-                      <td data-etiqueta="Estado">
-                        <span className="fila-pago__verbo" data-tono={TONO_SITUACION[e.situacion]}>
-                          {TEXTO_SITUACION[e.situacion]}
+                      {/* La fecha va debajo del estado: la tabla no se ensancha (decisión 11). */}
+                      <td data-etiqueta="Estado y fecha">
+                        <span className="fila-pago__verbo" data-tono={TONO_ESTADO[e.estado_visible]}>
+                          {NOMBRE_ESTADO[e.estado_visible]}
                         </span>
+                        <p className="tabla-lista__dato">
+                          <time dateTime={e.creada_en}>{fechaCorta(e.creada_en)}</time>
+                        </p>
                       </td>
                       <td data-etiqueta="Operación">{e.numero_operacion}</td>
                       <td data-etiqueta="Importe">

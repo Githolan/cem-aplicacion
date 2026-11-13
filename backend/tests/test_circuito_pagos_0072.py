@@ -534,19 +534,13 @@ def rechazada(motor_migrate, e) -> UUID:
     return o
 
 
-def test_lo_rechazado_queda_en_la_bandeja_los_dias_de_la_configuracion(motor_migrate, e):
+def test_lo_rechazado_no_queda_en_la_bandeja_y_la_ficha_lo_sigue_diciendo(motor_migrate, e):
+    """Decisión 3 del propietario (12-11-2026): sale de «Para preparar»; a quien la preparó se le
+    avisa arriba de la bandeja (`test_bandeja_honesta_0096`)."""
     o = rechazada(motor_migrate, e)
-    assert fila(e, e.adm, o)["grupo"] == "para_preparar"
-    assert paso(e, e.adm, o) == "rechazada"
+    assert paso(e, e.adm, o) is None and paso(e, e.mc1, o) is None
     assert ficha(e, e.adm, o)["orden"]["motivo_rechazo"] == "SINTETICO"
-    assert paso(e, e.mc1, o) is None  # control: es de quien prepara
-    with motor_migrate.begin() as c:
-        c.execute(
-            text("update nucleo.orden_pago set actualizada_en = now() - interval '8 days'"
-                 " where id = :o"), {"o": o},
-        )  # fmt: skip
-    assert paso(e, e.adm, o) is None
-    assert ficha(e, e.adm, o)["paso"] == "rechazada"  # la ficha lo sigue diciendo
+    assert ficha(e, e.adm, o)["paso"] == "rechazada"
     assert str(o) in ids(consulta(e, e.adm, "?filtro=rechazados"))
 
 

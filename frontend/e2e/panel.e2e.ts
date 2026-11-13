@@ -57,9 +57,9 @@ async function simularApi(pagina: Page): Promise<string[]> {
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: PANEL });
-      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
+      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } });
       if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")
-        return ruta.fulfill({ json: { elementos: [] } });
+        return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } });
     }
     imprevistos.push(`${pedido.method()} ${camino}`);
     return ruta.abort();

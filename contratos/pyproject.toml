@@ -15,7 +15,7 @@ include = ["cem_contracts*"]
 # Las políticas de autorización (2b-3) viajan dentro del paquete: el backend instalado
 # (`pip install ./contratos` en backend/Dockerfile) las lee en tiempo de ejecución.
 [tool.setuptools.package-data]
-cem_contracts = ["politicas_datos/*.json", "politicas_datos/*.csv"]
+cem_contracts = ["politicas_datos/*.json", "politicas_datos/*.csv", "pantallas_datos/*.json"]
 
 [tool.ruff]
 line-length = 100

@@ -8,9 +8,10 @@ export type Grupo = components["schemas"]["GrupoPago"];
 export type Situacion = components["schemas"]["SituacionPago"];
 export type LeTocaA = components["schemas"]["LeTocaA"];
 export type Filtro = components["schemas"]["FiltroConsultaPagos"];
+export type EstadoVisible = components["schemas"]["EstadoVisible"];
 
 export const VERBO: Record<Paso, string> = {
-  pagar: "Pagar",
+  pagar: "Ver la cuenta para pagar",
   tomar_pago: "Tomar el pago",
   subir_comprobante: "Subir el comprobante",
   corregir: "Corregir el registro",
@@ -20,11 +21,11 @@ export const VERBO: Record<Paso, string> = {
   volver_a_pagar: "Enviar a aprobar de nuevo",
   rechazada: "Ver el motivo",
   preparar_faltante: "Preparar la orden por lo que falta",
-  aprobar: "Aprobar o rechazar",
-  conciliar: "Conciliar",
-  confirmar_no_pago: "Confirmar",
+  aprobar: "Aprobar la orden",
+  conciliar: "Conciliar el pago",
+  confirmar_no_pago: "Confirmar que no se pagó",
   declarar_no_pago: "Declarar que no se pagó",
-  resolver_diferencia: "Resolver",
+  resolver_diferencia: "Resolver la diferencia",
   espera_aprobar: "Falta aprobar",
   espera_comprobante: "Falta el comprobante",
   espera_declarar: "Falta declarar que no se pagó",
@@ -42,41 +43,63 @@ export const TITULO_GRUPO: Record<Grupo, string> = {
   para_conciliar: "Para conciliar",
   para_confirmar: "Para confirmar",
   para_resolver: "Para resolver",
+  para_cotejar: "Para cotejar",
   esperando: "Esperando a otra persona",
+  borradores_viejos: "Borradores viejos",
 };
 
-export const TEXTO_SITUACION: Record<Situacion, string> = {
+/** La única palabra de cada estado, la misma en bandeja, ficha, consulta y panel (decisión 11 del
+ * propietario, 12-11-2026). Qué estado tiene cada orden lo dice el servidor (`estado_visible`); la
+ * palabra es la de `contratos/cem_contracts/pantallas_datos/pagos.json`, y una prueba compara las
+ * dos. No hay otro mapa de nombres de estado en el frontend. */
+export const NOMBRE_ESTADO: Record<EstadoVisible, string> = {
   borrador: "Borrador",
-  en_revision: "Esperando aprobación",
+  esperando_aprobacion: "Esperando aprobación",
   rechazada: "Rechazada",
   retirada: "Retirada",
-  para_pagar: "Aprobada",
-  pagando: "Para pagar",
-  no_pago_declarado: "Falta confirmar",
+  lista_para_pagar: "Lista para pagar",
+  pagando: "Pagando",
   falta_conciliar: "Falta conciliar",
-  observado: "Observado",
-  con_diferencia: "Se pagó otra cosa",
-  reclamo: "Reclamo abierto",
-  pagada: "Pagada",
+  observada: "Observada",
   no_se_pago: "No se pagó",
+  pagada: "Pagada",
+  pagada_y_cotejada: "Pagada y cotejada",
 };
 
-/** El color que acompaña a la palabra de cada situación. */
-export const TONO_SITUACION: Record<Situacion, "pendiente" | "bien" | "mal" | "neutro"> = {
+/** El color que acompaña a la palabra de cada estado. */
+export const TONO_ESTADO: Record<EstadoVisible, "pendiente" | "bien" | "mal" | "neutro"> = {
   borrador: "pendiente",
-  en_revision: "pendiente",
+  esperando_aprobacion: "pendiente",
   rechazada: "mal",
   retirada: "neutro",
-  para_pagar: "bien",
+  lista_para_pagar: "bien",
   pagando: "pendiente",
-  no_pago_declarado: "pendiente",
   falta_conciliar: "pendiente",
-  observado: "pendiente",
-  con_diferencia: "pendiente",
-  reclamo: "mal",
-  pagada: "bien",
+  observada: "mal",
   no_se_pago: "neutro",
+  pagada: "bien",
+  pagada_y_cotejada: "bien",
 };
+
+/** La fecha de una orden, corta para no ensanchar la fila: «9 nov». Con otro año, «9 nov 2025». */
+export function fechaCorta(iso: string, ahora = new Date()): string {
+  const fecha = new Date(iso);
+  const conAnio = fecha.getFullYear() !== ahora.getFullYear();
+  return new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "short", ...(conAnio ? { year: "numeric" } : {}) })
+    .format(fecha)
+    .replace(/\./g, "")
+    .replace(/ de /g, " ");
+}
+
+/** El aviso de orden repetida (decisión 5): no bloquea, dice cuál es la otra. */
+export const textoRepetida = (fecha: string, estado: EstadoVisible) =>
+  `Hay otra orden del mismo proveedor y el mismo importe, del ${fecha} (${NOMBRE_ESTADO[estado]}). Revisar que no sea la misma factura.`;
+
+/** El aviso arriba de la bandeja de quien preparó una orden rechazada (decisión 3). */
+export const ENTENDIDO = "Entendido";
+export const PREPARAR_OTRA = "Preparar otra orden";
+export const textoRechazada = (proveedor: string, importe: string, fecha: string) =>
+  `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}.`;
 
 export const TEXTO_LE_TOCA_A: Record<LeTocaA, string> = {
   vos: "Te toca a vos.",
@@ -107,6 +130,13 @@ export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nom
 
 export const PASOS_DEL_CAMINO = ["Preparar", "Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
 
+/** Cerrar sin pagar una orden que no se pagó (decisión 12). */
+export const PREGUNTA_CERRAR_SIN_PAGAR =
+  "Cerrar la orden sin pagar: queda como «No se pagó», sale de la bandeja y ya no se vuelve a pagar. Queda registrado quién la cerró, cuándo y por qué.";
+export const TEXTO_CERRADA_SIN_PAGO = "Listo: la orden quedó cerrada sin pagar. Ya no está en la bandeja.";
+export const textoCierreSinPago = (nombre: string, cuando: string, motivo: string) =>
+  `La cerró sin pagar ${nombre} el ${cuando}: ${motivo}.`;
+
 /** Inventado: muestra la forma del archivo, que el servidor lee (`extracto.py`). */
 export const EJEMPLO_EXTRACTO = "Fecha;Débito;Número de operación\n05/11/2026;-184.350,00;0048213377";
 /** Se dice una vez, donde se paga, y no en cada visita al inicio (P-36, AC-04, 12-11-2026). */
@@ -136,7 +166,5 @@ export const AVISO_PASA_SOLA = "No pide aprobación: se puede dejar lista para p
 /** El botón de `volver_a_pagar` cuando la orden no pasa por el Consejo: dice lo que ocurre al tocarlo. */
 export const VERBO_PASA_SOLA = "Dejar lista para pagar";
 export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
-export const AVISO_PROVEEDOR_CAMBIADO =
-  "El proveedor cambió después de aprobar esta orden: no se puede pagar. Modificala para que use los datos nuevos y vuelva a aprobación.";
 export const AVISO_MODIFICAR =
   "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";

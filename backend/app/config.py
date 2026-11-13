@@ -11,6 +11,12 @@ from cem_contracts.documentos import TOPE_BYTES
 PAGOS_DIAS_BANDEJA = 7
 """Decisión por defecto del rediseño del circuito de pagos (§15). `CEM_PAGOS_DIAS_BANDEJA` la
 cambia."""
+PAGOS_DIAS_BORRADOR_VIEJO = 7
+"""Decisión 4 del propietario (12-11-2026): un borrador sin movimiento pasa a «Borradores
+viejos». `CEM_PAGOS_DIAS_BORRADOR_VIEJO` la cambia."""
+PAGOS_DIAS_REPETIDA = 30
+"""Decisión 5 del propietario (12-11-2026): ventana del aviso de orden repetida.
+`CEM_PAGOS_DIAS_REPETIDA` la cambia."""
 PAGOS_HORAS_TOMAR = 24
 """Decisión 1 del propietario (07-11-2026). `CEM_PAGOS_HORAS_TOMAR` la cambia."""
 COTEJO_MAXIMO_LINEAS = 50_000
@@ -44,6 +50,10 @@ class Config:
     503."""
     pagos_dias_bandeja: int = PAGOS_DIAS_BANDEJA
     """Cuántos días queda lo rechazado en la bandeja de pagos antes de pasar a la consulta."""
+    pagos_dias_borrador_viejo: int = PAGOS_DIAS_BORRADOR_VIEJO
+    """Días sin movimiento tras los que un borrador pasa a «Borradores viejos»."""
+    pagos_dias_repetida: int = PAGOS_DIAS_REPETIDA
+    """Días de diferencia entre dos órdenes iguales para avisar que puede estar repetida."""
     pagos_horas_tomar: int = PAGOS_HORAS_TOMAR
     """Cuántas horas espera otro ejecutor a quien vio la cuenta antes de poder tomar el pago."""
     cotejo_tope_bytes: int = TOPE_BYTES
@@ -86,6 +96,8 @@ def cargar() -> Config:
         origen_publico=os.environ.get("CEM_ORIGEN_PUBLICO", ""),
         codigo_clave=os.environ.get("CEM_CODIGO_CLAVE", ""),
         pagos_dias_bandeja=_dias("CEM_PAGOS_DIAS_BANDEJA", PAGOS_DIAS_BANDEJA),
+        pagos_dias_borrador_viejo=_dias("CEM_PAGOS_DIAS_BORRADOR_VIEJO", PAGOS_DIAS_BORRADOR_VIEJO),
+        pagos_dias_repetida=_dias("CEM_PAGOS_DIAS_REPETIDA", PAGOS_DIAS_REPETIDA),
         pagos_horas_tomar=_positivo("CEM_PAGOS_HORAS_TOMAR", PAGOS_HORAS_TOMAR),
         cotejo_tope_bytes=_positivo("CEM_COTEJO_TOPE_BYTES", TOPE_BYTES),
         cotejo_maximo_lineas=_positivo("CEM_COTEJO_MAXIMO_LINEAS", COTEJO_MAXIMO_LINEAS),

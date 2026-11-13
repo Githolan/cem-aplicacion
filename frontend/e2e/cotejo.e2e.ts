@@ -46,7 +46,7 @@ async function simularCotejo(pagina: Page, baseURL: string): Promise<Pedidos> {
     const permisos = simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
-    if (camino === `${c}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [] } });
+    if (camino === `${c}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 1 } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "GET")
       return ruta.fulfill({ json: { elementos: pendientes, siguiente: null, tope_bytes: 20 * 1024 * 1024, maximo_pagos: 100, moneda_extracto: "ARS" } });
     if (camino === `${c}/pagos/cotejo` && pedido.method() === "POST") {

@@ -444,7 +444,7 @@ export function RegistroPago(props: Props) {
         <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
           {otraCosa ? (
             <>
-              <h3>{corrigeDiferencia ? "Corregir lo que registré" : "Pagué otra cosa"}</h3>
+              <h3>{corrigeDiferencia ? "Corregir lo registrado" : "Pagué otra cosa"}</h3>
               <p>Escribí lo que salió del banco, tal como figura en el comprobante.{corrigeDiferencia && " Lo anterior queda en la historia."}</p>
             </>
           ) : (

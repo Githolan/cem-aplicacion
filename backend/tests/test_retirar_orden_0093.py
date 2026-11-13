@@ -90,13 +90,14 @@ def test_aprobada_no_se_retira(motor_migrate, e):
     niega(motor_migrate, e, e.adm, RETIRAR, "estado_invalido", orden=o, version=1)
 
 
-def test_solo_la_retira_quien_la_preparo(motor_migrate, motor_app, e):
-    o = preparada(motor_migrate, e)
+def test_en_revision_solo_la_retira_quien_la_preparo(motor_migrate, motor_app, e):
+    """Un borrador lo retira cualquiera que prepara (decisión 4, 12-11-2026, `0096`)."""
+    o = preparada(motor_migrate, e, en_revision=True)
     otro = otro_que_prepara(motor_migrate, motor_app, e)
     niega(motor_migrate, e, otro, RETIRAR, "retirar_solo_quien_preparo", orden=o, version=1)
     # Sin la facultad de preparar, la base no dice nada de la orden.
     niega(motor_migrate, e, e.mc1, RETIRAR, "42501", orden=o, version=1)
-    assert orden(motor_migrate, o)["estado"] == "borrador"
+    assert orden(motor_migrate, o)["estado"] == "en_revision"
     llamar(motor_migrate, e, e.adm, RETIRAR, orden=o, version=1)  # control
 
 
@@ -167,7 +168,7 @@ def test_la_ruta_dice_por_que_no(motor_migrate, motor_app, e):
     r = post(e, e.adm, f"ordenes-pago/{o}/retirar", {"version_esperada": 1})
     assert codigo(r) == (409, "orden_con_aprobaciones")
     otro = otro_que_prepara(motor_migrate, motor_app, e)
-    b = preparada(motor_migrate, e)
+    b = preparada(motor_migrate, e, en_revision=True)
     assert ficha(e, otro, b)["puede_retirar"] is False
     r = post(e, otro, f"ordenes-pago/{b}/retirar", {"version_esperada": 1})
     assert codigo(r) == (403, "retirar_solo_quien_preparo")

@@ -40,10 +40,21 @@ function elemento(n: number, grupo: string) {
     paso: grupo === "esperando" ? "espera_conciliar" : "aprobar",
     grupo,
     le_toca_a: grupo === "esperando" ? "consejo" : "vos",
+    // Si cuenta como pendiente lo dice el servidor con la tabla de la pantalla (tanda 2).
+    pendiente: grupo !== "esperando",
+    situacion: grupo === "esperando" ? "falta_conciliar" : "en_revision",
+    estado_visible: grupo === "esperando" ? "falta_conciliar" : "esperando_aprobacion",
+    principal: grupo === "esperando" ? null : "aprobar",
+    creada_en: "2026-11-09T15:00:00Z",
+    actualizada_en: "2026-11-09T15:00:00Z",
+    posible_duplicada_de: null,
   };
 }
 
-const conElementos = (...grupos: string[]) => () => Response.json({ elementos: grupos.map((g, i) => elemento(i, g)) });
+const conElementos = (...grupos: string[]) => () =>
+  Response.json({ elementos: grupos.map((g, i) => elemento(i, g)), avisos_rechazo: [], por_cotejar: 0 });
+/** Pagos conciliados sin cotejar: el servidor los cuenta solo para quien coteja (P-24). */
+const conPorCotejar = (n: number) => () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: n });
 
 type Respuesta = () => Response;
 
@@ -127,6 +138,19 @@ describe("Pagos en el inicio de quien revisa", () => {
     expect(hero.getByText("Para hacer")).toBeTruthy();
     expect(hero.getByText("Edificio Azul")).toBeTruthy();
     expect(hero.getByRole("link", { name: "Ver los pagos" }).getAttribute("href")).toBe("/pagos");
+  });
+
+  it("los pagos por cotejar cuentan; una rechazada ya vista o un borrador viejo, no (tanda 2)", async () => {
+    const bandeja = () =>
+      Response.json({
+        elementos: [elemento(0, "para_aprobar"), { ...elemento(1, "borradores_viejos"), pendiente: false }],
+        avisos_rechazo: [],
+        por_cotejar: 2,
+      });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: bandeja } }));
+    abrir();
+    const hero = within(await tarjeta());
+    expect((await hero.findByText("cosas para hacer", { exact: false })).textContent).toBe("3 cosas para hacer");
   });
 
   it("no repite Pagos en la lista: la tarjeta la reemplaza", async () => {
@@ -368,8 +392,8 @@ describe("salidas de la bandeja según el rol", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: "Cotejar con el banco" })).toBeNull());
   });
 
-  it("quien concilia: «Cotejar con el banco» manda y no ofrece preparar", async () => {
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conElementos() } }));
+  it("quien concilia, con pagos por cotejar: «Cotejar con el banco» manda y no ofrece preparar", async () => {
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: conPorCotejar(2) } }));
     abrir("/pagos");
 
     await screen.findByRole("link", { name: "Cotejar con el banco" });

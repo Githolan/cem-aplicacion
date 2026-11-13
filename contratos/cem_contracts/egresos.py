@@ -378,6 +378,35 @@ class RetiroOrdenPago(BaseModel):
     retirada_en: datetime
 
 
+class CierreSinPago(BaseModel):
+    """`POST …/ordenes-pago/{o}/cerrar-sin-pagar`: una orden que no se pagó y ya no hace falta
+    pagar (decisión 12 del propietario, 12-11-2026, `0096`). Queda No se pagó, con quién, cuándo
+    y el motivo, y sale de la bandeja."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    version_esperada: Version
+    motivo: _texto(1, 300) = Field(description="Por qué no hace falta pagarla.")
+
+
+class RechazoVisto(BaseModel):
+    """Respuesta de `POST …/ordenes-pago/{o}/rechazo-visto` (decisión 3, `0096`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+
+
+class CierreSinPagoOrden(BaseModel):
+    """Quién cerró sin pagar una orden que no se pagó, cuándo y por qué (`0096`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    cerrada_por_nombre: str
+    cerrada_en: datetime
+    motivo: str
+
+
 class Rechazo(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1113,7 +1142,8 @@ class PasoPago(StrEnum):
 
 
 class GrupoPago(StrEnum):
-    """Los grupos de la bandeja, en el orden en que se muestran (§2)."""
+    """Los grupos de la bandeja, en el orden en que se muestran (§2). Cuál le toca a cada orden lo
+    dice la tabla de la pantalla (`pantallas_datos/pagos.json`, campo `lista`)."""
 
     PARA_PAGAR = "para_pagar"
     PARA_CORREGIR = "para_corregir"
@@ -1122,33 +1152,13 @@ class GrupoPago(StrEnum):
     PARA_CONCILIAR = "para_conciliar"
     PARA_CONFIRMAR = "para_confirmar"
     PARA_RESOLVER = "para_resolver"
+    PARA_COTEJAR = "para_cotejar"
+    """Pagos conciliados que falta cotejar con el banco (P-24). No trae órdenes: la bandeja dice
+    cuántos son (`por_cotejar`) y el cotejo es otra pantalla."""
     ESPERANDO = "esperando"
-
-
-GRUPO_DE_PASO = {
-    PasoPago.PAGAR: GrupoPago.PARA_PAGAR,
-    PasoPago.TOMAR_PAGO: GrupoPago.PARA_PAGAR,
-    PasoPago.SUBIR_COMPROBANTE: GrupoPago.PARA_PAGAR,
-    PasoPago.DECLARAR_NO_PAGO: GrupoPago.PARA_PAGAR,
-    PasoPago.CORREGIR: GrupoPago.PARA_CORREGIR,
-    PasoPago.ENVIAR: GrupoPago.PARA_PREPARAR,
-    PasoPago.RENOVAR: GrupoPago.PARA_PREPARAR,
-    PasoPago.MODIFICAR: GrupoPago.PARA_PREPARAR,
-    PasoPago.VOLVER_A_PAGAR: GrupoPago.PARA_PREPARAR,
-    PasoPago.RECHAZADA: GrupoPago.PARA_PREPARAR,
-    PasoPago.PREPARAR_FALTANTE: GrupoPago.PARA_PREPARAR,
-    PasoPago.APROBAR: GrupoPago.PARA_APROBAR,
-    PasoPago.CONCILIAR: GrupoPago.PARA_CONCILIAR,
-    PasoPago.CONFIRMAR_NO_PAGO: GrupoPago.PARA_CONFIRMAR,
-    PasoPago.RESOLVER_DIFERENCIA: GrupoPago.PARA_RESOLVER,
-    PasoPago.ESPERA_APROBAR: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_COMPROBANTE: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_DECLARAR: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_CONCILIAR: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_CONFIRMAR: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_RESOLVER: GrupoPago.ESPERANDO,
-    PasoPago.ESPERA_CORREGIR: GrupoPago.ESPERANDO,
-}
+    BORRADORES_VIEJOS = "borradores_viejos"
+    """Borradores sin movimiento hace más de `CEM_PAGOS_DIAS_BORRADOR_VIEJO` días (decisión 4 del
+    propietario, 12-11-2026): plegados, no cuentan como pendientes y no se borran."""
 
 
 class LeTocaA(StrEnum):
@@ -1177,7 +1187,118 @@ class SituacionPago(StrEnum):
     CON_DIFERENCIA = "con_diferencia"
     RECLAMO = "reclamo"
     PAGADA = "pagada"
+    PAGADA_Y_COTEJADA = "pagada_y_cotejada"
+    """Pagada, y su pago ya se cotejó con el banco (P-05): la barra queda completa."""
     NO_SE_PAGO = "no_se_pago"
+
+
+class EstadoVisible(StrEnum):
+    """La única palabra de cada estado, la misma en bandeja, ficha, consulta y panel (decisión 11
+    del propietario, 12-11-2026). La da la situación, por la tabla de la pantalla; la palabra
+    está en `pantallas_datos/pagos.json` y en el frontend, y una prueba compara las dos."""
+
+    BORRADOR = "borrador"
+    ESPERANDO_APROBACION = "esperando_aprobacion"
+    RECHAZADA = "rechazada"
+    RETIRADA = "retirada"
+    LISTA_PARA_PAGAR = "lista_para_pagar"
+    PAGANDO = "pagando"
+    FALTA_CONCILIAR = "falta_conciliar"
+    OBSERVADA = "observada"
+    NO_SE_PAGO = "no_se_pago"
+    PAGADA = "pagada"
+    PAGADA_Y_COTEJADA = "pagada_y_cotejada"
+
+
+class AccionPago(StrEnum):
+    """Lo que se le puede ofrecer a quien mira una orden. Que se ofrezca lo decide la base (los
+    `puede_*`); en qué orden y con qué peso, la tabla de la pantalla."""
+
+    ENVIAR = "enviar"
+    MODIFICAR = "modificar"
+    RETIRAR = "retirar"
+    APROBAR = "aprobar"
+    RECHAZAR = "rechazar"
+    RENOVAR = "renovar"
+    PAGAR = "pagar"
+    VER_CUENTA_DE_NUEVO = "ver_cuenta_de_nuevo"
+    RETOMAR_PAGO = "retomar_pago"
+    TOMAR_PAGO = "tomar_pago"
+    SUBIR_COMPROBANTE = "subir_comprobante"
+    """Se hace con el formulario del comprobante, no con un botón suelto."""
+    CORREGIR = "corregir"
+    """Se hace con el formulario del comprobante, no con un botón suelto."""
+    DECLARAR_NO_PAGO = "declarar_no_pago"
+    CONCILIAR = "conciliar"
+    OBSERVAR = "observar"
+    CONFIRMAR_NO_PAGO = "confirmar_no_pago"
+    RESOLVER_DIFERENCIA = "resolver_diferencia"
+    """Se hace eligiendo qué pasa con lo pagado: el botón dice lo elegido (comentario 29)."""
+    RECUPERAR = "recuperar"
+    CERRAR_RECLAMO = "cerrar_reclamo"
+    CORREGIR_DIFERENCIA = "corregir_diferencia"
+    PREPARAR_FALTANTE = "preparar_faltante"
+    VOLVER_A_PAGAR = "volver_a_pagar"
+    PREPARAR_OTRA = "preparar_otra"
+    CERRAR_SIN_PAGAR = "cerrar_sin_pagar"
+    COTEJAR = "cotejar"
+
+
+class TipoAccion(StrEnum):
+    """Cómo se dibuja una acción ofrecida: una sola principal por pantalla (§4.2)."""
+
+    PRINCIPAL = "principal"
+    SECUNDARIA = "secundaria"
+    NEGATIVA = "negativa"
+
+
+class AccionOfrecida(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    codigo: AccionPago
+    tipo: TipoAccion
+
+
+class LugarEnLaBarra(StrEnum):
+    AHORA = "ahora"
+    ALERTA = "alerta"
+    """El paso actual con un problema: rechazada, observada, vencida, no se pagó."""
+
+
+PASOS_DE_LA_BARRA = 5
+"""Preparar, Aprobar, Pagar, Conciliar y Cotejar (decisión 6 del propietario, 12-11-2026)."""
+
+
+class BarraPago(BaseModel):
+    """Por dónde va la orden. Depende solo de la orden, no de quién mira (§4.2, regla 4)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hechos: int = Field(ge=0, le=PASOS_DE_LA_BARRA, description="Cuántos pasos ya se hicieron.")
+    actual: LugarEnLaBarra | None = Field(
+        description="Cómo está el paso siguiente a los hechos; nulo si no hay paso actual."
+    )
+
+
+class DespuesDelActo(StrEnum):
+    """Qué muestra la pantalla al terminar la acción principal (decisión 1, 12-11-2026)."""
+
+    LISTO = "listo"
+    """El «Listo» con lo que pasó; en PC, «Seguir con lo pendiente». No abre otra orden."""
+    MISMO_PASO = "mismo_paso"
+    """Además sigue con la próxima orden del mismo paso, si hay (como al conciliar)."""
+
+
+class OrdenParecida(BaseModel):
+    """Otra orden del mismo proveedor y el mismo importe, preparada con menos de
+    `CEM_PAGOS_DIAS_REPETIDA` días de diferencia (decisión 5 del propietario, 12-11-2026). Es un
+    aviso: no bloquea nada."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    creada_en: datetime
+    estado_visible: EstadoVisible
 
 
 class FiltroConsultaPagos(StrEnum):
@@ -1205,15 +1326,54 @@ class ElementoBandejaPagos(BaseModel):
     lectura_disputada: bool = Field(
         description="Al conciliar: quien registró dijo que la lectura estaba mal."
     )
+    situacion: SituacionPago
+    estado_visible: EstadoVisible
+    principal: AccionPago | None = Field(
+        description="La acción principal de la fila, la misma que el botón principal de la ficha:"
+        " el verbo de la fila es su texto (P-09). Nula si a quien mira no le toca nada."
+    )
+    pendiente: bool = Field(
+        description="Si cuenta como pendiente en el inicio. Lo que espera a otra persona y los"
+        " borradores viejos, no."
+    )
+    creada_en: datetime
+    actualizada_en: datetime
+    posible_duplicada_de: OrdenParecida | None = Field(
+        description="Otra orden del mismo proveedor e importe con menos de"
+        " `CEM_PAGOS_DIAS_REPETIDA` días de diferencia. Solo avisa."
+    )
+
+
+class AvisoRechazo(BaseModel):
+    """Una orden rechazada que quien la preparó todavía no vio (decisión 3 del propietario,
+    12-11-2026): se le avisa arriba de la bandeja hasta que dice «Entendido». No es un pendiente."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    proveedor: str
+    concepto: str
+    importe_centavos: int
+    moneda: str
+    proveedor_id: UUID
+    motivo: str
+    creada_en: datetime
+    rechazada_en: datetime
 
 
 class BandejaPagos(BaseModel):
     """`GET …/pagos/bandeja`: lo que quien pide tiene que hacer ahora, por grupo y de lo más viejo
-    a lo más nuevo. Lo pagado no está; lo rechazado, solo `CEM_PAGOS_DIAS_BANDEJA` días."""
+    a lo más nuevo. Lo pagado no está; lo rechazado, como aviso hasta que quien la preparó lo ve."""
 
     model_config = ConfigDict(frozen=True)
 
     elementos: list[ElementoBandejaPagos]
+    avisos_rechazo: list[AvisoRechazo]
+    por_cotejar: int = Field(
+        ge=0,
+        description="Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»)."
+        " Cero si no puede cotejar.",
+    )
 
 
 class ComprobanteActual(BaseModel):
@@ -1315,6 +1475,28 @@ class FichaPago(BaseModel):
     situacion: SituacionPago
     paso: PasoPago | None = Field(description="Nulo si a quien mira no le toca ni espera nada.")
     le_toca_a: LeTocaA | None
+    estado_visible: EstadoVisible
+    acciones: list[AccionOfrecida] = Field(
+        description="Lo que se le ofrece a quien mira, en el orden en que se dibuja: a lo sumo una"
+        " principal. Sale de la tabla de la pantalla y de los `puede_*`: nunca ofrece algo que la"
+        " base negaría."
+    )
+    barra: BarraPago | None = Field(description="Nula en una orden retirada.")
+    que_decir: str = Field(description="La frase de la situación, para quien mira.")
+    esperando_desde: datetime | None = Field(
+        description="Desde cuándo espera a otra persona, si a quien mira no le toca nada."
+    )
+    despues: DespuesDelActo
+    cotejado_en: datetime | None = Field(
+        description="Cuándo se cotejó con el banco el pago de la orden, si está cotejado."
+    )
+    posible_duplicada_de: OrdenParecida | None
+    cierre_sin_pago: CierreSinPagoOrden | None = Field(
+        description="Quién la cerró sin pagar, cuándo y por qué, si se cerró."
+    )
+    puede_cerrar_sin_pagar: bool = Field(
+        description="Si puede cerrar sin pagar una orden que no se pagó (`0096`)."
+    )
     puede_enviar: bool
     puede_aprobar: bool
     puede_rechazar: bool
@@ -1404,6 +1586,8 @@ class ElementoConsultaPagos(BaseModel):
     )
     fecha_operacion: date | None
     actualizada_en: datetime
+    creada_en: datetime
+    estado_visible: EstadoVisible
 
 
 class ConsultaPagos(BaseModel):

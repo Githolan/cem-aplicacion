@@ -69,7 +69,7 @@ function backend(respuestas: Respuestas) {
   const base: Respuestas = {
     "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
-    [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [] }),
+    [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 1 }),
     [LISTA]: lista([]),
   };
   return vi.fn(async (pedido: Request) => {
@@ -134,8 +134,13 @@ describe("la entrada", () => {
     expect((await screen.findByRole("link", { name: "Cotejar con el banco" })).getAttribute("href")).toBe("/pagos/cotejo");
   });
 
+  // Quién ve «Para cotejar» lo decide el servidor (`por_cotejar` es 0 para quien no puede cotejar;
+  // backend/tests/test_bandeja_honesta_0096.py): la pantalla dibuja lo que llega.
   it("control: a quien solo prepara no se la ofrece y la ruta lo lleva al inicio", async () => {
-    const simulado = backend({ [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden") });
+    const simulado = backend({
+      [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden"),
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0 }),
+    });
     vi.stubGlobal("fetch", simulado);
     abrir("/pagos");
     await screen.findByRole("link", { name: "Consultar pagos" });

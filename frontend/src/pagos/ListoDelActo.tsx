@@ -6,9 +6,9 @@ import type { components } from "../api/tipos";
 import { importe, mensajeDeError } from "../egresos/comun";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
-import { CaminoOrden } from "./CaminoOrden";
+import { Barra } from "./Barra";
 import { rutaFicha } from "./rutas";
-import { TEXTO_LE_TOCA_A, TEXTO_SITUACION } from "./textos";
+import { NOMBRE_ESTADO, TEXTO_LE_TOCA_A } from "./textos";
 
 // En PC, terminado un acto, el lugar de la ficha muestra lo que pasó con ESA orden: en qué estado
 // quedó y a quién le toca. No se abre ninguna otra orden sola: la siguiente se abre recién con
@@ -75,11 +75,11 @@ export function ListoDelActo({ consorcio, orden, texto, siguiente, quedan, aEntr
               {lectura.ficha.orden.razon_social}, {importe(lectura.ficha.orden.importe_centavos, lectura.ficha.orden.moneda)}
             </dd>
             <dt>Quedó</dt>
-            <dd>{TEXTO_SITUACION[lectura.ficha.situacion]}</dd>
+            <dd>{NOMBRE_ESTADO[lectura.ficha.estado_visible]}</dd>
             <dt>Ahora</dt>
             <dd>{lectura.ficha.le_toca_a === null ? SIN_NADA_MAS : TEXTO_LE_TOCA_A[lectura.ficha.le_toca_a]}</dd>
           </dl>
-          <CaminoOrden situacion={lectura.ficha.situacion} paso={lectura.ficha.paso} />
+          <Barra barra={lectura.ficha.barra} />
         </>
       )}
       {siguiente === null ? (

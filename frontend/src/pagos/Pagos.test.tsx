@@ -17,7 +17,9 @@ import { SIN_CONEXION } from "../fallas";
 import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
-import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, NO_RETIRAR, type Paso, PREGUNTA_RETIRAR, RETIRAR, TEXTO_RETIRADA, VERBO } from "./textos";
+import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
+import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoRepetida, TITULO_GRUPO, VERBO } from "./textos";
+import { TEXTO_ACCION } from "./textosDeAcciones";
 
 // La bandeja y la ficha del circuito de pagos. Todos los datos son ficticios: CUIT y CBU inventados,
 // banco 999, y nada se transfiere. La API está simulada: que el servidor mande el `paso` correcto lo
@@ -104,8 +106,15 @@ function ejecucion(pagos: Pago[] = [], declaraciones: Declaracion[] = []): NonNu
   return { id: X1, version: 1, creada_en: "2026-10-31T12:30:00Z", resultado: null, referencia: null, pagos, declaraciones };
 }
 
+/** Lo que el servidor simulado completa con la tabla real de la pantalla al servir la ficha
+ * (`completarFicha`): las acciones salen de la fila y de los `puede_*` que tenga la ficha servida. */
+const CALCULAR = "calcular desde la tabla";
+
 function ficha(extra: Partial<Ficha> = {}): Ficha {
   return {
+    acciones: [{ codigo: CALCULAR as never, tipo: "principal" }], estado_visible: "lista_para_pagar", barra: null,
+    que_decir: CALCULAR, esperando_desde: null, despues: "listo", cotejado_en: null, posible_duplicada_de: null,
+    cierre_sin_pago: null, puede_cerrar_sin_pagar: false,
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
     puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
@@ -167,7 +176,8 @@ const CUENTA_DEL_ACTO = {
 function elemento(paso: Paso, grupo: Elemento["grupo"], extra: Partial<Elemento> = {}): Elemento {
   return {
     orden_id: O1, proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre", importe_centavos: 1_500_000, moneda: "ARS",
-    paso, grupo, lectura_disputada: false, le_toca_a: "vos", ...extra,
+    paso, grupo, lectura_disputada: false, le_toca_a: "vos", ...deLaFila(paso, grupo), creada_en: "2026-10-30T12:00:00Z",
+    actualizada_en: "2026-10-31T12:00:00Z", posible_duplicada_de: null, ...extra,
   };
 }
 
@@ -196,9 +206,28 @@ function error(codigo: string, status: number) {
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
-const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos });
+const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0 });
 const VERIFICADO = () =>
   Response.json({ verificado_en: "2026-10-31T12:00:00Z", vale_hasta: "2026-10-31T12:10:00Z", codigos_recuperacion_restantes: 9 });
+
+const RUTA_FICHA = /^GET \/api\/v1\/consorcios\/[^/]+\/pagos\/[0-9a-f-]{36}$/;
+
+/** El servidor simulado arma la ficha como el backend: estado, barra, frase y acciones salen de la
+ * tabla real de la pantalla y de los `puede_*` de la ficha servida (salvo que la prueba los fije). */
+async function completarFicha(clave: string, respuesta: Response): Promise<Response> {
+  if (!RUTA_FICHA.test(clave) || !respuesta.ok) return respuesta;
+  const datos = (await respuesta.clone().json()) as Ficha;
+  if (datos.situacion === undefined) return respuesta;
+  const completa = { ...datos };
+  // La barra que fija la prueba gana: el servidor la cambia por la orden (p. ej. aprobación vencida).
+  if (datos.que_decir === CALCULAR)
+    Object.assign(completa, deLaTabla(datos.situacion, datos.paso), datos.barra === null ? {} : { barra: datos.barra });
+  if (datos.acciones.length === 1 && datos.acciones[0]?.codigo === (CALCULAR as never)) {
+    const noCoincide = datos.paso === "conciliar" && (datos.lectura_comprobante?.distinto_de_lo_registrado.length ?? 0) > 0;
+    completa.acciones = accionesDe(datos, noCoincide);
+  }
+  return Response.json(completa, { status: respuesta.status });
+}
 
 /** Responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
@@ -212,7 +241,7 @@ function backend(respuestas: Respuestas) {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = respuestas[clave] ?? base[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-    return respuesta();
+    return completarFicha(clave, await respuesta());
   });
 }
 
@@ -323,7 +352,7 @@ describe("bandeja", () => {
     const { container } = abrir("/pagos");
     const pagar = await screen.findByRole("region", { name: /^Para pagar/ });
     expect(within(pagar).getByRole("link").getAttribute("href")).toBe(`/pagos/${O1}`);
-    expect(within(pagar).getByRole("link").textContent).toContain("Pagar");
+    expect(within(pagar).getByRole("link").textContent).toContain("Ver la cuenta para pagar");
     expect(screen.getByRole("region", { name: /^Para aprobar/ }).textContent).toContain("Ascensores Ficticios SA");
     expect(screen.queryByRole("region", { name: /^Para conciliar/ })).toBeNull();
     expect(screen.queryByText("Nada pendiente.")).toBeNull();
@@ -332,9 +361,14 @@ describe("bandeja", () => {
     await sinFaltasDeAccesibilidad(container);
   });
 
-  it.each(Object.entries(VERBO) as [Paso, string][])("%s dice «%s»", async (paso, verbo) => {
-    const grupo = paso.startsWith("espera_") ? "esperando" : "para_pagar";
-    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento(paso, grupo)) }));
+  // Cada fila de la tabla que va a una lista: la fila dice el verbo de su acción principal (el mismo
+  // texto que el botón, P-09) y, si no tiene, el del paso.
+  const FILAS_EN_LISTA = TABLA.filas.flatMap((f) =>
+    f.lista === null || f.paso === null ? [] : [[`${f.situacion}/${f.paso}`, f.paso, f.lista, f.principal] as const],
+  );
+  it.each(FILAS_EN_LISTA)("%s dice su verbo", async (_, paso, grupo, principal) => {
+    const verbo = principal === null ? VERBO[paso] : TEXTO_ACCION[principal];
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento(paso, grupo, { principal })) }));
     abrir("/pagos");
     expect((await screen.findByRole("link", { name: new RegExp(verbo) })).getAttribute("href")).toBe(`/pagos/${O1}`);
   });
@@ -377,7 +411,7 @@ describe("bandeja", () => {
   it("si la lectura falla, ofrece Reintentar y vuelve a pedir", async () => {
     let caido = true;
     vi.stubGlobal("fetch", backend({
-      [`GET ${BASE}/pagos/bandeja`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
+      [`GET ${BASE}/pagos/bandeja`]: () => (caido ? error("error_interno", 500) : bandejaCon()()),
     }));
     abrir("/pagos");
     const reintentar = await boton("Reintentar");
@@ -393,7 +427,7 @@ describe("bandeja", () => {
     vi.stubGlobal("fetch", backend({
       [`GET ${BASE}/pagos/bandeja`]: () => {
         if (caido) throw new TypeError("sin red");
-        return Response.json({ elementos: [] });
+        return bandejaCon()();
       },
     }));
     abrir("/pagos");
@@ -454,7 +488,7 @@ describe("el ancho de la pantalla", () => {
     const { container } = abrir("/pagos");
     expect(await screen.findByRole("heading", { level: 2, name: "Limpieza Ficticia SRL" })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Pagos" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Pagar/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("link", { name: /Ver la cuenta para pagar/ }).getAttribute("aria-current")).toBe("true");
     expect(container.querySelector(".circuito-pagos--al-lado")).not.toBeNull();
   });
 
@@ -503,7 +537,7 @@ describe("el ancho de la pantalla", () => {
       },
     }));
     abrir("/pagos");
-    const aprobar = (await boton("Aprobar esta versión")) as HTMLButtonElement;
+    const aprobar = (await boton("Aprobar la orden")) as HTMLButtonElement;
     await waitFor(() => expect(aprobar.disabled).toBe(false));
     fireEvent.click(aprobar);
     expect(await screen.findByRole("region", { name: "Lo que pasó con la orden" })).toBeTruthy();
@@ -525,7 +559,7 @@ describe("el ancho de la pantalla", () => {
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
     const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     expect(await screen.findByText(/Listo: quedó conciliado/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas));
@@ -570,7 +604,7 @@ describe("el ancho de la pantalla", () => {
     const api = backend(CON_UNA);
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/pagos");
-    await screen.findByRole("link", { name: /Pagar/ });
+    await screen.findByRole("link", { name: /Ver la cuenta para pagar/ });
     expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(0);
     expect(container.querySelector(".circuito-pagos--al-lado")).toBeNull();
   });
@@ -594,7 +628,6 @@ describe("ficha: la línea de pasos sale de lo que dice el servidor", () => {
     ["borrador", "enviar", "Preparar", "ahora", 0],
     ["en_revision", "aprobar", "Aprobar", "ahora", 1],
     ["para_pagar", "pagar", "Pagar", "ahora", 2],
-    ["para_pagar", "renovar", "Pagar", "alerta", 2],
     ["falta_conciliar", "conciliar", "Conciliar", "ahora", 3],
     ["observado", "corregir", "Conciliar", "alerta", 3],
   ] as const)("%s con %s: el paso actual es %s", async (situacion, paso, nombre, tono, hechos) => {
@@ -605,17 +638,32 @@ describe("ficha: la línea de pasos sale de lo que dice el servidor", () => {
     expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(hechos);
   });
 
-  it("pagada: cuatro hechos y «Cotejar» sin marcar, porque la ficha no sabe si se cotejó", async () => {
-    abrirFicha(ficha({ situacion: "pagada", paso: null }));
+  it("la aprobación vencida: el servidor marca Pagar en alerta y la pantalla lo dibuja", async () => {
+    abrirFicha(ficha({ situacion: "para_pagar", paso: "renovar", barra: { hechos: 2, actual: "alerta" } }));
     const lista = await camino();
-    expect(actual(lista)).toBeNull();
-    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(4);
-    expect(estado(lista, "Cotejar")).toBeNull();
+    expect(actual(lista)?.textContent).toBe("Pagar");
+    expect(actual(lista)?.getAttribute("data-estado")).toBe("alerta");
   });
 
-  it("control: una orden que no se pagó no muestra la línea", async () => {
+  it("pagada: cuatro hechos y «Cotejar» como paso actual, hasta que se coteje (P-05)", async () => {
+    abrirFicha(ficha({ situacion: "pagada", paso: null }));
+    const lista = await camino();
+    expect(actual(lista)?.textContent).toBe("Cotejar");
+    expect(lista.querySelectorAll('[data-estado="hecho"]')).toHaveLength(4);
+    expect(estado(lista, "Cotejar")).toBe("ahora");
+  });
+
+  it("una orden que no se pagó no pierde la línea: Pagar queda en alerta (P-06)", async () => {
     abrirFicha(ficha({ situacion: "no_se_pago", paso: null }));
     await screen.findByText("No se pagó");
+    const lista = await camino();
+    expect(actual(lista)?.textContent).toBe("Pagar");
+    expect(actual(lista)?.getAttribute("data-estado")).toBe("alerta");
+  });
+
+  it("control: una orden retirada no tiene línea", async () => {
+    abrirFicha(ficha({ orden: orden({ estado: "retirada" }), situacion: "retirada", paso: null }));
+    await screen.findByText(NOMBRE_ESTADO.retirada);
     expect(screen.queryByRole("list", { name: "Por dónde va la orden" })).toBeNull();
   });
 
@@ -631,13 +679,18 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   const CASOS: [string, Ficha, string, keyof Ficha][] = [
     ["enviar", BORRADOR, "Enviar a aprobar", "puede_enviar"],
     ["renovar", ficha({ paso: "renovar", puede_renovar: true }), "Renovar la aprobación", "puede_renovar"],
-    ["volver_a_pagar", ficha({ situacion: "no_se_pago", paso: "volver_a_pagar", puede_modificar: true }), "Enviar a aprobar de nuevo", "puede_modificar"],
-    ["aprobar", APROBAR, "Aprobar esta versión", "puede_aprobar"],
+    [
+      "volver_a_pagar",
+      ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", puede_modificar: true }),
+      "Enviar a aprobar de nuevo",
+      "puede_modificar",
+    ],
+    ["aprobar", APROBAR, "Aprobar la orden", "puede_aprobar"],
     ["pagar", PAGAR, "Ver la cuenta para pagar", "puede_pagar"],
     ["subir_comprobante", SUBIR, "Elegir un archivo", "puede_subir_comprobante"],
     ["corregir", CORREGIR, "Guardar la corrección", "puede_corregir"],
-    ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "No se pudo pagar", "puede_declarar"],
-    ["conciliar", CONCILIAR, "Conforme", "puede_conciliar"],
+    ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "Declarar que no se pagó", "puede_declarar"],
+    ["conciliar", CONCILIAR, "Conciliar el pago", "puede_conciliar"],
     [
       "confirmar_no_pago",
       ficha({ situacion: "no_pago_declarado", paso: "confirmar_no_pago", puede_confirmar: true, declaracion_vigente: DECLARACION }),
@@ -656,15 +709,17 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
   });
 
   it.each([
-    ["espera_aprobar", "en_revision", "consejo", "Le toca al Consejo."],
-    ["espera_conciliar", "falta_conciliar", "consejo", "Le toca al Consejo."],
-    ["espera_corregir", "observado", "quien_registro", "Le toca a quien registró el pago."],
-    ["espera_declarar", "pagando", "quien_ejecuta", "Le toca a quien ejecuta los pagos."],
-    ["espera_comprobante", "pagando", "quien_vio_la_cuenta", "Le toca a quien vio la cuenta."],
-    ["espera_confirmar", "no_pago_declarado", "quien_vio_la_cuenta", "Le toca a quien vio la cuenta."],
-  ] as [Paso, Ficha["situacion"], Ficha["le_toca_a"], string][])("%s dice a quién le toca y no ofrece nada", async (paso, situacion, leToca, texto) => {
+    ["espera_aprobar", "en_revision", "consejo", /^Espera la aprobación del Consejo\./],
+    ["espera_conciliar", "falta_conciliar", "consejo", /Consejo/],
+    ["espera_corregir", "observado", "quien_registro", /quien lo registró/],
+    ["espera_declarar", "pagando", "quien_ejecuta", /quien ejecuta los pagos/],
+    ["espera_comprobante", "pagando", "quien_vio_la_cuenta", /quien la vio/],
+    ["espera_confirmar", "no_pago_declarado", "quien_vio_la_cuenta", /quien vio la cuenta/],
+  ] as [Paso, Ficha["situacion"], Ficha["le_toca_a"], RegExp][])("%s dice qué pasa y no ofrece nada", async (paso, situacion, leToca, quien) => {
     const api = abrirFicha(ficha({ paso, situacion, le_toca_a: leToca }));
-    expect(await screen.findByText(texto)).toBeTruthy();
+    // La frase es la de la tabla de la pantalla y nombra a quién le toca.
+    const frase = await screen.findByText(filaDe(situacion, paso).que_decir);
+    expect(frase.textContent).toMatch(quien);
     expect(within(document.querySelector(".ficha-pago") as HTMLElement).queryAllByRole("button")).toHaveLength(0);
     expect(escrituras(api)).toEqual([]);
   });
@@ -689,7 +744,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
 
   it("no muestra datos que no hacen falta para decidir, salvo en «Más datos»", async () => {
     abrirFicha(APROBAR);
-    await boton("Aprobar esta versión");
+    await boton("Aprobar la orden");
     const mas = screen.getByText("Más datos").closest("details") as HTMLElement;
     expect(mas.hasAttribute("open")).toBe(false);
     expect(mas.textContent).toContain("20000000001");
@@ -698,7 +753,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
 
   it("«Más datos» no repite lo habitual ni los números de versión (comentario 25)", async () => {
     abrirFicha({ ...APROBAR, versiones: [version({ condicion_beneficiario: "conocido", franja: "bajo_umbral", aprobada_por: [] })] });
-    await boton("Aprobar esta versión");
+    await boton("Aprobar la orden");
     const mas = (screen.getByText("Más datos").closest("details") as HTMLElement).textContent ?? "";
     expect(mas).toContain("20000000001");
     for (const fuera of ["Beneficiario", "Franja", "Fondo de reserva", "Versión de la orden", "Versión del proveedor", "Cambios anteriores"])
@@ -707,7 +762,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
 
   it("control: lo que no es habitual sí se ve en «Más datos»", async () => {
     abrirFicha({ ...APROBAR, versiones: [version({ usa_fondo_reserva: true, franja: "sobre_umbral", condicion_beneficiario: "nuevo", aprobada_por: [] })] });
-    await boton("Aprobar esta versión");
+    await boton("Aprobar la orden");
     const mas = (screen.getByText("Más datos").closest("details") as HTMLElement).textContent ?? "";
     expect(mas).toContain("Fondo de reserva");
     expect(mas).toContain("Supera el umbral");
@@ -719,7 +774,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     const v2 = version({ numero: 2, importe_centavos: 4_000_000, aprobada_por: [] });
     const v3 = version({ numero: 3, importe_centavos: 4_500_000, aprobada_por: [] });
     abrirFicha({ ...APROBAR, orden: { ...APROBAR.orden, version_vigente: 3 }, versiones: [v1, v2, v3] });
-    await boton("Aprobar esta versión");
+    await boton("Aprobar la orden");
     const mas = screen.getByText("Más datos").closest("details") as HTMLElement;
     const filas = [...mas.querySelectorAll("h3 + ol.versiones li")].map((li) => li.textContent);
     // v1 → v2 no cambió nada visible; v2 → v3 cambió el importe.
@@ -735,7 +790,10 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     const RUTA_ENVIO = `${BASE}/ordenes-pago/${O1}/enviar-a-revision`;
     const conAlerta = { ...BORRADOR, versiones: [version({ alerta_fraccionamiento: true, aprobada_por: [], franja: "bajo_umbral" })] };
     let enviada = false;
-    abrirFicha(() => (enviada ? { ...conAlerta, orden: orden({ estado: "en_revision" }), situacion: "en_revision", le_toca_a: "consejo" } : conAlerta), {
+    const enviadaYa: Ficha = {
+      ...conAlerta, orden: orden({ estado: "en_revision" }), situacion: "en_revision", paso: "espera_aprobar", le_toca_a: "consejo", puede_enviar: false,
+    };
+    abrirFicha(() => (enviada ? enviadaYa : conAlerta), {
       [`POST ${RUTA_ENVIO}`]: () => {
         enviada = true;
         return Response.json({ id: O1, version: 1 });
@@ -955,7 +1013,7 @@ describe("pagar", () => {
     expect(await screen.findByText(AVISO_SIN_CUENTA)).toBeTruthy();
     sinBoton("Ver la cuenta de nuevo");
     expect(await boton("Registrar el pago")).toBeTruthy();
-    expect(await boton("No se pudo pagar")).toBeTruthy();
+    expect(await boton("Declarar que no se pagó")).toBeTruthy();
   });
 
   it("si la orden cambió de versión, la cuenta de la anterior se va y lo escrito queda", async () => {
@@ -1002,7 +1060,7 @@ describe("registrar y corregir", () => {
   it("si falla la recarga después de registrar, el «Listo» queda y se puede reintentar", async () => {
     let caido = false;
     abrirFicha(LISTO, {
-      [`GET ${BASE}/pagos/bandeja`]: () => (caido ? error("error_interno", 500) : Response.json({ elementos: [] })),
+      [`GET ${BASE}/pagos/bandeja`]: () => (caido ? error("error_interno", 500) : bandejaCon()()),
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => {
         caido = true;
         return Response.json({ id: PAGO, orden_id: O1 }, { status: 201 });
@@ -1129,8 +1187,8 @@ describe("registrar y corregir", () => {
         ...RESOLVER, situacion: "reclamo", puede_resolver_diferencia: false, puede_recuperar: true,
         diferencia_vigente: diferencia({ resolucion: "reclamo", resuelta_en: "2026-11-01T12:00:00Z" }),
       }), { [`POST ${CAMINO}/recuperada`]: () => Response.json({ orden_id: O1, estado: "fallida" }) });
-      expect(await screen.findByText("Reclamo abierto")).toBeTruthy();
-      fireEvent.click(await boton("Ya recuperamos la plata"));
+      expect(await screen.findByText(NOMBRE_ESTADO.observada)).toBeTruthy();
+      fireEvent.click(await boton("Registrar que se recuperó la plata"));
       expect(await screen.findByText(/se puede volver a pagar/)).toBeTruthy();
       expect(pedidos(api, "POST", `${CAMINO}/recuperada`)).toHaveLength(1);
     });
@@ -1208,8 +1266,8 @@ describe("registrar y corregir", () => {
 
   it("observado, sin ser quien registró: no corrige y sabe a quién le toca", async () => {
     abrirFicha({ ...CORREGIR, paso: "espera_corregir", le_toca_a: "quien_registro", puede_corregir: false, puede_declarar: false });
-    expect(await screen.findByText("Le toca a quien registró el pago.")).toBeTruthy();
-    expect(screen.getByText("Observado")).toBeTruthy();
+    expect(await screen.findByText(filaDe("observado", "espera_corregir").que_decir)).toBeTruthy();
+    expect(screen.getByText(NOMBRE_ESTADO.observada)).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 });
@@ -1704,16 +1762,16 @@ describe("la lectura con IA del comprobante", () => {
   });
 
   const CONCILIAR_DISTINTO = { ...CONCILIAR, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_la_orden: ["importe"], distinto_de_lo_registrado: ["importe"] }) };
-  const nombres = () => screen.getAllByRole("button").map((b) => b.textContent).filter((t) => t === "Conforme" || t === "Observar");
+  const nombres = () => screen.getAllByRole("button").map((b) => b.textContent).filter((t) => t === "Conciliar el pago" || t === "Observar");
 
   it("si lo leído difiere de lo registrado, el Consejo lo ve y Observar pasa a principal", async () => {
     abrirFicha(CONCILIAR_DISTINTO);
     expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y registraron $ 15.000,00.");
-    await boton("Conforme");
-    expect(nombres()).toEqual(["Observar", "Conforme"]);
+    await boton("Conciliar el pago");
+    expect(nombres()).toEqual(["Observar", "Conciliar el pago"]);
     // Observar es una acción negativa: principal y en rojo (comentario 26).
     expect((await boton("Observar")).className).toBe("peligro");
-    expect((await boton("Conforme")).className).toBe("secundario");
+    expect((await boton("Conciliar el pago")).className).toBe("secundario");
   });
 
   it("conforme sigue, porque la lectura puede equivocarse", async () => {
@@ -1721,7 +1779,7 @@ describe("la lectura con IA del comprobante", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
   });
@@ -1738,8 +1796,8 @@ describe("la lectura con IA del comprobante", () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ coincide_con_lo_registrado: true }) });
     expect(await screen.findByText("La lectura del comprobante coincide con lo registrado.")).toBeTruthy();
     expect(screen.queryByText(/quedó incompleta/)).toBeNull();
-    await boton("Conforme");
-    expect(nombres()).toEqual(["Conforme", "Observar"]);
+    await boton("Conciliar el pago");
+    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -1747,15 +1805,15 @@ describe("la lectura con IA del comprobante", () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA }) });
     expect(await screen.findByText("La lectura del comprobante quedó incompleta: compará los datos con el archivo.")).toBeTruthy();
     expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
-    await boton("Conforme");
-    expect(nombres()).toEqual(["Conforme", "Observar"]);
+    await boton("Conciliar el pago");
+    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
   });
 
   it("una moneda distinta se avisa aunque el importe no se haya leído", async () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_lo_registrado: ["moneda"] }) });
     expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y registraron ARS.");
-    await boton("Conforme");
-    expect(nombres()).toEqual(["Observar", "Conforme"]);
+    await boton("Conciliar el pago");
+    expect(nombres()).toEqual(["Observar", "Conciliar el pago"]);
   });
 
   it("antes de registrar, también: otra moneda sin importe pregunta qué pasó", async () => {
@@ -1767,9 +1825,9 @@ describe("la lectura con IA del comprobante", () => {
 
   it("control: sin lectura no dice que coincida", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
-    expect(nombres()).toEqual(["Conforme", "Observar"]);
+    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
   });
 
   it("al resolver una diferencia también se ve lo leído", async () => {
@@ -1829,7 +1887,7 @@ describe("no se pagó", () => {
     const api = abrirFicha(SUBIR, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("No se pudo pagar"));
+    fireEvent.click(await boton("Declarar que no se pagó"));
     fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "No había saldo" } });
     fireEvent.click(await boton("Declarar que no se pagó"));
     expect(await screen.findByText(/Listo: declaraste que no se pagó/)).toBeTruthy();
@@ -1841,7 +1899,7 @@ describe("no se pagó", () => {
     abrirFicha(LISTO);
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    fireEvent.click(await boton("No se pudo pagar"));
+    fireEvent.click(await boton("Declarar que no se pagó"));
     fireEvent.click(await boton("Cancelar"));
     expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
   });
@@ -1851,7 +1909,7 @@ describe("no se pagó", () => {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`]: () => Response.json({ id: DECL, orden_id: O1 }, { status: 201 }),
     });
     expect(await screen.findByText(AVISO_SIN_SALIDA)).toBeTruthy();
-    fireEvent.click(await boton("No se pudo pagar"));
+    fireEvent.click(await boton("Declarar que no se pagó"));
     fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "Venció" } });
     fireEvent.click(await boton("Declarar que no se pagó"));
     await screen.findByText(/Listo: declaraste/);
@@ -1860,7 +1918,7 @@ describe("no se pagó", () => {
 
   it("sin `documentos.cargar` no hay un registro que no se podría terminar: queda declarar", async () => {
     abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_reabrir_cuenta: false });
-    expect(await boton("No se pudo pagar")).toBeTruthy();
+    expect(await boton("Declarar que no se pagó")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
   });
 
@@ -1870,7 +1928,7 @@ describe("no se pagó", () => {
     const api = abrirFicha(ficha({
       orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", puede_corregir_diferencia: true, ejecucion: ejecucion(), diferencia_vigente: d,
     }), { [`POST ${CORRECCION}`]: () => Response.json({ id: d.id, orden_id: O1 }, { status: 201 }) });
-    fireEvent.click(await boton("Corregir lo que registré"));
+    fireEvent.click(await boton("Corregir lo registrado"));
     expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe(d.numero_operacion);
     expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
     fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: CUENTA } });
@@ -1882,7 +1940,7 @@ describe("no se pagó", () => {
   it("sin poder corregir la diferencia no se ofrece", async () => {
     abrirFicha(ficha({ orden: orden({ estado: "en_verificacion" }), situacion: "con_diferencia", paso: "espera_resolver", ejecucion: ejecucion(), diferencia_vigente: diferencia() }));
     await screen.findByText(/Se pagó otra cosa/);
-    sinBoton("Corregir lo que registré");
+    sinBoton("Corregir lo registrado");
   });
 
   it("al conciliar se ve que dijo que la lectura estaba mal; sin eso, no", async () => {
@@ -1890,7 +1948,7 @@ describe("no se pagó", () => {
     expect(await screen.findByText(/Dijo que la lectura estaba mal/)).toBeTruthy();
     cleanup();
     abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago()]) });
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     expect(screen.queryByText(/Dijo que la lectura estaba mal/)).toBeNull();
   });
 
@@ -1922,7 +1980,7 @@ describe("no se pagó", () => {
 
   it("aprobada con el proveedor cambiado, Modificar es lo principal y dice por qué", async () => {
     abrirFicha(ficha({ orden: orden({ estado: "aprobada" }), situacion: "para_pagar", paso: "modificar", puede_modificar: true }));
-    const modificar = await boton("Modificar");
+    const modificar = await boton("Modificar la orden");
     expect(modificar.className).not.toContain("secundario");
     expect(screen.getByText(/El proveedor cambió después de aprobar/)).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
@@ -1955,7 +2013,7 @@ describe("no se pagó", () => {
       declaracion_vigente: DECLARACION, ejecucion: ejecucion([], [DECLARACION]),
     }));
     expect(await screen.findByText(/No había saldo/)).toBeTruthy();
-    expect(screen.getByText("Falta confirmar")).toBeTruthy();
+    expect(screen.getByText(filaDe("no_pago_declarado", "espera_confirmar").que_decir)).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
     sinBoton("Retomar el pago");
   });
@@ -2160,7 +2218,7 @@ describe("preparar, enviar y renovar", () => {
 
     it("control: sin `puede_retirar` no se ofrece", async () => {
       abrirFicha({ ...ESPERANDO, puede_retirar: false });
-      await boton("Modificar");
+      await boton("Modificar la orden");
       sinBoton(RETIRAR);
       expect(screen.queryByText(AVISO_SE_PUEDE_RETIRAR)).toBeNull();
     });
@@ -2173,7 +2231,7 @@ describe("preparar, enviar y renovar", () => {
       expect(await screen.findByText(/La retiró Marta Ficticia el .*No se aprueba ni se paga\./)).toBeTruthy();
       expect(screen.getByText("Retirada")).toBeTruthy();
       sinBoton(RETIRAR);
-      sinBoton("Modificar");
+      sinBoton("Modificar la orden");
     });
   });
 
@@ -2194,7 +2252,7 @@ describe("preparar, enviar y renovar", () => {
         ...LECTURAS,
         [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
       });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       fireEvent.click(await boton("Guardar la orden"));
       expect(await screen.findByText(AVISO_MODIFICAR)).toBeTruthy();
@@ -2210,7 +2268,7 @@ describe("preparar, enviar y renovar", () => {
         ...LECTURAS,
         [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
       });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
       fireEvent.click(await boton("Guardar la orden"));
       await screen.findByText("Listo: guardamos la versión nueva.");
@@ -2220,7 +2278,7 @@ describe("preparar, enviar y renovar", () => {
 
     it("sin cambios o con el proveedor inactivo, el formulario sigue abierto con lo escrito", async () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("sin_cambios", 409) });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
       fireEvent.click(await boton("Guardar la orden"));
       expect((await screen.findByRole("alert")).textContent).toContain("ningún cambio");
@@ -2229,7 +2287,7 @@ describe("preparar, enviar y renovar", () => {
 
     it("volver a pagar abre el formulario con los datos de la orden", async () => {
       abrirFicha(ficha({ orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true }), LECTURAS);
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       expect(((await screen.findByLabelText("Concepto")) as HTMLInputElement).value).toBe("Limpieza de octubre");
     });
 
@@ -2388,12 +2446,12 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Enviar a aprobar de nuevo"));
       expect((await screen.findByRole("alert")).textContent).toContain("no cubre esta orden");
-      expect(await boton("Modificar")).toBeTruthy();
+      expect(await boton("Modificar la orden")).toBeTruthy();
     });
 
     it("un contrato que ya no rige se quita del formulario y se avisa", async () => {
       abrirFicha({ ...BORRADOR, versiones: [version({ contrato_id: X1 })] }, LECTURAS);
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       expect(((await screen.findByLabelText("Contrato o abono (opcional)")) as HTMLSelectElement).value).toBe("");
       expect(screen.getByRole("alert").textContent).toContain("ya no rige");
     });
@@ -2410,7 +2468,7 @@ describe("preparar, enviar y renovar", () => {
           return error("version_desactualizada", 409);
         },
       });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Mío" } });
       fireEvent.click(await boton("Guardar la orden"));
       fireEvent.click(await boton("Sí, crear la versión nueva"));
@@ -2432,7 +2490,7 @@ describe("preparar, enviar y renovar", () => {
           return error("version_desactualizada", 409);
         },
       });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
       fireEvent.click(await boton("Guardar la orden"));
       fireEvent.click(await boton("Sí, crear la versión nueva"));
@@ -2441,7 +2499,7 @@ describe("preparar, enviar y renovar", () => {
 
     it("otro conflicto de la orden cierra el formulario y vuelve a la ficha", async () => {
       abrirFicha(BORRADOR, { ...LECTURAS, [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => error("orden_no_admite", 409) });
-      fireEvent.click(await boton("Modificar"));
+      fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
       fireEvent.click(await boton("Guardar la orden"));
       expect((await screen.findByRole("alert")).textContent).toContain("ya no admite");
@@ -2453,7 +2511,7 @@ describe("preparar, enviar y renovar", () => {
 describe("aprobar y rechazar", () => {
   /** El botón ya se puede tocar: llegó la cuenta que se aprueba. */
   async function listoParaAprobar() {
-    await waitFor(async () => expect(((await boton("Aprobar esta versión")) as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(async () => expect(((await boton("Aprobar la orden")) as HTMLButtonElement).disabled).toBe(false));
   }
 
   it("quien decide ve la cuenta completa, porque es lo que aprueba", async () => {
@@ -2500,7 +2558,7 @@ describe("aprobar y rechazar", () => {
     });
     const volver = await boton("Volver a pedir la cuenta");
     expect(screen.getByRole("alert").textContent).toContain("El servicio no está disponible");
-    expect(((await boton("Aprobar esta versión")) as HTMLButtonElement).disabled).toBe(true);
+    expect(((await boton("Aprobar la orden")) as HTMLButtonElement).disabled).toBe(true);
     expect(((await boton("Rechazar")) as HTMLButtonElement).disabled).toBe(false);
     caido = false;
     fireEvent.click(volver);
@@ -2527,7 +2585,7 @@ describe("aprobar y rechazar", () => {
       },
     });
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     expect(await screen.findByText(OTRA)).toBeTruthy();
     expect(screen.queryByText(CUENTA)).toBeNull();
   });
@@ -2543,7 +2601,7 @@ describe("aprobar y rechazar", () => {
         conFactor ? Response.json({ id: O1, version: 1 }, { status: 201 }) : error("segundo_factor_requerido", 403),
     });
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     await verificarCodigo();
     expect(await screen.findByText("Listo: aprobaste la versión 1.")).toBeTruthy();
     const aprobaciones = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`);
@@ -2566,7 +2624,7 @@ describe("aprobar y rechazar", () => {
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1));
     fireEvent.click(screen.getByRole("link", { name: /Ascensores Ficticios SA/ }));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
@@ -2602,7 +2660,7 @@ describe("aprobar y rechazar", () => {
       },
     });
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     expect(await screen.findByText(/Cambió el importe/)).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("Revisá la versión nueva");
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1);
@@ -2617,8 +2675,8 @@ describe("aprobar y rechazar", () => {
       },
     });
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
-    await waitFor(() => sinBoton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
+    await waitFor(() => sinBoton("Aprobar la orden"));
   });
 
   it("rechazar pide un motivo sobre la misma ficha", async () => {
@@ -2663,10 +2721,10 @@ describe("aprobar y rechazar", () => {
       },
     });
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     await screen.findByRole("alert");
     await listoParaAprobar();
-    fireEvent.click(await boton("Aprobar esta versión"));
+    fireEvent.click(await boton("Aprobar la orden"));
     await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(2));
     const [a, b] = claves(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`));
     expect(a).not.toBe(b);
@@ -2704,7 +2762,7 @@ describe("aprobar y rechazar", () => {
   it("quien ya aprobó rechaza y no aprueba: cada botón sigue a su campo", async () => {
     abrirFicha({ ...APROBAR, puede_aprobar: false });
     expect(await boton("Rechazar")).toBeTruthy();
-    sinBoton("Aprobar esta versión");
+    sinBoton("Aprobar la orden");
   });
 });
 
@@ -2713,7 +2771,7 @@ describe("conciliar", () => {
 
   it("la fecha de la transferencia se lee día, mes y año", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     expect(screen.getByText("31/10/2026")).toBeTruthy();
     expect(screen.queryByText("2026-10-31")).toBeNull();
   });
@@ -2725,7 +2783,7 @@ describe("conciliar", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("conciliar", "para_conciliar", { orden_id: O2 })),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     expect(await screen.findByRole("heading", { name: "Ascensores Ficticios SA" })).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(await screen.findByText(/Listo: quedó conciliado el pago a .+\. Sigue este, 1 de 1\.$/)).toBeTruthy();
@@ -2737,7 +2795,7 @@ describe("conciliar", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2 })),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(lugar()).toBe("/pagos");
   });
@@ -2758,7 +2816,7 @@ describe("conciliar", () => {
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
     expect(await screen.findByText(/Para darlo por conforme, escribí por qué lo aceptás/)).toBeTruthy();
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     expect(escrituras(api)).toEqual([]);
     fireEvent.change(await screen.findByLabelText("Por qué lo aceptás fuera de término"), { target: { value: "Lo autorizó el Consejo" } });
     fireEvent.click(await boton("Dar el pago por conforme"));
@@ -2768,7 +2826,7 @@ describe("conciliar", () => {
 
   it("«Ver más grande» abre el mismo comprobante en una hoja, sin volver a pedirlo, y Escape la cierra", async () => {
     const api = abrirFicha(CONCILIAR);
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     await screen.findByRole("img", { name: "Comprobante de la transferencia" });
     const pedidosAntes = pedidos(api, "GET", CONTENIDO).length;
     fireEvent.click(await boton("Ver más grande"));
@@ -2784,7 +2842,7 @@ describe("conciliar", () => {
 
   it("muestra el comprobante y, al lado, la orden contra lo registrado, con la cuenta y quién registró", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
     const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
     expect(within(tabla).getAllByText(/15\.000,00/)).toHaveLength(2);
@@ -2797,7 +2855,7 @@ describe("conciliar", () => {
     abrirFicha(CONCILIAR, {
       [REVISION]: () => Response.json({ orden: CONCILIAR.orden, versiones: CONCILIAR.versiones.map((x) => ({ ...x, cuenta_destino: null })), puede_aprobar: false, puede_rechazar: false }),
     });
-    await boton("Conforme");
+    await boton("Conciliar el pago");
     const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
     expect(within(tabla).getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
     await waitFor(() => expect(document.body.textContent).not.toContain(CUENTA));
@@ -2805,21 +2863,21 @@ describe("conciliar", () => {
 
   it("control: quien mira sin conciliar no pide la cuenta", async () => {
     const api = abrirFicha({ ...CONCILIAR, paso: "espera_conciliar", le_toca_a: "consejo", puede_conciliar: false });
-    await screen.findByText("Le toca al Consejo.");
+    await screen.findByText(filaDe("falta_conciliar", "espera_conciliar").que_decir);
     expect(pedidos(api, "GET", RUTA_REVISION)).toHaveLength(0);
     expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("quien vio la cuenta no recibe los botones: decide `puede_conciliar`", async () => {
     abrirFicha({ ...CONCILIAR, paso: "espera_conciliar", le_toca_a: "consejo", puede_conciliar: false });
-    expect(await screen.findByText("Le toca al Consejo.")).toBeTruthy();
-    sinBoton("Conforme");
+    expect(await screen.findByText(filaDe("falta_conciliar", "espera_conciliar").que_decir)).toBeTruthy();
+    sinBoton("Conciliar el pago");
     sinBoton("Observar");
   });
 
   it("si igual llega un 403, se dice en la ficha", async () => {
     abrirFicha(CONCILIAR, { [`POST ${RUTA_CONCILIACION}`]: () => error("sin_permiso", 403) });
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     expect((await screen.findByRole("alert")).textContent).toContain("personas distintas");
     expect(lugar()).toBe(`/pagos/${O1}`);
   });
@@ -2836,7 +2894,7 @@ describe("conciliar", () => {
 
     it("sin comprobante en la ficha no lo pide", async () => {
       const api = abrirFicha({ ...CONCILIAR, comprobante_actual: null });
-      await boton("Conforme");
+      await boton("Conciliar el pago");
       expect(pedidos(api, "GET", CONTENIDO)).toHaveLength(0);
     });
 
@@ -2883,7 +2941,7 @@ describe("consultar pagos: el comprobante en pantalla", () => {
     }));
     expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
     expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
-    sinBoton("Conforme");
+    sinBoton("Conciliar el pago");
   });
 
   it("control: quien no puede abrirlo no recibe el comprobante y no se pide", async () => {
@@ -2898,6 +2956,7 @@ describe("consultar pagos", () => {
   const FILA = {
     orden_id: O1, proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre", importe_centavos: 1_500_000, moneda: "ARS", estado: "pagada",
     situacion: "pagada", numero_operacion: "0001234567", fecha_operacion: "2026-10-31", actualizada_en: "2026-11-01T12:00:00Z",
+    creada_en: "2026-10-30T12:00:00Z", estado_visible: "pagada",
   };
   const parametros = (p: Request | undefined) => new URL((p as Request).url).searchParams;
 
@@ -2910,6 +2969,10 @@ describe("consultar pagos", () => {
     const celdas = within(screen.getByRole("table", { name: "Pagos" }));
     expect(celdas.getByRole("columnheader", { name: "Operación" })).toBeTruthy();
     expect(celdas.getByRole("cell", { name: "0001234567" })).toBeTruthy();
+    // Cada fila dice su estado y su fecha, apilados (decisiones 5 y 11, P-07).
+    expect(celdas.getByRole("columnheader", { name: "Estado y fecha" })).toBeTruthy();
+    const estado = celdas.getByText(fechaCorta("2026-10-30T12:00:00Z")).closest("td") as HTMLElement;
+    expect(estado.textContent).toContain(NOMBRE_ESTADO.pagada);
     await sinFaltasDeAccesibilidad(container);
 
     fireEvent.change(screen.getByLabelText(/número de operación/), { target: { value: "Limpieza" } });
@@ -3507,7 +3570,7 @@ describe("la factura arriba de la orden (0088)", () => {
       }
 
       async function reemplazar() {
-        fireEvent.click(await boton("Modificar"));
+        fireEvent.click(await boton("Modificar la orden"));
         // La factura de la versión se ve desde el principio.
         expect(await boton("Ver la factura")).toBeTruthy();
         fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Otro concepto" } });
@@ -3657,20 +3720,20 @@ describe("la factura arriba de la orden (0088)", () => {
     it("control: si el documento se ve pero no ese archivo, no hay botón (no se cambia por otro)", async () => {
       const api = abrirFicha(CON_FACTURA, { [`GET ${BASE}/documentos`]: documentos(true, [archivo(VF_NUEVA)]) });
       await waitFor(() => expect(pedidos(api, "GET", `${BASE}/documentos`).length).toBeGreaterThan(0));
-      expect(await boton("Aprobar esta versión")).toBeTruthy();
+      expect(await boton("Aprobar la orden")).toBeTruthy();
       sinBoton("Ver la factura");
     });
 
     it("control: si quien mira no la ve en sus documentos, no hay botón", async () => {
       const api = abrirFicha(CON_FACTURA, { [`GET ${BASE}/documentos`]: documentos(false) });
       await waitFor(() => expect(pedidos(api, "GET", `${BASE}/documentos`).length).toBeGreaterThan(0));
-      expect(await boton("Aprobar esta versión")).toBeTruthy();
+      expect(await boton("Aprobar la orden")).toBeTruthy();
       sinBoton("Ver la factura");
     });
 
     it("control: una versión sin factura ni consulta los documentos", async () => {
       const api = abrirFicha(APROBAR);
-      expect(await boton("Aprobar esta versión")).toBeTruthy();
+      expect(await boton("Aprobar la orden")).toBeTruthy();
       expect(pedidos(api, "GET", `${BASE}/documentos`)).toHaveLength(0);
       sinBoton("Ver la factura");
     });
@@ -3772,9 +3835,9 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
       },
     }));
     abrir("/pagos");
-    fireEvent.click(await boton("Conforme"));
+    fireEvent.click(await boton("Conciliar el pago"));
     expect(await screen.findByText("No hay nada más que hacer con ella.")).toBeTruthy();
-    sinBoton("Conforme");
+    sinBoton("Conciliar el pago");
     fireEvent.click(await boton("Seguir con lo pendiente (1)"));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
   });
@@ -3990,5 +4053,174 @@ describe("tanda 1 de fricción: revisión de Codex", () => {
     });
     expect(lugar()).toBe("/pagos");
     expect(screen.queryByText(/no se envió a aprobar/)).toBeNull();
+  });
+});
+
+describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () => {
+  const RECHAZO_VISTO = `${BASE}/ordenes-pago/${O2}/rechazo-visto`;
+  const AVISO = {
+    orden_id: O2, proveedor: "Plomería Ficticia SRL", proveedor_id: P1, concepto: "Destapación", importe_centavos: 4_500_000,
+    moneda: "ARS", creada_en: "2026-11-09T15:00:00Z", rechazada_en: "2026-11-10T15:00:00Z", motivo: "Falta la factura",
+  };
+  const marcas = () =>
+    within(screen.getByRole("list", { name: "Por dónde va la orden" })).getAllByRole("listitem").map((li) => li.getAttribute("data-estado"));
+
+  it("cada fila dice su fecha y su estado (decisiones 5 y 11)", async () => {
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("pagar", "para_pagar", { creada_en: "2026-11-09T15:00:00Z" })),
+    }));
+    abrir("/pagos");
+    const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
+    const fecha = within(fila).getByText(fechaCorta("2026-11-09T15:00:00Z"));
+    expect(fecha.getAttribute("dateTime")).toBe("2026-11-09T15:00:00Z");
+    expect(fila.textContent).toContain(NOMBRE_ESTADO.lista_para_pagar);
+  });
+
+  it("una orden parecida a otra lo avisa con la fecha y el estado de la otra, sin frenar (decisión 5, P-02)", async () => {
+    const otra = { orden_id: O2, creada_en: "2026-11-02T15:00:00Z", estado_visible: "pagada" as const };
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("enviar", "para_preparar", { posible_duplicada_de: otra })),
+    }));
+    abrir("/pagos");
+    expect(await screen.findByText(textoRepetida(fechaCorta(otra.creada_en), "pagada"))).toBeTruthy();
+    cleanup();
+    abrirFicha({ ...BORRADOR, posible_duplicada_de: otra });
+    const nota = await screen.findByText(/^Hay otra orden del mismo proveedor/);
+    expect(nota.textContent).toContain(fechaCorta(otra.creada_en));
+    expect(nota.textContent).toContain(NOMBRE_ESTADO.pagada);
+    expect(screen.getByRole("link", { name: "Ver la otra orden" }).getAttribute("href")).toBe(`/pagos/${O2}`);
+    expect(await boton("Enviar a aprobar")).toBeTruthy();
+  });
+
+  it("una rechazada se avisa una vez arriba, no cuenta, y con «Entendido» se va (decisión 3, P-03)", async () => {
+    let vista = false;
+    const simulado = backend({
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: vista ? [] : [AVISO], por_cotejar: 0 }),
+      [`POST ${RECHAZO_VISTO}`]: () => {
+        vista = true;
+        return Response.json({ orden_id: O2 });
+      },
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir("/pagos");
+    const aviso = await screen.findByText(/^Se rechazó la orden de Plomería Ficticia SRL/);
+    expect(aviso.closest("[role=status]")?.textContent).toContain("Falta la factura");
+    expect(screen.getByRole("link", { name: PREPARAR_OTRA })).toBeTruthy();
+    expect(screen.getByText("Nada pendiente.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: /^Para preparar/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: ENTENDIDO }));
+    await waitFor(() => expect(screen.queryByText(/^Se rechazó la orden/)).toBeNull());
+    const [post] = pedidos(simulado, "POST", RECHAZO_VISTO);
+    expect(post?.headers.get("Idempotency-Key")).toBeTruthy();
+  });
+
+  it("un borrador viejo va plegado y no cuenta como pendiente (decisión 4, P-04)", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("enviar", "borradores_viejos")) }));
+    abrir("/pagos");
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
+    const plegado = screen.getByText(`${TITULO_GRUPO.borradores_viejos} (1)`).closest("details") as HTMLDetailsElement;
+    expect(plegado.open).toBe(false);
+    expect(plegado.textContent).toContain("Limpieza Ficticia SRL");
+  });
+
+  it("control: el mismo borrador, si no es viejo, está en «Para preparar» y cuenta", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("enviar", "para_preparar")) }));
+    abrir("/pagos");
+    expect(await screen.findByRole("region", { name: /^Para preparar/ })).toBeTruthy();
+    expect(screen.queryByText("Nada pendiente.")).toBeNull();
+  });
+
+  it("«Para cotejar» aparece solo si hay pagos por cotejar, con su cantidad (decisión 6, P-24)", async () => {
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 3 }),
+    }));
+    abrir("/pagos");
+    const grupo = await screen.findByRole("region", { name: TITULO_GRUPO.para_cotejar });
+    expect(grupo.textContent).toContain("3");
+    expect(within(grupo).getByRole("link", { name: TEXTO_ACCION.cotejar }).getAttribute("href")).toBe("/pagos/cotejo");
+    expect(screen.queryByText("Nada pendiente.")).toBeNull();
+    cleanup();
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/bandeja`]: bandejaCon() }));
+    abrir("/pagos");
+    expect(await screen.findByText("Nada pendiente.")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: TEXTO_ACCION.cotejar })).toBeNull();
+  });
+
+  it.each([
+    ["aprobar", "para_aprobar", APROBAR],
+    ["pagar", "para_pagar", PAGAR],
+    ["enviar", "para_preparar", BORRADOR],
+  ] as const)("P-09: el verbo de la fila de %s es el botón principal de la ficha", async (paso, grupo, laFicha) => {
+    ancho(false);
+    vi.stubGlobal("fetch", backend({
+      [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento(paso, grupo)),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(laFicha),
+      [REVISION]: () =>
+        Response.json({ orden: laFicha.orden, versiones: laFicha.versiones.map((x) => ({ ...x, cuenta_destino: CUENTA })), puede_aprobar: true, puede_rechazar: true }),
+    }));
+    abrir("/pagos");
+    const fila = await screen.findByRole("link", { name: /Limpieza Ficticia SRL/ });
+    const verbo = fila.querySelector(".fila-pago__verbo")?.textContent;
+    expect(verbo).toBeTruthy();
+    fireEvent.click(fila);
+    const principal = await waitFor(() => {
+      const b = document.querySelector<HTMLButtonElement>("button[data-tipo=principal]");
+      if (b === null) throw new Error("sin principal todavía");
+      return b;
+    });
+    expect(principal.textContent).toBe(verbo);
+  });
+
+  it("«No se pagó» se cierra sin pagar con un motivo (decisión 12, P-04)", async () => {
+    const NO_SE_PAGO = ficha({
+      orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos",
+      puede_modificar: true, puede_cerrar_sin_pagar: true,
+    });
+    const CIERRE = `${BASE}/ordenes-pago/${O1}/cerrar-sin-pagar`;
+    const api = abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: () => Response.json({ id: O1, version: 1 }) });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    expect(screen.getByText(PREGUNTA_CERRAR_SIN_PAGAR)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Por qué ya no hace falta pagarla"), { target: { value: "Se pagó por caja chica" } });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    await waitFor(() => expect(pedidos(api, "POST", CIERRE)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", CIERRE)[0])).toEqual({ version_esperada: 1, motivo: "Se pagó por caja chica" });
+    expect(await screen.findByText(TEXTO_CERRADA_SIN_PAGO)).toBeTruthy();
+  });
+
+  it("control: sin `puede_cerrar_sin_pagar` no se ofrece", async () => {
+    abrirFicha(ficha({
+      orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true,
+    }));
+    await screen.findByText(NOMBRE_ESTADO.no_se_pago);
+    sinBoton(TEXTO_ACCION.cerrar_sin_pagar);
+  });
+
+  it("cerrada sin pagar dice quién, cuándo y por qué, y no ofrece nada", async () => {
+    abrirFicha(ficha({
+      orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: null,
+      cierre_sin_pago: { cerrada_por_nombre: "Marta Ficticia", cerrada_en: "2026-11-11T15:00:00Z", motivo: "Se pagó por caja chica" },
+    }));
+    expect(await screen.findByText(/^La cerró sin pagar Marta Ficticia el .*: Se pagó por caja chica\.$/)).toBeTruthy();
+    expect(document.querySelector("button[data-accion]")).toBeNull();
+  });
+
+  it("esperando aprobación dice qué pasa y desde cuándo (P-16)", async () => {
+    abrirFicha(ficha({
+      orden: orden({ estado: "en_revision" }), versiones: [version({ aprobada_por: [] })], situacion: "en_revision", paso: "espera_aprobar",
+      le_toca_a: "consejo", esperando_desde: "2026-11-07T15:00:00Z",
+    }));
+    const frase = await screen.findByText(/^Espera la aprobación del Consejo\. Si nadie la aprueba, queda esperando\./);
+    expect(frase.textContent).toContain(`Desde el ${fechaCorta("2026-11-07T15:00:00Z")}.`);
+  });
+
+  it("la barra de una pagada deja Cotejar como actual, y la cotejada la completa (decisión 6, P-05)", async () => {
+    const PAGADA = ficha({ orden: orden({ estado: "conciliada" }), situacion: "pagada", paso: null });
+    abrirFicha(PAGADA);
+    await screen.findByText(NOMBRE_ESTADO.pagada);
+    expect(marcas()).toEqual(["hecho", "hecho", "hecho", "hecho", "ahora"]);
+    cleanup();
+    abrirFicha({ ...PAGADA, situacion: "pagada_y_cotejada", cotejado_en: "2026-11-12T15:00:00Z" });
+    await screen.findByText(NOMBRE_ESTADO.pagada_y_cotejada);
+    expect(marcas()).toEqual(["hecho", "hecho", "hecho", "hecho", "hecho"]);
   });
 });
