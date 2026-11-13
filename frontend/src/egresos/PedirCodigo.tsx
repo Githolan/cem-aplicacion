@@ -1,7 +1,9 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
 
+import { ActivarLlave } from "../ActivarLlave";
 import { api } from "../api/cliente";
+import { CodigosRecuperacion } from "../CodigosRecuperacion";
 import { encabezadoCsrf } from "../csrf";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
@@ -20,6 +22,11 @@ import { mensajeDeError } from "./comun";
 //
 // Un navegador puede negar la llave si el gesto del botón ya quedó lejos (Safari): cae en «No se pudo
 // confirmar», y «Probar de nuevo» la pide con un toque propio.
+//
+// Informe de fricción, AC-34: quien tiene la llave en otro equipo y acá no la puede usar no cae
+// directo en un código de recuperación (se gasta uno): la hoja lo explica y lo ofrece. Quien no
+// tiene nada activado activa la llave en la misma hoja, sin salir de la pantalla y sin perder lo
+// escrito; el alta deja la sesión verificada y el acto sigue.
 
 interface Props {
   /** Qué se va a reintentar, en palabras («aprobar la orden»). */
@@ -37,7 +44,9 @@ type Paso =
   | { tipo: "codigo"; clase: Clase }
   | { tipo: "fallo"; mensaje: string }
   | { tipo: "otro" }
-  | { tipo: "sin_alta" };
+  | { tipo: "llave_lejos" }
+  | { tipo: "sin_alta" }
+  | { tipo: "codigos"; codigos: string[] };
 
 const TEXTO_METODO: Record<MetodoConfirmar, string> = {
   llave: "PIN, huella o cara",
@@ -77,16 +86,24 @@ async function primerMetodo(activos: Activos): Promise<MetodoConfirmar | null> {
   return (["aplicacion", "llave", "recuperacion"] as const).find((m) => activos[m]) ?? null;
 }
 
-/** Sin ningún método no hay nada que pedir: el camino es darlo de alta. */
-function SinAlta() {
+/** Sin ningún método no hay nada que pedir: el camino es darlo de alta, acá mismo si se puede. */
+function SinAlta({ conLlave }: { conLlave: boolean }) {
   const { pathname } = useLocation();
-  return (
-    <p role="alert">
-      Todavía no la activaste.{" "}
+  return conLlave ? (
+    <p>
+      Otras opciones:{" "}
       <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
-        Activala ahora
+        la página del segundo factor
+      </Link>
+      . Lo escrito en esta pantalla puede perderse.
+    </p>
+  ) : (
+    <p role="alert">
+      Todavía no está activada.{" "}
+      <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
+        Activarla
       </Link>{" "}
-      y volvé a este paso.
+      y volver a este paso.
     </p>
   );
 }
@@ -140,7 +157,10 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
         const primero = await primerMetodo(leidos);
         if (!vigente) return;
         setActivos(leidos);
-        if (primero !== null) usar(primero);
+        // La llave está en otro equipo y acá solo queda un código de recuperación: no se gasta sin avisar.
+        if (primero === "recuperacion" && llaves > 0 && !leidos.llave && ultimoMetodo() !== "recuperacion")
+          setPaso({ tipo: "llave_lejos" });
+        else if (primero !== null) usar(primero);
         else if (llaves > 0) setPaso({ tipo: "fallo", mensaje: LLAVE_EN_OTRO_LADO });
         else setPaso({ tipo: "sin_alta" });
       })
@@ -260,16 +280,50 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
       </Hoja>
     );
 
-  if (paso.tipo === "sin_alta")
+  if (paso.tipo === "llave_lejos")
+    return (
+      <Hoja key="llave_lejos" titulo="La llave está en otro dispositivo" alEscapar={alCancelar}>
+        <p>
+          Este navegador no puede usar la llave de acceso. Para {acto} se puede usar un código de
+          recuperación; cada uno sirve una sola vez.
+        </p>
+        <div className="formulario">
+          <div className="acciones">
+            <button type="button" data-foco onClick={() => usar("recuperacion")}>
+              Usar un código de recuperación (se gasta uno)
+            </button>
+            {cancelar}
+          </div>
+        </div>
+      </Hoja>
+    );
+
+  if (paso.tipo === "codigos")
+    return (
+      <Hoja key="codigos" titulo="Guardar los códigos de recuperación">
+        <p className="aviso-ok">Listo: la llave quedó activada.</p>
+        <CodigosRecuperacion codigos={paso.codigos} medio="llave" alGuardar={alVerificar} />
+      </Hoja>
+    );
+
+  if (paso.tipo === "sin_alta") {
+    const conLlave = llaveDisponible();
     return (
       <Hoja key="sin_alta" titulo="Falta la verificación en dos pasos" alEscapar={alCancelar}>
-        <p>Para {acto} hace falta la verificación en dos pasos.</p>
-        <SinAlta />
+        <p>
+          Para {acto} hace falta la verificación en dos pasos.
+          {conLlave && " Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo."}
+        </p>
+        <ActivarLlave
+          alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos }))}
+        />
+        <SinAlta conLlave={conLlave} />
         <div className="formulario">
           <div className="acciones">{cancelar}</div>
         </div>
       </Hoja>
     );
+  }
 
   const { clase } = paso;
   return (

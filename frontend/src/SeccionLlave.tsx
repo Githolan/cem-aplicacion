@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 
+import { ACTIVAR_CON_LLAVE } from "./ActivarLlave";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { Hoja } from "./Hoja";
 import {
   esDeEsteDispositivo,
   llaveDisponible,
@@ -22,6 +24,10 @@ import {
 // sumar otra. Los códigos de recuperación salen de acá apenas llegan (`alCodigos`): los muestra la
 // página, que no los suelta hasta que la persona dice que los guardó, y hasta entonces no se
 // consulta nada más.
+//
+// Informe de fricción (tanda 7): quitar una llave pide confirmarlo en una hoja (AC-14). Si en la
+// lista ya hay una llave con el nombre de este equipo, no se invita a agregarlo otra vez: puede ser
+// otro navegador del mismo equipo, que la usa igual (AC-12).
 
 type Llave = components["schemas"]["LlaveResumen"];
 
@@ -42,6 +48,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [listo, setListo] = useState<string | null>(null);
   const [pendiente, setPendiente] = useState<(() => void) | null>(null);
+  const [aQuitar, setAQuitar] = useState<Llave | null>(null);
   const consultado = useRef(false);
 
   const consultar = useCallback(() => {
@@ -117,6 +124,9 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
     );
 
   const enEste = llaves?.some((k) => esDeEsteDispositivo(k.credencial_id)) ?? false;
+  const nombreDeEste = nombreDelDispositivo(navigator.userAgent);
+  // Sin la marca de este navegador, una llave con el nombre de este equipo puede ser la suya.
+  const conSuNombre = !enEste && (llaves?.some((k) => k.nombre === nombreDeEste) ?? false);
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
@@ -151,7 +161,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
                 type="button"
                 className="secundario peligro"
                 disabled={enviando}
-                onClick={() => quitar(k)}
+                onClick={() => setAQuitar(k)}
               >
                 Quitar
               </button>
@@ -159,13 +169,38 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
           ))}
         </ul>
       )}
-      {llaves !== null && llaves.length > 0 && !enEste && (
-        <p>Si este dispositivo no está en la lista, agregalo.</p>
+      {conSuNombre && (
+        <p>Si este equipo es «{nombreDeEste}», no hace falta hacer nada: la llave se confirma al usarla.</p>
+      )}
+      {llaves !== null && llaves.length > 0 && !enEste && !conSuNombre && (
+        <p>Si este dispositivo no está en la lista, agregarlo.</p>
       )}
       {llaves !== null && !enEste && (
-        <button type="button" onClick={activar} disabled={enviando}>
-          {llaves.length === 0 ? "Activar en este dispositivo" : "Agregar este dispositivo"}
+        <button type="button" className={conSuNombre ? "secundario" : undefined} onClick={activar} disabled={enviando}>
+          {llaves.length === 0 ? ACTIVAR_CON_LLAVE : conSuNombre ? "Es otro equipo: agregarlo" : "Agregar este dispositivo"}
         </button>
+      )}
+      {aQuitar !== null && (
+        <Hoja titulo={`¿Quitar la llave de ${aQuitar.nombre}?`} alEscapar={() => setAQuitar(null)}>
+          <p>Para confirmar pagos desde ese equipo habrá que activarla de nuevo.</p>
+          <div className="formulario">
+            <div className="acciones">
+              <button
+                type="button"
+                className="peligro"
+                onClick={() => {
+                  setAQuitar(null);
+                  quitar(aQuitar);
+                }}
+              >
+                Quitar la llave
+              </button>
+              <button type="button" className="secundario" data-foco onClick={() => setAQuitar(null)}>
+                Volver
+              </button>
+            </div>
+          </div>
+        </Hoja>
       )}
     </section>
   );

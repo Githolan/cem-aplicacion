@@ -6,6 +6,7 @@ import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceInstalar } from "./Instalar";
 import { RUTA_ENTRAR, tokenDelFragmento, VIGENCIA_ENLACE_MS } from "./enlace";
 import { codigoDe, mensajeDeFallaConEnlace } from "./fallas";
+import { recordarFormaDeEntrar } from "./formaDeEntrar";
 import { useIrTrasEntrar, useSesion } from "./sesion";
 
 // Página /entrar: la que abre el enlace del correo (documento 13, §10.3). El token llega en el
@@ -20,8 +21,10 @@ import { useIrTrasEntrar, useSesion } from "./sesion";
 // lo gasta: se queda para reintentar.
 //
 // Es el paso de Acceso donde se elige cómo entrar (decisión del propietario del 05-11-2026, §2):
-// primero el enlace por correo y, debajo, las otras formas, de a una por vez, con un solo correo
-// para las tres. Terminada la entrada sigue sola al inicio. Con sesión abierta no hay nada que hacer
+// primero el código por correo (decisión del 12-11-2026, pregunta 16) o la última forma usada en
+// este dispositivo y, debajo, las otras formas, de a una por vez, con un solo correo para las tres.
+// Si el enlace no sirve acá (vencido, usado o abierto en otro navegador), la página pasa al código
+// del mismo correo, que sirve en cualquier navegador (AC-29). Terminada la entrada sigue sola al inicio. Con sesión abierta no hay nada que hacer
 // acá y sigue también. Una sesión que vence mientras se trabaja no pasa por acá: se entra encima de
 // la pantalla (`EntrarEncima.tsx`).
 
@@ -113,6 +116,7 @@ export function Entrar() {
       ({ error, response }) => {
         if (error === undefined) {
           olvidarToken();
+          recordarFormaDeEntrar("correo");
           terminarEntrada("Entraste.");
         } else if (response.status === ESTADO_ENLACE_INVALIDO || response.status === ESTADO_TOKEN_MAL_FORMADO) {
           olvidarToken();
@@ -152,9 +156,8 @@ export function Entrar() {
         {estado.tipo === "entrando" && <p>Entrando…</p>}
         {estado.tipo === "rechazado" && (
           <p className="aviso-error">
-            No pudimos hacerte entrar con este enlace. Puede haber vencido, haberse usado o
-            haberse abierto en otro navegador. Pedí uno nuevo desde el mismo navegador donde lo
-            vas a abrir.
+            Este enlace no sirve acá. Escribir el código de 6 números que llegó en el mismo correo;
+            si el código venció o ya se usó, pedir uno nuevo.
           </p>
         )}
         {estado.tipo === "fallo" && token !== null && (
@@ -168,7 +171,12 @@ export function Entrar() {
       </div>
       {estado.tipo !== "entrando" && (
         <>
-          <FormasDeEntrar correo={correo} alCambiarCorreo={setCorreo} alElegir={alElegir} />
+          <FormasDeEntrar
+            correo={correo}
+            alCambiarCorreo={setCorreo}
+            alElegir={alElegir}
+            inicial={estado.tipo === "rechazado" ? "codigo" : undefined}
+          />
           <EnlaceInstalar />
         </>
       )}

@@ -104,7 +104,7 @@ async function montar() {
 const tocar = (nombre: string) => fireEvent.click(screen.getByRole("button", { name: nombre }));
 
 async function entrarConCodigo() {
-  fireEvent.click(await screen.findByRole("button", { name: "Entrar con un código" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Ya tengo un código" }));
   fireEvent.change(await screen.findByLabelText(/Código de/), { target: { value: "042917" } });
   tocar("Entrar con el código");
 }
@@ -121,6 +121,8 @@ describe("entrar encima", () => {
 
   afterEach(() => {
     cleanup();
+    // La última forma de entrar queda en este dispositivo (AC-30): cada prueba empieza sin ella.
+    window.localStorage.clear();
     apagar();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();

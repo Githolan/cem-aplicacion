@@ -38,14 +38,14 @@ const RUTA_CANJE = "/api/v1/auth/canje";
 const RUTA_ENLACE = "/api/v1/auth/enlace";
 const RUTA_CODIGO = "/api/v1/auth/codigo";
 // El texto lo arma el backend (router.py, MENSAJE_PEDIDO); la página muestra el que llega.
-const MENSAJE = "Si el correo corresponde a una cuenta, en unos minutos te llega un enlace para entrar.";
+const MENSAJE = "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para entrar.";
 
 const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
-const PEDIR = { name: "Pedir el enlace para entrar" };
-const CODIGO = { name: "Entrar con un código" };
+const PEDIR = { name: "Pedir un código para entrar" };
+const CODIGO = { name: "Escribir el código del correo" };
 const CONTRASENA = { name: "Entrar con contraseña" };
-const RECHAZADO = /No pudimos hacerte entrar con este enlace/;
+const RECHAZADO = /Este enlace no sirve acá/;
 const REINTENTAR = { name: "Reintentar" };
 // Una pantalla que no pide nada al backend: la de origen de quien vuelve a entrar.
 
@@ -139,7 +139,7 @@ function escribirCorreo(forma: { name: string }, correo: string) {
 
 function pedirElEnlace(correo: string) {
   escribirCorreo(PEDIR, correo);
-  fireEvent.submit(within(screen.getByRole("region", PEDIR)).getByRole("button", { name: "Pedir el enlace" }).closest("form")!);
+  fireEvent.submit(within(screen.getByRole("region", PEDIR)).getByRole("button", { name: "Enviar el código" }).closest("form")!);
 }
 
 afterEach(() => {
@@ -177,7 +177,7 @@ describe("página /entrar", () => {
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
+    expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
     expect(screen.queryByText("Entraste.")).toBeNull();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(window.location.hash).toBe("");
@@ -273,7 +273,7 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    await screen.findByText(/No pudimos hacerte entrar con este enlace/);
+    await screen.findByText(/Este enlace no sirve acá/);
     expect(guardado()).toBeNull();
   });
 
@@ -418,7 +418,7 @@ describe("un canje que falla por algo que no es el enlace", () => {
     abrir(`/entrar#token=${TOKEN}`);
     await screen.findByText(SERVICIO_NO_DISPONIBLE);
 
-    elegir("Entrar con un código");
+    elegir("Ya tengo un código");
 
     expect(screen.queryByText(SERVICIO_NO_DISPONIBLE)).toBeNull();
     expect(screen.queryByRole("button", REINTENTAR)).toBeNull();
@@ -441,6 +441,7 @@ describe("después de un enlace rechazado", () => {
     abrir(`/entrar#token=${TOKEN}`);
     await screen.findByText(RECHAZADO);
 
+    elegir("Pedir un código por correo");
     pedirElEnlace(CORREO);
 
     expect(await screen.findByText(MENSAJE)).toBeTruthy();
@@ -547,7 +548,7 @@ describe("/entrar decide por la sesión", () => {
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    expect(await screen.findByText(/No pudimos hacerte entrar con este enlace/)).toBeTruthy();
+    expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(caminosDe(pedido)).toEqual([RUTA_CANJE]);
   });
@@ -563,24 +564,24 @@ describe("/entrar: una forma por vez", () => {
     abrir("/entrar");
 
     expect(formasVisibles()).toEqual([PEDIR.name]);
-    expect(botones()).toEqual(["Entrar con un código", "Entrar con contraseña"]);
+    expect(botones()).toEqual(["Ya tengo un código", "Entrar con contraseña"]);
   });
 
   it("cambia de forma sin dejar la anterior, y la que está a la vista no se ofrece", () => {
     vi.stubGlobal("fetch", backend());
     abrir("/entrar");
 
-    elegir("Entrar con un código");
+    elegir("Ya tengo un código");
     expect(formasVisibles()).toEqual([CODIGO.name]);
-    expect(botones()).toEqual(["Pedir el enlace por correo", "Entrar con contraseña"]);
+    expect(botones()).toEqual(["Pedir un código por correo", "Entrar con contraseña"]);
 
     elegir("Entrar con contraseña");
     expect(formasVisibles()).toEqual([CONTRASENA.name]);
-    expect(botones()).toEqual(["Pedir el enlace por correo", "Entrar con un código"]);
+    expect(botones()).toEqual(["Pedir un código por correo", "Ya tengo un código"]);
 
-    elegir("Pedir el enlace por correo");
+    elegir("Pedir un código por correo");
     expect(formasVisibles()).toEqual([PEDIR.name]);
-    expect(botones()).toEqual(["Entrar con un código", "Entrar con contraseña"]);
+    expect(botones()).toEqual(["Ya tengo un código", "Entrar con contraseña"]);
   });
 
   it("al cambiar, el foco va al primer campo de la forma elegida; al abrir la página, no", () => {
@@ -600,7 +601,7 @@ describe("/entrar: una forma por vez", () => {
     abrir("/entrar");
     const enlace = within(screen.getByRole("region", PEDIR));
     fireEvent.change(enlace.getByLabelText("Correo"), { target: { value: `  ${CORREO} ` } });
-    fireEvent.submit(enlace.getByRole("button", { name: "Pedir el enlace" }).closest("form")!);
+    fireEvent.submit(enlace.getByRole("button", { name: "Enviar el código" }).closest("form")!);
 
     const codigo = within(await screen.findByRole("region", CODIGO));
     expect(formasVisibles()).toEqual([CODIGO.name]);
@@ -612,7 +613,7 @@ describe("/entrar: una forma por vez", () => {
   it("control: elegir el código sin pedir el enlace no trae correo ni mensaje", () => {
     vi.stubGlobal("fetch", backend());
     abrir("/entrar");
-    elegir("Entrar con un código");
+    elegir("Ya tengo un código");
 
     const codigo = within(screen.getByRole("region", CODIGO));
     expect((codigo.getByLabelText("Correo") as HTMLInputElement).value).toBe("");
@@ -622,17 +623,17 @@ describe("/entrar: una forma por vez", () => {
   it("el correo escrito sigue al cambiar de forma, en las tres", () => {
     vi.stubGlobal("fetch", backend());
     abrir("/entrar");
-    elegir("Entrar con un código");
+    elegir("Ya tengo un código");
     escribirCorreo(CODIGO, CORREO);
 
-    elegir("Pedir el enlace por correo");
+    elegir("Pedir un código por correo");
     expect(correoDe(PEDIR).value).toBe(CORREO);
 
     elegir("Entrar con contraseña");
     expect(correoDe(CONTRASENA).value).toBe(CORREO);
 
     escribirCorreo(CONTRASENA, "otra@ejemplo.com");
-    elegir("Entrar con un código");
+    elegir("Ya tengo un código");
     expect(correoDe(CODIGO).value).toBe("otra@ejemplo.com");
   });
 
@@ -660,10 +661,74 @@ describe("/entrar: una forma por vez", () => {
     vi.stubGlobal("fetch", backend());
     const { container } = abrir("/entrar");
 
-    for (const forma of ["Entrar con un código", "Entrar con contraseña", "Pedir el enlace por correo"]) {
+    for (const forma of ["Ya tengo un código", "Entrar con contraseña", "Pedir un código por correo"]) {
       elegir(forma);
       const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
       expect(resultado.violations).toEqual([]);
     }
+  });
+});
+
+describe("informe de fricción, tanda 7: acceso", () => {
+  const CLAVE_FORMA = "cem.entrar.ultima-forma";
+  const formaVisible = () => [PEDIR, CODIGO, CONTRASENA].filter((f) => screen.queryByRole("region", f) !== null).map((f) => f.name);
+
+  it("pregunta 16: /entrar abre en pedir el código del correo; el enlace queda como alternativa", () => {
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+
+    expect(formaVisible()).toEqual([PEDIR.name]);
+    const pedir = within(screen.getByRole("region", PEDIR));
+    expect(pedir.getByRole("button", { name: "Enviar el código" })).toBeTruthy();
+    expect(pedir.getByText(/El mismo correo trae un enlace, que sirve solo en este dispositivo/)).toBeTruthy();
+  });
+
+  it("AC-28: después de pedirlo dice qué hacer si no llega, sin otro pedido que distinga si hay cuenta", async () => {
+    const simulado = backend();
+    vi.stubGlobal("fetch", simulado);
+    abrir("/entrar");
+    pedirElEnlace(CORREO);
+
+    const codigo = within(await screen.findByRole("region", CODIGO));
+    expect(codigo.getByText(MENSAJE)).toBeTruthy();
+    expect(codigo.getByText(/la cuenta se crea con la invitación que envía la administración del edificio/)).toBeTruthy();
+    // El aviso sale de la página, igual para todos: el único pedido es el del código, cuyo 202 no cambia.
+    expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([RUTA_ENLACE]);
+  });
+
+  it("AC-29: con el enlace rechazado, el campo del código del mismo correo queda a la vista", async () => {
+    vi.stubGlobal("fetch", backend({ canje: enlaceInvalido }));
+    abrir(`/entrar#token=${TOKEN}`);
+
+    expect(await screen.findByText(RECHAZADO)).toBeTruthy();
+    expect(within(screen.getByRole("region", CODIGO)).getByLabelText("Código de 6 números")).toBeTruthy();
+    expect(screen.queryByRole("region", PEDIR)).toBeNull();
+  });
+
+  it("AC-30: si la última entrada fue con contraseña, abre esa forma; sin nada guardado, el código", () => {
+    window.localStorage.setItem(CLAVE_FORMA, "contrasena");
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    expect(formaVisible()).toEqual([CONTRASENA.name]);
+    cleanup();
+
+    window.localStorage.clear();
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    expect(formaVisible()).toEqual([PEDIR.name]);
+  });
+
+  it("AC-30: entrar con el código lo recuerda como forma por correo, y la próxima vez abre el código", async () => {
+    window.localStorage.setItem(CLAVE_FORMA, "contrasena");
+    vi.stubGlobal("fetch", backend());
+    abrir("/entrar");
+    elegir("Ya tengo un código");
+    const codigo = within(screen.getByRole("region", CODIGO));
+    fireEvent.change(codigo.getByLabelText("Correo"), { target: { value: CORREO } });
+    fireEvent.change(codigo.getByLabelText("Código de 6 números"), { target: { value: "042917" } });
+    fireEvent.submit(codigo.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
+
+    expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
+    expect(window.localStorage.getItem(CLAVE_FORMA)).toBe("correo");
   });
 });

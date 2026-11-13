@@ -426,8 +426,8 @@ describe("el edificio elegido", () => {
     fireEvent.click(await screen.findByRole("link", { name: "Mi cuenta" }));
     fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Entrar con un código" }));
-    const codigo = within(screen.getByRole("region", { name: "Entrar con un código" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Ya tengo un código" }));
+    const codigo = within(screen.getByRole("region", { name: "Escribir el código del correo" }));
     fireEvent.change(codigo.getByLabelText("Correo"), { target: { value: "otra@ejemplo.com" } });
     fireEvent.change(codigo.getByLabelText(/^Código de 6 números/), { target: { value: "042917" } });
     fireEvent.submit(codigo.getByRole("button", { name: "Entrar con el código" }).closest("form")!);
@@ -502,7 +502,7 @@ const PANTALLAS: [string, string, string, string][] = [
   ["/pagos", "egresos.preparar_orden", "pagos/bandeja", "Pagos"],
   ["/pagos/nueva", "egresos.preparar_orden", "proveedores", "Preparar una orden"],
   ["/pagos/consulta", "egresos.revisar_orden", "pagos/consulta", "Consultar pagos"],
-  ["/liquidacion", "liquidacion.preparar", "liquidaciones", "Liquidación"],
+  ["/liquidacion", "liquidacion.preparar", "liquidaciones", "Liquidación (borrador)"],
 ];
 
 const CON_ACCIONES: [string, readonly string[], string, string][] = PANTALLAS.map(

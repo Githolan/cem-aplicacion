@@ -2,7 +2,7 @@
 
 Se lee al empezar cada sesión y se actualiza antes de terminarla (documento 14, regla 5).
 
-**Actualizado:** 12-11-2026 (tanda 1 del informe de fricción, rama `friccion/tanda-1-pagos`).
+**Actualizado:** 12-11-2026 (tanda 7 del informe de fricción, rama `friccion/tanda-7-acceso-y-cuenta`).
 
 ## Qué existe
 
@@ -1108,3 +1108,7 @@ Orden pedido por el propietario el 15-10-2026: ordenar antes de sumar funciones.
    - **Decisiones del propietario (12-11):** (1) en PC, terminado un acto, no se abre ninguna orden sola: al lado queda el «Listo» con el estado de esa orden y a quién le toca, y «Seguir con lo pendiente (N)» abre la siguiente (`pagos/ListoDelActo.tsx`); (2) al preparar, el botón principal es «Guardar y enviar a aprobar» y «Guardar como borrador» queda secundario; si el envío no sale, la orden ya guardada no se duplica: se va a su ficha con el motivo; (3) barra de cinco pasos: Preparar → Aprobar → Pagar → Conciliar → Cotejar.
    - **Además:** el aviso de enviar lee en qué quedó la orden (P-12, `pagos/comoQuedo.ts`); «Cancelar» en Proveedores se lleva el error (P-25); «Preparar una orden» arriba de la bandeja (P-35); sin «Estamos construyendo…» ni el aviso fijo de que la aplicación no mueve dinero en el inicio, que pasa al paso de pagar (P-36, AC-03, AC-04); sin pendientes, el inicio de quien revisa no muestra la tarjeta de Pagos y Pagos queda como fila (AC-01).
    - **Sin cambios en backend ni contrato.** En teléfono y tablet el acto sigue llevando a la bandeja (o, al conciliar, al pago siguiente) con el aviso.
+44. **Tanda 7 del informe de fricción: acceso y cuenta** (rama `friccion/tanda-7-acceso-y-cuenta`, 12-11-2026; sin fusionar ni desplegar). Informe: `C:\Users\holan\cem-pruebas\informe-friccion-fable.md`, parte 5.
+   - **Decisiones del propietario (12-11):** pregunta 16, el código de 6 números del correo es el camino principal para entrar y el enlace queda como alternativa (`/entrar` abre en «Pedir un código para entrar»; el correo trae primero el código; un enlace rechazado lleva al código del mismo correo); pregunta 9, textos impersonales en lo que se tocó.
+   - **Hallazgos:** AC-09 (Panel en la navegación), AC-10 y AC-11 (cabecera de volver en segundo factor, Liquidación y Pagos para aclarar; «Liquidación (borrador)»), AC-12 (no invita a agregar un equipo cuyo nombre ya está en la lista), AC-14 (quitar una llave y desactivar la aplicación piden confirmar en una hoja), AC-15 (la llave es la única acción principal), AC-17 (en pantallas táctiles, abrir la aplicación primero y el QR plegado), AC-18 (copiar y guardar los códigos; aviso con 3 o menos), AC-21 (Mi cuenta activa la llave ahí mismo), AC-28 (qué hacer si el código no llega, igual con cuenta o sin ella), AC-29, AC-30 (se recuerda la última forma de entrar en el dispositivo, `formaDeEntrar.ts`) y AC-34 (llave en otro equipo: avisa antes de gastar un código de recuperación; sin nada activado, la llave se activa en la misma hoja de confirmar).
+   - **Backend:** solo textos (`MENSAJE_PEDIDO` y el correo de entrada); sin cambio de contrato ni de reglas. Los controles del servidor (vida de la sesión, intentos, R10, alta con entrada reciente) no cambian.

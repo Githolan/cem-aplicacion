@@ -2,12 +2,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 
+import { ActivarLlave } from "./ActivarLlave";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
+import { CodigosRecuperacion } from "./CodigosRecuperacion";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { PieDeVersion } from "./EstadoServicio";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { llaveDisponible } from "./llaveAcceso";
 import { olvidarEdificio } from "./permisos";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
 import { SeccionPrivacidad } from "./SeccionPrivacidad";
@@ -19,6 +22,8 @@ import { useAEntrar } from "./sesionEncima";
 // estado del segundo factor con el enlace a su página, y la contraseña (SeccionContrasena). Sin sesión manda a /entrar, igual que
 // después de cerrar la sesión actual. Cada parte se lee por su lado: si una falla, esa parte dice qué
 // pasó y deja reintentar, y las demás siguen a la vista. Diseño provisorio: el definitivo llega con G3.
+// Sin segundo factor, la tarjeta activa la llave ahí mismo, con un botón, y la página del segundo
+// factor queda para las otras opciones (informe de fricción, AC-21).
 
 type Yo = components["schemas"]["SesionActual"];
 type Sesion = components["schemas"]["SesionDispositivo"];
@@ -108,6 +113,8 @@ export function Cuenta() {
   const [pantalla, setPantalla] = useState<Pantalla>({ tipo: "cargando" });
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  const [codigosNuevos, setCodigosNuevos] = useState<string[] | null>(null);
+  const [llaveActivada, setLlaveActivada] = useState(false);
   const consultado = useRef(false);
   const textoAviso = useRef<HTMLParagraphElement>(null);
 
@@ -166,6 +173,13 @@ export function Cuenta() {
   function reintentarTodo() {
     setPantalla({ tipo: "cargando" });
     consultar();
+  }
+
+  /** La llave quedó activada desde la tarjeta: el segundo factor ya está. */
+  function activarLlave(codigos: string[] | null) {
+    setCodigosNuevos(codigos);
+    setLlaveActivada(true);
+    setPantalla((actual) => (actual.tipo === "lista" ? { ...actual, segundoFactor: { ok: true, valor: true } } : actual));
   }
 
   /** Saca de la lista las sesiones que ya no están vigentes. */
@@ -321,16 +335,29 @@ export function Cuenta() {
           <section aria-labelledby={`${id}-factor`} className="tarjeta">
             <h2 id={`${id}-factor`}>Segundo factor</h2>
             {fallaDe("segundoFactor", lista.segundoFactor)}
-            {lista.segundoFactor.ok && (
+            {codigosNuevos !== null && (
               <>
+                <h3>Guardar los códigos de recuperación</h3>
+                <p className="aviso-ok">Listo: la llave quedó activada.</p>
+                <CodigosRecuperacion codigos={codigosNuevos} medio="llave" alGuardar={() => setCodigosNuevos(null)} />
+              </>
+            )}
+            {codigosNuevos === null && lista.segundoFactor.ok && (
+              <>
+                {llaveActivada && <p className="aviso-ok">Listo: la llave quedó activada.</p>}
                 <p>
                   {lista.segundoFactor.valor
                     ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
                     : "No está activado."}
                 </p>
+                {!lista.segundoFactor.valor && <ActivarLlave alActivar={activarLlave} />}
                 <p>
                   <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
-                    {lista.segundoFactor.valor ? "Ver el segundo factor" : "Activar el segundo factor"}
+                    {lista.segundoFactor.valor
+                      ? "Ver el segundo factor"
+                      : llaveDisponible()
+                        ? "Otras opciones"
+                        : "Activar el segundo factor"}
                   </Link>
                 </p>
               </>

@@ -475,3 +475,13 @@ describe("fricción: las lecturas y el comprobante", () => {
     });
   });
 });
+
+describe("informe de fricción, tanda 7 (AC-11)", () => {
+  it("la cabecera tiene cómo volver al inicio, como el Panel", async () => {
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }) }));
+    abrir("/pagos/por-aclarar");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Pagos para aclarar" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Volver a Inicio" }).getAttribute("href")).toBe("/");
+  });
+});

@@ -513,3 +513,20 @@ describe("liquidación (borrador)", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 });
+
+describe("informe de fricción, tanda 7 (AC-11)", () => {
+  it("la cabecera vuelve al inicio y el título es el mismo que en el menú: «Liquidación (borrador)»", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/me/consorcios": CONSORCIOS,
+        [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+        [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      }),
+    );
+    abrir();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Liquidación (borrador)" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Volver a Inicio" }).getAttribute("href")).toBe("/");
+  });
+});

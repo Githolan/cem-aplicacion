@@ -24,23 +24,28 @@ from sqlalchemy import Connection
 
 from app.plataforma import correo
 
-ASUNTO_ENLACE = "Tu enlace para entrar a Consorcio en Mano"
+ASUNTO_ENLACE = "Código para entrar a Consorcio en Mano"
+# El código va primero: es el camino principal y sirve en cualquier dispositivo (decisión del
+# propietario del 12-11-2026, pregunta 16). Texto impersonal, sin voseo (pregunta 9).
 TEXTO_ENLACE = """Hola:
 
-Para entrar a Consorcio en Mano abrí este enlace en el mismo navegador donde lo pediste:
-
-{enlace}
-
-El enlace vence en {minutos} minutos y sirve una sola vez.
-
-Si lo leés en otro dispositivo o no podés abrir enlaces, en la página para entrar elegí
-"Entrar con un código" y escribí tu correo y este código:
+Para entrar a Consorcio en Mano, escribir este código en la página para entrar, junto con
+este correo:
 
 {codigo}
 
-El código vence en {minutos_codigo} minutos. Si lo usás, el enlace deja de servir, y al revés.
+El código vence en {minutos_codigo} minutos y sirve en cualquier dispositivo.
 
-Si no lo pediste, ignorá este correo: nadie puede entrar a tu cuenta sin el enlace o el código.
+Otra forma: abrir este enlace en el mismo dispositivo y el mismo navegador donde se pidió la
+entrada. En otro navegador no sirve.
+
+{enlace}
+
+El enlace vence en {minutos} minutos y sirve una sola vez. Usar el código gasta el enlace, y
+al revés.
+
+Si no se pidió esta entrada, ignorar este correo: nadie puede entrar a la cuenta sin el enlace
+o el código.
 """
 
 

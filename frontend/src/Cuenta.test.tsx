@@ -897,3 +897,60 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 });
+
+describe("informe de fricción, tanda 7", () => {
+  const OPCIONES_DE_ALTA = { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } };
+  const CODIGOS = Array.from({ length: 10 }, (_, i) => `abcd${i + 2}-fgh${i + 2}k`);
+
+  beforeEach(() => {
+    const vacio = new ArrayBuffer(1);
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          id: "x",
+          rawId: vacio,
+          type: "public-key",
+          getClientExtensionResults: () => ({}),
+          response: { clientDataJSON: vacio, attestationObject: vacio, getTransports: () => [] },
+        }),
+      },
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "credentials");
+    localStorage.clear();
+  });
+
+  it("AC-21: sin segundo factor, la tarjeta activa la llave ahí mismo y muestra los códigos hasta guardarlos", async () => {
+    const simulado = conSesion({
+      "POST /api/v1/auth/llave/alta/opciones": () => Response.json({ opciones: OPCIONES_DE_ALTA }),
+      "POST /api/v1/auth/llave/alta": () =>
+        Response.json({ id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d", codigos_recuperacion: CODIGOS }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+
+    const activar = await enPantalla().findByRole("button", { name: "Activar con PIN, huella o cara" });
+    // Las otras formas siguen en la página del segundo factor.
+    expect(screen.getByRole("link", { name: "Otras opciones" }).getAttribute("href")).toBe("/cuenta/segundo-factor");
+    fireEvent.click(activar);
+    const lista = await screen.findByRole("list", { name: "Códigos de recuperación" });
+    expect(within(lista).getAllByRole("listitem").map((li) => li.textContent)).toEqual(CODIGOS);
+    expect(pedido(simulado, "POST", "/api/v1/auth/llave/alta/opciones")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ya los guardé" }));
+    expect(await screen.findByText(/Está activado/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Códigos de recuperación" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
+  });
+
+  it("AC-21, control: con el segundo factor activado no ofrece activarlo", async () => {
+    vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO));
+    abrir();
+
+    expect(await screen.findByRole("link", { name: "Ver el segundo factor" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
+  });
+});

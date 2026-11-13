@@ -200,3 +200,14 @@ describe("panel del Consejo", () => {
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Panel del Consejo" })).toBeNull());
   });
 });
+
+describe("informe de fricción, tanda 7", () => {
+  it("AC-09: en /panel sigue la navegación de la aplicación, con el Panel en ella", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS) }));
+    abrir();
+
+    await screen.findByRole("region", { name: "Órdenes de pago por estado" });
+    const navegacion = await screen.findByRole("navigation", { name: "Secciones" });
+    expect(within(navegacion).getByRole("link", { name: "Panel del Consejo" }).getAttribute("href")).toBe("/panel");
+  });
+});

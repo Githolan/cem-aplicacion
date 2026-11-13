@@ -285,7 +285,7 @@ describe("confirmar en el momento", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole("link", { name: "Activala ahora" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Activarla" }));
     expect(await screen.findByText("Volver a /pagos")).toBeTruthy();
   });
 
@@ -332,5 +332,77 @@ describe("confirmar en el momento", () => {
 
     fireEvent.keyDown(await screen.findByLabelText("Código"), { key: "Escape" });
     expect(alCancelar).toHaveBeenCalledOnce();
+  });
+});
+
+describe("informe de fricción, tanda 7 (AC-34)", () => {
+  beforeEach(() => {
+    document.cookie = "__Host-cem_csrf=x";
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator, "credentials");
+  });
+
+  it("con la llave en otro dispositivo no abre directo el código de recuperación: lo explica y lo ofrece", async () => {
+    // Este navegador no sabe usar llaves; la persona tiene una llave y códigos de recuperación.
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 1, 5) });
+    mostrar();
+
+    expect(await titulo("La llave está en otro dispositivo")).toBeTruthy();
+    expect(screen.queryByLabelText("Código")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Usar un código de recuperación (se gasta uno)" }));
+    expect(await titulo("Escribí un código de recuperación")).toBeTruthy();
+  });
+
+  it("control: si el último método fue un código de recuperación, va directo a ese campo", async () => {
+    recordarMetodo("recuperacion");
+    backend({ "GET /api/v1/auth/totp": estadoTotp(false, 1, 5) });
+    mostrar();
+
+    expect(await titulo("Escribí un código de recuperación")).toBeTruthy();
+  });
+
+  it("sin nada activado, activa la llave en la misma hoja, muestra los códigos y sigue con el acto", async () => {
+    const vacio = new ArrayBuffer(1);
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          id: "x",
+          rawId: vacio,
+          type: "public-key",
+          getClientExtensionResults: () => ({}),
+          response: { clientDataJSON: vacio, attestationObject: vacio, getTransports: () => [] },
+        }),
+      },
+    });
+    const codigos = Array.from({ length: 10 }, (_, i) => `abcd${i + 2}-fgh${i + 2}k`);
+    const simulado = backend({
+      "GET /api/v1/auth/totp": estadoTotp(false, 0),
+      "POST /api/v1/auth/llave/alta/opciones": () =>
+        Response.json({ opciones: { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } } }),
+      "POST /api/v1/auth/llave/alta": () => Response.json({ id: "1", codigos_recuperacion: codigos }, { status: 201 }),
+    });
+    const alVerificar = vi.fn();
+    // La hoja enlaza a la página del segundo factor: necesita el enrutador.
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    expect(await titulo("Guardar los códigos de recuperación")).toBeTruthy();
+    expect(pedidos(simulado, "/api/v1/auth/llave/alta")).toBe(1);
+    // Los códigos no se sueltan solos: el acto sigue recién con «Ya los guardé».
+    expect(alVerificar).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Ya los guardé" }));
+    expect(alVerificar).toHaveBeenCalledOnce();
+    expect(ultimoMetodo()).toBe("llave");
   });
 });
