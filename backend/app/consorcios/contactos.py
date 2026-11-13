@@ -52,7 +52,7 @@ ERRORES = {
     "no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO),
     "contacto_terminado": (
         409, CodigoError.CONTACTO_TERMINADO,
-        "Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.",
+        "Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.",
     ),
 }  # fmt: skip
 """Motivos de las funciones de `0031`. `origen_invalido` lo fija esta ruta: si llega, es un

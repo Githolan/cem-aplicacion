@@ -153,7 +153,7 @@ def test_token_no_valido_da_401_sin_detalles(emisor, caso):
     r = pedir(cliente(emisor.url, AUD), rechazados(emisor)[caso])
     assert r.status_code == 401
     assert r.json()["codigo"] == "no_autenticado"
-    assert r.json()["mensaje"] == "Iniciá sesión para continuar."
+    assert r.json()["mensaje"] == "Hay que entrar para continuar."
 
 
 def test_sin_configurar_rechaza_incluso_un_token_valido(emisor):

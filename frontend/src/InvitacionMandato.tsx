@@ -109,10 +109,10 @@ export function InvitacionMandato() {
       })
       .then(({ data, error, response }) => {
         if (data !== undefined) {
-          const asociada = `Listo: tu cuenta quedó asociada a la administración de ${invitacion?.consorcio}.`;
+          const asociada = `Listo: la cuenta quedó asociada a la administración de ${invitacion?.consorcio}.`;
           irAlInicio(
             data.vigente_desde > hoyLocal()
-              ? `${asociada} El mandato empieza el ${fecha(data.vigente_desde)}: desde ese día vas a ver el consorcio.`
+              ? `${asociada} El mandato empieza el ${fecha(data.vigente_desde)}: desde ese día el consorcio aparece en la cuenta.`
               : asociada,
           );
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
@@ -131,22 +131,22 @@ export function InvitacionMandato() {
 
   return (
     <>
-      <h1>Asociar tu cuenta a la administración</h1>
+      <h1>Asociar la cuenta a la administración</h1>
       {invitacion && (estado === "lista" || estado === "aceptando") && (
         <section aria-labelledby={`${id}-titulo`} className="tarjeta">
           <h2 id={`${id}-titulo`}>{invitacion.consorcio}</h2>
           <dl className="detalles">
             <dt>Administración</dt>
             <dd>{invitacion.mandatario ?? "Sin nombre en el mandato"}</dd>
-            <dt>Te invitó</dt>
+            <dt>Invitó</dt>
             <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
           </dl>
           <p>
-            Al aceptar, tu cuenta queda asociada al mandato de administración de este consorcio. El
+            Al aceptar, la cuenta queda asociada al mandato de administración de este consorcio. El
             mandato, su CUIT y su vigencia no cambian.
           </p>
           <form className="formulario" onSubmit={aceptar}>
-            <label htmlFor={`${id}-nombre`}>Tu nombre (solo si la cuenta es nueva)</label>
+            <label htmlFor={`${id}-nombre`}>Nombre (solo si la cuenta es nueva)</label>
             <input
               id={`${id}-nombre`}
               type="text"
@@ -168,22 +168,22 @@ export function InvitacionMandato() {
         {estado === "invalida" && (
           <>
             <p className="aviso-error">
-              Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada. Pedile una nueva al
-              consorcio.
+              Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada. Hay que pedir una
+              nueva al consorcio.
             </p>
             <EnlaceAlInicio />
           </>
         )}
         {estado === "invitacion_requiere_sesion" && (
           <p className="aviso-error">
-            Ya tenés una cuenta con este correo. <Link to={RUTA_ENTRAR}>Entrá</Link> y después volvé a abrir el enlace
-            desde el correo.
+            Ya hay una cuenta con este correo. Hay que <Link to={RUTA_ENTRAR}>entrar</Link> y después abrir de nuevo el
+            enlace del correo.
           </p>
         )}
         {estado === "invitacion_de_otra_persona" && (
           <>
             <p className="aviso-error">
-              Estás con una cuenta que no es la del correo invitado. Salí de esa cuenta para aceptarla.
+              La sesión abierta es de una cuenta que no es la del correo invitado. Hay que salir de esa cuenta para aceptarla.
             </p>
             {token && <SalirDeEstaCuenta alSalir={() => consultar(token)} />}
           </>
@@ -191,8 +191,8 @@ export function InvitacionMandato() {
         {estado === "asociacion_incompatible_con_consejo" && (
           <>
             <p className="aviso-error">
-              Tenés un mandato del Consejo en este consorcio que se superpone con el de administración: el Consejo
-              fiscaliza y no administra. Hablalo con el consorcio.
+              Esta cuenta tiene un mandato del Consejo en este consorcio que se superpone con el de administración: el Consejo
+              fiscaliza y no administra. Conviene hablarlo con el consorcio.
             </p>
             <EnlaceAlInicio />
           </>
@@ -207,7 +207,7 @@ export function InvitacionMandato() {
           <>
             <p className="aviso-error">{falla}</p>
             {token && (
-              <button type="button" onClick={() => consultar(token)}>
+              <button className="secundario" type="button" onClick={() => consultar(token)}>
                 Reintentar
               </button>
             )}
@@ -215,7 +215,7 @@ export function InvitacionMandato() {
         )}
         {estado === "sin_enlace" && (
           <>
-            <p>Para asociar tu cuenta, abrí el enlace que te llegó por correo.</p>
+            <p>Para asociar la cuenta hay que abrir el enlace que llegó por correo.</p>
             <EnlaceAlInicio />
           </>
         )}

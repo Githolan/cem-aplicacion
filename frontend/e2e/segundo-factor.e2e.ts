@@ -131,7 +131,7 @@ test.describe("segundo factor", () => {
     await page.goto(direccion.href);
     await page.getByRole("button", { name: "Activar con PIN, huella o cara" }).click();
 
-    await expect(page.getByText("Listo: tu llave quedó activada.")).toBeVisible();
+    await expect(page.getByText("Listo: la llave quedó activada.")).toBeVisible();
     await expect(page.getByRole("list", { name: "Códigos de recuperación" }).getByRole("listitem")).toHaveCount(10);
     expect(recibida?.credencial.response.attestationObject.length).toBeGreaterThan(100);
     expect(recibida?.credencial.response.clientDataJSON.length).toBeGreaterThan(50);

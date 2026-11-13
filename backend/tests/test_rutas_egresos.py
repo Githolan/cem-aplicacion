@@ -398,10 +398,16 @@ def test_quien_preparo_no_aprueba_con_otra_cuenta_del_consejo(motor_migrate, mot
     h = huella(e, o, 1)
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     r = post(e, otra, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
-    assert codigo(r) == (403, "sin_permiso")
+    # Pregunta 10 del propietario: a quien ya participó se le dice el motivo concreto.
+    assert codigo(r) == (403, "ya_participo")
+    assert r.json()["mensaje"] == "La preparó esta cuenta: la aprueba otra persona del Consejo."
+    assert r.json()["detalle"] == {"separacion": "no_es_quien_preparo"}
     motivos = [d["motivo"] for d in denegaciones(motor_app, e.cons, e.mc1, otra)]
     assert motivos == ["no_es_quien_preparo"]
     r = post(e, otra, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "No"})
+    assert codigo(r) == (403, "ya_participo")
+    # Control: sin la facultad, el motivo sigue siendo «sin permiso» y no se nombra la separación.
+    r = post(e, e.adm, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
     assert codigo(r) == (403, "sin_permiso")
     # Control: otro ser humano del Consejo sí.
     r = post(e, e.mc2, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
@@ -545,9 +551,9 @@ def test_puede_aprobar_y_rechazar_con_quien_preparo_por_ser_humano(motor_migrate
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     assert _puede(e, otra, o) == (False, False)
     r = post(e, otra, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
-    assert codigo(r) == (403, "sin_permiso")
+    assert codigo(r) == (403, "ya_participo")
     r = post(e, otra, f"ordenes-pago/{o}/rechazar", {"version": 1, "motivo": "No"})
-    assert codigo(r) == (403, "sin_permiso")
+    assert codigo(r) == (403, "ya_participo")
     # Control: otro ser humano del Consejo puede, y la ruta concede.
     assert _puede(e, e.mc1, o) == (True, True)
     r = post(e, e.mc1, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
@@ -652,7 +658,7 @@ def test_aprobada_por_vos_coincide_con_lo_que_decide_emitir(motor_migrate, e):
     assert r.status_code == 201, r.json()
     assert _de_la_lista(e, e.mc2, "ordenes-pago", o)["aprobada_por_vos"] is True
     r = post(e, e.mc2, f"ordenes-pago/{o}/emitir", {"version": 1, "huella": h})
-    assert codigo(r) == (403, "sin_permiso")
+    assert codigo(r) == (403, "ya_participo")
     # Control: para quien no aprobó es falso, y la ruta concede.
     assert _de_la_lista(e, e.adm, "ordenes-pago", o)["aprobada_por_vos"] is False
     r = post(e, e.adm, f"ordenes-pago/{o}/emitir", {"version": 1, "huella": h})

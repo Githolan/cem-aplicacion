@@ -169,9 +169,9 @@ test.describe("invitar", () => {
     expect(Math.abs((boton?.width ?? 0) - (campo?.width ?? -1))).toBeLessThanOrEqual(1);
 
     await invitar(page, "2° B", "Dora Ruiz", "dora@ejemplo.com");
-    await expect(page.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeVisible();
+    await expect(page.getByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeVisible();
     // El resultado entra en la pantalla del teléfono, sin bajar por la lista para encontrarlo.
-    await expect(page.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeInViewport();
+    await expect(page.getByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeInViewport();
     await expect(page.getByText("Dora Ruiz, 2° B")).toBeVisible();
     expect(envios).toHaveLength(1);
     expect(envios[0]?.csrf).toBe(CSRF);
@@ -194,11 +194,11 @@ test.describe("invitar", () => {
     await expect(ficha).toHaveCount(0);
 
     await invitar(page, "2° B", "Eva Sosa", "eva@ejemplo.com");
-    await expect(page.getByText("No tenés permiso para invitar a esa unidad.")).toBeVisible();
+    await expect(page.getByText("Esta cuenta no tiene permiso para invitar a esa unidad.")).toBeVisible();
     await expect(page.getByText("Eva Sosa, 2° B")).toHaveCount(0);
 
     await invitar(page, "1° A", "Eva Sosa", "eva@ejemplo.com");
-    await expect(page.getByText("Listo: le mandamos la invitación a Eva Sosa.")).toBeVisible();
+    await expect(page.getByText("Listo: la invitación a Eva Sosa quedó enviada.")).toBeVisible();
     await expect(page.getByText("Eva Sosa, 1° A")).toBeVisible();
     expect(envios.map((e) => e.cuerpo.unidad_id)).toEqual([U2, U1]);
     // Otro intento (otra unidad): otra clave.
@@ -214,8 +214,8 @@ test.describe("invitar", () => {
     await page.getByLabel("Nombre").fill("Elsa Paz");
     await page.getByLabel("Correo").fill("elsa@ejemplo.com");
     await page.getByLabel("Correo").press("Enter");
-    await expect(page.getByText("Listo: le mandamos la invitación a Elsa Paz.")).toBeVisible();
-    await expect(page.getByText("Listo: le mandamos la invitación a Elsa Paz.")).toBeFocused();
+    await expect(page.getByText("Listo: la invitación a Elsa Paz quedó enviada.")).toBeVisible();
+    await expect(page.getByText("Listo: la invitación a Elsa Paz quedó enviada.")).toBeFocused();
   });
 
   test("si durante el envío la persona lleva el foco a otro lado, no se lo saca", async ({ page, baseURL }) => {
@@ -244,7 +244,7 @@ test.describe("invitar", () => {
     });
     expect(elegido).toBe("Invitar a una persona");
     soltar();
-    await expect(page.getByText("Listo: le mandamos la invitación a Fito Sosa.")).toBeVisible();
+    await expect(page.getByText("Listo: la invitación a Fito Sosa quedó enviada.")).toBeVisible();
     expect(await page.evaluate(() => document.activeElement?.textContent ?? "")).toBe(elegido);
     await expect(page.getByLabel("Correo")).not.toBeFocused();
   });
@@ -266,8 +266,8 @@ test.describe("invitar", () => {
     // Con el teclado, como quien no usa el mouse (E46): el foco termina en el aviso del resultado.
     await ficha.getByRole("button", { name: "Sí, retirarla" }).focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeVisible();
-    await expect(page.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeFocused();
+    await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeVisible();
+    await expect(page.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeFocused();
     // Retirada, deja la vista principal y pasa al historial plegado (sigue en la base y la auditoría).
     await expect(page.getByText("No hay invitaciones pendientes.")).toBeVisible();
     await expect(ficha).toHaveCount(0);
@@ -283,7 +283,7 @@ test.describe("invitar", () => {
     await page.context().clearCookies();
     await page.goto("/invitaciones");
     await invitar(page, "2° B", "Dora Ruiz", "dora@ejemplo.com");
-    await expect(page.getByText("No pudimos verificar el pedido. Recargá la página.")).toBeVisible();
+    await expect(page.getByText("La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.")).toBeVisible();
     expect(envios[0]?.csrf).toBeNull();
   });
 });

@@ -4,7 +4,7 @@ import { useAvisoAlSalir } from "./avisoAlSalir";
 import { llaveDisponible, registrarLlave } from "./llaveAcceso";
 
 // Activar la llave de acceso ahí mismo, sin ir a otra pantalla (informe de fricción, AC-21 en Mi
-// cuenta y AC-34 en la hoja de confirmar un acto): el mismo alta que la página del segundo factor
+// cuenta y AC-34 en la hoja de confirmar un acto): el mismo alta que la página de confirmación con PIN, huella o código
 // (`registrarLlave`), con los mismos controles del servidor (entrada reciente si es el primer medio;
 // confirmar con el que ya haya si es otro). El alta deja la sesión verificada. Si llegan códigos de
 // recuperación, los muestra quien usa el botón (`alActivar`), que no los suelta hasta que la persona

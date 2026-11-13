@@ -4,7 +4,7 @@ import type { ManifestOptions } from "vite-plugin-pwa";
 export const manifiesto: Partial<ManifestOptions> = {
   name: "Consorcio en Mano",
   short_name: "Consorcio",
-  description: "Expensas, documentos y avisos de tu consorcio.",
+  description: "Expensas, documentos y avisos del consorcio.",
   lang: "es-AR",
   start_url: "/",
   scope: "/",

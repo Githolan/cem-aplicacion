@@ -212,7 +212,7 @@ describe("página /cuenta", () => {
 
     expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
     expect(screen.getByText("ana@ejemplo.com")).toBeTruthy();
-    const lista = screen.getByRole("heading", { name: "Dónde tenés la sesión abierta" }).parentElement!;
+    const lista = screen.getByRole("heading", { name: "Sesiones abiertas" }).parentElement!;
     const items = within(lista).getAllByRole("listitem");
     expect(items).toHaveLength(3);
     const [actual, otra] = items as [HTMLElement, HTMLElement, HTMLElement];
@@ -225,7 +225,7 @@ describe("página /cuenta", () => {
       within(otra).getByRole("button", { name: "Cerrar esta sesión", description: "Chrome en Android" }),
     ).toBeTruthy();
     expect(screen.getByText("No está activado.")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Activar el segundo factor" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Activar la confirmación" }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
     );
   });
@@ -235,7 +235,7 @@ describe("página /cuenta", () => {
     abrir();
 
     expect(await screen.findByText(/Está activado/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Ver el segundo factor" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Ver la confirmación" }).getAttribute("href")).toBe(
       "/cuenta/segundo-factor",
     );
   });
@@ -253,9 +253,9 @@ describe("página /cuenta", () => {
     abrir();
     fireEvent.click(await botonCerrar("Chrome en Android"));
     // Control: el «Listo» se ve.
-    expect(await screen.findByText(/Listo: cerramos/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: se cerr/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Cambiar la contraseña" }));
-    expect(screen.queryByText(/Listo: cerramos/)).toBeNull();
+    expect(screen.queryByText(/Listo: se cerr/)).toBeNull();
   });
 
   it("cierra otra sesión con CSRF y la saca de la lista", async () => {
@@ -265,7 +265,7 @@ describe("página /cuenta", () => {
 
     fireEvent.click(await botonCerrar("Chrome en Android"));
 
-    expect(await screen.findByText("Listo: cerramos la sesión de Chrome en Android.")).toBeTruthy();
+    expect(await screen.findByText("Listo: se cerró la sesión de Chrome en Android.")).toBeTruthy();
     expect(screen.queryByText("Chrome en Android")).toBeNull();
     expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
     const revocar = pedido(simulado, "POST", `/api/v1/auth/sesiones/${OTRA}/revocar`);
@@ -278,8 +278,8 @@ describe("página /cuenta", () => {
 
     fireEvent.click(await botonCerrar("Chrome en Android"));
 
-    const aviso = await screen.findByText("Listo: cerramos la sesión de Chrome en Android.");
-    expect(screen.getByRole("region", { name: "Dónde tenés la sesión abierta" }).contains(aviso)).toBe(true);
+    const aviso = await screen.findByText("Listo: se cerró la sesión de Chrome en Android.");
+    expect(screen.getByRole("region", { name: "Sesiones abiertas" }).contains(aviso)).toBe(true);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
@@ -300,7 +300,7 @@ describe("página /cuenta", () => {
 
     const aviso = await screen.findByText(SERVICIO_NO_DISPONIBLE);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
     expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
@@ -328,7 +328,7 @@ describe("página /cuenta", () => {
 
     fireEvent.click(await botonCerrar("Chrome en Android"));
 
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido/)).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 
@@ -341,8 +341,8 @@ describe("página /cuenta", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Cerrar las otras sesiones" }));
 
-    expect(await screen.findByText("Listo: cerramos 2 sesiones en otros dispositivos.")).toBeTruthy();
-    const lista = screen.getByRole("heading", { name: "Dónde tenés la sesión abierta" }).parentElement!;
+    expect(await screen.findByText("Listo: se cerraron 2 sesiones en otros dispositivos.")).toBeTruthy();
+    const lista = screen.getByRole("heading", { name: "Sesiones abiertas" }).parentElement!;
     expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
     // Sin otras sesiones, el botón ya no tiene sentido.
     expect(screen.queryByRole("button", { name: "Cerrar las otras sesiones" })).toBeNull();
@@ -394,7 +394,7 @@ describe("página /cuenta", () => {
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("sin red"))));
     abrir();
 
-    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/Hay que revisar la conexión/)).toBeTruthy();
   });
 
   it("sin nada de la cuenta, un solo aviso; Reintentar la vuelve a leer entera", async () => {
@@ -412,14 +412,14 @@ describe("página /cuenta", () => {
     fireEvent.click(boton);
 
     expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
   it.each([
-    ["GET /api/v1/auth/sesiones", "Dónde tenés la sesión abierta", "Ana Pérez", "Chrome en Android"],
-    ["GET /api/v1/auth/sesion", "Tus datos", "Chrome en Android", "Ana Pérez"],
-    ["GET /api/v1/auth/totp", "Segundo factor", "Ana Pérez", "No está activado."],
+    ["GET /api/v1/auth/sesiones", "Sesiones abiertas", "Ana Pérez", "Chrome en Android"],
+    ["GET /api/v1/auth/sesion", "Datos de la cuenta", "Chrome en Android", "Ana Pérez"],
+    ["GET /api/v1/auth/totp", "Confirmación con PIN, huella o código", "Ana Pérez", "No está activado."],
     ["GET /api/v1/auth/contrasena", "Contraseña", "Ana Pérez", "Definir una contraseña"],
   ])("si falla %s, «%s» lo dice y deja reintentar sin perder el resto", async (ruta, parte, sigue, recupera) => {
     let caida = true;
@@ -434,7 +434,7 @@ describe("página /cuenta", () => {
     const region = within(screen.getByRole("region", { name: parte }));
     expect(region.getByRole("alert").textContent).toBe(SERVICIO_NO_DISPONIBLE);
     expect(enPantalla().queryByText(recupera)).toBeNull();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
     // Salir tiene que seguir a mano aunque falte una parte.
     expect(screen.getByRole("button", { name: "Salir" })).toBeTruthy();
     const pedidosAntes = simulado.mock.calls.length;
@@ -466,7 +466,7 @@ describe("página /cuenta", () => {
     );
     abrir();
     expect(await enPantalla().findByText("Ana Pérez")).toBeTruthy();
-    const region = within(screen.getByRole("region", { name: "Dónde tenés la sesión abierta" }));
+    const region = within(screen.getByRole("region", { name: "Sesiones abiertas" }));
     expect(region.getByRole("alert").textContent).toBe(SIN_CONEXION);
 
     fireEvent.click(region.getByRole("button", { name: "Reintentar" }));
@@ -504,7 +504,7 @@ describe("página /cuenta", () => {
     else await enPantalla().findByText("Ana Pérez");
     if (estado === "aviso") {
       fireEvent.click(await botonCerrar("Chrome en Android"));
-      await screen.findByText(/Listo: cerramos/);
+      await screen.findByText(/Listo: se cerr/);
     }
 
     // jsdom no calcula colores: el contraste lo mide axe en el navegador (e2e/cuenta.e2e.ts).
@@ -548,7 +548,7 @@ describe("contraseña en /cuenta", () => {
     if (actual !== undefined)
       fireEvent.change(seccion().getByLabelText("Contraseña actual"), { target: { value: actual } });
     fireEvent.change(seccion().getByLabelText(/^Contraseña( nueva)?$/), { target: { value: nueva } });
-    fireEvent.change(seccion().getByLabelText("Repetí la contraseña"), { target: { value: repetida } });
+    fireEvent.change(seccion().getByLabelText("Repetir la contraseña"), { target: { value: repetida } });
     const formulario = seccion()
       .getByRole("button", { name: /^Guardar la contraseña( nueva)?$/ })
       .closest("form");
@@ -571,7 +571,7 @@ describe("contraseña en /cuenta", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
 
-    expect(await screen.findByText(/Todavía no tenés contraseña/)).toBeTruthy();
+    expect(await screen.findByText(/Sin contraseña todavía/)).toBeTruthy();
     const definir = seccion().getByRole("button", { name: "Definir una contraseña" });
     expect(definir.getAttribute("aria-expanded")).toBe("false");
     expect(seccion().queryByLabelText("Contraseña")).toBeNull();
@@ -581,11 +581,11 @@ describe("contraseña en /cuenta", () => {
     expect(document.activeElement).toBe(campo);
     expect(campo.getAttribute("autocomplete")).toBe("new-password");
     expect(campo.getAttribute("type")).toBe("password");
-    expect(seccion().getByLabelText("Repetí la contraseña").getAttribute("autocomplete")).toBe("new-password");
+    expect(seccion().getByLabelText("Repetir la contraseña").getAttribute("autocomplete")).toBe("new-password");
     completar(NUEVA);
 
-    expect(await screen.findByText("Listo: definiste tu contraseña. Te avisamos por correo.")).toBeTruthy();
-    expect(screen.getByText(/Tenés una contraseña. La cambiaste por última vez el 16 de octubre de 2026/)).toBeTruthy();
+    expect(await screen.findByText("Listo: la contraseña quedó definida. Llega un aviso por correo.")).toBeTruthy();
+    expect(screen.getByText(/Contraseña definida. Último cambio: 16 de octubre de 2026/)).toBeTruthy();
     const put = pedido(simulado, "PUT", "/api/v1/auth/contrasena");
     if (put === undefined) throw new Error("no hubo PUT");
     expect(put.headers.get("X-CSRF-Token")).toBe("abc123");
@@ -599,13 +599,13 @@ describe("contraseña en /cuenta", () => {
     const simulado = conSesion({ "PUT /api/v1/auth/contrasena": () => error("reautenticacion_requerida", 403) });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await screen.findByText(/Todavía no tenés contraseña/);
+    await screen.findByText(/Sin contraseña todavía/);
     desplegar();
     completar(NUEVA);
 
     await waitFor(() => expect(seccion().getByRole("button", { name: /^Guardar la contraseña/ })).toHaveProperty("disabled", false));
     expect(seccion().queryByText(ENTRAR_DE_NUEVO)).toBeNull();
-    expect(seccion().queryByText(/Revisá la conexión/)).toBeNull();
+    expect(seccion().queryByText(/Hay que revisar la conexión/)).toBeNull();
     expect(seccion().queryByText(/Listo:/)).toBeNull();
     expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
   });
@@ -613,10 +613,10 @@ describe("contraseña en /cuenta", () => {
   it("control: otro rechazo no ofrece volver a entrar", async () => {
     vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": () => error("csrf_invalido", 403) }));
     abrir();
-    await screen.findByText(/Todavía no tenés contraseña/);
+    await screen.findByText(/Sin contraseña todavía/);
     completar(NUEVA);
 
-    expect(await seccion().findByText(/No pudimos verificar el pedido/)).toBeTruthy();
+    expect(await seccion().findByText(/La página quedó abierta mucho tiempo/)).toBeTruthy();
     expect(seccion().queryByRole("link", { name: "Volver a entrar" })).toBeNull();
   });
 
@@ -629,21 +629,21 @@ describe("contraseña en /cuenta", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
 
-    expect(await screen.findByText(/La cambiaste por última vez el 10 de octubre de 2026/)).toBeTruthy();
+    expect(await screen.findByText(/Último cambio: 10 de octubre de 2026/)).toBeTruthy();
     // Plegado: ni la actual a la vista (que el navegador autocompletaría) ni el aviso de sesiones.
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
-    expect(seccion().queryByText(/cerramos las sesiones de tus otros dispositivos/)).toBeNull();
+    expect(seccion().queryByText(/se cierran las sesiones de los otros dispositivos/)).toBeNull();
     desplegar();
     const actual = seccion().getByLabelText("Contraseña actual");
     expect(actual.getAttribute("autocomplete")).toBe("current-password");
     expect(document.activeElement).toBe(actual);
-    expect(seccion().getByText(/cerramos las sesiones de tus otros dispositivos/)).toBeTruthy();
+    expect(seccion().getByText(/se cierran las sesiones de los otros dispositivos/)).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
     completar(NUEVA, NUEVA, ANTERIOR);
 
     expect(
       await screen.findByText(
-        "Listo: cambiaste tu contraseña. Cerramos 2 sesiones en otros dispositivos. Te avisamos por correo.",
+        "Listo: la contraseña quedó cambiada. Se cerraron 2 sesiones en otros dispositivos. Llega un aviso por correo.",
       ),
     ).toBeTruthy();
     const put = pedido(simulado, "PUT", "/api/v1/auth/contrasena");
@@ -658,7 +658,7 @@ describe("contraseña en /cuenta", () => {
     const simulado = conSesion();
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await screen.findByText(/Todavía no tenés contraseña/);
+    await screen.findByText(/Sin contraseña todavía/);
 
     completar("corta 11 ch");
     const explicacion = seccion().getByText(/tiene que tener al menos 12/);
@@ -668,7 +668,7 @@ describe("contraseña en /cuenta", () => {
 
     completar(NUEVA, `${NUEVA}!`);
     expect(seccion().getByText("Las dos contraseñas no coinciden.")).toBeTruthy();
-    expect(seccion().getByLabelText("Repetí la contraseña").getAttribute("aria-invalid")).toBe("true");
+    expect(seccion().getByLabelText("Repetir la contraseña").getAttribute("aria-invalid")).toBe("true");
     expect(pedido(simulado, "PUT", "/api/v1/auth/contrasena")).toBeUndefined();
   });
 
@@ -681,7 +681,7 @@ describe("contraseña en /cuenta", () => {
   it("con segundo factor no pide la actual, no anticipa lo que va a pedir y no manda a otra página", async () => {
     vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO, CON_CONTRASENA));
     abrir();
-    await screen.findByText(/La cambiaste por última vez/);
+    await screen.findByText(/Último cambio:/);
 
     desplegar();
     expect(seccion().queryByLabelText("Contraseña actual")).toBeNull();
@@ -707,12 +707,12 @@ describe("contraseña en /cuenta", () => {
     );
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await screen.findByText(/La cambiaste por última vez/);
+    await screen.findByText(/Último cambio:/);
     completar(NUEVA);
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
 
-    expect(await screen.findByText("Listo: cambiaste tu contraseña. Te avisamos por correo.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la contraseña quedó cambiada. Llega un aviso por correo.")).toBeTruthy();
     const puts = pedidosDe(simulado).filter((p) => p.method === "PUT");
     expect(puts).toHaveLength(2);
     expect(await puts[1]?.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
@@ -730,7 +730,7 @@ describe("contraseña en /cuenta", () => {
     );
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await screen.findByText(/La cambiaste por última vez/);
+    await screen.findByText(/Último cambio:/);
     completar(NUEVA);
 
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "042917" } });
@@ -740,7 +740,7 @@ describe("contraseña en /cuenta", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
     expect((seccion().getByLabelText(/^Contraseña( nueva)?$/) as HTMLInputElement).value).toBe(NUEVA);
-    expect((seccion().getByLabelText("Repetí la contraseña") as HTMLInputElement).value).toBe(NUEVA);
+    expect((seccion().getByLabelText("Repetir la contraseña") as HTMLInputElement).value).toBe(NUEVA);
     expect(pedidosDe(simulado).filter((p) => p.method === "PUT")).toHaveLength(1);
   });
 
@@ -754,7 +754,7 @@ describe("contraseña en /cuenta", () => {
         ),
       "No puede ser tu correo (mensaje del backend).",
     ],
-    [() => error("csrf_invalido", 403), /No pudimos verificar el pedido. Recargá la página/],
+    [() => error("csrf_invalido", 403), /La página quedó abierta mucho tiempo. Hay que recargarla/],
     [() => error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
     [() => error("servicio_no_disponible", 503), SERVICIO_NO_DISPONIBLE],
     [() => error("error_interno", 500), SERVICIO_NO_DISPONIBLE],
@@ -762,7 +762,7 @@ describe("contraseña en /cuenta", () => {
   ])("muestra el rechazo del backend a la vista (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", conSesion({ "PUT /api/v1/auth/contrasena": respuesta }, TOTP_INACTIVO, CON_CONTRASENA));
     abrir();
-    await screen.findByText(/La cambiaste por última vez/);
+    await screen.findByText(/Último cambio:/);
     completar(NUEVA, NUEVA, ANTERIOR);
 
     expect(await seccion().findByText(mensaje)).toBeTruthy();
@@ -775,7 +775,7 @@ describe("contraseña en /cuenta", () => {
     const simulado = conSesion({}, TOTP_INACTIVO, CON_CONTRASENA);
     vi.stubGlobal("fetch", simulado);
     abrir();
-    await screen.findByText(/La cambiaste por última vez/);
+    await screen.findByText(/Último cambio:/);
 
     desplegar();
     fireEvent.change(seccion().getByLabelText("Contraseña nueva"), { target: { value: NUEVA } });
@@ -796,10 +796,10 @@ describe("contraseña en /cuenta", () => {
       vi.fn(async (p: Request) => (p.method === "PUT" ? Promise.reject(new TypeError("sin red")) : simulado(p))),
     );
     abrir();
-    await screen.findByText(/Todavía no tenés contraseña/);
+    await screen.findByText(/Sin contraseña todavía/);
     completar(NUEVA);
 
-    expect(await seccion().findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await seccion().findByText(/No se pudo completar el pedido/)).toBeTruthy();
   });
 
   it("si la sesión venció al guardar (401), manda a /entrar", async () => {
@@ -808,7 +808,7 @@ describe("contraseña en /cuenta", () => {
       conSesion(sesionQueSeCierra("PUT /api/v1/auth/contrasena", () => error("no_autenticado", 401))),
     );
     abrir();
-    await screen.findByText(/Todavía no tenés contraseña/);
+    await screen.findByText(/Sin contraseña todavía/);
     completar(NUEVA);
 
     await quedoEnEntrar();
@@ -903,7 +903,7 @@ describe("página /cuenta: estados de pantalla mínima (documento 08, §13.1)", 
     abrir();
     fireEvent.click(await botonCerrar("Chrome en Android"));
 
-    expect(await screen.findByText("No pudimos completar el pedido. Revisá la conexión y probá de nuevo.")).toBeTruthy();
+    expect(await screen.findByText("No se pudo completar el pedido. Hay que revisar la conexión y reintentar.")).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 });
@@ -944,13 +944,13 @@ describe("informe de fricción, tanda 7", () => {
     abrir();
 
     const activar = await enPantalla().findByRole("button", { name: "Activar con PIN, huella o cara" });
-    // Las otras formas siguen en la página del segundo factor.
+    // Las otras formas siguen en la página de confirmación con PIN, huella o código.
     expect(screen.getByRole("link", { name: "Otras opciones" }).getAttribute("href")).toBe("/cuenta/segundo-factor");
     fireEvent.click(activar);
     const lista = await screen.findByRole("list", { name: "Códigos de recuperación" });
     expect(within(lista).getAllByRole("listitem").map((li) => li.textContent)).toEqual(CODIGOS);
     expect(pedido(simulado, "POST", "/api/v1/auth/llave/alta/opciones")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Ya los guardé" }));
+    fireEvent.click(screen.getByRole("button", { name: "Códigos guardados: seguir" }));
     expect(await screen.findByText(/Está activado/)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Códigos de recuperación" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
@@ -976,7 +976,7 @@ describe("informe de fricción, tanda 7", () => {
     fireEvent.keyDown(hoja, { key: "Escape" });
     expect(screen.getByRole("dialog", { name: "Guardar los códigos de recuperación" })).toBeTruthy();
 
-    fireEvent.click(within(hoja).getByRole("button", { name: "Ya los guardé" }));
+    fireEvent.click(within(hoja).getByRole("button", { name: "Códigos guardados: seguir" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(container.inert).toBe(false);
   });
@@ -985,7 +985,7 @@ describe("informe de fricción, tanda 7", () => {
     vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO));
     abrir();
 
-    expect(await screen.findByRole("link", { name: "Ver el segundo factor" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Ver la confirmación" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
   });
 });

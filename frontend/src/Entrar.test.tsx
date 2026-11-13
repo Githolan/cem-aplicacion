@@ -40,7 +40,7 @@ const RUTA_CODIGO = "/api/v1/auth/codigo";
 // El texto lo arma el backend (router.py, MENSAJE_PEDIDO); la página muestra el que llega.
 const MENSAJE = "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para entrar.";
 
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const PEDIR = { name: "Pedir un código para entrar" };
 const CODIGO = { name: "Escribir el código del correo" };
@@ -158,7 +158,7 @@ describe("página /entrar", () => {
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(window.location.hash).toBe("");
     expect(window.location.href).not.toContain(TOKEN);
@@ -178,7 +178,7 @@ describe("página /entrar", () => {
     abrir(`/entrar#token=${TOKEN}`);
 
     expect(await screen.findByText(/Este enlace no sirve acá/)).toBeTruthy();
-    expect(screen.queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByText("Listo: sesión abierta.")).toBeNull();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(window.location.hash).toBe("");
   });
@@ -198,7 +198,7 @@ describe("página /entrar", () => {
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
     vi.stubGlobal("fetch", backend());
     const { container } = abrir(`/entrar#token=${TOKEN}`);
-    await screen.findByText("Entraste.");
+    await screen.findByText("Listo: sesión abierta.");
     await screen.findByRole("heading", INICIO);
 
     // jsdom no calcula estilos: el contraste se mide en el navegador (e2e), no aquí.
@@ -233,7 +233,7 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
     vi.stubGlobal("fetch", pedido);
     const { container } = abrir("/entrar");
 
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     await screen.findByRole("heading", INICIO);
     const [canje, ...otros] = postsDe(pedido);
     expect(otros).toEqual([]);
@@ -263,7 +263,7 @@ describe("token guardado en la pestaña (recarga o actualización a mitad de cam
 
     abrir(`/entrar#token=${TOKEN}`);
 
-    await screen.findByText("Entraste.");
+    await screen.findByText("Listo: sesión abierta.");
     const [canje] = postsDe(pedido);
     expect(await canje!.json()).toEqual({ token: TOKEN });
   });
@@ -341,7 +341,7 @@ describe("un canje que falla por algo que no es el enlace", () => {
   it.each<[string, Respuesta, string | RegExp]>([
     ["un 503", caido(503), SERVICIO_NO_DISPONIBLE],
     ["un 500", caido(500), SERVICIO_NO_DISPONIBLE],
-    ["un 429", limite, /Llegaste al límite de pedidos/],
+    ["un 429", limite, /Se llegó al límite de pedidos/],
     ["sin red", () => Promise.reject(new TypeError("Failed to fetch")), SIN_CONEXION_ENLACE],
   ])("con %s conserva el token, y Reintentar repite el canje y entra", async (_, falla, mensaje) => {
     let fallando = true;
@@ -358,7 +358,7 @@ describe("un canje que falla por algo que no es el enlace", () => {
     fireEvent.click(screen.getByRole("button", REINTENTAR));
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     const canjes = canjesDe(pedido);
     expect(canjes).toHaveLength(2);
     expect(await canjes[1]?.json()).toEqual({ token: TOKEN });
@@ -501,7 +501,7 @@ describe("página /entrar: estados de pantalla mínima (documento 08, §13.1)", 
     expect(screen.queryByRole("region", { name: "Otras formas de entrar" })).toBeNull();
     soltar();
 
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     expect(screen.queryByText("Entrando…")).toBeNull();
   });
 });

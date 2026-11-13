@@ -346,7 +346,7 @@ def _invitacion_invalida() -> ErrorApi:
         404,
         CodigoError.INVITACION_INVALIDA,
         "La invitación no sirve: puede haber vencido, haberse usado o haber sido retirada."
-        " Pedí una nueva a quien te invitó.",
+        " Hay que pedir una nueva a quien invitó.",
         encabezados=SIN_CACHE,
     )
 
@@ -379,15 +379,16 @@ def consultar(pedido: TokenInvitacionMandato, motor: MotorDep) -> InvitacionMand
 RECHAZOS_ACEPTAR = {
     "requiere_sesion": (
         CodigoError.INVITACION_REQUIERE_SESION,
-        "Ya tenés una cuenta con este correo. Entrá con él y volvé a abrir la invitación.",
+        "Ya hay una cuenta con este correo. Hay que entrar con él y abrir la invitación de nuevo.",
     ),
     "otra_persona": (
         CodigoError.INVITACION_DE_OTRA_PERSONA,
-        "La invitación es para otro correo. Salí de esta cuenta y abrila de nuevo.",
+        "La invitación es para otro correo. Hay que salir de esta cuenta y abrirla de nuevo.",
     ),
     "asociacion_incompatible_con_consejo": (
         CodigoError.ASOCIACION_INCOMPATIBLE_CON_CONSEJO,
-        "Tenés en este consorcio un mandato del Consejo en las mismas fechas: el Consejo"
+        "Esta cuenta tiene en este consorcio un mandato del Consejo en las mismas fechas: el "
+        "Consejo"
         " fiscaliza y no administra.",
     ),
     "asociacion_de_si_mismo": (
@@ -425,7 +426,9 @@ def aceptar(
     if sitio is not None and sitio != "same-origin":
         log.info("aceptación de invitación de mandato rechazada: otro_sitio")
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )
     persona_sesion = persona_de_la_sesion(request, motor)
     token_sesion = sesiones.nuevo_token()

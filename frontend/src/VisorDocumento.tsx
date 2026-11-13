@@ -16,7 +16,7 @@ import { abrirPdf } from "./pagos/pdf";
 
 /** Un comprobante son una o dos páginas y un documento rara vez pasa de unas pocas; a lo sumo se dibujan estas. */
 const PAGINAS_A_DIBUJAR = 5;
-const FALLA_PDF = "No pudimos mostrar este PDF.";
+const FALLA_PDF = "No se pudo mostrar este PDF.";
 
 export type LecturaDelArchivo = { tipo: "cargando" } | { tipo: "falla"; texto: string } | { tipo: "ok"; archivo: Blob };
 

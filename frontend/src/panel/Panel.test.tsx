@@ -131,7 +131,7 @@ describe("panel del Consejo", () => {
     const fondo = screen.getByRole("region", { name: "Pagos con el fondo de reserva" });
     expect(within(fondo).getByText(/No es el saldo del fondo/)).toBeTruthy();
 
-    const faltantes = screen.getByRole("region", { name: "Comprobantes faltantes" });
+    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
     const lista = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
     expect(within(lista).getByRole("link", { name: "Limpieza Ficticia SRL" }).getAttribute("href")).toBe(`/pagos/${O1}`);
     expect(within(lista).getByRole("link", { name: "Ascensores Ficticios SA" }).getAttribute("href")).toBe(`/pagos/${O2}`);
@@ -143,7 +143,7 @@ describe("panel del Consejo", () => {
   it("sin acceso a los pagos no ofrece los enlaces a los registros", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: alcanza("fiscalizacion.ver_panel") }));
     abrir();
-    const faltantes = await screen.findByRole("region", { name: "Comprobantes faltantes" });
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
     expect(within(faltantes).getByText("Limpieza Ficticia SRL")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Limpieza Ficticia SRL" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Consultar los pagos" })).toBeNull();
@@ -169,20 +169,20 @@ describe("panel del Consejo", () => {
       }),
     );
     const { container } = abrir();
-    expect(await screen.findByText("No pudimos cargar los datos de esta pantalla.")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron cargar los datos de esta pantalla.")).toBeTruthy();
     expect(screen.getByRole("alert").textContent).not.toBe("");
     await sinViolaciones(container);
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
-    expect(await screen.findByRole("region", { name: "Comprobantes faltantes" })).toBeTruthy();
-    expect(screen.queryByText("No pudimos cargar los datos de esta pantalla.")).toBeNull();
+    expect(await screen.findByRole("region", { name: "Facturas faltantes" })).toBeTruthy();
+    expect(screen.queryByText("No se pudieron cargar los datos de esta pantalla.")).toBeNull();
   });
 
   it("sin la acción del panel no aparece en el inicio y la dirección lleva al inicio", async () => {
     const api = backend({ [ACCIONES]: alcanza("documentos.ver"), [PANEL]: () => Response.json(DATOS) });
     vi.stubGlobal("fetch", api);
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
     await screen.findByRole("link", { name: "Documentos del edificio" });
     expect(screen.queryByRole("link", { name: "Panel del Consejo" })).toBeNull();
     expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/panel"))).toBe(false);
@@ -197,7 +197,7 @@ describe("panel del Consejo", () => {
   it("si la API lo niega lleva al inicio: decide el servidor", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Panel del Consejo" })).toBeNull());
   });
 });

@@ -119,7 +119,7 @@ def test_a15_quien_registro_la_decision_no_da_el_alta(escena, motor_app, motor_m
     e = escena
     d = decision(e["mc1"], e["cons"]).json()["id"]
     r = alta_http(e["mc1"], e["cons"], d, persona_id=e["vecina"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     assert _motivos(motor_app, e, e["mc1"]) == [("mandatos.alta", "no_registro_la_decision")]
     assert _mandatos_de(motor_migrate, e["cons"], e["vecina"]) == 0
     # Control: la otra integrante del Consejo usa esa misma decisión.

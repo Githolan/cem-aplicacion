@@ -53,7 +53,7 @@ export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof 
         if (data !== undefined) {
           releerAcciones(cliente);
           void consulta.refetch();
-          irAlInicio(`Listo: ya sos parte de ${invitacion.consorcio}.`);
+          irAlInicio(`Listo: la cuenta ya es parte de ${invitacion.consorcio}.`);
         } else if (response.status === ESTADO_SIN_SESION) {
           aEntrar();
         } else if ((response.status === ESTADO_NO_SIRVE || response.status === ESTADO_CONFLICTO) && error && "mensaje" in error) {
@@ -72,13 +72,13 @@ export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof 
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-      <h2 id={`${id}-titulo`}>Invitaciones para vos</h2>
+      <h2 id={`${id}-titulo`}>Invitaciones pendientes</h2>
       {fallaDeLectura && (
         <>
           <p className="aviso-error" role="alert">
             {mensajeDeLectura(consulta.error)}
           </p>
-          <button type="button" disabled={consulta.isFetching} onClick={() => void consulta.refetch()}>
+          <button className="secundario" type="button" disabled={consulta.isFetching} onClick={() => void consulta.refetch()}>
             Reintentar
           </button>
         </>
@@ -93,7 +93,7 @@ export function InvitacionesPropias({ consulta }: { consulta: ReturnType<typeof 
                 <dd>{invitacion.unidad}</dd>
                 <dt>Como</dt>
                 <dd>{TIPOS[invitacion.tipo]}</dd>
-                <dt>Te invitó</dt>
+                <dt>Invitó</dt>
                 <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
               </dl>
               <button

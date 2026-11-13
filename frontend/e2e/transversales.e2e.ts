@@ -94,7 +94,7 @@ test.describe("entrar encima", () => {
     await completarAlta(page);
     await guardar(page);
 
-    const hoja = page.getByRole("dialog", { name: "Tu sesión venció" });
+    const hoja = page.getByRole("dialog", { name: "La sesión venció" });
     await expect(hoja).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/egresos/proveedores");
     await sinFaltasDeAccesibilidad(page);
@@ -113,13 +113,13 @@ test.describe("entrar encima", () => {
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Seguís donde estabas.")).toBeVisible();
+    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(hoja).toHaveCount(0);
     await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
     expect(estado.altas).toHaveLength(1); // control: el pedido no salió solo
 
     await guardar(page);
-    await expect(page.getByText("Listo: dimos de alta el proveedor.")).toBeVisible();
+    await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
     expect(estado.altas).toHaveLength(2);
     const [primera, segunda] = await Promise.all(estado.altas.map((a) => a.headerValue("idempotency-key")));
     expect(primera).toBeTruthy();
@@ -132,12 +132,12 @@ test.describe("entrar encima", () => {
     await completarAlta(page);
     await guardar(page);
 
-    const hoja = page.getByRole("dialog", { name: "Tu sesión venció" });
+    const hoja = page.getByRole("dialog", { name: "La sesión venció" });
     await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Seguís donde estabas.")).toBeVisible();
+    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(page.getByText(/más de 12 horas/)).toHaveCount(0);
     await expect(page.getByLabel("Razón social")).toHaveValue(RAZON);
   });
@@ -150,7 +150,7 @@ test.describe("confirmar directo", () => {
     await completarAlta(page);
     await guardar(page);
 
-    const hoja = page.getByRole("dialog", { name: "Escribí el código de tu aplicación" });
+    const hoja = page.getByRole("dialog", { name: "Código de la aplicación" });
     await expect(hoja).toBeVisible();
     await expect(page.getByText("Confirmá que sos vos")).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
@@ -158,7 +158,7 @@ test.describe("confirmar directo", () => {
 
     await hoja.getByLabel("Código", { exact: true }).fill("042917");
 
-    await expect(page.getByText("Listo: dimos de alta el proveedor.")).toBeVisible();
+    await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
     expect(estado.altas).toHaveLength(2);
     const [primera, segunda] = await Promise.all(estado.altas.map((a) => a.headerValue("idempotency-key")));
     expect(primera).toBe(segunda);
@@ -198,7 +198,7 @@ test.describe("hojas superpuestas", () => {
     await completarAlta(page);
     await guardar(page);
 
-    const entrar = page.getByRole("dialog", { name: "Tu sesión venció" });
+    const entrar = page.getByRole("dialog", { name: "La sesión venció" });
     await expect(entrar).toBeVisible();
     const fallo = page.getByRole("dialog", { name: "No se pudo confirmar" });
     // Un clic de verdad: falla si la hoja quedó inerte o tapada por la de confirmar.
@@ -207,7 +207,7 @@ test.describe("hojas superpuestas", () => {
     await sinFaltasDeAccesibilidad(page);
     await entrar.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Seguís donde estabas.")).toBeVisible();
+    await expect(page.getByText("La pantalla sigue donde estaba.")).toBeVisible();
     await expect(entrar).toHaveCount(0);
     await expect(fallo).toBeVisible();
     await fallo.getByRole("button", { name: "Cancelar" }).click();
@@ -248,12 +248,12 @@ test.describe("entrar encima en mi cuenta", () => {
     await expect(miCuenta).toBeVisible();
     estado = "falla";
     await miCuenta.click();
-    const datos = page.getByRole("region", { name: "Tus datos" });
+    const datos = page.getByRole("region", { name: "Datos de la cuenta" });
     await expect(datos.getByRole("button", { name: "Reintentar" })).toBeVisible();
 
     estado = "vencida";
     await datos.getByRole("button", { name: "Reintentar" }).click();
-    const hoja = page.getByRole("dialog", { name: "Tu sesión venció" });
+    const hoja = page.getByRole("dialog", { name: "La sesión venció" });
     await expect(hoja).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/cuenta");
 
@@ -283,7 +283,7 @@ test.describe("datos del proveedor", () => {
     await page.getByLabel("Teléfono (opcional)").fill("11 5555 0142");
     await page.getByLabel("Atiende emergencias").check();
     await guardar(page);
-    await expect(page.getByText("Listo: dimos de alta el proveedor.")).toBeVisible();
+    await expect(page.getByText("Listo: el proveedor quedó dado de alta.")).toBeVisible();
     expect(estado.altas[0]?.postDataJSON()).toMatchObject({ cuit: CUIT, telefono: "11 5555 0142", atiende_emergencias: true });
   });
 

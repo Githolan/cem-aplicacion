@@ -128,12 +128,12 @@ function Contenido({ panel, consorcio, veRegistros }: { panel: DatosPanel; conso
         <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} registros={registros} />
       ))}
       <GraficoBarras
-        titulo="Comprobantes faltantes"
-        base="Órdenes aprobadas o pagadas cuya versión vigente no tiene el archivo de la factura. Es una señal para pedirlo, no una conclusión."
+        titulo="Facturas faltantes"
+        base="Órdenes aprobadas o pagadas sin el archivo de la factura. Conviene pedirlo."
         barras={faltantesPorEstado(panel)}
         columna="Estado de la orden"
         valor="Sin factura"
-        vacio="No falta ningún comprobante."
+        vacio="No falta ninguna factura."
         registros={<Faltantes panel={panel} consorcio={consorcio} veRegistros={veRegistros} />}
       />
     </div>
@@ -153,11 +153,11 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
     <>
       <GraficoBarras
         titulo={`Órdenes de pago por estado${en}`}
-        base="Cantidad de órdenes en cada estado, con el importe de su versión vigente. No incluye borradores."
+        base="Cuántas órdenes hay en cada paso y cuánto suman. No incluye borradores."
         barras={ordenesPorEstado(panel, moneda)}
         columna="Estado"
         valor="Órdenes e importe"
-        vacio="No hay órdenes enviadas a revisión."
+        vacio="No hay órdenes enviadas a aprobar."
         registros={registros}
       />
       <GraficoBarras
@@ -172,7 +172,7 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
       {meses.length > 0 && (
         <GraficoBarras
           titulo={`Gasto pagado por rubro${en}`}
-          base="Lo pagado en el mes elegido, por el rubro del proveedor al momento de pagar."
+          base="Lo pagado en el mes elegido, por el rubro que tenía el proveedor cuando se pagó."
           control={
             <div className="formulario">
               <label htmlFor={`${id}-mes`}>Mes</label>

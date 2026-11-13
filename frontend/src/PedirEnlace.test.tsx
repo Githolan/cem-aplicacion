@@ -23,7 +23,7 @@ function error(codigo: string, estado: number) {
 
 const RUTA_ENLACE = "/api/v1/auth/enlace";
 const CODIGO = { name: "Escribir el código del correo" };
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 
 /**
  * El backend de quien todavía no entró: `/auth/sesion` da 401 hasta que un canje la abre, `enlace`
@@ -161,7 +161,7 @@ describe("pedir el enlace para entrar", () => {
     abrir();
     pedir(CORREO);
 
-    expect(await seccion().findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await seccion().findByText(/No se pudo completar el pedido/)).toBeTruthy();
     expect(screen.queryByRole("region", CODIGO)).toBeNull();
   });
 
@@ -169,7 +169,7 @@ describe("pedir el enlace para entrar", () => {
     vi.stubGlobal("fetch", backend(aceptado, () => Response.json({})));
     abrir(`/entrar#token=${TOKEN}`);
     expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Pedir un código para entrar" })).toBeNull();
     cleanup();

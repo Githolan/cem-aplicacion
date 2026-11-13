@@ -25,7 +25,7 @@ function error(codigo: string, estado: number) {
 }
 
 const RUTA_CODIGO = "/api/v1/auth/codigo";
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -111,7 +111,7 @@ describe("entrar con el código del correo", () => {
     abrirCodigo();
     completar(`  ${CORREO} `, "042 917");
 
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Escribir el código del correo" })).toBeNull();
     const [canje, ...otros] = postsDe(pedido);
@@ -164,7 +164,7 @@ describe("entrar con el código del correo", () => {
     completar(CORREO, CODIGO);
 
     expect(await screen.findByText(mensaje)).toBeTruthy();
-    expect(screen.queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByText("Listo: sesión abierta.")).toBeNull();
     // El error queda en la misma pantalla, con lo escrito.
     expect((seccionCodigo().getByLabelText("Correo") as HTMLInputElement).value).toBe(CORREO);
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
@@ -176,14 +176,14 @@ describe("entrar con el código del correo", () => {
     abrirCodigo();
     completar(CORREO, CODIGO);
 
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido/)).toBeTruthy();
   });
 
   it("con un enlace válido no muestra el formulario; con uno rechazado, sí", async () => {
     vi.stubGlobal("fetch", backend({ canje: () => Response.json(SESION) }));
     abrir(`/entrar#token=${TOKEN}`);
     expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
-    expect(await screen.findByText("Entraste.")).toBeTruthy();
+    expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Escribir el código del correo" })).toBeNull();
     cleanup();

@@ -32,7 +32,7 @@ export function Reintentar({ alReintentar, children }: PropsReintentar) {
   return (
     <div className="formulario">
       <div className="acciones">
-        <button type="button" onClick={alReintentar}>
+        <button className="secundario" type="button" onClick={alReintentar}>
           Reintentar
         </button>
         {children}
@@ -52,7 +52,7 @@ export function FallaDeLectura({ alReintentar, avisar, children }: PropsFalla) {
   });
   return (
     <div className="tarjeta">
-      <p>No pudimos cargar los datos de esta pantalla.</p>
+      <p>No se pudieron cargar los datos de esta pantalla.</p>
       <Reintentar alReintentar={alReintentar}>{children}</Reintentar>
     </div>
   );

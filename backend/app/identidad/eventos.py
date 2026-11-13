@@ -74,19 +74,20 @@ def solicitar_enlace(
 # `consorcio_id`. El nombre del consorcio, la unidad y los nombres los escribieron personas:
 # el correo es texto plano y cada uno se escribe en una sola línea.
 
-ASUNTO_INVITACION = "Te invitaron a {consorcio} en Consorcio en Mano"
+ASUNTO_INVITACION = "Invitación a {consorcio} en Consorcio en Mano"
 TEXTO_INVITACION = """Hola, {nombre}:
 
-{quien} te invitó a sumarte a {consorcio} en Consorcio en Mano, en la unidad {unidad}, como {tipo}.
+{quien} invitó a esta dirección de correo a sumarse a {consorcio} en Consorcio en Mano, en la
+unidad {unidad}, como {tipo}.
 
-Para aceptar abrí este enlace:
+Para aceptar, abrir este enlace:
 
 {enlace}
 
-La invitación vence el {vence} y sirve una sola vez. Al aceptarla tu cuenta queda con este
-correo. Si ya tenés cuenta con este correo, entrá primero y después abrí el enlace.
+La invitación vence el {vence} y sirve una sola vez. Al aceptarla, la cuenta queda con este
+correo. Si ya hay una cuenta con este correo, primero entrar y después abrir el enlace.
 
-Si no esperabas esta invitación, ignorá este correo: sin aceptarla no se crea nada.
+Si esta invitación no se esperaba, se puede ignorar este correo: sin aceptarla no se crea nada.
 """
 TIPOS_LEGIBLES = {
     "propietario": "propietario/a",
@@ -132,21 +133,21 @@ def solicitar_invitacion(
 # `scripts/mandato_soporte.py`, en la misma transacción que aprueba la invitación. Nombra al
 # mandatario como figura en el mandato y nunca lleva el CUIT ni la referencia del respaldo.
 
-ASUNTO_INVITACION_MANDATO = "Te invitaron a administrar {consorcio} en Consorcio en Mano"
+ASUNTO_INVITACION_MANDATO = "Invitación a administrar {consorcio} en Consorcio en Mano"
 TEXTO_INVITACION_MANDATO = """Hola:
 
-{quien} te invitó a entrar a {consorcio} en Consorcio en Mano con la cuenta del administrador
-externo {mandatario}.
+{quien} invitó a esta dirección de correo a entrar a {consorcio} en Consorcio en Mano con la
+cuenta del administrador externo {mandatario}.
 
-Para aceptar abrí este enlace:
+Para aceptar, abrir este enlace:
 
 {enlace}
 
 La invitación vence el {vence} y sirve una sola vez. Al aceptarla, la cuenta de este correo queda
-asociada a ese mandato. Si ya tenés cuenta con este correo, entrá primero y después abrí el
+asociada a ese mandato. Si ya hay una cuenta con este correo, primero entrar y después abrir el
 enlace.
 
-Si no esperabas esta invitación, ignorá este correo: sin aceptarla no se asocia nada.
+Si esta invitación no se esperaba, se puede ignorar este correo: sin aceptarla no se asocia nada.
 """
 
 

@@ -202,14 +202,14 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
 
     const campo = seccion.getByLabel("Código de la aplicación o de recuperación");
     await expect(campo).toBeFocused();
-    await expect(seccion.getByText(/Tenés hasta las 18:05/)).toBeVisible();
+    await expect(seccion.getByText(/Hay tiempo hasta las 18:05/)).toBeVisible();
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
     await campo.fill("k7m2q-x9p4t");
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
 
-    await expect(page.getByText("Entraste.")).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page.getByText("Listo: sesión abierta.")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
     await expect(page).toHaveURL(/\/$/);
     expect(cuerpos).toEqual({ [ENTRAR]: { correo: CORREO, contrasena: CONTRASENA }, [PASO]: { codigo: "k7m2q-x9p4t" } });
     expect(page.url()).not.toContain("frase");
@@ -284,7 +284,7 @@ async function cambiar(pagina: Page) {
   const seccion = seccionCuenta(pagina);
   if ((await seccion.getByLabel("Contraseña nueva").count()) === 0) await desplegar(pagina);
   await seccion.getByLabel("Contraseña nueva").fill(NUEVA);
-  await seccion.getByLabel("Repetí la contraseña").fill(NUEVA);
+  await seccion.getByLabel("Repetir la contraseña").fill(NUEVA);
   await seccion.getByRole("button", { name: "Guardar la contraseña nueva" }).click();
 }
 
@@ -299,14 +299,14 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.goto("/cuenta");
 
     const seccion = seccionCuenta(page);
-    await expect(seccion.getByText(/La cambiaste por última vez el 10 de octubre de 2026/)).toBeVisible();
+    await expect(seccion.getByText(/Último cambio: 10 de octubre de 2026/)).toBeVisible();
     await desplegar(page);
     await expect(seccion.getByLabel("Contraseña nueva")).toHaveAttribute("autocomplete", "new-password");
     await anchoSinDesborde(page);
     await sinFaltasDeAccesibilidad(page);
     await cambiar(page);
 
-    await expect(seccion.getByRole("status")).toContainText("Listo: cambiaste tu contraseña.");
+    await expect(seccion.getByRole("status")).toContainText("Listo: la contraseña quedó cambiada.");
     await expect(seccion.getByRole("button", { name: "Cambiar la contraseña" })).toBeFocused();
     expect(puts).toEqual([{ csrf: CSRF, cuerpo: { contrasena_nueva: NUEVA, contrasena_actual: null } }]);
     await anchoSinDesborde(page);
@@ -319,7 +319,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.goto("/cuenta");
     await cambiar(page);
 
-    await expect(page.getByRole("dialog", { name: "Escribí el código de tu aplicación" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Código de la aplicación" })).toBeVisible();
     await expect(page).toHaveURL(/\/cuenta$/);
   });
 
@@ -329,7 +329,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.getByRole("banner").getByRole("button", { name: "Letra grande y alto contraste" }).click();
     await expect(page.locator("html")).toHaveClass("lectura-ampliada");
     await cambiar(page);
-    await expect(page.getByRole("dialog", { name: "Escribí el código de tu aplicación" })).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Código de la aplicación" })).toBeVisible();
 
     const resultado = await new AxeBuilder({ page })
       .withRules(["color-contrast", "color-contrast-enhanced"])
@@ -348,7 +348,7 @@ test.describe("contraseña en /cuenta (API simulada)", () => {
     await page.goto("/cuenta");
     await cambiar(page);
 
-    await expect(seccionCuenta(page).getByRole("status")).toContainText("No pudimos verificar el pedido");
+    await expect(seccionCuenta(page).getByRole("status")).toContainText("La página quedó abierta mucho tiempo");
     expect(puts.map((p) => p.csrf)).toEqual([null]);
   });
 });

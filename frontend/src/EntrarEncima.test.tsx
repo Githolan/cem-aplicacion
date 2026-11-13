@@ -20,7 +20,7 @@ const CONSORCIO = "c1c1c1c1-0000-4000-8000-000000000001";
 const RUTA = `/api/v1/consorcios/${CONSORCIO}/proveedores`;
 const SESION = { persona_id: PERSONA, nombre: "Ana", correo: "ana@ejemplo.com", sesion_id: "s1", vence_en: "2026-12-01T00:00:00Z" };
 const NUEVA = { ...SESION, sesion_id: "s2" };
-const HOJA = "Tu sesión venció";
+const HOJA = "La sesión venció";
 const LISTA = { elementos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" } as unknown as Copia["lista"];
 
 const error = (codigo: string, estado: number, detalle?: object) =>
@@ -57,6 +57,7 @@ function Formulario() {
       <input id="escrito" value={texto} onChange={(e) => setTexto(e.target.value)} />
       <button
         type="button"
+        className="secundario"
         onClick={() =>
           void api
             .GET("/api/v1/consorcios/{consorcio_id}/proveedores", { params: { path: { consorcio_id: CONSORCIO } } })
@@ -165,7 +166,7 @@ describe("entrar encima", () => {
     expect(entrar.contains(document.activeElement)).toBe(true);
 
     await entrarConCodigo();
-    await screen.findByText("Seguís donde estabas.");
+    await screen.findByText("La pantalla sigue donde estaba.");
     expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
     expect(fallo.inert).toBeFalsy();
     expect(fallo.contains(document.activeElement)).toBe(true);
@@ -251,7 +252,7 @@ describe("entrar encima", () => {
 
     await entrarConCodigo();
 
-    expect(await screen.findByText("Seguís donde estabas.")).toBeTruthy();
+    expect(await screen.findByText("La pantalla sigue donde estaba.")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: HOJA })).toBeNull();
     expect(await screen.findByText("leído")).toBeTruthy();
     expect(veces(simulado, "GET", RUTA)).toBe(2);
@@ -273,7 +274,7 @@ describe("entrar encima", () => {
     tocar("Guardar");
     await screen.findByRole("heading", { name: HOJA });
     await entrarConCodigo();
-    await screen.findByText("Seguís donde estabas.");
+    await screen.findByText("La pantalla sigue donde estaba.");
     expect(veces(simulado, "POST", RUTA)).toBe(1); // el control: no salió de nuevo
 
     tocar("Guardar");
@@ -303,7 +304,7 @@ describe("entrar encima", () => {
     expect(screen.getByRole("heading", { name: HOJA })).toBeTruthy();
 
     await entrarConCodigo();
-    expect(await screen.findByText("Seguís donde estabas.")).toBeTruthy();
+    expect(await screen.findByText("La pantalla sigue donde estaba.")).toBeTruthy();
   });
 
   it("si entró por el enlace en otra pestaña, al volver se cierra sola", async () => {
@@ -315,7 +316,7 @@ describe("entrar encima", () => {
     estado.sesion = NUEVA;
     fireEvent.focus(window);
 
-    expect(await screen.findByText("Seguís donde estabas.")).toBeTruthy();
+    expect(await screen.findByText("La pantalla sigue donde estaba.")).toBeTruthy();
   });
 
   it("si entra otra persona, no ve la pantalla de la anterior: carga el inicio de cero y borra las copias", async () => {
@@ -335,7 +336,7 @@ describe("entrar encima", () => {
     await entrarConCodigo();
 
     await waitFor(() => expect(salidas.aInicio).toHaveBeenCalledOnce());
-    expect(screen.queryByText("Seguís donde estabas.")).toBeNull();
+    expect(screen.queryByText("La pantalla sigue donde estaba.")).toBeNull();
     expect(leerCopias()).toEqual([]);
   });
 

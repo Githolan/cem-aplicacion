@@ -62,8 +62,8 @@ log = logging.getLogger("cem.identidad")
 
 VIGENCIA_DESAFIO = timedelta(minutes=5)
 BYTES_DESAFIO = 32
-ASUNTO_ALTA = "Agregaste una llave de acceso"
-ASUNTO_BAJA = "Quitaste una llave de acceso"
+ASUNTO_ALTA = "Se agregó una llave de acceso"
+ASUNTO_BAJA = "Se quitó una llave de acceso"
 
 
 def _sitio(request: Request) -> tuple[str, str]:
@@ -99,7 +99,7 @@ def llave_invalida() -> ErrorApi:
     return ErrorApi(
         400,
         CodigoError.SEGUNDO_FACTOR_INVALIDO,
-        "No pudimos confirmar tu llave. Probá de nuevo.",
+        "La llave no se pudo confirmar. Reintentar.",
         encabezados=sf.SIN_CACHE,
     )
 
@@ -171,7 +171,12 @@ def listar(identidad: IdentidadDep, motor: MotorDep, response: Response) -> list
     "/alta/opciones",
     response_model=OpcionesLlave,
     summary="Empezar el alta de una llave",
-    responses={403: {"model": Error, "description": "Falta confirmar que sos vos."}},
+    responses={
+        403: {
+            "model": Error,
+            "description": "Falta confirmar la identidad con PIN, huella o código.",
+        }
+    },
 )
 def alta_opciones(
     request: Request, identidad: IdentidadDep, motor: MotorDep, response: Response
@@ -206,7 +211,10 @@ def alta_opciones(
     summary="Registrar la llave",
     responses={
         400: {"model": Error, "description": "La llave no se pudo confirmar."},
-        403: {"model": Error, "description": "Falta confirmar que sos vos."},
+        403: {
+            "model": Error,
+            "description": "Falta confirmar la identidad con PIN, huella o código.",
+        },
     },
 )
 async def alta(
@@ -277,7 +285,9 @@ def verificar_opciones(
         credenciales = _credenciales(conn)
         if not credenciales:
             raise ErrorApi(
-                409, CodigoError.SEGUNDO_FACTOR_SIN_ALTA, "No tenés una llave de acceso activa."
+                409,
+                CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
+                "Esta cuenta no tiene una llave de acceso activa.",
             )
         return _opciones(
             generate_authentication_options(
@@ -362,7 +372,10 @@ async def verificar(
     summary="Quitar una llave",
     responses={
         403: {"model": Error, "description": "Falta una verificación reciente (10 minutos)."},
-        404: {"model": Error, "description": "No hay una llave tuya con ese identificador."},
+        404: {
+            "model": Error,
+            "description": "Esta cuenta no tiene una llave con ese identificador.",
+        },
     },
 )
 def baja(llave_id: UUID, identidad: sf.SegundoFactorRecienteDep, motor: MotorDep) -> Response:
@@ -374,7 +387,7 @@ def baja(llave_id: UUID, identidad: sf.SegundoFactorRecienteDep, motor: MotorDep
             text("delete from nucleo.llave_acceso where id = :i returning id"), {"i": llave_id}
         ).one_or_none()
         if borrada is None:
-            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos esa llave.")
+            raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No se encontró esa llave.")
         if not sf.tiene_medio(conn):
             conn.execute(text("delete from nucleo.codigo_recuperacion"))
         sf.olvidar_verificaciones(conn)

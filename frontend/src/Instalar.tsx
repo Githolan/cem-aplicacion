@@ -5,7 +5,7 @@ import { RUTA_ENTRAR, RUTA_INSTALAR } from "./enlace";
 import { enComputadora, instalar, useInstalacion } from "./instalacion";
 
 export const AVISO_INSTALADA =
-  "Ya está instalada. Seguí acá, o abrila desde el ícono de tu pantalla de inicio la próxima vez.";
+  "Ya está instalada. Se puede seguir acá, o abrirla desde el ícono de la pantalla de inicio la próxima vez.";
 
 type Pedido = "quieto" | "instalando" | "fallo";
 
@@ -38,7 +38,7 @@ export function Instalar() {
 
   return (
     <>
-      <h1>Instalá Consorcio en Mano {enEstaComputadora ? "en esta computadora" : "en este dispositivo"}</h1>
+      <h1>Instalar Consorcio en Mano {enEstaComputadora ? "en esta computadora" : "en este dispositivo"}</h1>
       <p>
         No hace falta ir a ninguna tienda. La aplicación queda con su ícono en la pantalla de
         inicio y se abre como cualquier otra.
@@ -49,7 +49,7 @@ export function Instalar() {
         <div role="status" aria-live="polite">
           {pedido === "instalando" && <p>Instalando…</p>}
           {pedido === "fallo" && (
-            <p className="aviso-error">No se instaló. Probá de nuevo, o seguí sin instalar.</p>
+            <p className="aviso-error">No se instaló. Reintentar, o seguir sin instalar.</p>
           )}
           {pedido === "fallo" && forma !== "boton" && (
             <button type="button" onClick={() => window.location.reload()}>
@@ -59,7 +59,7 @@ export function Instalar() {
         </div>
         {forma === "boton" && (
           <>
-            <p>Tocá el botón y confirmá.</p>
+            <p>Tocar el botón y confirmar.</p>
             <button type="button" onClick={pedirInstalacion}>
               Instalar la aplicación
             </button>
@@ -68,23 +68,23 @@ export function Instalar() {
         {forma === "iphone" && (
           <ol className="pasos">
             <li>
-              Abrí este enlace en <strong>Safari</strong>.
+              Abrir este enlace en <strong>Safari</strong>.
             </li>
             <li>
-              Tocá el botón <strong>Compartir</strong> (el cuadrado con una flecha hacia arriba).
+              Tocar el botón <strong>Compartir</strong> (el cuadrado con una flecha hacia arriba).
             </li>
             <li>
-              Elegí <strong>Agregar a inicio</strong> y después <strong>Agregar</strong>.
+              Elegir <strong>Agregar a inicio</strong> y después <strong>Agregar</strong>.
             </li>
           </ol>
         )}
         {forma === "menu" && pedido === "quieto" && (
           <ol className="pasos">
             <li>
-              En Android, abrí este enlace en <strong>Chrome</strong>.
+              En Android, abrir este enlace en <strong>Chrome</strong>.
             </li>
             <li>
-              Tocá el menú (los tres puntos) y elegí <strong>Instalar aplicación</strong> o{" "}
+              Tocar el menú (los tres puntos) y elegir <strong>Instalar aplicación</strong> o{" "}
               <strong>Agregar a la pantalla principal</strong>.
             </li>
           </ol>
@@ -107,7 +107,7 @@ export function EnlaceInstalar() {
   if (computadora && forma !== "boton") return null;
   return (
     <p>
-      <Link to={RUTA_INSTALAR}>Instalá la aplicación {computadora ? "en esta computadora" : "en este dispositivo"}</Link>
+      <Link to={RUTA_INSTALAR}>Instalar la aplicación {computadora ? "en esta computadora" : "en este dispositivo"}</Link>
     </p>
   );
 }

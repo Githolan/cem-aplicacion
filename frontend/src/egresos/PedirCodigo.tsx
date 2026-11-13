@@ -57,11 +57,11 @@ const TEXTO_METODO: Record<MetodoConfirmar, string> = {
 const METODOS = Object.keys(TEXTO_METODO) as MetodoConfirmar[];
 
 const TITULO_CODIGO: Record<Clase, string> = {
-  aplicacion: "Escribí el código de tu aplicación",
-  recuperacion: "Escribí un código de recuperación",
+  aplicacion: "Código de la aplicación",
+  recuperacion: "Código de recuperación",
 };
 
-const LLAVE_EN_OTRO_LADO = "Este navegador no puede usar tu llave de acceso. Probá desde el dispositivo donde la tenés.";
+const LLAVE_EN_OTRO_LADO = "Este navegador no puede usar la llave de acceso. Hay que usar el dispositivo donde está la llave.";
 
 async function leerActivos(): Promise<{ activos: Activos; llaves: number }> {
   const { data, error, response } = await api.GET("/api/v1/auth/totp");
@@ -96,7 +96,7 @@ function SinAlta({ conLlave, activando }: { conLlave: boolean; activando: boolea
     <p>
       Otras opciones:{" "}
       <Link to={RUTA_SEGUNDO_FACTOR} state={{ volver: pathname }}>
-        la página del segundo factor
+        la página de confirmación con PIN, huella o código
       </Link>
       . Lo escrito en esta pantalla puede perderse.
     </p>
@@ -120,7 +120,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // El alta de la llave en curso: la hoja no se cierra hasta que termine (y, con códigos, hasta
-  // «Ya los guardé»). Revisión de #237.
+  // «Códigos guardados: seguir»). Revisión de #237.
   const [activando, setActivando] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
   const llave = useRef<AbortController | null>(null);
@@ -202,7 +202,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
         const motivo = codigoDe(falla);
         if (motivo === "segundo_factor_invalido" || motivo === "codigo_invalido") {
           setCodigo("");
-          setError("El código no es válido. Probá con el que muestra ahora la aplicación.");
+          setError("El código no es válido. Hay que usar el que muestra ahora la aplicación.");
         } else if (motivo === "segundo_factor_sin_alta") setPaso({ tipo: "sin_alta" });
         else setError(mensajeDeError(response.status, motivo));
       })
@@ -223,13 +223,13 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   function enviar(evento: FormEvent<HTMLFormElement>, clase: Clase) {
     evento.preventDefault();
     const limpio = codigoVerificacion(codigo);
-    if (limpio === null) setError("Escribí los seis números de la aplicación o un código de recuperación.");
+    if (limpio === null) setError("Hacen falta los seis números de la aplicación o un código de recuperación.");
     else verificar(limpio, clase);
   }
 
   const hayOtro = activos !== null && METODOS.filter((m) => activos[m]).length > 1;
   const cancelar = (
-    <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
+    <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
       Cancelar
     </button>
   );
@@ -243,8 +243,8 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
 
   if (paso.tipo === "llave")
     return (
-      <Hoja key="llave" titulo="Usá tu PIN, huella o cara" alEscapar={alCancelar}>
-        <p>Para {acto}. Lo pide tu dispositivo y después seguimos con el mismo pedido.</p>
+      <Hoja key="llave" titulo="Confirmar con PIN, huella o cara" alEscapar={alCancelar}>
+        <p>Para {acto}. Lo pide el dispositivo y después sigue el mismo pedido.</p>
         <div className="formulario">
           <div className="acciones">{cancelar}</div>
         </div>
@@ -281,7 +281,8 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
         <div className="formulario">
           <div className="acciones">
             {METODOS.filter((m) => activos?.[m] === true).map((m, i) => (
-              <button key={m} type="button" data-foco={i === 0 ? true : undefined} onClick={() => usar(m)}>
+              // Opciones del mismo peso: ninguna es la principal (pregunta 13).
+              <button key={m} type="button" className="secundario" data-foco={i === 0 ? true : undefined} onClick={() => usar(m)}>
                 {TEXTO_METODO[m]}
               </button>
             ))}
@@ -320,9 +321,9 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   if (paso.tipo === "sin_alta") {
     const conLlave = llaveDisponible();
     return (
-      <Hoja key="sin_alta" titulo="Falta la verificación en dos pasos" alEscapar={activando ? undefined : alCancelar}>
+      <Hoja key="sin_alta" titulo="Falta la confirmación con PIN, huella o código" alEscapar={activando ? undefined : alCancelar}>
         <p>
-          Para {acto} hace falta la verificación en dos pasos.
+          Para {acto} hace falta la confirmación con PIN, huella o código.
           {conLlave && " Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo."}
         </p>
         <ActivarLlave
@@ -332,7 +333,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
         <SinAlta conLlave={conLlave} activando={activando} />
         <div className="formulario">
           <div className="acciones">
-            <button type="button" className="secundario peligro" disabled={activando} onClick={alCancelar}>
+            <button type="button" className="secundario" disabled={activando} onClick={alCancelar}>
               Cancelar
             </button>
           </div>
@@ -344,7 +345,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const { clase } = paso;
   return (
     <Hoja key={clase} titulo={TITULO_CODIGO[clase]} alEscapar={alCancelar}>
-      <p>Para {acto}. Después seguimos con el mismo pedido.</p>
+      <p>Para {acto}. Después sigue el mismo pedido.</p>
       <form className="formulario" onSubmit={(e) => enviar(e, clase)} noValidate>
         <label htmlFor={`${id}-codigo`}>Código</label>
         <input

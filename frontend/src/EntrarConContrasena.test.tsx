@@ -28,7 +28,7 @@ function error(codigo: string, estado: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status: estado });
 }
 
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 
 /**
  * Un backend que responde por ruta, en orden; lo que no está previsto falla la prueba. Como el de
@@ -87,7 +87,7 @@ function escribirContrasena(correo = CORREO, contrasena = CONTRASENA) {
 }
 
 async function llegoAlInicio() {
-  expect(await screen.findByText("Entraste.")).toBeTruthy();
+  expect(await screen.findByText("Listo: sesión abierta.")).toBeTruthy();
   expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Entrar con contraseña" })).toBeNull();
 }
@@ -161,7 +161,7 @@ describe("entrar con contraseña", () => {
 
     const campo = await seccion().findByLabelText("Código de la aplicación o de recuperación");
     expect(document.activeElement).toBe(campo);
-    expect(seccion().getByText(/Tenés hasta las 18:05/)).toBeTruthy();
+    expect(seccion().getByText(/Hay tiempo hasta las 18:05/)).toBeTruthy();
     expect(seccion().queryByLabelText("Contraseña")).toBeNull();
     escribirCodigo("042 917");
 
@@ -198,7 +198,7 @@ describe("entrar con contraseña", () => {
 
     const campo = seccion().getByLabelText("Código de la aplicación o de recuperación");
     expect(campo.getAttribute("aria-invalid")).toBe("true");
-    expect(campo.getAttribute("aria-describedby")).toBe(seccion().getByText(/Escribí los seis números/).id);
+    expect(campo.getAttribute("aria-describedby")).toBe(seccion().getByText(/Hacen falta los seis números/).id);
     expect(postsDe(simulado).map((p) => new URL(p.url).pathname)).toEqual([ENTRAR]);
   });
 
@@ -206,14 +206,14 @@ describe("entrar con contraseña", () => {
     [error("credenciales_invalidas", 401), /El correo o la contraseña no son correctos/],
     [error("demasiadas_peticiones", 429), /Hubo demasiados intentos/],
     [error("servicio_no_disponible", 503), /El servicio no está disponible/],
-    [error("csrf_invalido", 403), /No pudimos completar el pedido/],
+    [error("csrf_invalido", 403), /No se pudo completar el pedido/],
   ])("ante un rechazo de la contraseña muestra un mensaje genérico (%#)", async (respuesta, mensaje) => {
     vi.stubGlobal("fetch", backend({ [ENTRAR]: [() => respuesta] }));
     abrir();
     escribirContrasena();
 
     expect(await seccion().findByText(mensaje)).toBeTruthy();
-    expect(screen.queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByText("Listo: sesión abierta.")).toBeNull();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
     expect(seccion().getByLabelText("Contraseña")).toBeTruthy();
   });
@@ -223,7 +223,7 @@ describe("entrar con contraseña", () => {
     abrir();
     escribirContrasena();
 
-    expect(await seccion().findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await seccion().findByText(/No se pudo completar el pedido/)).toBeTruthy();
   });
 
   it("si el paso venció (401 entrada_vencida), vuelve a la contraseña con el foco en ella", async () => {
@@ -239,7 +239,7 @@ describe("entrar con contraseña", () => {
     await seccion().findByLabelText("Código de la aplicación o de recuperación");
     escribirCodigo("042917");
 
-    expect(await seccion().findByText(/Volvé a escribir la contraseña/)).toBeTruthy();
+    expect(await seccion().findByText(/Hay que escribir la contraseña de nuevo/)).toBeTruthy();
     const campo = seccion().getByLabelText("Contraseña") as HTMLInputElement;
     expect(campo.value).toBe("");
     await vi.waitFor(() => expect(document.activeElement).toBe(campo));
@@ -262,7 +262,7 @@ describe("entrar con contraseña", () => {
 
     expect(await seccion().findByText(mensaje)).toBeTruthy();
     expect(seccion().getByLabelText("Código de la aplicación o de recuperación")).toBeTruthy();
-    expect(screen.queryByText("Entraste.")).toBeNull();
+    expect(screen.queryByText("Listo: sesión abierta.")).toBeNull();
   });
 
   it("«Volver a la contraseña» deja el paso del código", async () => {
@@ -303,7 +303,7 @@ describe("entrar con contraseña", () => {
     await sinFaltas(container);
 
     escribirCodigo("042917");
-    await seccion().findByText(/Volvé a escribir la contraseña/);
+    await seccion().findByText(/Hay que escribir la contraseña de nuevo/);
     await sinFaltas(container);
   });
 

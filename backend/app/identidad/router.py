@@ -192,7 +192,9 @@ def canjear(
     if sitio is not None and sitio != MISMO_ORIGEN:
         log.info("canje rechazado: otro_sitio")
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )
     token = canje.token
     nonce = request.cookies.get(sesiones.COOKIE_NONCE)
@@ -232,7 +234,8 @@ def _enlace_invalido() -> ErrorApi:
     return ErrorApi(
         401,
         CodigoError.ENLACE_INVALIDO,
-        "El enlace no sirve: venció, ya se usó o se abrió en otro navegador. Pedí uno nuevo.",
+        "El enlace no sirve: venció, ya se usó o se abrió en otro navegador. Hay que pedir uno "
+        "nuevo.",
     )
 
 
@@ -311,7 +314,9 @@ async def canjear_codigo(
     if sitio is not None and sitio != MISMO_ORIGEN:
         log.info("canje de código rechazado: otro_sitio")
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )
     clave = _clave_codigo(request)
     correo = canje.correo.lower()
@@ -338,7 +343,7 @@ async def canjear_codigo(
             401,
             CodigoError.CODIGO_INVALIDO,
             "El código no sirve: puede estar mal escrito, haber vencido o haberse usado."
-            " Revisalo o pedí uno nuevo.",
+            " Hay que revisarlo o pedir uno nuevo.",
             encabezados=SIN_CACHE,
         )
     log.info("sesión creada con código", extra={"campos": {"persona_id": str(sesion.persona_id)}})
@@ -469,7 +474,7 @@ def revocar_sesion(sesion_id: UUID, identidad: IdentidadDep, motor: MotorDep) ->
             {"s": sesion_id},
         ).one_or_none()
     if propia is None:
-        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás.")
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, "No se encontró lo pedido.")
     log.info("sesión revocada", extra={"campos": {"persona_id": str(identidad.persona_id)}})
     respuesta = Response(status_code=204, headers=SIN_CACHE)
     if sesion_id == actual:

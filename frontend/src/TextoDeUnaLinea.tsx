@@ -7,7 +7,7 @@ import { type TextareaHTMLAttributes, useLayoutEffect, useRef } from "react";
 // espacio, sin mover el cursor. Un `textarea` no admite `pattern`, así que el texto hecho solo de
 // espacios (que la API rechaza al recortarlo) se marca inválido con `setCustomValidity`.
 
-export const SOLO_ESPACIOS = "Escribí algo más que espacios.";
+export const SOLO_ESPACIOS = "Hace falta algo más que espacios.";
 
 const ULTIMO_CONTROL = 0x1f;
 const SUPRIMIR = 0x7f;

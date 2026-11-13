@@ -132,23 +132,23 @@ export function mensajeDeError(
   campos: string[] = [],
   conEspera = false,
 ): string {
-  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
-  if (estado === ESTADO.sinPermiso) return "No tenés permiso para cargar documentos de esa categoría.";
+  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
+  if (estado === ESTADO.sinPermiso) return "Esta cuenta no tiene permiso para cargar documentos de esa categoría.";
   if (estado === ESTADO.noEncontrado) return "Ese documento ya no está en este edificio.";
-  if (estado === ESTADO.demasiadoLento) return "El archivo tardó demasiado en llegar y no se guardó. Probá de nuevo con una conexión más firme.";
+  if (estado === ESTADO.demasiadoLento) return "El archivo tardó demasiado en llegar y no se guardó. Reintentar con una conexión más firme.";
   if (estado === ESTADO.demasiadoGrande) return "El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.";
   if (estado === ESTADO.tipoNoAdmitido)
     return "Solo se aceptan archivos PDF, JPEG o PNG, y el contenido tiene que coincidir con el tipo. El archivo no se guardó.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
-    return "El pedido se está procesando. Probá de nuevo en unos segundos.";
+    return "El pedido se está procesando. Reintentar en unos segundos.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
-    return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
+    return "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.";
   // Cada campo marcado lleva su motivo al lado (`ErrorDeCampo`); el resumen solo los nombra (G-08).
   if (estado === ESTADO.invalido && paso === "crear")
     return resumenDeErrores(Object.fromEntries(campos.map((c) => [c.split(".").pop() ?? "", REVISAR_DATO])), TEXTO_CAMPO);
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   // Un 503 con `Retry-After` es el tope de cargas a la vez; sin él, el servicio no está.
-  if (estado === ESTADO.noDisponible && conEspera) return "Hay muchas cargas en curso. Probá de nuevo en un momento.";
+  if (estado === ESTADO.noDisponible && conEspera) return "Hay muchas cargas en curso. Reintentar en un momento.";
   return mensajeDeFalla(estado, codigo);
 }
 
@@ -373,7 +373,7 @@ export function Documentos() {
     // vieja y no sigue solo (`setLectura` no cambia, así que no se programa otro): queda «Actualizar».
     const fallaAutomatica = (falla: string) =>
       setAviso((actual) =>
-        actual !== null && !actual.ok ? actual : { texto: `${falla} La lista puede no estar al día: tocá «Actualizar».`, ok: false },
+        actual !== null && !actual.ok ? actual : { texto: `${falla} La lista puede no estar al día: «Actualizar» la vuelve a pedir.`, ok: false },
       );
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
@@ -521,7 +521,7 @@ export function Documentos() {
     // se dice y el formulario pasa a subir solo el archivo de ese documento.
     const fallo = (texto: string) => {
       setAviso({
-        texto: recienCreado ? `Creamos el documento «${titulo}», pero el archivo no se subió. ${texto}` : texto,
+        texto: recienCreado ? `El documento «${titulo}» quedó creado, pero el archivo no se subió. ${texto}` : texto,
         ok: false,
       });
       if (recienCreado) {
@@ -554,11 +554,11 @@ export function Documentos() {
       // Sin acceso a la lista, quien solo carga no ve el resultado del análisis. Con la lista caída
       // no hay refresco automático: queda «Actualizar».
       const despues = soloCarga
-        ? "Queda «En revisión» mientras lo analizamos."
+        ? "Queda «En revisión» mientras el antivirus lo analiza."
         : lectura.tipo === "sin_servicio"
-          ? "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; tocá «Actualizar» para ver si ya está disponible."
-          : "Queda «En revisión» mientras lo analizamos, de unos segundos a unos minutos; la lista se actualiza sola.";
-      setAviso({ texto: `Listo: subimos el archivo de «${titulo}». ${despues}`, ok: true });
+          ? "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; «Actualizar» muestra si ya está disponible."
+          : "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; la lista se actualiza sola.";
+      setAviso({ texto: `Listo: el archivo de «${titulo}» se subió. ${despues}`, ok: true });
       actualizarLista();
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
@@ -607,7 +607,7 @@ export function Documentos() {
             <section aria-labelledby={`${id}-lista`} className="tarjeta">
               <h2 id={`${id}-lista`}>Documentos</h2>
               {lectura.tipo === "cargando" && <p>Consultando…</p>}
-              {lectura.tipo === "sin_servicio" && <p>No pudimos mostrar la lista.</p>}
+              {lectura.tipo === "sin_servicio" && <p>No se pudo mostrar la lista.</p>}
               {lectura.tipo === "ok" && (
                 <>
                   {lectura.documentos.length === 0 && <p>El edificio todavía no tiene documentos cargados.</p>}
@@ -662,10 +662,10 @@ export function Documentos() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
+                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button
+            <button className="secundario"
               type="button"
               onClick={() => {
                 setPantalla({ tipo: "cargando" });
@@ -854,8 +854,9 @@ export function Documentos() {
           : subir !== null &&
             puede(...accionesDeCarga(d.categoria)) && (
               <p>
-                <button type="button" className="secundario" onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })}
-                  disabled={enviando}>
+                {/* G-04: sin archivo, subirlo es lo que hace avanzar: el principal (pregunta 13). */}
+                <button type="button" className={esperaArchivo(d) ? undefined : "secundario"}
+                  onClick={() => abrir({ tipo: "subir", documento: d.id, titulo: d.titulo })} disabled={enviando}>
                   {subir}
                 </button>
               </p>
@@ -905,7 +906,7 @@ export function Documentos() {
           <button type="submit" disabled={enviando}>
             Subir el archivo
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={cancelar} disabled={enviando}>
+          <button type="button" className="secundario" onClick={cancelar} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -972,7 +973,7 @@ export function Documentos() {
           {!soloCarga && (
             <>
               {" "}
-              <button type="button" className="secundario peligro" onClick={cancelar} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cancelar} disabled={enviando}>
                 Cancelar
               </button>
             </>

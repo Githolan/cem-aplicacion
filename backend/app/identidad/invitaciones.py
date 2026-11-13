@@ -74,7 +74,7 @@ ESTADO_SQL = """case when i.aceptada_en is not null then 'aceptada'
   when i.vence_en <= now() then 'vencida' else 'pendiente' end"""
 COLUMNAS = f"""i.id, i.unidad_id, u.designacion as unidad, i.tipo::text as tipo, i.correo,
   i.nombre, {ESTADO_SQL} as estado, i.creada_en, i.vence_en, i.aceptada_en, i.revocada_en"""
-NO_ENCONTRADA = "No encontramos lo que buscás."
+NO_ENCONTRADA = "No se encontró lo pedido."
 # El correo en el listado (P6 del propietario, 19-10-2026): solo el de una invitación
 # **pendiente** y solo para quien la creó. Para cualquier otro autorizado, y para toda aceptada,
 # vencida o revocada, es null: una aceptada es el correo con el que la persona entra (D6; E30).
@@ -154,8 +154,8 @@ def crear(
         raise ErrorApi(
             409,
             CodigoError.IDEMPOTENCIA_EN_CURSO,
-            "Otra invitación para esta persona, unidad y carácter se registró recién. Probá de"
-            " nuevo en unos segundos.",
+            "Otra invitación para esta persona, unidad y carácter se registró recién. Reintentar"
+            " en unos segundos.",
         )
     # Se retiran solo las que se bloquearon al principio (las mismas, por lo de arriba).
     for (anterior,) in conn.execute(
@@ -423,7 +423,7 @@ def _invitacion_propia() -> ErrorApi:
     return ErrorApi(
         409,
         CodigoError.INVITACION_PROPIA,
-        "Esta invitación la creaste vos: la tiene que aceptar la persona invitada.",
+        "Esta invitación la creó esta cuenta: la tiene que aceptar la persona invitada.",
         encabezados=SIN_CACHE,
     )
 
@@ -435,8 +435,8 @@ def _vinculo_no_corresponde() -> ErrorApi:
     return ErrorApi(
         409,
         CodigoError.INVITACION_VINCULO_NO_CORRESPONDE,
-        "El vínculo de esta invitación ya no está en el padrón. Consultá a quien administra el"
-        " consorcio.",
+        "El vínculo de esta invitación ya no está en el padrón. Conviene consultar a quien"
+        " administra el consorcio.",
         encabezados=SIN_CACHE,
     )
 
@@ -445,8 +445,8 @@ def _invitacion_invalida() -> ErrorApi:
     return ErrorApi(
         404,
         CodigoError.INVITACION_INVALIDA,
-        "La invitación no sirve: venció, ya se usó o la retiraron. Pedí una nueva a quien te"
-        " invitó.",
+        "La invitación no sirve: venció, ya se usó o la retiraron. Hay que pedir una nueva a"
+        " quien invitó.",
         encabezados=SIN_CACHE,
     )
 
@@ -529,7 +529,9 @@ def aceptar(
     if sitio is not None and sitio != "same-origin":
         log.info("aceptación de invitación rechazada: otro_sitio")
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )
     persona_sesion = persona_de_la_sesion(request, motor)
     token_sesion = sesiones.nuevo_token()
@@ -555,14 +557,15 @@ def aceptar(
         raise ErrorApi(
             409,
             CodigoError.INVITACION_REQUIERE_SESION,
-            "Ya tenés una cuenta con este correo. Entrá con él y volvé a abrir la invitación.",
+            "Ya hay una cuenta con este correo. Hay que entrar con él y abrir la invitación de "
+            "nuevo.",
             encabezados=SIN_CACHE,
         )
     if r.resultado == "otra_persona":
         raise ErrorApi(
             409,
             CodigoError.INVITACION_DE_OTRA_PERSONA,
-            "La invitación es para otro correo. Salí de esta cuenta y abrila de nuevo.",
+            "La invitación es para otro correo. Hay que salir de esta cuenta y abrirla de nuevo.",
             encabezados=SIN_CACHE,
         )
     if r.resultado == "vinculo_no_corresponde":

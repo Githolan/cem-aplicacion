@@ -15,10 +15,10 @@ export type Resultado<T> =
   /** `faltaConfirmar`: hay otro medio activo y primero hay que verificarse con él. */
   | { ok: false; mensaje: string; faltaConfirmar: boolean; yaEstaAca?: boolean };
 
-const CANCELADO = "No se confirmó. Probá de nuevo cuando quieras.";
-const NO_CONFIRMADO = "No pudimos confirmar tu llave. Probá de nuevo.";
-const FALTA_CONFIRMAR = "Primero confirmá que sos vos con tu llave o con un código.";
-const YA_REGISTRADA = "Este dispositivo ya tiene una llave en tu cuenta.";
+const CANCELADO = "No se confirmó. Se puede reintentar en cualquier momento.";
+const NO_CONFIRMADO = "La llave no se pudo confirmar. Reintentar.";
+const FALTA_CONFIRMAR = "Primero hay que confirmar la identidad con la llave o con un código.";
+const YA_REGISTRADA = "Este dispositivo ya tiene una llave en esta cuenta.";
 
 // Qué llaves son de este dispositivo. El navegador no lo dice sin pedir el gesto: se sabe al activar
 // la llave o al usarla acá, y se recuerda su identificador público. Si este navegador no deja

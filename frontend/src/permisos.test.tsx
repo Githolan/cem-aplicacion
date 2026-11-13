@@ -20,7 +20,7 @@ const EDIFICIOS = [
   { id: C2, nombre: "Edificio Verde", vinculos: [] },
 ];
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 
 function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", detalle: null, id_correlacion: "c" }, { status });
@@ -255,7 +255,7 @@ describe("inicio por rol", () => {
 
   it("«Pagos para aclarar» aparece solo si la lista trae algo", async () => {
     const CON_ALGO = { "/api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ orden_id: "x" }] }) };
-    const nombre = "Pagos para aclarar (si dejaste de administrar)";
+    const nombre = "Pagos para aclarar (de quien dejó de administrar)";
     vi.stubGlobal("fetch", backend({ [C1]: VECINO }, CON_ALGO));
     abrirApp();
     expect(await screen.findByRole("link", { name: nombre })).toBeTruthy();
@@ -629,7 +629,7 @@ describe("una dirección abierta a mano sin permiso", () => {
     abrirApp(ruta);
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(caminos(simulado)).not.toContain(`/api/v1/consorcios/${C1}/${lectura}`);
-    expect(screen.queryByText(/No tenés (permiso|la facultad|acceso)/)).toBeNull();
+    expect(screen.queryByText(/no tiene (permiso|la facultad|acceso)/)).toBeNull();
   });
 });
 
@@ -640,7 +640,7 @@ describe("un 403 al leer lleva al inicio", () => {
     vi.stubGlobal("fetch", backend({ [C1]: acciones }, {}, NEGADA));
     abrirApp(ruta);
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByText(/No tenés (permiso|la facultad|acceso)/)).toBeNull();
+    expect(screen.queryByText(/no tiene (permiso|la facultad|acceso)/)).toBeNull();
   });
 
   it("control: un 500 no lleva al inicio, se queda a reintentar", async () => {

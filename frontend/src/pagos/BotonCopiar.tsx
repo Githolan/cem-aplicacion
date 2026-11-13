@@ -34,8 +34,8 @@ export function BotonCopiar({ valor, nombre }: Props) {
       </button>
       {estado === "a_mano" && (
         <span className="copiar-a-mano">
-          <input ref={seleccionable} readOnly aria-label={`Copiá ${nombre}`} value={valor} onFocus={(e) => e.target.select()} />
-          <span role="status">No pudimos copiarlo: quedó seleccionado para que lo copies vos.</span>
+          <input ref={seleccionable} readOnly aria-label={`Para copiar a mano: ${nombre}`} value={valor} onFocus={(e) => e.target.select()} />
+          <span role="status">No se pudo copiar solo: quedó seleccionado para copiarlo a mano.</span>
         </span>
       )}
     </>

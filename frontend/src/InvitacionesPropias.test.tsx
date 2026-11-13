@@ -23,7 +23,7 @@ const INVITACION = {
 };
 const LISTA = "/api/v1/me/invitaciones";
 const ACEPTAR = `${LISTA}/${INVITACION.id}/aceptar`;
-const SECCION = { name: "Invitaciones para vos" };
+const SECCION = { name: "Invitaciones pendientes" };
 const BOTON = { name: "Aceptar la invitación" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 
@@ -124,7 +124,7 @@ describe("invitaciones en el inicio", () => {
 
     fireEvent.click(await screen.findByRole("button", BOTON));
 
-    expect(await screen.findByText("Listo: ya sos parte de Edificio Azul.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la cuenta ya es parte de Edificio Azul.")).toBeTruthy();
     expect(await screen.findByRole("link", { name: "Contactos de emergencia" })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("region", SECCION)).toBeNull());
     const [aceptacion, ...otras] = pedidos(simulado, ACEPTAR);
@@ -156,7 +156,7 @@ describe("invitaciones en el inicio", () => {
     expect(await screen.findByText("Aceptando…")).toBeTruthy();
     expect(boton.disabled).toBe(true);
     soltar();
-    expect(await screen.findByText("Listo: ya sos parte de Edificio Azul.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la cuenta ya es parte de Edificio Azul.")).toBeTruthy();
   });
 
   it.each([
@@ -175,7 +175,7 @@ describe("invitaciones en el inicio", () => {
     fireEvent.click(await screen.findByRole("button", BOTON));
 
     expect(await screen.findByText(mensaje)).toBeTruthy();
-    expect(screen.queryByText(/ya sos parte/)).toBeNull();
+    expect(screen.queryByText(/ya es parte/)).toBeNull();
     await waitFor(() => expect(pedidos(simulado, LISTA)).toHaveLength(2));
   });
 
@@ -219,7 +219,7 @@ describe("invitaciones en el inicio", () => {
     caido = false;
     fireEvent.click(boton);
 
-    expect(await screen.findByText("Listo: ya sos parte de Edificio Azul.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la cuenta ya es parte de Edificio Azul.")).toBeTruthy();
   });
 
   it("con la sesión vencida va a /entrar y borra las copias de los contactos", async () => {

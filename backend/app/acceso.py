@@ -83,7 +83,7 @@ def require_operador(request: Request) -> Operador:
             ) from e
         except jwt.PyJWTError as e:
             log.warning("JWT de Access rechazado: %s: %s", type(e).__name__, e)
-    raise ErrorApi(401, CodigoError.NO_AUTENTICADO, "Iniciá sesión para continuar.")
+    raise ErrorApi(401, CodigoError.NO_AUTENTICADO, "Hay que entrar para continuar.")
 
 
 OperadorDep = Annotated[Operador, Depends(require_operador)]

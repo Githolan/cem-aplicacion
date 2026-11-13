@@ -89,7 +89,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         setEstado("listo");
         if (data.estado === "sesion_abierta") {
           recordarFormaDeEntrar("contrasena");
-          terminarEntrada("Entraste.");
+          terminarEntrada("Listo: sesión abierta.");
         } else {
           setCodigo("");
           setPaso({ tipo: "codigo", venceEn: data.vence_en });
@@ -121,7 +121,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
           setCodigo("");
           setEstado("listo");
           recordarFormaDeEntrar("contrasena");
-          terminarEntrada("Entraste.");
+          terminarEntrada("Listo: sesión abierta.");
         } else if (response.status === ESTADO_RECHAZADO) volverALaContrasena("vencida");
         else if (response.status === ESTADO_INVALIDO) setEstado("codigo_invalido");
         else setEstado(fallo(response.status, error));
@@ -136,7 +136,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
       {titulo}
       {paso.tipo === "contrasena" ? (
         <>
-          <p>Si definiste una contraseña en Mi cuenta, escribila con tu correo.</p>
+          <p>Con una contraseña definida en Mi cuenta, se entra con el correo y esa contraseña.</p>
           <form className="formulario" onSubmit={entrar}>
             <label htmlFor={`${id}-correo`}>Correo</label>
             <input
@@ -164,9 +164,9 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
       ) : (
         <>
           <p>
-            La contraseña es correcta. Como tenés el segundo factor activado, falta el código de
-            seis números de tu aplicación de autenticación, o uno de tus códigos de recuperación.
-            Tenés hasta las {FORMATO_HORA.format(new Date(paso.venceEn))}.
+            La contraseña es correcta. Como la confirmación con código está activada, falta el código
+            de seis números de la aplicación de autenticación, o uno de los códigos de recuperación.
+            Hay tiempo hasta las {FORMATO_HORA.format(new Date(paso.venceEn))}.
           </p>
           <form className="formulario" onSubmit={completar} noValidate>
             <label htmlFor={`${id}-codigo`}>Código de la aplicación o de recuperación</label>
@@ -185,7 +185,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
             />
             {estado === "formato_codigo" && (
               <p id={`${id}-formato`} className="aviso-error">
-                Escribí los seis números de la aplicación o un código de recuperación (como
+                Hacen falta los seis números de la aplicación o un código de recuperación (como
                 k7m2q-x9p4t).
               </p>
             )}
@@ -193,7 +193,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
               Entrar con el código
             </button>
           </form>
-          <button type="button" onClick={() => volverALaContrasena("listo")} disabled={estado === "enviando"}>
+          <button className="secundario" type="button" onClick={() => volverALaContrasena("listo")} disabled={estado === "enviando"}>
             Volver a la contraseña
           </button>
         </>
@@ -208,17 +208,17 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
         )}
         {estado === "vencida" && (
           <p className="aviso-error">
-            Pasó demasiado tiempo o hubo demasiados intentos con el código. Volvé a escribir la
-            contraseña.
+            Pasó demasiado tiempo o hubo demasiados intentos con el código. Hay que escribir la
+            contraseña de nuevo.
           </p>
         )}
         {estado === "codigo_invalido" && (
           <p className="aviso-error">
-            El código no sirve. Revisá que la hora del teléfono esté bien y usá el código nuevo.
+            El código no sirve. Hay que revisar que la hora del teléfono esté bien y usar el código nuevo.
           </p>
         )}
         {estado === "demasiados" && (
-          <p className="aviso-error">Hubo demasiados intentos. Esperá un rato y probá de nuevo.</p>
+          <p className="aviso-error">Hubo demasiados intentos. Reintentar en un rato.</p>
         )}
         {estado === "sin_servicio" && <p className="aviso-error">{falla}</p>}
       </div>

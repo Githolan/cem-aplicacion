@@ -172,7 +172,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/cuenta",
     url: "/cuenta",
-    cargada: ["Dónde tenés la sesión abierta", "Copia de tus datos: confirmado"],
+    cargada: ["Sesiones abiertas", "Copia de los datos: confirmado"],
     api: {
       "GET /api/v1/auth/sesion": {
         persona_id: "99999999-9999-4999-8999-999999999999",
@@ -415,7 +415,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/panel",
     url: "/panel",
-    cargada: ["Comprobantes faltantes", "Gasto pagado por rubro"],
+    cargada: ["Facturas faltantes", "Gasto pagado por rubro"],
     api: {
       "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [] }],
       "GET /api/v1/consorcios/11111111-1111-4111-8111-111111111111/panel": {

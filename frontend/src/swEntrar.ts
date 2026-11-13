@@ -4,7 +4,7 @@ import { PARAMETRO_TOKEN, RUTA_ENTRAR } from "./enlace";
 //
 // El problema (medido en staging el 14-10-2026): un navegador con una versión anterior en caché
 // abre /entrar#token=… del correo; el service worker viejo responde con el index.html de su
-// caché, la app vieja no conoce /entrar y la persona queda en "No encontramos esa página" con el
+// caché, la app vieja no conoce /entrar y la persona queda en "No se encontró esa página" con el
 // token sin canjear. Ese service worker viejo no tiene este código, pero en esa misma visita el
 // navegador baja el sw.js nuevo (nginx lo sirve sin caché) y lo instala. Esta extensión hace que,
 // si alguna ventana está abriendo un enlace de entrada que nadie leyó todavía (el fragmento con

@@ -58,7 +58,7 @@ ERRORES = {
     "no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO),
     "liquidacion_en_borrador": (
         409, CodigoError.LIQUIDACION_NO_ADMITE,
-        "Ya hay un borrador de ese período: seguí trabajando en ese.",
+        "Ya hay un borrador de ese período: se sigue trabajando en ese.",
     ),
     "liquidacion_no_admite": (
         409, CodigoError.LIQUIDACION_NO_ADMITE,
@@ -127,7 +127,7 @@ def _simular(
     if viejos:
         motivo = (
             f"el esquema de {', '.join(viejos)} cambió después de agregar sus gastos:"
-            " quitalos y volvé a agregarlos"
+            " hay que quitarlos y agregarlos de nuevo"
         )
         return SimulacionLiquidacion(**simulacion, unidades=[], bloqueo=motivo)
     try:

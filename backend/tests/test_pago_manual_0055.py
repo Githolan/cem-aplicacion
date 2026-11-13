@@ -237,11 +237,11 @@ def test_puede_conciliar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
 
     # Quien registró: el dato dice que no y la ruta niega.
     assert en_revision(e, x, o)["puede_conciliar"] is False
-    assert codigo(post(e, x, conciliacion, {"resultado": "conforme"})) == (403, "sin_permiso")
+    assert codigo(post(e, x, conciliacion, {"resultado": "conforme"})) == (403, "ya_participo")
     # Quien preparó, con otra cuenta del Consejo: lo mismo, por ser humano.
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     assert en_revision(e, otra, o)["puede_conciliar"] is False
-    assert codigo(post(e, otra, conciliacion, {"resultado": "conforme"})) == (403, "sin_permiso")
+    assert codigo(post(e, otra, conciliacion, {"resultado": "conforme"})) == (403, "ya_participo")
 
     # Control: otro consejero. El dato dice que sí y la ruta concede.
     assert en_revision(e, e.mc2, o)["puede_conciliar"] is True
@@ -297,7 +297,7 @@ def test_puede_confirmar_coincide_con_lo_que_decide_la_ruta(motor_migrate, motor
     # Quien preparó, con otra cuenta del Consejo: tampoco.
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     assert puede_confirmar(e, otra, o) == {dm: False, dx: False}
-    assert codigo(post(e, otra, confirmar.format(dm), {})) == (403, "sin_permiso")
+    assert codigo(post(e, otra, confirmar.format(dm), {})) == (403, "ya_participo")
 
     # Control: quien no ejecutó ni preparó. El dato dice que sí y la ruta concede.
     assert puede_confirmar(e, e.mc1, o) == {dm: True, dx: True}
@@ -791,7 +791,7 @@ def test_quien_registro_no_concilia_ni_con_otra_cuenta_ni_desvinculado(motor_mig
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.adm)
     niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_ejecuto", **datos)
     r = post(e, otra, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     desvincular(motor_migrate, e, e.adm)
     # La identidad guardada al registrar sigue mandando, aunque la cuenta ya no esté vinculada.
     niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_ejecuto", **datos)
@@ -817,7 +817,7 @@ def test_quien_preparo_no_concilia_aunque_otro_haya_ejecutado(motor_migrate, mot
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_preparo", **datos)
     r = post(e, otra, f"ordenes-pago/{o}/pago-manual/{p}/conciliacion", {"resultado": "conforme"})
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     llamar(motor_migrate, e, e.mc2, CONCILIAR, **datos)  # control
 
 

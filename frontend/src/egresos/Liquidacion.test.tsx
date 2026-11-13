@@ -155,27 +155,27 @@ describe("liquidación (borrador)", () => {
     expect(await screen.findByText("Todavía no hay liquidaciones en este edificio.")).toBeTruthy();
     await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
-    expect(await screen.findByText("Listo: abriste el borrador del período.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     const [preparar] = pedidos(api, "POST", `${BASE}/liquidaciones`);
     expect(await preparar!.json()).toEqual({ periodo: "2026-10-01" });
     expect(preparar!.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(preparar!.headers.get("Idempotency-Key")).toBeTruthy();
 
     const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
-    expect(within(borrador).getByText("Todavía no agregaste gastos.")).toBeTruthy();
+    expect(within(borrador).getByText("Todavía no hay gastos agregados.")).toBeTruthy();
     fireEvent.change(within(borrador).getByLabelText("Orden pagada"), { target: { value: O1 } });
     fireEvent.change(within(borrador).getByLabelText("Grupo de gasto"), { target: { value: "expensas_comunes" } });
     fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
-    expect(await screen.findByText("Listo: agregaste el gasto. La simulación ya lo reparte.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el gasto quedó agregado. La simulación ya lo reparte.")).toBeTruthy();
     const [agregar] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
     expect(await agregar!.json()).toEqual({ orden_id: O1, grupo: "expensas_comunes" });
     // P3 139: la fecha con la que el gasto entra en el período, sin pasarla por la hora local.
-    expect(within(borrador).getByText(/pagada el 2026-10-30\)/)).toBeTruthy();
+    expect(within(borrador).getByText(/pagada el 30 de octubre de 2026\)/)).toBeTruthy();
 
     const tabla = await screen.findByRole("table");
     const filas = within(tabla).getAllByRole("row");
     expect(filas.map((f) => f.textContent)).toEqual([
-      "Unidadexpensas_comunesTotal",
+      "UnidadExpensas comunesTotal",
       expect.stringContaining("1° A"),
       expect.stringContaining("1° B"),
     ]);
@@ -185,8 +185,8 @@ describe("liquidación (borrador)", () => {
     expect(resultado.violations.map((v) => v.id)).toEqual([]);
 
     fireEvent.click(screen.getByRole("button", { name: /^Quitar Limpieza Ficticia SRL, .*1\.000,00$/ }));
-    expect(await screen.findByText("Listo: quitaste el gasto del borrador.")).toBeTruthy();
-    expect(await screen.findByText("Todavía no agregaste gastos.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el gasto salió del borrador.")).toBeTruthy();
+    expect(await screen.findByText("Todavía no hay gastos agregados.")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
   });
 
@@ -202,7 +202,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(bloqueado),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: "octubre de 2026, versión 1 (borrador)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Octubre de 2026 · Borrador" }));
     expect((await screen.findByRole("alert")).textContent).toBe(
       "No se puede repartir: el esquema no coincide con las unidades activas",
     );
@@ -218,7 +218,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json({ ...CON_GASTO, liquidacion: publicada }),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     expect(await screen.findByText(/Limpieza Ficticia SRL: /)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Quitar/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Agregar el gasto" })).toBeNull();
@@ -239,17 +239,17 @@ describe("liquidación (borrador)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     const boton = await screen.findByRole("button", { name: "Descartar el borrador" });
     expect((boton as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Motivo para descartar el borrador"),
       { target: { value: "  SINTETICO: período equivocado " } });
     fireEvent.click(boton);
-    expect(await screen.findByText(/Listo: descartaste el borrador/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el borrador se descartó/)).toBeTruthy();
     const [descarte] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/descartar`);
     expect(await descarte!.json()).toEqual({ motivo: "SINTETICO: período equivocado" });
     expect(descarte!.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: /versión 1 \(descartada\)/ })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /· Descartada/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
   });
 
@@ -265,10 +265,10 @@ describe("liquidación (borrador)", () => {
         Response.json({ ...SIN_GASTOS, liquidacion: noviembre }),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"),
       { target: { value: "SINTETICO: el de octubre" } });
-    fireEvent.click(screen.getByRole("button", { name: /noviembre de 2026, versión 1/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Noviembre de 2026 ·/ }));
     const campo = await screen.findByLabelText("Motivo para descartar el borrador");
     expect((campo as HTMLInputElement).value).toBe("");
     const boton = screen.getByRole("button", { name: "Descartar el borrador" });
@@ -286,7 +286,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(CON_GASTO),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     const select = await screen.findByLabelText("Orden pagada");
     const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true);
@@ -304,7 +304,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     const select = await screen.findByLabelText("Orden pagada");
     const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true); // control: el 31 entra
@@ -367,7 +367,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => error("sin_permiso", 403),
     }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
     expect(screen.queryByText(/La liquidación la prepara la administración/)).toBeNull();
     cleanup();
 
@@ -454,7 +454,7 @@ describe("liquidación (borrador)", () => {
     abrir();
     await elegirPeriodo("2026", "10");
     fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
-    expect(await screen.findByText("Listo: abriste el borrador del período.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el borrador del período quedó abierto.")).toBeTruthy();
     await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
     // Vuelve al mes anterior, como al abrir uno que ya existía: nada vacío ni a medias.
     const hoy = new Date();
@@ -476,7 +476,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => (caido ? error("error_interno", 500) : Response.json(SIN_GASTOS)),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     await screen.findByRole("alert");
     caido = false;
     fireEvent(window, new Event("online"));
@@ -492,15 +492,15 @@ describe("liquidación (borrador)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
     // Control: mientras está abierta, su fila queda marcada.
-    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBe("true");
     const pedidasAntes = pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`).length;
     fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
-    expect(await screen.findByText(/Listo: descartaste el borrador/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el borrador se descartó/)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Borrador de octubre de 2026" })).toBeNull();
-    expect(screen.getByRole("button", { name: /octubre de 2026, versión 1/ }).getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`)).toHaveLength(pedidasAntes);
   });
 
@@ -511,9 +511,9 @@ describe("liquidación (borrador)", () => {
       [`POST ${BASE}/liquidaciones/${L1}/gastos/${G1}/quitar`]: () => Response.json({ id: G1 }),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
     fireEvent.click(await screen.findByRole("button", { name: /^Quitar/ }));
-    expect(await screen.findByText(/Listo: quitaste el gasto/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el gasto salió del borrador/)).toBeTruthy();
     expect(screen.getByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
   });
 
@@ -524,13 +524,13 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/${L1}`]: () => (caido ? error("error_interno", 500) : Response.json(SIN_GASTOS)),
     }));
     abrir();
-    fireEvent.click(await screen.findByRole("button", { name: /octubre de 2026, versión 1/ }));
-    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos abrir esta liquidación");
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("No se pudo abrir esta liquidación");
     expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Volver a la lista" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-    const boton = screen.getByRole("button", { name: /octubre de 2026, versión 1/ });
+    const boton = screen.getByRole("button", { name: /^Octubre de 2026 ·/ });
     expect(boton.getAttribute("aria-current")).toBeNull();
 
     fireEvent.click(boton);

@@ -4,7 +4,7 @@ import { useAvisoAlSalir } from "./avisoAlSalir";
 
 // Los códigos de recuperación, que se muestran una sola vez (TB-CEM-3): la lista, copiarlos y
 // guardarlos como archivo (informe de fricción, AC-18: en un teléfono, anotar diez códigos a mano
-// invita a tocar «Ya los guardé» sin guardarlos). Quien los muestra no los suelta hasta «Ya los
+// invita a tocar «Códigos guardados: seguir» sin guardarlos). Quien los muestra no los suelta hasta «Ya los
 // guardé». Los usan la página del segundo factor, Mi cuenta y la hoja de confirmar un acto.
 
 export type MedioActivado = "aplicacion" | "llave";
@@ -80,7 +80,7 @@ export function CodigosRecuperacion({ codigos, medio, alGuardar }: Props) {
         {resultado !== null && <p className={resultado.ok ? "aviso-ok" : "aviso-error"}>{resultado.texto}</p>}
       </div>
       <button type="button" data-foco onClick={alGuardar}>
-        Ya los guardé
+        Códigos guardados: seguir
       </button>
     </>
   );

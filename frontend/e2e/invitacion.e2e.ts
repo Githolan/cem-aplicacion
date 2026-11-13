@@ -13,8 +13,8 @@ const CSRF = "e2e-csrf-invitacion";
 const TOKEN = "I".repeat(21) + "_-" + "v".repeat(20);
 const ANCHO_TELEFONO_PX = 360;
 const ALTO_TELEFONO_PX = 740;
-const AVISO = "Listo: ya sos parte de Edificio Azul.";
-const TITULO_INICIO = "Tu consorcio, en tu mano";
+const AVISO = "Listo: la cuenta ya es parte de Edificio Azul.";
+const TITULO_INICIO = "El consorcio, en la mano";
 const RECIBIDA = {
   consorcio: "Edificio Azul",
   unidad: "1° A",
@@ -94,7 +94,7 @@ test.describe("invitación", () => {
     expect(await anchoDePagina(page)).toBeLessThanOrEqual(ANCHO_TELEFONO_PX);
     await sinFaltasDeAccesibilidad(page);
 
-    await page.getByLabel("Tu nombre").fill("  Alberto ");
+    await page.getByLabel("Nombre").fill("  Alberto ");
     await page.getByRole("button", { name: "Aceptar la invitación" }).click();
     await expect(page.getByText(AVISO)).toBeVisible();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
@@ -145,7 +145,7 @@ test.describe("invitación", () => {
     const pedidos = await simularApi(page, baseURL!, async (_camino, ruta) => ruta.abort("internetdisconnected"));
     await page.goto(`/invitacion#token=${TOKEN}`);
 
-    await expect(page.getByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeVisible();
+    await expect(page.getByText(/No se pudo completar el pedido. Hay que revisar la conexión/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Aceptar la invitación" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
     expect(pedidos.map((p) => p.camino)).toEqual(["/api/v1/auth/invitacion/consultar"]);
@@ -187,11 +187,11 @@ test.describe("invitación", () => {
     await simularPuntero(page, false);
     await simularSesion(page, "con_sesion");
     await page.goto(`/invitacion#token=${TOKEN}`);
-    await page.getByLabel("Tu nombre").fill("Alberto");
+    await page.getByLabel("Nombre").fill("Alberto");
     await page.getByRole("button", { name: "Aceptar la invitación" }).click();
 
     await expect(page.getByText(/El servicio no está disponible/)).toBeVisible();
-    await expect(page.getByLabel("Tu nombre")).toHaveValue("Alberto");
+    await expect(page.getByLabel("Nombre")).toHaveValue("Alberto");
     await expect(page).toHaveURL(/\/invitacion$/);
     await sinFaltasDeAccesibilidad(page);
 
@@ -207,7 +207,7 @@ test.describe("invitación", () => {
     await page.reload();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);
     await expect(page.getByText(AVISO)).toHaveCount(0);
-    await page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }).click();
+    await page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }).click();
     await expect(page).toHaveURL(/\/instalar$/);
     await page.goBack();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_INICIO);

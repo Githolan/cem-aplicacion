@@ -152,7 +152,7 @@ def instalar(app: FastAPI) -> None:
             respuesta_error(
                 422,
                 CodigoError.PETICION_INVALIDA,
-                "Revisá los datos enviados.",
+                "Hay que revisar los datos enviados.",
                 {"campos": campos, "mensajes": mensajes_por_campo(errores)},
             ),
         )
@@ -160,9 +160,7 @@ def instalar(app: FastAPI) -> None:
     @app.exception_handler(StarletteHTTPException)
     async def _http(request: Request, e: StarletteHTTPException) -> JSONResponse:
         if e.status_code == 404:
-            respuesta = respuesta_error(
-                404, CodigoError.NO_ENCONTRADO, "No encontramos lo que buscás."
-            )
+            respuesta = respuesta_error(404, CodigoError.NO_ENCONTRADO, "No se encontró lo pedido.")
         else:
             respuesta = respuesta_error(
                 e.status_code, CodigoError.PETICION_INVALIDA, "Petición no válida."
@@ -181,7 +179,7 @@ def instalar(app: FastAPI) -> None:
             respuesta_error(
                 503,
                 CodigoError.SERVICIO_NO_DISPONIBLE,
-                "El servicio no está disponible. Probá en un rato.",
+                "El servicio no está disponible. Reintentar en un rato.",
             ),
         )
 
@@ -190,5 +188,5 @@ def instalar(app: FastAPI) -> None:
         log.exception("error no controlado")
         return _terminar(
             request,
-            respuesta_error(500, CodigoError.ERROR_INTERNO, "Ocurrió un error. Probá de nuevo."),
+            respuesta_error(500, CodigoError.ERROR_INTERNO, "Ocurrió un error. Reintentar."),
         )

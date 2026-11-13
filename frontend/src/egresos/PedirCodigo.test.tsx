@@ -21,8 +21,8 @@ const CREDENCIAL = {
   getClientExtensionResults: () => ({}),
   response: { clientDataJSON: bytes(), authenticatorData: bytes(), signature: bytes(), userHandle: null },
 };
-const HOJA_LLAVE = "Usá tu PIN, huella o cara";
-const HOJA_CODIGO = "Escribí el código de tu aplicación";
+const HOJA_LLAVE = "Confirmar con PIN, huella o cara";
+const HOJA_CODIGO = "Código de la aplicación";
 
 type Respuestas = Record<string, () => Response>;
 
@@ -242,7 +242,7 @@ describe("confirmar en el momento", () => {
     expect(screen.getByRole("button", { name: "PIN, huella o cara" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Código de recuperación" }));
-    await titulo("Escribí un código de recuperación");
+    await titulo("Código de recuperación");
     fireEvent.change(screen.getByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
     expect(alVerificar).not.toHaveBeenCalled(); // control: uno de recuperación no sale solo
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
@@ -378,7 +378,7 @@ describe("informe de fricción, tanda 7 (AC-34)", () => {
     expect(await titulo("La llave está en otro dispositivo")).toBeTruthy();
     expect(screen.queryByLabelText("Código")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Usar un código de recuperación (se gasta uno)" }));
-    expect(await titulo("Escribí un código de recuperación")).toBeTruthy();
+    expect(await titulo("Código de recuperación")).toBeTruthy();
   });
 
   it("control: si el último método fue un código de recuperación, va directo a ese campo", async () => {
@@ -386,7 +386,7 @@ describe("informe de fricción, tanda 7 (AC-34)", () => {
     backend({ "GET /api/v1/auth/totp": estadoTotp(false, 1, 5) });
     mostrar();
 
-    expect(await titulo("Escribí un código de recuperación")).toBeTruthy();
+    expect(await titulo("Código de recuperación")).toBeTruthy();
   });
 
   it("sin nada activado, activa la llave en la misma hoja, muestra los códigos y sigue con el acto", async () => {
@@ -412,7 +412,7 @@ describe("informe de fricción, tanda 7 (AC-34)", () => {
       "POST /api/v1/auth/llave/alta": () => Response.json({ id: "1", codigos_recuperacion: codigos }, { status: 201 }),
     });
     const alVerificar = vi.fn();
-    // La hoja enlaza a la página del segundo factor: necesita el enrutador.
+    // La hoja enlaza a la página de confirmación con PIN, huella o código: necesita el enrutador.
     render(
       <MemoryRouter>
         <PedirCodigo acto="aprobar la orden" alVerificar={alVerificar} alCancelar={() => undefined} />
@@ -422,9 +422,9 @@ describe("informe de fricción, tanda 7 (AC-34)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
     expect(await titulo("Guardar los códigos de recuperación")).toBeTruthy();
     expect(pedidos(simulado, "/api/v1/auth/llave/alta")).toBe(1);
-    // Los códigos no se sueltan solos: el acto sigue recién con «Ya los guardé».
+    // Los códigos no se sueltan solos: el acto sigue recién con «Códigos guardados: seguir».
     expect(alVerificar).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Ya los guardé" }));
+    fireEvent.click(screen.getByRole("button", { name: "Códigos guardados: seguir" }));
     expect(alVerificar).toHaveBeenCalledOnce();
     expect(ultimoMetodo()).toBe("llave");
   });
@@ -487,7 +487,7 @@ describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no s
     expect(alCancelar).not.toHaveBeenCalled();
   });
 
-  it("con el alta en camino no queda el enlace a la página del segundo factor; si falla, vuelve", async () => {
+  it("con el alta en camino no queda el enlace a la página de confirmación con PIN, huella o código; si falla, vuelve", async () => {
     vi.stubGlobal("PublicKeyCredential", class {});
     let rechazar: () => void = () => undefined;
     Object.defineProperty(navigator, "credentials", {
@@ -510,16 +510,16 @@ describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no s
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("link", { name: "la página del segundo factor" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Activar con PIN, huella o cara" }));
-    await waitFor(() => expect(screen.queryByRole("link", { name: "la página del segundo factor" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeNull());
     // Cerrar la pestaña también pregunta antes.
     const salida = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(salida);
     expect(salida.defaultPrevented).toBe(true);
 
     rechazar();
-    expect(await screen.findByRole("link", { name: "la página del segundo factor" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "la página de confirmación con PIN, huella o código" })).toBeTruthy();
     const otra = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(otra);
     expect(otra.defaultPrevented).toBe(false);

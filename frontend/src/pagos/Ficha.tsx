@@ -45,12 +45,12 @@ import {
   AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
   AVISO_LECTURA_DISPUTADA,
-  AVISO_LO_DECIDE_EL_CONSEJO,
   AVISO_POR_EL_CONSEJO,
   AVISO_PASA_SOLA,
   AVISO_VUELVE_A_APROBACION,
   AVISO_NO_TRANSFIERAS,
   AVISO_NO_TRANSFIERE,
+  AVISO_OBSERVAR,
   AVISO_RETOMAR,
   AVISO_SE_PUEDE_RETIRAR,
   AVISO_SIN_CUENTA,
@@ -71,6 +71,7 @@ import {
   textoRetiro,
   TEXTO_LE_TOCA_A,
   TONO_ESTADO,
+  VERBO_CONCILIAR,
   VERBO_PASA_SOLA,
 } from "./textos";
 import { useActo } from "./useActo";
@@ -303,7 +304,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
   /** Un acto con motivo que falla: el campo marcado, si el error nombra el motivo; lo demás, como siempre. */
   function fallaDelMotivo(estado: number, codigo: string | undefined, error: unknown) {
-    setErroresMotivo(soloDe(erroresDe(error, mensajeDeActo(estado, codigo)), CAMPOS_MOTIVO));
+    setErroresMotivo(soloDe(erroresDe(error, mensajeDeActo(estado, error)), CAMPOS_MOTIVO));
     siCambio(estado, codigo);
   }
 
@@ -498,7 +499,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version: v.numero, huella: v.huella },
         }),
-      alTerminar: () => terminar(`Listo: aprobaste la versión ${v.numero}.`),
+      alTerminar: () => terminar("Listo: la orden quedó aprobada por esta cuenta."),
       alFallar: siCambio,
     });
   }
@@ -513,7 +514,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version: v.numero, motivo: texto },
         }),
-      alTerminar: () => terminar("Listo: rechazaste la orden."),
+      alTerminar: () => terminar("Listo: la orden se rechazó."),
       alFallar: fallaDelMotivo,
     });
   }
@@ -528,7 +529,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { version: v.numero, motivo: texto },
         }),
-      alTerminar: () => terminar("Listo: declaraste que no se pagó. Lo confirma otro miembro del Consejo."),
+      alTerminar: () => terminar("Listo: quedó declarado que no se pagó. Lo confirma otro miembro del Consejo."),
       alFallar: fallaDelMotivo,
     });
   }
@@ -547,7 +548,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
         terminar(
           resultado === "conforme"
             ? `Listo: quedó conciliado el pago a ${v.razon_social}.`
-            : "Listo: observaste el pago. Quien lo registró tiene que corregirlo.",
+            : "Listo: el pago volvió a quien lo registró para que lo corrija.",
           seguir,
         ),
       alFallar: fallaDelMotivo,
@@ -563,7 +564,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           headers: encabezadoCsrf(),
           params: { path: { ...ruta, declaracion_id: declaracionId }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
         }),
-      alTerminar: () => terminar("Listo: confirmaste que no se pagó."),
+      alTerminar: () => terminar("Listo: quedó confirmado que no se pagó."),
       alFallar: siCambio,
     });
   }
@@ -608,7 +609,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           params: { path: { ...ruta, diferencia_id: d.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
           body: { motivo: texto },
         }),
-      alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
+      alTerminar: () => terminar("Listo: el reclamo se cerró sin recuperar la plata. La diferencia queda en la historia."),
       alFallar: fallaDelMotivo,
     });
   }
@@ -634,7 +635,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   function tomar() {
     void acto.hacer({
       quePide: ["tomar", orden, v.numero, v.huella],
-      nombre: "tomar el pago",
+      nombre: "hacerse cargo del pago",
       pedir: (clave) =>
         api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/pago-manual/tomar", {
           headers: encabezadoCsrf(),
@@ -643,7 +644,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
         }),
       alTerminar: () => {
         setConfirmaToma(false);
-        setAviso({ texto: "Listo: tomaste el pago.", ok: true });
+        setAviso({ texto: "Listo: el pago quedó a cargo de esta cuenta.", ok: true });
         releer();
         alCambiar();
       },
@@ -729,8 +730,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const TEXTOS_MOTIVO: Record<ConMotivo, { etiqueta: string; boton: string; largo: number }> = {
     rechazar: { etiqueta: "Motivo del rechazo", boton: "Rechazar la orden", largo: 500 },
     declarar: { etiqueta: "Por qué no se pagó", boton: "Declarar que no se pagó", largo: 200 },
-    conforme: { etiqueta: "Por qué lo aceptás fuera de término", boton: "Dar el pago por conforme", largo: 300 },
-    observar: { etiqueta: "Qué no coincide", boton: "Observar el pago", largo: 300 },
+    conforme: { etiqueta: "Motivo para aceptarlo fuera de término", boton: "Dar el pago por conforme", largo: 300 },
+    observar: { etiqueta: "Qué no coincide", boton: "Devolverlo a corregir", largo: 300 },
     cerrar: { etiqueta: "Por qué se cierra sin recuperar", boton: "Cerrar sin recuperar", largo: 300 },
     cerrar_sin_pagar: { etiqueta: "Por qué ya no hace falta pagarla", boton: "Cerrar sin pagar", largo: 300 },
   };
@@ -840,11 +841,10 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           )}
 
           {enDecision && v.alerta_fraccionamiento && (
-            <p className="aviso-error" role="note">
+            <p className="aviso-info" role="note">
               {TEXTO_ALERTA_FRACCIONAMIENTO}
             </p>
           )}
-          {situacion === "borrador" && v.alerta_fraccionamiento && <p className="aviso-info" role="note">{AVISO_LO_DECIDE_EL_CONSEJO}</p>}
           {enDecision && anterior !== undefined && cambiosDeVersion(v, anterior).map((c) => <p key={c}>{c}</p>)}
           {ficha.orden.motivo_rechazo !== null && situacion === "rechazada" && (
             <p>
@@ -868,7 +868,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           )}
           {declaracion !== null && (
             <p className="aviso-info" role="note">
-              Se declaró que no se pagó el {momento(declaracion.declarado_en)}: {declaracion.motivo}. No pagues esta orden mientras tanto.
+              Se declaró que no se pagó el {momento(declaracion.declarado_en)}: {declaracion.motivo}. Esta orden no se paga mientras tanto.
             </p>
           )}
           {paso === "espera_resolver" && (
@@ -878,14 +878,14 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           )}
           {paso === "espera_comprobante" && (
             <p className="aviso-info" role="note">
-              Ya se vio la cuenta: no pagues esta orden mientras se espera el comprobante.
-              {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} vas a poder tomar el pago.`}
+              Ya se vio la cuenta: esta orden no se paga mientras se espera el comprobante.
+              {ficha.tomar_desde !== null && ` Si no aparece, desde el ${momento(ficha.tomar_desde)} otra persona puede hacerse cargo del pago.`}
             </p>
           )}
           {ficha.toma_vigente !== null && (
             <p className="aviso-info" role="note">
               {ficha.toma_vigente.tomado_por_nombre} tomó este pago el {momentoAlFinal(ficha.toma_vigente.tomada_en)}
-              {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
+              {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si la transferencia la hizo esta cuenta, corresponde registrarla ahora."}
             </p>
           )}
           {situacion === "en_revision" && ficha.puede_retirar && <p>{AVISO_SE_PUEDE_RETIRAR}</p>}
@@ -897,7 +897,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
           {cuentaVista !== null && (
             <div className="tarjeta">
-              <h3>Transferí desde tu banco</h3>
+              <h3>Datos para transferir</h3>
               <p>{AVISO_NO_TRANSFIERE}</p>
               <dl className="detalles">
                 <dt>CBU/CVU</dt>
@@ -911,7 +911,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                 <dd>{momento(cuentaVista.aprobacion_vence_en)}</dd>
               </dl>
               <p className="aviso-error" role="note">
-                Antes de confirmar en tu banco, mirá que el titular sea <strong>{v.razon_social}</strong>
+                Antes de confirmar en el banco: el titular debe ser <strong>{v.razon_social}</strong>
               </p>
             </div>
           )}
@@ -1022,8 +1022,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   <>
                     <dt>Cuenta destino</dt>
                     <dd>{cuentaDecidida?.cuenta ?? cuentaEnmascarada(v.cuenta_ultimos_digitos)}</dd>
-                    <dt>Comprobante</dt>
-                    <dd>{v.comprobante ?? "Sin comprobante"}</dd>
+                    <dt>Número de la factura</dt>
+                    <dd>{v.comprobante ?? "Sin número de factura"}</dd>
                   </>
                 )}
                 {situacion === "en_revision" && (
@@ -1067,7 +1067,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                 {pago?.lectura_disputada === true && (
                   <>
                     <dt>Lectura del comprobante</dt>
-                    <dd>{AVISO_LECTURA_DISPUTADA}: los datos los escribió a mano. Comparalos con el archivo.</dd>
+                    <dd>{AVISO_LECTURA_DISPUTADA}: los datos los escribió a mano. Conviene compararlos con el archivo.</dd>
                   </>
                 )}
                 {pago?.fuera_de_termino === true && (
@@ -1075,7 +1075,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                     <dt>Fuera de término</dt>
                     <dd>
                       Se transfirió después de que venció la aprobación.
-                      {ficha.puede_conciliar && " Para darlo por conforme, escribí por qué lo aceptás."}
+                      {ficha.puede_conciliar && " Para darlo por conforme hace falta el motivo."}
                     </dd>
                   </>
                 )}
@@ -1126,7 +1126,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   )}
                   {ofrece("resolver_diferencia") && diferencia !== null && (
                     <fieldset className="formulario">
-                      <legend>Qué hacemos</legend>
+                      <legend>Cómo se resuelve</legend>
                       {diferencia.se_puede_dar_por_pagada && (
                         <label className="opcion-formulario">
                           <input type="radio" name={`${id}-resolucion`} checked={elegida === "pagada_por_lo_real"} disabled={enviando}
@@ -1154,7 +1154,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                     {/* Los actos de la orden: exactamente los que mandó el servidor (§4.3). */}
                     <Acciones acciones={ficha.acciones} enviando={enviando} alElegir={elegir} ocultas={ocultas}
                       deshabilitadas={cuentaDecidida === null ? new Set(["aprobar"]) : undefined}
-                      textos={pasaSola ? { volver_a_pagar: VERBO_PASA_SOLA } : undefined} enlaces={enlaces}>
+                      textos={{ conciliar: VERBO_CONCILIAR, ...(pasaSola ? { volver_a_pagar: VERBO_PASA_SOLA } : {}) }} enlaces={enlaces}>
                       {decide && faltaCuenta && (
                         <button type="button" className="secundario" disabled={enviando}
                           onClick={() => {
@@ -1167,9 +1167,9 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                       {ofrece("tomar_pago") && confirmaToma && (
                         <>
                           <button type="button" disabled={enviando} onClick={tomar}>
-                            No se transfirió: tomar el pago
+                            Nadie transfirió: hacerse cargo del pago
                           </button>
-                          <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setConfirmaToma(false)}>
+                          <button type="button" className="secundario" disabled={enviando} onClick={() => setConfirmaToma(false)}>
                             Cancelar
                           </button>
                         </>
@@ -1194,6 +1194,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               {motivoAbierto !== null && (
                 <form className="formulario" onSubmit={enviarMotivo}>
                   {motivoAbierto === "cerrar_sin_pagar" && <p>{PREGUNTA_CERRAR_SIN_PAGAR}</p>}
+                  {motivoAbierto === "observar" && <p>{AVISO_OBSERVAR}</p>}
                   <label htmlFor={`${id}-motivo`}>{TEXTOS_MOTIVO[motivoAbierto].etiqueta}</label>
                   <input id={`${id}-motivo`} required maxLength={TEXTOS_MOTIVO[motivoAbierto].largo} value={motivo} disabled={enviando}
                     {...marcaDe(`${id}-motivo`, erroresMotivo.motivo)}
@@ -1207,7 +1208,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                     <button type="submit" className={motivoAbierto === "conforme" ? undefined : "peligro"} disabled={enviando || motivo.trim() === ""}>
                       {TEXTOS_MOTIVO[motivoAbierto].boton}
                     </button>
-                    <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setConMotivo(null)}>
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => setConMotivo(null)}>
                       Cancelar
                     </button>
                   </div>

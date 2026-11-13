@@ -215,7 +215,7 @@ export function Contactos() {
         {pantalla.tipo === "copias" && pantalla.consorcios.length === 0 && (
           <div className="tarjeta">
             <p className="aviso-error">
-              {pantalla.mensaje} Este dispositivo no tiene contactos guardados: abrí esta página con conexión
+              {pantalla.mensaje} Este dispositivo no tiene contactos guardados: hay que abrir esta página con conexión
               para guardarlos.
             </p>
             {botonReconsultar()}
@@ -260,7 +260,7 @@ export function Contactos() {
         );
       case "en_linea":
         return lectura.guardada ? null : (
-          <p className="tarjeta aviso-error">Este navegador no deja guardar la lista: sin conexión no la vas a poder ver.</p>
+          <p className="tarjeta aviso-error">Este navegador no deja guardar la lista: sin conexión no se va a poder ver.</p>
         );
     }
   }

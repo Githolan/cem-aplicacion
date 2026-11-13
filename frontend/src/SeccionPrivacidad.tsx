@@ -7,7 +7,7 @@ import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
 
-// Sección "Tus pedidos sobre tus datos" de /cuenta (RF37, corte 2d-2). Decisión del propietario
+// Sección "Pedidos sobre los datos de la cuenta" de /cuenta (RF37, corte 2d-2). Decisión del propietario
 // del 28-10-2026: la confirmación de un caso y la copia de los datos propios van solo dentro de
 // la aplicación, al titular autenticado. Lista sus casos (`GET /api/v1/privacidad/casos`); uno
 // abierto se confirma con el código que llegó al correo y uno de copia confirmado se descarga.
@@ -30,12 +30,12 @@ const ESTADO_DEMASIADOS = 429;
 /** Lo que se espera antes de liberar el archivo local: el navegador ya empezó a guardarlo. */
 const ESPERA_LIBERAR_MS = 60_000;
 const NOMBRE_DERECHO: Record<Caso["derecho"], string> = {
-  acceso: "Copia de tus datos",
-  rectificacion_nombre: "Corregir tu nombre",
-  supresion: "Suprimir tus datos",
+  acceso: "Copia de los datos",
+  rectificacion_nombre: "Corregir el nombre",
+  supresion: "Suprimir los datos",
 };
 const NOMBRE_ESTADO: Record<Caso["estado"], string> = {
-  abierto: "espera tu confirmación",
+  abierto: "espera confirmación",
   confirmado: "confirmado",
   resuelto: "resuelto",
   rechazado: "rechazado",
@@ -58,7 +58,7 @@ function avisoDeError(error: unknown, status: number): Aviso {
   if (codigo === "codigo_caso_invalido" || codigo === "caso_no_disponible")
     return { tipo: "error", texto: String(campoDe(error, "mensaje") ?? SIN_CONEXION) };
   if (status === ESTADO_DEMASIADOS)
-    return { tipo: "error", texto: "Hubo demasiados intentos. Esperá un rato y probá de nuevo." };
+    return { tipo: "error", texto: "Hubo demasiados intentos. Reintentar en un rato." };
   return { tipo: "error", texto: mensajeDeFalla(status, codigoDe(error)) };
 }
 
@@ -153,7 +153,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
         if (response.status === 204) {
           actualizar(caso.id, { estado: "confirmado", codigo_vence_en: null });
           setClave("");
-          setAviso({ tipo: "ok", texto: "Listo: confirmaste tu pedido." });
+          setAviso({ tipo: "ok", texto: "Listo: el pedido quedó confirmado." });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
         else rechazar(error, response.status, () => confirmar(caso));
       })
@@ -177,7 +177,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
           setClave("");
           setAviso({
             tipo: "ok",
-            texto: "Te mandamos la copia. Revisá que el archivo se haya guardado y avisanos.",
+            texto: "La copia se descargó. Conviene revisar que el archivo se haya guardado y avisarlo acá.",
           });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
         else rechazar(error, response.status, () => descargar(caso));
@@ -197,7 +197,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
       .then(({ error, response }) => {
         if (response.status === 204) {
           actualizar(caso.id, { estado: "resuelto" });
-          setAviso({ tipo: "ok", texto: "Listo: cerramos tu pedido." });
+          setAviso({ tipo: "ok", texto: "Listo: el pedido quedó cerrado." });
         } else if (response.status === ESTADO_SIN_SESION) sinSesion();
         else rechazar(error, response.status, () => recibida(caso));
       })
@@ -208,7 +208,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
   const campoClave = (caso: string) =>
     contrasena && (
       <>
-        <label htmlFor={`${id}-${caso}-clave`}>Tu contraseña</label>
+        <label htmlFor={`${id}-${caso}-clave`}>Contraseña</label>
         <CampoContrasena
           id={`${id}-${caso}-clave`}
           autoComplete="current-password"
@@ -223,7 +223,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
   if (pendiente !== null)
     return (
       <PedirCodigo
-        acto="seguir con tu pedido"
+        acto="seguir con el pedido"
         alVerificar={() => {
           setPendiente(null);
           pendiente();
@@ -235,14 +235,14 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
       <h2 id={`${id}-titulo`} ref={titulo} tabIndex={-1}>
-        Tus pedidos sobre tus datos
+        Pedidos sobre los datos de la cuenta
       </h2>
       {fallaConsulta !== null && (
         <>
           <p className="aviso-error" role="alert">
             {fallaConsulta}
           </p>
-          <button
+          <button className="secundario"
             type="button"
             onClick={() => {
               setFallaConsulta(null);
@@ -254,9 +254,9 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
           </button>
         </>
       )}
-      {fallaConsulta === null && casos === null && <p role="status">Consultando tus pedidos…</p>}
+      {fallaConsulta === null && casos === null && <p role="status">Consultando los pedidos…</p>}
       {fallaConsulta === null && casos !== null && !conPedidos && (
-        <p role="status">No tenés pedidos pendientes sobre tus datos.</p>
+        <p role="status">No hay pedidos pendientes sobre los datos de la cuenta.</p>
       )}
       {pendientes.map((caso) => (
         <article key={caso.id} aria-labelledby={`${id}-${caso.id}`}>
@@ -273,7 +273,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
               }}
               noValidate
             >
-              <label htmlFor={`${id}-${caso.id}-codigo`}>Código que te llegó por correo</label>
+              <label htmlFor={`${id}-${caso.id}-codigo`}>Código que llegó por correo</label>
               <input
                 id={`${id}-${caso.id}-codigo`}
                 autoComplete="one-time-code"
@@ -298,17 +298,17 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
               >
                 <p>
                   {caso.copia_entregada_en
-                    ? "Si el archivo no se guardó, podés descargarlo de nuevo."
+                    ? "Si el archivo no se guardó, se puede descargar de nuevo."
                     : "La copia se guarda como archivo en este dispositivo."}
                 </p>
                 {campoClave(caso.id)}
-                <button type="submit" disabled={enviando}>
+                <button type="submit" className={caso.copia_entregada_en ? "secundario" : undefined} disabled={enviando}>
                   {caso.copia_entregada_en ? "Descargar de nuevo" : "Descargar la copia de mis datos"}
                 </button>
               </form>
               {caso.copia_entregada_en && (
                 <button type="button" disabled={enviando} onClick={() => recibida(caso)}>
-                  Ya la guardé: cerrar el pedido
+                  Copia guardada: cerrar el pedido
                 </button>
               )}
             </>
@@ -319,7 +319,7 @@ export function SeccionPrivacidad({ contrasena, fecha, sinSesion }: Props) {
         {aviso?.tipo === "ok" && <p className="aviso-ok">{aviso.texto}</p>}
         {aviso?.tipo === "error" && <p className="aviso-error">{aviso.texto}</p>}
         {aviso?.tipo === "falta" && aviso.falta === "contrasena" && (
-          <p className="aviso-error">Escribí tu contraseña actual.</p>
+          <p className="aviso-error">Falta la contraseña actual.</p>
         )}
       </div>
     </section>

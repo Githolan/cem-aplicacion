@@ -14,7 +14,7 @@ import { cumpleEnAlguno, Exige, REQUISITOS, type Requisito, useConsultaDeAccione
 import { useSesion } from "./sesion";
 import { Entrar } from "./Entrar";
 import { EntrarEncima } from "./EntrarEncima";
-import { AvisoServicio, PuntoServicio } from "./EstadoServicio";
+import { PuntoServicio, useFallaDelServicio } from "./EstadoServicio";
 import { ElegirConsorcio } from "./egresos/ElegirConsorcio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
@@ -175,6 +175,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     retry: false,
   });
   const pagos = useResumenPagos(porEdificio);
+  const servicio = useFallaDelServicio(sesion === "con_sesion");
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
   if (sesion === "consultando") return <p role="status">Cargando…</p>;
   // Sin saber qué puede la persona, solo lo que le sirve igual: los contactos guardados.
@@ -183,32 +184,51 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
+  // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
+  // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
+  const fallaDePagos = pagos.enTarjeta && pagos.falla !== null;
+  const reintentables = [
+    ...(servicio.falla === null ? [] : [servicio]),
+    ...(falla === null ? [] : [{ reintentar, reintentando }]),
+    ...(fallaDePagos ? [pagos] : []),
+  ];
+  const reintentarTodo = () => reintentables.forEach((r) => r.reintentar());
+  const botonReintentar = (
+    <button type="button" className="secundario" disabled={reintentables.some((r) => r.reintentando)} onClick={reintentarTodo}>
+      Reintentar
+    </button>
+  );
+  const enLaTarjeta = servicio.falla === null && falla === null;
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
-      <h1>Tu consorcio, en tu mano</h1>
-      <AvisoServicio />
+      <h1>El consorcio, en la mano</h1>
       {porEdificio?.size === 0 && (
-        <section className="resumen-inicio" aria-label="Tu edificio">
+        <section className="resumen-inicio" aria-label="Edificio">
           <div className="resumen-inicio__arriba">
-            <span>Tu edificio</span>
+            <span>Edificio</span>
             <span className="resumen-inicio__estado resumen-inicio__estado--neutro">Sin edificio</span>
           </div>
           <p>
-            Todavía no participás de ningún edificio.
+            Esta cuenta todavía no participa de ningún edificio.
             {invitaciones.data?.length === 0 &&
-              " Para sumarte, abrí el enlace de la invitación que te llegó por correo."}
+              " Para sumarse hay que abrir el enlace de la invitación que llegó por correo."}
           </p>
         </section>
       )}
-      {falla !== null && (
+      {!enLaTarjeta && (
         <div className="tarjeta">
-          <p className="aviso-error" role="alert">
-            Puede que falten secciones. {falla}
-          </p>
-          <button type="button" disabled={reintentando} onClick={reintentar}>
-            Reintentar
-          </button>
+          {servicio.falla !== null && (
+            <p className="aviso-error" role="alert">
+              {servicio.falla}
+            </p>
+          )}
+          {falla !== null && (
+            <p className="aviso-error" role="alert">
+              Puede que falten secciones. {falla}
+            </p>
+          )}
+          {botonReintentar}
         </div>
       )}
       <InvitacionesPropias consulta={invitaciones} />
@@ -222,8 +242,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         <TarjetaPagos
           cantidad={pagos.cantidad}
           falla={pagos.falla}
-          reintentar={pagos.reintentar}
-          reintentando={pagos.reintentando}
+          reintentar={fallaDePagos && enLaTarjeta ? botonReintentar : null}
           edificio={edificio.nombre}
         />
       )}
@@ -243,7 +262,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
                   <FilaDeInicio
                     enlace={{
                       ruta: RUTA_POR_ACLARAR,
-                      texto: "Pagos para aclarar (si dejaste de administrar)",
+                      texto: "Pagos para aclarar (de quien dejó de administrar)",
                       icono: "billetera",
                     }}
                   />
@@ -280,7 +299,7 @@ function NoEncontrada() {
   }
   return (
     <>
-      <h1>No encontramos esa página</h1>
+      <h1>No se encontró esa página</h1>
       <p>
         <Link to="/" className="enlace-suelto">Volver al inicio</Link>
       </p>

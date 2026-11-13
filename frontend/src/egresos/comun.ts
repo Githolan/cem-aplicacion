@@ -2,7 +2,7 @@ import type { MutableRefObject } from "react";
 
 import type { components } from "../api/tipos";
 import { REVISAR_FORMULARIO } from "../ErrorDeCampo";
-import { LIMITE_DE_PEDIDOS, mensajeDeFalla } from "../fallas";
+import { codigoDe, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion } from "../fallas";
 import { NOMBRE_ESTADO } from "../pagos/textos";
 
 // Lo común a las pantallas de egresos (H3; `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del
@@ -43,7 +43,7 @@ export const TEXTO_SESION_VENCIDA = "La sesión venció: hay que volver a entrar
 export type Aviso = { texto: string; ok: boolean };
 
 /** Lo que se dice al repetir sola una lectura que falló. No es algo hecho: si vuelve a fallar, se va. */
-export const VOLVIO_LA_RED = "Volvió la conexión. Actualizamos los datos.";
+export const VOLVIO_LA_RED = "Volvió la conexión. Los datos están actualizados.";
 
 /** Si falla la recarga que sigue a un cambio, queda a la vista lo que sí se hizo. */
 export function sinPisarLoHecho(falla: string) {
@@ -117,7 +117,7 @@ export const TEXTO_ESTADO_PROVEEDOR: Record<EstadoProveedor, string> = {
 
 /** La alerta de fraccionamiento (punto 9 del 30-10-2026): funcional, sin afirmar intención. */
 export const TEXTO_ALERTA_FRACCIONAMIENTO =
-  "Posible fraccionamiento: existen órdenes recientes relacionadas que en conjunto superan el umbral o el máximo del contrato.";
+  "Hay otras órdenes recientes de este proveedor. Sumadas pasan el tope del edificio o el máximo del contrato, así que esta la aprueba el Consejo.";
 
 /** Si la aprobación de una orden aprobada ya venció (la base lo vuelve a controlar al emitir). */
 export function vencida(o: OrdenPago, ahora = Date.now()): boolean {
@@ -214,14 +214,14 @@ export function cambioLaOrden(codigo: string | undefined): boolean {
 }
 
 const MENSAJES: Record<string, string> = {
-  csrf_invalido: "No pudimos verificar el pedido. Recargá la página.",
+  csrf_invalido: "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
   sesion_reciente_requerida: TEXTO_SESION_VENCIDA,
-  identidad_no_verificada: "Falta verificar una identidad en el consorcio. Soporte puede ayudarte.",
-  version_desactualizada: "La orden cambió mientras la mirabas. Revisá la versión nueva.",
-  huella_distinta: "La orden cambió mientras la mirabas. Revisá la versión nueva antes de aprobar.",
+  identidad_no_verificada: "Falta verificar una identidad en el consorcio. Soporte puede ayudar.",
+  version_desactualizada: "La orden cambió mientras estaba abierta. Esta es la versión nueva.",
+  huella_distinta: "La orden cambió mientras estaba abierta. Esta es la versión nueva: revisarla antes de aprobar.",
   sin_cambios: "No hay ningún cambio para guardar.",
-  orden_no_admite: "La orden ya no admite eso en su estado. Revisá la lista actualizada.",
-  aprobacion_repetida: "Ya aprobaste esta versión.",
+  orden_no_admite: "La orden ya no admite eso en su estado. La lista ya está actualizada.",
+  aprobacion_repetida: "Esta cuenta ya aprobó la orden así como está.",
   no_es_quien_preparo: "Quien preparó la orden no la aprueba ni la rechaza.",
   retirar_solo_quien_preparo: "La orden la retira solo quien la preparó.",
   orden_con_aprobaciones: "Alguien ya aprobó esta versión: la orden ya no se retira.",
@@ -229,24 +229,24 @@ const MENSAJES: Record<string, string> = {
   no_es_quien_aprobo: "Quien aprobó la orden no la emite.",
   proveedor_inexistente: "Ese proveedor no existe en este edificio.",
   proveedor_inactivo: "El proveedor está suspendido o de baja: no recibe órdenes nuevas.",
-  proveedor_cambiado: "El proveedor cambió después de preparar la orden: modificala para que vuelva a revisión.",
-  proveedor_sin_cuenta: "El proveedor no tiene cuenta destino: cargala antes de emitir.",
+  proveedor_cambiado: "El proveedor cambió después de preparar la orden: hay que modificarla para que el Consejo la apruebe de nuevo.",
+  proveedor_sin_cuenta: "El proveedor no tiene cuenta destino: hay que cargarla antes de emitir.",
   cuit_invalido: "El CUIT no es válido.",
   cuit_repetido: "Ya hay un proveedor con ese CUIT en este edificio.",
   cuit_ya_cargado: "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
   documento_invalido: "El documento no existe en este edificio o no está vigente.",
-  aprobacion_vencida: "La aprobación tiene más de 7 días: renová la orden para que vuelva a revisión.",
+  aprobacion_vencida: "La aprobación tiene más de 7 días: hay que renovar la orden para que el Consejo la apruebe de nuevo.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",
-  contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: renovala; la versión nueva va sin contrato y pide aprobación.",
-  contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Elegí otro o ninguno.",
+  contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: hay que renovarla; la versión nueva va sin contrato y pide aprobación.",
+  contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Hay que elegir otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",
-  pago_en_curso: "Otra persona ya vio la cuenta de este pago: esperá su comprobante, para no pagar dos veces.",
+  pago_en_curso: "Otra persona ya vio la cuenta de este pago: hay que esperar su comprobante, para no pagar dos veces.",
   toma_antes_de_tiempo: "Todavía no pasó el plazo para tomar el pago: quien vio la cuenta puede estar pagando.",
-  numero_operacion_invalido: "El número de operación no es válido: copialo tal como figura en el comprobante.",
-  no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante o usá «Pagué otra cosa».",
-  sin_diferencia: "Lo que escribiste es lo mismo que la orden: registrá el pago, no una diferencia.",
+  numero_operacion_invalido: "El número de operación no es válido: hay que copiarlo tal como figura en el comprobante.",
+  no_coincide_con_la_orden: "El importe, la moneda o la cuenta no son los de la orden aprobada: hay que revisar el comprobante o usar «Se transfirió otro importe o a otra cuenta».",
+  sin_diferencia: "Lo escrito es lo mismo que la orden: corresponde registrar el pago, no una diferencia.",
   diferencia_ya_resuelta: "El Consejo ya resolvió esa diferencia.",
   solo_reclamo: "Un pago a otra cuenta o en otra moneda no se da por pagado: solo se puede reclamar.",
   fecha_operacion_invalida: "La fecha no puede ser anterior a la emisión ni futura.",
@@ -255,15 +255,15 @@ const MENSAJES: Record<string, string> = {
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",
   conciliacion_repetida: "Ese pago ya está conciliado.",
   pago_sin_conciliar: "Ese pago todavía no está conciliado: se coteja después de conciliarlo.",
-  extracto_invalido: "No pudimos leer el archivo como un extracto en CSV: revisá que sea el que bajaste del banco.",
-  extracto_demasiadas_lineas: "El archivo tiene demasiadas líneas: bajá del banco un período más corto.",
-  extracto_sin_movimientos: "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
-  columnas_no_encontradas: "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
+  extracto_invalido: "El archivo no se pudo leer como un extracto en CSV: tiene que ser el que se bajó del banco.",
+  extracto_demasiadas_lineas: "El archivo tiene demasiadas líneas: hay que bajar del banco un período más corto.",
+  extracto_sin_movimientos: "No se pudo leer ninguna línea con esas columnas: hay que revisar cuál es cada dato.",
+  columnas_no_encontradas: "El archivo no tiene las columnas elegidas: hay que elegirlas de nuevo.",
   columnas_sin_elegir: "Falta elegir qué columna es cada dato.",
-  archivo_demasiado_grande: "El archivo pasa del tamaño máximo. Elegí uno más chico.",
+  archivo_demasiado_grande: "El archivo pasa del tamaño máximo. Hace falta uno más chico.",
   no_es_quien_ejecuto:
     "Carga el comprobante y registra el pago (o declara que no se hizo, si alguien vio la cuenta) quien vio la cuenta en el acto de ejecución. Quien vio la cuenta o registró un pago no lo concilia ni confirma que no se pagó, y quien declaró no confirma su propia declaración.",
-  motivo_con_cuenta: "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla. Si no es una cuenta, separá los números con una coma.",
+  motivo_con_cuenta: "El motivo no puede llevar el número de una cuenta: hay que describir el problema sin copiarla. Si no es una cuenta, separar los números con una coma.",
   liquidacion_no_admite: "La liquidación no admite eso: ya hay un borrador de ese período, ya no es un borrador o el gasto ya se quitó.",
   orden_no_liquidable:
     "Esa orden no se puede liquidar: no está pagada, ya está en una liquidación, es de otra moneda o se pagó después del período.",
@@ -273,28 +273,26 @@ const MENSAJES: Record<string, string> = {
   documento_referenciado:
     "Este documento respalda algo guardado (una orden, un pago, un proveedor, un contrato o el acta de una decisión): no se puede quitar ni retirar.",
   no_es_quien_lo_subio: "Solo quien subió el archivo lo puede quitar.",
-  idempotencia_en_curso: "El pedido se está procesando. Probá de nuevo en unos segundos.",
-  idempotencia_reutilizada: "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.",
+  idempotencia_en_curso: "El pedido se está procesando. Reintentar en unos segundos.",
+  idempotencia_reutilizada: "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.",
 };
 
 /** Qué decir ante una respuesta de error de una acción o una lectura de egresos. */
 export function mensajeDeError(estado: number, codigo: string | undefined): string {
   const conocido = codigo === undefined ? undefined : MENSAJES[codigo];
   if (conocido !== undefined) return conocido;
-  if (estado === ESTADO.sinPermiso) return "No tenés la facultad para esto en este edificio.";
-  if (estado === ESTADO.noEncontrado) return "Eso ya no está en este edificio. Revisá la lista actualizada.";
+  if (estado === ESTADO.sinPermiso) return "Esta cuenta no tiene la facultad para esto en este edificio.";
+  if (estado === ESTADO.noEncontrado) return "Eso ya no está en este edificio. La lista ya está actualizada.";
   // Un 422 que nombra campos se dice junto a cada uno (`ErrorDeCampo`); este es el que no nombra ninguno.
   if (estado === ESTADO.invalido) return REVISAR_FORMULARIO;
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   return mensajeDeFalla(estado, codigo);
 }
 
-/** Al actuar sobre una orden o su pago la API responde `sin_permiso` también cuando frena la
- * separación de funciones (el motivo no sale, por diseño): decir solo que falta la facultad sería falso. */
-const SIN_PERMISO_EN_LA_ORDEN =
-  "No podés hacer esto en esta orden. Puede ser que tu mandato no lo incluya o que ya hayas participado de ella: quien prepara, aprueba, ejecuta y concilia tienen que ser personas distintas.";
-
-/** Qué decir ante el rechazo de un acto sobre una orden o su pago. */
-export function mensajeDeActo(estado: number, codigo: string | undefined): string {
-  return estado === ESTADO.sinPermiso && codigo === "sin_permiso" ? SIN_PERMISO_EN_LA_ORDEN : mensajeDeError(estado, codigo);
+/** Qué decir ante el rechazo de un acto sobre una orden o su pago. Cuando lo frena la separación de
+ * funciones, el servidor dice el motivo concreto a quien ya participa («La preparó esta cuenta: la
+ * aprueba otra persona del Consejo.», pregunta 10 del propietario, 13-11-2026) y se dice tal cual;
+ * `sin_permiso` queda para la facultad que falta. */
+export function mensajeDeActo(estado: number, error: unknown): string {
+  return motivoDeSeparacion(error) ?? mensajeDeError(estado, codigoDe(error));
 }

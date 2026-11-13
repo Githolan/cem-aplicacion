@@ -160,13 +160,13 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(within(tarjetas).getByText(/Edificio Ficticio/)).toBeTruthy();
     expect(container.textContent).not.toContain(CUENTA);
     await sinFaltasDeAccesibilidad(container);
-    const boton = screen.getByRole("button", { name: "No transferí" }) as HTMLButtonElement;
+    const boton = screen.getByRole("button", { name: "No se transfirió" }) as HTMLButtonElement;
     expect(boton.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Por qué no se transfirió"), { target: { value: "Renuncié antes de pagar" } });
     fireEvent.click(boton);
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
     expect(await screen.findByText(/Ahora lo confirma otro miembro del Consejo/)).toBeTruthy();
-    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
+    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
     const [uno, dos] = pedidos(api, "POST", DECLARAR);
     expect(await uno?.json()).toEqual({ version: 1, motivo: "Renuncié antes de pagar" });
     expect(dos?.headers.get("Idempotency-Key")).toBe(uno?.headers.get("Idempotency-Key"));
@@ -193,14 +193,14 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     const { container } = abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
     expect(screen.getByText("Primero hay que subir el comprobante de la transferencia.")).toBeTruthy();
     const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
     expect(registrar.disabled).toBe(true);
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
     fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
-    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
     expect(await screen.findByText(/El antivirus revisa el comprobante/)).toBeTruthy();
     expect(registrar.disabled).toBe(true); // en cuarentena todavía no se registra
     const [carga] = pedidos(api, "POST", CARGA);
@@ -218,8 +218,8 @@ describe("pagos para aclarar (app 0067)", () => {
     fireEvent.change(screen.getByLabelText(/^CBU\/CVU de destino/), { target: { value: `${CUENTA.slice(0, 8)} ${CUENTA.slice(8)}` } });
     await sinFaltasDeAccesibilidad(container);
     fireEvent.click(registrar);
-    expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
-    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
+    expect(await screen.findByText(/Listo: el pago quedó registrado/)).toBeTruthy();
+    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
     const [registro] = pedidos(api, "POST", REGISTRO);
     expect(await registro?.json()).toEqual({
       version: 1,
@@ -243,11 +243,11 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
     expect(screen.getByText(/El antivirus rechazó el archivo/)).toBeTruthy();
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
-    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
     expect(pedidos(api, "POST", SUBIDA)).toHaveLength(1);
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/comprobante`)).toHaveLength(0);
   });
@@ -263,12 +263,12 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
     const archivo = new File(["%PDF-1.4 SINTETICO"], "comprobante.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText("Archivo del comprobante"), { target: { files: [archivo] } });
     expect(await screen.findByText(/El archivo no se subió/)).toBeTruthy();
     fireEvent.click(await screen.findByRole("button", { name: "Reintentar la subida" }));
-    expect(await screen.findByText(/Listo: subimos el comprobante/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el comprobante se subió/)).toBeTruthy();
     const [primera, segunda] = pedidos(api, "POST", SUBIDA).map((q) => q.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
     expect(screen.queryByRole("button", { name: "Reintentar la subida" })).toBeNull();
@@ -282,9 +282,9 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
     expect(screen.queryByLabelText("Qué pasó")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Pagué otra cosa" }));
+    fireEvent.click(screen.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" }));
     fireEvent.change(screen.getByLabelText("Fecha de la transferencia"), { target: { value: "2026-10-31" } });
     fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
     fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "14000" } });
@@ -299,7 +299,7 @@ describe("pagos para aclarar (app 0067)", () => {
     expect(pedidos(api, "POST", `${BASE}/pagos-por-aclarar/${O1}/pago`)).toHaveLength(0);
   });
 
-  it("«Pagué otra cosa» trae la moneda de la orden y se puede cambiar", async () => {
+  it("«Se transfirió otro importe o a otra cuenta» trae la moneda de la orden y se puede cambiar", async () => {
     const DIFERENCIA = `${BASE}/pagos-por-aclarar/${O1}/diferencia`;
     const api = backend({
       "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...POR_ACLARAR, comprobante_id: DOC, comprobante_estado: "disponible" }] }),
@@ -307,9 +307,9 @@ describe("pagos para aclarar (app 0067)", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/por-aclarar");
-    fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
     expect(screen.queryByLabelText("Moneda que salió del banco")).toBeNull(); // el registro común no la pide
-    fireEvent.click(screen.getByRole("button", { name: "Pagué otra cosa" }));
+    fireEvent.click(screen.getByRole("button", { name: "Se transfirió otro importe o a otra cuenta" }));
     const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
     expect(moneda.value).toBe("ARS");
     fireEvent.change(moneda, { target: { value: "usd" } });
@@ -327,7 +327,7 @@ describe("pagos para aclarar (app 0067)", () => {
   it("sin pagos para aclarar lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [] }) }));
     abrir("/pagos/por-aclarar");
-    expect(await screen.findByText("No tenés pagos para aclarar.")).toBeTruthy();
+    expect(await screen.findByText("No hay pagos para aclarar.")).toBeTruthy();
   });
 });
 
@@ -340,7 +340,7 @@ describe("fricción: las lecturas y el comprobante", () => {
   };
 
   const LECTURAS = [
-    ["/pagos/por-aclarar", "GET /api/v1/pagos-por-aclarar", "No tenés pagos para aclarar."],
+    ["/pagos/por-aclarar", "GET /api/v1/pagos-por-aclarar", "No hay pagos para aclarar."],
   ] as const;
 
   const conLecturaCaida = (clave: string, caido: () => boolean) =>
@@ -386,7 +386,7 @@ describe("fricción: las lecturas y el comprobante", () => {
         "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ ...CON_ARCHIVO, comprobante_estado: estado }] }),
       }));
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
       const registrar = screen.getByRole("button", { name: "Registrar el pago" }) as HTMLButtonElement;
       expect(registrar.disabled).toBe(true);
       estado = "disponible";
@@ -403,7 +403,7 @@ describe("fricción: las lecturas y el comprobante", () => {
       });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      await screen.findByRole("button", { name: "Sí transferí" });
+      await screen.findByRole("button", { name: "Sí se transfirió" });
       const lecturas = pedidos(api, "GET", "/api/v1/pagos-por-aclarar").length;
       await vi.advanceTimersByTimeAsync(ESPERA * 2);
       expect(pedidos(api, "GET", "/api/v1/pagos-por-aclarar")).toHaveLength(lecturas);
@@ -420,12 +420,12 @@ describe("fricción: las lecturas y el comprobante", () => {
           caido ? error("error_interno", 500) : Response.json({ elementos: [EN_REVISION] }),
       }));
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
       fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-234567" } });
       expect(actualizar()).toBeNull();
       caido = true;
       await vi.advanceTimersByTimeAsync(ESPERA);
-      expect((await screen.findByRole("alert")).textContent).toContain("No pudimos actualizar la lista");
+      expect((await screen.findByRole("alert")).textContent).toContain("No se pudo actualizar la lista");
       expect((screen.getByLabelText("Número de operación") as HTMLInputElement).value).toBe("0001-234567");
       caido = false;
       fireEvent.click(actualizar() as HTMLElement);
@@ -442,7 +442,7 @@ describe("fricción: las lecturas y el comprobante", () => {
       });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
       caido = true;
       await vi.advanceTimersByTimeAsync(ESPERA);
       await screen.findByRole("alert");
@@ -456,7 +456,7 @@ describe("fricción: las lecturas y el comprobante", () => {
       const api = backend({ "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [EN_REVISION] }) });
       vi.stubGlobal("fetch", api);
       abrir("/pagos/por-aclarar");
-      fireEvent.click(await screen.findByRole("button", { name: "Sí transferí" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Sí se transfirió" }));
       await vi.advanceTimersByTimeAsync(ESPERA * 20);
       // Control: mientras todavía mira, no hay botón.
       expect(actualizar()).toBeNull();

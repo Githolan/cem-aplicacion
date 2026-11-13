@@ -85,7 +85,7 @@ RESPUESTAS_ARCHIVO = RESPUESTAS_LECTURA | {
     413: {"description": "El archivo pasa del tope (`archivo_demasiado_grande`)."},
     415: {"description": "No se declaró como `text/csv`."},
     422: {"description": "El archivo no se puede leer como un extracto (`extracto_invalido`)."},
-    503: {"description": "Demasiadas cargas a la vez: probá de nuevo en un momento."},
+    503: {"description": "Demasiadas cargas a la vez: reintentar en un momento."},
 }
 ARCHIVO_OPENAPI = {
     "requestBody": {
@@ -245,7 +245,7 @@ class _Turno:
         except TimeoutError:
             raise ErrorApi(
                 503, CodigoError.SERVICIO_NO_DISPONIBLE,
-                "Hay muchas cargas en curso. Probá de nuevo en un momento.",
+                "Hay muchas cargas en curso. Reintentar en un momento.",
                 {"Retry-After": str(ESPERA_TURNO)},
             ) from None  # fmt: skip
 
@@ -259,12 +259,12 @@ def _tabla(cuerpo: bytes, request: Request) -> extracto.Tabla:
     except extracto.DemasiadasLineas as e:
         raise ErrorApi(
             422, CodigoError.EXTRACTO_DEMASIADAS_LINEAS,
-            "El archivo tiene demasiadas líneas: bajá del banco un período más corto.",
+            "El archivo tiene demasiadas líneas: hay que bajar del banco un período más corto.",
         ) from e  # fmt: skip
     except extracto.ExtractoInvalido as e:
         raise ErrorApi(
             422, CodigoError.EXTRACTO_INVALIDO,
-            "No pudimos leer el archivo como un extracto en CSV: revisá que sea el que bajaste del"
+            "El archivo no se pudo leer como un extracto en CSV: tiene que ser el que se bajó del"
             " banco.",
         ) from e  # fmt: skip
 
@@ -455,12 +455,13 @@ async def subir_extracto(
             except extracto.ColumnasNoEncontradas as e:
                 raise ErrorApi(
                     422, CodigoError.COLUMNAS_NO_ENCONTRADAS,
-                    "El archivo no tiene las columnas elegidas: elegilas de nuevo.",
+                    "El archivo no tiene las columnas elegidas: hay que elegirlas de nuevo.",
                 ) from e  # fmt: skip
             if lectura is None:
                 raise ErrorApi(
                     422, CodigoError.EXTRACTO_SIN_MOVIMIENTOS,
-                    "No pudimos leer ninguna línea con esas columnas: revisá cuál es cada dato.",
+                    "No se pudo leer ninguna línea con esas columnas: hay que revisar cuál es "
+                    "cada dato.",
                 )  # fmt: skip
             suma = extracto.hash_archivo(cuerpo)
             return 200, _comparar_y_cotejar(conn, permiso, lectura, columnas, suma)

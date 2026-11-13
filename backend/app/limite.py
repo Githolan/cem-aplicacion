@@ -132,13 +132,13 @@ async def consumir(
         raise ErrorApi(
             503,
             CodigoError.SERVICIO_NO_DISPONIBLE,
-            "El servicio no está disponible. Probá en un rato.",
+            "El servicio no está disponible. Reintentar en un rato.",
         ) from e
     espera = max(1, math.ceil(ventana.reset_time - time.time()))
     raise ErrorApi(
         429,
         CodigoError.DEMASIADAS_PETICIONES,
-        "Hiciste demasiados pedidos seguidos. Esperá un momento y probá de nuevo.",
+        "Hubo demasiados pedidos seguidos. Reintentar en un momento.",
         encabezados={"Retry-After": str(espera)},
     )
 

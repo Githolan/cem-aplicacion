@@ -14,11 +14,11 @@ const AGENTE_IPHONE =
 const AGENTE_COMPUTADORA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
 
-const INSTALAR = { name: /Instalá Consorcio en Mano/ };
+const INSTALAR = { name: /Instalar Consorcio en Mano/ };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
-const ENLACE_INSTALAR = { name: "Instalá la aplicación en este dispositivo" };
-const ENLACE_COMPUTADORA = { name: "Instalá la aplicación en esta computadora" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const ENLACE_INSTALAR = { name: "Instalar la aplicación en este dispositivo" };
+const ENLACE_COMPUTADORA = { name: "Instalar la aplicación en esta computadora" };
 const NO_SE_INSTALO = /No se instaló/;
 const REINTENTAR = { name: "Reintentar" };
 
@@ -93,7 +93,7 @@ describe("página /instalar", () => {
     simularNavegador(AGENTE_IPHONE);
     montar();
 
-    expect(screen.getByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Instalar Consorcio en Mano/ })).toBeTruthy();
     expect(screen.getByText("Agregar a inicio")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Instalar la aplicación" })).toBeNull();
   });
@@ -101,7 +101,7 @@ describe("página /instalar", () => {
   it("cuando el navegador lo permite, el botón abre la instalación del navegador", async () => {
     simularNavegador(AGENTE_ANDROID);
     montar();
-    expect(screen.getByText(/Tocá el menú/)).toBeTruthy();
+    expect(screen.getByText(/Tocar el menú/)).toBeTruthy();
 
     const evento = ofrecerInstalacion();
     expect(evento.defaultPrevented).toBe(true);
@@ -191,7 +191,7 @@ describe("página /instalar", () => {
     await tocarInstalar();
 
     expect(await screen.findByText(estado)).toBeTruthy();
-    expect(screen.queryByText(/Tocá el menú/)).toBeNull();
+    expect(screen.queryByText(/Tocar el menú/)).toBeNull();
   });
 
   it("terminada la instalación sigue a /entrar con el aviso", async () => {
@@ -205,7 +205,7 @@ describe("página /instalar", () => {
     terminarInstalacion();
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.getByText(/Ya está instalada. Seguí acá/)).toBeTruthy();
+    expect(screen.getByText(/Ya está instalada. Se puede seguir acá/)).toBeTruthy();
     expect(screen.queryByRole("heading", INSTALAR)).toBeNull();
     // Recién instalada, /entrar no vuelve a ofrecer la instalación.
     expect(screen.queryByRole("link", ENLACE_INSTALAR)).toBeNull();
@@ -219,7 +219,7 @@ describe("página /instalar", () => {
     terminarInstalacion();
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.getByText(/Ya está instalada. Seguí acá/)).toBeTruthy();
+    expect(screen.getByText(/Ya está instalada. Se puede seguir acá/)).toBeTruthy();
   });
 
   it("«Seguir sin instalar» lleva a /entrar, sin aviso", async () => {
@@ -296,8 +296,8 @@ describe("enlace en el inicio", () => {
 });
 
 describe("en una computadora", () => {
-  const EN_COMPUTADORA = { level: 1, name: "Instalá Consorcio en Mano en esta computadora" };
-  const EN_TELEFONO = { level: 1, name: "Instalá Consorcio en Mano en este dispositivo" };
+  const EN_COMPUTADORA = { level: 1, name: "Instalar Consorcio en Mano en esta computadora" };
+  const EN_TELEFONO = { level: 1, name: "Instalar Consorcio en Mano en este dispositivo" };
 
   it("con la oferta del navegador, la página habla de esta computadora, también después de tocar el botón", async () => {
     simularNavegador(AGENTE_COMPUTADORA, false, true);
@@ -325,7 +325,7 @@ describe("en una computadora", () => {
     montar("/entrar");
 
     expect(screen.getByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Instalá la aplicación/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Instalar la aplicación/ })).toBeNull();
   });
 
   it("con la oferta aparece el enlace, y dice esta computadora", () => {

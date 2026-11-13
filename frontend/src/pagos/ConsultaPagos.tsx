@@ -95,7 +95,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
       <CabeceraInterna titulo="Consultar pagos" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       {pantalla.tipo === "lista" && consorcio !== "" && (
@@ -124,7 +124,7 @@ function ConsultaDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
               avisar={setAviso}
             />
           )}
-          {lectura.tipo === "ok" && lectura.elementos.length === 0 && <p className="tarjeta">No encontramos pagos.</p>}
+          {lectura.tipo === "ok" && lectura.elementos.length === 0 && <p className="tarjeta">No se encontraron pagos.</p>}
           {lectura.tipo === "ok" && lectura.elementos.length > 0 && (
             <div className="tabla-lista tabla-tarjetas">
               <table aria-label="Pagos">

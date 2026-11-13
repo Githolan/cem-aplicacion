@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from cem_contracts.egresos import AccionPago, EstadoVisible, GrupoPago, PasoPago, SituacionPago
 from cem_contracts.pantalla_pagos import ARCHIVO, EXCEPCIONES_REGLA_3, PantallaPagos, cargar
+from cem_contracts.redaccion import faltas
 
 NEGATIVAS = {
     AccionPago.RETIRAR,
@@ -22,10 +23,6 @@ NEGATIVAS = {
 
 PROHIBIDAS = {"versión", "franja", "huella", "riel", "umbral", "fraccionamiento"}
 """Palabras internas que no se muestran (P-29, informe de fricción §4.4)."""
-
-SEGUNDA_PERSONA = {"vos", "te", "tu", "tus", "ti", "usted", "ustedes", "sos", "tenés", "podés"}
-NO_SON_VOSEO = {"más", "además", "atrás", "jamás", "después", "demás", "detrás", "través"}
-VOSEO = re.compile(r"\b\w+(?:ás|és)\b")
 
 
 def _datos() -> dict:
@@ -187,14 +184,18 @@ def test_regla_5_las_negativas_son_las_que_cierran_y_el_texto_es_impersonal():
         assert set(f.negativas) <= NEGATIVAS, (f.situacion, f.paso)
         assert not set(f.secundarias) & NEGATIVAS, (f.situacion, f.paso)
         palabras = set(re.findall(r"\w+", f.que_decir.lower()))
-        assert not palabras & SEGUNDA_PERSONA, f.que_decir
         assert not palabras & PROHIBIDAS, f.que_decir
-        assert not set(VOSEO.findall(f.que_decir.lower())) - NO_SON_VOSEO, f.que_decir
+        # La regla de redacción de toda la aplicación (pregunta 9), la misma del backend y del
+        # frontend.
+        assert not faltas(f.que_decir), (f.que_decir, faltas(f.que_decir))
 
 
 def test_regla_5_control_el_detector_de_voseo_ve_el_voseo():
-    assert VOSEO.findall("revisá lo que tenés") == ["tenés"]
-    assert set(re.findall(r"\w+", "te toca a vos")) & SEGUNDA_PERSONA
+    assert faltas("revisá lo que tenés") == [
+        "revisá (voseo, tuteo o primera persona)",
+        "tenés (voseo)",
+    ]
+    assert faltas("te toca a vos") == ["te (segunda persona)", "vos (segunda persona)"]
 
 
 def test_nada_se_ofrece_que_no_sea_una_accion():

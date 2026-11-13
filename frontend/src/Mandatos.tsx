@@ -12,7 +12,7 @@ import { useAEntrar } from "./sesionEncima";
 import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
 import { useAlVolverLaRed, useMiPersona } from "./egresos/useConsorcio";
 import { nombreDeFacultad } from "./facultades";
-import { codigoDe, esDeConexion, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { codigoDe, esDeConexion, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
 
@@ -56,7 +56,6 @@ const LARGO_NOMBRE = 200;
 const LARGO_MATRICULA = 100;
 /** Cuánto de la descripción entra en una opción: el ancho de un `<select>` es el de su opción más larga. */
 const LARGO_OPCION = 60;
-const PATRON_SHA256 = "[0-9a-fA-F]{64}";
 /** Un texto con algo más que espacios (la API rechaza el vacío después de recortar). */
 const PATRON_TEXTO = ".*\\S.*";
 
@@ -118,15 +117,15 @@ const recortar = (texto: string) => (texto.length > LARGO_OPCION ? `${texto.slic
 export type Accion = "decision" | "alta" | "baja";
 
 const SIN_PERMISO: Record<Accion, string> = {
-  decision: "No tenés permiso para registrar decisiones en este edificio.",
-  alta: "No tenés permiso para dar este alta. Puede ser que tu mandato no lo incluya o que el alta sea para vos.",
-  baja: "No tenés permiso para dar esta baja. Puede ser que tu mandato no lo incluya.",
+  decision: "Esta cuenta no tiene permiso para registrar decisiones en este edificio.",
+  alta: "El mandato de esta cuenta no incluye dar este alta.",
+  baja: "El mandato de esta cuenta no incluye dar esta baja.",
 };
 
 const NO_ENCONTRADO: Record<Accion, string> = {
-  decision: "No encontramos el edificio o ya no tenés acceso.",
-  alta: "No encontramos el edificio o ya no tenés acceso.",
-  baja: "No encontramos ese mandato en este edificio.",
+  decision: "No se encontró el edificio, o esta cuenta ya no tiene acceso.",
+  alta: "No se encontró el edificio, o esta cuenta ya no tiene acceso.",
+  baja: "No se encontró ese mandato en este edificio.",
 };
 
 /** Los motivos de dominio, por el código del cuerpo uniforme. */
@@ -155,7 +154,6 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
     fecha: "la fecha del acto",
     descripcion: "qué se decidió",
     referencia: "dónde consta",
-    sha256: "la huella del acta",
   },
   alta: {
     tipo: "el tipo de mandato",
@@ -177,14 +175,14 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
 
 /** Qué decir ante el error de un envío, según el estado y el código del cuerpo uniforme. */
 export function mensajeDeError(estado: number, codigo: string | undefined, accion: Accion): string {
-  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
+  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
   if (estado === ESTADO.sinPermiso) return SIN_PERMISO[accion];
   if (estado === ESTADO.noEncontrado) return NO_ENCONTRADO[accion];
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
-    return "El pedido se está procesando. Probá de nuevo en unos segundos.";
-  if (estado === ESTADO.limite) return "Llegaste al límite de pedidos por ahora. Probá más tarde.";
+    return "El pedido se está procesando. Reintentar en unos segundos.";
+  if (estado === ESTADO.limite) return "Se llegó al límite de pedidos por ahora. Reintentar más tarde.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
-    return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
+    return "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.";
   if ((estado === ESTADO.conflicto || estado === ESTADO.invalido) && codigo !== undefined && codigo in POR_CODIGO)
     return POR_CODIGO[codigo] as string;
   if (estado === ESTADO.conflicto) return "Los datos del edificio cambiaron mientras tanto: recargar la página y revisar el formulario.";
@@ -269,8 +267,8 @@ export function presentacion({ veMandatos, veDecisiones, registra, daAltas, daBa
     ...(daBajas ? ["dar de baja un mandato"] : []),
   ];
   return [
-    ...(ve.length > 0 ? [`Acá ves ${ENUMERAR.format(ve)}.`] : []),
-    ...(hace.length > 0 ? [`Podés ${ENUMERAR.format(hace)}.`] : []),
+    ...(ve.length > 0 ? [`Acá están ${ENUMERAR.format(ve)}.`] : []),
+    ...(hace.length > 0 ? [`Esta cuenta puede ${ENUMERAR.format(hace)}.`] : []),
   ].join(" ");
 }
 
@@ -338,7 +336,6 @@ export function Mandatos() {
   const [fechaDecision, setFechaDecision] = useState("");
   const [descripcionDecision, setDescripcionDecision] = useState("");
   const [referencia, setReferencia] = useState("");
-  const [sha256, setSha256] = useState("");
 
   // Formulario de alta.
   const [tipoMandato, setTipoMandato] = useState<TipoMandato>(TIPO_MANDATO_INICIAL);
@@ -521,9 +518,10 @@ export function Mandatos() {
           if (renovarClave(response.status, codigo)) clave.current = null;
           // Un rechazo que nombra campos del formulario se dice junto a cada uno (G-49).
           const nombres = NOMBRES_CAMPO[accion];
-          const marcados = soloDe(erroresDe(error, mensajeDeError(response.status, codigo, accion)), nombres);
+          const mensaje = motivoDeSeparacion(error) ?? mensajeDeError(response.status, codigo, accion);
+          const marcados = soloDe(erroresDe(error, mensaje), nombres);
           setErrores({ accion, campos: marcados });
-          const texto = Object.keys(marcados).length > 0 ? resumenDe(marcados, nombres) : mensajeDeError(response.status, codigo, accion);
+          const texto = Object.keys(marcados).length > 0 ? resumenDe(marcados, nombres) : mensaje;
           setAviso({ texto, ok: false, formulario: accion });
           fallo?.(response.status, codigo);
           return;
@@ -554,7 +552,6 @@ export function Mandatos() {
             fecha: fechaDecision,
             descripcion: descripcionDecision.trim(),
             referencia: referencia.trim(),
-            sha256: sha256.trim() === "" ? null : sha256.trim(),
           },
         }),
       (datos) => {
@@ -563,8 +560,7 @@ export function Mandatos() {
         setFechaDecision("");
         setDescripcionDecision("");
         setReferencia("");
-        setSha256("");
-        const hecho = "Listo: registramos la decisión.";
+        const hecho = "Listo: la decisión quedó registrada.";
         setAviso({ texto: hecho, ok: true });
         setAbierto(null);
         origenDetalle.current = botonDecision.current;
@@ -661,7 +657,7 @@ export function Mandatos() {
         limpiarBaja();
         pedidoDetalle.current += 1;
         setDetalle(null);
-        setAviso({ texto: `Listo: dimos de baja el mandato de ${mandato.nombre}.`, ok: true });
+        setAviso({ texto: `Listo: el mandato de ${mandato.nombre} quedó dado de baja.`, ok: true });
       },
       (estado, codigo) => {
         // Un error cierra la confirmación: el reintento se vuelve a confirmar.
@@ -682,7 +678,7 @@ export function Mandatos() {
    * sigue siendo el «Listo» y dice dónde verlo.
    */
   function falloDetalle(texto: string, hecho: string | null) {
-    setAviso(hecho === null ? { texto, ok: false } : { texto: `${hecho} No pudimos abrir su detalle: buscalo en la lista.`, ok: true });
+    setAviso(hecho === null ? { texto, ok: false } : { texto: `${hecho} No se pudo abrir su detalle: está en la lista.`, ok: true });
   }
 
   function verMandato(mandato: Mandato) {
@@ -710,7 +706,7 @@ export function Mandatos() {
           setDetalle({ tipo: "mandato", datos: data });
           return;
         }
-        if (response.status === ESTADO.sinPermiso) falloDetalle("No tenés permiso para ver ese mandato.", hecho);
+        if (response.status === ESTADO.sinPermiso) falloDetalle("Esta cuenta no tiene permiso para ver ese mandato.", hecho);
         else if (response.status === ESTADO.noEncontrado) {
           falloDetalle("Ese mandato ya no está en este edificio.", hecho);
           setVuelta((v) => v + 1);
@@ -744,7 +740,7 @@ export function Mandatos() {
           setDetalle({ tipo: "decision", datos: data });
           return;
         }
-        if (response.status === ESTADO.sinPermiso) falloDetalle("No tenés permiso para ver esa decisión.", hecho);
+        if (response.status === ESTADO.sinPermiso) falloDetalle("Esta cuenta no tiene permiso para ver esa decisión.", hecho);
         else if (response.status === ESTADO.noEncontrado) {
           falloDetalle("Esa decisión ya no está en este edificio.", hecho);
           setVuelta((v) => v + 1);
@@ -792,7 +788,7 @@ export function Mandatos() {
     ) : null;
   // Hasta tres listas pueden caerse a la vez: cada botón dice de qué sección es.
   const consultarDeNuevo = (seccion: string) => (
-    <button type="button" onClick={reconsultarListas} disabled={enviando} aria-describedby={seccion}>
+    <button className="secundario" type="button" onClick={reconsultarListas} disabled={enviando} aria-describedby={seccion}>
       Consultar de nuevo
     </button>
   );
@@ -807,10 +803,10 @@ export function Mandatos() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
+                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button
+            <button className="secundario"
               type="button"
               onClick={() => {
                 setPantalla({ tipo: "cargando" });
@@ -821,7 +817,7 @@ export function Mandatos() {
             </button>
           </>
         )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {pantalla.tipo === "sin_consorcios" && <p>Esta cuenta todavía no participa de ningún edificio.</p>}
         {avisoEn()}
       </div>
 
@@ -853,6 +849,7 @@ export function Mandatos() {
                 <button
                   type="button"
                   ref={botonAlta}
+                  className={abierto === null && detalle === null ? undefined : "secundario"}
                   aria-expanded={abierto === "alta"}
                   disabled={enviando}
                   onClick={() => setAbierto(abierto === "alta" ? null : "alta")}
@@ -933,30 +930,16 @@ export function Mandatos() {
                 onValor={cambiar(claveDecision, setReferencia, "referencia")}
               />
               <ErrorDeCampo idCampo={`${id}-referencia`} mensaje={errorEn("decision", "referencia")} />
-              <label htmlFor={`${id}-sha256`}>Huella SHA-256 del acta escaneada (opcional)</label>
-              <input
-                id={`${id}-sha256`}
-                {...marcaDe(`${id}-sha256`, errorEn("decision", "sha256"))}
-                type="text"
-                autoComplete="off"
-                pattern={PATRON_SHA256}
-                spellCheck={false}
-                autoCapitalize="none"
-                disabled={enviando}
-                value={sha256}
-                onChange={(e) => cambiar(claveDecision, setSha256, "sha256")(e.target.value)}
-              />
-              <ErrorDeCampo idCampo={`${id}-sha256`} mensaje={errorEn("decision", "sha256")} />
-              <button type="submit" disabled={enviando}>
-                Registrar decisión
-              </button>
+              <div className="acciones">
+                <button type="submit" disabled={enviando}>
+                  Registrar decisión
+                </button>
+                <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
+                  Cancelar
+                </button>
+              </div>
             </form>
             {avisoEn("decision")}
-            <p>
-              <button type="button" className="secundario peligro" onClick={cerrarFormulario} disabled={enviando}>
-                Cancelar
-              </button>
-            </p>
           </section>
           )}
 
@@ -968,13 +951,13 @@ export function Mandatos() {
             {candidatos.tipo === "cargando" && <p>Consultando…</p>}
             {candidatos.tipo === "sin_servicio" && (
               <>
-                <p>No pudimos consultar quiénes pueden recibir un mandato.</p>
+                <p>No se pudo consultar quiénes pueden recibir un mandato.</p>
                 {consultarDeNuevo(`${id}-alta`)}
               </>
             )}
             {candidatos.tipo === "ok" && decisiones.tipo === "sin_servicio" && (
               <>
-                <p>Para dar un alta hace falta elegir la decisión que la respalda, y no pudimos consultarlas.</p>
+                <p>Para dar un alta hace falta elegir la decisión que la respalda, y no se pudieron consultar.</p>
                 {consultarDeNuevo(`${id}-alta`)}
               </>
             )}
@@ -1065,7 +1048,7 @@ export function Mandatos() {
                   <p>
                     {listaDecisiones.length === 0
                       ? "Todavía no hay decisiones registradas: sin una que lo respalde no se puede dar el mandato."
-                      : "Las decisiones de este edificio las registraste vos, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
+                      : "Las decisiones de este edificio las registró esta cuenta, y quien registra una decisión no la usa: el alta la tiene que dar otra persona del Consejo o de la administración."}
                   </p>
                 ) : (
                   <>
@@ -1078,7 +1061,7 @@ export function Mandatos() {
                       disabled={enviando}
                       onChange={(e) => cambiar(claveAlta, setDecisionAlta, "decision_id")(e.target.value)}
                     >
-                      <option value="">Elegí la decisión</option>
+                      <option value="">Elegir la decisión</option>
                       {usables.map((d) => (
                         <option key={d.id} value={d.id}>
                           {recortar(textoDecision(d))}
@@ -1124,7 +1107,7 @@ export function Mandatos() {
             )}
             {avisoEn("alta")}
             <p>
-              <button type="button" className="secundario peligro" onClick={cerrarFormulario} disabled={enviando}>
+              <button type="button" className="secundario" onClick={cerrarFormulario} disabled={enviando}>
                 Cancelar
               </button>
             </p>
@@ -1137,7 +1120,7 @@ export function Mandatos() {
             {mandatos.tipo === "cargando" && <p>Consultando…</p>}
             {mandatos.tipo === "sin_servicio" && (
               <>
-                <p>No pudimos consultar los mandatos.</p>
+                <p>No se pudieron consultar los mandatos.</p>
                 {consultarDeNuevo(`${id}-mandatos`)}
               </>
             )}
@@ -1172,7 +1155,7 @@ export function Mandatos() {
             {decisiones.tipo === "cargando" && <p>Consultando…</p>}
             {decisiones.tipo === "sin_servicio" && (
               <>
-                <p>No pudimos consultar las decisiones.</p>
+                <p>No se pudieron consultar las decisiones.</p>
                 {consultarDeNuevo(`${id}-decisiones`)}
               </>
             )}
@@ -1214,7 +1197,7 @@ export function Mandatos() {
                 <dt>Quién la registró</dt>
                 <dd>
                   {detalle.datos.registrada_por_vos
-                    ? "Vos: no podés usarla para dar de alta ni para remover."
+                    ? "Esta cuenta. Por eso no puede usarla para dar de alta ni para remover."
                     : detalle.datos.del_equipo
                       ? "El equipo de la plataforma."
                       : "Otra persona del edificio."}
@@ -1258,7 +1241,7 @@ export function Mandatos() {
                 <dd>
                   {(() => {
                     const d = listaDecisiones.find((x) => x.id === detalle.datos.decision_id);
-                    return d ? textoDecision(d) : "No figura entre las decisiones que podés ver.";
+                    return d ? textoDecision(d) : "No figura entre las decisiones visibles para esta cuenta.";
                   })()}
                 </dd>
                 <dt>Facultades</dt>
@@ -1293,7 +1276,7 @@ export function Mandatos() {
                     <dd>
                       {(() => {
                         const d = listaDecisiones.find((x) => x.id === detalle.datos.baja_decision_id);
-                        return d ? textoDecision(d) : "No figura entre las decisiones que podés ver.";
+                        return d ? textoDecision(d) : "No figura entre las decisiones visibles para esta cuenta.";
                       })()}
                     </dd>
                   </>
@@ -1356,7 +1339,7 @@ export function Mandatos() {
                         disabled={enviando}
                         onChange={(e) => cambiarBaja(setDecisionBaja, "decision_id")(e.target.value)}
                       >
-                        <option value="">Elegí la asamblea</option>
+                        <option value="">Elegir la asamblea</option>
                         {asambleas.map((d) => (
                           <option key={d.id} value={d.id}>
                             {recortar(textoDecision(d))}
@@ -1396,7 +1379,7 @@ export function Mandatos() {
                       </button>
                     </div>
                   ) : (
-                    <button type="submit" className="peligro" ref={botonBaja} disabled={enviando}>
+                    <button type="submit" className={abierto === null ? "peligro" : "secundario peligro"} ref={botonBaja} disabled={enviando}>
                       Dar de baja
                     </button>
                   )}

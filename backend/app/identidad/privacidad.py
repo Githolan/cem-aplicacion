@@ -66,9 +66,9 @@ FALTA = {
 }
 """Motivos de `privacidad_reautenticacion` (0042) y lo que la persona tiene que hacer."""
 MENSAJE_REAUTENTICACION = (
-    "Para esto tenés que volver a confirmar que sos vos: escribí tu contraseña, entrá de nuevo"
-    " con el enlace del correo si no tenés contraseña, y confirmá con tu aplicación de"
-    " autenticación si la activaste."
+    "Para esto hay que volver a confirmar la identidad: escribir la contraseña (o, sin"
+    " contraseña, entrar de nuevo con el código del correo) y confirmar con el código de la"
+    " aplicación si está activada."
 )
 SESION_INVALIDA = "sesion_invalida"
 """La sesión se revocó o venció entre la identidad de la petición y la función: 401."""
@@ -76,10 +76,11 @@ CODIGO_INCORRECTO = {"sin_codigo", "codigo_usado", "codigo_vencido", "codigo_inc
 CASO_NO_DISPONIBLE = {
     "caso_no_abierto": "El caso ya no espera confirmación.",
     "caso_no_confirmado": "El caso no está confirmado o ya se resolvió.",
-    "derecho_no_acceso": "Ese caso no es un pedido de copia de tus datos.",
-    "copia_no_entregada": "Primero descargá la copia.",
+    "derecho_no_acceso": "Ese caso no es un pedido de copia de los datos de esta cuenta.",
+    "copia_no_entregada": "Primero hay que descargar la copia.",
     "requiere_corroboracion": (
-        "Falta que la administración o el Consejo corroboren el pedido: el equipo te va a escribir."
+        "Falta que la administración o el Consejo corroboren el pedido: el equipo va a escribir "
+        "al correo de la cuenta."
     ),
 }
 
@@ -126,7 +127,9 @@ def _traducir(e: DBAPIError, persona_id: UUID, caso_id: UUID) -> ErrorApi | None
     if motivo == "caso_inexistente":
         return ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
     if motivo == SESION_INVALIDA:
-        return ErrorApi(401, CodigoError.NO_AUTENTICADO, "Tu sesión terminó: entrá de nuevo.")
+        return ErrorApi(
+            401, CodigoError.NO_AUTENTICADO, "La sesión terminó: hay que entrar de nuevo."
+        )
     if motivo in FALTA:
         log.info("caso de privacidad rechazado", extra={"campos": campos})
         return ErrorApi(
@@ -140,7 +143,7 @@ def _traducir(e: DBAPIError, persona_id: UUID, caso_id: UUID) -> ErrorApi | None
         return ErrorApi(
             400,
             CodigoError.CODIGO_CASO_INVALIDO,
-            "El código no sirve: revisá que sea el último que te llegó y que no haya vencido.",
+            "El código no sirve: tiene que ser el último que llegó por correo y no haber vencido.",
         )
     if motivo in CASO_NO_DISPONIBLE:
         log.info("caso de privacidad rechazado", extra={"campos": campos})
@@ -260,7 +263,7 @@ async def copia(
     "/casos/{caso_id}/recibida",
     status_code=204,
     response_class=Response,
-    summary="Avisar que guardé la copia: el caso queda resuelto",
+    summary="Avisar que la copia quedó guardada: el caso queda resuelto",
     responses={
         404: {"model": Error, "description": "No hay un caso así de esta persona."},
         409: {"model": Error, "description": "El caso no es de copia o la copia no se entregó."},

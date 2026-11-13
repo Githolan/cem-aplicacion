@@ -31,8 +31,7 @@ import type { ActoEnCurso } from "./useActo";
 
 // Preparar una orden o guardar una versión nueva: el proveedor se elige de la lista, nunca se
 // escribe a mano. Con la orden abierta (`modificar`), el formulario sigue a la versión que muestra
-// la ficha: si otra persona la cambió, lo que se escribió queda sobre la versión nueva y lo que se
-// confirmó se vuelve a confirmar.
+// la ficha: si otra persona la cambió, lo que se escribió queda sobre la versión nueva.
 //
 // Arriba, la factura (0088): elegir el archivo la sube, el antivirus la revisa y la IA lee importe,
 // moneda, número, concepto y el CUIT del proveedor. Lo que completa la lectura queda marcado hasta que
@@ -50,6 +49,8 @@ type Version = components["schemas"]["VersionOrdenPago"];
 type OrdenParecida = components["schemas"]["OrdenParecida"];
 
 export const MONEDAS = ["ARS", "USD"] as const;
+/** Lo que ve la persona al elegir la moneda de una orden (P-14): el código queda para el servidor. */
+const NOMBRE_MONEDA: Record<(typeof MONEDAS)[number], string> = { ARS: "Pesos", USD: "Dólares" };
 /** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
 const SE_CORRIGE_EN_EL_FORMULARIO = new Set(["sin_cambios", "proveedor_inactivo"]);
 
@@ -170,7 +171,6 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const [vuelta, setVuelta] = useState(0);
   const [datos, setDatos] = useState<Datos | null>(null);
-  const [confirmar, setConfirmar] = useState(false);
   /** Otra orden parecida, encontrada al guardar (decisión 4 del 13-11-2026): se avisa y no bloquea. */
   const [parecida, setParecida] = useState<OrdenParecida | null>(null);
   /** Los datos con los que se eligió «Guardar igual»: con otros, se vuelve a mirar. */
@@ -257,12 +257,11 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     const nuevos = datosDe(versionVista, lectura.contratos);
     const antes = vistos.current;
     vistos.current = nuevos;
-    setConfirmar(false);
     setDatos((d) => (d === null || antes === null ? nuevos : sobreLoNuevo(d, antes, nuevos)));
     // La factura sigue a la versión, salvo que la persona haya subido otra.
     if (!facturaTocada.current) setFactura(versionVista.factura_version_id ?? null);
     if (antes === null && versionVista.contrato_id !== null && nuevos.contrato === "")
-      setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Si guardás, pide aprobación.", ok: false });
+      setAviso({ texto: "El contrato de esta orden ya no rige: se quitó del formulario. Al guardar, pide aprobación.", ok: false });
   }, [lectura, versionVista, inicial, setAviso]);
 
   function revisado(campo: Campo) {
@@ -276,7 +275,6 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
 
   function cargarFactura(cargada: Cargado | null) {
     facturaTocada.current = true;
-    setConfirmar(false);
     // Mientras el archivo nuevo no pasa el antivirus, no hay factura que mandar.
     setFactura(cargada?.version ?? null);
   }
@@ -284,7 +282,6 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   function leerFactura(l: LecturaCarga) {
     if (lectura.tipo !== "ok") return;
     const leidos = camposLeidos(l, lectura.proveedores);
-    setConfirmar(false);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, ...leidos };
@@ -302,7 +299,6 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     revisado(campo);
-    setConfirmar(false);
     setParecida(null);
     setDatos((d) => {
       if (d === null) return d;
@@ -318,11 +314,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     if (datos === null || facturaEnEspera) return;
     const centavos = aCentavos(datos.importe);
     if (centavos === null) {
-      setAviso({ texto: "Escribí el importe en pesos, por ejemplo 12345,50.", ok: false });
-      return;
-    }
-    if (modificar?.pierdeAprobaciones === true && !confirmar) {
-      setConfirmar(true);
+      setAviso({ texto: "Hay que escribir el importe en pesos, por ejemplo 12345,50.", ok: false });
       return;
     }
     // Antes de guardar, si no es rutinaria (sin contrato ni abono), se mira si hay otra parecida.
@@ -359,7 +351,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
             });
       },
       alTerminar: (data) => {
-        if (modificar !== undefined) alGuardar(data.id, "Listo: guardamos la versión nueva.");
+        if (modificar !== undefined) alGuardar(data.id, "Listo: los cambios quedaron guardados.");
         else if (destino.current === "borrador") alGuardar(data.id, "Listo: la orden quedó en borrador.");
         else {
           alCrear?.(data.id);
@@ -387,7 +379,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data === undefined) {
-          setAviso({ texto: mensajeDeActo(response.status, codigoDe(error)), ok: false });
+          setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
           return;
         }
         if (data.parecida !== null) {
@@ -425,7 +417,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           )
           .finally(() => acto.setEnviando(false));
       },
-      alFallar: (estado, codigo) => alGuardar(nueva.id, noSeEnvio(mensajeDeActo(estado, codigo)), true),
+      alFallar: (estado, _codigo, error) => alGuardar(nueva.id, noSeEnvio(mensajeDeActo(estado, error)), true),
       alNoLlegar: () => alGuardar(nueva.id, noSeEnvio(SIN_CONEXION), true),
     });
   }
@@ -447,13 +439,14 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <p className="tarjeta">
         Para preparar una orden hace falta un proveedor activo:{" "}
         <Link to={RUTA_PROVEEDORES} state={{ consorcio, paraPreparar: true }}>
-          cargalo en Proveedores
+          cargarlo en Proveedores
         </Link>
         .
       </p>
     );
   if (datos === null) return null;
 
+  const aplicables = contratosAplicables(lectura.contratos, datos.proveedor, datos.moneda);
   const marca = (campo: Campo) => (deLaLectura.has(campo) ? <MarcaDeLectura alRevisar={() => revisado(campo)} /> : null);
   const facturaVisible: Cargado | undefined = subida ?? inicial?.factura ?? facturaDeLaVersion ?? undefined;
   const alAlta = sinProveedor === null ? null : {
@@ -468,6 +461,8 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   return (
     <form ref={formulario} className="formulario tarjeta" onSubmit={guardar} aria-labelledby={`${id}-form`}>
       <h2 id={`${id}-form`}>{modificar === undefined ? "Preparar una orden" : "Modificar la orden"}</h2>
+      {/* Se avisa al abrir, no después de completar todo (P-32). */}
+      {modificar?.pierdeAprobaciones === true && <p className="aviso-info" role="note">{AVISO_MODIFICAR}</p>}
       <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
         deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
         alCargar={(c) => {
@@ -509,26 +504,31 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <select id={`${id}-moneda`} value={datos.moneda} disabled={enviando} onChange={(e) => cambiar("moneda", e.target.value)}>
         {MONEDAS.map((m) => (
           <option key={m} value={m}>
-            {m}
+            {NOMBRE_MONEDA[m]}
           </option>
         ))}
       </select>
       {marca("moneda")}
-      <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
-      <select id={`${id}-contrato`} value={datos.contrato} disabled={enviando}
-        onChange={(e) => cambiar("contrato", e.target.value)}>
-        <option value="">Ninguno: no es un gasto rutinario</option>
-        {contratosAplicables(lectura.contratos, datos.proveedor, datos.moneda).map((k) => (
-          <option key={k.id} value={k.id}>
-            {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
-          </option>
-        ))}
-      </select>
+      {/* Solo si el proveedor elegido tiene un contrato vigente en esa moneda (P-14). */}
+      {aplicables.length > 0 && (
+        <>
+          <label htmlFor={`${id}-contrato`}>Contrato o abono (opcional)</label>
+          <select id={`${id}-contrato`} value={datos.contrato} disabled={enviando}
+            onChange={(e) => cambiar("contrato", e.target.value)}>
+            <option value="">Ninguno</option>
+            {aplicables.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.alcance} (hasta {importe(k.importe_maximo_centavos, k.moneda)})
+              </option>
+            ))}
+          </select>
+        </>
+      )}
       <label htmlFor={`${id}-concepto`}>Concepto</label>
       <input id={`${id}-concepto`} required maxLength={300} value={datos.concepto} disabled={enviando}
         onChange={(e) => cambiar("concepto", e.target.value)} />
       {marca("concepto")}
-      <label htmlFor={`${id}-comprobante`}>Comprobante (opcional)</label>
+      <label htmlFor={`${id}-comprobante`}>Número de la factura (opcional)</label>
       <input id={`${id}-comprobante`} maxLength={200} value={datos.comprobante} disabled={enviando}
         onChange={(e) => cambiar("comprobante", e.target.value)} />
       {marca("comprobante")}
@@ -537,11 +537,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
           onChange={(e) => cambiar("reserva", e.target.checked)} />{" "}
         Usa el fondo de reserva (siempre lo aprueba el Consejo)
       </label>
-      {confirmar && (
-        <p className="aviso-error" role="alert">
-          {AVISO_MODIFICAR}
-        </p>
-      )}
+      <p>Tildar solo si este gasto se paga con el fondo de reserva.</p>
       {parecida !== null && (
         <div className="aviso-info" role="alert">
           <p>{textoParecidaAntes(fechaCorta(parecida.creada_en))}</p>
@@ -567,7 +563,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
       <div className="acciones">
         <button type="submit" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
           aria-describedby={facturaEnEspera ? `${id}-espera` : undefined} onClick={() => (destino.current = "enviar")}>
-          {modificar === undefined ? "Guardar y enviar a aprobar" : confirmar ? "Sí, crear la versión nueva" : "Guardar la orden"}
+          {modificar === undefined ? "Guardar y enviar a aprobar" : modificar.pierdeAprobaciones ? "Guardar y enviar a aprobar de nuevo" : "Guardar la orden"}
         </button>
         {modificar === undefined && (
           <button type="submit" className="secundario" disabled={enviando || datos.proveedor === "" || facturaEnEspera}
@@ -575,7 +571,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
             Guardar como borrador
           </button>
         )}
-        <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
+        <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
           Cancelar
         </button>
       </div>

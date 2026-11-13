@@ -164,7 +164,7 @@ def test_el_alta_entrega_codigos_verifica_y_avisa(app, motor_migrate):  # noqa: 
     c, _, alta, correo = con_llave(app, motor_migrate)
     assert len(alta["codigos_recuperacion"]) == sf.CANTIDAD_RECUPERACION
     assert verificada(motor_migrate, correo)
-    assert "Agregaste una llave de acceso" in avisos(motor_migrate, correo)
+    assert "Se agregó una llave de acceso" in avisos(motor_migrate, correo)
     llaves = c.get(BASE).json()
     assert [k["nombre"] for k in llaves] == ["Mi PC"]
     assert c.get(BASE_TOTP).json()["codigos_recuperacion_restantes"] == sf.CANTIDAD_RECUPERACION
@@ -374,7 +374,7 @@ def test_quitar_la_ultima_borra_los_codigos(app, motor_migrate):  # noqa: F811
     assert c.get(BASE).json() == []
     assert c.get(BASE_TOTP).json()["codigos_recuperacion_restantes"] == 0
     assert not verificada(motor_migrate, correo)
-    assert "Quitaste una llave de acceso" in avisos(motor_migrate, correo)
+    assert "Se quitó una llave de acceso" in avisos(motor_migrate, correo)
 
 
 def test_quitar_una_de_dos_conserva_los_codigos(app, motor_migrate):  # noqa: F811

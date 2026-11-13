@@ -61,7 +61,7 @@ export function EntrarConCodigo({ correo, alCambiarCorreo, aviso, alEntrar }: Pr
       .then(({ error, response }) => {
         if (error === undefined) {
           recordarFormaDeEntrar("correo");
-          terminarEntrada("Entraste.");
+          terminarEntrada("Listo: sesión abierta.");
         }
         else if (response.status === ESTADO_RECHAZADO) setEstado("rechazado");
         else if (response.status === ESTADO_DEMASIADOS) setEstado("demasiados");

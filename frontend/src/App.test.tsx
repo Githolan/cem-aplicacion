@@ -28,7 +28,7 @@ const SESION = {
   vence_en: "2026-11-13T00:00:00Z",
 };
 
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "El consorcio, en la mano" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const RUTA_SESION = "/api/v1/auth/sesion";
 
@@ -201,13 +201,13 @@ describe("cabecera", () => {
     fireEvent.click(marca);
 
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "No encontramos esa página" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "No se encontró esa página" })).toBeNull();
   });
 });
 
 describe("inicio sin edificios", () => {
-  const SIN_EDIFICIO = /^Todavía no participás de ningún edificio\./;
-  const PARA_SUMARTE = /Para sumarte, abrí el enlace de la invitación que te llegó por correo\./;
+  const SIN_EDIFICIO = /^Esta cuenta todavía no participa de ningún edificio\./;
+  const PARA_SUMARTE = /Para sumarse hay que abrir el enlace de la invitación que llegó por correo\./;
 
   it("dice por qué no hay secciones y cómo sumarse", async () => {
     vi.stubGlobal("fetch", backend());
@@ -253,7 +253,7 @@ describe("rutas", () => {
 
     montar("/no-existe");
 
-    expect(screen.getByRole("heading", { name: "No encontramos esa página" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "No se encontró esa página" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Volver al inicio" }).getAttribute("href")).toBe("/");
     expect(pedido).not.toHaveBeenCalled();
   });
@@ -284,7 +284,7 @@ describe("versión nueva (documento 13, §14.4)", () => {
 
     expect(actualizar).toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Actualizando la aplicación" })).toBeTruthy();
-    expect(screen.queryByText("No encontramos esa página")).toBeNull();
+    expect(screen.queryByText("No se encontró esa página")).toBeNull();
     expect(pedido).not.toHaveBeenCalled();
     const resultado = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(resultado.violations).toEqual([]);
@@ -296,7 +296,7 @@ describe("versión nueva (documento 13, §14.4)", () => {
 
     montar("/no-existe", { hayVersionNueva: false, actualizar });
 
-    expect(screen.getByRole("heading", { name: "No encontramos esa página" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "No se encontró esa página" })).toBeTruthy();
     expect(actualizar).not.toHaveBeenCalled();
   });
 

@@ -138,11 +138,11 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
             data.sesiones_cerradas === 0
               ? ""
               : data.sesiones_cerradas === 1
-                ? " Cerramos 1 sesión en otro dispositivo."
-                : ` Cerramos ${data.sesiones_cerradas} sesiones en otros dispositivos.`;
+                ? " Se cerró 1 sesión en otro dispositivo."
+                : ` Se cerraron ${data.sesiones_cerradas} sesiones en otros dispositivos.`;
           setAviso({
             tipo: "ok",
-            texto: `${estado.definida ? "Listo: cambiaste tu contraseña." : "Listo: definiste tu contraseña."}${cerradas} Te avisamos por correo.`,
+            texto: `${estado.definida ? "Listo: la contraseña quedó cambiada." : "Listo: la contraseña quedó definida."}${cerradas} Llega un aviso por correo.`,
           });
           alGuardar(data);
           return;
@@ -161,9 +161,9 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         // La primera contraseña pide una entrada reciente: lo resuelve la hoja, y lo escrito queda.
         else if (codigo === CODIGO_ENTRAR_DE_NUEVO) setAviso(null);
         else if (codigo === CODIGO_CSRF)
-          setAviso({ tipo: "error", texto: "No pudimos verificar el pedido. Recargá la página y probá de nuevo." });
+          setAviso({ tipo: "error", texto: "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso." });
         else if (response.status === ESTADO_DEMASIADOS)
-          setAviso({ tipo: "error", texto: "Hubo demasiados intentos. Esperá un rato y probá de nuevo." });
+          setAviso({ tipo: "error", texto: "Hubo demasiados intentos. Reintentar en un rato." });
         else setAviso({ tipo: "error", texto: mensajeDeFalla(response.status, codigo) });
       })
       .catch(() => setAviso({ tipo: "error", texto: SIN_CONEXION }))
@@ -177,7 +177,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   if (pidiendoCodigo)
     return (
       <PedirCodigo
-        acto="guardar tu contraseña"
+        acto="guardar la contraseña"
         alVerificar={() => {
           setPidiendoCodigo(false);
           enviar();
@@ -192,9 +192,9 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
       <p>
         {estado.definida
           ? estado.cambiada_en
-            ? `Tenés una contraseña. La cambiaste por última vez el ${fecha(estado.cambiada_en)}.`
-            : "Tenés una contraseña."
-          : "Todavía no tenés contraseña: entrás con el enlace o el código que te mandamos por correo."}
+            ? `Contraseña definida. Último cambio: ${fecha(estado.cambiada_en)}.`
+            : "Contraseña definida."
+          : "Sin contraseña todavía: se entra con el código o el enlace que llega por correo."}
       </p>
       {!abierto && (
         <button type="button" className="secundario" ref={botonAbrir} aria-expanded={false} aria-controls={`${id}-formulario`} onClick={abrir}>
@@ -202,7 +202,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
         </button>
       )}
       {abierto && estado.definida && (
-        <p>Al cambiarla cerramos las sesiones de tus otros dispositivos.</p>
+        <p>Al cambiarla se cierran las sesiones de los otros dispositivos.</p>
       )}
       {abierto && (
       <form id={`${id}-formulario`} className="formulario" onSubmit={guardar} noValidate>
@@ -236,7 +236,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           onChange={(e) => setNueva(e.target.value)}
         />
         <p id={ayuda}>
-          Al menos {LARGO_MINIMO_CONTRASENA} caracteres, y que no sea tu correo. Una frase de
+          Al menos {LARGO_MINIMO_CONTRASENA} caracteres, y que no sea el correo de la cuenta. Una frase de
           varias palabras sirve.
         </p>
         {corta && (
@@ -244,7 +244,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
             Le faltan caracteres: tiene que tener al menos {LARGO_MINIMO_CONTRASENA}.
           </p>
         )}
-        <label htmlFor={`${id}-repetida`}>Repetí la contraseña</label>
+        <label htmlFor={`${id}-repetida`}>Repetir la contraseña</label>
         <CampoContrasena
           id={`${id}-repetida`}
           autoComplete="new-password"
@@ -264,7 +264,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
           <button type="submit" disabled={enviando}>
             {estado.definida ? "Guardar la contraseña nueva" : "Guardar la contraseña"}
           </button>
-          <button type="button" className="secundario peligro" disabled={enviando} onClick={cerrar}>
+          <button type="button" className="secundario" disabled={enviando} onClick={cerrar}>
             Cancelar
           </button>
         </div>
