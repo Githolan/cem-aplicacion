@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { useAvisoAlSalir } from "./avisoAlSalir";
 import { llaveDisponible, registrarLlave } from "./llaveAcceso";
 
 // Activar la llave de acceso ahí mismo, sin ir a otra pantalla (informe de fricción, AC-21 en Mi
@@ -25,6 +26,7 @@ interface Props {
 export function ActivarLlave({ alActivar, alOcupar, secundario = false }: Props) {
   const [enviando, setEnviando] = useState(false);
   const [falla, setFalla] = useState<string | null>(null);
+  useAvisoAlSalir(enviando);
 
   if (!llaveDisponible()) return null;
 

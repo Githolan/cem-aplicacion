@@ -464,6 +464,44 @@ describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no s
     expect(alCancelar).not.toHaveBeenCalled();
   });
 
+  it("con el alta en camino no queda el enlace a la página del segundo factor; si falla, vuelve", async () => {
+    vi.stubGlobal("PublicKeyCredential", class {});
+    let rechazar: () => void = () => undefined;
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: () =>
+          new Promise((_, no) => {
+            rechazar = () => no(new DOMException("no", "NotAllowedError"));
+          }),
+      },
+    });
+    backend({
+      "GET /api/v1/auth/totp": estadoTotp(false, 0),
+      "POST /api/v1/auth/llave/alta/opciones": () =>
+        Response.json({ opciones: { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } } }),
+    });
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={() => undefined} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("link", { name: "la página del segundo factor" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Activar con PIN, huella o cara" }));
+    await waitFor(() => expect(screen.queryByRole("link", { name: "la página del segundo factor" })).toBeNull());
+    // Cerrar la pestaña también pregunta antes.
+    const salida = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(salida);
+    expect(salida.defaultPrevented).toBe(true);
+
+    rechazar();
+    expect(await screen.findByRole("link", { name: "la página del segundo factor" })).toBeTruthy();
+    const otra = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(otra);
+    expect(otra.defaultPrevented).toBe(false);
+  });
+
   it("control: si el alta falla, Cancelar vuelve a funcionar", async () => {
     vi.stubGlobal("PublicKeyCredential", class {});
     Object.defineProperty(navigator, "credentials", {

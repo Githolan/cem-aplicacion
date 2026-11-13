@@ -997,3 +997,105 @@ describe("informe de fricción, tanda 7", () => {
     expect(screen.queryByText(/Para tener otros/)).toBeNull();
   });
 });
+
+describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de la página", () => {
+  /** Una respuesta que llega cuando la prueba la suelta. */
+  function enEspera(respuesta: () => Response) {
+    let soltar: () => void = () => undefined;
+    const promesa = new Promise<Response>((resolver) => {
+      soltar = () => resolver(respuesta());
+    });
+    return { responder: () => promesa as unknown as Response, soltar };
+  }
+
+  async function sinSalidaHastaGuardar(container: HTMLElement) {
+    const hoja = await screen.findByRole("dialog", { name: "Guardar los códigos de recuperación" });
+    expect(container.inert).toBe(true);
+    // La marca de la cabecera (lleva al inicio) queda inerte, y Escape no cierra la hoja.
+    expect(container.contains(screen.getByRole("link", { name: "Consorcio en Mano", hidden: true }))).toBe(true);
+    fireEvent.keyDown(hoja, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Guardar los códigos de recuperación" })).toBeTruthy();
+    // Cerrar la pestaña o recargar pregunta antes; después de guardarlos, ya no.
+    const salida = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(salida);
+    expect(salida.defaultPrevented).toBe(true);
+    fireEvent.click(within(hoja).getByRole("button", { name: "Ya los guardé" }));
+    expect(await screen.findByRole("heading", MI_CUENTA)).toBeTruthy();
+    const despues = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(despues);
+    expect(despues.defaultPrevented).toBe(false);
+  }
+
+  it("llave: desde que empieza el alta, ni volver ni el resto de la aplicación; después, los códigos en una hoja", async () => {
+    conLlaves();
+    const alta = enEspera(() => Response.json({ id: LLAVE.id, codigos_recuperacion: CODIGOS }, { status: 201 }));
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json({ ...INACTIVO, llaves: 0 }),
+        "GET /api/v1/auth/llave": () => Response.json([]),
+        ...altaDeLlave(CODIGOS),
+        "POST /api/v1/auth/llave/alta": alta.responder,
+        ...LECTURAS_DE_CUENTA,
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
+    expect(container.inert).toBe(true);
+    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+
+    alta.soltar();
+    await sinSalidaHastaGuardar(container);
+  });
+
+  it("aplicación: con el primer código en camino, ni volver ni el resto de la aplicación; después, los códigos en una hoja", async () => {
+    const confirmacion = enEspera(() => Response.json({ codigos: CODIGOS }));
+    let activo = false;
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(activo ? ACTIVO : INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => {
+          activo = true;
+          return confirmacion.responder();
+        },
+        ...LECTURAS_DE_CUENTA,
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
+    expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
+    expect(container.inert).toBe(true);
+    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+
+    confirmacion.soltar();
+    await sinSalidaHastaGuardar(container);
+  });
+
+  it("control: si el primer código no sirve, vuelve la cabecera y la página se puede dejar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        "GET /api/v1/auth/totp": () => Response.json(INACTIVO),
+        "POST /api/v1/auth/totp/alta": () => Response.json({ secreto: SECRETO, uri: URI }),
+        "POST /api/v1/auth/totp/confirmar": () => error("segundo_factor_invalido", 400),
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar el segundo factor" }));
+    await screen.findByLabelText("Código de la aplicación");
+    escribirCodigo("Código de la aplicación", "042917");
+    fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
+    expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
+    expect(container.inert).toBe(false);
+    expect(screen.getByRole("link", { name: "Volver a Mi cuenta" })).toBeTruthy();
+  });
+});

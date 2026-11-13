@@ -87,8 +87,10 @@ async function primerMetodo(activos: Activos): Promise<MetodoConfirmar | null> {
 }
 
 /** Sin ningún método no hay nada que pedir: el camino es darlo de alta, acá mismo si se puede. */
-function SinAlta({ conLlave }: { conLlave: boolean }) {
+function SinAlta({ conLlave, activando }: { conLlave: boolean; activando: boolean }) {
   const { pathname } = useLocation();
+  // Con el alta de la llave en camino, el enlace no está: irse perdería los códigos (revisión de #237).
+  if (activando) return null;
   return conLlave ? (
     <p>
       Otras opciones:{" "}
@@ -321,7 +323,7 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
           alOcupar={setActivando}
           alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos }))}
         />
-        <SinAlta conLlave={conLlave} />
+        <SinAlta conLlave={conLlave} activando={activando} />
         <div className="formulario">
           <div className="acciones">
             <button type="button" className="secundario peligro" disabled={activando} onClick={alCancelar}>

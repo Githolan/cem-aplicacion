@@ -38,9 +38,12 @@ interface Props {
   alCodigos: (codigos: string[]) => void;
   /** Terminó la acción: la página sigue a la pantalla siguiente con este aviso. */
   alTerminar: (aviso: string) => void;
+  /** Empieza (true) o termina (false) el alta de una llave: con ella en camino, la página no deja
+   * salir, porque los códigos de recuperación llegan una sola vez (revisión de #237). */
+  alOcupar?: (ocupado: boolean) => void;
 }
 
-export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
+export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Props) {
   const id = useId();
   const [llaves, setLlaves] = useState<Llave[] | null>(null);
   const [fallaConsulta, setFallaConsulta] = useState<string | null>(null);
@@ -72,14 +75,17 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   if (!llaveDisponible()) return null;
 
   /** Corre un pedido; si falta confirmar, lo deja pendiente hasta que la persona confirme. */
-  function intentar<T>(pedido: () => Promise<Resultado<T>>, alListo: (valor: T) => void) {
+  function intentar<T>(pedido: () => Promise<Resultado<T>>, alListo: (valor: T) => void, alta = false) {
     setEnviando(true);
     setAviso(null);
     setListo(null);
+    if (alta) alOcupar?.(true);
     void pedido()
       .then((r) => {
+        // En el mismo paso: la página deja de esperar y ya tiene los códigos a la vista.
+        if (alta) alOcupar?.(false);
         if (r.ok) alListo(r.valor);
-        else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo));
+        else if (r.faltaConfirmar) setPendiente(() => () => intentar(pedido, alListo, alta));
         else if (r.yaEstaAca !== true || !reconocerEste()) setAviso(r.mensaje);
       })
       .finally(() => setEnviando(false));
@@ -94,10 +100,14 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar }: Props) {
   }
 
   function activar() {
-    intentar(registrarLlave, (nuevos) => {
-      if (nuevos !== null) alCodigos(nuevos);
-      else alTerminar("Listo: tu llave quedó activada.");
-    });
+    intentar(
+      registrarLlave,
+      (nuevos) => {
+        if (nuevos !== null) alCodigos(nuevos);
+        else alTerminar("Listo: tu llave quedó activada.");
+      },
+      true,
+    );
   }
 
   function quitar(llave: Llave) {

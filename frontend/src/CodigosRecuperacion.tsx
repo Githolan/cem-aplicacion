@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { useAvisoAlSalir } from "./avisoAlSalir";
+
 // Los códigos de recuperación, que se muestran una sola vez (TB-CEM-3): la lista, copiarlos y
 // guardarlos como archivo (informe de fricción, AC-18: en un teléfono, anotar diez códigos a mano
 // invita a tocar «Ya los guardé» sin guardarlos). Quien los muestra no los suelta hasta «Ya los
@@ -36,6 +38,7 @@ interface Props {
 
 export function CodigosRecuperacion({ codigos, medio, alGuardar }: Props) {
   const [resultado, setResultado] = useState<Resultado>(null);
+  useAvisoAlSalir(true);
 
   function copiar() {
     setResultado(null);

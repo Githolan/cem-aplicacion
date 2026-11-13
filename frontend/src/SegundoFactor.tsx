@@ -6,6 +6,7 @@ import type { components } from "./api/tipos";
 import { CabeceraInterna } from "./CabeceraInterna";
 import { CodigoQr } from "./CodigoQr";
 import { CodigosRecuperacion } from "./CodigosRecuperacion";
+import { useAvisoAlSalir } from "./avisoAlSalir";
 import { borrarCopias } from "./copiaContactos";
 import { RUTA_CUENTA } from "./Cuenta";
 import { encabezadoCsrf } from "./csrf";
@@ -131,6 +132,11 @@ export function SegundoFactor() {
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [pendiente, setPendiente] = useState<Pendiente | null>(null);
   const [confirmarBaja, setConfirmarBaja] = useState(false);
+  // Un alta en camino (llave o aplicación): su respuesta trae los códigos de recuperación, que llegan
+  // una sola vez. Hasta que se muestran y la persona dice que los guardó, no se puede salir de la
+  // página (revisión de #237).
+  const [altaEnCurso, setAltaEnCurso] = useState(false);
+  useAvisoAlSalir(altaEnCurso);
   const consultado = useRef(false);
 
   /** Cambia de pantalla, salvo que estén a la vista códigos que no se pueden volver a mostrar. */
@@ -229,9 +235,11 @@ export function SegundoFactor() {
     }
     setEnviando(true);
     setAviso(null);
+    setAltaEnCurso(true);
     void api
       .POST("/api/v1/auth/totp/confirmar", { body: { codigo: limpio }, headers: encabezadoCsrf() })
       .then(({ data, error, response }) => {
+        setAltaEnCurso(false);
         if (data !== undefined) {
           setCodigo("");
           setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
@@ -240,7 +248,10 @@ export function SegundoFactor() {
           setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
         } else rechazar(response.status, error);
       })
-      .catch(() => setAviso(fallo(SIN_CONEXION)))
+      .catch(() => {
+        setAltaEnCurso(false);
+        setAviso(fallo(SIN_CONEXION));
+      })
       .finally(() => setEnviando(false));
   }
 
@@ -270,32 +281,46 @@ export function SegundoFactor() {
   // La llave ya se ofrece arriba como la acción principal: la aplicación queda como otra opción.
   const llaveArriba = llaveDisponible();
 
-  // Sin cabecera de volver: los códigos no se sueltan hasta «Ya los guardé».
+  // Los códigos no se sueltan hasta «Ya los guardé»: van en una hoja que deja inerte el resto de la
+  // aplicación (la marca de la cabecera, el aviso de versión nueva) y no se cierra con Escape.
   if (pantalla.tipo === "codigos")
     return (
       <>
         <h1>Segundo factor</h1>
-        <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-          <h2 id={`${id}-titulo`}>Guardar los códigos de recuperación</h2>
+        <Hoja titulo="Guardar los códigos de recuperación">
           <p className="aviso-ok">{ACTIVADO[pantalla.medio]}</p>
           <CodigosRecuperacion
             codigos={pantalla.codigos}
             medio={pantalla.medio}
             alGuardar={() => setPantalla({ tipo: "terminado", aviso: ACTIVADO[pantalla.medio] })}
           />
-        </section>
+        </Hoja>
       </>
     );
 
   return (
     <>
-      <CabeceraInterna
-        titulo="Segundo factor"
-        volver={volver ?? RUTA_CUENTA}
-        destino={volver === null ? "Mi cuenta" : "la pantalla anterior"}
-      />
+      {altaEnCurso ? (
+        <h1>Segundo factor</h1>
+      ) : (
+        <CabeceraInterna
+          titulo="Segundo factor"
+          volver={volver ?? RUTA_CUENTA}
+          destino={volver === null ? "Mi cuenta" : "la pantalla anterior"}
+        />
+      )}
+      {altaEnCurso && (
+        <Hoja titulo="Activando">
+          <p role="status">Esperando la respuesta. Los códigos de recuperación aparecen acá.</p>
+        </Hoja>
+      )}
       {["inactivo", "alta", "activo"].includes(pantalla.tipo) && (
-        <SeccionLlave alCambiar={consultar} alCodigos={mostrarCodigosDeLlave} alTerminar={terminar} />
+        <SeccionLlave
+          alCambiar={consultar}
+          alCodigos={mostrarCodigosDeLlave}
+          alTerminar={terminar}
+          alOcupar={setAltaEnCurso}
+        />
       )}
 
       {pendiente !== null && (
