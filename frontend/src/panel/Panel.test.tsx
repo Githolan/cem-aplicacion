@@ -8,9 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
-import { gastoPorMes, gastoPorRubro, mesesConPagos, type Panel, SIN_RUBRO } from "./datos";
+import { nombreDeFacultad } from "../facultades";
+import { faltantesPorEstado, gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
 
-// Panel del Consejo (app 0094). Datos ficticios: ningún proveedor ni importe real.
+// Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
+// proveedor ni importe real.
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -106,7 +108,7 @@ describe("datos del panel", () => {
   });
 });
 
-describe("panel del Consejo", () => {
+describe("resumen de pagos del edificio", () => {
   it("muestra cada gráfico con su base, su tabla y los enlaces a los registros", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS) }));
     const { container } = abrir();
@@ -120,7 +122,10 @@ describe("panel del Consejo", () => {
       expect.stringMatching(/^Esperando aprobación1 orden, \$\s?500,00$/),
       expect.stringMatching(/^Pagada3 órdenes, \$\s?3\.000,00$/),
     ]);
-    expect(within(estados).getByRole("link", { name: "Consultar los pagos" }).getAttribute("href")).toBe("/pagos/consulta");
+    // Un solo enlace a los pagos, arriba, y no uno al pie de cada gráfico (AC-44).
+    const enlaces = screen.getAllByRole("link", { name: "Consultar los pagos" });
+    expect(enlaces).toHaveLength(1);
+    expect(enlaces[0]!.getAttribute("href")).toBe("/pagos/consulta");
 
     const porMes = screen.getByRole("region", { name: "Gasto pagado por mes" });
     expect(within(porMes).getByRole("rowheader", { name: "noviembre de 2026" })).toBeTruthy();
@@ -184,21 +189,21 @@ describe("panel del Consejo", () => {
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     await screen.findByRole("link", { name: "Documentos del edificio" });
-    expect(screen.queryByRole("link", { name: "Panel del Consejo" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Resumen de pagos del edificio" })).toBeNull();
     expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/panel"))).toBe(false);
   });
 
   it("con la acción aparece en el inicio", async () => {
     vi.stubGlobal("fetch", backend({ [ACCIONES]: alcanza("fiscalizacion.ver_panel") }));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Panel del Consejo" })).getAttribute("href")).toBe("/panel");
+    expect((await screen.findByRole("link", { name: "Resumen de pagos del edificio" })).getAttribute("href")).toBe("/panel");
   });
 
   it("si la API lo niega lleva al inicio: decide el servidor", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => error("sin_permiso", 403) }));
     abrir();
     expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
-    await waitFor(() => expect(screen.queryByRole("heading", { name: "Panel del Consejo" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Resumen de pagos del edificio" })).toBeNull());
   });
 });
 
@@ -209,6 +214,57 @@ describe("informe de fricción, tanda 7", () => {
 
     await screen.findByRole("region", { name: "Órdenes de pago por estado" });
     const navegacion = await screen.findByRole("navigation", { name: "Secciones" });
-    expect(within(navegacion).getByRole("link", { name: "Panel del Consejo" }).getAttribute("href")).toBe("/panel");
+    expect(within(navegacion).getByRole("link", { name: "Resumen de pagos del edificio" }).getAttribute("href")).toBe("/panel");
+  });
+});
+
+describe("informe de fricción, tanda 9", () => {
+  it("AC-42: el mismo nombre en el inicio, la barra, la cabecera y la facultad", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS) }));
+    abrir();
+    expect(await screen.findByRole("heading", { level: 1, name: "Resumen de pagos del edificio" })).toBeTruthy();
+    await screen.findByRole("region", { name: "Órdenes de pago por estado" });
+    const navegacion = await screen.findByRole("navigation", { name: "Secciones" });
+    expect(await within(navegacion).findByRole("link", { name: "Resumen de pagos del edificio" })).toBeTruthy();
+    expect(screen.queryByText(/Panel del Consejo|panel de fiscalización/)).toBeNull();
+    expect(nombreDeFacultad("fiscalizacion.ver_panel")).toBe("Ver el resumen de pagos del edificio");
+  });
+
+  it("AC-43: «Pagada» es una sola barra aunque el servidor separe las pagadas de las conciliadas", () => {
+    const conConciliadas: Panel = {
+      ...DATOS,
+      ordenes_por_estado: [
+        { estado: "conciliada", moneda: "ARS", cantidad: 2, importe_centavos: 200000 },
+        { estado: "pagada", moneda: "ARS", cantidad: 3, importe_centavos: 300000 },
+        { estado: "en_revision", moneda: "ARS", cantidad: 1, importe_centavos: 50000 },
+      ],
+      comprobantes_faltantes: [
+        ...DATOS.comprobantes_faltantes,
+        { ...DATOS.comprobantes_faltantes[0]!, orden_id: O2.replace("4444-4444", "4445-4444"), estado: "conciliada" },
+      ],
+    };
+    const barras = ordenesPorEstado(conConciliadas, "ARS");
+    expect(barras.map((b) => [b.etiqueta, b.valor])).toEqual([
+      ["Esperando aprobación", 1],
+      ["Pagada", 5],
+    ]);
+    expect(barras[1]!.texto).toMatch(/^5 órdenes, \$\s?5\.000,00$/);
+    expect(faltantesPorEstado(conConciliadas).map((b) => [b.etiqueta, b.valor])).toEqual([
+      ["Lista para pagar", 1],
+      ["Pagada", 2],
+    ]);
+  });
+
+  it("AC-45: sin pagos lo dice en palabras, y sin edificios igual que las demás pantallas", async () => {
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json({ ...DATOS, gasto_pagado: [] }) }));
+    abrir();
+    const porMes = await screen.findByRole("region", { name: "Gasto pagado por mes" });
+    expect(within(porMes).getByText("Todavía no se pagó ninguna orden.")).toBeTruthy();
+    expect(screen.queryByText(/pagos con fecha/)).toBeNull();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
+    abrir();
+    expect(await screen.findByText("Esta cuenta no tiene edificios en Consorcio en Mano.")).toBeTruthy();
   });
 });

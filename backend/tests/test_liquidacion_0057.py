@@ -313,7 +313,12 @@ def test_un_esquema_nuevo_vigente_en_el_periodo_bloquea_los_gastos_viejos(
     detalle = get(e, e.adm, f"liquidaciones/{liq}").json()
     assert detalle["grupos"][0]["esquema_id"] == str(nuevo)
     sim = detalle["simulacion"]
-    assert "expensas_comunes" in sim["bloqueo"] and sim["unidades"] == []
+    # Informe de fricción, AC-46/AC-50: el grupo con palabras, sin el código ni «esquema».
+    assert sim["bloqueo"] == (
+        "Los porcentajes de expensas comunes cambiaron después de agregar sus gastos:"
+        " hay que quitarlos y agregarlos de nuevo."
+    )
+    assert sim["unidades"] == []
     llamar(motor_migrate, e, e.adm, QUITAR, liquidacion=liq, gasto=gasto)
     llamar(motor_migrate, e, e.adm, AGREGAR, liquidacion=liq, orden=o, grupo="expensas_comunes")
     detalle = get(e, e.adm, f"liquidaciones/{liq}").json()

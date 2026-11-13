@@ -14,7 +14,7 @@ const NOMBRES: Readonly<Record<string, string>> = {
   "egresos.aprobar_orden": "Revisar y decidir órdenes de pago",
   "egresos.ejecutar_pago": "Pagar las órdenes aprobadas",
   "egresos.preparar_orden": "Preparar órdenes de pago",
-  "fiscalizacion.ver_panel": "Ver el panel de fiscalización",
+  "fiscalizacion.ver_panel": "Ver el resumen de pagos del edificio",
   "fondo_reserva.autorizar": "Autorizar el uso del fondo de reserva",
   "fondo_reserva.solicitar": "Pedir el uso del fondo de reserva",
   "invitaciones.crear": "Invitar personas",

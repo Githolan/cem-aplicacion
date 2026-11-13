@@ -125,9 +125,11 @@ def _simular(
     vigentes = {g.grupo: g.esquema_id for g in grupos_vigentes}
     viejos = sorted({g.grupo for g in gastos if vigentes.get(g.grupo) != g.esquema_id})
     if viejos:
+        # El grupo con palabras, como lo muestra la pantalla («Expensas comunes»): sin el código.
+        nombres = ", ".join(g.replace("_", " ") for g in viejos)
         motivo = (
-            f"el esquema de {', '.join(viejos)} cambió después de agregar sus gastos:"
-            " hay que quitarlos y agregarlos de nuevo"
+            f"Los porcentajes de {nombres} cambiaron después de agregar sus gastos:"
+            " hay que quitarlos y agregarlos de nuevo."
         )
         return SimulacionLiquidacion(**simulacion, unidades=[], bloqueo=motivo)
     try:

@@ -163,8 +163,9 @@ describe("liquidación (borrador)", () => {
 
     const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
     expect(within(borrador).getByText("Todavía no hay gastos agregados.")).toBeTruthy();
-    fireEvent.change(within(borrador).getByLabelText("Orden pagada"), { target: { value: O1 } });
-    fireEvent.change(within(borrador).getByLabelText("Grupo de gasto"), { target: { value: "expensas_comunes" } });
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    // Un solo grupo vigente: va ese, sin desplegable (AC-48).
+    expect(within(borrador).queryByLabelText("Grupo de gasto")).toBeNull();
     fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
     expect(await screen.findByText("Listo: el gasto quedó agregado. La simulación ya lo reparte.")).toBeTruthy();
     const [agregar] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
@@ -193,7 +194,7 @@ describe("liquidación (borrador)", () => {
   it("si el esquema no coincide con las unidades, dice por qué no se reparte", async () => {
     const bloqueado: Detalle = {
       ...CON_GASTO,
-      simulacion: { ...CON_GASTO.simulacion, unidades: [], bloqueo: "el esquema no coincide con las unidades activas" },
+      simulacion: { ...CON_GASTO.simulacion, unidades: [], bloqueo: "Los porcentajes no coinciden con las unidades activas." },
     };
     vi.stubGlobal("fetch", backend({
       "GET /api/v1/me/consorcios": CONSORCIOS,
@@ -204,7 +205,7 @@ describe("liquidación (borrador)", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Octubre de 2026 · Borrador" }));
     expect((await screen.findByRole("alert")).textContent).toBe(
-      "No se puede repartir: el esquema no coincide con las unidades activas",
+      "No se puede repartir. Los porcentajes no coinciden con las unidades activas.",
     );
     expect(screen.queryByRole("table")).toBeNull();
   });
@@ -240,16 +241,20 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    const boton = await screen.findByRole("button", { name: "Descartar el borrador" });
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
+    const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
+    const boton = within(hoja).getByRole("button", { name: "Descartar el borrador" });
     expect((boton as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Motivo para descartar el borrador"),
+    fireEvent.change(within(hoja).getByLabelText("Motivo para descartar el borrador"),
       { target: { value: "  SINTETICO: período equivocado " } });
     fireEvent.click(boton);
     expect(await screen.findByText(/Listo: el borrador se descartó/)).toBeTruthy();
     const [descarte] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/descartar`);
     expect(await descarte!.json()).toEqual({ motivo: "SINTETICO: período equivocado" });
     expect(descarte!.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(await screen.findByRole("button", { name: /· Descartada/ })).toBeTruthy();
+    // La descartada sale de la lista de trabajo y queda plegada (AC-47).
+    expect(await screen.findByText("Ver descartados (1)")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Liquidaciones" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
   });
 
@@ -266,12 +271,17 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
     fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"),
       { target: { value: "SINTETICO: el de octubre" } });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: /^Noviembre de 2026 ·/ }));
-    const campo = await screen.findByLabelText("Motivo para descartar el borrador");
-    expect((campo as HTMLInputElement).value).toBe("");
-    const boton = screen.getByRole("button", { name: "Descartar el borrador" });
+    await screen.findByRole("region", { name: "Borrador de noviembre de 2026" });
+    fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
+    const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
+    expect((within(hoja).getByLabelText("Motivo para descartar el borrador") as HTMLInputElement).value).toBe("");
+    const boton = within(hoja).getByRole("button", { name: "Descartar el borrador" });
     expect((boton as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -287,8 +297,8 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    const select = await screen.findByLabelText("Orden pagada");
-    const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
+    const lista = await screen.findByRole("list", { name: "Órdenes pagadas" });
+    const opciones = within(lista).getAllByRole("checkbox").map((o) => o.closest("label")?.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true);
     expect(opciones.some((t) => t?.includes("Proveedor en dólares SRL"))).toBe(false);
   });
@@ -305,8 +315,8 @@ describe("liquidación (borrador)", () => {
     }));
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    const select = await screen.findByLabelText("Orden pagada");
-    const opciones = within(select).getAllByRole("option").map((o) => o.textContent);
+    const lista = await screen.findByRole("list", { name: "Órdenes pagadas" });
+    const opciones = within(lista).getAllByRole("checkbox").map((o) => o.closest("label")?.textContent);
     expect(opciones.some((t) => t?.includes("Limpieza Ficticia SRL"))).toBe(true); // control: el 31 entra
     expect(opciones.some((t) => t?.includes("Pagada en noviembre SRL"))).toBe(false);
   });
@@ -493,11 +503,13 @@ describe("liquidación (borrador)", () => {
     vi.stubGlobal("fetch", api);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
-    fireEvent.change(await screen.findByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
+    const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
+    fireEvent.change(within(hoja).getByLabelText("Motivo para descartar el borrador"), { target: { value: "SINTETICO" } });
     // Control: mientras está abierta, su fila queda marcada.
     expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBe("true");
     const pedidasAntes = pedidos(api, "GET", `${BASE}/liquidaciones/${L1}`).length;
-    fireEvent.click(screen.getByRole("button", { name: "Descartar el borrador" }));
+    fireEvent.click(within(hoja).getByRole("button", { name: "Descartar el borrador" }));
     expect(await screen.findByText(/Listo: el borrador se descartó/)).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Borrador de octubre de 2026" })).toBeNull();
     expect(screen.getByRole("button", { name: /^Octubre de 2026 ·/ }).getAttribute("aria-current")).toBeNull();
@@ -571,5 +583,193 @@ describe("informe de fricción, tanda 7 (AC-11)", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Liquidación (borrador)" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Volver a Inicio" }).getAttribute("href")).toBe("/");
+  });
+});
+
+describe("informe de fricción, tanda 9", () => {
+  const O2 = O1.replace("3333-4333", "3334-4333");
+  const O3 = O1.replace("3333-4333", "3335-4333");
+  const TRES = [
+    LIQUIDABLE,
+    { ...LIQUIDABLE, orden_id: O2, razon_social: "Ascensores Ficticios SA", concepto: "Abono de octubre", importe_centavos: 50000 },
+    { ...LIQUIDABLE, orden_id: O3, razon_social: "Pinturas Ficticias SRL", concepto: "Pintura del hall", importe_centavos: 25000 },
+  ];
+  const CON_LISTAS = (liquidables: unknown[], detalle: Detalle = SIN_GASTOS): Respuestas => ({
+    "GET /api/v1/me/consorcios": CONSORCIOS,
+    [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+    [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: liquidables }),
+    [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(detalle),
+  });
+
+  async function abrirBorrador() {
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    return screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+  }
+
+  it("AC-48: se eligen varias; cada una va en su pedido y la que no entra se dice cuál y por qué", async () => {
+    let restantes: unknown[] = TRES;
+    const api = backend({
+      ...CON_LISTAS([]),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: restantes }),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => {
+        const n = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`).length;
+        if (n === 2)
+          return Response.json(
+            { codigo: "orden_no_liquidable", mensaje: "La orden ya está en una liquidación.", detalle: null, id_correlacion: "c" },
+            { status: 409 },
+          );
+        return Response.json({ id: G1 }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    const borrador = await abrirBorrador();
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: "Elegir las 3" }));
+    restantes = [TRES[1]];
+    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 3 gastos" }));
+
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /^Se agregaron 2 de 3 gastos\. No se agregó Ascensores Ficticios SA, \$\s?500,00: La orden ya está en una liquidación\.$/,
+    );
+    const enviados = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`);
+    expect(await Promise.all(enviados.map((q) => q.json()))).toEqual([
+      { orden_id: O1, grupo: "expensas_comunes" },
+      { orden_id: O2, grupo: "expensas_comunes" },
+      { orden_id: O3, grupo: "expensas_comunes" },
+    ]);
+    // Cada orden con su propia clave: el servidor valida cada gasto como si fuera solo.
+    expect(new Set(enviados.map((q) => q.headers.get("Idempotency-Key"))).size).toBe(3);
+    // La que no entró sigue elegida y a la vista.
+    await vi.waitFor(() =>
+      expect((within(borrador).getByRole("checkbox", { name: /Ascensores Ficticios SA/ }) as HTMLInputElement).checked).toBe(true),
+    );
+    expect(within(borrador).getByRole("button", { name: "Agregar el gasto" })).toBeTruthy();
+  });
+
+  it("AC-48: todas entran y el «Listo» dice cuántas", async () => {
+    const api = backend({
+      ...CON_LISTAS(TRES),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => Response.json({ id: G1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const borrador = await abrirBorrador();
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Pinturas Ficticias SRL/ }));
+    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 2 gastos" }));
+    expect(await screen.findByText("Listo: se agregaron 2 gastos. La simulación ya los reparte.")).toBeTruthy();
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(2);
+  });
+
+  it("AC-48: una falla pasajera frena las que siguen; repetir lleva la misma clave", async () => {
+    let caido = true;
+    const api = backend({
+      ...CON_LISTAS(TRES.slice(0, 2)),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () =>
+        caido ? error("error_interno", 500) : Response.json({ id: G1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const borrador = await abrirBorrador();
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: "Elegir las 2" }));
+    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar 2 gastos" }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/^No se agregó ningún gasto\. .*Las órdenes que faltan siguen elegidas\.$/);
+    expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(1);
+
+    caido = false;
+    fireEvent.click(await within(borrador).findByRole("button", { name: "Agregar 2 gastos" }));
+    expect(await screen.findByText("Listo: se agregaron 2 gastos. La simulación ya los reparte.")).toBeTruthy();
+    const claves = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`).map((q) => q.headers.get("Idempotency-Key"));
+    expect(claves).toHaveLength(3);
+    expect(claves[1]).toBe(claves[0]);
+    expect(claves[2]).not.toBe(claves[0]);
+  });
+
+  it("AC-48: con más de un grupo, el grupo se elige y sin él no se agrega", async () => {
+    const dos: Detalle = { ...SIN_GASTOS, grupos: [GRUPO, { ...GRUPO, grupo: "cocheras", esquema_id: U2 }] };
+    const api = backend({
+      ...CON_LISTAS([LIQUIDABLE], dos),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => Response.json({ id: G1 }, { status: 201 }),
+    });
+    vi.stubGlobal("fetch", api);
+    const borrador = await abrirBorrador();
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    const boton = within(borrador).getByRole("button", { name: "Agregar el gasto" }) as HTMLButtonElement;
+    expect(boton.disabled).toBe(true);
+    fireEvent.change(within(borrador).getByLabelText("Grupo de gasto"), { target: { value: "cocheras" } });
+    expect(boton.disabled).toBe(false);
+    fireEvent.click(boton);
+    await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(1));
+    expect(await pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)[0]!.json()).toEqual({ orden_id: O1, grupo: "cocheras" });
+  });
+
+  it("AC-47: las descartadas no están en la lista de trabajo; quedan plegadas y se pueden abrir", async () => {
+    const L2 = L1.replace("2222-4222", "2223-4222");
+    const descartada = { ...LIQUIDACION, id: L2, estado: "descartada" };
+    vi.stubGlobal("fetch", backend({
+      ...CON_LISTAS([]),
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION, descartada] }),
+      [`GET ${BASE}/liquidaciones/${L2}`]: () => Response.json({ ...SIN_GASTOS, liquidacion: descartada }),
+    }));
+    abrir();
+    const lista = await screen.findByRole("list", { name: "Liquidaciones" });
+    expect(within(lista).getAllByRole("button").map((b) => b.textContent)).toEqual(["Octubre de 2026 · Borrador"]);
+    const plegadas = screen.getByText("Ver descartados (1)").closest("details")!;
+    expect(plegadas.open).toBe(false);
+    fireEvent.click(within(plegadas).getByRole("button", { name: /· Descartada/ }));
+    expect(await screen.findByRole("region", { name: "Borrador de octubre de 2026" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Descartar el borrador" })).toBeNull();
+  });
+
+  it("AC-49: donde termina dice para qué sirve y ofrece imprimir", async () => {
+    const imprimir = vi.spyOn(window, "print").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", backend(CON_LISTAS([], CON_GASTO)));
+    const borrador = await abrirBorrador();
+    expect(within(borrador).getByText(/antes de liquidar por el sistema de siempre/)).toBeTruthy();
+    fireEvent.click(within(borrador).getByRole("button", { name: "Imprimir o guardar como PDF" }));
+    expect(imprimir).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC-52: el motivo para descartar aparece recién al tocar «Descartar el borrador»", async () => {
+    vi.stubGlobal("fetch", backend(CON_LISTAS([LIQUIDABLE])));
+    const borrador = await abrirBorrador();
+    expect(screen.queryByLabelText("Motivo para descartar el borrador")).toBeNull();
+    // La simulación va antes que descartar.
+    const simulacion = within(borrador).getByRole("heading", { name: "Simulación del reparto" });
+    const descartar = within(borrador).getByRole("button", { name: "Descartar el borrador" });
+    expect(simulacion.compareDocumentPosition(descartar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(descartar);
+    expect(await screen.findByLabelText("Motivo para descartar el borrador")).toBeTruthy();
+  });
+
+  it("AC-46: el grupo de cada columna, también en el teléfono, va con palabras", async () => {
+    vi.stubGlobal("fetch", backend(CON_LISTAS([], CON_GASTO)));
+    const borrador = await abrirBorrador();
+    const celdas = await within(borrador).findAllByRole("cell");
+    expect(celdas.map((c) => c.getAttribute("data-etiqueta"))).toContain("Expensas comunes");
+    expect(borrador.querySelector('[data-etiqueta="expensas_comunes"]')).toBeNull();
+    expect(screen.queryByText(/expensas_comunes/)).toBeNull();
+  });
+
+  it("AC-53: si se cancela la confirmación al leer, queda «Reintentar» y no un «Cargando…» sin salida", async () => {
+    vi.stubGlobal("fetch", backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => error("segundo_factor_requerido", 403),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => error("segundo_factor_requerido", 403),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.queryByText("Cargando la liquidación…")).toBeNull();
+  });
+
+  it("AC-53: lo mismo si la confirmación la pidió el detalle: la lista sigue y se puede reintentar", async () => {
+    vi.stubGlobal("fetch", backend({
+      ...CON_LISTAS([]),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => error("segundo_factor_requerido", 403),
+    }));
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
   });
 });
