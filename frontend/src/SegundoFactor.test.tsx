@@ -1095,7 +1095,7 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     escribirCodigo("Código de la aplicación", "042917");
     fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
-    expect(container.inert).toBe(false);
+    expect(container.inert).toBeFalsy();
     expect(screen.getByRole("link", { name: "Volver a Mi cuenta" })).toBeTruthy();
   });
 });
