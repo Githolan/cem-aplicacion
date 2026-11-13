@@ -9,7 +9,16 @@ import { encabezadoCsrf } from "./csrf";
 import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe as resumenDeErrores, REVISAR_DATO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { useAEntrar } from "./sesionEncima";
-import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import {
+  codigoDe,
+  esDeConexion,
+  esPasajera,
+  LIMITE_DE_PEDIDOS,
+  mensajeDeFalla,
+  SERVICIO_NO_DISPONIBLE,
+  SIN_CONEXION,
+  SIN_RESPUESTA,
+} from "./fallas";
 import { AlInicioSinEdificios, REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
 import { useConsultaDelAntivirus } from "./egresos/useConsorcio";
 import { SubirArchivo } from "./SubirArchivo";
@@ -208,10 +217,34 @@ type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: s
 const NUEVO: Abierto = { tipo: "nuevo" };
 
 type Aviso = { texto: string; ok: boolean };
-/** Un archivo subido por quien solo carga, a la espera del antivirus (G-09). */
-type Pendiente = { documento: string; version: string; titulo: string };
-/** Un archivo que el antivirus rechazó: su documento sigue esperando otro. */
-type Rechazo = { documento: string; titulo: string; texto: string };
+/** Un archivo subido por quien solo carga, a la espera del antivirus (G-09), con las consultas
+ * seguidas que fallaron por algo pasajero y el estado de la última. */
+type Pendiente = { documento: string; version: string; titulo: string; fallas: number; estadoFalla: number };
+/** Un archivo cuyo análisis terminó sin quedar disponible: rechazado (su documento espera otro
+ * archivo, `ofreceOtro`) o imposible de consultar (404, 403: ya no hay nada que esperar). */
+type Rechazo = { documento: string; version: string; titulo: string; texto: string; ofreceOtro: boolean };
+
+/** Consultas seguidas con una falla pasajera antes de decirlo: tres vueltas de la espera del
+ * antivirus, unos 9 s. Con menos, un corte de un instante ya alarma; la consulta sigue igual. */
+const FALLAS_PARA_AVISAR = 3;
+
+/** Por qué no se pudo consultar, cuando la falla es pasajera. */
+function causaPasajera(estado: number): string {
+  if (estado === ESTADO.limite) return "se llegó al límite de pedidos";
+  if (estado >= ESTADO.errorDelServidor) return "el servicio no está disponible";
+  return "no hay conexión";
+}
+
+/** Por qué ya no se puede saber cómo terminó: la respuesta es definitiva. */
+function sinResultado(titulo: string, estado: number, codigo: string | undefined): string {
+  const porque =
+    estado === ESTADO.noEncontrado
+      ? "ese documento o ese archivo ya no está en el edificio."
+      : estado === ESTADO.sinPermiso
+        ? "esta cuenta ya no puede cargar documentos en el edificio."
+        : mensajeDeFalla(estado, codigo);
+  return `No se puede saber cómo terminó la revisión del archivo de «${titulo}»: ${porque}`;
+}
 
 class SinSesion extends Error {}
 
@@ -361,34 +394,48 @@ export function Documentos() {
     for (const cual of esperando) mirarUno(cual);
 
     function mirarUno(cual: Pendiente) {
-      const sinEsperar = (lista: Pendiente[]) => lista.filter((p) => p.version !== cual.version);
+      const esta = (p: Pendiente) => p.version === cual.version;
+      const sinEsperar = (lista: Pendiente[]) => lista.filter((p) => !esta(p));
+      // Solo un resultado definitivo saca el archivo de la espera; una falla pasajera (sin red, 429,
+      // 5xx) se cuenta y se vuelve a consultar en la vuelta siguiente (revisión del PR #241).
+      const pasajera = (estado: number) =>
+        setEsperando((lista) => lista.map((p) => (esta(p) ? { ...p, fallas: p.fallas + 1, estadoFalla: estado } : p)));
+      const terminado = (texto: string, ofreceOtro: boolean) => {
+        setEsperando(sinEsperar);
+        setRechazados((lista) => [
+          ...lista.filter((r) => r.documento !== cual.documento),
+          { documento: cual.documento, version: cual.version, titulo: cual.titulo, texto, ofreceOtro },
+        ]);
+      };
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
           params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
         })
         .then(({ data, error, response }) => {
           exigirSesion(response);
-          if (data?.estado === "en_cuarentena") return;
-          setEsperando(sinEsperar);
-          if (data?.estado === "disponible")
+          if (data === undefined) {
+            if (esPasajera(response.status)) pasajera(response.status);
+            else terminado(sinResultado(cual.titulo, response.status, codigoDe(error)), false);
+            return;
+          }
+          if (data.estado === "en_cuarentena") {
+            setEsperando((lista) => lista.map((p) => (esta(p) ? { ...p, fallas: 0 } : p)));
+            return;
+          }
+          if (data.estado === "disponible") {
+            setEsperando(sinEsperar);
             setAviso({ texto: `Listo: el archivo de «${cual.titulo}» pasó la revisión del antivirus y quedó «Disponible».`, ok: true });
-          else if (data?.estado === "rechazado") {
-            // Aparte del aviso, para que otro resultado no lo tape, y sin tocar el formulario: subir otro
-            // archivo para ese documento es un paso que la persona elige (revisión del PR #241).
-            const motivo = data.motivo_rechazo ? TEXTO_MOTIVO[data.motivo_rechazo] : "sin el motivo";
-            setRechazados((lista) => [
-              ...lista.filter((r) => r.documento !== cual.documento),
-              {
-                documento: cual.documento,
-                titulo: cual.titulo,
-                texto: `«Rechazado»: el archivo de «${cual.titulo}» no pasó la revisión (${motivo}). No se va a mostrar: hay que subir otro.`,
-              },
-            ]);
-          } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
+            return;
+          }
+          // Rechazado: aparte del aviso, para que otro resultado no lo tape, y sin tocar el formulario:
+          // subir otro archivo para ese documento es un paso que la persona elige (revisión del PR #241).
+          const motivo = data.motivo_rechazo ? TEXTO_MOTIVO[data.motivo_rechazo] : "sin el motivo";
+          terminado(`«Rechazado»: el archivo de «${cual.titulo}» no pasó la revisión (${motivo}). No se va a mostrar: hay que subir otro.`, true);
         })
         .catch((e: unknown) => {
-          // Una consulta que no llega se repite en la vuelta siguiente; sin sesión, a entrar.
+          // Sin sesión, a entrar; una consulta que no llegó es una falla pasajera más.
           if (e instanceof SinSesion) aEntrar();
+          else pasajera(SIN_RESPUESTA);
         });
     }
   }, [esperando, consorcio, aEntrar]);
@@ -617,7 +664,8 @@ export function Documentos() {
       cerrarFichaDe(false);
       // Sin acceso a la lista, quien solo carga pregunta por su archivo hasta que el antivirus
       // termina (G-09). Con la lista caída no hay refresco automático: queda «Actualizar».
-      if (soloCarga) setEsperando((lista) => [...lista, { documento, version: data.id, titulo }]);
+      if (soloCarga)
+        setEsperando((lista) => [...lista, { documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
       // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
       setRechazados((lista) => lista.filter((r) => r.documento !== documento));
       const despues = soloCarga
@@ -636,7 +684,7 @@ export function Documentos() {
   // El error de subir el archivo desde la ficha se dice en la ficha: la página de atrás queda
   // inerte mientras está abierta (G-01).
   const avisoEnFicha = aviso !== null && !aviso.ok && abierto?.tipo === "subir" && enSuFicha(abierto.documento);
-  const conMensaje = (aviso !== null && !avisoEnFicha) || rechazados.length > 0 || pantalla.tipo !== "lista";
+  const conMensaje = (aviso !== null && !avisoEnFicha) || rechazados.length > 0 || esperando.some((p) => p.fallas >= FALLAS_PARA_AVISAR) || pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -757,10 +805,18 @@ export function Documentos() {
             pantalla sigue esperando.
           </p>
         )}
+        {esperando
+          .filter((p) => p.fallas >= FALLAS_PARA_AVISAR)
+          .map((p) => (
+            <p key={p.version} className="aviso-error">
+              No se pudo consultar cómo va el archivo de «{p.titulo}» ({causaPasajera(p.estadoFalla)}); esta pantalla lo sigue
+              intentando.
+            </p>
+          ))}
         {rechazados.map((r) => (
-          <div key={r.documento}>
+          <div key={r.version}>
             <p className="aviso-error">{r.texto}</p>
-            {!(formulario?.tipo === "subir" && formulario.documento === r.documento) && (
+            {r.ofreceOtro && !(formulario?.tipo === "subir" && formulario.documento === r.documento) && (
               <button type="button" className="secundario" disabled={enviando}
                 onClick={() => abrir({ tipo: "subir", documento: r.documento, titulo: r.titulo })}>
                 Subir otro archivo para «{r.titulo}»

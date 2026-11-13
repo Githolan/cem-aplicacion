@@ -12,7 +12,7 @@ import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { aceptar, hoyDelDispositivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
 import { AYUDA_FECHA, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, tamano } from "./Documentos";
-import { SIN_CONEXION } from "./fallas";
+import { LIMITE_DE_PEDIDOS, SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -1366,6 +1366,62 @@ describe("tanda 6 de fricción en /documentos", () => {
       expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
       // El rechazo sigue a la vista: ese documento todavía espera otro archivo.
       expect(screen.getByText(RECHAZO)).toBeTruthy();
+    });
+
+    it("revisión del PR #241: un 429 pasajero no corta la consulta: la vuelta siguiente trae el rechazo", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        ++vueltas === 1 ? error("limite_de_pedidos", 429) : Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }),
+      );
+      await subirYEsperar(simulado);
+      // Una vuelta, y se espera a que su 429 se procese antes de la siguiente.
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1));
+      await act(() => new Promise((listo) => setTimeout(listo, 100)));
+      // El 429 no es un resultado: ni se dice como error final ni alarma con una sola falla.
+      expect(screen.queryByText(LIMITE_DE_PEDIDOS)).toBeNull();
+      expect(screen.queryByText(/No se pudo consultar cómo va/)).toBeNull();
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(2);
+    });
+
+    it("revisión del PR #241: si el servicio sigue caído, lo dice y sigue preguntando; al volver, trae el resultado", async () => {
+      let caido = true;
+      const simulado = soloCarga(() =>
+        caido ? error("servicio_no_disponible", 503) : Response.json({ estado: "disponible", motivo_rechazo: null }),
+      );
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(
+        await screen.findByText(
+          "No se pudo consultar cómo va el archivo de «Presupuesto de pintura» (el servicio no está disponible); esta pantalla lo sigue intentando.",
+        ),
+      ).toBeTruthy();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4).length).toBeGreaterThan(consultas);
+      caido = false;
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(
+        await screen.findByText("Listo: el archivo de «Presupuesto de pintura» pasó la revisión del antivirus y quedó «Disponible»."),
+      ).toBeTruthy();
+      expect(screen.queryByText(/No se pudo consultar cómo va/)).toBeNull();
+    });
+
+    it("revisión del PR #241: un 404 es definitivo: lo dice, sin ofrecer subir otro, y deja de preguntar", async () => {
+      const simulado = soloCarga(() => error("no_encontrado", 404));
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(
+        await screen.findByText(
+          "No se puede saber cómo terminó la revisión del archivo de «Presupuesto de pintura»: ese documento o ese archivo ya no está en el edificio.",
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^Subir otro archivo/ })).toBeNull();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(consultas);
     });
 
     it("revisión del PR #241: subir otro documento antes de que termine el primero no deja de mirar el primero", async () => {
