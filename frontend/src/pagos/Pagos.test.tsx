@@ -1072,8 +1072,13 @@ describe("registrar y corregir", () => {
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
-    expect(await boton("Reintentar")).toBeTruthy();
-    expect(screen.getByText(/Listo: el pago quedó registrado/)).toBeTruthy();
+    // El «Listo» llega en la navegación (`AvisoLlegada` lo pone en un efecto, después de la transición
+    // de la ruta) y la falla, por la lectura de la bandeja: pueden dibujarse en dos vueltas seguidas y
+    // en cualquier orden (reproducido con carga: 23 de 1200). Lo que se afirma es que terminan juntos.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
+      expect(screen.getByText(/Listo: el pago quedó registrado/)).toBeTruthy();
+    });
   });
 
   it("un error queda en la ficha con lo escrito", async () => {
@@ -2153,8 +2158,11 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.change(screen.getByLabelText(/CBU|Cuenta/), { target: { value: CUENTA } });
     fireEvent.submit(document.querySelector("form") as HTMLFormElement);
     expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
-    await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1));
-    expect(screen.getByText("Listo: el proveedor quedó dado de alta.")).toBeTruthy();
+    // El «Listo» llega en la navegación (`AvisoLlegada`, en un efecto): se espera junto con lo elegido.
+    await waitFor(() => {
+      expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
+      expect(screen.getByText("Listo: el proveedor quedó dado de alta.")).toBeTruthy();
+    });
   });
 
   it("enviar lleva a la bandeja con el resultado", async () => {
