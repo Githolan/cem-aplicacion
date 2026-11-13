@@ -1390,6 +1390,12 @@ class BandejaPagos(BaseModel):
         " para quien concilia es algo que mirar; para la administración, una consulta de solo"
         " lectura. Cero para quien no lee el cotejo.",
     )
+    marcados_no_es_pago: int = Field(
+        ge=0,
+        description="Cuántos débitos tienen la marca vigente «No es el pago de una orden»: con"
+        " alguno, la bandeja lleva a la pantalla donde se ven y quien concilia los retira (Codex"
+        " en #240). Cero para quien no lee el cotejo.",
+    )
 
 
 class ComprobanteActual(BaseModel):

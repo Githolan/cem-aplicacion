@@ -43,7 +43,10 @@ const MARCA: Marca = {
   motivo: "Comisión del banco", marcado_en: "2026-11-06T13:00:00Z",
 };
 
-const bandeja = (sin_explicar: number) => () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar });
+const bandeja =
+  (sin_explicar: number, marcados_no_es_pago = 0) =>
+  () =>
+    Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar, marcados_no_es_pago });
 
 function backend(respuestas: Respuestas) {
   const base: Respuestas = {
@@ -115,12 +118,25 @@ describe("en la bandeja", () => {
     expect(screen.getByText("Al día")).toBeTruthy();
   });
 
+  it("con todo marcado, los dos siguen llegando a las marcas, como consulta y sin contar (Codex en #240)", async () => {
+    for (const acciones of [CONCILIA, PREPARA]) {
+      vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: acciones, [`GET ${BASE}/pagos/bandeja`]: bandeja(0, 1) }));
+      abrir("/pagos");
+      const enlace = await screen.findByRole("link", { name: "Marcados como que no son el pago de una orden (1)" });
+      expect(enlace.getAttribute("href")).toBe(RUTA);
+      expect(enlace.className).toContain("enlace-boton--borde");
+      expect(screen.getByText("Al día")).toBeTruthy();
+      cleanup();
+    }
+  });
+
   it("control: sin nada sin explicar no aparece en ninguna de las dos", async () => {
     for (const acciones of [CONCILIA, PREPARA]) {
       vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: acciones, [`GET ${BASE}/pagos/bandeja`]: bandeja(0) }));
       abrir("/pagos");
       await screen.findByRole("link", { name: "Consultar pagos" });
       expect(screen.queryByText(/Lo que el extracto no explica/)).toBeNull();
+      expect(screen.queryByText(/Marcados como/)).toBeNull();
       cleanup();
     }
   });

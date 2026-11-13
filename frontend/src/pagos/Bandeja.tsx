@@ -22,6 +22,7 @@ import {
   textoRechazada,
   textoRepetida,
   TITULO_GRUPO,
+  TITULO_MARCADOS,
   TITULO_SIN_EXPLICAR,
   VER_LO_COTEJADO,
   VER_SIN_EXPLICAR,
@@ -160,7 +161,7 @@ type Props = {
 };
 
 export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLado }: Props) {
-  const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar, sin_explicar: sinExplicar } = bandeja;
+  const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar, sin_explicar: sinExplicar, marcados_no_es_pago: marcados } = bandeja;
   const puede = usePuede(consorcio);
   const prepara = puede("egresos.preparar_orden");
   /** Quien coteja llega al cotejo aunque no quede nada por cotejar: ahí está lo ya cotejado y
@@ -172,6 +173,10 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
   /** Lo que el extracto no explica (pregunta 8, opción c): para quien concilia es algo que mirar;
    * para la administración, una consulta de solo lectura, abajo y sin contar como pendiente. */
   const sinExplicarParaMirar = coteja && sinExplicar > 0;
+  /** Una consulta abajo, que no cuenta como pendiente: lo sin explicar para la administración, y
+   * las marcas vigentes para los dos, que si no quedan sin camino para retirarlas (Codex en #240).
+   * Sin nada de eso, no se muestra. */
+  const consultaExtracto = sinExplicar > 0 && !coteja ? `${TITULO_SIN_EXPLICAR} (${sinExplicar})` : !sinExplicarParaMirar && marcados > 0 ? `${TITULO_MARCADOS} (${marcados})` : null;
   return (
     <div className="bandeja">
       {/* Lo que más hace quien prepara va arriba, antes de la lista (P-35, 12-11-2026); las consultas,
@@ -236,9 +241,9 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
             Proveedores
           </Link>
         )}
-        {!coteja && sinExplicar > 0 && (
+        {consultaExtracto !== null && (
           <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
-            {`${TITULO_SIN_EXPLICAR} (${sinExplicar})`}
+            {consultaExtracto}
           </Link>
         )}
         {coteja && porCotejar === 0 && (

@@ -677,3 +677,23 @@ def test_el_retiro_no_se_cambia(motor_migrate, e):
                       {"c": e.cons})  # fmt: skip
     assert error.value.orig.diag.message_hint == "historia_inmutable"
     assert marcados(motor_migrate, e.cons)[0]["motivo_retiro"] == "Marcada por error SINTETICO"
+
+
+def test_la_bandeja_cuenta_las_marcas_vigentes(motor_migrate, e):
+    """Codex en #240 (sobre 9dcc1f4): con todo marcado, la bandeja tiene que seguir llevando a las
+    marcas. Contra 9dcc1f4 la bandeja no trae `marcados_no_es_pago`."""
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    for quien in (e.mc1, e.adm):  # control: sin marcas, cero
+        assert bandeja(e, quien)["marcados_no_es_pago"] == 0
+    assert no_es_pago(e, e.mc1, m).status_code == 200
+    for quien in (e.mc1, e.adm):
+        assert (bandeja(e, quien)["sin_explicar"], bandeja(e, quien)["marcados_no_es_pago"]) == (
+            0,
+            1,
+        )
+    assert retirar(e, e.mc1, m).status_code == 200
+    for quien in (e.mc1, e.adm):
+        assert (bandeja(e, quien)["sin_explicar"], bandeja(e, quien)["marcados_no_es_pago"]) == (
+            1,
+            0,
+        )

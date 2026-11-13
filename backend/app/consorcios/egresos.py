@@ -2306,6 +2306,7 @@ def _por_cotejar(c: Connection, revisar: Permiso) -> int:
 MOVIMIENTOS_SIN_COTEJO = (
     "select * from nucleo.movimientos_sin_cotejo_lectura(:actor, 'api', :sesion)"
 )
+MARCAS_VIGENTES = "select * from nucleo.marcas_no_es_pago_lectura(:actor, 'api', :sesion)"
 PAGOS_PARA_EXPLICAR = (
     "select * from nucleo.pagos_para_explicar_lectura(cast(:n as text[]), :d, :h, :actor, 'api',"
     " :sesion)"
@@ -2360,14 +2361,15 @@ def sin_explicar(c: Connection, lector: Permiso) -> list[MovimientoSinExplicar]:
     ]
 
 
-def _cuantos_sin_explicar(c: Connection, preparar: Permiso, revisar: Permiso) -> int:
-    """Para la bandeja: quien concilia y la administración. Sin ninguna de las dos, cero, sin
+def _cuantos_sin_explicar(c: Connection, preparar: Permiso, revisar: Permiso) -> tuple[int, int]:
+    """Para la bandeja: lo que el extracto no explica y las marcas vigentes «No es el pago de una
+    orden», para quien concilia y la administración. Sin ninguna de las dos, cero, sin
     preguntar."""
-    if revisar.decidir().permitido:
-        return len(sin_explicar(c, revisar))
-    if preparar.decidir().permitido:
-        return len(sin_explicar(c, preparar))
-    return 0
+    for lector in (revisar, preparar):
+        if lector.decidir().permitido:
+            marcas = _ejecutar(c, lector, MARCAS_VIGENTES, {}).all()
+            return len(sin_explicar(c, lector)), len(marcas)
+    return 0, 0
 
 
 def _toma_vigente(
@@ -2402,7 +2404,7 @@ def bandeja_pagos(
         )  # fmt: skip
         para_avisar = _para_avisar(c, lector, ordenes)
         por_cotejar = _por_cotejar(c, revisar)
-        cuantos_sin_explicar = _cuantos_sin_explicar(c, preparar, revisar)
+        cuantos_sin_explicar, marcados = _cuantos_sin_explicar(c, preparar, revisar)
     plazos = circuito_pagos.Plazos(
         cerradas_desde=ahora - timedelta(days=config.pagos_dias_bandeja),
         viejos_desde=ahora - timedelta(days=config.pagos_dias_borrador_viejo),
@@ -2413,6 +2415,7 @@ def bandeja_pagos(
         avisos_rechazo=circuito_pagos.avisos_de_rechazo(ordenes, prepara, para_avisar),
         por_cotejar=por_cotejar,
         sin_explicar=cuantos_sin_explicar,
+        marcados_no_es_pago=marcados,
     )
 
 

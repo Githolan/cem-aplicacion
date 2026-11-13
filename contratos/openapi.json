@@ -396,6 +396,12 @@
             "title": "Elementos",
             "type": "array"
           },
+          "marcados_no_es_pago": {
+            "description": "Cuántos débitos tienen la marca vigente «No es el pago de una orden»: con alguno, la bandeja lleva a la pantalla donde se ven y quien concilia los retira (Codex en #240). Cero para quien no lee el cotejo.",
+            "minimum": 0.0,
+            "title": "Marcados No Es Pago",
+            "type": "integer"
+          },
           "por_cotejar": {
             "description": "Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»). Cero si no puede cotejar.",
             "minimum": 0.0,
@@ -413,7 +419,8 @@
           "elementos",
           "avisos_rechazo",
           "por_cotejar",
-          "sin_explicar"
+          "sin_explicar",
+          "marcados_no_es_pago"
         ],
         "title": "BandejaPagos",
         "type": "object"
