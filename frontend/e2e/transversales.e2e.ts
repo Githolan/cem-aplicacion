@@ -109,7 +109,7 @@ test.describe("entrar encima", () => {
     await sinDesborde(page);
 
     await hoja.getByRole("button", { name: "Ya tengo un código" }).click();
-    await expect(hoja.getByLabel("Correo")).toHaveValue("ana@ejemplo.com");
+    await expect(hoja.getByLabel("Correo", { exact: true })).toHaveValue("ana@ejemplo.com");
     await hoja.getByLabel(/Código de 6 números/).fill("042917");
     await hoja.getByRole("button", { name: "Entrar con el código" }).click();
 
