@@ -438,6 +438,37 @@ describe("liquidación (borrador)", () => {
     expect(tercera).not.toBe(segunda);
   });
 
+  it("AC-51 (Codex en #236): después de abrir un borrador, el período sigue completo y el siguiente sale bien", async () => {
+    let liquidaciones: unknown[] = [];
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(SIN_GASTOS),
+      [`POST ${BASE}/liquidaciones`]: () => {
+        liquidaciones = [LIQUIDACION];
+        return Response.json({ id: L1 }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await elegirPeriodo("2026", "10");
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    expect(await screen.findByText("Listo: abriste el borrador del período.")).toBeTruthy();
+    await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    // Vuelve al mes anterior, como al abrir uno que ya existía: nada vacío ni a medias.
+    const hoy = new Date();
+    const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const anio = String(anterior.getFullYear());
+    expect((screen.getByLabelText("Año") as HTMLSelectElement).value).toBe(anio);
+    expect((screen.getByLabelText("Mes") as HTMLSelectElement).value).toBe(String(anterior.getMonth() + 1).padStart(2, "0"));
+    // Cambiar solo el mes deja un período completo, con el año que se ve.
+    fireEvent.change(screen.getByLabelText("Mes"), { target: { value: "03" } });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
+    expect(await pedidos(api, "POST", `${BASE}/liquidaciones`)[1]!.json()).toEqual({ periodo: `${anio}-03-01` });
+  });
+
   it("si falló el detalle de la abierta, se repite solo al volver la red", async () => {
     let caido = true;
     vi.stubGlobal("fetch", backend({

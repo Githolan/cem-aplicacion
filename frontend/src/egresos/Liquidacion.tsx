@@ -217,7 +217,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           }[acto.tipo];
           setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
-            setMes("");
+            // Vuelve a un período completo: los desplegables nunca quedan vacíos ni a medias (Codex en #236).
+            setMes(mesAnterior());
             abrir(data.id);
           }
           if (acto.tipo === "agregar") setOrden("");
@@ -337,14 +338,20 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   <legend>Período</legend>
                   <label htmlFor={`${id}-mes`}>Mes</label>
                   <select id={`${id}-mes`} value={mes.slice(5, 7)} disabled={enviando}
-                    onChange={(e) => setMes(`${mes.slice(0, 4)}-${e.target.value}`)}>
+                    onChange={(e) => {
+                      const elegido = e.target.value;
+                      setMes((actual) => `${actual.slice(0, 4)}-${elegido}`);
+                    }}>
                     {MESES.map((nombre, i) => (
                       <option key={nombre} value={String(i + 1).padStart(2, "0")}>{nombre}</option>
                     ))}
                   </select>
                   <label htmlFor={`${id}-anio`}>Año</label>
                   <select id={`${id}-anio`} value={mes.slice(0, 4)} disabled={enviando}
-                    onChange={(e) => setMes(`${e.target.value}-${mes.slice(5, 7)}`)}>
+                    onChange={(e) => {
+                      const elegido = e.target.value;
+                      setMes((actual) => `${elegido}-${actual.slice(5, 7)}`);
+                    }}>
                     {aniosOfrecidos().map((anio) => (
                       <option key={anio} value={anio}>{anio}</option>
                     ))}
