@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -14,6 +14,8 @@ import { ContextoVersion } from "../version";
 // quien concilia y, solo para leer, en la de la administración. Datos ficticios, banco 999. La API
 // está simulada: qué entra en la lista lo prueba `backend/tests/test_avisos_y_sin_explicar_0098.py`.
 // Contra 3c2d638 la ruta no existe (lleva a «No se encontró») y la bandeja no trae `sin_explicar`.
+// Marcar que un débito no es el pago de una orden (respuesta del 13-11, opción a): contra a668127
+// no hay botón.
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -21,6 +23,7 @@ const M1 = "55555555-5555-4555-8555-555555555555";
 const BASE = `/api/v1/consorcios/${C1}`;
 const LISTA = `GET ${BASE}/pagos/extracto/sin-explicar`;
 const RUTA = "/pagos/extracto-sin-explicar";
+const MARCAR = `POST ${BASE}/pagos/extracto/sin-explicar/${M1}/no-es-pago`;
 const CONCILIA = alcanza("egresos.revisar_orden", "egresos.conciliar_pago");
 const PREPARA = alcanza("egresos.preparar_orden");
 
@@ -136,6 +139,74 @@ describe("la pantalla", () => {
     abrir(RUTA);
     await screen.findByText("Débito sin explicar");
     expect(screen.getByRole("link", { name: "Cotejar con el banco" }).getAttribute("href")).toBe("/pagos/cotejo");
+  });
+
+  it("quien concilia marca que no es el pago de una orden, con el motivo y la clave, y la lista se vuelve a pedir", async () => {
+    let marcado = false;
+    const simulado = backend({
+      [`GET ${BASE}/mis-acciones`]: CONCILIA,
+      [LISTA]: () => Response.json(marcado ? { elementos: [], total: 0 } : { elementos: [MOVIMIENTO], total: 1 }),
+      [MARCAR]: () => ((marcado = true), Response.json({ movimiento_id: M1 })),
+    });
+    vi.stubGlobal("fetch", simulado);
+    const { container } = abrir(RUTA);
+    fireEvent.click(await screen.findByRole("button", { name: "No es el pago de una orden" }));
+    // Un solo botón lleno: el que guarda; cancelar va con borde.
+    expect(screen.getByRole("button", { name: "Cancelar" }).className).toContain("secundario");
+    const guardar = screen.getAllByRole("button", { name: "No es el pago de una orden" }).find((b) => b.getAttribute("type") === "submit");
+    expect(guardar?.hasAttribute("disabled")).toBe(true); // sin motivo no se manda
+    fireEvent.change(screen.getByLabelText("Qué es este débito"), { target: { value: "  Comisión del banco  " } });
+    fireEvent.click(guardar as HTMLElement);
+    expect(await screen.findByText(/Listo: el débito salió de la lista/)).toBeTruthy();
+    const [pedido] = pedidos(simulado, MARCAR);
+    expect(await pedido.clone().json()).toEqual({ motivo: "Comisión del banco" });
+    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(pedido.headers.get("X-CSRF-Token")).toBe("abc123");
+    expect(await screen.findByText("El extracto no tiene nada sin explicar.")).toBeTruthy();
+    const faltas = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(faltas.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("un motivo con una cuenta se marca junto al campo y lo escrito queda", async () => {
+    const detalle = { campos: ["body.motivo"], mensajes: {} };
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [`GET ${BASE}/mis-acciones`]: CONCILIA,
+        [MARCAR]: () => Response.json({ codigo: "motivo_con_cuenta", mensaje: "El motivo no puede llevar el número de una cuenta.", detalle, id_correlacion: "c" }, { status: 422 }),
+      }),
+    );
+    abrir(RUTA);
+    fireEvent.click(await screen.findByRole("button", { name: "No es el pago de una orden" }));
+    const campo = screen.getByLabelText("Qué es este débito");
+    fireEvent.change(campo, { target: { value: "Transferencia a 9990000000000000000001" } });
+    fireEvent.submit(campo.closest("form") as HTMLFormElement);
+    await waitFor(() => expect(campo.getAttribute("aria-invalid")).toBe("true"));
+    expect((campo as HTMLTextAreaElement).value).toBe("Transferencia a 9990000000000000000001");
+  });
+
+  it("pide el código y repite lo mismo con la misma clave", async () => {
+    let veces = 0;
+    const simulado = backend({
+      [`GET ${BASE}/mis-acciones`]: CONCILIA,
+      [MARCAR]: () =>
+        ++veces === 1
+          ? Response.json({ codigo: "segundo_factor_requerido", mensaje: "x", detalle: null, id_correlacion: "c" }, { status: 403 })
+          : Response.json({ movimiento_id: M1 }),
+      "POST /api/v1/auth/totp/verificar": () =>
+        Response.json({ verificado_en: "2026-11-06T12:00:00Z", vale_hasta: "2026-11-06T12:10:00Z", codigos_recuperacion_restantes: 9 }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir(RUTA);
+    fireEvent.click(await screen.findByRole("button", { name: "No es el pago de una orden" }));
+    const campo = screen.getByLabelText("Qué es este débito");
+    fireEvent.change(campo, { target: { value: "Comisión del banco" } });
+    fireEvent.submit(campo.closest("form") as HTMLFormElement);
+    fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "123456" } });
+    expect(await screen.findByText(/Listo: el débito salió de la lista/)).toBeTruthy();
+    const claves = pedidos(simulado, MARCAR).map((p) => p.headers.get("Idempotency-Key"));
+    expect(claves).toHaveLength(2);
+    expect(claves[0]).toBe(claves[1]);
   });
 
   it("sin nada sin explicar lo dice", async () => {

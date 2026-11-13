@@ -9,6 +9,10 @@ Datos SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999)
   para leer, en la de la administración. Contra `3c2d638` la ruta da 404 y la bandeja no trae
   `sin_explicar`.
 - **Columnas reconocidas solas** (P-23): la vista del extracto las trae.
+- **Débito que no es el pago de una orden** (respuesta del 13-11, opción a): quien concilia lo marca
+  con motivo y sale de la lista; nada se borra. Contra `3c2d638` la ruta da 404.
+- **Codex en #240**: el tope cuenta envíos reales (P2) y un pago ya cotejado no explica otro débito
+  (P1). Las dos pruebas fallan contra `a668127`.
 """
 
 import re
@@ -27,6 +31,7 @@ from app.plataforma import cola
 from tests.conftest import url_rol
 from tests.test_cotejo_0074 import (
     COLUMNAS,
+    PESOS,
     dato_pago,
     extracto,
     linea,
@@ -49,7 +54,7 @@ from tests.test_orden_pago_neutra import (
     otra_cuenta_en_el_consejo,
 )
 from tests.test_pago_manual_0055 import CUENTA, acta, emitida, registrada
-from tests.test_rutas_egresos import get
+from tests.test_rutas_egresos import get, post
 
 pytestmark = pytest.mark.db
 
@@ -200,7 +205,28 @@ def test_como_maximo_uno_por_dia_aunque_cambie_la_hora(motor_migrate, motor_app,
     # Alguien movió la hora: otra ventana el mismo día. Con tope 1, no sale otro.
     avisar(motor_app, HOY + timedelta(hours=3))
     assert len(avisos_a(motor_migrate, e.mc1)) == 1
-    # Control: al día siguiente, a la misma hora, sí.
+    # Control: un día después del envío real, sí.
+    pasa_un_dia(motor_migrate, e.mc1)
+    avisar(motor_app, HOY + timedelta(days=1))
+    assert len(avisos_a(motor_migrate, e.mc1)) == 2
+
+
+def pasa_un_dia(motor_migrate, persona: UUID, cuanto: timedelta = avisos_pagos.DIA) -> None:
+    """El tope se cuenta desde el envío real (`registrado_en`): acá se lo corre hacia atrás."""
+    with motor_migrate.begin() as c:
+        c.execute(text("update nucleo.aviso_pendientes set registrado_en = registrado_en - :d"
+                       " where persona_id = :p"), {"d": cuanto, "p": persona})  # fmt: skip
+
+
+def test_dos_corridas_atrasadas_que_salen_juntas_mandan_un_solo_aviso(motor_migrate, motor_app, e):
+    """Codex P2 en #240: el trabajador estuvo caído y al volver procesa la ventana de ayer y la de
+    hoy una detrás de otra. Contra a668127 salían dos correos (el tope contaba ventanas)."""
+    enviada(motor_migrate, e)
+    avisar(motor_app, HOY - timedelta(days=1))
+    avisar(motor_app, HOY)
+    assert len(avisos_a(motor_migrate, e.mc1)) == 1
+    # Control: casi un día después del envío (menos que el margen), la corrida siguiente sí sale.
+    pasa_un_dia(motor_migrate, e.mc1, avisos_pagos.DIA - avisos_pagos.MARGEN / 2)
     avisar(motor_app, HOY + timedelta(days=1))
     assert len(avisos_a(motor_migrate, e.mc1)) == 2
 
@@ -273,9 +299,15 @@ def test_los_pendientes_de_todos_solo_los_lee_el_trabajo(motor_app, e):
     assert error.value.orig.diag.sqlstate == "42501"
     with pytest.raises(DBAPIError) as error:
         with transaccion(motor_app, persona_id=None) as c:
-            c.execute(text("select nucleo.registrar_aviso_pendientes(:a, :v, 0)"),
-                      {"a": e.mc1, "v": HOY})  # fmt: skip
+            c.execute(text("select nucleo.registrar_aviso_pendientes(:a, :v, 0, :m)"),
+                      {"a": e.mc1, "v": HOY, "m": avisos_pagos.MARGEN})  # fmt: skip
     assert error.value.orig.diag.message_hint == "tope_invalido"
+    for margen in (None, timedelta(hours=-1), avisos_pagos.DIA):
+        with pytest.raises(DBAPIError) as error:
+            with transaccion(motor_app, persona_id=None) as c:
+                c.execute(text("select nucleo.registrar_aviso_pendientes(:a, :v, 1, :m)"),
+                          {"a": e.mc1, "v": HOY, "m": margen})  # fmt: skip
+        assert error.value.orig.diag.message_hint == "margen_invalido", margen
     # `cem_app` no toca la tabla del tope.
     with pytest.raises(DBAPIError) as error:
         with transaccion(motor_app, persona_id=None) as c:
@@ -355,6 +387,128 @@ def test_quien_no_concilia_ni_prepara_no_lo_ve(motor_migrate, motor_app, e):
     # Control: un consejero nuevo, con la facultad de conciliar, sí.
     e.sesion[vecina] = nueva_sesion(motor_migrate, vecina)
     assert get(e, vecina, "pagos/extracto/sin-explicar").status_code == 200
+
+
+def test_un_pago_ya_cotejado_no_explica_otro_debito_igual(motor_migrate, e):
+    """Codex P1 en #240: el pago ya cotejado con un débito no explica otro del mismo día, importe y
+    moneda sin referencia. Contra a668127 la lista daba 0: el pago consumido lo ocultaba."""
+    _, p = pagado(motor_migrate, e)
+    fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
+    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p), linea(fecha, f"-{PESOS}", "")))
+    with motor_migrate.connect() as c:
+        atado = c.execute(text("select movimiento_id from nucleo.cotejo_pago where pago_id = :p"),
+                          {"p": p}).scalar_one()  # fmt: skip
+    assert atado is not None  # control: el pago quedó cotejado con la línea de su referencia
+    lista = sin_explicar(e, e.mc1)
+    assert lista["total"] == 1
+    [m] = lista["elementos"]
+    assert (m["numero_operacion"], m["movimiento_id"] != str(atado)) == (None, True)
+    assert bandeja(e, e.adm)["sin_explicar"] == 1
+
+
+# El débito que no es el pago de una orden (respuesta del 13-11-2026, opción a) -------------------
+
+
+def no_es_pago(e, quien, movimiento, motivo="Comisión del banco SINTETICA"):
+    return post(e, quien, f"pagos/extracto/sin-explicar/{movimiento}/no-es-pago",
+                {"motivo": motivo})  # fmt: skip
+
+
+def con_un_debito_sin_explicar(motor_migrate, e) -> tuple[UUID, str]:
+    """Un pago cotejado por su línea y una comisión de 7,50 que nada explica."""
+    _, p = pagado(motor_migrate, e)
+    fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
+    subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p), linea(fecha, "-7,50", "")))
+    [m] = sin_explicar(e, e.mc1)["elementos"]
+    return p, m["movimiento_id"]
+
+
+def marcados(motor_migrate, cons) -> list[dict]:
+    with motor_migrate.connect() as c:
+        return [dict(f) for f in c.execute(
+            text("select * from nucleo.movimiento_no_es_pago where consorcio_id = :c"),
+            {"c": cons},
+        ).mappings()]  # fmt: skip
+
+
+def test_quien_concilia_marca_que_no_es_el_pago_de_una_orden_y_sale_de_la_lista(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    assert bandeja(e, e.adm)["sin_explicar"] == 1  # control: antes está, para los dos
+    r = no_es_pago(e, e.mc1, m)
+    assert r.status_code == 200, r.json()
+    assert r.json() == {"movimiento_id": m}
+    for quien in (e.mc1, e.mc2, e.adm):
+        assert sin_explicar(e, quien) == {"elementos": [], "total": 0}
+        assert bandeja(e, quien)["sin_explicar"] == 0
+    # Nada se borra: queda quién, cuándo y por qué; el movimiento sigue en la base.
+    [fila] = marcados(motor_migrate, e.cons)
+    assert (str(fila["movimiento_id"]), fila["marcado_por"], fila["motivo"]) == (
+        m, e.mc1, "Comisión del banco SINTETICA")  # fmt: skip
+    assert fila["marcado_en"] is not None
+    with motor_migrate.connect() as c:
+        assert c.execute(text("select count(*) from nucleo.movimiento_extracto where id = :m"),
+                         {"m": m}).scalar_one() == 1  # fmt: skip
+        evento = c.execute(
+            text("select despues from auditoria.eventos"
+                 " where accion = 'consorcio.extracto.no_es_pago' and entidad_id = :m"), {"m": m},
+        ).scalar_one()  # fmt: skip
+    assert evento == {"movimiento": m}  # el motivo queda en la tabla, no en el evento
+    # Repetir no hace nada.
+    assert no_es_pago(e, e.mc1, m, "Otra cosa").status_code == 200
+    assert [f["motivo"] for f in marcados(motor_migrate, e.cons)] == [
+        "Comisión del banco SINTETICA"
+    ]
+
+
+def test_la_administracion_no_marca(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    r = no_es_pago(e, e.adm, m)
+    assert r.status_code == 403, r.json()
+    assert marcados(motor_migrate, e.cons) == []
+    assert sin_explicar(e, e.adm)["total"] == 1
+
+
+def test_el_motivo_no_lleva_una_cuenta(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    r = no_es_pago(e, e.mc1, m, f"Transferencia a {CUENTA}")
+    assert (r.status_code, r.json()["codigo"]) == (422, "motivo_con_cuenta"), r.json()
+    assert marcados(motor_migrate, e.cons) == []
+    # Control: sin la cuenta, el mismo pedido pasa.
+    assert no_es_pago(e, e.mc1, m, "Transferencia propia SINTETICA").status_code == 200
+
+
+def test_un_debito_ya_cotejado_no_se_marca(motor_migrate, e):
+    p, _ = con_un_debito_sin_explicar(motor_migrate, e)
+    with motor_migrate.connect() as c:
+        atado = c.execute(text("select movimiento_id from nucleo.cotejo_pago where pago_id = :p"),
+                          {"p": p}).scalar_one()  # fmt: skip
+    r = no_es_pago(e, e.mc1, atado)
+    assert (r.status_code, r.json()["codigo"]) == (409, "movimiento_ya_explicado"), r.json()
+    # Uno que no existe en el edificio.
+    r = no_es_pago(e, e.mc1, UUID(int=7))
+    assert r.status_code == 404, r.json()
+    assert marcados(motor_migrate, e.cons) == []
+
+
+def test_marcar_pide_el_gesto(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    e.sesion[e.mc1] = nueva_sesion(motor_migrate, e.mc1, totp_min_atras=None)
+    r = no_es_pago(e, e.mc1, m)
+    assert (r.status_code, r.json()["codigo"]) == (403, "segundo_factor_requerido"), r.json()
+    assert marcados(motor_migrate, e.cons) == []
+
+
+def test_lo_marcado_no_se_cambia_ni_se_borra(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    assert no_es_pago(e, e.mc1, m).status_code == 200
+    for sentencia in ("update nucleo.movimiento_no_es_pago set motivo = 'otro'",
+                      "delete from nucleo.movimiento_no_es_pago",
+                      "truncate nucleo.movimiento_no_es_pago"):  # fmt: skip
+        with pytest.raises(DBAPIError) as error:
+            with motor_migrate.begin() as c:
+                c.execute(text(sentencia))
+        assert error.value.orig.diag.message_hint == "historia_inmutable", sentencia
+    assert len(marcados(motor_migrate, e.cons)) == 1
 
 
 # P-23: columnas reconocidas -------------------------------------------------------------------

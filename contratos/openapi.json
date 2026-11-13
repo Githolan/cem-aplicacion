@@ -921,6 +921,7 @@
           "columnas_sin_elegir",
           "pago_sin_conciliar",
           "movimiento_no_coincide",
+          "movimiento_ya_explicado",
           "no_es_quien_lo_subio",
           "documento_referenciado"
         ],
@@ -7005,6 +7006,20 @@
         "title": "MotivoRechazo",
         "type": "string"
       },
+      "MovimientoMarcado": {
+        "properties": {
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "movimiento_id"
+        ],
+        "title": "MovimientoMarcado",
+        "type": "object"
+      },
       "MovimientoSinExplicar": {
         "description": "Un débito de un extracto ya subido que ningún pago de Consorcio en Mano explica (pregunta 8\ndel propietario, 13-11-2026). Lo ven quien concilia y, solo para leer, la administración.",
         "properties": {
@@ -7101,6 +7116,23 @@
         ],
         "title": "NaturalezaContacto",
         "type": "string"
+      },
+      "NoEsPago": {
+        "additionalProperties": false,
+        "description": "`POST …/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago`: quien concilia dice que ese\ndébito no es el pago de una orden (una comisión, un impuesto del banco). No se borra: queda\nquién, cuándo y el motivo, y sale de lo que el extracto no explica.",
+        "properties": {
+          "motivo": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "NoEsPago",
+        "type": "object"
       },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
@@ -18755,6 +18787,83 @@
           }
         },
         "summary": "Lo que el extracto del banco no explica: débitos sin un pago en Consorcio en Mano. Lo lee quien concilia y, solo para leer, la administración. Sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago": {
+      "post": {
+        "operationId": "marcar_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_sin_explicar__movimiento_id__no_es_pago_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "movimiento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Movimiento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEsPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovimientoMarcado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese débito no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ese débito ya lo explica un pago (`movimiento_ya_explicado`)."
+          },
+          "422": {
+            "description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."
+          }
+        },
+        "summary": "Marcar que un débito del extracto no es el pago de una orden, con motivo. Lo hace quien concilia, con el gesto. No se borra: queda quién, cuándo y por qué",
         "tags": [
           "egresos"
         ]

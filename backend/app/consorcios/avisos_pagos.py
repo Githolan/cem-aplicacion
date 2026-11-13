@@ -14,8 +14,9 @@ solo correo.
 
 **Cuándo y cuántos.** Una corrida del planificador por día a `CEM_AVISOS_HORA_UTC`; con
 `CEM_AVISOS_TOPE_DIARIO` = N, N corridas por día repartidas desde esa hora, y la base
-(`registrar_aviso_pendientes`) corta en N avisos por persona en 24 horas aunque la hora cambie en
-el medio. Con 0 no se programa ninguna corrida.
+(`registrar_aviso_pendientes`) corta en N avisos por persona en 24 horas contadas desde los envíos
+reales: ni mover la hora ni dos corridas atrasadas que salen juntas mandan de más. Con 0 no se
+programa ninguna corrida.
 
 El correo sale por el camino de siempre (`correo.solicitar`, outbox, `notificar.correo`), en la
 misma transacción que registra el aviso: o quedan los dos o ninguno.
@@ -40,6 +41,9 @@ log = logging.getLogger("cem.avisos")
 
 TIPO = "pagos.avisar_pendientes"
 DIA = timedelta(days=1)
+MARGEN = timedelta(hours=1)
+"""Lo que el tope deja de contar de las 24 horas: la corrida de ayer pudo terminar algo después
+que la de hoy (cola ocupada, reintento). Nunca pasa de medio período entre corridas."""
 RUTA_BANDEJA = "/pagos"
 """La bandeja de pagos del frontend (`RUTA_PAGOS` en `frontend/src/pagos/rutas.ts`)."""
 
@@ -136,11 +140,12 @@ def avisar(conn: Connection, ventana: datetime, config: Config) -> dict[str, int
     ).mappings().all()  # fmt: skip
     avisos = agrupar(list(filas))
     enlace = f"{config.origen_publico}{RUTA_BANDEJA}"
+    margen = min(MARGEN, periodo(config.avisos_tope_diario) / 2)
     enviados = 0
     for persona, aviso in avisos.items():
         admite = conn.execute(
-            text("select nucleo.registrar_aviso_pendientes(:p, :v, :t)"),
-            {"p": persona, "v": ventana, "t": config.avisos_tope_diario},
+            text("select nucleo.registrar_aviso_pendientes(:p, :v, :t, :m)"),
+            {"p": persona, "v": ventana, "t": config.avisos_tope_diario, "m": margen},
         ).scalar_one()  # fmt: skip
         if not admite:
             continue

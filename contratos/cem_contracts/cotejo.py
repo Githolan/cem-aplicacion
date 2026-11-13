@@ -193,6 +193,24 @@ class ListaSinExplicar(BaseModel):
     total: int = Field(ge=0)
 
 
+class NoEsPago(BaseModel):
+    """`POST …/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago`: quien concilia dice que ese
+    débito no es el pago de una orden (una comisión, un impuesto del banco). No se borra: queda
+    quién, cuándo y el motivo, y sale de lo que el extracto no explica."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MAXIMO_MOTIVO)
+    ]
+
+
+class MovimientoMarcado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+
+
 class ResultadoCotejo(BaseModel):
     """`POST …/pagos/cotejo/extracto`. Lo que coincide se cuenta; se lista lo que hay que mirar.
 

@@ -190,6 +190,12 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "         alter table nucleo.movimiento_extracto disable trigger user;"
                 "         alter table nucleo.importacion_extracto disable trigger user;"
                 "         delete from nucleo.cotejo_pago;"
+                # «No es el pago de una orden» (0098) cita el débito: va antes.
+                "         if to_regclass('nucleo.movimiento_no_es_pago') is not null then"
+                "           alter table nucleo.movimiento_no_es_pago disable trigger user;"
+                "           delete from nucleo.movimiento_no_es_pago;"
+                "           alter table nucleo.movimiento_no_es_pago enable trigger user;"
+                "         end if;"
                 "         delete from nucleo.movimiento_extracto;"
                 "         delete from nucleo.importacion_extracto;"
                 "         delete from nucleo.columnas_extracto;"

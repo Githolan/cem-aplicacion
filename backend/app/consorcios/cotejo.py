@@ -32,7 +32,9 @@ from cem_contracts.cotejo import (
     ListaCotejo,
     ListaSinExplicar,
     MonedaExtracto,
+    MovimientoMarcado,
     MovimientoSinRegistrar,
+    NoEsPago,
     NombreColumna,
     PagoCotejado,
     PagoPorCotejar,
@@ -80,6 +82,12 @@ ERRORES = {
         409, CodigoError.MOVIMIENTO_NO_COINCIDE, "Ese movimiento no coincide con el pago.",
     ),
 }  # fmt: skip
+ERRORES_NO_ES_PAGO = {
+    "estado_invalido": (
+        409, CodigoError.MOVIMIENTO_YA_EXPLICADO, "Ese débito ya lo explica un pago.",
+    ),
+}  # fmt: skip
+"""Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
 """Además de los de `egresos`: `no_encontrado` y las separaciones, igual que al conciliar."""
 
 RESPUESTAS_LECTURA = {
@@ -224,6 +232,36 @@ def listar_sin_explicar(preparar: Preparar, revisar: Revisar, motor: MotorDep) -
     with _lectura(lector, motor) as c:
         todos = sin_explicar(c, lector)
     return ListaSinExplicar(elementos=todos[:MAXIMO_FILAS_RESULTADO], total=len(todos))
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago",
+    response_model=MovimientoMarcado,
+    summary="Marcar que un débito del extracto no es el pago de una orden, con motivo. Lo hace"
+    " quien concilia, con el gesto. No se borra: queda quién, cuándo y por qué",
+    responses=RESPUESTAS_LECTURA
+    | {
+        404: {"description": "Ese débito no existe en este consorcio."},
+        409: {"description": "Ese débito ya lo explica un pago (`movimiento_ya_explicado`)."},
+        422: {"description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."},
+    },
+)
+def marcar_no_es_pago(
+    movimiento_id: UUID,
+    pedido: NoEsPago,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, MovimientoMarcado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.marcar_no_es_pago(:m, :motivo, :actor, 'api', :sesion)",
+            {"m": movimiento_id, "motivo": pedido.motivo}, ERRORES_NO_ES_PAGO,
+        )  # fmt: skip
+        return 200, MovimientoMarcado(movimiento_id=movimiento_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
 def _demasiado_grande(tope: int) -> ErrorApi:

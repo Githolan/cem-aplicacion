@@ -9,6 +9,7 @@ aprobación; las pruebas que necesitan dos las cargan como soporte (`exigir`).
 """
 
 import random
+import re
 import threading
 from dataclasses import dataclass
 from uuid import UUID
@@ -1063,13 +1064,21 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
     # aprobación completa. Las de `0072` solo la leen: dicen sí o no y no escriben ninguna tabla.
     # `proveedor_cambio_tras_aprobar` (0080) tampoco escribe: es `stable` y dice sí o no.
     # `panel_comprobantes_faltantes` (0094) es una lectura `stable` del panel del Consejo.
+    # `acciones_de_ordenes_de` (0098) es el cuerpo que era de `acciones_de_ordenes_lectura`, que
+    # ahora solo la llama: lee el estado para decir qué botón ve cada uno y no escribe nada.
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
         "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
         "nucleo.aprobar_por_franja", "nucleo.renovar_orden_vencida",
-        "nucleo.admite_pagar", "nucleo.admite_renovar", "nucleo.acciones_de_ordenes_lectura",
+        "nucleo.admite_pagar", "nucleo.admite_renovar", "nucleo.acciones_de_ordenes_de",
         "nucleo.proveedor_cambio_tras_aprobar", "nucleo.panel_comprobantes_faltantes",
     }  # fmt: skip
+    with motor_migrate.connect() as c:
+        cuerpo = c.execute(
+            text("select lower(prosrc) from pg_proc where oid ="
+                 " 'nucleo.acciones_de_ordenes_de'::regproc")
+        ).scalar_one()  # fmt: skip
+    assert not re.search(r"\b(insert|update|delete|truncate)\b", cuerpo)
 
 
 def test_truncate_tampoco_borra_la_historia(motor_migrate, e):
