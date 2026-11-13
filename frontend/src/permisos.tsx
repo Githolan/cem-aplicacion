@@ -230,6 +230,9 @@ export const REQUISITOS = {
   pagos: [["egresos.preparar_orden"], ["egresos.revisar_orden"]],
   /** Las reglas de conciliar: la base separa pago por pago. */
   cotejo: [["egresos.conciliar_pago"]],
+  /** Lo que el extracto no explica (pregunta 8, opción c): quien concilia y la administración, que
+   * solo lee. Las mismas lecturas que la bandeja. */
+  sinExplicar: [["egresos.preparar_orden"], ["egresos.revisar_orden"]],
   liquidacion: [["liquidacion.preparar"]],
   /** El panel completo del Consejo y la administración (RF48). */
   panel: [["fiscalizacion.ver_panel"]],

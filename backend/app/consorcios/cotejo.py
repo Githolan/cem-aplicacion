@@ -30,8 +30,14 @@ from cem_contracts.cotejo import (
     CotejoAnulado,
     ListaCotejados,
     ListaCotejo,
+    ListaMarcasNoEsPago,
+    ListaSinExplicar,
+    MarcaNoEsPago,
     MonedaExtracto,
+    MovimientoMarcado,
+    MovimientoSinExplicar,
     MovimientoSinRegistrar,
+    NoEsPago,
     NombreColumna,
     PagoCotejado,
     PagoPorCotejar,
@@ -48,7 +54,15 @@ from sqlalchemy import Connection
 from app.autorizacion.requiere import Permiso, requiere
 from app.consorcios import extracto
 from app.consorcios.documentos import ESPERA_TURNO, LECTURA_MAXIMA, _semaforo
-from app.consorcios.egresos import REVISAR, _ejecutar, _lectura
+from app.consorcios.egresos import (
+    REVISAR,
+    Preparar,
+    Revisar,
+    _ejecutar,
+    _lectura,
+    lector_del_extracto,
+    sin_explicar,
+)
 from app.contexto import MotorDep
 from app.errores import ErrorApi, sin_cache
 from app.plataforma.idempotencia import (
@@ -70,8 +84,25 @@ ERRORES = {
     "movimiento_no_coincide": (
         409, CodigoError.MOVIMIENTO_NO_COINCIDE, "Ese movimiento no coincide con el pago.",
     ),
+    "movimiento_no_es_pago": (
+        409, CodigoError.MOVIMIENTO_YA_EXPLICADO,
+        "Ese débito está marcado como que no es el pago de una orden: no se coteja con un pago.",
+    ),
 }  # fmt: skip
 """Además de los de `egresos`: `no_encontrado` y las separaciones, igual que al conciliar."""
+ERRORES_NO_ES_PAGO = {
+    "estado_invalido": (
+        409, CodigoError.MOVIMIENTO_YA_EXPLICADO, "Ese débito ya lo explica un pago.",
+    ),
+}  # fmt: skip
+"""Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
+ERRORES_RETIRO = {
+    "sin_marca_vigente": (
+        409, CodigoError.SIN_MARCA_VIGENTE,
+        "Ese débito no tiene una marca vigente: ya se retiró o no se marcó.",
+    ),
+}  # fmt: skip
+"""Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
 
 RESPUESTAS_LECTURA = {
     403: {"description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."}
@@ -202,6 +233,124 @@ def anular_cotejo(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/extracto/sin-explicar",
+    response_model=ListaSinExplicar,
+    summary="Lo que el extracto del banco no explica: débitos sin un pago en Consorcio en Mano."
+    " Lo lee quien concilia y, solo para leer, la administración. Sin la cuenta",
+    responses={403: {"description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`,"
+                                    " sin el modo, o falta renovar la sesión."}},
+)  # fmt: skip
+def listar_sin_explicar(
+    preparar: Preparar,
+    revisar: Revisar,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
+) -> ListaSinExplicar:
+    lector = lector_del_extracto(preparar, revisar)
+    with _lectura(lector, motor) as c:
+        todos = sin_explicar(c, lector)
+    pagina, siguiente = _pagina(todos, despues, limite)
+    return ListaSinExplicar(elementos=pagina, siguiente=siguiente, total=len(todos))
+
+
+def _pagina[T: MovimientoSinExplicar | MarcaNoEsPago](
+    todos: list[T], despues: UUID | None, limite: int
+) -> tuple[list[T], UUID | None]:
+    """Por débito, en el orden en que llegaron (`uuid_v7`), como las páginas del cotejo: la lista
+    se arma entera (lo sin explicar sale de comparar todo) y se corta acá."""
+    restantes = [m for m in todos if despues is None or m.movimiento_id > despues]
+    pagina = restantes[:limite]
+    return pagina, pagina[-1].movimiento_id if len(restantes) > limite else None
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago",
+    response_model=MovimientoMarcado,
+    summary="Marcar que un débito del extracto no es el pago de una orden, con motivo. Lo hace"
+    " quien concilia, con el gesto. No se borra: queda quién, cuándo y por qué",
+    responses=RESPUESTAS_LECTURA
+    | {
+        404: {"description": "Ese débito no existe en este consorcio."},
+        409: {"description": "Ese débito ya lo explica un pago (`movimiento_ya_explicado`)."},
+        422: {"description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."},
+    },
+)
+def marcar_no_es_pago(
+    movimiento_id: UUID,
+    pedido: NoEsPago,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, MovimientoMarcado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.marcar_no_es_pago(:m, :motivo, :actor, 'api', :sesion)",
+            {"m": movimiento_id, "motivo": pedido.motivo}, ERRORES_NO_ES_PAGO,
+        )  # fmt: skip
+        return 200, MovimientoMarcado(movimiento_id=movimiento_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/extracto/no-es-pago",
+    response_model=ListaMarcasNoEsPago,
+    summary="Los débitos con la marca vigente «No es el pago de una orden», con su motivo. Los lee"
+    " quien concilia y, solo para leer, la administración",
+    responses={403: {"description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`,"
+                                    " sin el modo, o falta renovar la sesión."}},
+)  # fmt: skip
+def listar_marcas_no_es_pago(
+    preparar: Preparar,
+    revisar: Revisar,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
+) -> ListaMarcasNoEsPago:
+    lector = lector_del_extracto(preparar, revisar)
+    with _lectura(lector, motor) as c:
+        filas = _ejecutar(
+            c, lector, "select * from nucleo.marcas_no_es_pago_lectura(:actor, 'api', :sesion)", {}
+        ).mappings().all()  # fmt: skip
+    marcas = sorted((MarcaNoEsPago(**f) for f in filas), key=lambda m: m.movimiento_id)
+    pagina, siguiente = _pagina(marcas, despues, limite)
+    return ListaMarcasNoEsPago(elementos=pagina, siguiente=siguiente, total=len(marcas))
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/extracto/no-es-pago/{movimiento_id}/retiro",
+    response_model=MovimientoMarcado,
+    summary="Retirar la marca «No es el pago de una orden», con motivo. Lo hace quien concilia, con"
+    " el gesto. No se borra: queda quién la retiró, cuándo y por qué, y el débito vuelve a lo que"
+    " el extracto no explica",
+    responses=RESPUESTAS_LECTURA
+    | {
+        404: {"description": "Ese débito no existe en este consorcio."},
+        409: {"description": "Ese débito no tiene una marca vigente (`sin_marca_vigente`)."},
+        422: {"description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."},
+    },
+)
+def retirar_no_es_pago(
+    movimiento_id: UUID,
+    pedido: NoEsPago,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, MovimientoMarcado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.retirar_no_es_pago(:m, :motivo, :actor, 'api', :sesion)",
+            {"m": movimiento_id, "motivo": pedido.motivo}, ERRORES_RETIRO,
+        )  # fmt: skip
+        return 200, MovimientoMarcado(movimiento_id=movimiento_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
 def _demasiado_grande(tope: int) -> ErrorApi:
     return ErrorApi(
         413, CodigoError.ARCHIVO_DEMASIADO_GRANDE,
@@ -300,6 +449,7 @@ async def columnas_del_extracto(request: Request, permiso: Leer, motor: MotorDep
         return VistaExtracto(
             columnas=tabla.columnas, muestra=extracto.muestra(tabla),
             signo_sugerido=extracto.signo_sugerido(tabla), columnas_guardadas=guardadas,
+            columnas_reconocidas=extracto.reconocer_columnas(tabla),
         )  # fmt: skip
 
     async with _Turno():
@@ -332,6 +482,12 @@ def _comparar_y_cotejar(
             "s": columnas.signo.value, "moneda": columnas.moneda,
         },
     ).mappings().all()  # fmt: skip
+    # Los marcados como «no es el pago de una orden» no se comparan: la base tampoco los coteja.
+    marcados = set(_ejecutar(
+        conn, permiso,
+        "select * from nucleo.no_es_pago_lectura(cast(:m as uuid[]), :actor, 'api', :sesion)",
+        {"m": [g["movimiento_id"] for g in guardados]},
+    ).scalars())  # fmt: skip
     movimientos = [
         extracto.MovimientoGuardado(
             id=g["movimiento_id"],
@@ -340,6 +496,7 @@ def _comparar_y_cotejar(
             moneda=g["moneda"],
             numero_operacion=g["numero_operacion"],
             pago_id=g["pago_id"],
+            no_es_pago=g["movimiento_id"] in marcados,
         )  # fmt: skip
         for g in guardados
     ]

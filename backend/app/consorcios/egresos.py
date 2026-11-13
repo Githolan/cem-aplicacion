@@ -35,7 +35,7 @@ from typing import Annotated
 from uuid import UUID
 
 import anyio
-from cem_contracts.cotejo import LIMITE_COTEJO_MAXIMO
+from cem_contracts.cotejo import LIMITE_COTEJO_MAXIMO, MovimientoSinExplicar
 from cem_contracts.documentos import DocumentoId, EstadoVersion, VersionCargada
 from cem_contracts.egresos import (
     LARGO_MAXIMO_BUSQUEDA_PAGOS,
@@ -140,7 +140,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.autorizacion.evaluador import Entidad, alcanza
 from app.autorizacion.requiere import NO_ENCONTRADO, RENOVAR, VOLVER_A_ENTRAR, Permiso, requiere
-from app.consorcios import circuito_pagos, lectura_comprobantes
+from app.consorcios import circuito_pagos, extracto, lectura_comprobantes
 from app.consorcios.documentos import (
     ERRORES_BAJA,
     RESPUESTAS_SUBIDA,
@@ -2303,6 +2303,75 @@ def _por_cotejar(c: Connection, revisar: Permiso) -> int:
         despues = filas[-1]["pago_id"]
 
 
+MOVIMIENTOS_SIN_COTEJO = (
+    "select * from nucleo.movimientos_sin_cotejo_lectura(:actor, 'api', :sesion)"
+)
+MARCAS_VIGENTES = "select * from nucleo.marcas_no_es_pago_lectura(:actor, 'api', :sesion)"
+PAGOS_PARA_EXPLICAR = (
+    "select * from nucleo.pagos_para_explicar_lectura(cast(:n as text[]), :d, :h, :actor, 'api',"
+    " :sesion)"
+)
+
+
+def lector_del_extracto(preparar: Permiso, revisar: Permiso) -> Permiso:
+    """Lo que el extracto no explica lo lee quien concilia y, solo para leer, la administración
+    (pregunta 8, opción c): como quien concilia si le alcanza, si no como quien prepara."""
+    permiso = revisar if alcanza(REVISAR, revisar.ctx.autorizacion) else preparar
+    permiso.verificar()
+    return permiso
+
+
+def sin_explicar(c: Connection, lector: Permiso) -> list[MovimientoSinExplicar]:
+    """Los débitos de los extractos ya subidos que ningún pago explica: los que no tienen cotejo
+    vigente y que la comparación de subir un extracto (`extracto.comparar`) deja sin pago. Se
+    vuelve a comparar con los pagos de hoy: un pago registrado después ya lo explica."""
+    filas = _ejecutar(c, lector, MOVIMIENTOS_SIN_COTEJO, {}).mappings().all()
+    if not filas:
+        return []
+    vistos = {f["movimiento_id"]: f["visto_en"] for f in filas}
+    movimientos = [
+        extracto.MovimientoGuardado(
+            id=f["movimiento_id"],
+            fecha=f["fecha"],
+            importe_centavos=f["importe_centavos"],
+            moneda=f["moneda"],
+            numero_operacion=f["numero_operacion"],
+            pago_id=None,
+        )  # fmt: skip
+        for f in filas
+    ]
+    desde, hasta = min(m.fecha for m in movimientos), max(m.fecha for m in movimientos)
+    numeros = sorted({m.numero_operacion for m in movimientos if m.numero_operacion is not None})
+    pagos = _ejecutar(
+        c, lector, PAGOS_PARA_EXPLICAR, {"n": numeros, "d": desde, "h": hasta}
+    ).mappings().all()  # fmt: skip
+    # Nadie coteja desde acá: quién podría hacerlo no cambia lo que el extracto explica.
+    comparables = [extracto.PagoComparable(**f, puede_cotejar=False) for f in pagos]
+    sueltos = extracto.comparar(movimientos, comparables, desde, hasta).sin_pago
+    return [
+        MovimientoSinExplicar(
+            movimiento_id=m.id,
+            fecha=m.fecha,
+            importe_centavos=m.importe_centavos,
+            moneda=m.moneda,
+            numero_operacion=m.numero_operacion,
+            visto_en=vistos[m.id],
+        )  # fmt: skip
+        for m in sorted(sueltos, key=lambda m: m.id)
+    ]
+
+
+def _cuantos_sin_explicar(c: Connection, preparar: Permiso, revisar: Permiso) -> tuple[int, int]:
+    """Para la bandeja: lo que el extracto no explica y las marcas vigentes «No es el pago de una
+    orden», para quien concilia y la administración. Sin ninguna de las dos, cero, sin
+    preguntar."""
+    for lector in (revisar, preparar):
+        if lector.decidir().permitido:
+            marcas = _ejecutar(c, lector, MARCAS_VIGENTES, {}).all()
+            return len(sin_explicar(c, lector)), len(marcas)
+    return 0, 0
+
+
 def _toma_vigente(
     c: Connection, lector: Permiso, orden: UUID, ejecucion: UUID
 ) -> TomaVigente | None:
@@ -2335,6 +2404,7 @@ def bandeja_pagos(
         )  # fmt: skip
         para_avisar = _para_avisar(c, lector, ordenes)
         por_cotejar = _por_cotejar(c, revisar)
+        cuantos_sin_explicar, marcados = _cuantos_sin_explicar(c, preparar, revisar)
     plazos = circuito_pagos.Plazos(
         cerradas_desde=ahora - timedelta(days=config.pagos_dias_bandeja),
         viejos_desde=ahora - timedelta(days=config.pagos_dias_borrador_viejo),
@@ -2344,6 +2414,8 @@ def bandeja_pagos(
         elementos=circuito_pagos.bandeja(ordenes, acciones, prepara, plazos),
         avisos_rechazo=circuito_pagos.avisos_de_rechazo(ordenes, prepara, para_avisar),
         por_cotejar=por_cotejar,
+        sin_explicar=cuantos_sin_explicar,
+        marcados_no_es_pago=marcados,
     )
 
 

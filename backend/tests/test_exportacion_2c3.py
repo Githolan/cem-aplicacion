@@ -161,6 +161,8 @@ CLAVES_POR_ENTIDAD = {
                              "importado_en"},
     "movimiento_extracto": {"id", "importacion_id", "hash_linea", "fecha", "importe_centavos",
                             "moneda", "numero_operacion"},
+    "movimiento_no_es_pago": {"id", "movimiento_id", "marcado_por_nombre", "marcado_en", "motivo",
+                              "retirada_por_nombre", "retirada_en", "motivo_retiro"},
     "columnas_extracto": {"columna_fecha", "columna_importe", "columna_numero", "signo", "moneda",
                           "guardadas_por_nombre", "guardadas_en"},
     "lectura_comprobante": {"id", "version_documento_id", "documento_id", "ejecucion_id", "modelo",
@@ -1291,6 +1293,7 @@ TABLA_DE_LA_ENTIDAD = {
     "cotejo": "nucleo.cotejo_pago",
     "importacion_extracto": "nucleo.importacion_extracto",
     "movimiento_extracto": "nucleo.movimiento_extracto",
+    "movimiento_no_es_pago": "nucleo.movimiento_no_es_pago",
     "columnas_extracto": "nucleo.columnas_extracto",
     "lectura_comprobante": "nucleo.lectura_comprobante",
     "lectura_carga": "nucleo.lectura_carga",
@@ -1306,6 +1309,10 @@ IMPORTAR = (
 )
 COTEJAR_EXTRACTO = (
     "select nucleo.cotejar_por_extracto(cast(:pares as jsonb), :actor, :origen, :sesion)"
+)
+NO_ES_PAGO = "select nucleo.marcar_no_es_pago(:movimiento, :motivo, :actor, :origen, :sesion)"
+RETIRAR_NO_ES_PAGO = (
+    "select nucleo.retirar_no_es_pago(:movimiento, :motivo, :actor, :origen, :sesion)"
 )
 TRANSICIONES = (
     "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
@@ -1328,7 +1335,9 @@ def _con_objetos_en_el_almacen(motor_migrate, cons, bucket) -> None:  # noqa: F8
 
 
 def cotejadas(motor_migrate, s, ordenes) -> None:
-    """La primera, tildada a mano; la segunda, por un extracto con una línea que coincide."""
+    """La primera, tildada a mano; la segunda, por un extracto con una línea que coincide. Otro
+    extracto trae un débito que no es el pago de una orden (`0098`): se marca, se retira la marca
+    y se vuelve a marcar."""
     with motor_migrate.connect() as c:
         pagos = [dict(c.execute(
             text("select p.id, p.numero_operacion, p.fecha_operacion, p.importe_centavos"
@@ -1348,6 +1357,20 @@ def cotejadas(motor_migrate, s, ordenes) -> None:
     )  # fmt: skip
     pares = json.dumps([{"movimiento": str(movimiento), "pago": str(por_extracto["id"])}])
     assert llamar(motor_migrate, s, s.mc2, COTEJAR_EXTRACTO, pares=pares) == 1
+    comision = llamar(
+        motor_migrate, s, s.mc2, IMPORTAR, archivo="c" * 64,
+        desde=por_extracto["fecha_operacion"], hasta=por_extracto["fecha_operacion"],
+        movimientos=json.dumps([{
+            "hash_linea": "d" * 64, "fecha": por_extracto["fecha_operacion"].isoformat(),
+            "importe_centavos": 750, "numero_operacion": None,
+        }]),
+    )  # fmt: skip
+    llamar(motor_migrate, s, s.mc2, NO_ES_PAGO, movimiento=comision,
+           motivo="Comisión del banco SINTETICA")  # fmt: skip
+    llamar(motor_migrate, s, s.mc2, RETIRAR_NO_ES_PAGO, movimiento=comision,
+           motivo="Marcada por error SINTETICO")  # fmt: skip
+    llamar(motor_migrate, s, s.mc2, NO_ES_PAGO, movimiento=comision,
+           motivo="Impuesto del banco SINTETICO")  # fmt: skip
 
 
 def leida(motor_migrate, motor_app, s, o) -> None:
@@ -1481,8 +1504,23 @@ def test_lo_economico_va_completo(economico, con_url, claves, tmp_path, motor_mi
     # Lo cotejado, de las dos formas, y el movimiento atado a su pago.
     assert {t["origen"] for t in datos["cotejo"]} == {"manual", "extracto"}
     [atado] = [t for t in datos["cotejo"] if t["origen"] == "extracto"]
-    assert atado["movimiento_id"] == datos["movimiento_extracto"][0]["id"]
+    [del_pago, comision] = sorted(
+        datos["movimiento_extracto"], key=lambda m: m["importe_centavos"] == 750
+    )
+    assert atado["movimiento_id"] == del_pago["id"]
     assert all(t["cotejado_por_nombre"] for t in datos["cotejo"])
+    # El débito que no es el pago de una orden, con quién, cuándo y por qué (0098): la marca
+    # retirada va con su retiro, y la vigente sin él.
+    [retirada, vigente] = datos["movimiento_no_es_pago"]
+    assert {retirada["movimiento_id"], vigente["movimiento_id"]} == {comision["id"]}
+    assert (retirada["motivo"], retirada["motivo_retiro"]) == (
+        "Comisión del banco SINTETICA", "Marcada por error SINTETICO",
+    )  # fmt: skip
+    assert retirada["retirada_por_nombre"] and retirada["retirada_en"]
+    assert (vigente["motivo"], vigente["retirada_en"], vigente["motivo_retiro"]) == (
+        "Impuesto del banco SINTETICO", None, None,
+    )  # fmt: skip
+    assert vigente["marcado_por_nombre"] and vigente["marcado_en"]
     assert datos["columnas_extracto"][0]["columna_importe"] == "Importe"
     # Una orden pagada, paso a paso, por sus transiciones.
     primera = str(e["pagadas"][0])
@@ -1620,6 +1658,12 @@ _COLUMNAS_DE_PERSONA = {
     "nucleo.confirmacion_pago_no_realizado": ("confirmado_por", "identidad_confirmo"),
     "nucleo.cotejo_pago": ("cotejado_por", "identidad_cotejo", "anulado_por", "identidad_anulo"),
     "nucleo.importacion_extracto": ("importado_por", "identidad_importo"),
+    "nucleo.movimiento_no_es_pago": (
+        "marcado_por",
+        "identidad_marco",
+        "retirada_por",
+        "identidad_retiro",
+    ),
     "nucleo.columnas_extracto": ("guardadas_por",),
     "nucleo.liquidacion": ("preparada_por", "identidad_preparo"),
     "nucleo.liquidacion_gasto": ("agregado_por", "identidad_agrego"),

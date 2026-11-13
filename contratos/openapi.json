@@ -396,17 +396,31 @@
             "title": "Elementos",
             "type": "array"
           },
+          "marcados_no_es_pago": {
+            "description": "Cuántos débitos tienen la marca vigente «No es el pago de una orden»: con alguno, la bandeja lleva a la pantalla donde se ven y quien concilia los retira (Codex en #240). Cero para quien no lee el cotejo.",
+            "minimum": 0.0,
+            "title": "Marcados No Es Pago",
+            "type": "integer"
+          },
           "por_cotejar": {
             "description": "Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»). Cero si no puede cotejar.",
             "minimum": 0.0,
             "title": "Por Cotejar",
+            "type": "integer"
+          },
+          "sin_explicar": {
+            "description": "Cuántos débitos de los extractos subidos ningún pago explica (pregunta 8): para quien concilia es algo que mirar; para la administración, una consulta de solo lectura. Cero para quien no lee el cotejo.",
+            "minimum": 0.0,
+            "title": "Sin Explicar",
             "type": "integer"
           }
         },
         "required": [
           "elementos",
           "avisos_rechazo",
-          "por_cotejar"
+          "por_cotejar",
+          "sin_explicar",
+          "marcados_no_es_pago"
         ],
         "title": "BandejaPagos",
         "type": "object"
@@ -914,6 +928,8 @@
           "columnas_sin_elegir",
           "pago_sin_conciliar",
           "movimiento_no_coincide",
+          "movimiento_ya_explicado",
+          "sin_marca_vigente",
           "no_es_quien_lo_subio",
           "documento_referenciado"
         ],
@@ -6300,6 +6316,43 @@
         "title": "ListaMandatos",
         "type": "object"
       },
+      "ListaMarcasNoEsPago": {
+        "description": "`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, en el orden en que llegaron los\nextractos, por páginas con `despues` (Codex en #240). `total` cuenta todas.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/MarcaNoEsPago"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente",
+          "total"
+        ],
+        "title": "ListaMarcasNoEsPago",
+        "type": "object"
+      },
       "ListaModos": {
         "description": "La historia completa, del más reciente al más antiguo. Vacía: el consorcio todavía no\ntiene modo registrado.",
         "properties": {
@@ -6414,6 +6467,43 @@
           "elementos"
         ],
         "title": "ListaSesiones",
+        "type": "object"
+      },
+      "ListaSinExplicar": {
+        "description": "`GET …/pagos/extracto/sin-explicar`: en el orden en que llegaron los extractos, por páginas\ncon `despues` (como `ListaCotejo`; Codex en #240). `total` cuenta todos. Sin la cuenta ni la\ndescripción del banco: no se guardan.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/MovimientoSinExplicar"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "siguiente",
+          "total"
+        ],
+        "title": "ListaSinExplicar",
         "type": "object"
       },
       "ListaUnidades": {
@@ -6956,6 +7046,60 @@
         "title": "MandatoRevisado",
         "type": "object"
       },
+      "MarcaNoEsPago": {
+        "description": "Un débito con la marca vigente «No es el pago de una orden» (respuesta del propietario,\n13-11-2026). Quien concilia puede retirarla, con motivo: `POST …/no-es-pago/{id}/retiro`, con\nel mismo cuerpo que marcar (`NoEsPago`).",
+        "properties": {
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "marcado_en": {
+            "format": "date-time",
+            "title": "Marcado En",
+            "type": "string"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          }
+        },
+        "required": [
+          "movimiento_id",
+          "fecha",
+          "importe_centavos",
+          "moneda",
+          "numero_operacion",
+          "motivo",
+          "marcado_en"
+        ],
+        "title": "MarcaNoEsPago",
+        "type": "object"
+      },
       "MetodoReparto": {
         "description": "`nucleo.metodo_reparto` (0021).",
         "enum": [
@@ -7009,6 +7153,70 @@
         "title": "MotivoRechazo",
         "type": "string"
       },
+      "MovimientoMarcado": {
+        "properties": {
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "movimiento_id"
+        ],
+        "title": "MovimientoMarcado",
+        "type": "object"
+      },
+      "MovimientoSinExplicar": {
+        "description": "Un débito de un extracto ya subido que ningún pago de Consorcio en Mano explica (pregunta 8\ndel propietario, 13-11-2026). Lo ven quien concilia y, solo para leer, la administración.",
+        "properties": {
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          },
+          "visto_en": {
+            "description": "Cuándo se subió el extracto que lo trajo.",
+            "format": "date-time",
+            "title": "Visto En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "movimiento_id",
+          "fecha",
+          "importe_centavos",
+          "moneda",
+          "numero_operacion",
+          "visto_en"
+        ],
+        "title": "MovimientoSinExplicar",
+        "type": "object"
+      },
       "MovimientoSinRegistrar": {
         "description": "Un débito del banco sin pago en Consorcio en Mano, en la moneda elegida para el extracto.",
         "properties": {
@@ -7055,6 +7263,23 @@
         ],
         "title": "NaturalezaContacto",
         "type": "string"
+      },
+      "NoEsPago": {
+        "additionalProperties": false,
+        "description": "`POST …/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago`: quien concilia dice que ese\ndébito no es el pago de una orden (una comisión, un impuesto del banco). No se borra: queda\nquién, cuándo y el motivo, y sale de lo que el extracto no explica.",
+        "properties": {
+          "motivo": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "motivo"
+        ],
+        "title": "NoEsPago",
+        "type": "object"
       },
       "NuevaContrasena": {
         "description": "`PUT /api/v1/auth/contrasena`: definir o cambiar la contraseña.\n\nCon el segundo factor activo, la sesión tiene que haberlo verificado en los últimos 10\nminutos (TB-CEM-3). Sin segundo factor, cambiar una contraseña existente pide la actual.",
@@ -10798,6 +11023,17 @@
             ],
             "description": "Las del edificio, si este archivo las tiene todas."
           },
+          "columnas_reconocidas": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnasExtracto"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Las que se reconocen solas por su nombre (P-23): una sola columna de fecha, una sola de importe o de débitos y, si hay, una sola de número de operación. Nula si falta alguna o hay más de una que puede ser: entonces se pregunta."
+          },
           "muestra": {
             "description": "La primera línea de datos, columna por columna, sin números de cuenta.",
             "items": {
@@ -10814,7 +11050,8 @@
           "columnas",
           "muestra",
           "signo_sugerido",
-          "columnas_guardadas"
+          "columnas_guardadas",
+          "columnas_reconocidas"
         ],
         "title": "VistaExtracto",
         "type": "object"
@@ -18721,6 +18958,310 @@
           }
         },
         "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago": {
+      "get": {
+        "operationId": "listar_marcas_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_no_es_pago_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaMarcasNoEsPago"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los débitos con la marca vigente «No es el pago de una orden», con su motivo. Los lee quien concilia y, solo para leer, la administración",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago/{movimiento_id}/retiro": {
+      "post": {
+        "operationId": "retirar_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_no_es_pago__movimiento_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "movimiento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Movimiento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEsPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovimientoMarcado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese débito no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ese débito no tiene una marca vigente (`sin_marca_vigente`)."
+          },
+          "422": {
+            "description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."
+          }
+        },
+        "summary": "Retirar la marca «No es el pago de una orden», con motivo. Lo hace quien concilia, con el gesto. No se borra: queda quién la retiró, cuándo y por qué, y el débito vuelve a lo que el extracto no explica",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/sin-explicar": {
+      "get": {
+        "operationId": "listar_sin_explicar_api_v1_consorcios__consorcio_id__pagos_extracto_sin_explicar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaSinExplicar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que el extracto del banco no explica: débitos sin un pago en Consorcio en Mano. Lo lee quien concilia y, solo para leer, la administración. Sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago": {
+      "post": {
+        "operationId": "marcar_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_sin_explicar__movimiento_id__no_es_pago_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "movimiento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Movimiento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEsPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovimientoMarcado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese débito no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ese débito ya lo explica un pago (`movimiento_ya_explicado`)."
+          },
+          "422": {
+            "description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."
+          }
+        },
+        "summary": "Marcar que un débito del extracto no es el pago de una orden, con motivo. Lo hace quien concilia, con el gesto. No se borra: queda quién, cuándo y por qué",
         "tags": [
           "egresos"
         ]

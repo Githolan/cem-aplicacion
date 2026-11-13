@@ -4,7 +4,9 @@ Ningún secreto vive en el repositorio (documento 13, §15.4).
 """
 
 import os
+import re
 from dataclasses import dataclass
+from datetime import time
 
 from cem_contracts.documentos import TOPE_BYTES
 
@@ -19,6 +21,12 @@ PAGOS_DIAS_REPETIDA = 30
 `CEM_PAGOS_DIAS_REPETIDA` la cambia."""
 PAGOS_HORAS_TOMAR = 24
 """Decisión 1 del propietario (07-11-2026). `CEM_PAGOS_HORAS_TOMAR` la cambia."""
+AVISOS_HORA_UTC = time(12, 0)
+"""Pregunta 7 del propietario (13-11-2026): el aviso diario de pendientes sale a las 12:00 UTC (las
+09:00 en Buenos Aires). `CEM_AVISOS_HORA_UTC` («HH:MM», en UTC) la cambia."""
+AVISOS_TOPE_DIARIO = 1
+"""Pregunta 7: como máximo un aviso por persona por día. `CEM_AVISOS_TOPE_DIARIO` lo cambia; con
+`N` el aviso sale `N` veces por día, repartidas desde la hora; con 0 no sale ninguno."""
 COTEJO_MAXIMO_LINEAS = 50_000
 """Más que el extracto de varios años de un edificio."""
 SALUD_CACHE_SEGUNDOS = 10
@@ -63,6 +71,10 @@ class Config:
     """Líneas máximas de un extracto."""
     salud_cache_segundos: int = SALUD_CACHE_SEGUNDOS
     """Segundos durante los que `/api/v1/health/deps` reutiliza su última comprobación."""
+    avisos_hora_utc: time = AVISOS_HORA_UTC
+    """Hora (UTC) del primer aviso del día a quien tiene algo para aprobar, pagar o conciliar."""
+    avisos_tope_diario: int = AVISOS_TOPE_DIARIO
+    """Avisos por persona en 24 horas, y corridas por día del aviso. 0 apaga los avisos."""
 
 
 def _dias(variable: str, por_defecto: int) -> int:
@@ -84,6 +96,20 @@ def _positivo(variable: str, por_defecto: int) -> int:
     return valor
 
 
+HORA = re.compile(r"(?P<hora>[01]\d|2[0-3]):(?P<minuto>[0-5]\d)")
+
+
+def _hora(variable: str, por_defecto: time) -> time:
+    """«HH:MM». Un valor mal escrito impide el arranque, como en `_dias`."""
+    valor = os.environ.get(variable)
+    if valor is None:
+        return por_defecto
+    hallada = HORA.fullmatch(valor)
+    if hallada is None:
+        raise ValueError(f"{variable} tiene que ser una hora HH:MM, no {valor!r}")
+    return time(int(hallada["hora"]), int(hallada["minuto"]))
+
+
 def cargar() -> Config:
     return Config(
         database_url=os.environ.get("CEM_DATABASE_URL", ""),
@@ -102,4 +128,6 @@ def cargar() -> Config:
         cotejo_tope_bytes=_positivo("CEM_COTEJO_TOPE_BYTES", TOPE_BYTES),
         cotejo_maximo_lineas=_positivo("CEM_COTEJO_MAXIMO_LINEAS", COTEJO_MAXIMO_LINEAS),
         salud_cache_segundos=_positivo("CEM_SALUD_CACHE_SEGUNDOS", SALUD_CACHE_SEGUNDOS),
+        avisos_hora_utc=_hora("CEM_AVISOS_HORA_UTC", AVISOS_HORA_UTC),
+        avisos_tope_diario=_dias("CEM_AVISOS_TOPE_DIARIO", AVISOS_TOPE_DIARIO),
     )

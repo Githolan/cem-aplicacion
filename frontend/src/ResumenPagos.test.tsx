@@ -52,9 +52,9 @@ function elemento(n: number, grupo: string) {
 }
 
 const conElementos = (...grupos: string[]) => () =>
-  Response.json({ elementos: grupos.map((g, i) => elemento(i, g)), avisos_rechazo: [], por_cotejar: 0 });
+  Response.json({ elementos: grupos.map((g, i) => elemento(i, g)), avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 });
 /** Pagos conciliados sin cotejar: el servidor los cuenta solo para quien coteja (P-24). */
-const conPorCotejar = (n: number) => () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: n });
+const conPorCotejar = (n: number) => () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: n, sin_explicar: 0 });
 
 type Respuesta = () => Response;
 
@@ -145,12 +145,26 @@ describe("Pagos en el inicio de quien revisa", () => {
       Response.json({
         elementos: [elemento(0, "para_aprobar"), { ...elemento(1, "borradores_viejos"), pendiente: false }],
         avisos_rechazo: [],
-        por_cotejar: 2,
+        por_cotejar: 2, sin_explicar: 0,
       });
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: bandeja } }));
     abrir();
     const hero = within(await tarjeta());
     expect((await hero.findByText("cosas para hacer", { exact: false })).textContent).toBe("3 cosas para hacer");
+  });
+
+  // Pregunta 8: lo que el extracto no explica es algo para hacer de quien coteja; de la
+  // administración, no (lo ve como consulta). Contra 3c2d638 el número no lo sumaba.
+  it("lo que el extracto no explica cuenta para quien coteja y no para la administración", async () => {
+    const bandeja = () => Response.json({ elementos: [elemento(0, "para_aprobar")], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 2 });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONSEJO }, bandejas: { [C1]: bandeja } }));
+    abrir();
+    expect((await within(await tarjeta()).findByText("cosas para hacer", { exact: false })).textContent).toBe("3 cosas para hacer");
+    cleanup();
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: bandeja } }));
+    abrir();
+    expect(await screen.findByText("1 cosa para hacer")).toBeTruthy();
+    expect(screen.queryByText("3 cosas para hacer")).toBeNull();
   });
 
   it("no repite Pagos en la lista: la tarjeta la reemplaza", async () => {

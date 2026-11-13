@@ -503,7 +503,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "planificador"}, **salida
     )
     procesos.append(planificador)
-    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 8)
+    esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs") == 9)
     trabajos = subprocess.Popen(
         ["sh", "arranque.sh"], cwd=RAIZ, env=entorno | {"CEM_PROCESO": "trabajos"}, **salida
     )
@@ -512,14 +512,16 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
     # las copias y el control de índices fallan y lo dicen; no se saltean en silencio. La
     # vigilancia de la cuarentena termina y anota que no llega a `clamd` (sin aviso a Kuma
     # configurado, solo informa), y la limpieza de objetos sin fila falla porque no tiene las
-    # variables del almacén de documentos.
+    # variables del almacén de documentos. El aviso de pendientes (0098) falla porque no tiene
+    # `CEM_ORIGEN_PUBLICO` para el enlace: lo dice y no manda un correo sin enlace.
     esperar(lambda: uno(motor_migrate, "select count(*) from plataforma.jobs"
                         " where estado = 'hecho' and tipo in ('plataforma.purgar_cola',"
                         " 'consorcio.revocar_por_vencimiento', 'documentos.vigilar_cuarentena')"
                         " or error like '%faltan variables de las copias%'"
                         " or error like '%falta CEM_DATABASE_URL_BACKUP%'"
-                        " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'")
-           == 8)  # fmt: skip
+                        " or error like '%faltan variables de entorno: CEM_DOCUMENTOS%'"
+                        " or error like '%CEM_ORIGEN_PUBLICO sin configurar%'")
+           == 9)  # fmt: skip
     registros: dict[str, list[dict]] = {}
     for nombre, proceso in (("planificador", planificador), ("trabajos", trabajos)):
         proceso.send_signal(signal.SIGTERM)
@@ -541,6 +543,7 @@ def test_los_procesos_arrancan_con_las_tareas_registradas(
             ("consorcio.revocar_por_vencimiento",),
             ("documentos.limpiar_huerfanos",),
             ("documentos.vigilar_cuarentena",),
+            ("pagos.avisar_pendientes",),
             ("plataforma.controlar_tamano_copias",),
             ("plataforma.copia_diaria",),
             ("plataforma.purgar_cola",),

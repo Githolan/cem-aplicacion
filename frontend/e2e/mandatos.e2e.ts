@@ -77,7 +77,7 @@ async function simularApi(pagina: Page, baseURL: string, quien: Quien): Promise<
     const permisos = quien === "propietaria" ? simularPermisos(ruta, camino, ["consorcios.mis"]) : simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
     if (pedido.method() === "GET") {
-      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } });
+      if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (quien === "propietaria") return ruta.fulfill(error(403, "sin_permiso"));
       if (camino === `${BASE}/mandatos`) return ruta.fulfill({ json: { elementos: [MANDATO_AE] } });

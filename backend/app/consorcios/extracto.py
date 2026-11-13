@@ -32,6 +32,7 @@ import csv
 import hashlib
 import io
 import re
+import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
@@ -239,6 +240,66 @@ def signo_sugerido(tabla: Tabla) -> SignoExtracto:
     return SignoExtracto.SIN_SIGNO
 
 
+# Columnas reconocidas solas (P-23) ------------------------------------------------------------
+
+NOMBRES_FECHA = frozenset({
+    "fecha", "fecha operacion", "fecha de operacion", "fecha movimiento", "fecha del movimiento",
+    "fecha mov",
+})  # fmt: skip
+NOMBRES_IMPORTE = frozenset({"importe", "monto", "importe en pesos", "monto en pesos"})
+"""Una columna de importes: los débitos van con signo menos."""
+NOMBRES_DEBITO = frozenset({"debito", "debitos", "debe", "importe debito", "debito en pesos"})
+"""Una columna solo de débitos."""
+NOMBRES_NUMERO = frozenset({
+    "numero de operacion", "numero operacion", "nro operacion", "nro de operacion",
+    "n de operacion", "n operacion", "operacion", "referencia", "nro referencia",
+    "numero de referencia", "comprobante", "nro comprobante", "numero de comprobante",
+})  # fmt: skip
+SIN_LETRAS = re.compile(r"[^a-z0-9]+")
+
+
+def _normalizado(nombre: str) -> str:
+    """«N.º de Operación» → «n de operacion»: sin tildes, sin mayúsculas ni signos."""
+    sin_tildes = "".join(
+        c for c in unicodedata.normalize("NFD", nombre.lower()) if not unicodedata.combining(c)
+    )
+    return " ".join(SIN_LETRAS.sub(" ", sin_tildes.replace("º", " ").replace("°", " ")).split())
+
+
+def _llamadas(tabla: Tabla, nombres: frozenset[str]) -> list[str]:
+    return [c for c in tabla.columnas if _normalizado(c) in nombres]
+
+
+def _con_negativos(tabla: Tabla, columna: str) -> bool:
+    i = tabla.columnas.index(columna)
+    for _, fila in tabla.filas:
+        if len(fila) == len(tabla.columnas):
+            valor = leer_importe(fila[i])
+            if valor is not None and valor < 0:
+                return True
+    return False
+
+
+def reconocer_columnas(tabla: Tabla) -> ColumnasExtracto | None:
+    """Las columnas por su nombre, solo si no hay duda: una de fecha, una de importe o de débitos y,
+    si hay, una de número de operación. Una columna de importes sin ningún negativo no dice cuáles
+    son los débitos: se pregunta. En una de débitos, un negativo dice que van con signo."""
+    fechas = _llamadas(tabla, NOMBRES_FECHA)
+    importes = _llamadas(tabla, NOMBRES_IMPORTE)
+    debitos = _llamadas(tabla, NOMBRES_DEBITO)
+    numeros = _llamadas(tabla, NOMBRES_NUMERO)
+    if len(fechas) != 1 or len(importes) + len(debitos) != 1 or len(numeros) > 1:
+        return None
+    importe = (importes or debitos)[0]
+    con_signo = _con_negativos(tabla, importe)
+    if importes and not con_signo:
+        return None
+    return ColumnasExtracto(
+        fecha=fechas[0], importe=importe, numero_operacion=numeros[0] if numeros else None,
+        signo=SignoExtracto.CON_SIGNO if con_signo else SignoExtracto.SIN_SIGNO,
+    )  # fmt: skip
+
+
 def leer_fecha(celda: str) -> date | None:
     limpia = HORA.sub("", celda.strip())
     for formato, orden in FECHAS:
@@ -379,6 +440,8 @@ class MovimientoGuardado:
     numero_operacion: str | None
     pago_id: UUID | None
     """El pago que ya tiene por un extracto anterior."""
+    no_es_pago: bool = False
+    """Quien concilia dijo que no es el pago de una orden (`0098`): no se compara con un pago."""
 
 
 @dataclass(frozen=True)
@@ -411,7 +474,7 @@ def comparar(
     por_id = {p.pago_id: p for p in pagos}
     usados = {m.pago_id for m in movimientos if m.pago_id is not None}
     ya_atados = sum(1 for m in movimientos if m.pago_id is not None)
-    pendientes = [m for m in movimientos if m.pago_id is None]
+    pendientes = [m for m in movimientos if m.pago_id is None and not m.no_es_pago]
     por_numero = {p.numero_operacion: p for p in pagos}
 
     pares = []

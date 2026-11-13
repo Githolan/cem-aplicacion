@@ -151,6 +151,11 @@ class VistaExtracto(BaseModel):
     columnas_guardadas: ColumnasExtracto | None = Field(
         description="Las del edificio, si este archivo las tiene todas."
     )
+    columnas_reconocidas: ColumnasExtracto | None = Field(
+        description="Las que se reconocen solas por su nombre (P-23): una sola columna de fecha,"
+        " una sola de importe o de débitos y, si hay, una sola de número de operación. Nula si"
+        " falta alguna o hay más de una que puede ser: entonces se pregunta."
+    )
 
 
 class MovimientoSinRegistrar(BaseModel):
@@ -162,6 +167,81 @@ class MovimientoSinRegistrar(BaseModel):
     importe_centavos: int
     moneda: str
     numero_operacion: str | None
+
+
+class MovimientoSinExplicar(BaseModel):
+    """Un débito de un extracto ya subido que ningún pago de Consorcio en Mano explica (pregunta 8
+    del propietario, 13-11-2026). Lo ven quien concilia y, solo para leer, la administración."""
+
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+    fecha: date
+    importe_centavos: int
+    moneda: str
+    numero_operacion: str | None
+    visto_en: datetime = Field(description="Cuándo se subió el extracto que lo trajo.")
+
+
+class ListaSinExplicar(BaseModel):
+    """`GET …/pagos/extracto/sin-explicar`: en el orden en que llegaron los extractos, por páginas
+    con `despues` (como `ListaCotejo`; Codex en #240). `total` cuenta todos. Sin la cuenta ni la
+    descripción del banco: no se guardan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[MovimientoSinExplicar]
+    siguiente: UUID | None = Field(
+        description="El `despues` de la página siguiente; sin él, no hay más."
+    )
+    total: int = Field(ge=0)
+
+
+class NoEsPago(BaseModel):
+    """`POST …/pagos/extracto/sin-explicar/{movimiento_id}/no-es-pago`: quien concilia dice que ese
+    débito no es el pago de una orden (una comisión, un impuesto del banco). No se borra: queda
+    quién, cuándo y el motivo, y sale de lo que el extracto no explica."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    motivo: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MAXIMO_MOTIVO)
+    ]
+
+
+class MovimientoMarcado(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+
+
+class MarcaNoEsPago(BaseModel):
+    """Un débito con la marca vigente «No es el pago de una orden» (respuesta del propietario,
+    13-11-2026). Quien concilia puede retirarla, con motivo: `POST …/no-es-pago/{id}/retiro`, con
+    el mismo cuerpo que marcar (`NoEsPago`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+    fecha: date
+    importe_centavos: int
+    moneda: str
+    numero_operacion: str | None
+    motivo: str
+    marcado_en: datetime
+
+
+class ListaMarcasNoEsPago(BaseModel):
+    """`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, en el orden en que llegaron los
+    extractos, por páginas con `despues` (Codex en #240). `total` cuenta todas."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[MarcaNoEsPago]
+    siguiente: UUID | None = Field(
+        description="El `despues` de la página siguiente; sin él, no hay más."
+    )
+    total: int = Field(ge=0)
 
 
 class ResultadoCotejo(BaseModel):
