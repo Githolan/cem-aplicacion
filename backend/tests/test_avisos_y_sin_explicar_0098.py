@@ -583,3 +583,97 @@ def test_a_mano_se_coteja_el_pago_y_el_debito_marcado_sigue_marcado(motor_migrat
     fila = cotejo(motor_migrate, p2)
     assert (fila["origen"], fila["movimiento_id"]) == ("manual", None)
     assert [str(f["movimiento_id"]) for f in marcados(motor_migrate, e.cons)] == [m]
+
+
+# Retirar la marca (respuesta del propietario, 13-11-2026) -----------------------------------------
+
+
+def retirar(e, quien, movimiento, motivo="Marcada por error SINTETICO"):
+    return post(e, quien, f"pagos/extracto/no-es-pago/{movimiento}/retiro", {"motivo": motivo})
+
+
+def marcas(e, quien) -> dict:
+    r = get(e, quien, "pagos/extracto/no-es-pago")
+    assert r.status_code == 200, r.json()
+    return r.json()
+
+
+def test_quien_concilia_retira_la_marca_y_el_debito_vuelve_a_la_lista(motor_migrate, e):
+    """Contra 2d2cdff la ruta no existe (404) y la marca no se podía retirar."""
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    assert no_es_pago(e, e.mc1, m).status_code == 200
+    for quien in (e.mc1, e.adm):  # control: marcado, está en las marcas y no en la lista
+        [marca] = marcas(e, quien)["elementos"]
+        assert (marca["movimiento_id"], marca["motivo"]) == (m, "Comisión del banco SINTETICA")
+        assert sin_explicar(e, quien)["total"] == 0
+    r = retirar(e, e.mc2, m)
+    assert r.status_code == 200, r.json()
+    for quien in (e.mc1, e.mc2, e.adm):
+        assert marcas(e, quien) == {"elementos": [], "total": 0}
+        assert [x["movimiento_id"] for x in sin_explicar(e, quien)["elementos"]] == [m]
+        assert bandeja(e, quien)["sin_explicar"] == 1
+    # Nada se borra: la marca queda con su retiro (quién, cuándo, por qué).
+    [fila] = marcados(motor_migrate, e.cons)
+    assert (fila["retirada_por"], fila["motivo_retiro"], fila["motivo"]) == (
+        e.mc2, "Marcada por error SINTETICO", "Comisión del banco SINTETICA")  # fmt: skip
+    assert fila["retirada_en"] is not None and fila["identidad_retiro"] is not None
+    with motor_migrate.connect() as c:
+        evento = c.execute(
+            text("select despues from auditoria.eventos where entidad_id = :m"
+                 " and accion = 'consorcio.extracto.retirar_no_es_pago'"), {"m": m},
+        ).scalar_one()  # fmt: skip
+    assert evento == {"movimiento": m}
+    # Y se puede volver a marcar: una marca vigente nueva, la retirada sigue.
+    assert no_es_pago(e, e.mc1, m, "Impuesto del banco SINTETICO").status_code == 200
+    filas = sorted(marcados(motor_migrate, e.cons), key=lambda f: f["marcado_en"])
+    assert [(f["motivo"], f["retirada_en"] is None) for f in filas] == [
+        ("Comisión del banco SINTETICA", False),
+        ("Impuesto del banco SINTETICO", True),
+    ]
+    assert sin_explicar(e, e.mc1)["total"] == 0
+
+
+def test_retirada_la_marca_el_debito_se_coteja_otra_vez(motor_migrate, e):
+    """El disparador mira solo las marcas vigentes."""
+    cuerpo, m, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
+    assert subio(e, e.mc1, cuerpo)["cotejados"] == 0  # control: marcado, no se coteja
+    assert retirar(e, e.mc1, m).status_code == 200
+    resultado = subio(e, e.mc1, cuerpo)
+    assert resultado["cotejados"] == 1
+    assert str(cotejo(motor_migrate, p2)["movimiento_id"]) == m
+    # Cotejado, ya no se puede volver a marcar.
+    r = no_es_pago(e, e.mc1, m)
+    assert (r.status_code, r.json()["codigo"]) == (409, "movimiento_ya_explicado"), r.json()
+
+
+def test_retirar_tiene_las_reglas_de_marcar(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    # Sin marca vigente no hay nada que retirar.
+    r = retirar(e, e.mc1, m)
+    assert (r.status_code, r.json()["codigo"]) == (409, "sin_marca_vigente"), r.json()
+    assert no_es_pago(e, e.mc1, m).status_code == 200
+    assert retirar(e, e.adm, m).status_code == 403  # la administración solo lee
+    r = retirar(e, e.mc1, m, f"Era la cuenta {CUENTA}")
+    assert (r.status_code, r.json()["codigo"]) == (422, "motivo_con_cuenta"), r.json()
+    assert retirar(e, e.mc1, UUID(int=7)).status_code == 404
+    e.sesion[e.mc2] = nueva_sesion(motor_migrate, e.mc2, totp_min_atras=None)
+    r = retirar(e, e.mc2, m)
+    assert (r.status_code, r.json()["codigo"]) == (403, "segundo_factor_requerido"), r.json()
+    assert marcados(motor_migrate, e.cons)[0]["retirada_en"] is None
+    # Control: con todo en regla, se retira; retirar otra vez ya no tiene qué.
+    assert retirar(e, e.mc1, m).status_code == 200
+    r = retirar(e, e.mc1, m)
+    assert (r.status_code, r.json()["codigo"]) == (409, "sin_marca_vigente"), r.json()
+
+
+def test_el_retiro_no_se_cambia(motor_migrate, e):
+    _, m = con_un_debito_sin_explicar(motor_migrate, e)
+    assert no_es_pago(e, e.mc1, m).status_code == 200
+    assert retirar(e, e.mc1, m).status_code == 200
+    with pytest.raises(DBAPIError) as error:
+        with motor_migrate.begin() as c:
+            c.execute(text("update nucleo.movimiento_no_es_pago set motivo_retiro = 'otro'"
+                           " where consorcio_id = :c and retirada_en is not null"),
+                      {"c": e.cons})  # fmt: skip
+    assert error.value.orig.diag.message_hint == "historia_inmutable"
+    assert marcados(motor_migrate, e.cons)[0]["motivo_retiro"] == "Marcada por error SINTETICO"

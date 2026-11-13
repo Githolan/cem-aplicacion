@@ -922,6 +922,7 @@
           "pago_sin_conciliar",
           "movimiento_no_coincide",
           "movimiento_ya_explicado",
+          "sin_marca_vigente",
           "no_es_quien_lo_subio",
           "documento_referenciado"
         ],
@@ -6273,6 +6274,30 @@
         "title": "ListaMandatos",
         "type": "object"
       },
+      "ListaMarcasNoEsPago": {
+        "description": "`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, de lo más viejo a lo más nuevo.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/MarcaNoEsPago"
+            },
+            "maxItems": 200,
+            "title": "Elementos",
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "total"
+        ],
+        "title": "ListaMarcasNoEsPago",
+        "type": "object"
+      },
       "ListaModos": {
         "description": "La historia completa, del más reciente al más antiguo. Vacía: el consorcio todavía no\ntiene modo registrado.",
         "properties": {
@@ -6951,6 +6976,60 @@
           "eficaz_desde"
         ],
         "title": "MandatoRevisado",
+        "type": "object"
+      },
+      "MarcaNoEsPago": {
+        "description": "Un débito con la marca vigente «No es el pago de una orden» (respuesta del propietario,\n13-11-2026). Quien concilia puede retirarla, con motivo: `POST …/no-es-pago/{id}/retiro`, con\nel mismo cuerpo que marcar (`NoEsPago`).",
+        "properties": {
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "marcado_en": {
+            "format": "date-time",
+            "title": "Marcado En",
+            "type": "string"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          }
+        },
+        "required": [
+          "movimiento_id",
+          "fecha",
+          "importe_centavos",
+          "moneda",
+          "numero_operacion",
+          "motivo",
+          "marcado_en"
+        ],
+        "title": "MarcaNoEsPago",
         "type": "object"
       },
       "MetodoReparto": {
@@ -18741,6 +18820,129 @@
           }
         },
         "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago": {
+      "get": {
+        "operationId": "listar_marcas_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_no_es_pago_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaMarcasNoEsPago"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los débitos con la marca vigente «No es el pago de una orden», con su motivo. Los lee quien concilia y, solo para leer, la administración",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago/{movimiento_id}/retiro": {
+      "post": {
+        "operationId": "retirar_no_es_pago_api_v1_consorcios__consorcio_id__pagos_extracto_no_es_pago__movimiento_id__retiro_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "movimiento_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Movimiento Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoEsPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MovimientoMarcado"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."
+          },
+          "404": {
+            "description": "Ese débito no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ese débito no tiene una marca vigente (`sin_marca_vigente`)."
+          },
+          "422": {
+            "description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."
+          }
+        },
+        "summary": "Retirar la marca «No es el pago de una orden», con motivo. Lo hace quien concilia, con el gesto. No se borra: queda quién la retiró, cuándo y por qué, y el débito vuelve a lo que el extracto no explica",
         "tags": [
           "egresos"
         ]

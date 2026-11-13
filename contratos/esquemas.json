@@ -995,6 +995,7 @@
           "pago_sin_conciliar",
           "movimiento_no_coincide",
           "movimiento_ya_explicado",
+          "sin_marca_vigente",
           "no_es_quien_lo_subio",
           "documento_referenciado"
         ],

@@ -39,6 +39,8 @@ export const VERBO: Record<Paso, string> = {
 export const TITULO_SIN_EXPLICAR = "Lo que el extracto no explica";
 export const VER_SIN_EXPLICAR = "Ver los débitos sin explicar";
 export const NO_ES_PAGO = "No es el pago de una orden";
+export const RETIRAR_MARCA = "Retirar la marca";
+export const TITULO_MARCADOS = "Marcados como que no son el pago de una orden";
 
 export const TITULO_GRUPO: Record<Grupo, string> = {
   para_pagar: "Para pagar",

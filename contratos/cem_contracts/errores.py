@@ -288,6 +288,7 @@ class CodigoError(StrEnum):
     MOVIMIENTO_NO_COINCIDE = "movimiento_no_coincide"
     """El movimiento del extracto no tiene el importe y el número o la fecha del pago."""
     MOVIMIENTO_YA_EXPLICADO = "movimiento_ya_explicado"
+    SIN_MARCA_VIGENTE = "sin_marca_vigente"
     """Se marca «no es el pago de una orden» un débito que ya explica un pago (cotejo vigente)."""
     NO_ES_QUIEN_LO_SUBIO = "no_es_quien_lo_subio"
     """Un archivo subido por error lo quita solo quien lo subió (`0089`)."""

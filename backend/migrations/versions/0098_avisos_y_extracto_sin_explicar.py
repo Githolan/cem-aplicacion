@@ -35,6 +35,12 @@ del propietario, 13-11-2026).
   repetirla no hace nada. El débito marcado sale de lo que el extracto no explica. Exportación
   económica (`0069`): `exportar_pagos` suma `movimiento_no_es_pago`, con el nombre de quien marcó y
   el motivo sin cuentas. RLS habilitada y forzada; `cem_app` no toca la tabla.
+- **Retirar la marca** (respuesta del propietario del 13-11): `nucleo.retirar_no_es_pago`, con las
+  mismas reglas que marcar y motivo sin cuenta, completa en la fila quién la retiró, con qué
+  identidad, cuándo y por qué (`negar_cambio_no_es_pago` deja hacerlo una vez y ningún otro cambio,
+  como el cotejo anulado de `0083`). La marca retirada queda en la historia y en la exportación; el
+  débito vuelve a lo que el extracto no explica, se puede cotejar y volver a marcar (una sola marca
+  vigente por débito: índice parcial). `marcas_no_es_pago_lectura` lista las vigentes.
 - **Un débito marcado no se coteja** (Codex en #240, sobre 6b2de4d): el trigger
   `cotejo_sin_no_es_pago` de `nucleo.cotejo_pago` niega (`movimiento_no_es_pago`) todo cotejo atado
   a un débito marcado, venga de donde venga; al subir un extracto, `no_es_pago_lectura` dice cuáles
@@ -93,20 +99,26 @@ EXPORTAR = "nucleo.exportar_pagos(uuid, uuid)"
 EXPORTAR_ANTES = "    return query\n      select 'columnas_extracto'::text,\n"
 EXPORTAR_NUEVO = """    return query
       select 'movimiento_no_es_pago'::text,
-             jsonb_build_object('movimiento_id', y.movimiento_id,
+             jsonb_build_object('id', y.id, 'movimiento_id', y.movimiento_id,
                                 'marcado_por_nombre',
                                 nucleo.nombre_para_exportar(c, y.marcado_por, hoy),
                                 'marcado_en', y.marcado_en,
-                                'motivo', nucleo.texto_sin_cuenta(y.motivo))
+                                'motivo', nucleo.texto_sin_cuenta(y.motivo),
+                                'retirada_por_nombre',
+                                nucleo.nombre_para_exportar(c, y.retirada_por, hoy),
+                                'retirada_en', y.retirada_en,
+                                'motivo_retiro', nucleo.texto_sin_cuenta(y.motivo_retiro))
         from nucleo.movimiento_no_es_pago y
        where y.consorcio_id = c
-       order by y.marcado_en, y.movimiento_id;
+       order by y.marcado_en, y.id;
 """
 EXIGIR_LECTURA = "nucleo.exigir_lectura_extracto(uuid, uuid, uuid, text)"
 MOVIMIENTOS = "nucleo.movimientos_sin_cotejo_lectura(uuid, text, uuid)"
 PAGOS = "nucleo.pagos_para_explicar_lectura(text[], date, date, uuid, text, uuid)"
 MARCADOS = "nucleo.no_es_pago_lectura(uuid[], uuid, text, uuid)"
-RUTAS = (PENDIENTES, REGISTRAR, MOVIMIENTOS, PAGOS, MARCAR, MARCADOS)
+RETIRAR = "nucleo.retirar_no_es_pago(uuid, text, uuid, text, uuid)"
+VIGENTES = "nucleo.marcas_no_es_pago_lectura(uuid, text, uuid)"
+RUTAS = (PENDIENTES, REGISTRAR, MOVIMIENTOS, PAGOS, MARCAR, MARCADOS, RETIRAR, VIGENTES)
 
 TABLA = """
 create table nucleo.aviso_pendientes (
@@ -251,7 +263,8 @@ create function nucleo.movimientos_sin_cotejo_lectura(actor uuid, origen_pedido 
                           where t.consorcio_id = c and t.movimiento_id = m.id
                             and t.anulado_en is null)
          and not exists (select 1 from nucleo.movimiento_no_es_pago y
-                          where y.consorcio_id = c and y.movimiento_id = m.id)
+                          where y.consorcio_id = c and y.movimiento_id = m.id
+                            and y.retirada_en is null)
        order by m.fecha, m.id;
   end
   $$;
@@ -299,7 +312,31 @@ create function nucleo.no_es_pago_lectura(movimientos uuid[], actor uuid, origen
     perform nucleo.exigir_lectura_extracto(c, actor, sesion, origen_pedido);
     return query
       select y.movimiento_id from nucleo.movimiento_no_es_pago y
-       where y.consorcio_id = c and y.movimiento_id = any(movimientos);
+       where y.consorcio_id = c and y.movimiento_id = any(movimientos)
+         and y.retirada_en is null;
+  end
+  $$;
+
+-- Las marcas vigentes, para verlas y poder retirarlas. Lo lee quien lee lo que el extracto no
+-- explica; retirarlas, solo quien concilia.
+create function nucleo.marcas_no_es_pago_lectura(actor uuid, origen_pedido text, sesion uuid)
+  returns table (movimiento_id uuid, fecha date, importe_centavos bigint, moneda text,
+                 numero_operacion text, motivo text, marcado_en timestamptz)
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+  begin
+    perform nucleo.exigir_lectura_extracto(c, actor, sesion, origen_pedido);
+    return query
+      select m.id, m.fecha, m.importe_centavos, m.moneda, m.numero_operacion, y.motivo,
+             y.marcado_en
+        from nucleo.movimiento_no_es_pago y
+        join nucleo.movimiento_extracto m
+          on m.consorcio_id = y.consorcio_id and m.id = y.movimiento_id
+       where y.consorcio_id = c and y.retirada_en is null
+       order by m.fecha, m.id;
   end
   $$;
 """
@@ -307,17 +344,30 @@ create function nucleo.no_es_pago_lectura(movimientos uuid[], actor uuid, origen
 NO_ES_PAGO = """
 create table nucleo.movimiento_no_es_pago (
   consorcio_id     uuid not null,
+  id               uuid not null default plataforma.uuid_v7(),
   movimiento_id    uuid not null,
   motivo           text not null check (length(btrim(motivo)) between 1 and 300),
   marcado_por      uuid not null references nucleo.persona (id),
   identidad_marco  uuid not null,
   marcado_en       timestamptz not null default clock_timestamp(),
-  primary key (consorcio_id, movimiento_id),
+  -- El retiro (respuesta del propietario del 13-11): se completa una vez y no cambia más.
+  retirada_por     uuid references nucleo.persona (id),
+  identidad_retiro uuid,
+  retirada_en      timestamptz,
+  motivo_retiro    text check (length(btrim(motivo_retiro)) between 1 and 300),
+  primary key (consorcio_id, id),
   foreign key (consorcio_id, movimiento_id)
     references nucleo.movimiento_extracto (consorcio_id, id),
   foreign key (consorcio_id, identidad_marco)
-    references nucleo.identidad_humana (consorcio_id, id)
+    references nucleo.identidad_humana (consorcio_id, id),
+  foreign key (consorcio_id, identidad_retiro)
+    references nucleo.identidad_humana (consorcio_id, id),
+  constraint no_es_pago_retiro_completo
+    check (num_nonnulls(retirada_por, identidad_retiro, retirada_en, motivo_retiro) in (0, 4))
 );
+-- Una sola marca vigente por débito; después de un retiro se puede volver a marcar.
+create unique index no_es_pago_vigente on nucleo.movimiento_no_es_pago (consorcio_id, movimiento_id)
+  where retirada_en is null;
 alter table nucleo.movimiento_no_es_pago enable row level security;
 alter table nucleo.movimiento_no_es_pago force row level security;
 create policy por_consorcio on nucleo.movimiento_no_es_pago for select
@@ -325,16 +375,40 @@ create policy por_consorcio on nucleo.movimiento_no_es_pago for select
 revoke all on nucleo.movimiento_no_es_pago from public, cem_app;
 create trigger motivo_sin_cuenta before insert on nucleo.movimiento_no_es_pago
   for each row execute function nucleo.negar_cuenta_en_motivo('motivo');
+create trigger motivo_retiro_sin_cuenta before update of motivo_retiro
+  on nucleo.movimiento_no_es_pago
+  for each row when (new.motivo_retiro is not null)
+  execute function nucleo.negar_cuenta_en_motivo('motivo_retiro');
+
+-- Como `negar_cambio_cotejo_pago` (`0083`): solo se completa el retiro, una vez.
+create function nucleo.negar_cambio_no_es_pago()
+  returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    retiro constant text[] :=
+      array['retirada_por', 'identidad_retiro', 'retirada_en', 'motivo_retiro'];
+  begin
+    if tg_op = 'DELETE' or old.retirada_en is not null
+       or (to_jsonb(old) - retiro) is distinct from (to_jsonb(new) - retiro) then
+      raise exception 'la historia de una orden de pago solo se agrega'
+        using errcode = 'P0001', hint = 'historia_inmutable';
+    end if;
+    return new;
+  end
+  $$;
+revoke all on function nucleo.negar_cambio_no_es_pago() from public;
 create trigger historia_movimiento_no_es_pago before update or delete
   on nucleo.movimiento_no_es_pago
-  for each row execute function nucleo.negar_cambio_historia_orden_pago();
+  for each row execute function nucleo.negar_cambio_no_es_pago();
 create trigger historia_movimiento_no_es_pago_truncate before truncate
   on nucleo.movimiento_no_es_pago
   for each statement execute function nucleo.negar_cambio_historia_orden_pago();
 
--- Un débito marcado no se coteja con ningún pago, por ningún camino: la regla está en la tabla
--- del cotejo y no en cada función que inserta (Codex en #240, sobre 6b2de4d). El cotejo a mano no
--- tiene débito (`movimiento_id` nulo): no lo alcanza.
+-- Un débito con una marca vigente no se coteja con ningún pago, por ningún camino: la regla está
+-- en la tabla del cotejo y no en cada función que inserta (Codex en #240, sobre 6b2de4d). Una marca
+-- retirada ya no lo frena. El cotejo a mano no tiene débito (`movimiento_id` nulo): no lo alcanza.
 create function nucleo.negar_cotejo_de_no_es_pago()
   returns trigger
   language plpgsql
@@ -343,7 +417,8 @@ create function nucleo.negar_cotejo_de_no_es_pago()
   begin
     if new.movimiento_id is not null and exists (
         select 1 from nucleo.movimiento_no_es_pago y
-         where y.consorcio_id = new.consorcio_id and y.movimiento_id = new.movimiento_id) then
+         where y.consorcio_id = new.consorcio_id and y.movimiento_id = new.movimiento_id
+           and y.retirada_en is null) then
       raise exception 'ese débito no es el pago de una orden: no se coteja con un pago'
         using errcode = 'P0001', hint = 'movimiento_no_es_pago';
     end if;
@@ -383,7 +458,7 @@ create function nucleo.marcar_no_es_pago(movimiento uuid, motivo text, actor uui
     insert into nucleo.movimiento_no_es_pago
       (consorcio_id, movimiento_id, motivo, marcado_por, identidad_marco)
     values (c, movimiento, btrim(motivo), actor, identidad)
-    on conflict do nothing;
+    on conflict (consorcio_id, movimiento_id) where retirada_en is null do nothing;
     if found then
       -- El motivo queda en la tabla, no en el evento (como el rechazo de una orden).
       insert into auditoria.eventos
@@ -392,6 +467,43 @@ create function nucleo.marcar_no_es_pago(movimiento uuid, motivo text, actor uui
       values (c, actor, 'api', 'consorcio.extracto.no_es_pago', 'movimiento_extracto',
               movimiento, null, jsonb_build_object('movimiento', movimiento), '', '');
     end if;
+  end
+  $$;
+
+-- Retirar la marca vigente (respuesta del propietario del 13-11): mismas reglas que marcar. La
+-- fila queda con quién la retiró, cuándo y por qué; el débito vuelve a lo que el extracto no
+-- explica y se puede cotejar o marcar de nuevo.
+create function nucleo.retirar_no_es_pago(movimiento uuid, motivo text, actor uuid,
+                                          origen_pedido text, sesion uuid)
+  returns void
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+    identidad uuid;
+  begin
+    identidad := nucleo.exigir_acto_economico(c, actor, sesion, 'egresos.aprobar_orden',
+                                              origen_pedido);
+    perform nucleo.bloquear_cotejo(c);
+    if not exists (select 1 from nucleo.movimiento_extracto m
+                    where m.consorcio_id = c and m.id = movimiento) then
+      raise exception 'ese débito no existe en este consorcio' using errcode = 'P0001',
+        hint = 'no_encontrado';
+    end if;
+    update nucleo.movimiento_no_es_pago y
+       set retirada_por = actor, identidad_retiro = identidad, retirada_en = clock_timestamp(),
+           motivo_retiro = btrim(retirar_no_es_pago.motivo)
+     where y.consorcio_id = c and y.movimiento_id = movimiento and y.retirada_en is null;
+    if not found then
+      raise exception 'ese débito no tiene una marca vigente' using errcode = 'P0001',
+        hint = 'sin_marca_vigente';
+    end if;
+    insert into auditoria.eventos
+      (consorcio_id, actor_persona_id, origen, accion, entidad, entidad_id, antes, despues,
+       hash_previo, hash)
+    values (c, actor, 'api', 'consorcio.extracto.retirar_no_es_pago', 'movimiento_extracto',
+            movimiento, null, jsonb_build_object('movimiento', movimiento), '', '');
   end
   $$;
 """
@@ -481,6 +593,7 @@ def downgrade() -> None:
     op.execute("drop trigger cotejo_sin_no_es_pago on nucleo.cotejo_pago")
     op.execute("drop function nucleo.negar_cotejo_de_no_es_pago()")
     op.execute("drop table nucleo.movimiento_no_es_pago")
+    op.execute("drop function nucleo.negar_cambio_no_es_pago()")
     op.execute("drop table nucleo.aviso_pendientes")
     cuerpo = _cuerpo(_definicion(INTERNA), INTERNA)
     definicion = _definicion(ACCIONES)

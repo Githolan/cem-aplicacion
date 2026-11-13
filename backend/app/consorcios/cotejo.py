@@ -30,7 +30,9 @@ from cem_contracts.cotejo import (
     CotejoAnulado,
     ListaCotejados,
     ListaCotejo,
+    ListaMarcasNoEsPago,
     ListaSinExplicar,
+    MarcaNoEsPago,
     MonedaExtracto,
     MovimientoMarcado,
     MovimientoSinRegistrar,
@@ -90,6 +92,13 @@ ERRORES = {
 ERRORES_NO_ES_PAGO = {
     "estado_invalido": (
         409, CodigoError.MOVIMIENTO_YA_EXPLICADO, "Ese débito ya lo explica un pago.",
+    ),
+}  # fmt: skip
+"""Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
+ERRORES_RETIRO = {
+    "sin_marca_vigente": (
+        409, CodigoError.SIN_MARCA_VIGENTE,
+        "Ese débito no tiene una marca vigente: ya se retiró o no se marcó.",
     ),
 }  # fmt: skip
 """Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
@@ -262,6 +271,57 @@ def marcar_no_es_pago(
             conn, permiso,
             "select nucleo.marcar_no_es_pago(:m, :motivo, :actor, 'api', :sesion)",
             {"m": movimiento_id, "motivo": pedido.motivo}, ERRORES_NO_ES_PAGO,
+        )  # fmt: skip
+        return 200, MovimientoMarcado(movimiento_id=movimiento_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/extracto/no-es-pago",
+    response_model=ListaMarcasNoEsPago,
+    summary="Los débitos con la marca vigente «No es el pago de una orden», con su motivo. Los lee"
+    " quien concilia y, solo para leer, la administración",
+    responses={403: {"description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`,"
+                                    " sin el modo, o falta renovar la sesión."}},
+)  # fmt: skip
+def listar_marcas_no_es_pago(
+    preparar: Preparar, revisar: Revisar, motor: MotorDep
+) -> ListaMarcasNoEsPago:
+    lector = lector_del_extracto(preparar, revisar)
+    with _lectura(lector, motor) as c:
+        filas = _ejecutar(
+            c, lector, "select * from nucleo.marcas_no_es_pago_lectura(:actor, 'api', :sesion)", {}
+        ).mappings().all()  # fmt: skip
+    marcas = [MarcaNoEsPago(**f) for f in filas]
+    return ListaMarcasNoEsPago(elementos=marcas[:MAXIMO_FILAS_RESULTADO], total=len(marcas))
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/pagos/extracto/no-es-pago/{movimiento_id}/retiro",
+    response_model=MovimientoMarcado,
+    summary="Retirar la marca «No es el pago de una orden», con motivo. Lo hace quien concilia, con"
+    " el gesto. No se borra: queda quién la retiró, cuándo y por qué, y el débito vuelve a lo que"
+    " el extracto no explica",
+    responses=RESPUESTAS_LECTURA
+    | {
+        404: {"description": "Ese débito no existe en este consorcio."},
+        409: {"description": "Ese débito no tiene una marca vigente (`sin_marca_vigente`)."},
+        422: {"description": "El motivo lleva una cuenta (`motivo_con_cuenta`)."},
+    },
+)
+def retirar_no_es_pago(
+    movimiento_id: UUID,
+    pedido: NoEsPago,
+    permiso: Escribir,
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    def efecto(conn: Connection) -> tuple[int, MovimientoMarcado]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.retirar_no_es_pago(:m, :motivo, :actor, 'api', :sesion)",
+            {"m": movimiento_id, "motivo": pedido.motivo}, ERRORES_RETIRO,
         )  # fmt: skip
         return 200, MovimientoMarcado(movimiento_id=movimiento_id)
 

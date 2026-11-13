@@ -15,7 +15,7 @@ import { ContextoVersion } from "../version";
 // está simulada: qué entra en la lista lo prueba `backend/tests/test_avisos_y_sin_explicar_0098.py`.
 // Contra 3c2d638 la ruta no existe (lleva a «No se encontró») y la bandeja no trae `sin_explicar`.
 // Marcar que un débito no es el pago de una orden (respuesta del 13-11, opción a): contra a668127
-// no hay botón.
+// no hay botón. Retirar la marca (respuesta del 13-11): contra 2d2cdff no hay lista de marcas.
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -24,15 +24,23 @@ const BASE = `/api/v1/consorcios/${C1}`;
 const LISTA = `GET ${BASE}/pagos/extracto/sin-explicar`;
 const RUTA = "/pagos/extracto-sin-explicar";
 const MARCAR = `POST ${BASE}/pagos/extracto/sin-explicar/${M1}/no-es-pago`;
+const MARCAS = `GET ${BASE}/pagos/extracto/no-es-pago`;
+const RETIRAR = `POST ${BASE}/pagos/extracto/no-es-pago/${M1}/retiro`;
 const CONCILIA = alcanza("egresos.revisar_orden", "egresos.conciliar_pago");
 const PREPARA = alcanza("egresos.preparar_orden");
 
 type Movimiento = components["schemas"]["MovimientoSinExplicar"];
+type Marca = components["schemas"]["MarcaNoEsPago"];
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 const MOVIMIENTO: Movimiento = {
   movimiento_id: M1, fecha: "2026-11-02", importe_centavos: 1_240_000, moneda: "ARS", numero_operacion: "0048213999",
   visto_en: "2026-11-05T13:00:00Z",
+};
+
+const MARCA: Marca = {
+  movimiento_id: M1, fecha: "2026-11-02", importe_centavos: 75_000, moneda: "ARS", numero_operacion: null,
+  motivo: "Comisión del banco", marcado_en: "2026-11-06T13:00:00Z",
 };
 
 const bandeja = (sin_explicar: number) => () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar });
@@ -42,6 +50,7 @@ function backend(respuestas: Respuestas) {
     "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
     [LISTA]: () => Response.json({ elementos: [MOVIMIENTO], total: 1 }),
+    [MARCAS]: () => Response.json({ elementos: [], total: 0 }),
   };
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
@@ -158,10 +167,12 @@ describe("la pantalla", () => {
     fireEvent.change(screen.getByLabelText("Qué es este débito"), { target: { value: "  Comisión del banco  " } });
     fireEvent.click(guardar as HTMLElement);
     expect(await screen.findByText(/Listo: el débito salió de la lista/)).toBeTruthy();
-    const [pedido] = pedidos(simulado, MARCAR);
-    expect(await pedido.clone().json()).toEqual({ motivo: "Comisión del banco" });
-    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
-    expect(pedido.headers.get("X-CSRF-Token")).toBe("abc123");
+    const enviados = pedidos(simulado, MARCAR);
+    expect(enviados).toHaveLength(1);
+    const [pedido] = enviados;
+    expect(await pedido?.clone().json()).toEqual({ motivo: "Comisión del banco" });
+    expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(await screen.findByText("El extracto no tiene nada sin explicar.")).toBeTruthy();
     const faltas = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
     expect(faltas.violations.map((v) => v.id)).toEqual([]);
@@ -207,6 +218,45 @@ describe("la pantalla", () => {
     const claves = pedidos(simulado, MARCAR).map((p) => p.headers.get("Idempotency-Key"));
     expect(claves).toHaveLength(2);
     expect(claves[0]).toBe(claves[1]);
+  });
+
+  it("quien concilia ve las marcas vigentes y retira una con motivo; vuelve a la lista", async () => {
+    let retirada = false;
+    const simulado = backend({
+      [`GET ${BASE}/mis-acciones`]: CONCILIA,
+      [LISTA]: () => Response.json(retirada ? { elementos: [MOVIMIENTO], total: 1 } : { elementos: [], total: 0 }),
+      [MARCAS]: () => Response.json(retirada ? { elementos: [], total: 0 } : { elementos: [MARCA], total: 1 }),
+      [RETIRAR]: () => ((retirada = true), Response.json({ movimiento_id: M1 })),
+    });
+    vi.stubGlobal("fetch", simulado);
+    const { container } = abrir(RUTA);
+    const marcados = await screen.findByRole("region", { name: "Marcados como que no son el pago de una orden" });
+    expect(marcados.textContent).toContain("Comisión del banco");
+    expect(marcados.textContent).toContain("750,00");
+    const boton = within(marcados).getByRole("button", { name: "Retirar la marca" });
+    expect(boton.className).toContain("secundario");
+    fireEvent.click(boton);
+    const campo = screen.getByLabelText("Por qué se retira la marca");
+    fireEvent.change(campo, { target: { value: "Era el pago de una orden" } });
+    fireEvent.submit(campo.closest("form") as HTMLFormElement);
+    expect(await screen.findByText(/Listo: la marca se retiró y el débito volvió a la lista/)).toBeTruthy();
+    const enviados = pedidos(simulado, RETIRAR);
+    expect(enviados).toHaveLength(1);
+    const [pedido] = enviados;
+    expect(await pedido?.clone().json()).toEqual({ motivo: "Era el pago de una orden" });
+    expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(await screen.findByText("Débito sin explicar")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Marcados como que no son el pago de una orden" })).toBeNull();
+    const faltas = await axe.run(container, { rules: { "color-contrast": { enabled: false } } });
+    expect(faltas.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  it("la administración ve las marcas sin poder retirarlas", async () => {
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [MARCAS]: () => Response.json({ elementos: [MARCA], total: 1 }) }));
+    abrir(RUTA);
+    const marcados = await screen.findByRole("region", { name: "Marcados como que no son el pago de una orden" });
+    expect(marcados.textContent).toContain("Comisión del banco");
+    expect(within(marcados).queryByRole("button")).toBeNull();
   });
 
   it("sin nada sin explicar lo dice", async () => {

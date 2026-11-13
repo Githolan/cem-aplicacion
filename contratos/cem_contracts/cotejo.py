@@ -211,6 +211,31 @@ class MovimientoMarcado(BaseModel):
     movimiento_id: UUID
 
 
+class MarcaNoEsPago(BaseModel):
+    """Un débito con la marca vigente «No es el pago de una orden» (respuesta del propietario,
+    13-11-2026). Quien concilia puede retirarla, con motivo: `POST …/no-es-pago/{id}/retiro`, con
+    el mismo cuerpo que marcar (`NoEsPago`)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+    fecha: date
+    importe_centavos: int
+    moneda: str
+    numero_operacion: str | None
+    motivo: str
+    marcado_en: datetime
+
+
+class ListaMarcasNoEsPago(BaseModel):
+    """`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, de lo más viejo a lo más nuevo."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[MarcaNoEsPago] = Field(max_length=MAXIMO_FILAS_RESULTADO)
+    total: int = Field(ge=0)
+
+
 class ResultadoCotejo(BaseModel):
     """`POST …/pagos/cotejo/extracto`. Lo que coincide se cuenta; se lista lo que hay que mirar.
 
