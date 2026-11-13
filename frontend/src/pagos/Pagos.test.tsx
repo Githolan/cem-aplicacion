@@ -4200,6 +4200,43 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
     expect(await screen.findByText(TEXTO_CERRADA_SIN_PAGO)).toBeTruthy();
   });
 
+  it("un motivo con un número de cuenta se marca junto al campo, y al corregirlo se va (tanda 3)", async () => {
+    const NO_SE_PAGO = ficha({
+      orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos",
+      puede_modificar: true, puede_cerrar_sin_pagar: true,
+    });
+    const CIERRE = `${BASE}/ordenes-pago/${O1}/cerrar-sin-pagar`;
+    const conCampo = () =>
+      Response.json({ codigo: "motivo_con_cuenta", mensaje: "x", detalle: { campos: ["body.motivo"] }, id_correlacion: "c" }, { status: 422 });
+    abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: conCampo });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    const campo = screen.getByLabelText("Por qué ya no hace falta pagarla");
+    fireEvent.change(campo, { target: { value: "Se pagó a la cuenta 9990003100000000001234" } });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    await waitFor(() => expect(campo.getAttribute("aria-invalid")).toBe("true"));
+    const mensaje = document.getElementById(campo.getAttribute("aria-describedby") ?? "") as HTMLElement;
+    expect(mensaje.textContent).toMatch(/^El motivo no puede llevar el número de una cuenta/);
+    // Lo escrito queda, para corregirlo; al escribir, la marca se va.
+    expect((campo as HTMLInputElement).value).toContain("Se pagó");
+    fireEvent.change(campo, { target: { value: "Se pagó por caja chica" } });
+    expect(campo.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("control: un error sin campo no marca el motivo", async () => {
+    const NO_SE_PAGO = ficha({
+      orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos",
+      puede_modificar: true, puede_cerrar_sin_pagar: true,
+    });
+    const CIERRE = `${BASE}/ordenes-pago/${O1}/cerrar-sin-pagar`;
+    abrirFicha(NO_SE_PAGO, { [`POST ${CIERRE}`]: () => error("error_interno", 500) });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    const campo = screen.getByLabelText("Por qué ya no hace falta pagarla");
+    fireEvent.change(campo, { target: { value: "Se pagó por caja chica" } });
+    fireEvent.click(await boton(TEXTO_ACCION.cerrar_sin_pagar));
+    await screen.findByRole("alert");
+    expect(campo.getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("control: sin `puede_cerrar_sin_pagar` no se ofrece", async () => {
     abrirFicha(ficha({
       orden: orden({ estado: "fallida" }), situacion: "no_se_pago", paso: "volver_a_pagar", le_toca_a: "vos", puede_modificar: true,

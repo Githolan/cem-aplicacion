@@ -15,6 +15,7 @@ import {
   ESTADO,
   importe,
   importeParaCopiar,
+  mensajeDeActo,
   mensajeDeError,
   fechaLegible,
   momento,
@@ -28,6 +29,7 @@ import {
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
 import { Acciones } from "./Acciones";
@@ -89,6 +91,9 @@ type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
+/** El único campo de los formularios de motivo, por su nombre en la pantalla. */
+const CAMPOS_MOTIVO = { motivo: "el motivo" } as const;
+
 type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar" | "cerrar_sin_pagar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
@@ -199,6 +204,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const [retirando, setRetirando] = useState(false);
   const [conMotivo, setConMotivo] = useState<ConMotivo | null>(null);
   const [motivo, setMotivo] = useState("");
+  // El error del motivo se dice junto al campo (tanda 3): p. ej. un número de cuenta escrito ahí.
+  const [erroresMotivo, setErroresMotivo] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** La cuenta que se decide, con la versión que muestra; `cuenta` nula si no hay qué mostrar. */
   const [decision, setDecision] = useState<{ version: number; cuenta: string | null } | null>(null);
   const [vueltaDecision, setVueltaDecision] = useState(0);
@@ -294,6 +301,12 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
   const releer = () => setVuelta((v) => v + 1);
 
+  /** Un acto con motivo que falla: el campo marcado, si el error nombra el motivo; lo demás, como siempre. */
+  function fallaDelMotivo(estado: number, codigo: string | undefined, error: unknown) {
+    setErroresMotivo(soloDe(erroresDe(error, mensajeDeActo(estado, codigo)), CAMPOS_MOTIVO));
+    siCambio(estado, codigo);
+  }
+
   function siCambio(estado: number, codigo: string | undefined) {
     if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) {
       releer();
@@ -366,6 +379,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
   function escribir(cual: ConMotivo) {
     setMotivo("");
+    setErroresMotivo(SIN_ERRORES);
     setConMotivo(cual);
   }
 
@@ -500,7 +514,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { version: v.numero, motivo: texto },
         }),
       alTerminar: () => terminar("Listo: rechazaste la orden."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -515,7 +529,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { version: v.numero, motivo: texto },
         }),
       alTerminar: () => terminar("Listo: declaraste que no se pagó. Lo confirma otro miembro del Consejo."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -536,7 +550,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
             : "Listo: observaste el pago. Quien lo registró tiene que corregirlo.",
           seguir,
         ),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -595,7 +609,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { motivo: texto },
         }),
       alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -612,7 +626,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { version_esperada: v.numero, motivo: texto },
         }),
       alTerminar: () => terminar(TEXTO_CERRADA_SIN_PAGO),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -1182,7 +1196,12 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   {motivoAbierto === "cerrar_sin_pagar" && <p>{PREGUNTA_CERRAR_SIN_PAGAR}</p>}
                   <label htmlFor={`${id}-motivo`}>{TEXTOS_MOTIVO[motivoAbierto].etiqueta}</label>
                   <input id={`${id}-motivo`} required maxLength={TEXTOS_MOTIVO[motivoAbierto].largo} value={motivo} disabled={enviando}
-                    onChange={(e) => setMotivo(e.target.value)} />
+                    {...marcaDe(`${id}-motivo`, erroresMotivo.motivo)}
+                    onChange={(e) => {
+                      setMotivo(e.target.value);
+                      setErroresMotivo((errores) => sinElDe(errores, "motivo"));
+                    }} />
+                  <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={erroresMotivo.motivo} />
                   <div className="acciones">
                     {/* Dar por conforme avanza; los demás motivos son de una acción negativa. */}
                     <button type="submit" className={motivoAbierto === "conforme" ? undefined : "peligro"} disabled={enviando || motivo.trim() === ""}>
