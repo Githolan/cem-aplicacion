@@ -22,7 +22,12 @@ contrato): la categoría elige la acción.
     falla, no queda la fila.
 
 - **`GET …/documentos`** (`documentos.ver`): los vigentes de las categorías que la persona puede
-  ver. De las versiones, las `disponible`; las otras, solo las que subió ella.
+  ver. De las versiones, las `disponible`; las otras, solo las que subió ella. A quien tiene la
+  facultad `documentos.ver` (la de retirar) le dice además si algo guardado cita cada documento
+  (`respalda`, `0097`): así la ficha no ofrece retirar lo que no se puede (tanda 6, G-02).
+- **`GET …/documentos/{id}/versiones/{v}/estado`** (alguna acción de carga): cómo terminó el
+  análisis de un archivo que subió quien pregunta, para quien carga sin ver la lista (tanda 6,
+  G-09).
 - **`GET …/documentos/{id}/versiones/{v}/descargar`** (la lectura de la categoría): 302 a una URL
   firmada de `VIGENCIA_DESCARGA` segundos, solo si la versión está `disponible` (documento 13
   §9.2). Nunca hay una URL permanente. Si el objeto ya no está en el almacén (staging lo borra a
@@ -57,6 +62,7 @@ from cem_contracts.documentos import (
     DocumentoEnLista,
     DocumentoId,
     DocumentoNuevo,
+    EstadoDeMiVersion,
     EstadoVersion,
     ListaDocumentos,
     RetiroDocumento,
@@ -477,6 +483,13 @@ def listar_documentos(
             {},
             ver,
         )
+        # Qué documentos respaldan algo: solo para quien tiene la facultad que pide retirar.
+        respaldan = (
+            {f["id"] for f in _leer(conn, "select nucleo.documentos_que_respaldan() as id", {},
+                                     restringidos)}
+            if puede[restringidos.accion]
+            else None
+        )  # fmt: skip
     documentos: dict[UUID, DocumentoEnLista] = {}
     for f in filas:
         categoria = CategoriaDocumento(f["categoria"])
@@ -489,6 +502,7 @@ def listar_documentos(
                 id=f["documento_id"], categoria=categoria, titulo=f["titulo"],
                 fecha=f["fecha"], cargado_en=f["cargado_en"],
                 orden_pago_id=f["orden_comprobante"], versiones=[],
+                respalda=None if respaldan is None else f["documento_id"] in respaldan,
             )  # fmt: skip
         if f["version_id"] is not None:
             d.versiones.append(
@@ -675,3 +689,42 @@ def contenido_de_version(
         media_type=TipoArchivo(f["tipo"]).value,
         headers=CABECERAS_CONTENIDO | {"Content-Length": str(leido["ContentLength"])},
     )
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado",
+    response_model=EstadoDeMiVersion,
+    summary="Cómo terminó el análisis de un archivo que subió quien pregunta",
+    responses={
+        403: {"description": "Sin ninguna acción de carga de documentos en el consorcio."},
+        404: {
+            "description": "La versión no existe en este consorcio, no la subió quien pregunta, o"
+            " su documento ya no está vigente."
+        },
+    },
+)
+def estado_de_mi_version(
+    documento_id: UUID,
+    version_id: UUID,
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    operativos: Annotated[Permiso, Depends(requiere("documentos.cargar_operativos"))],
+    motor: MotorDep,
+) -> EstadoDeMiVersion:
+    """Para quien carga sin ver la lista (el administrador externo): después de subir, la pantalla
+    pregunta hasta que el antivirus termina y dice si quedó disponible o fue rechazado (G-09). Solo
+    las versiones propias: una ajena responde igual que una inexistente."""
+    ctx = cargar.ctx
+    _verificar_carga(cargar, operativos, None)
+    with transaccion(motor, persona_id=ctx.persona_id, consorcio_id=ctx.consorcio_id) as conn:
+        try:
+            filas = conn.execute(
+                text("select estado, motivo_rechazo from nucleo.estado_de_mi_version(:d, :v)"),
+                {"d": documento_id, "v": version_id},
+            ).mappings().all()  # fmt: skip
+        except DBAPIError as e:
+            if isinstance(e.orig, InsufficientPrivilege):
+                raise Discrepancia("la base niega la carga y el evaluador la concede") from e
+            raise
+    if not filas:
+        raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
+    return EstadoDeMiVersion(**filas[0])

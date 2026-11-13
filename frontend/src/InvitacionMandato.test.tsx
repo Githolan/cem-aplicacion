@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { YA_HAY_CUENTA_MANDATO } from "./InvitacionMandato";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -298,9 +299,45 @@ describe("ningún error de /invitacion-mandato termina sin un paso siguiente", (
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
-    expect(await screen.findByRole("link", { name: "entrar" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Entrar para asociar la cuenta" })).toBeTruthy();
     expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
     expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
+  });
+});
+
+describe("G-35 en /invitacion-mandato", () => {
+  it("con una cuenta que ya existe, se entra acá mismo y la asociación sale sola, sin volver a abrir el correo", async () => {
+    vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+    let conSesion = false;
+    const pedido = vi.fn(async (p: Request) => {
+      const camino = new URL(p.url).pathname;
+      if (camino === CONSULTAR) return Response.json(RECIBIDA);
+      if (camino === ACEPTAR)
+        return conSesion ? Response.json({ ...aceptada("2026-01-01"), cuenta_nueva: false }) : error("invitacion_requiere_sesion", 409);
+      if (camino === "/api/v1/auth/codigo") {
+        conSesion = true;
+        return Response.json({ persona_id: "11111111-1111-4111-8111-111111111111" });
+      }
+      if (camino === "/api/v1/auth/sesion") return Response.json({});
+      if (camino === "/health") return error("servicio_no_disponible", 503);
+      throw new Error(`pedido no previsto: ${p.method} ${camino}`);
+    });
+    vi.stubGlobal("fetch", pedido);
+    abrir(`${RUTA}#token=${TOKEN}`);
+    fireEvent.click(await aceptarBoton());
+
+    expect(await screen.findByText(YA_HAY_CUENTA_MANDATO)).toBeTruthy();
+    expect(screen.queryByText(/abrir de nuevo el enlace del correo/)).toBeNull();
+    const entrar = screen.getByRole("region", { name: "Entrar para asociar la cuenta" });
+    fireEvent.click(within(entrar).getByRole("button", { name: "Ya tengo un código" }));
+    fireEvent.change(within(entrar).getByLabelText("Correo"), { target: { value: "estudio@ejemplo.com" } });
+    fireEvent.change(within(entrar).getByLabelText(/Código de/), { target: { value: "042917" } });
+    fireEvent.click(within(entrar).getByRole("button", { name: "Entrar con el código" }));
+
+    expect(await screen.findByText(AVISO)).toBeTruthy();
+    const aceptaciones = aceptacionesDe(pedido);
+    expect(aceptaciones).toHaveLength(2);
+    expect(((await aceptaciones[1]?.json()) as { token: string }).token).toBe(TOKEN);
   });
 });
 

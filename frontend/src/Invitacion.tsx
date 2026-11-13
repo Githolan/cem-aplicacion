@@ -1,11 +1,11 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { codigoDe, mensajeDeFallaConEnlace, SIN_CONEXION_ENLACE } from "./fallas";
-import { RUTA_ENTRAR, RUTA_INVITACION, tokenDelFragmento } from "./enlace";
+import { RUTA_INVITACION, tokenDelFragmento } from "./enlace";
+import { FormasDeEntrar } from "./FormasDeEntrar";
 import { EnlaceAlInicio, SalirDeEstaCuenta } from "./SalidaDeInvitacion";
 import { useIrAlInicio } from "./sesion";
 
@@ -15,8 +15,9 @@ import { useIrAlInicio } from "./sesion";
 // es y otro, cuando la persona confirma, para aceptarla.
 //
 // Si el correo invitado no tenía cuenta, aceptar crea la cuenta y deja la sesión abierta. Si ya
-// la tenía, hay que entrar con ese correo y aceptarla desde el inicio (InvitacionesPropias): la
-// invitación nunca abre la cuenta de otra persona. Diseño provisorio: el definitivo llega con G3.
+// la tenía, hay que entrar con ese correo: la invitación nunca abre la cuenta de otra persona. Se
+// entra acá mismo y, al entrar, la aceptación se repite sola con el mismo enlace (G-35): no hace
+// falta tocar «Aceptar» otra vez. Diseño provisorio: el definitivo llega con G3.
 
 type Recibida = components["schemas"]["InvitacionRecibida"];
 
@@ -37,6 +38,10 @@ export const TIPOS: Record<Recibida["tipo"], string> = {
   inquilino: "inquilino/a",
   ocupante: "ocupante",
 };
+
+/** Con el correo de una cuenta que ya existe: se entra acá y la invitación se acepta sola (G-35). */
+export const YA_HAY_CUENTA =
+  "Ya hay una cuenta con este correo. Para aceptar la invitación, entrar con esa cuenta: al entrar, la invitación se acepta sola.";
 
 const ESTADO_INVALIDA = 404;
 const ESTADO_CONFLICTO = 409;
@@ -60,6 +65,8 @@ export function Invitacion() {
   const [nombre, setNombre] = useState("");
   const [falla, setFalla] = useState(SIN_CONEXION_ENLACE);
   const [fallaAlAceptar, setFallaAlAceptar] = useState<string | null>(null);
+  /** El correo con el que se entra cuando ya hay una cuenta: el invitado, que la persona puede cambiar. */
+  const [correoParaEntrar, setCorreoParaEntrar] = useState("");
   const consultada = useRef(false);
   const irAlInicio = useIrAlInicio();
 
@@ -71,6 +78,7 @@ export function Invitacion() {
         if (data !== undefined) {
           setInvitacion(data);
           setNombre(data.nombre);
+          setCorreoParaEntrar(data.correo);
           setEstado("lista");
         } else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else fallar(response.status, codigoDe(error));
@@ -87,6 +95,11 @@ export function Invitacion() {
 
   function aceptar(evento: FormEvent<HTMLFormElement>) {
     evento.preventDefault();
+    aceptarConElEnlace();
+  }
+
+  /** Acepta con el token del enlace: al tocar «Aceptar», o sola después de entrar (G-35). */
+  function aceptarConElEnlace() {
     if (!token) return;
     setEstado("aceptando");
     setFallaAlAceptar(null);
@@ -163,10 +176,7 @@ export function Invitacion() {
           </>
         )}
         {estado === "requiere_sesion" && (
-          <p className="aviso-error">
-            Ya hay una cuenta con este correo. Después de <Link to={RUTA_ENTRAR}>entrar</Link>, la invitación
-            aparece en el inicio, lista para aceptar.
-          </p>
+          <p>{YA_HAY_CUENTA}</p>
         )}
         {estado === "otra_persona" && (
           <>
@@ -209,6 +219,12 @@ export function Invitacion() {
           </>
         )}
       </div>
+      {estado === "requiere_sesion" && (
+        <section aria-labelledby={`${id}-entrar`} className="tarjeta">
+          <h2 id={`${id}-entrar`}>Entrar para aceptar</h2>
+          <FormasDeEntrar correo={correoParaEntrar} alCambiarCorreo={setCorreoParaEntrar} alEntrar={aceptarConElEnlace} />
+        </section>
+      )}
     </>
   );
 }

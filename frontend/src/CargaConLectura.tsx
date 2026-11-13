@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
-import { TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
+import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "./archivos";
 import { encabezadoCsrf } from "./csrf";
 import { mensajeDeError as mensajeDeCarga } from "./Documentos";
 import { ENCABEZADO_IDEMPOTENCIA, LARGO_TITULO, mensajeDeActo, renovarClave } from "./egresos/comun";
@@ -74,17 +74,10 @@ export const TEXTO_QUITADO_VUELVE_ANTERIOR = "Se quitó el archivo: vuelve a est
 /** Lo que dice el formulario mientras no se puede guardar. */
 export const TEXTO_ESPERA_PARA_GUARDAR = "Hay que esperar a que termine el archivo, o elegir seguir sin él, para guardar.";
 
-const hoy = () => {
-  const ahora = new Date();
-  const dos = (n: number) => String(n).padStart(2, "0");
-  return `${ahora.getFullYear()}-${dos(ahora.getMonth() + 1)}-${dos(ahora.getDate())}`;
-};
+const hoy = () => hoyDelDispositivo();
 
 /** El título del documento: el nombre del archivo sin la extensión o, si no sirve, el de siempre. */
-function tituloDe(archivo: File, porOmision: string): string {
-  const sinExtension = archivo.name.replace(/\.[^.]+$/, "").trim();
-  return (sinExtension === "" ? porOmision : sinExtension).slice(0, LARGO_TITULO);
-}
+const tituloDe = (archivo: File, porOmision: string) => tituloDeArchivo(archivo, porOmision, LARGO_TITULO);
 
 type Props = {
   consorcio: string;

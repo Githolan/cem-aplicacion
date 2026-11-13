@@ -1,5 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
@@ -19,6 +19,10 @@ import { REQUISITOS, useEdificioElegido } from "./permisos";
 // llevan al inicio. Es solo interfaz: la API decide cada pedido, la base vuelve a controlar y un
 // 403 al actuar se dice en la pantalla. Esta lista nunca se guarda en el dispositivo (§5): la copia
 // sin conexión es solo la de /contactos.
+//
+// La entrada de quien gestiona es /contactos (G-52): su ficha ofrece cada acto y lo trae acá con el
+// pedido. Un acto pedido desde allá termina allá, con el «Listo» o al cancelar (G-53). Lo ya hecho
+// no se ofrece de nuevo: un contacto ya señalado no ofrece «Señalar un error» (G-54).
 
 type Consorcio = components["schemas"]["ConsorcioResumen"];
 type Contacto = components["schemas"]["ContactoGestion"];
@@ -26,6 +30,16 @@ type Funcion = components["schemas"]["FuncionContacto"];
 type Naturaleza = components["schemas"]["NaturalezaContacto"];
 
 export const RUTA_CONTACTOS_GESTION = "/contactos/gestion";
+/** La lista que ven todos, adonde vuelve un acto pedido desde ahí (la ruta de `Contactos.tsx`). */
+const RUTA_CONTACTOS = "/contactos";
+
+/** El botón de cada acto de la ficha, con el verbo de lo que hace (G-54: «Comprobado» era un estado). */
+export const TEXTO_ACTO = {
+  corregir: "Corregir",
+  verificar: "Marcar como comprobado",
+  senalar: "Señalar un error",
+  retirar: "Retirar",
+} as const;
 
 const ESTADO = {
   sinSesion: 401,
@@ -197,17 +211,20 @@ type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; c
 
 type Abierto = { accion: Accion; contacto: Contacto | null };
 
-/** Lo que se tocó en /contactos para hacer acá (comentario 25): agregar, o corregir o retirar uno. */
-export type PedidoDeGestion =
-  | { consorcio: string; accion: "agregar" }
-  | { consorcio: string; accion: "corregir" | "retirar"; contacto: string };
+/** Los actos sobre un contacto que se piden desde la ficha de /contactos (G-52). */
+const ACTOS_SOBRE_UNO = ["corregir", "verificar", "senalar", "retirar"] as const;
+type ActoSobreUno = (typeof ACTOS_SOBRE_UNO)[number];
+
+/** Lo que se tocó en /contactos para hacer acá (comentario 25): agregar, o un acto sobre uno. */
+export type PedidoDeGestion = { consorcio: string; accion: "agregar" } | { consorcio: string; accion: ActoSobreUno; contacto: string };
 
 function pedidoDe(estado: unknown): PedidoDeGestion | null {
   if (typeof estado !== "object" || estado === null) return null;
   const { consorcio, accion, contacto } = estado as Record<string, unknown>;
   if (typeof consorcio !== "string") return null;
   if (accion === "agregar") return { consorcio, accion };
-  if ((accion === "corregir" || accion === "retirar") && typeof contacto === "string") return { consorcio, accion, contacto };
+  const sobreUno = ACTOS_SOBRE_UNO.find((a) => a === accion);
+  if (sobreUno !== undefined && typeof contacto === "string") return { consorcio, accion: sobreUno, contacto };
   return null;
 }
 
@@ -235,6 +252,8 @@ export function ContactosGestion() {
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   // Se usa una sola vez, con la primera lectura de la lista.
   const pedido = useRef(pedidoInicial);
+  // Un acto pedido desde /contactos vuelve allá al terminar o al cancelarlo (G-53).
+  const volverAContactos = useRef(pedidoInicial !== null);
   const [abierto, setAbierto] = useState<Abierto | null>(null);
   // La ficha abierta, por el id del contacto; las acciones de ese contacto van dentro de ella.
   const { abierta: fichaAbierta, abrir: abrirFichaDe, cerrar: cerrarFichaDe, refFila } = useFichas<string>();
@@ -376,8 +395,16 @@ export function ContactosGestion() {
     setAbierto(null);
   }
 
+  /** Lo pedido desde /contactos se termina allá: con el «Listo», o sin nada si se canceló (G-53). */
+  function aContactos(listo: string | null): boolean {
+    if (!volverAContactos.current) return false;
+    navegar(RUTA_CONTACTOS, listo === null ? undefined : { state: { aviso: listo } });
+    return true;
+  }
+
   /** «Cancelar» en Agregar: el rechazo era del formulario y se va con él, como al corregir (G-59). */
   function cancelarAgregar() {
+    if (aContactos(null)) return;
     cerrar();
     setAviso((actual) => (actual?.ok === false ? null : actual));
   }
@@ -389,8 +416,10 @@ export function ContactosGestion() {
     abrirFichaDe(c.id);
   }
 
-  /** De un formulario a la ficha con sus botones; el rechazo de ese formulario ya no vale. */
+  /** De un formulario a la ficha con sus botones; el rechazo de ese formulario ya no vale. Lo pedido
+   * desde /contactos, en cambio, vuelve allá. */
   function volverALaFicha() {
+    if (aContactos(null)) return;
     cerrar();
     setAviso((actual) => (actual?.ok === false ? null : actual));
   }
@@ -480,8 +509,6 @@ export function ContactosGestion() {
           }
           return;
         }
-        if (accion === "agregar") cerrar();
-        else cerrarFicha(false);
         const hecho: Record<Accion, string> = {
           agregar: `el contacto ${nombre} quedó agregado`,
           corregir: `el contacto ${nombre} quedó corregido`,
@@ -489,7 +516,11 @@ export function ContactosGestion() {
           verificar: `quedó la constancia de que el contacto ${nombre} se comprobó`,
           senalar: `quedó señalado el dato incorrecto del contacto ${nombre}`,
         };
-        setAviso({ texto: `Listo: ${hecho[accion]}.`, ok: true });
+        const listo = `Listo: ${hecho[accion]}.`;
+        if (aContactos(listo)) return;
+        if (accion === "agregar") cerrar();
+        else cerrarFicha(false);
+        setAviso({ texto: listo, ok: true });
         // Lo que se ve lo decide la API: la lista se vuelve a pedir.
         volverAPedir();
       })
@@ -513,9 +544,10 @@ export function ContactosGestion() {
       {pantalla.tipo === "lista" && (
         <>
           <p className="tarjeta">
-            La administración y el Consejo mantienen la lista que todos ven en «Contactos de
-            emergencia». Solo números de empresas, servicios u organismos; un profesional va con su
-            número profesional y la constancia de que aceptó figurar. Nunca un celular personal.
+            La administración y el Consejo mantienen la lista que todos ven en{" "}
+            <Link to={RUTA_CONTACTOS}>Contactos de emergencia</Link>. Solo números de empresas, servicios u
+            organismos; un profesional va con su número profesional y la constancia de que aceptó figurar. Nunca
+            un celular personal.
           </p>
 
           {edificios.length > 1 && (
@@ -662,9 +694,9 @@ export function ContactosGestion() {
         )}
         {accion === null ? (
           <p className="ficha-registro__acciones">
-            {(["corregir", "verificar", "senalar", "retirar"] as const).map((a) => (
+            {ACTOS_SOBRE_UNO.filter((a) => a !== "senalar" || !c.observado).map((a) => (
               <button key={a} type="button" className={a === "retirar" ? "secundario peligro" : "secundario"} onClick={() => abrir(a, c)} disabled={enviando}>
-                {{ corregir: "Corregir", verificar: "Comprobado", senalar: "Señalar un error", retirar: "Retirar" }[a]}
+                {TEXTO_ACTO[a]}
               </button>
             ))}
           </p>

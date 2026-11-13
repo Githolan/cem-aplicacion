@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import contrato from "../../contratos/openapi.json";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { mensajeAlInvitar } from "./Invitar";
+import { FALTA_CONFIRMAR, INVITACION_DEL_PADRON, mensajeAlInvitar } from "./Invitar";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -337,6 +337,20 @@ describe("página /invitaciones", () => {
     const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
     expect(claves[1]).toBe(claves[0]);
     expect(claves[2]).not.toBe(claves[1]);
+  });
+
+  it("G-21: la invitación que ya salió con el padrón se explica, no pide reintentar, y el intento siguiente lleva otra clave", async () => {
+    const simulado = conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error("invitacion_importada_pendiente", 409) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    expect(await screen.findByText(INVITACION_DEL_PADRON)).toBeTruthy();
+    expect(screen.queryByText(/se está procesando/)).toBeNull();
+    fireEvent.click(invitarBoton());
+    await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
+    const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
+    expect(claves[1]).not.toBe(claves[0]);
   });
 
   it("E34: un 503 de la aplicación dice que el servicio no está disponible, no que revise la conexión", async () => {
@@ -1066,6 +1080,33 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
 describe("lo que no se puede hacer no aparece en /invitaciones", () => {
   const unidades = (...invitables: boolean[]) => ({
     elementos: invitables.map((invitable, i) => ({ id: [U1, U2, C2][i], designacion: `${i + 1}° A`, invitable })),
+  });
+
+  it("G-26: la ficha de una aceptada dice que falta confirmar el vínculo y lleva al Padrón", async () => {
+    vi.stubGlobal("fetch", conConsorcio());
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    expect(within(aceptada).getByText(FALTA_CONFIRMAR, { exact: false })).toBeTruthy();
+    expect(within(aceptada).getByRole("link", { name: "Ir al Padrón para confirmar el vínculo" }).getAttribute("href")).toBe("/padron");
+    fireEvent.click(within(aceptada).getByRole("button", { name: "Cerrar" }));
+    // Control: una pendiente no lo dice.
+    const pendiente = await abrirFicha("Beto Pérez, 1° A");
+    expect(within(pendiente).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
+  });
+
+  it("control G-26: sin `padron.confirmar_vinculo`, la aceptada no manda a confirmar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("invitaciones.crear", "invitaciones.revocar") }),
+    );
+    abrir();
+    await screen.findByText("Beto Pérez, 1° A");
+    fireEvent.click(document.querySelector("details.historial summary") as HTMLElement);
+    const aceptada = await abrirFicha("Carla Gómez, 1° A");
+    expect(within(aceptada).queryByText(FALTA_CONFIRMAR, { exact: false })).toBeNull();
+    expect(within(aceptada).queryByRole("link", { name: "Ir al Padrón para confirmar el vínculo" })).toBeNull();
   });
 
   it("solo ofrece las unidades que la persona alcanza", async () => {

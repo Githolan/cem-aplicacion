@@ -13,7 +13,7 @@ import {
   leerCopias,
   vigentes,
 } from "./copiaContactos";
-import { type PedidoDeGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
+import { type PedidoDeGestion, RUTA_CONTACTOS_GESTION, TEXTO_ACTO } from "./ContactosGestion";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
@@ -28,8 +28,10 @@ import { AlInicioSinEdificios, REQUISITOS, useEdificioElegido, usePuede } from "
 // responde (sin red o caída), se muestra la copia con su fecha, volviendo a aplicar la vigencia con
 // el día del consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
 // Cada contacto es una fila que abre su ficha (comentario 21); el teléfono queda a un toque al lado
-// de la fila, porque son números de emergencia. Corregir y retirar van en la ficha, con
-// `contactos.gestionar` y con conexión, y se hacen en la gestión.
+// de la fila, porque son números de emergencia. Con `contactos.gestionar` y con conexión, la ficha
+// ofrece también corregir, marcar como comprobado, señalar un error y retirar, y arriba está «Agregar
+// un contacto» (G-52, G-60): esta es la entrada de quien gestiona. Cada acto se hace en la gestión y
+// vuelve acá con el «Listo» (G-53).
 
 export const RUTA_CONTACTOS = "/contactos";
 
@@ -224,16 +226,21 @@ export function Contactos() {
         {pantalla.tipo !== "cargando" && pantalla.consorcios.length > 0 && estado()}
       </div>
 
-      {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
-
-      {/* El botón dice lo que hace (comentario 25): agregar arriba, y cada contacto con lo suyo. */}
-      {consorcio !== "" && puede("contactos.gestionar") && (
-        <p className="tarjeta">
-          <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "agregar" } satisfies PedidoDeGestion} className="enlace-boton">
+      {/* El botón dice lo que hace (comentario 25): agregar arriba, antes de la lista, con la misma forma
+          que en la gestión (G-60); necesita la lista en línea, como los actos de la ficha. */}
+      {consorcio !== "" && lectura.tipo === "en_linea" && puede("contactos.gestionar") && (
+        <p className="acciones-pantalla">
+          <Link
+            to={RUTA_CONTACTOS_GESTION}
+            state={{ consorcio, accion: "agregar" } satisfies PedidoDeGestion}
+            className="enlace-boton enlace-boton--principal"
+          >
             Agregar un contacto
           </Link>
         </p>
       )}
+
+      {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
     </>
   );
 
@@ -318,7 +325,17 @@ export function Contactos() {
     );
   }
 
-  /** La ficha de un contacto. Sin conexión no ofrece corregir ni retirar: necesitan la lista en línea. */
+  /** Un acto de la gestión sobre este contacto: se hace allá y vuelve acá con el «Listo» (G-53). */
+  function acto(c: Contacto, accion: Exclude<PedidoDeGestion["accion"], "agregar">, texto: string, clase = "enlace-boton") {
+    return (
+      <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion, contacto: c.id } satisfies PedidoDeGestion} className={clase}>
+        {texto}
+      </Link>
+    );
+  }
+
+  /** La ficha de un contacto. Sin conexión no ofrece ningún acto: necesitan la lista en línea. Lo ya
+   * hecho no se ofrece de nuevo: un contacto ya señalado no ofrece «Señalar un error» (G-54). */
   function ficha(c: Contacto, sinConexion: boolean) {
     const gestiona = !sinConexion && consorcio !== "" && puede("contactos.gestionar");
     return (
@@ -337,12 +354,10 @@ export function Contactos() {
       >
         {gestiona && (
           <p className="ficha-registro__acciones">
-            <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "corregir", contacto: c.id } satisfies PedidoDeGestion} className="enlace-boton">
-              Corregir
-            </Link>
-            <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion: "retirar", contacto: c.id } satisfies PedidoDeGestion} className="enlace-boton peligro">
-              Retirar
-            </Link>
+            {acto(c, "corregir", "Corregir")}
+            {acto(c, "verificar", TEXTO_ACTO.verificar)}
+            {!c.observado && acto(c, "senalar", TEXTO_ACTO.senalar)}
+            {acto(c, "retirar", "Retirar", "enlace-boton peligro")}
           </p>
         )}
       </FichaDeRegistro>

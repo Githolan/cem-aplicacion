@@ -10,8 +10,8 @@ import contrato from "../../contratos/openapi.json";
 import type { components } from "./api/tipos";
 import { alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
-import { aceptar, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
-import { mensajeDeError, REFRESCO_CUARENTENA_MS, tamano } from "./Documentos";
+import { aceptar, hoyDelDispositivo, TIPOS_DE_DOCUMENTO, TOPE_BYTES } from "./archivos";
+import { AYUDA_FECHA, mensajeDeError, REFRESCO_CUARENTENA_MS, RESPALDA_ALGO, RETIRAR_DOCUMENTO, tamano } from "./Documentos";
 import { SIN_CONEXION } from "./fallas";
 import { ContextoVersion } from "./version";
 
@@ -490,7 +490,7 @@ describe("página /documentos", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     expect(await screen.findByText("No se pudo mostrar la lista.")).toBeTruthy();
     const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
-    expect(reintento.tagName).toBe("H3");
+    expect(reintento.tagName).toBe("H2"); // es el título de la tarjeta de arriba (G-05)
     elegir(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Subir el archivo" }));
     const listo = await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura»/);
@@ -522,7 +522,7 @@ describe("página /documentos", () => {
     llenarNuevo(pdf());
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
     const reintento = await screen.findByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" });
-    expect(reintento.tagName).toBe("H3"); // bajo el h2 de la sección, sin saltar niveles
+    expect(reintento.tagName).toBe("H2"); // el título de la tarjeta, sin saltar niveles (G-05)
     const reglas = { rules: { "color-contrast": { enabled: false } } };
     expect((await axe.run(document.body, reglas)).violations.map((v) => v.id)).toEqual([]);
     elegir(pdf());
@@ -544,7 +544,9 @@ describe("página /documentos", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
-    expect(document.activeElement).toBe(screen.getByLabelText("Categoría"));
+    // G-06: el archivo va primero, y el foco también.
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    expect(document.activeElement).toBe(within(carga).getByRole("button", { name: "Sacar una foto" }));
     expect(screen.getByLabelText("Archivo del documento").getAttribute("accept")).toBe(aceptar(TIPOS_DE_DOCUMENTO));
     // Todos los caminos a la vez: soltar, la cámara, la galería y el archivo.
     expect(screen.getByText("Soltar el archivo acá")).toBeTruthy();
@@ -662,7 +664,8 @@ describe("página /documentos", () => {
     expect([...document.querySelectorAll(".aviso-error")].map((e) => e.textContent).join(" ")).not.toMatch(/título/);
     const fecha = screen.getByLabelText("Fecha del documento");
     expect(fecha.getAttribute("aria-invalid")).toBe("true");
-    expect(document.getElementById(fecha.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Escribir una fecha válida.");
+    const describe = (fecha.getAttribute("aria-describedby") ?? "").split(" ").map((i) => document.getElementById(i)?.textContent);
+    expect(describe).toContain("Escribir una fecha válida.");
     // Control: el título no queda marcado.
     expect(screen.getByLabelText("Título").getAttribute("aria-invalid")).toBeNull();
   });
@@ -1053,10 +1056,11 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
       const campoArchivo = screen.getByLabelText("Archivo del documento");
       llenarNuevo(pdf());
       fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-      const aviso = await screen.findByText("Listo: el archivo de «Presupuesto de pintura» se subió. Queda «En revisión» mientras el antivirus lo analiza.");
+      const aviso = await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura» se subió\. Queda «En revisión».*esta pantalla avisa cuando termina\.$/);
       await waitFor(() => expect(document.activeElement).toBe(aviso));
       expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("");
-      expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe("");
+      // La fecha vuelve a la de hoy, la que se propone siempre (G-06).
+      expect((screen.getByLabelText("Fecha del documento") as HTMLInputElement).value).toBe(hoyDelDispositivo());
       expect(screen.queryByText(/Elegido:/)).toBeNull();
       // El campo del sistema no guarda el archivo ya elegido: se vacía al elegir.
       expect((screen.getByLabelText("Archivo del documento") as HTMLInputElement).value).toBe("");
@@ -1208,3 +1212,123 @@ describe("«Retirar el documento» (0089)", () => {
     expect(formulario.textContent).not.toMatch(/\b(tenés|podés|escribí|elegí|tocá|subí|soltá|retirá)\b/);
   });
 });
+
+describe("tanda 6 de fricción en /documentos", () => {
+  const ADMINISTRA = ["documentos.ver", "documentos.ver_restringidos", "documentos.cargar"];
+  const conAcciones = (acciones: string[], extra: Respuestas = {}) =>
+    conLista({ [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza(...acciones), ...extra });
+
+  it("G-02: un documento que respalda algo no ofrece «Retirar el documento»: lo dice en su lugar", async () => {
+    const lista = {
+      documentos: [
+        documento(D1, "Acta de asamblea ordinaria", { versiones: [version(V1)], respalda: true }),
+        documento(D3, "Contrato de limpieza", { categoria: "contratos_proveedores", respalda: false }),
+      ],
+    };
+    vi.stubGlobal("fetch", conAcciones(ADMINISTRA, { [`GET ${BASE}`]: () => Response.json(lista) }));
+    abrir();
+    const acta = await tarjeta("Acta de asamblea ordinaria");
+    expect(within(acta).queryByRole("button", { name: RETIRAR_DOCUMENTO })).toBeNull();
+    expect(within(acta).getByText(RESPALDA_ALGO)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    // Control: el que no respalda nada sigue ofreciéndolo, sin el aviso.
+    const contrato = await tarjeta("Contrato de limpieza");
+    expect(within(contrato).getByRole("button", { name: RETIRAR_DOCUMENTO })).toBeTruthy();
+    expect(within(contrato).queryByText(RESPALDA_ALGO)).toBeNull();
+  });
+
+  it("G-05: «Cargar un documento» está arriba, antes de la lista, y no repite su nombre adentro", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    const boton = await screen.findByRole("button", { name: "Cargar un documento" });
+    const lista = screen.getByRole("heading", { level: 2, name: "Documentos" });
+    expect(boton.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(boton);
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    expect(carga.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Sin el «Datos del documento» del medio; el botón abierto ya no está.
+    expect(within(carga).queryByText("Datos del documento")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cargar un documento" })).toBeNull();
+  });
+
+  it("G-06: el archivo va primero, propone el título y la fecha empieza en hoy, con su ayuda", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
+    const carga = screen.getByRole("region", { name: "Cargar un documento" });
+    const archivoCampo = within(carga).getByLabelText("Archivo del documento");
+    const categoria = within(carga).getByLabelText("Categoría");
+    expect(archivoCampo.compareDocumentPosition(categoria) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const fecha = within(carga).getByLabelText("Fecha del documento") as HTMLInputElement;
+    expect(fecha.value).toBe(hoyDelDispositivo());
+    const ayuda = document.getElementById((fecha.getAttribute("aria-describedby") ?? "").split(" ")[0] ?? "");
+    expect(ayuda?.textContent).toBe(AYUDA_FECHA);
+    const titulo = within(carga).getByLabelText("Título") as HTMLInputElement;
+    expect(titulo.value).toBe("");
+    elegir(pdf("Acta 12 de asamblea.pdf"));
+    expect(titulo.value).toBe("Acta 12 de asamblea");
+    // Otro archivo cambia lo que propuso el anterior...
+    elegir(pdf("Acta 13.pdf"));
+    expect(titulo.value).toBe("Acta 13");
+    // ...pero nunca lo que escribió la persona (control).
+    escribir("Título", "Acta de la asamblea de octubre");
+    elegir(pdf("otro.pdf"));
+    expect(titulo.value).toBe("Acta de la asamblea de octubre");
+  });
+
+  describe("G-09: quien solo carga se entera de cómo terminó el antivirus", () => {
+    const ESTADO_V4 = `${versiones(D3)}/${V4}/estado`;
+    const subida = () =>
+      Response.json(
+        { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
+        { status: 201 },
+      );
+    const soloCarga = (estado: () => Response) =>
+      conLista({
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+        [`POST ${versiones(D3)}`]: subida,
+        [`GET ${ESTADO_V4}`]: estado,
+      });
+
+    async function subirYEsperar(simulado: ReturnType<typeof soloCarga>) {
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await screen.findByLabelText("Categoría");
+      llenarNuevo(pdf());
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Presupuesto de pintura» se subió/);
+    }
+
+    it("sigue preguntando mientras está en revisión y dice «Disponible» al terminar, sin recargar", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        Response.json(++vueltas < 2 ? { estado: "en_cuarentena", motivo_rechazo: null } : { estado: "disponible", motivo_rechazo: null }),
+      );
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(
+        await screen.findByText("Listo: el archivo de «Presupuesto de pintura» pasó la revisión del antivirus y quedó «Disponible»."),
+      ).toBeTruthy();
+      const consultas = pedidos(simulado, "GET", ESTADO_V4).length;
+      expect(consultas).toBeGreaterThanOrEqual(2); // la primera dijo «en revisión»
+      // Terminado, no pregunta más (control de que la espera se cortó).
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(consultas);
+    });
+
+    it("si el antivirus lo rechaza, dice «Rechazado» con el motivo y ofrece subir otro para el mismo documento", async () => {
+      const simulado = soloCarga(() => Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(
+        await screen.findByText(
+          "«Rechazado»: el archivo de «Presupuesto de pintura» no pasó la revisión (el PDF tiene contraseña). No se va a mostrar: hay que subir otro.",
+        ),
+      ).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeTruthy();
+    });
+  });
+});
+
