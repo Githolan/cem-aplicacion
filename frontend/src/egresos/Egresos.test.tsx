@@ -317,6 +317,28 @@ describe("página /egresos/proveedores", () => {
     expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
   });
 
+  it("Codex en #236: si otra sesión ya cargó el CUIT (409 con campo), cierra y recarga en vez de marcar el campo", async () => {
+    const CARGA = `${BASE}/proveedores/${P1}/cuit`;
+    const sinCuit = proveedor({ cuit: null });
+    const api = conLista({
+      [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [sinCuit] }),
+      [`GET ${BASE}/proveedores/${P1}`]: () => Response.json({ proveedor: sinCuit, versiones: [] }),
+      [`POST ${CARGA}`]: () => error("cuit_ya_cargado", 409, { campos: ["body.cuit"] }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/egresos/proveedores");
+    fireEvent.click(await screen.findByRole("button", { name: /^Limpieza Ficticia SRL / }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
+    fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
+    const listasAntes = pedidos(api, "GET", `${BASE}/proveedores`).length;
+    fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
+    expect(await screen.findByText("Ese proveedor ya tiene CUIT, y un CUIT no cambia.")).toBeTruthy();
+    // Lo que se veía cambió: el formulario se cierra y la lista se vuelve a pedir.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar el CUIT" })).toBeNull());
+    expect(screen.queryByText(/^Hay que corregir el CUIT/)).toBeNull();
+    await waitFor(() => expect(pedidos(api, "GET", `${BASE}/proveedores`).length).toBeGreaterThan(listasAntes));
+  });
+
   it("la fila entera abre la ficha, sin un botón aparte, y al volver el foco queda en la fila", async () => {
     vi.stubGlobal("fetch", conLista());
     abrir("/egresos/proveedores");

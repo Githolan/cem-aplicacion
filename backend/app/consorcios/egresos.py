@@ -358,13 +358,14 @@ R10 pueden llegar si la sesión venció entre el evaluador y la base."""
 CAMPO_DEL_MOTIVO = {
     "cuit_invalido": "cuit",
     "cuit_repetido": "cuit",
-    "cuit_ya_cargado": "cuit",
     "numero_operacion_invalido": "numero_operacion",
     "fecha_operacion_invalida": "fecha_operacion",
     "motivo_con_cuenta": "motivo",
 }
 """El campo del cuerpo que motiva cada error de negocio que tiene uno (`detalle.campos`): la
-pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos."""
+pantalla lo marca junto al campo. Los nombres son los de los cuerpos de los contratos.
+`cuit_ya_cargado` no está: no es un dato para corregir sino que lo visto cambió (otra sesión ya
+cargó el CUIT), y la pantalla cierra el formulario y vuelve a pedir la lista."""
 
 ERRORES_CONFIRMACION = {
     "proveedor_cambiado": (

@@ -488,16 +488,19 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           setVuelta((v) => v + 1);
           return;
         }
-        // El rechazo que nombra campos del formulario se dice junto a cada uno (tanda 3, P-26).
+        // Lo que se veía cambió (p. ej. `cuit_ya_cargado`: otra sesión ya cargó el CUIT): el formulario
+        // viejo se cierra y la lista se vuelve a pedir, aunque la API nombre un campo (Codex en #236).
+        const cambioLoQueSeVe = cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && codigo !== "cuit_repetido";
+        // Si no, el rechazo que nombra campos del formulario se dice junto a cada uno (tanda 3, P-26).
         const nombres = nombresDe(f);
-        const marcados = soloDe(erroresDe(error, mensajeDeError(response.status, codigo)), nombres);
+        const marcados = cambioLoQueSeVe ? SIN_ERRORES : soloDe(erroresDe(error, mensajeDeError(response.status, codigo)), nombres);
         if (Object.keys(marcados).length > 0) {
           setErrores(marcados);
           setAviso({ texto: resumenDe(marcados, nombres), ok: false });
           return;
         }
         setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
-        if (cambioLoVisto(response.status, codigo) && codigo !== "sin_cambios" && codigo !== "cuit_repetido") {
+        if (cambioLoQueSeVe) {
           cerrar();
           volverAPedir();
         }
