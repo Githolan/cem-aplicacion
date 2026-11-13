@@ -23,7 +23,7 @@ test.describe("pedir el enlace para entrar", () => {
     await sinFaltasDeAccesibilidad(page);
 
     const seccion = page.getByRole("region", { name: "Pedir un código para entrar" });
-    await expect(seccion.getByText(/en otro dispositivo, usá el código de 6 números/)).toBeVisible();
+    await expect(seccion.getByText(/código de 6 números para entrar desde cualquier dispositivo/)).toBeVisible();
     await seccion.getByLabel("Correo").fill(CORREO);
     const pedido = page.waitForRequest((r) => new URL(r.url()).pathname === RUTA);
     await seccion.getByRole("button", { name: "Enviar el código" }).click();
@@ -53,7 +53,7 @@ test.describe("pedir el enlace para entrar", () => {
 
     const respuesta = await (await pedido).response();
     expect(respuesta?.status()).toBe(422);
-    await expect(seccion.getByText("Revisá el correo: no parece una dirección válida.")).toBeVisible();
+    await expect(seccion.getByText("El correo no parece una dirección válida. Revisarlo.")).toBeVisible();
     await expect(campo).toHaveAttribute("aria-invalid", "true");
     await sinFaltasDeAccesibilidad(page);
   });
