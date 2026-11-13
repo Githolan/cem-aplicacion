@@ -3678,6 +3678,7 @@ describe("la factura arriba de la orden (0088)", () => {
         [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
         [`GET /api/v1/consorcios/${C3}/proveedores`]: () => Response.json({ elementos: [proveedor({ id: P3, razon_social: "Pintura Ficticia SA" })] }),
         [`GET /api/v1/consorcios/${C3}/contratos`]: () => Response.json({ elementos: [] }),
+        [`GET /api/v1/consorcios/${C3}/pagos/parecida`]: () => Response.json({ parecida: null }),
         [`POST /api/v1/consorcios/${C3}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
       });
 
@@ -3705,6 +3706,8 @@ describe("la factura arriba de la orden (0088)", () => {
       fireEvent.click(await boton("Guardar como borrador"));
       await waitFor(() => expect(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)).toHaveLength(1));
       expect(await cuerpo(pedidos(api, "POST", `/api/v1/consorcios/${C3}/ordenes-pago`)[0])).toMatchObject({ factura_version_id: null, proveedor_id: P3 });
+      // La orden parecida se busca en el edificio elegido, no en el de la llegada.
+      expect(pedidos(api, "GET", `${BASE}/pagos/parecida`)).toHaveLength(0);
     });
   });
 

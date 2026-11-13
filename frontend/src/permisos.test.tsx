@@ -33,9 +33,17 @@ const sinRed: Respuesta = () => Promise.reject(new TypeError("Failed to fetch"))
 /** Lo que alcanza la persona en cada edificio. */
 type Acciones = Record<string, readonly string[]>;
 
-/** Una lectura vacía que sirve a todas las pantallas. */
+/** Una lectura vacía que sirve a todas las pantallas: trae los campos que cada contrato da siempre (la
+ * bandeja de pagos, `avisos_rechazo` y `por_cotejar`). */
 const LECTURA_VACIA = () =>
-  Response.json({ elementos: [], documentos: [], actualizada_en: null, zona_horaria: "America/Argentina/Buenos_Aires" });
+  Response.json({
+    elementos: [],
+    documentos: [],
+    avisos_rechazo: [],
+    por_cotejar: 0,
+    actualizada_en: null,
+    zona_horaria: "America/Argentina/Buenos_Aires",
+  });
 
 /** Responde por ruta. `acciones` decide `mis-acciones`; lo demás de un edificio, `lectura`. */
 function backend(acciones: Acciones, extra: Record<string, Respuesta> = {}, lectura: Respuesta = LECTURA_VACIA) {
