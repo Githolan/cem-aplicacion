@@ -1424,6 +1424,39 @@ describe("tanda 6 de fricción en /documentos", () => {
       expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(consultas);
     });
 
+    it("revisión del PR #241: lo que responde tarde el edificio anterior no aparece en el nuevo ni le cambia el formulario", async () => {
+      const C2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+      let responder: (r: Response) => void = () => undefined;
+      const tarde = new Promise<Response>((listo) => {
+        responder = listo;
+      });
+      const simulado = conLista({
+        "GET /api/v1/me/consorcios": () =>
+          Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Bordó", vinculos: [] }]),
+        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`GET /api/v1/consorcios/${C2}/mis-acciones`]: alcanza("documentos.cargar"),
+        [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+        [`POST ${versiones(D3)}`]: subida,
+        [`GET ${ESTADO_V4}`]: () => tarde,
+      });
+      await subirYEsperar(simulado);
+      await act(() => vi.advanceTimersByTimeAsync(3_000));
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1));
+      // Con la consulta en vuelo, otro edificio; después llega el rechazo del anterior.
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      await screen.findByLabelText("Categoría");
+      await act(async () => {
+        responder(Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+        await new Promise((listo) => setTimeout(listo, 100));
+      });
+      expect(screen.queryByText(RECHAZO)).toBeNull();
+      expect(screen.queryByRole("button", { name: /^Subir otro archivo/ })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      // Y no se sigue preguntando por el archivo del edificio anterior.
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(pedidos(simulado, "GET", ESTADO_V4)).toHaveLength(1);
+    });
+
     it("revisión del PR #241: subir otro documento antes de que termine el primero no deja de mirar el primero", async () => {
       let vueltas = 0;
       const simulado = soloCarga(() =>

@@ -219,7 +219,7 @@ const NUEVO: Abierto = { tipo: "nuevo" };
 type Aviso = { texto: string; ok: boolean };
 /** Un archivo subido por quien solo carga, a la espera del antivirus (G-09), con las consultas
  * seguidas que fallaron por algo pasajero y el estado de la última. */
-type Pendiente = { documento: string; version: string; titulo: string; fallas: number; estadoFalla: number };
+type Pendiente = { consorcio: string; documento: string; version: string; titulo: string; fallas: number; estadoFalla: number };
 /** Un archivo cuyo análisis terminó sin quedar disponible: rechazado (su documento espera otro
  * archivo, `ofreceOtro`) o imposible de consultar (404, 403: ya no hay nada que esperar). */
 type Rechazo = { documento: string; version: string; titulo: string; texto: string; ofreceOtro: boolean };
@@ -342,6 +342,10 @@ export function Documentos() {
   /** Los archivos rechazados, cada uno con su documento esperando otro archivo. Quedan a la vista hasta
    * que ese documento recibe uno: el formulario a medio llenar no cambia de destino por esto. */
   const [rechazados, setRechazados] = useState<Rechazo[]>([]);
+  /** El edificio elegido, para las respuestas que llegan tarde: una pedida para otro se ignora. Se
+   * fija también al cambiarlo, antes de que la pantalla se vuelva a dibujar. */
+  const consorcioVigente = useRef(consorcio);
+  consorcioVigente.current = consorcio;
   // El próximo pedido de la lista es el refresco automático: si falla, la lista a la vista no se pierde.
   const refrescoAutomatico = useRef(false);
 
@@ -362,7 +366,10 @@ export function Documentos() {
     setAviso(null);
     // El aviso queda al final de la página: sin el foco, tocar «Descargar» parece no hacer nada. Se
     // marca recién con la falla, para que una descarga buena no le deje el foco a un aviso posterior.
+    // Una falla que llega con otro edificio ya elegido es de un documento que ya no está a la vista.
+    const pedidoEn = consorcio;
     const fallo = (texto: string) => {
+      if (consorcioVigente.current !== pedidoEn) return;
       alAviso.current = true;
       setAviso({ texto, ok: false });
       // El aviso está en la página, debajo de la ficha: la ficha se cierra para que lo tome el foco.
@@ -409,10 +416,13 @@ export function Documentos() {
       };
       void api
         .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
-          params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
+          params: { path: { consorcio_id: cual.consorcio, documento_id: cual.documento, version_id: cual.version } },
         })
         .then(({ data, error, response }) => {
           exigirSesion(response);
+          // Una respuesta que llega con otro edificio ya elegido no toca nada: su espera ya se descartó
+          // y su documento no está en el formulario de este edificio (revisión del PR #241).
+          if (consorcioVigente.current !== cual.consorcio) return;
           if (data === undefined) {
             if (esPasajera(response.status)) pasajera(response.status);
             else terminado(sinResultado(cual.titulo, response.status, codigoDe(error)), false);
@@ -435,10 +445,10 @@ export function Documentos() {
         .catch((e: unknown) => {
           // Sin sesión, a entrar; una consulta que no llegó es una falla pasajera más.
           if (e instanceof SinSesion) aEntrar();
-          else pasajera(SIN_RESPUESTA);
+          else if (consorcioVigente.current === cual.consorcio) pasajera(SIN_RESPUESTA);
         });
     }
-  }, [esperando, consorcio, aEntrar]);
+  }, [esperando, aEntrar]);
   const antivirusTarda = useConsultaDelAntivirus(esperando.length > 0, mirarMiArchivo);
 
   const consultarEdificios = useCallback(() => {
@@ -665,7 +675,7 @@ export function Documentos() {
       // Sin acceso a la lista, quien solo carga pregunta por su archivo hasta que el antivirus
       // termina (G-09). Con la lista caída no hay refresco automático: queda «Actualizar».
       if (soloCarga)
-        setEsperando((lista) => [...lista, { documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
+        setEsperando((lista) => [...lista, { consorcio, documento, version: data.id, titulo, fallas: 0, estadoFalla: SIN_RESPUESTA }]);
       // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
       setRechazados((lista) => lista.filter((r) => r.documento !== documento));
       const despues = soloCarga
@@ -702,10 +712,14 @@ export function Documentos() {
                 value={consorcio}
                 disabled={enviando}
                 onChange={(e) => {
+                  // Desde ya, lo que responda el edificio anterior se ignora (ver `consorcioVigente`).
+                  consorcioVigente.current = e.target.value;
                   cerrar();
                   cerrarFichaDe(false);
                   setEsperando([]);
                   setRechazados([]);
+                  setRetiro(null);
+                  setViendo(null);
                   setAviso(null);
                   setLectura({ tipo: "cargando" });
                   setConsorcio(e.target.value);
