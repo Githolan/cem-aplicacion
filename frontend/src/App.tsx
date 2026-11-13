@@ -202,7 +202,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
-      <h1>El consorcio, en la mano</h1>
+      <h1>Consorcio en mano</h1>
       {porEdificio?.size === 0 && (
         <section className="resumen-inicio" aria-label="Edificio">
           <div className="resumen-inicio__arriba">

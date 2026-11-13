@@ -209,7 +209,7 @@ test.describe("entrar con contraseña y segundo factor (API simulada)", () => {
     await seccion.getByRole("button", { name: "Entrar con el código" }).click();
 
     await expect(page.getByText("Listo: sesión abierta.")).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     await expect(page).toHaveURL(/\/$/);
     expect(cuerpos).toEqual({ [ENTRAR]: { correo: CORREO, contrasena: CONTRASENA }, [PASO]: { codigo: "k7m2q-x9p4t" } });
     expect(page.url()).not.toContain("frase");

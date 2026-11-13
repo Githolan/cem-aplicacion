@@ -56,7 +56,7 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
 const CONSULTAR = "/api/v1/auth/invitacion-mandato/consultar";
 const ACEPTAR = "/api/v1/auth/invitacion-mandato/aceptar";
 const SALIR = "/api/v1/auth/salir";
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 const AVISO = "Listo: la cuenta quedó asociada a la administración de Edificio Alvear 100.";
 const CAMPO_NOMBRE = "Nombre (solo si la cuenta es nueva)";
 

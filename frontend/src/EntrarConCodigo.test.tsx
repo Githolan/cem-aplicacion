@@ -25,7 +25,7 @@ function error(codigo: string, estado: number) {
 }
 
 const RUTA_CODIGO = "/api/v1/auth/codigo";
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 
 type Respuesta = () => Response | Promise<Response>;
 

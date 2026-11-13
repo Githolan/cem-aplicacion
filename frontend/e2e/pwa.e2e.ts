@@ -134,7 +134,7 @@ test.describe("PWA servida por la imagen", () => {
     await dejarDeSimularSesion(page);
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     await expect(page.getByRole("img", { name: "El servicio no funciona" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });

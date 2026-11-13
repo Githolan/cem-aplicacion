@@ -73,7 +73,7 @@ test.describe("invitación de mandato", () => {
 
     await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
     await expect(page.getByText(/la cuenta quedó asociada a la administración de Edificio Azul/)).toBeVisible();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     await expect(page).toHaveURL(/\/$/);
     expect(pedidos.map((p) => p.camino)).toEqual([
       "/api/v1/auth/invitacion-mandato/consultar",
@@ -121,7 +121,7 @@ test.describe("invitación de mandato", () => {
     caido = false;
     await page.getByRole("button", { name: "Aceptar y asociar mi cuenta" }).click();
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     await expect(page.getByText(/la cuenta quedó asociada a la administración de Edificio Azul/)).toBeVisible();
     expect(pedidos.at(-1)).toMatchObject({ csrf: CSRF, cuerpo: { token: TOKEN, nombre: "Beto Estudio" } });
   });

@@ -956,7 +956,7 @@ describe("quien ya no participa de ningún edificio", () => {
     fireEvent.click(reintentar);
 
     expect(await screen.findByText(/^Esta cuenta todavía no participa de ningún edificio./)).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 1, name: "Documentos del edificio" })).toBeNull();
   });
 });
@@ -1115,7 +1115,7 @@ describe("lo que no se puede hacer no aparece en /documentos", () => {
       }),
     );
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
   });
 });
 

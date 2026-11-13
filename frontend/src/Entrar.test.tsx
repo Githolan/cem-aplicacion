@@ -40,7 +40,7 @@ const RUTA_CODIGO = "/api/v1/auth/codigo";
 // El texto lo arma el backend (router.py, MENSAJE_PEDIDO); la página muestra el que llega.
 const MENSAJE = "Si el correo corresponde a una cuenta, en unos minutos llega un código de 6 números para entrar.";
 
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const PEDIR = { name: "Pedir un código para entrar" };
 const CODIGO = { name: "Escribir el código del correo" };

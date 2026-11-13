@@ -33,7 +33,7 @@ const PRINCIPALES: readonly Destino[] = [
   { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
   { ruta: RUTA_DOCUMENTOS, texto: "Documentos", icono: "documento", requisito: REQUISITOS.documentos },
   { ruta: RUTA_CONTACTOS, texto: "Contactos de emergencia", corto: "Emergencias", icono: "telefono", requisito: REQUISITOS.contactos },
-  { ruta: RUTA_CUENTA, texto: "Mi cuenta", icono: "persona" },
+  { ruta: RUTA_CUENTA, texto: "Cuenta", icono: "persona" },
 ];
 
 // Solo en la barra lateral de la PC: en el teléfono y la tablet se llega desde el inicio.
@@ -118,7 +118,7 @@ const iniciales = (nombre: string) =>
     .map((palabra) => palabra.charAt(0).toUpperCase())
     .join("");
 
-/** Arriba, en tablet y PC: quién tiene la sesión. En el teléfono está en «Mi cuenta». */
+/** Arriba, en tablet y PC: quién tiene la sesión. En el teléfono está en «Cuenta». */
 export function PersonaEnCabecera({ nombre }: { nombre: string }) {
   return (
     <NavLink to={RUTA_CUENTA} className="persona-cabecera">

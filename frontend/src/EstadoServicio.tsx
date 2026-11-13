@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Salud } from "./api/cliente";
 
 // El estado del servicio (rediseño de pagos, §12): un punto en la barra de Inicio y un aviso chico
-// solo si no funciona. La versión va al pie de Mi cuenta. La consulta es una sola, compartida.
+// solo si no funciona. La versión va al pie de Cuenta. La consulta es una sola, compartida.
 
 export const TEXTO_FUNCIONA = "El servicio funciona";
 export const TEXTO_NO_FUNCIONA = "El servicio no funciona";

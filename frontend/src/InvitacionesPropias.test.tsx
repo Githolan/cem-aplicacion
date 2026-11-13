@@ -112,7 +112,7 @@ describe("invitaciones en el inicio", () => {
     abrir();
 
     await waitFor(() => expect(pedidos(simulado, LISTA)).toHaveLength(1));
-    await screen.findByRole("link", { name: "Mi cuenta" });
+    await screen.findByRole("link", { name: "Cuenta" });
     await new Promise((listo) => setTimeout(listo, 0));
     expect(screen.queryByRole("region", SECCION)).toBeNull();
   });

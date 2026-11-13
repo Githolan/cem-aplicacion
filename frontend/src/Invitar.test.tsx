@@ -1128,7 +1128,7 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
   ])("un 403 al leer %s lleva al inicio", async (_, ruta) => {
     vi.stubGlobal("fetch", conConsorcio({ ...INICIO_CON_SESION, [ruta]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByText(/no tiene permiso/)).toBeNull();
   });
 });

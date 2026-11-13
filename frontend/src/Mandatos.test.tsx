@@ -280,7 +280,7 @@ describe("página /mandatos", () => {
       }),
     );
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByText(/no tiene permiso/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
   });

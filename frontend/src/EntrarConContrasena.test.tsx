@@ -28,7 +28,7 @@ function error(codigo: string, estado: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status: estado });
 }
 
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 
 /**
  * Un backend que responde por ruta, en orden; lo que no está previsto falla la prueba. Como el de

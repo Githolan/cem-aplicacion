@@ -278,7 +278,7 @@ describe("página /padron", () => {
   it("un 403 al leer el padrón lleva al inicio, sin una pantalla de «sin permiso»", async () => {
     vi.stubGlobal("fetch", conPadron({ ...INICIO_CON_SESION, [`GET ${RUTA_PADRON}`]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Padrón del edificio" })).toBeNull();
     expect(screen.queryByText(/no tiene permiso|No hay permiso/)).toBeNull();
   });

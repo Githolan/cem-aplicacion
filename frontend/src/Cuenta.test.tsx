@@ -172,10 +172,10 @@ afterEach(() => {
 });
 
 describe("página /cuenta", () => {
-  it("el inicio tiene el enlace a Mi cuenta", async () => {
+  it("el inicio tiene el enlace a Cuenta", async () => {
     vi.stubGlobal("fetch", backend(INICIO_CON_SESION));
     abrir("/");
-    expect((await screen.findByRole("link", { name: "Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
+    expect((await screen.findByRole("link", { name: "Cuenta" })).getAttribute("href")).toBe("/cuenta");
   });
 
   it("la versión va al pie, y sin saberla no se muestra nada", async () => {
@@ -203,7 +203,7 @@ describe("página /cuenta", () => {
     abrir();
 
     expect(await screen.findByRole("heading", ENTRAR)).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Mi cuenta" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Cuenta" })).toBeNull();
   });
 
   it("muestra quién soy, las sesiones con la actual marcada y el segundo factor inactivo", async () => {
@@ -267,7 +267,7 @@ describe("página /cuenta", () => {
 
     expect(await screen.findByText("Listo: se cerró la sesión de Chrome en Android.")).toBeTruthy();
     expect(screen.queryByText("Chrome en Android")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Cuenta" })).toBeTruthy();
     const revocar = pedido(simulado, "POST", `/api/v1/auth/sesiones/${OTRA}/revocar`);
     expect(revocar?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
@@ -301,7 +301,7 @@ describe("página /cuenta", () => {
     const aviso = await screen.findByText(SERVICIO_NO_DISPONIBLE);
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
-    expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Cuenta" })).toBeTruthy();
     expect(screen.getByText("Chrome en Android")).toBeTruthy();
   });
 
@@ -716,7 +716,7 @@ describe("contraseña en /cuenta", () => {
     const puts = pedidosDe(simulado).filter((p) => p.method === "PUT");
     expect(puts).toHaveLength(2);
     expect(await puts[1]?.json()).toEqual({ contrasena_nueva: NUEVA, contrasena_actual: null });
-    expect(screen.getByRole("heading", { name: "Mi cuenta" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Cuenta" })).toBeTruthy();
   });
 
   it("si cancela el código vuelve al formulario con lo escrito y no guarda; un código malo se queda ahí", async () => {

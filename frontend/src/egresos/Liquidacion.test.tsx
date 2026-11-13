@@ -367,7 +367,7 @@ describe("liquidación (borrador)", () => {
       [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => error("sin_permiso", 403),
     }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByText(/La liquidación la prepara la administración/)).toBeNull();
     cleanup();
 

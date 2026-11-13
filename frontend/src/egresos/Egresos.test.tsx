@@ -817,7 +817,7 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
   it("un 403 al leer lleva al inicio: volver a pedir no lo arregla", async () => {
     vi.stubGlobal("fetch", backend({ ...INICIO, [`GET ${BASE}/proveedores`]: () => error("sin_permiso", 403) }));
     abrir("/egresos/proveedores");
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByText(/no tiene la facultad/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });

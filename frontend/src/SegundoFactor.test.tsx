@@ -38,7 +38,7 @@ const LLAVE = {
   ultimo_uso_en: null,
 };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
-const MI_CUENTA = { level: 1, name: "Mi cuenta" };
+const MI_CUENTA = { level: 1, name: "Cuenta" };
 const YO = {
   persona_id: "99999999-9999-4999-8999-999999999999",
   nombre: "Ana Pérez",
@@ -862,11 +862,11 @@ describe("códigos de recuperación de la llave: nunca se pierden", () => {
 });
 
 describe("informe de fricción, tanda 7", () => {
-  it("AC-10: la página tiene cómo volver a Mi cuenta", async () => {
+  it("AC-10: la página tiene cómo volver a Cuenta", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/auth/totp": () => Response.json(ACTIVO) }));
     abrir();
 
-    expect((await screen.findByRole("link", { name: "Volver a Mi cuenta" })).getAttribute("href")).toBe("/cuenta");
+    expect((await screen.findByRole("link", { name: "Volver a Cuenta" })).getAttribute("href")).toBe("/cuenta");
   });
 
   it("AC-14: desactivar no sale hasta confirmarlo en la hoja, y «Volver» no desactiva nada", async () => {
@@ -1044,7 +1044,7 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
     expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
     expect(container.inert).toBe(true);
-    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Volver a Cuenta", hidden: true })).toBeNull();
 
     alta.soltar();
     await sinSalidaHastaGuardar(container);
@@ -1073,7 +1073,7 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(await screen.findByRole("dialog", { name: "Activando" })).toBeTruthy();
     expect(container.inert).toBe(true);
-    expect(screen.queryByRole("link", { name: "Volver a Mi cuenta", hidden: true })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Volver a Cuenta", hidden: true })).toBeNull();
 
     confirmacion.soltar();
     await sinSalidaHastaGuardar(container);
@@ -1096,6 +1096,6 @@ describe("tanda 7, revisión de #237: con un alta en camino no se puede salir de
     fireEvent.click(screen.getByRole("button", { name: "Activar la aplicación" }));
     expect(await screen.findByText(/El código no sirve/)).toBeTruthy();
     expect(container.inert).toBeFalsy();
-    expect(screen.getByRole("link", { name: "Volver a Mi cuenta" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Volver a Cuenta" })).toBeTruthy();
   });
 });

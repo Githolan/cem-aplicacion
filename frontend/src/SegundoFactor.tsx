@@ -306,7 +306,7 @@ export function SegundoFactor() {
         <CabeceraInterna
           titulo="Confirmación con PIN, huella o código"
           volver={volver ?? RUTA_CUENTA}
-          destino={volver === null ? "Mi cuenta" : "la pantalla anterior"}
+          destino={volver === null ? "Cuenta" : "la pantalla anterior"}
         />
       )}
       {altaEnCurso && (

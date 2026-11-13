@@ -244,7 +244,7 @@ test.describe("entrar encima en mi cuenta", () => {
     });
 
     await page.goto("/");
-    const miCuenta = page.getByRole("link", { name: "Mi cuenta" });
+    const miCuenta = page.getByRole("link", { name: "Cuenta" });
     await expect(miCuenta).toBeVisible();
     estado = "falla";
     await miCuenta.click();

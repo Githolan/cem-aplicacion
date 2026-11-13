@@ -194,7 +194,7 @@ describe("página /contactos", () => {
       }),
     );
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByText(/no tiene acceso/)).toBeNull();
     expect(copiaGuardada(C1)).toBeNull();
     // Control: la copia de otro edificio no se toca.
@@ -365,7 +365,7 @@ describe("página /contactos", () => {
     caidos = false;
     fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
     expect(await screen.findByText(/^Esta cuenta todavía no participa de ningún edificio./)).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos de emergencia" })).toBeNull();
     expect(copiaGuardada()).toBeNull();
   });

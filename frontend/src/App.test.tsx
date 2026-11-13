@@ -28,7 +28,7 @@ const SESION = {
   vence_en: "2026-11-13T00:00:00Z",
 };
 
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
 const RUTA_SESION = "/api/v1/auth/sesion";
 
@@ -92,7 +92,7 @@ describe("página de inicio", () => {
     montar();
 
     expect(await screen.findByRole("img", { name: "El servicio funciona" })).toBeTruthy();
-    // La versión queda al pie de Mi cuenta: el inicio no la muestra.
+    // La versión queda al pie de Cuenta: el inicio no la muestra.
     expect(screen.queryByText("0849ee9")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(caminosDe(pedido)).toContain("/health");
@@ -215,7 +215,7 @@ describe("inicio sin edificios", () => {
 
     const texto = await screen.findByText(SIN_EDIFICIO);
     await vi.waitFor(() => expect(texto.textContent).toMatch(PARA_SUMARTE));
-    expect(screen.getByRole("link", { name: "Mi cuenta" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Cuenta" })).toBeTruthy();
   });
 
   it("control: con un edificio no lo dice", async () => {

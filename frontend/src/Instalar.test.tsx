@@ -16,7 +16,7 @@ const AGENTE_COMPUTADORA =
 
 const INSTALAR = { name: /Instalar Consorcio en Mano/ };
 const ENTRAR = { level: 1, name: "Entrar a Consorcio en Mano" };
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 const ENLACE_INSTALAR = { name: "Instalar la aplicación en este dispositivo" };
 const ENLACE_COMPUTADORA = { name: "Instalar la aplicación en esta computadora" };
 const NO_SE_INSTALO = /No se instaló/;

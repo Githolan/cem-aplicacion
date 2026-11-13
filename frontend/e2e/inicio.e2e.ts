@@ -11,7 +11,7 @@ import {
   sinFaltasDeAccesibilidad,
 } from "./entorno";
 
-const TITULO_INICIO = "El consorcio, en la mano";
+const TITULO_INICIO = "Consorcio en mano";
 const TITULO_ENTRAR = "Entrar a Consorcio en Mano";
 const ALTO_TACTIL_PX = 44;
 
@@ -29,7 +29,7 @@ test.describe("inicio contra el cem-backend real", () => {
     const cuerpo = (await salud.json()) as Salud;
     expect(cuerpo.sha_imagen).toBe(SHA_BACKEND);
 
-    // Un punto en la barra, con nombre accesible; la versión queda al pie de Mi cuenta.
+    // Un punto en la barra, con nombre accesible; la versión queda al pie de Cuenta.
     await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     await expect(page.getByRole("banner").getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     await expect(page.getByText(SHA_BACKEND.slice(0, LARGO_SHA_CORTA))).toHaveCount(0);
@@ -72,7 +72,7 @@ test.describe("inicio contra el cem-backend real", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/");
 
-    await expect(page.getByRole("link", { name: "Mi cuenta" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Instalar la aplicación/ })).toHaveCount(0);
   });
 

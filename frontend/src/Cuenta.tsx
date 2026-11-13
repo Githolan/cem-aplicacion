@@ -19,7 +19,7 @@ import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 import { useAEntrar } from "./sesionEncima";
 
-// Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
+// Página /cuenta ("Cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
 // con la actual marcada (cada una se puede cerrar, o todas las otras de una vez), salir, y el
 // estado del segundo factor con el enlace a su página, y la contraseña (SeccionContrasena). Sin sesión manda a /entrar, igual que
 // después de cerrar la sesión actual. Cada parte se lee por su lado: si una falla, esa parte dice qué
@@ -272,7 +272,7 @@ export function Cuenta() {
 
   return (
     <>
-      <h1>Mi cuenta</h1>
+      <h1>Cuenta</h1>
 
       {lista !== null && (
         <>

@@ -462,7 +462,7 @@ describe("bandeja", () => {
       [`GET ${BASE}/pagos/bandeja`]: () => error("sin_permiso", 403),
     }));
     abrir("/pagos");
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
   });
 
   it("con varios edificios se elige cuál, y cambiar sale de la ficha de otro", async () => {
@@ -3153,7 +3153,7 @@ describe("rutas y navegación", () => {
   it("una dirección abierta a mano sin permiso lleva al inicio", async () => {
     vi.stubGlobal("fetch", backend({ ...INICIO, [`GET ${BASE}/mis-acciones`]: alcanza("contactos.ver") }));
     abrir("/pagos");
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     await waitFor(() => expect(lugar()).toBe("/"));
   });
 

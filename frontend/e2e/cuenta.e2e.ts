@@ -120,7 +120,7 @@ test.describe("mi cuenta", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     const csrf = await simularApi(page, baseURL!);
     await page.goto("/");
-    await page.getByRole("link", { name: "Mi cuenta" }).click();
+    await page.getByRole("link", { name: "Cuenta" }).click();
 
     await expect(page.getByLabel("Datos de la cuenta").getByText("Ana Pérez")).toBeVisible();
     // La versión pasó del inicio al pie de esta pantalla.

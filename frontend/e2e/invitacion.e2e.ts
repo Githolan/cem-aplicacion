@@ -14,7 +14,7 @@ const TOKEN = "I".repeat(21) + "_-" + "v".repeat(20);
 const ANCHO_TELEFONO_PX = 360;
 const ALTO_TELEFONO_PX = 740;
 const AVISO = "Listo: la cuenta ya es parte de Edificio Azul.";
-const TITULO_INICIO = "El consorcio, en la mano";
+const TITULO_INICIO = "Consorcio en mano";
 const RECIBIDA = {
   consorcio: "Edificio Azul",
   unidad: "1° A",

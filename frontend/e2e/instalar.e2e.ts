@@ -94,7 +94,7 @@ test.describe("página /instalar", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/instalar");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("El consorcio, en la mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     expect(new URL(page.url()).pathname).toBe("/");
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
     await expect(page.locator("ol.pasos")).toHaveCount(0);

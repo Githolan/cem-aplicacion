@@ -205,7 +205,7 @@ test.describe("mandatos", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Mandatos y decisiones" })).toHaveCount(0);
     await expect(page.getByText(/no tiene permiso/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);

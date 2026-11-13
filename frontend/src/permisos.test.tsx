@@ -20,7 +20,7 @@ const EDIFICIOS = [
   { id: C2, nombre: "Edificio Verde", vinculos: [] },
 ];
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 
 function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", detalle: null, id_correlacion: "c" }, { status });
@@ -190,7 +190,7 @@ describe("Exige", () => {
 });
 
 describe("inicio por rol", () => {
-  const MI_CUENTA = "Mi cuenta";
+  const MI_CUENTA = "Cuenta";
   const INVITAR = "Invitar a una persona";
   const MANDATOS = "Mandatos y decisiones";
   const PADRON = "Padrón del edificio";
@@ -247,7 +247,7 @@ describe("inicio por rol", () => {
   it.each<[string, Record<string, Respuesta>]>([
     ["sin conexión", { "/api/v1/me/consorcios": sinRed }],
     ["sin saber qué alcanza", { [`/api/v1/consorcios/${C1}/mis-acciones`]: sinRed }],
-  ])("%s quedan solo Mi cuenta y Contactos", async (_, extra) => {
+  ])("%s quedan solo Cuenta y Contactos", async (_, extra) => {
     vi.stubGlobal("fetch", backend({ [C1]: ADMINISTRADOR }, extra));
     abrirApp();
     expect(await enlaces()).toEqual([CONTACTOS]);
@@ -431,7 +431,7 @@ describe("el edificio elegido", () => {
     abrirApp("/padron");
     await elegirElVerde();
     fireEvent.click(screen.getByRole("link", MARCA));
-    fireEvent.click(await screen.findByRole("link", { name: "Mi cuenta" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Cuenta" }));
     fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Ya tengo un código" }));

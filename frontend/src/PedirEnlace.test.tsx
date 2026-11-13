@@ -23,7 +23,7 @@ function error(codigo: string, estado: number) {
 
 const RUTA_ENLACE = "/api/v1/auth/enlace";
 const CODIGO = { name: "Escribir el código del correo" };
-const INICIO = { level: 1, name: "El consorcio, en la mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 
 /**
  * El backend de quien todavía no entró: `/auth/sesion` da 401 hasta que un canje la abre, `enlace`

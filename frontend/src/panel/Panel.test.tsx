@@ -182,7 +182,7 @@ describe("panel del Consejo", () => {
     const api = backend({ [ACCIONES]: alcanza("documentos.ver"), [PANEL]: () => Response.json(DATOS) });
     vi.stubGlobal("fetch", api);
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     await screen.findByRole("link", { name: "Documentos del edificio" });
     expect(screen.queryByRole("link", { name: "Panel del Consejo" })).toBeNull();
     expect(api.mock.calls.some((c) => new URL((c as unknown as [Request])[0].url).pathname.endsWith("/panel"))).toBe(false);
@@ -197,7 +197,7 @@ describe("panel del Consejo", () => {
   it("si la API lo niega lleva al inicio: decide el servidor", async () => {
     vi.stubGlobal("fetch", backend({ [PANEL]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "El consorcio, en la mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Panel del Consejo" })).toBeNull());
   });
 });

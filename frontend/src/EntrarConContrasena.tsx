@@ -136,7 +136,7 @@ export function EntrarConContrasena({ correo, alCambiarCorreo, alEntrar }: Props
       {titulo}
       {paso.tipo === "contrasena" ? (
         <>
-          <p>Con una contraseña definida en Mi cuenta, se entra con el correo y esa contraseña.</p>
+          <p>Con una contraseña definida en Cuenta, se entra con el correo y esa contraseña.</p>
           <form className="formulario" onSubmit={entrar}>
             <label htmlFor={`${id}-correo`}>Correo</label>
             <input
