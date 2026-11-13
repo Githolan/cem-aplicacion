@@ -5,6 +5,7 @@ import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
+import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
@@ -43,6 +44,11 @@ const LARGO_TEXTO = 300;
 export const PATRON_TELEFONO = "[+0-9][0-9 \\(\\)\\-]{2,29}";
 /** Un texto con algo más que espacios. */
 const PATRON_TEXTO = ".*\\S.*";
+/** El navegador aplica `pattern` entero y con la marca `v`: la misma cuenta, para decirlo al escribir. */
+const TELEFONO_BIEN_ESCRITO = new RegExp(`^(?:${PATRON_TELEFONO})$`, "v");
+/** El formato del teléfono, en vez del mensaje genérico del navegador (G-57). */
+export const TELEFONO_MAL_ESCRITO = "El teléfono va solo con números, espacios, paréntesis o guiones.";
+const telefonoMalEscrito = (telefono: string) => telefono !== "" && !TELEFONO_BIEN_ESCRITO.test(telefono);
 
 export const TEXTO_FUNCION: Record<Funcion, string> = {
   administracion: "Administración",
@@ -61,6 +67,7 @@ const TEXTO_NATURALEZA: Record<Naturaleza, string> = {
   profesional: "Profesional (con su número profesional y la constancia del consentimiento)",
 };
 
+/** Cómo se nombra cada campo en el resumen del error: una frase por campo marcado (G-58). */
 const TEXTO_CAMPO: Record<string, string> = {
   nombre: "el nombre",
   telefono: "el teléfono",
@@ -85,11 +92,14 @@ function vigencia(c: Contacto): string {
   return c.vigente_hasta === null ? `${desde}, sin fecha de fin` : `${desde}; último día: ${dia(c.vigente_hasta, -1)}`;
 }
 
-/** Los campos que la API marcó en un 422 (`detalle.campos`, p. ej. `body.nombre`). */
-function camposDe(error: unknown): string[] {
-  const campos = (error as { detalle?: { campos?: unknown } } | undefined)?.detalle?.campos;
-  return Array.isArray(campos) ? campos.filter((c): c is string => typeof c === "string") : [];
-}
+/** El campo de la API de cada dato del formulario. */
+const CAMPO_API: Partial<Record<keyof Datos, string>> = {
+  nombre: "nombre",
+  telefono: "telefono",
+  consentimiento: "consentimiento_referencia",
+  indicaciones: "indicaciones",
+  desde: "vigente_desde",
+};
 
 /** Qué decir ante un error de una acción, según el estado, el código y los campos del 422. */
 export function mensajeDeError(estado: number, codigo: string | undefined, accion: Accion, campos: string[] = []): string {
@@ -104,10 +114,11 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
   if (estado === ESTADO.conflicto) return "El pedido choca con el estado actual de la lista. Revisá la lista actualizada.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
     return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
+  // Cada campo marcado lleva su motivo al lado (`ErrorDeCampo`); el resumen solo los nombra (G-58).
   if (estado === ESTADO.invalido) {
-    const nombres = [...new Set(campos.map((c) => TEXTO_CAMPO[c.split(".").pop() ?? ""]).filter((t) => t !== undefined))];
-    const que = nombres.length > 0 ? nombres.join(", ") : accion === "senalar" ? "el motivo" : "los datos";
-    return `Revisá ${que}. Los teléfonos y correos van solo en «Teléfono», nunca en el nombre, las indicaciones ni el motivo; un profesional va con su teléfono y la constancia del consentimiento.`;
+    const marcados = campos.length > 0 ? campos : accion === "senalar" ? ["body.motivo"] : [];
+    const errores = Object.fromEntries(marcados.map((c) => [c.split(".").pop() ?? "", ""]));
+    return marcados.length > 0 ? resumenDe(errores, TEXTO_CAMPO) : REVISAR_FORMULARIO;
   }
   if (estado === ESTADO.limite) return LIMITE_DE_PEDIDOS;
   return mensajeDeFalla(estado, codigo);
@@ -231,6 +242,8 @@ export function ContactosGestion() {
   const [motivo, setMotivo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** Los campos que rechazó la API, con su motivo (G-58). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [vuelta, setVuelta] = useState(0);
   const consultado = useRef(false);
   // Una clave por intento lógico: se conserva si el pedido se cae y se renueva al cambiar los datos.
@@ -350,6 +363,7 @@ export function ContactosGestion() {
 
   function abrir(accion: Accion, contacto: Contacto | null) {
     clave.current = null;
+    setErrores(SIN_ERRORES);
     setDatos(contacto === null ? VACIO : datosDe(contacto));
     setMotivo("");
     setAviso(null);
@@ -358,7 +372,14 @@ export function ContactosGestion() {
 
   function cerrar() {
     clave.current = null;
+    setErrores(SIN_ERRORES);
     setAbierto(null);
+  }
+
+  /** «Cancelar» en Agregar: el rechazo era del formulario y se va con él, como al corregir (G-59). */
+  function cancelarAgregar() {
+    cerrar();
+    setAviso((actual) => (actual?.ok === false ? null : actual));
   }
 
   function abrirFicha(c: Contacto) {
@@ -383,6 +404,8 @@ export function ContactosGestion() {
 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     clave.current = null;
+    const deLaApi = CAMPO_API[campo];
+    if (deLaApi !== undefined) setErrores((e) => sinElDe(e, deLaApi));
     setDatos((d) => ({ ...d, [campo]: valor }));
   }
 
@@ -443,7 +466,9 @@ export function ContactosGestion() {
         if (data === undefined) {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
-          setAviso({ texto: mensajeDeError(response.status, codigo, accion, camposDe(error)), ok: false });
+          const marcados = response.status === ESTADO.invalido ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
+          setErrores(marcados);
+          setAviso({ texto: mensajeDeError(response.status, codigo, accion, Object.keys(marcados).map((c) => `body.${c}`)), ok: false });
           if (cambioLaLista(response.status, codigo)) {
             // Lo escrito no se pierde: una corrección que ya no tiene contacto sigue como uno nuevo, y el
             // motivo espera la lista nueva, que muestra el formulario solo si el contacto sigue ahí.
@@ -660,6 +685,7 @@ export function ContactosGestion() {
     const profesional = datos.naturaleza === "profesional";
     const ayudaTelefono = `${titulo}-ayuda-telefono`;
     const ayudaTexto = `${titulo}-ayuda-texto`;
+    const errorTelefono = telefonoMalEscrito(datos.telefono) ? TELEFONO_MAL_ESCRITO : errores.telefono;
     return (
       <form className="formulario formulario-movil" onSubmit={enviar} aria-labelledby={`${titulo}-accion`}>
         <h3 id={`${titulo}-accion`}>{nuevo ? "Agregar un contacto" : "Corregir el contacto"}</h3>
@@ -702,10 +728,11 @@ export function ContactosGestion() {
           pattern={PATRON_TEXTO}
           required
           disabled={enviando}
-          aria-describedby={ayudaTexto}
+          {...marcaDe(`${titulo}-nombre`, errores.nombre, ayudaTexto)}
           value={datos.nombre}
           onChange={(e) => cambiar("nombre", e.target.value)}
         />
+        <ErrorDeCampo idCampo={`${titulo}-nombre`} mensaje={errores.nombre} />
         <label htmlFor={`${titulo}-telefono`}>Teléfono{profesional ? "" : " (opcional)"}</label>
         <input
           id={`${titulo}-telefono`}
@@ -715,11 +742,15 @@ export function ContactosGestion() {
           pattern={PATRON_TELEFONO}
           required={profesional}
           disabled={enviando}
-          aria-describedby={ayudaTelefono}
+          {...marcaDe(`${titulo}-telefono`, errorTelefono, ayudaTelefono)}
           value={datos.telefono}
-          onChange={(e) => cambiar("telefono", e.target.value)}
+          onChange={(e) => {
+            e.target.setCustomValidity(telefonoMalEscrito(e.target.value) ? TELEFONO_MAL_ESCRITO : "");
+            cambiar("telefono", e.target.value);
+          }}
         />
         <p id={ayudaTelefono}>Solo números de empresas, servicios u organismos; un profesional va con su constancia.</p>
+        <ErrorDeCampo idCampo={`${titulo}-telefono`} mensaje={errorTelefono} />
         {profesional && (
           <>
             <label htmlFor={`${titulo}-consentimiento`}>Constancia del consentimiento</label>
@@ -731,9 +762,11 @@ export function ContactosGestion() {
               pattern={PATRON_TEXTO}
               required
               disabled={enviando}
+              {...marcaDe(`${titulo}-consentimiento`, errores.consentimiento_referencia)}
               value={datos.consentimiento}
               onChange={(e) => cambiar("consentimiento", e.target.value)}
             />
+            <ErrorDeCampo idCampo={`${titulo}-consentimiento`} mensaje={errores.consentimiento_referencia} />
           </>
         )}
         <label htmlFor={`${titulo}-indicaciones`}>Indicaciones (opcional)</label>
@@ -741,10 +774,11 @@ export function ContactosGestion() {
           id={`${titulo}-indicaciones`}
           maxLength={LARGO_TEXTO}
           disabled={enviando}
-          aria-describedby={ayudaTexto}
+          {...marcaDe(`${titulo}-indicaciones`, errores.indicaciones, ayudaTexto)}
           value={datos.indicaciones}
           onChange={(e) => cambiar("indicaciones", e.target.value)}
         />
+        <ErrorDeCampo idCampo={`${titulo}-indicaciones`} mensaje={errores.indicaciones} />
         {nuevo && (
           <>
             <label htmlFor={`${titulo}-desde`}>Desde (opcional; si queda vacío, desde hoy)</label>
@@ -752,16 +786,18 @@ export function ContactosGestion() {
               id={`${titulo}-desde`}
               type="date"
               disabled={enviando}
+              {...marcaDe(`${titulo}-desde`, errores.vigente_desde)}
               value={datos.desde}
               onChange={(e) => cambiar("desde", e.target.value)}
             />
+            <ErrorDeCampo idCampo={`${titulo}-desde`} mensaje={errores.vigente_desde} />
           </>
         )}
         <p>
           <button type="submit" disabled={enviando}>
             {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={nuevo ? cerrar : volverALaFicha} disabled={enviando}>
+          <button type="button" className="secundario peligro" onClick={nuevo ? cancelarAgregar : volverALaFicha} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -827,13 +863,15 @@ export function ContactosGestion() {
               pattern={PATRON_TEXTO}
               required
               disabled={enviando}
-              aria-describedby={ayuda}
+              {...marcaDe(`${titulo}-motivo`, errores.motivo, ayuda)}
               value={motivo}
               onChange={(e) => {
                 clave.current = null;
+                setErrores((actuales) => sinElDe(actuales, "motivo"));
                 setMotivo(e.target.value);
               }}
             />
+            <ErrorDeCampo idCampo={`${titulo}-motivo`} mensaje={errores.motivo} />
           </>
         )}
         <p>

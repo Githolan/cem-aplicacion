@@ -289,7 +289,11 @@ def test_un_codigo_inventado_o_mal_formado(app, motor_migrate):  # noqa: F811
     for malo in ("12345", "1234567", "12 345", "abcdef", ""):
         r = canjear(navegador(app), ANA, malo)
         assert r.status_code == 422
-        assert r.json()["detalle"] == {"campos": ["body.codigo"]}
+        # El campo y qué hacer con él (tanda 3 del informe de fricción); nunca lo que se escribió.
+        assert r.json()["detalle"] == {
+            "campos": ["body.codigo"],
+            "mensajes": {"body.codigo": "Revisar cómo está escrito: el formato no corresponde."},
+        }
     # El 422 no descuenta: no llega a la base.
     assert fila_codigo(motor_migrate, ANA).intentos == 1
 

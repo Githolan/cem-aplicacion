@@ -583,7 +583,7 @@ describe("página /documentos", () => {
     expect(screen.queryByText(/Elegido:/)).toBeNull();
     // El rechazado no quedó elegido: enviar pide el archivo.
     fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
-    const aviso = await screen.findByText("Hay que elegir el archivo.");
+    const aviso = await screen.findByText("Falta elegir el archivo.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     elegir(archivo(["hola"], "notas.txt", "text/plain"));
     expect(await screen.findByText("Solo se aceptan archivos PDF, JPEG o PNG. Hay que elegir otro archivo.")).toBeTruthy();
@@ -629,6 +629,91 @@ describe("página /documentos", () => {
     expect(claves[0]).not.toBe(claves[1]);
     // Control: no se creó ningún documento nuevo.
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
+  });
+
+  it("G-01: el error de subir desde la ficha se dice dentro de la ficha, junto al botón", async () => {
+    const simulado = conLista({ [`POST ${versiones(D3)}`]: () => error("archivo_demasiado_grande", 413) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    const contrato = await tarjeta("Contrato de limpieza");
+    fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
+    // Sin archivo: el aviso queda en la ficha, que es lo que está a la vista.
+    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
+    expect(within(contrato).getByText("Falta elegir el archivo.")).toBeTruthy();
+    // El rechazo del servidor, también.
+    fireEvent.change(within(contrato).getByLabelText("Archivo del documento"), { target: { files: [pdf("contrato.pdf")] } });
+    expect(within(contrato).queryByText("Falta elegir el archivo.")).toBeNull();
+    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
+    expect(await within(contrato).findByText("El archivo pasa de 20 MB y no se guardó. Hay que elegir uno más chico.")).toBeTruthy();
+  });
+
+  it("G-08: un 422 de la fecha marca la fecha y no habla del título", async () => {
+    const simulado = conLista({
+      [`POST ${BASE}`]: () =>
+        error("peticion_invalida", 422, { campos: ["body.fecha"], mensajes: { "body.fecha": "Escribir una fecha válida." } }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    expect(await screen.findByText("Hay que corregir la fecha: el motivo está junto a cada campo.")).toBeTruthy();
+    // Ningún aviso de error habla del título (antes: «Revisá la fecha. El título no puede…»).
+    expect([...document.querySelectorAll(".aviso-error")].map((e) => e.textContent).join(" ")).not.toMatch(/título/);
+    const fecha = screen.getByLabelText("Fecha del documento");
+    expect(fecha.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(fecha.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Escribir una fecha válida.");
+    // Control: el título no queda marcado.
+    expect(screen.getByLabelText("Título").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-08: un 422 del título dice qué no puede llevar, junto al título", async () => {
+    const simulado = conLista({
+      [`POST ${BASE}`]: () =>
+        error("peticion_invalida", 422, {
+          campos: ["body.titulo"],
+          mensajes: { "body.titulo": "Sin teléfonos ni correos acá: el número va solo en el teléfono." },
+        }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    expect(await screen.findByText("Hay que corregir el título: el motivo está junto a cada campo.")).toBeTruthy();
+    const titulo = screen.getByLabelText("Título");
+    expect(titulo.getAttribute("aria-invalid")).toBe("true");
+    // Conserva la ayuda que ya lo describía y suma el motivo.
+    const ids = (titulo.getAttribute("aria-describedby") ?? "").split(" ");
+    expect(ids.map((i) => document.getElementById(i)?.textContent)).toEqual([
+      "Sin teléfonos ni correos en el título.",
+      "El título no puede llevar teléfonos ni correos.",
+    ]);
+  });
+
+  it("G-13: «Cancelar» se lleva el error del formulario", async () => {
+    const simulado = conLista({ [`POST ${BASE}`]: () => error("peticion_invalida", 422, { campos: ["body.fecha"] }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarNuevo();
+    fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+    // Control: el error se ve mientras el formulario está abierto.
+    expect(await screen.findByText(/^Hay que corregir la fecha/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByText(/^Hay que corregir la fecha/)).toBeNull();
+    // Y un formulario nuevo empieza sin marcas.
+    fireEvent.click(await screen.findByRole("button", { name: "Cargar un documento" }));
+    expect(screen.getByLabelText("Fecha del documento").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-13: cerrar la ficha se lleva el error de subir el archivo", async () => {
+    vi.stubGlobal("fetch", conLista());
+    abrir();
+    const contrato = await tarjeta("Contrato de limpieza");
+    fireEvent.click(within(contrato).getByRole("button", { name: "Subir archivo" }));
+    fireEvent.click(within(contrato).getByRole("button", { name: "Subir el archivo" }));
+    expect(screen.getAllByText(/^(Falta|Hay que) elegir el archivo\.$/).length).toBeGreaterThan(0);
+    fireEvent.click(within(contrato).getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText(/^(Falta|Hay que) elegir el archivo\.$/)).toBeNull();
   });
 
   it("si el segundo paso falla, lo dice y deja reintentar solo el archivo, con la misma clave", async () => {
@@ -842,8 +927,9 @@ describe("página /documentos", () => {
     expect([tamano(1), tamano(1024), tamano(1025), tamano(1024 * 1024)]).toEqual(["1 KB", "1 KB", "2 KB", "1 MB"]);
     expect(mensajeDeError(503, undefined, "subir")).toMatch(/servicio no está disponible/);
     expect(mensajeDeError(422, "peticion_invalida", "crear", ["body.titulo"])).toBe(
-      "Revisá el título. El título no puede llevar teléfonos ni correos.",
+      "Hay que corregir el título: el motivo está junto a cada campo.",
     );
+    expect(mensajeDeError(422, "peticion_invalida", "crear", [])).toBe("Hay que revisar los datos del formulario.");
   });
 });
 

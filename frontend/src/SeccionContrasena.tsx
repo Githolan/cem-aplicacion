@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { CampoContrasena } from "./CampoContrasena";
 import { api } from "./api/cliente";
+import { useListoHastaOtroActo } from "./listoHastaOtroActo";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
 import { PedirCodigo } from "./egresos/PedirCodigo";
@@ -74,6 +75,9 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
   const [distintas, setDistintas] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  // El «Listo» de la contraseña se va al empezar otro acto en otra tarjeta (AC-41).
+  const tarjeta = useRef<HTMLElement | null>(null);
+  useListoHastaOtroActo(tarjeta, () => setAviso((actual) => (actual?.tipo === "ok" ? null : actual)));
   const [abierto, setAbierto] = useState(false);
   const [pidiendoCodigo, setPidiendoCodigo] = useState(false);
   // `null`: todavía no se abrió ni se cerró, y el foco queda donde estaba.
@@ -183,7 +187,7 @@ export function SeccionContrasena({ estado, correo, segundoFactor, fecha, alGuar
     );
 
   return (
-    <section aria-labelledby={`${id}-titulo`} className="tarjeta">
+    <section ref={tarjeta} aria-labelledby={`${id}-titulo`} className="tarjeta">
       <h2 id={`${id}-titulo`}>Contraseña</h2>
       <p>
         {estado.definida

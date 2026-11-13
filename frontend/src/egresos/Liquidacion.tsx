@@ -48,8 +48,22 @@ type Acto =
   | { tipo: "quitar"; liquidacion: string; gasto: string }
   | { tipo: "descartar"; liquidacion: string; motivo: string };
 
-/** Año y mes: lo que da `type="month"`, y lo que se pide escribir donde el navegador no lo tiene. */
-const FORMATO_MES = /^\d{4}-(0[1-9]|1[0-2])$/;
+/** Los meses del desplegable «Mes» (AC-51): el período se elige, no se escribe como «2026-10». */
+const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+/** Años hacia atrás que ofrece «Año», además del actual y el siguiente. */
+const ANIOS_ATRAS = 3;
+
+/** «2026-10»: el mes anterior al de hoy, que es el que se suele liquidar. */
+function mesAnterior(hoy = new Date()): string {
+  const anterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+  return `${anterior.getFullYear()}-${String(anterior.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Del anterior más viejo que se ofrece al siguiente al actual. */
+function aniosOfrecidos(hoy = new Date()): string[] {
+  const actual = hoy.getFullYear();
+  return Array.from({ length: ANIOS_ATRAS + 2 }, (_, i) => String(actual - ANIOS_ATRAS + i));
+}
 
 const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
 /** «2026-10-01» como «octubre de 2026». */
@@ -75,7 +89,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   /** Por qué no llegó el detalle de la abierta: la lista sigue a la vista. */
   const [fallaDetalle, setFallaDetalle] = useState<string | null>(null);
   const [vuelta, setVuelta] = useState(0);
-  const [mes, setMes] = useState("");
+  /** El período elegido, «AAAA-MM»; empieza en el mes anterior (AC-51). */
+  const [mes, setMes] = useState(mesAnterior);
   const [orden, setOrden] = useState("");
   const [grupo, setGrupo] = useState("");
   const [motivo, setMotivo] = useState("");
@@ -202,7 +217,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           }[acto.tipo];
           setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
-            setMes("");
+            // Vuelve a un período completo: los desplegables nunca quedan vacíos ni a medias (Codex en #236).
+            setMes(mesAnterior());
             abrir(data.id);
           }
           if (acto.tipo === "agregar") setOrden("");
@@ -240,17 +256,12 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
 
   function preparar(evento: FormEvent) {
     evento.preventDefault();
-    if (mes === "") return;
-    if (!FORMATO_MES.test(mes)) {
-      setAviso({ texto: "Escribí el período como año y mes, por ejemplo 2026-10.", ok: false });
-      return;
-    }
     const periodoElegido = `${mes}-01`;
     // Un período admite un solo borrador: si ya lo tiene, se abre ese y no se pide otro.
     const existente = liquidaciones.find((l) => l.periodo === periodoElegido && l.estado === "borrador");
     if (existente !== undefined) {
       setAviso(null);
-      setMes("");
+      setMes(mesAnterior());
       abrir(existente.id);
       return;
     }
@@ -323,11 +334,31 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
             <>
               <p>Es un borrador para revisar los números: todavía no se aprueba ni se publica a los propietarios.</p>
               <form className="formulario" onSubmit={preparar}>
-                <label htmlFor={`${id}-mes`}>Período</label>
-                <input id={`${id}-mes`} type="month" required value={mes} disabled={enviando}
-                  placeholder="AAAA-MM" onChange={(e) => setMes(e.target.value)} />
+                <fieldset>
+                  <legend>Período</legend>
+                  <label htmlFor={`${id}-mes`}>Mes</label>
+                  <select id={`${id}-mes`} value={mes.slice(5, 7)} disabled={enviando}
+                    onChange={(e) => {
+                      const elegido = e.target.value;
+                      setMes((actual) => `${actual.slice(0, 4)}-${elegido}`);
+                    }}>
+                    {MESES.map((nombre, i) => (
+                      <option key={nombre} value={String(i + 1).padStart(2, "0")}>{nombre}</option>
+                    ))}
+                  </select>
+                  <label htmlFor={`${id}-anio`}>Año</label>
+                  <select id={`${id}-anio`} value={mes.slice(0, 4)} disabled={enviando}
+                    onChange={(e) => {
+                      const elegido = e.target.value;
+                      setMes((actual) => `${elegido}-${actual.slice(5, 7)}`);
+                    }}>
+                    {aniosOfrecidos().map((anio) => (
+                      <option key={anio} value={anio}>{anio}</option>
+                    ))}
+                  </select>
+                </fieldset>
                 <div className="acciones">
-                  <button type="submit" disabled={enviando || mes === ""}>
+                  <button type="submit" disabled={enviando}>
                     Abrir el borrador
                   </button>
                 </div>

@@ -115,8 +115,8 @@ const MANDATO_NUEVO = {
   con_cuenta: true,
 };
 
-function error(codigo: string, status: number) {
-  return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status });
+function error(codigo: string, status: number, detalle: Record<string, unknown> | null = null) {
+  return Response.json({ codigo, mensaje: "x", detalle, id_correlacion: "c" }, { status });
 }
 
 type Respuestas = Record<string, () => Response>;
@@ -570,6 +570,56 @@ describe("página /mandatos", () => {
     const [primera, segunda, tercera] = pedidos(simulado, "POST", RUTA_MANDATOS).map((p) => p.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
     expect(tercera).not.toBe(segunda);
+  });
+
+  it("G-49: un 422 de «Desde» nombra la fecha «Desde» y la marca, con su motivo al lado", async () => {
+    const simulado = conConsejo({
+      [`POST ${RUTA_MANDATOS}`]: () =>
+        error("peticion_invalida", 422, { campos: ["body.desde"], mensajes: { "body.desde": "Escribir una fecha válida." } }),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarAlta();
+    fireEvent.click(boton("Dar de alta"));
+    expect(await screen.findByText("Hay que corregir la fecha «Desde»: el motivo está junto a cada campo.")).toBeTruthy();
+    expect(screen.queryByText("Revisá los datos del formulario.")).toBeNull();
+    const desde = screen.getByLabelText("Desde");
+    expect(desde.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(desde.getAttribute("aria-describedby") ?? "")?.textContent).toBe("Escribir una fecha válida.");
+    // Control: «Hasta» no queda marcado y conserva su descripción; al corregir «Desde», su marca se va.
+    const hasta = screen.getByLabelText(/^Hasta/);
+    expect(hasta.getAttribute("aria-invalid")).toBeNull();
+    expect(hasta.getAttribute("aria-describedby")).toMatch(/-vigencia-vacia$/);
+    fireEvent.change(desde, { target: { value: "2026-11-02" } });
+    expect(desde.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-49: la fecha futura de una decisión se dice junto a la fecha del acto", async () => {
+    const simulado = conConsejo({ [`POST ${RUTA_DECISIONES}`]: () => error("fecha_futura", 422, { campos: ["body.fecha"] }) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await cargado();
+    const form = seccion("Registrar una decisión");
+    fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "2099-01-01" } });
+    fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Algo" } });
+    fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 1" } });
+    fireEvent.click(boton("Registrar decisión"));
+    expect(await screen.findByText("Hay que corregir la fecha del acto: el motivo está junto a cada campo.")).toBeTruthy();
+    const fecha = within(form).getByLabelText("Fecha del acto");
+    expect(fecha.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(fecha.getAttribute("aria-describedby") ?? "")?.textContent).toMatch(/no puede ser posterior a hoy/);
+    // «Cancelar» se lleva la marca: al volver a abrir, el campo empieza limpio.
+    fireEvent.click(within(form).getByRole("button", { name: "Cancelar" }));
+    const otra = seccion("Registrar una decisión");
+    expect(within(otra).getByLabelText("Fecha del acto").getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-49: los motivos de dominio no usan «facultad» ni «instrumento»", () => {
+    expect(mensajeDeError(422, "facultad_fuera_de_paquete", "alta")).toBe("Algún permiso no corresponde a ese tipo de mandato.");
+    expect(mensajeDeError(422, "respaldo_invalido", "baja")).toBe(
+      "La remoción se respalda con una asamblea; cualquier otra causa, con el documento que lo prueba.",
+    );
+    expect(mensajeDeError(409, "codigo_desconocido", "alta")).not.toMatch(/choca/);
   });
 
   it("una fecha posterior a hoy en el consorcio (422 fecha_futura) se explica", async () => {
@@ -1412,7 +1462,7 @@ describe("página /mandatos", () => {
     expect(rutas["/api/v1/consorcios/{consorcio_id}/mandatos/candidatos"]?.get).toBeTruthy();
     expect(mensajeDeError(500, undefined, "alta")).toMatch(/El servicio no está disponible/);
     expect(mensajeDeError(403, "csrf_invalido", "baja")).toMatch(/Recargá la página/);
-    expect(mensajeDeError(422, "codigo_desconocido", "decision")).toBe("Revisá los datos del formulario.");
+    expect(mensajeDeError(422, "codigo_desconocido", "decision")).toBe("Hay que revisar los datos del formulario.");
   });
 });
 

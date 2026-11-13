@@ -49,6 +49,13 @@ const LISTA = {
   ],
 };
 
+function errorConCampos(campos: string[], mensajes: Record<string, string> = {}) {
+  return Response.json(
+    { codigo: "peticion_invalida", mensaje: "x", detalle: { campos, mensajes }, id_correlacion: "c" },
+    { status: 422 },
+  );
+}
+
 function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", id_correlacion: "c" }, { status });
 }
@@ -302,7 +309,7 @@ describe("página /invitaciones", () => {
     [403, "csrf_invalido", "No pudimos verificar el pedido. Recargá la página."],
     [404, "no_encontrado", "Esa unidad ya no está en el consorcio. Elegí otra."],
     [409, "idempotencia_en_curso", "La invitación se está procesando. Probá de nuevo en unos segundos."],
-    [422, "peticion_invalida", "Revisá los datos: el correo tiene que ser válido y el nombre, de hasta 100 caracteres."],
+    [422, "peticion_invalida", "Hay que revisar los datos del formulario."],
     [429, "demasiadas_peticiones", "Llegaste al límite de invitaciones por ahora. Probá más tarde."],
   ])("un %i (%s) se explica sin tocar la lista", async (estado, codigo, texto) => {
     const simulado = conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error(codigo, estado) });
@@ -469,6 +476,47 @@ describe("página /invitaciones", () => {
     fallar(new TypeError("sin red"));
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+  });
+
+  it("G-23: un 422 del correo marca el correo, con su motivo al lado, y no habla del nombre", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        [`POST ${RUTA_LISTA}`]: () =>
+          errorConCampos(["body.correo"], { "body.correo": "Escribir un correo válido, por ejemplo nombre@dominio.com." }),
+      }),
+    );
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    expect(await screen.findByText("Hay que corregir el correo: el motivo está junto a cada campo.")).toBeTruthy();
+    expect([...document.querySelectorAll(".aviso-error")].map((e) => e.textContent).join(" ")).not.toMatch(/nombre,/);
+    const correo = screen.getByLabelText("Correo");
+    expect(correo.getAttribute("aria-invalid")).toBe("true");
+    expect(document.getElementById(correo.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Escribir un correo válido, por ejemplo nombre@dominio.com.",
+    );
+    // Control: el nombre no queda marcado; al corregir el correo, su marca se va.
+    expect(screen.getByLabelText("Nombre").getAttribute("aria-invalid")).toBeNull();
+    fireEvent.change(correo, { target: { value: "dora@otro.com" } });
+    expect(correo.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("G-24: abrir la ficha de otra invitación se lleva el aviso de la anterior", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conConsorcio({
+        [`POST ${RUTA_LISTA}`]: () =>
+          Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }),
+      }),
+    );
+    abrir();
+    await completar();
+    fireEvent.click(invitarBoton());
+    // Control: el «Listo» se ve.
+    expect(await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    await abrirFicha("Beto Pérez, 1° A");
+    expect(screen.queryByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeNull();
   });
 
   it("retirar pide confirmación; «No» no manda nada y «Sí» retira con CSRF", async () => {

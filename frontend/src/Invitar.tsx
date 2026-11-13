@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { api } from "./api/cliente";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
+import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, SIN_ERRORES, sinElDe, soloDe } from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
@@ -54,7 +55,16 @@ const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
 });
 const fecha = (iso: string) => FORMATO_FECHA.format(new Date(iso));
 
-/** Qué decir ante el error de invitar, según el estado y el código del cuerpo uniforme. */
+/** Cómo se nombra cada campo en el resumen del error (G-23). */
+const TEXTO_CAMPO: Record<string, string> = {
+  unidad_id: "la unidad",
+  tipo: "el vínculo",
+  nombre: "el nombre",
+  correo: "el correo",
+};
+
+/** Qué decir ante el error de invitar, según el estado y el código del cuerpo uniforme. Un 422 que
+ *  marca campos lo dice el resumen de `ErrorDeCampo`, con el motivo junto a cada campo (G-23). */
 export function mensajeAlInvitar(estado: number, codigo: string | undefined): string {
   if (estado === 403 && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
   if (estado === 403) return "No tenés permiso para invitar a esa unidad.";
@@ -63,7 +73,7 @@ export function mensajeAlInvitar(estado: number, codigo: string | undefined): st
   if (estado === 429) return "Llegaste al límite de invitaciones por ahora. Probá más tarde.";
   if (estado === 422 && codigo === "idempotencia_reutilizada")
     return "Cambiaste los datos de un intento anterior. Volvé a tocar «Invitar».";
-  if (estado === 422) return "Revisá los datos: el correo tiene que ser válido y el nombre, de hasta 100 caracteres.";
+  if (estado === 422) return REVISAR_FORMULARIO;
   return mensajeDeFalla(estado, codigo);
 }
 
@@ -104,6 +114,8 @@ export function Invitar() {
   const [nombre, setNombre] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [aviso, setAviso] = useState<Aviso | null>(null);
+  /** Los campos que rechazó la API, con su motivo (G-23). */
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   const [aRetirar, setARetirar] = useState<Invitacion | null>(null);
   const fichas = useFichas<string>();
   // Cada invitación nueva vuelve a pedir la lista: qué se ve (y con qué correo) lo decide la API.
@@ -245,9 +257,10 @@ export function Invitar() {
   }
 
   /** Cualquier cambio en los datos es otro intento: otra clave. */
-  function cambiar<T>(fijar: (v: T) => void) {
+  function cambiar<T>(fijar: (v: T) => void, campo?: string) {
     return (v: T) => {
       clave.current = null;
+      if (campo !== undefined) setErrores((e) => sinElDe(e, campo));
       fijar(v);
     };
   }
@@ -259,6 +272,7 @@ export function Invitar() {
     clave.current ??= crypto.randomUUID();
     setEnviando(true);
     setAviso(null);
+    setErrores(SIN_ERRORES);
     void api
       .POST("/api/v1/consorcios/{consorcio_id}/invitaciones", {
         params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current } },
@@ -274,7 +288,10 @@ export function Invitar() {
           // lo guardado. Solo una respuesta definitiva de la aplicación la renueva.
           const ambigua = response.status >= 500 || response.status === 409;
           if (codigo === "idempotencia_reutilizada" || !ambigua) clave.current = null;
-          setAviso({ texto: mensajeAlInvitar(response.status, codigo), ok: false });
+          const marcados = response.status === 422 ? soloDe(erroresDe(error), TEXTO_CAMPO) : SIN_ERRORES;
+          setErrores(marcados);
+          const texto = Object.keys(marcados).length > 0 ? resumenDe(marcados, TEXTO_CAMPO) : mensajeAlInvitar(response.status, codigo);
+          setAviso({ texto, ok: false });
           return;
         }
         clave.current = null;
@@ -351,6 +368,8 @@ export function Invitar() {
 
   function abrirFicha(i: Invitacion) {
     setARetirar(null);
+    // El aviso de lo anterior no queda a la vista mientras se mira otra invitación (G-24).
+    setAviso(null);
     fichas.abrir(i.id);
   }
 
@@ -410,7 +429,8 @@ export function Invitar() {
                   <select
                     id={`${id}-unidad`}
                     value={unidad}
-                    onChange={(e) => cambiar(setUnidad)(e.target.value)}
+                    {...marcaDe(`${id}-unidad`, errores.unidad_id)}
+                    onChange={(e) => cambiar(setUnidad, "unidad_id")(e.target.value)}
                     disabled={enviando}
                     required
                   >
@@ -420,6 +440,7 @@ export function Invitar() {
                       </option>
                     ))}
                   </select>
+                  <ErrorDeCampo idCampo={`${id}-unidad`} mensaje={errores.unidad_id} />
                 </>
               )}
               {unidadesFallidas && (
@@ -435,7 +456,8 @@ export function Invitar() {
                 id={`${id}-tipo`}
                 value={tipo}
                 disabled={enviando}
-                onChange={(e) => cambiar(setTipo)(e.target.value as TipoVinculo)}
+                {...marcaDe(`${id}-tipo`, errores.tipo)}
+                onChange={(e) => cambiar(setTipo, "tipo")(e.target.value as TipoVinculo)}
               >
                 {TIPOS.map((t) => (
                   <option key={t.valor} value={t.valor}>
@@ -443,6 +465,7 @@ export function Invitar() {
                   </option>
                 ))}
               </select>
+              <ErrorDeCampo idCampo={`${id}-tipo`} mensaje={errores.tipo} />
               <label htmlFor={`${id}-nombre`}>Nombre</label>
               <input
                 id={`${id}-nombre`}
@@ -452,8 +475,10 @@ export function Invitar() {
                 disabled={enviando}
                 required
                 value={nombre}
-                onChange={(e) => cambiar(setNombre)(e.target.value)}
+                {...marcaDe(`${id}-nombre`, errores.nombre)}
+                onChange={(e) => cambiar(setNombre, "nombre")(e.target.value)}
               />
+              <ErrorDeCampo idCampo={`${id}-nombre`} mensaje={errores.nombre} />
               <label htmlFor={`${id}-correo`}>Correo</label>
               <input
                 id={`${id}-correo`}
@@ -462,8 +487,10 @@ export function Invitar() {
                 disabled={enviando}
                 required
                 value={correo}
-                onChange={(e) => cambiar(setCorreo)(e.target.value)}
+                {...marcaDe(`${id}-correo`, errores.correo)}
+                onChange={(e) => cambiar(setCorreo, "correo")(e.target.value)}
               />
+              <ErrorDeCampo idCampo={`${id}-correo`} mensaje={errores.correo} />
               <button type="submit" disabled={enviando || unidad === ""}>
                 Invitar
               </button>

@@ -384,7 +384,11 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
             <button type="button" className="secundario peligro" disabled={quitar === "quitando" || subiendoOtro || deshabilitada} onClick={() => void quitarArchivo()}>
               {quitar === "quitando" ? "Quitando…" : CONFIRMAR_QUITAR}
             </button>
-            <button type="button" className="secundario" disabled={quitar === "quitando"} onClick={() => setQuitar("nada")}>
+            {/* Cerrar la pregunta se lleva también el rechazo anterior de quitar (G-20). */}
+            <button type="button" className="secundario" disabled={quitar === "quitando"} onClick={() => {
+              setQuitar("nada");
+              setFalloQuitar(null);
+            }}>
               {NO_QUITAR}
             </button>
           </div>
