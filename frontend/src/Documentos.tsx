@@ -208,6 +208,10 @@ type Abierto = { tipo: "nuevo" } | { tipo: "subir"; documento: string; titulo: s
 const NUEVO: Abierto = { tipo: "nuevo" };
 
 type Aviso = { texto: string; ok: boolean };
+/** Un archivo subido por quien solo carga, a la espera del antivirus (G-09). */
+type Pendiente = { documento: string; version: string; titulo: string };
+/** Un archivo que el antivirus rechazó: su documento sigue esperando otro. */
+type Rechazo = { documento: string; titulo: string; texto: string };
 
 class SinSesion extends Error {}
 
@@ -299,8 +303,12 @@ export function Documentos() {
   const alAviso = useRef(false);
   /** El último título que propuso un archivo: si la persona no lo cambió, otro archivo lo reemplaza. */
   const tituloPropuesto = useRef("");
-  /** El archivo que subió quien solo carga, mientras el antivirus lo revisa (G-09). */
-  const [esperando, setEsperando] = useState<{ documento: string; version: string; titulo: string } | null>(null);
+  /** Los archivos que subió quien solo carga y el antivirus todavía revisa: todos, no solo el último,
+   * porque puede subir otro antes de que termine el anterior (G-09). */
+  const [esperando, setEsperando] = useState<Pendiente[]>([]);
+  /** Los archivos rechazados, cada uno con su documento esperando otro archivo. Quedan a la vista hasta
+   * que ese documento recibe uno: el formulario a medio llenar no cambia de destino por esto. */
+  const [rechazados, setRechazados] = useState<Rechazo[]>([]);
   // El próximo pedido de la lista es el refresco automático: si falla, la lista a la vista no se pierde.
   const refrescoAutomatico = useRef(false);
 
@@ -350,32 +358,41 @@ export function Documentos() {
 
   /** Cómo va el archivo que subió quien solo carga: disponible, rechazado o todavía en revisión (G-09). */
   const mirarMiArchivo = useCallback(() => {
-    const cual = esperando;
-    if (cual === null) return;
-    void api
-      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
-        params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
-      })
-      .then(({ data, error, response }) => {
-        exigirSesion(response);
-        if (data?.estado === "en_cuarentena") return;
-        setEsperando((actual) => (actual === cual ? null : actual));
-        alAviso.current = true;
-        if (data?.estado === "disponible")
-          setAviso({ texto: `Listo: el archivo de «${cual.titulo}» pasó la revisión del antivirus y quedó «Disponible».`, ok: true });
-        else if (data?.estado === "rechazado") {
-          const motivo = data.motivo_rechazo ? TEXTO_MOTIVO[data.motivo_rechazo] : "sin el motivo";
-          setAviso({ texto: `«Rechazado»: el archivo de «${cual.titulo}» no pasó la revisión (${motivo}). No se va a mostrar: hay que subir otro.`, ok: false });
-          // El documento queda esperando su archivo: el formulario pasa a subir otro para ese mismo.
-          setAbierto({ tipo: "subir", documento: cual.documento, titulo: cual.titulo });
-        } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
-      })
-      .catch((e: unknown) => {
-        // Una consulta que no llega se repite en la vuelta siguiente; sin sesión, a entrar.
-        if (e instanceof SinSesion) aEntrar();
-      });
+    for (const cual of esperando) mirarUno(cual);
+
+    function mirarUno(cual: Pendiente) {
+      const sinEsperar = (lista: Pendiente[]) => lista.filter((p) => p.version !== cual.version);
+      void api
+        .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
+          params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
+        })
+        .then(({ data, error, response }) => {
+          exigirSesion(response);
+          if (data?.estado === "en_cuarentena") return;
+          setEsperando(sinEsperar);
+          if (data?.estado === "disponible")
+            setAviso({ texto: `Listo: el archivo de «${cual.titulo}» pasó la revisión del antivirus y quedó «Disponible».`, ok: true });
+          else if (data?.estado === "rechazado") {
+            // Aparte del aviso, para que otro resultado no lo tape, y sin tocar el formulario: subir otro
+            // archivo para ese documento es un paso que la persona elige (revisión del PR #241).
+            const motivo = data.motivo_rechazo ? TEXTO_MOTIVO[data.motivo_rechazo] : "sin el motivo";
+            setRechazados((lista) => [
+              ...lista.filter((r) => r.documento !== cual.documento),
+              {
+                documento: cual.documento,
+                titulo: cual.titulo,
+                texto: `«Rechazado»: el archivo de «${cual.titulo}» no pasó la revisión (${motivo}). No se va a mostrar: hay que subir otro.`,
+              },
+            ]);
+          } else setAviso({ texto: mensajeDeFalla(response.status, codigoDe(error)), ok: false });
+        })
+        .catch((e: unknown) => {
+          // Una consulta que no llega se repite en la vuelta siguiente; sin sesión, a entrar.
+          if (e instanceof SinSesion) aEntrar();
+        });
+    }
   }, [esperando, consorcio, aEntrar]);
-  const antivirusTarda = useConsultaDelAntivirus(esperando !== null, mirarMiArchivo);
+  const antivirusTarda = useConsultaDelAntivirus(esperando.length > 0, mirarMiArchivo);
 
   const consultarEdificios = useCallback(() => {
     void api
@@ -600,7 +617,9 @@ export function Documentos() {
       cerrarFichaDe(false);
       // Sin acceso a la lista, quien solo carga pregunta por su archivo hasta que el antivirus
       // termina (G-09). Con la lista caída no hay refresco automático: queda «Actualizar».
-      if (soloCarga) setEsperando({ documento, version: data.id, titulo });
+      if (soloCarga) setEsperando((lista) => [...lista, { documento, version: data.id, titulo }]);
+      // Ese documento ya tiene otro archivo: su rechazo anterior está atendido.
+      setRechazados((lista) => lista.filter((r) => r.documento !== documento));
       const despues = soloCarga
         ? "Queda «En revisión» mientras el antivirus lo analiza, de unos segundos a unos minutos; esta pantalla avisa cuando termina."
         : lectura.tipo === "sin_servicio"
@@ -617,7 +636,7 @@ export function Documentos() {
   // El error de subir el archivo desde la ficha se dice en la ficha: la página de atrás queda
   // inerte mientras está abierta (G-01).
   const avisoEnFicha = aviso !== null && !aviso.ok && abierto?.tipo === "subir" && enSuFicha(abierto.documento);
-  const conMensaje = (aviso !== null && !avisoEnFicha) || pantalla.tipo !== "lista";
+  const conMensaje = (aviso !== null && !avisoEnFicha) || rechazados.length > 0 || pantalla.tipo !== "lista";
 
   if (pantalla.tipo === "sin_consorcios") return <AlInicioSinEdificios />;
 
@@ -637,7 +656,8 @@ export function Documentos() {
                 onChange={(e) => {
                   cerrar();
                   cerrarFichaDe(false);
-                  setEsperando(null);
+                  setEsperando([]);
+                  setRechazados([]);
                   setAviso(null);
                   setLectura({ tipo: "cargando" });
                   setConsorcio(e.target.value);
@@ -731,9 +751,23 @@ export function Documentos() {
             {aviso.texto}
           </p>
         )}
-        {esperando !== null && antivirusTarda && (
-          <p>El antivirus está tardando más que de costumbre con «{esperando.titulo}»: esta pantalla sigue esperando.</p>
+        {esperando.length > 0 && antivirusTarda && (
+          <p>
+            El antivirus está tardando más que de costumbre con {esperando.map((p) => `«${p.titulo}»`).join(", ")}: esta
+            pantalla sigue esperando.
+          </p>
         )}
+        {rechazados.map((r) => (
+          <div key={r.documento}>
+            <p className="aviso-error">{r.texto}</p>
+            {!(formulario?.tipo === "subir" && formulario.documento === r.documento) && (
+              <button type="button" className="secundario" disabled={enviando}
+                onClick={() => abrir({ tipo: "subir", documento: r.documento, titulo: r.titulo })}>
+                Subir otro archivo para «{r.titulo}»
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </>
   );

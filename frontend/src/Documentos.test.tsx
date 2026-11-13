@@ -1283,13 +1283,31 @@ describe("tanda 6 de fricción en /documentos", () => {
         { id: V4, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "b".repeat(64) },
         { status: 201 },
       );
-    const soloCarga = (estado: () => Response) =>
-      conLista({
+    // Un segundo documento (D2, con su versión V3) que sigue en revisión.
+    const ESTADO_V3 = `${versiones(D2)}/${V3}/estado`;
+    const soloCarga = (estado: () => Response) => {
+      let creados = 0;
+      return conLista({
         [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("documentos.cargar"),
-        [`POST ${BASE}`]: () => Response.json({ id: D3 }, { status: 201 }),
+        [`POST ${BASE}`]: () => Response.json({ id: ++creados === 1 ? D3 : D2 }, { status: 201 }),
         [`POST ${versiones(D3)}`]: subida,
         [`GET ${ESTADO_V4}`]: estado,
+        [`POST ${versiones(D2)}`]: () =>
+          Response.json(
+            { id: V3, estado: "en_cuarentena", tipo: "application/pdf", tamano: BYTES_PDF.length, sha256: "c".repeat(64) },
+            { status: 201 },
+          ),
+        [`GET ${ESTADO_V3}`]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
       });
+    };
+    const RECHAZO = "«Rechazado»: el archivo de «Presupuesto de pintura» no pasó la revisión (el PDF tiene contraseña). No se va a mostrar: hay que subir otro.";
+
+    /** Con el formulario nuevo a la vista, llena el de un segundo documento: el plano. */
+    function llenarElPlano() {
+      fireEvent.change(screen.getByLabelText("Categoría"), { target: { value: "presupuestos" } });
+      escribir("Título", "Plano del edificio");
+      elegir(pdf("plano.pdf"));
+    }
 
     async function subirYEsperar(simulado: ReturnType<typeof soloCarga>) {
       vi.stubGlobal("fetch", simulado);
@@ -1322,12 +1340,50 @@ describe("tanda 6 de fricción en /documentos", () => {
       const simulado = soloCarga(() => Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
       await subirYEsperar(simulado);
       await act(() => vi.advanceTimersByTimeAsync(4_000));
-      expect(
-        await screen.findByText(
-          "«Rechazado»: el archivo de «Presupuesto de pintura» no pasó la revisión (el PDF tiene contraseña). No se va a mostrar: hay que subir otro.",
-        ),
-      ).toBeTruthy();
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // Subir otro es un paso que la persona elige: el formulario no cambia solo.
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Subir otro archivo para «Presupuesto de pintura»" }));
       expect(screen.getByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeTruthy();
+      // Con su formulario abierto, el botón ya no se ofrece.
+      expect(screen.queryByRole("button", { name: "Subir otro archivo para «Presupuesto de pintura»" })).toBeNull();
+    });
+
+    it("revisión del PR #241: un rechazo que llega con otro documento a medio cargar no le cambia el destino al archivo elegido", async () => {
+      const simulado = soloCarga(() => Response.json({ estado: "rechazado", motivo_rechazo: "pdf_cifrado" }));
+      await subirYEsperar(simulado);
+      llenarElPlano();
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // El formulario sigue siendo el del documento nuevo, con lo elegido.
+      expect(screen.queryByRole("heading", { name: "Subir el archivo de «Presupuesto de pintura»" })).toBeNull();
+      expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe("Plano del edificio");
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Plano del edificio» se subió/);
+      // El plano fue a un documento nuevo; el rechazado recibió un solo archivo, el suyo.
+      expect(pedidos(simulado, "POST", BASE)).toHaveLength(2);
+      expect(pedidos(simulado, "POST", versiones(D2))).toHaveLength(1);
+      expect(pedidos(simulado, "POST", versiones(D3))).toHaveLength(1);
+      // El rechazo sigue a la vista: ese documento todavía espera otro archivo.
+      expect(screen.getByText(RECHAZO)).toBeTruthy();
+    });
+
+    it("revisión del PR #241: subir otro documento antes de que termine el primero no deja de mirar el primero", async () => {
+      let vueltas = 0;
+      const simulado = soloCarga(() =>
+        Response.json(++vueltas < 2 ? { estado: "en_cuarentena", motivo_rechazo: null } : { estado: "rechazado", motivo_rechazo: "pdf_cifrado" }),
+      );
+      await subirYEsperar(simulado);
+      llenarElPlano();
+      fireEvent.click(screen.getByRole("button", { name: "Cargar el documento" }));
+      await screen.findByText(/^Listo: el archivo de «Plano del edificio» se subió/);
+      await act(() => vi.advanceTimersByTimeAsync(10_000));
+      expect(await screen.findByText(RECHAZO)).toBeTruthy();
+      // El segundo, todavía en revisión, se sigue mirando (control de que no se cambió uno por otro).
+      const delSegundo = pedidos(simulado, "GET", ESTADO_V3).length;
+      expect(delSegundo).toBeGreaterThanOrEqual(1);
+      await act(() => vi.advanceTimersByTimeAsync(4_000));
+      expect(pedidos(simulado, "GET", ESTADO_V3).length).toBeGreaterThan(delSegundo);
     });
   });
 });
