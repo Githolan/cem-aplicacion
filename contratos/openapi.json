@@ -6317,15 +6317,27 @@
         "type": "object"
       },
       "ListaMarcasNoEsPago": {
-        "description": "`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, de lo más viejo a lo más nuevo.",
+        "description": "`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, en el orden en que llegaron los\nextractos, por páginas con `despues` (Codex en #240). `total` cuenta todas.",
         "properties": {
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/MarcaNoEsPago"
             },
-            "maxItems": 200,
             "title": "Elementos",
             "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
           },
           "total": {
             "minimum": 0.0,
@@ -6335,6 +6347,7 @@
         },
         "required": [
           "elementos",
+          "siguiente",
           "total"
         ],
         "title": "ListaMarcasNoEsPago",
@@ -6457,15 +6470,27 @@
         "type": "object"
       },
       "ListaSinExplicar": {
-        "description": "`GET …/pagos/extracto/sin-explicar`: de lo más viejo a lo más nuevo, hasta\n`MAXIMO_FILAS_RESULTADO`. Sin la cuenta ni la descripción del banco: no se guardan.",
+        "description": "`GET …/pagos/extracto/sin-explicar`: en el orden en que llegaron los extractos, por páginas\ncon `despues` (como `ListaCotejo`; Codex en #240). `total` cuenta todos. Sin la cuenta ni la\ndescripción del banco: no se guardan.",
         "properties": {
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/MovimientoSinExplicar"
             },
-            "maxItems": 200,
             "title": "Elementos",
             "type": "array"
+          },
+          "siguiente": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El `despues` de la página siguiente; sin él, no hay más.",
+            "title": "Siguiente"
           },
           "total": {
             "minimum": 0.0,
@@ -6475,6 +6500,7 @@
         },
         "required": [
           "elementos",
+          "siguiente",
           "total"
         ],
         "title": "ListaSinExplicar",
@@ -18950,6 +18976,35 @@
               "title": "Consorcio Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -19072,6 +19127,35 @@
               "format": "uuid",
               "title": "Consorcio Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "despues",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Despues"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limite",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limite",
+              "type": "integer"
             }
           }
         ],

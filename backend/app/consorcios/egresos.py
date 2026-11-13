@@ -2357,7 +2357,7 @@ def sin_explicar(c: Connection, lector: Permiso) -> list[MovimientoSinExplicar]:
             numero_operacion=m.numero_operacion,
             visto_en=vistos[m.id],
         )  # fmt: skip
-        for m in sorted(sueltos, key=lambda m: (m.fecha, str(m.id)))
+        for m in sorted(sueltos, key=lambda m: m.id)
     ]
 
 

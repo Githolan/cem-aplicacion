@@ -336,7 +336,7 @@ create function nucleo.marcas_no_es_pago_lectura(actor uuid, origen_pedido text,
         join nucleo.movimiento_extracto m
           on m.consorcio_id = y.consorcio_id and m.id = y.movimiento_id
        where y.consorcio_id = c and y.retirada_en is null
-       order by m.fecha, m.id;
+       order by m.id;
   end
   $$;
 """

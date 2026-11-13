@@ -31,7 +31,7 @@ const PREPARA = alcanza("egresos.preparar_orden");
 
 type Movimiento = components["schemas"]["MovimientoSinExplicar"];
 type Marca = components["schemas"]["MarcaNoEsPago"];
-type Respuestas = Record<string, () => Response | Promise<Response>>;
+type Respuestas = Record<string, (pedido: Request) => Response | Promise<Response>>;
 
 const MOVIMIENTO: Movimiento = {
   movimiento_id: M1, fecha: "2026-11-02", importe_centavos: 1_240_000, moneda: "ARS", numero_operacion: "0048213999",
@@ -52,14 +52,14 @@ function backend(respuestas: Respuestas) {
   const base: Respuestas = {
     "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
-    [LISTA]: () => Response.json({ elementos: [MOVIMIENTO], total: 1 }),
-    [MARCAS]: () => Response.json({ elementos: [], total: 0 }),
+    [LISTA]: () => Response.json({ elementos: [MOVIMIENTO], siguiente: null, total: 1 }),
+    [MARCAS]: () => Response.json({ elementos: [], siguiente: null, total: 0 }),
   };
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
     const respuesta = respuestas[clave] ?? base[clave] ?? alcanzaTodo(clave);
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
-    return respuesta();
+    return respuesta(pedido);
   });
 }
 
@@ -170,7 +170,7 @@ describe("la pantalla", () => {
     let marcado = false;
     const simulado = backend({
       [`GET ${BASE}/mis-acciones`]: CONCILIA,
-      [LISTA]: () => Response.json(marcado ? { elementos: [], total: 0 } : { elementos: [MOVIMIENTO], total: 1 }),
+      [LISTA]: () => Response.json(marcado ? { elementos: [], siguiente: null, total: 0 } : { elementos: [MOVIMIENTO], siguiente: null, total: 1 }),
       [MARCAR]: () => ((marcado = true), Response.json({ movimiento_id: M1 })),
     });
     vi.stubGlobal("fetch", simulado);
@@ -240,8 +240,8 @@ describe("la pantalla", () => {
     let retirada = false;
     const simulado = backend({
       [`GET ${BASE}/mis-acciones`]: CONCILIA,
-      [LISTA]: () => Response.json(retirada ? { elementos: [MOVIMIENTO], total: 1 } : { elementos: [], total: 0 }),
-      [MARCAS]: () => Response.json(retirada ? { elementos: [], total: 0 } : { elementos: [MARCA], total: 1 }),
+      [LISTA]: () => Response.json(retirada ? { elementos: [MOVIMIENTO], siguiente: null, total: 1 } : { elementos: [], siguiente: null, total: 0 }),
+      [MARCAS]: () => Response.json(retirada ? { elementos: [], siguiente: null, total: 0 } : { elementos: [MARCA], siguiente: null, total: 1 }),
       [RETIRAR]: () => ((retirada = true), Response.json({ movimiento_id: M1 })),
     });
     vi.stubGlobal("fetch", simulado);
@@ -268,7 +268,7 @@ describe("la pantalla", () => {
   });
 
   it("la administración ve las marcas sin poder retirarlas", async () => {
-    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [MARCAS]: () => Response.json({ elementos: [MARCA], total: 1 }) }));
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [MARCAS]: () => Response.json({ elementos: [MARCA], siguiente: null, total: 1 }) }));
     abrir(RUTA);
     const marcados = await screen.findByRole("region", { name: "Marcados como que no son el pago de una orden" });
     expect(marcados.textContent).toContain("Comisión del banco");
@@ -276,15 +276,38 @@ describe("la pantalla", () => {
   });
 
   it("sin nada sin explicar lo dice", async () => {
-    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [LISTA]: () => Response.json({ elementos: [], total: 0 }) }));
+    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [LISTA]: () => Response.json({ elementos: [], siguiente: null, total: 0 }) }));
     abrir(RUTA);
     expect(await screen.findByText("El extracto no tiene nada sin explicar.")).toBeTruthy();
   });
 
-  it("de más de lo que se lista, dice que se ven los primeros", async () => {
-    vi.stubGlobal("fetch", backend({ [`GET ${BASE}/mis-acciones`]: PREPARA, [LISTA]: () => Response.json({ elementos: [MOVIMIENTO], total: 250 }) }));
+  it("«Ver más» trae la página siguiente de cada lista por `despues` y no repite (Codex en #240)", async () => {
+    const M2 = "66666666-6666-4666-8666-666666666666";
+    const simulado = backend({
+      [`GET ${BASE}/mis-acciones`]: CONCILIA,
+      [LISTA]: (pedido: Request) =>
+        new URL(pedido.url).searchParams.get("despues") === M1
+          ? Response.json({ elementos: [{ ...MOVIMIENTO, movimiento_id: M2, numero_operacion: "0048214000" }], siguiente: null, total: 2 })
+          : Response.json({ elementos: [MOVIMIENTO], siguiente: M1, total: 2 }),
+      [MARCAS]: (pedido: Request) =>
+        new URL(pedido.url).searchParams.get("despues") === M1
+          ? Response.json({ elementos: [{ ...MARCA, movimiento_id: M2, motivo: "Impuesto del banco" }], siguiente: null, total: 2 })
+          : Response.json({ elementos: [MARCA], siguiente: M1, total: 2 }),
+    });
+    vi.stubGlobal("fetch", simulado);
     abrir(RUTA);
-    expect(await screen.findByText("Se ven los primeros 1.")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Ver más débitos sin explicar" }));
+    expect(await screen.findByText(/Referencia 0048214000/)).toBeTruthy();
+    expect(screen.getAllByText("Débito sin explicar")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Ver más débitos sin explicar" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ver más marcados" }));
+    expect(await screen.findByText(/Impuesto del banco/)).toBeTruthy();
+    expect(screen.getAllByText("No es el pago de una orden", { selector: "strong" })).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Ver más marcados" })).toBeNull();
+    // La segunda página se pidió con el cursor de la primera.
+    const despues = (clave: string) => pedidos(simulado, clave).map((p) => new URL(p.url).searchParams.get("despues"));
+    expect(despues(LISTA)).toContain(M1);
+    expect(despues(MARCAS)).toContain(M1);
   });
 
   it("quien no prepara ni concilia no llega: la ruta lleva al inicio y no se pide nada", async () => {

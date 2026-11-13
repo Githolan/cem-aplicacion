@@ -355,7 +355,7 @@ def test_lo_que_el_extracto_no_explica_llega_a_quien_concilia_y_a_la_administrac
     fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
     # Control: antes de subir un extracto, nada.
     for quien in (e.mc1, e.adm):
-        assert sin_explicar(e, quien) == {"elementos": [], "total": 0}
+        assert sin_explicar(e, quien) == {"elementos": [], "siguiente": None, "total": 0}
         assert bandeja(e, quien)["sin_explicar"] == 0
     subio(e, e.mc1, extracto(
         linea_del_pago(motor_migrate, p), linea(fecha, "-12.400,00", "0048213999"),
@@ -442,7 +442,7 @@ def test_quien_concilia_marca_que_no_es_el_pago_de_una_orden_y_sale_de_la_lista(
     assert r.status_code == 200, r.json()
     assert r.json() == {"movimiento_id": m}
     for quien in (e.mc1, e.mc2, e.adm):
-        assert sin_explicar(e, quien) == {"elementos": [], "total": 0}
+        assert sin_explicar(e, quien) == {"elementos": [], "siguiente": None, "total": 0}
         assert bandeja(e, quien)["sin_explicar"] == 0
     # Nada se borra: queda quién, cuándo y por qué; el movimiento sigue en la base.
     [fila] = marcados(motor_migrate, e.cons)
@@ -609,7 +609,7 @@ def test_quien_concilia_retira_la_marca_y_el_debito_vuelve_a_la_lista(motor_migr
     r = retirar(e, e.mc2, m)
     assert r.status_code == 200, r.json()
     for quien in (e.mc1, e.mc2, e.adm):
-        assert marcas(e, quien) == {"elementos": [], "total": 0}
+        assert marcas(e, quien) == {"elementos": [], "siguiente": None, "total": 0}
         assert [x["movimiento_id"] for x in sin_explicar(e, quien)["elementos"]] == [m]
         assert bandeja(e, quien)["sin_explicar"] == 1
     # Nada se borra: la marca queda con su retiro (quién, cuándo, por qué).
@@ -697,3 +697,50 @@ def test_la_bandeja_cuenta_las_marcas_vigentes(motor_migrate, e):
             1,
             0,
         )
+
+
+# Páginas con `despues` (Codex en #240, sobre 3d090de) -----------------------------------------
+
+
+def paginas(e, quien, ruta: str, limite: int) -> list[list[str]]:
+    """Todas las páginas de una lista, siguiendo `siguiente`; cada una con sus débitos."""
+    vistas, despues = [], None
+    while True:
+        consulta = f"{ruta}?limite={limite}" + ("" if despues is None else f"&despues={despues}")
+        r = get(e, quien, consulta)
+        assert r.status_code == 200, r.json()
+        datos = r.json()
+        vistas.append([x["movimiento_id"] for x in datos["elementos"]])
+        despues = datos["siguiente"]
+        if despues is None:
+            return vistas
+
+
+def tres_debitos_sin_explicar(motor_migrate, e) -> list[str]:
+    _, p = pagado(motor_migrate, e)
+    fecha = dato_pago(motor_migrate, p)["fecha_operacion"]
+    subio(e, e.mc1, extracto(*(linea(fecha, f"-{n},00", "") for n in (11, 12, 13))))
+    todos = sin_explicar(e, e.mc1)
+    assert todos["total"] == 3 and todos["siguiente"] is None  # control: entran en una página
+    return [x["movimiento_id"] for x in todos["elementos"]]
+
+
+def test_lo_sin_explicar_se_recorre_entero_por_paginas(motor_migrate, e):
+    """Contra 3d090de no había `siguiente`: pasado el tope, el resto no se veía."""
+    ids_ = tres_debitos_sin_explicar(motor_migrate, e)
+    for quien in (e.mc1, e.adm):
+        vistas = paginas(e, quien, "pagos/extracto/sin-explicar", 2)
+        assert vistas == [ids_[:2], ids_[2:]]
+
+
+def test_las_marcas_vigentes_se_recorren_enteras_por_paginas(motor_migrate, e):
+    """Contra 3d090de no había `siguiente`: una marca después de la 200 no se podía retirar."""
+    ids_ = tres_debitos_sin_explicar(motor_migrate, e)
+    for m in ids_:
+        assert no_es_pago(e, e.mc1, m).status_code == 200
+    for quien in (e.mc1, e.adm):
+        assert paginas(e, quien, "pagos/extracto/no-es-pago", 2) == [ids_[:2], ids_[2:]]
+        assert marcas(e, quien)["total"] == 3
+    # La última, que queda en la segunda página, se retira.
+    assert retirar(e, e.mc1, ids_[2]).status_code == 200
+    assert paginas(e, e.mc1, "pagos/extracto/no-es-pago", 2) == [ids_[:2]]

@@ -35,6 +35,7 @@ from cem_contracts.cotejo import (
     MarcaNoEsPago,
     MonedaExtracto,
     MovimientoMarcado,
+    MovimientoSinExplicar,
     MovimientoSinRegistrar,
     NoEsPago,
     NombreColumna,
@@ -240,11 +241,28 @@ def anular_cotejo(
     responses={403: {"description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`,"
                                     " sin el modo, o falta renovar la sesión."}},
 )  # fmt: skip
-def listar_sin_explicar(preparar: Preparar, revisar: Revisar, motor: MotorDep) -> ListaSinExplicar:
+def listar_sin_explicar(
+    preparar: Preparar,
+    revisar: Revisar,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
+) -> ListaSinExplicar:
     lector = lector_del_extracto(preparar, revisar)
     with _lectura(lector, motor) as c:
         todos = sin_explicar(c, lector)
-    return ListaSinExplicar(elementos=todos[:MAXIMO_FILAS_RESULTADO], total=len(todos))
+    pagina, siguiente = _pagina(todos, despues, limite)
+    return ListaSinExplicar(elementos=pagina, siguiente=siguiente, total=len(todos))
+
+
+def _pagina[T: MovimientoSinExplicar | MarcaNoEsPago](
+    todos: list[T], despues: UUID | None, limite: int
+) -> tuple[list[T], UUID | None]:
+    """Por débito, en el orden en que llegaron (`uuid_v7`), como las páginas del cotejo: la lista
+    se arma entera (lo sin explicar sale de comparar todo) y se corta acá."""
+    restantes = [m for m in todos if despues is None or m.movimiento_id > despues]
+    pagina = restantes[:limite]
+    return pagina, pagina[-1].movimiento_id if len(restantes) > limite else None
 
 
 @router.post(
@@ -286,15 +304,20 @@ def marcar_no_es_pago(
                                     " sin el modo, o falta renovar la sesión."}},
 )  # fmt: skip
 def listar_marcas_no_es_pago(
-    preparar: Preparar, revisar: Revisar, motor: MotorDep
+    preparar: Preparar,
+    revisar: Revisar,
+    motor: MotorDep,
+    despues: UUID | None = None,
+    limite: Annotated[int, Query(ge=1, le=LIMITE_COTEJO_MAXIMO)] = LIMITE_COTEJO_POR_DEFECTO,
 ) -> ListaMarcasNoEsPago:
     lector = lector_del_extracto(preparar, revisar)
     with _lectura(lector, motor) as c:
         filas = _ejecutar(
             c, lector, "select * from nucleo.marcas_no_es_pago_lectura(:actor, 'api', :sesion)", {}
         ).mappings().all()  # fmt: skip
-    marcas = [MarcaNoEsPago(**f) for f in filas]
-    return ListaMarcasNoEsPago(elementos=marcas[:MAXIMO_FILAS_RESULTADO], total=len(marcas))
+    marcas = sorted((MarcaNoEsPago(**f) for f in filas), key=lambda m: m.movimiento_id)
+    pagina, siguiente = _pagina(marcas, despues, limite)
+    return ListaMarcasNoEsPago(elementos=pagina, siguiente=siguiente, total=len(marcas))
 
 
 @router.post(

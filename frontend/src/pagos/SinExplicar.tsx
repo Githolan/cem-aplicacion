@@ -31,7 +31,15 @@ type Marca = components["schemas"]["MarcaNoEsPago"];
 type Lectura =
   | { tipo: "cargando" }
   | { tipo: "sin_servicio" }
-  | { tipo: "ok"; elementos: Movimiento[]; total: number; marcas: Marca[]; totalMarcas: number };
+  | {
+      tipo: "ok";
+      elementos: Movimiento[];
+      total: number;
+      siguiente: string | null;
+      marcas: Marca[];
+      totalMarcas: number;
+      siguienteMarcas: string | null;
+    };
 type Abierto = { que: "marcar" | "retirar"; movimiento: string };
 
 const CAMPOS_MOTIVO = { motivo: "el motivo" } as const;
@@ -75,8 +83,8 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (sueltos.data !== undefined && marcados.data !== undefined) {
           setAviso(sinLaFalla);
           setLectura({
-            tipo: "ok", elementos: sueltos.data.elementos, total: sueltos.data.total,
-            marcas: marcados.data.elementos, totalMarcas: marcados.data.total,
+            tipo: "ok", elementos: sueltos.data.elementos, total: sueltos.data.total, siguiente: sueltos.data.siguiente,
+            marcas: marcados.data.elementos, totalMarcas: marcados.data.total, siguienteMarcas: marcados.data.siguiente,
           });
           return;
         }
@@ -100,6 +108,30 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, aInicio, setAviso]);
+
+  function leerMas<T>(pedido: Promise<{ data?: T; error?: unknown; response: Response }>, sumar: (data: T) => void) {
+    void pedido
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data === undefined) setAviso({ texto: mensajeDeError(response.status, codigoDe(error)), ok: false });
+        else sumar(data);
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })));
+  }
+
+  /** «Ver más»: la página siguiente de una de las dos listas, sumada a lo ya visto (Codex en #240). Si
+   * falla, lo visto queda y el mismo botón la vuelve a pedir. */
+  function verMas(lista: "sueltos" | "marcas", despues: string) {
+    const opciones = { params: { path: { consorcio_id: consorcio }, query: { despues } } };
+    if (lista === "sueltos")
+      leerMas(api.GET("/api/v1/consorcios/{consorcio_id}/pagos/extracto/sin-explicar", opciones), (d) =>
+        setLectura((l) => (l.tipo === "ok" ? { ...l, elementos: [...l.elementos, ...d.elementos], total: d.total, siguiente: d.siguiente } : l)),
+      );
+    else
+      leerMas(api.GET("/api/v1/consorcios/{consorcio_id}/pagos/extracto/no-es-pago", opciones), (d) =>
+        setLectura((l) => (l.tipo === "ok" ? { ...l, marcas: [...l.marcas, ...d.elementos], totalMarcas: d.total, siguienteMarcas: d.siguiente } : l)),
+      );
+  }
 
   function cerrar() {
     setAbierto(null);
@@ -252,7 +284,13 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                     </li>
                   ))}
                 </ul>
-                {lectura.total > lectura.elementos.length && <p>Se ven los primeros {lectura.elementos.length}.</p>}
+                {lectura.siguiente !== null && (
+                  <div className="formulario">
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => lectura.siguiente !== null && verMas("sueltos", lectura.siguiente)}>
+                      Ver más débitos sin explicar
+                    </button>
+                  </div>
+                )}
               </>
             )}
             {/* Quien concilia sube el extracto que lo explique; la administración solo lee. */}
@@ -282,7 +320,13 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   </li>
                 ))}
               </ul>
-              {lectura.totalMarcas > lectura.marcas.length && <p>Se ven los primeros {lectura.marcas.length}.</p>}
+              {lectura.siguienteMarcas !== null && (
+                <div className="formulario">
+                  <button type="button" className="secundario" disabled={enviando} onClick={() => lectura.siguienteMarcas !== null && verMas("marcas", lectura.siguienteMarcas)}>
+                    Ver más marcados
+                  </button>
+                </div>
+              )}
             </section>
           )}
         </>

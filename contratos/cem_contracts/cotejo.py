@@ -184,12 +184,16 @@ class MovimientoSinExplicar(BaseModel):
 
 
 class ListaSinExplicar(BaseModel):
-    """`GET …/pagos/extracto/sin-explicar`: de lo más viejo a lo más nuevo, hasta
-    `MAXIMO_FILAS_RESULTADO`. Sin la cuenta ni la descripción del banco: no se guardan."""
+    """`GET …/pagos/extracto/sin-explicar`: en el orden en que llegaron los extractos, por páginas
+    con `despues` (como `ListaCotejo`; Codex en #240). `total` cuenta todos. Sin la cuenta ni la
+    descripción del banco: no se guardan."""
 
     model_config = ConfigDict(frozen=True)
 
-    elementos: list[MovimientoSinExplicar] = Field(max_length=MAXIMO_FILAS_RESULTADO)
+    elementos: list[MovimientoSinExplicar]
+    siguiente: UUID | None = Field(
+        description="El `despues` de la página siguiente; sin él, no hay más."
+    )
     total: int = Field(ge=0)
 
 
@@ -228,11 +232,15 @@ class MarcaNoEsPago(BaseModel):
 
 
 class ListaMarcasNoEsPago(BaseModel):
-    """`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, de lo más viejo a lo más nuevo."""
+    """`GET …/pagos/extracto/no-es-pago`: las marcas vigentes, en el orden en que llegaron los
+    extractos, por páginas con `despues` (Codex en #240). `total` cuenta todas."""
 
     model_config = ConfigDict(frozen=True)
 
-    elementos: list[MarcaNoEsPago] = Field(max_length=MAXIMO_FILAS_RESULTADO)
+    elementos: list[MarcaNoEsPago]
+    siguiente: UUID | None = Field(
+        description="El `despues` de la página siguiente; sin él, no hay más."
+    )
     total: int = Field(ge=0)
 
 
