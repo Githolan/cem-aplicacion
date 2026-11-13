@@ -15,6 +15,7 @@ Datos SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999)
   (P1). Las dos pruebas fallan contra `a668127`.
 """
 
+import json
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -32,12 +33,14 @@ from tests.conftest import url_rol
 from tests.test_cotejo_0074 import (
     COLUMNAS,
     PESOS,
+    cotejo,
     dato_pago,
     extracto,
     linea,
     linea_del_pago,
     pagado,
     subio,
+    tildar,
     vista,
 )
 from tests.test_egresos_1a import aprobada, enviada
@@ -50,6 +53,7 @@ from tests.test_orden_pago_neutra import (
     Escena,
     escena_economica,
     llamar,
+    niega,
     nueva_sesion,
     otra_cuenta_en_el_consejo,
 )
@@ -522,3 +526,60 @@ def test_la_vista_trae_las_columnas_reconocidas(motor_migrate, e):
     # Control: con dos columnas que pueden ser la fecha, se pregunta.
     dudosa = "Fecha;Fecha de operación;Importe\n05/11/2026;05/11/2026;-10,00".encode()
     assert vista(e, e.mc1, dudosa).json()["columnas_reconocidas"] is None
+
+
+# Un débito marcado no se coteja (Codex en #240, sobre 6b2de4d) ----------------------------------
+
+COTEJAR_EXTRACTO = (
+    "select nucleo.cotejar_por_extracto(cast(:pares as jsonb), :actor, :origen, :sesion)"
+)
+
+
+def marcado_y_otro_pago_igual(motor_migrate, e) -> tuple[bytes, str, UUID, UUID]:
+    """Un extracto con la línea de un pago y otra igual sin referencia, marcada como que no es el
+    pago de una orden; después se paga otra orden del mismo día, importe y moneda."""
+    _, p1 = pagado(motor_migrate, e)
+    fecha = dato_pago(motor_migrate, p1)["fecha_operacion"]
+    cuerpo = extracto(linea_del_pago(motor_migrate, p1), linea(fecha, f"-{PESOS}", ""))
+    subio(e, e.mc1, cuerpo)
+    [m] = sin_explicar(e, e.mc1)["elementos"]
+    assert no_es_pago(e, e.mc1, m["movimiento_id"]).status_code == 200
+    _, p2 = pagado(motor_migrate, e)
+    d1, d2 = dato_pago(motor_migrate, p1), dato_pago(motor_migrate, p2)
+    # Control de la escena: el pago nuevo coincide con la línea marcada por fecha e importe.
+    assert (d2["fecha_operacion"], d2["importe_centavos"]) == (fecha, d1["importe_centavos"])
+    return cuerpo, m["movimiento_id"], p1, p2
+
+
+def test_subir_otra_vez_el_extracto_no_coteja_un_pago_con_el_debito_marcado(motor_migrate, e):
+    """Contra 6b2de4d el pago nuevo quedaba cotejado con la comisión marcada."""
+    cuerpo, _, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
+    resultado = subio(e, e.mc1, cuerpo)
+    assert resultado["cotejados"] == 0 and cotejo(motor_migrate, p2) is None
+    # El pago queda como lo que está acá y no en el banco; la línea marcada no es «del banco».
+    assert [x["pago_id"] for x in resultado["aca_no_banco"]] == [str(p2)]
+    assert resultado["banco_no_aca"] == []
+
+
+def test_la_base_no_coteja_un_debito_marcado_por_ningun_camino(motor_migrate, e):
+    """La regla está en la tabla del cotejo: aunque alguien pida el par directo a la base."""
+    _, m, p1, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
+    par = json.dumps([{"movimiento": m, "pago": str(p2)}])
+    niega(motor_migrate, e, e.mc1, COTEJAR_EXTRACTO, "movimiento_no_es_pago", pares=par)
+    assert cotejo(motor_migrate, p2) is None
+    # Control: un segundo débito igual, sin marcar, sí se coteja con el mismo pago. (La huella de
+    # la línea no lleva la descripción: el segundo es otro por ser la segunda aparición.)
+    fecha = dato_pago(motor_migrate, p2)["fecha_operacion"]
+    igual = linea(fecha, f"-{PESOS}", "")
+    otra = subio(e, e.mc1, extracto(linea_del_pago(motor_migrate, p1), igual, igual))
+    assert otra["cotejados"] == 1 and cotejo(motor_migrate, p2)["origen"] == "extracto"
+
+
+def test_a_mano_se_coteja_el_pago_y_el_debito_marcado_sigue_marcado(motor_migrate, e):
+    """El cotejo a mano es por pago, sin débito: no alcanza a la línea marcada."""
+    _, m, _, p2 = marcado_y_otro_pago_igual(motor_migrate, e)
+    r = tildar(e, e.mc1, p2)
+    assert r.status_code == 200, r.json()
+    fila = cotejo(motor_migrate, p2)
+    assert (fila["origen"], fila["movimiento_id"]) == ("manual", None)
+    assert [str(f["movimiento_id"]) for f in marcados(motor_migrate, e.cons)] == [m]

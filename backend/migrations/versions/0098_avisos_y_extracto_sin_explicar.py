@@ -35,6 +35,11 @@ del propietario, 13-11-2026).
   repetirla no hace nada. El débito marcado sale de lo que el extracto no explica. Exportación
   económica (`0069`): `exportar_pagos` suma `movimiento_no_es_pago`, con el nombre de quien marcó y
   el motivo sin cuentas. RLS habilitada y forzada; `cem_app` no toca la tabla.
+- **Un débito marcado no se coteja** (Codex en #240, sobre 6b2de4d): el trigger
+  `cotejo_sin_no_es_pago` de `nucleo.cotejo_pago` niega (`movimiento_no_es_pago`) todo cotejo atado
+  a un débito marcado, venga de donde venga; al subir un extracto, `no_es_pago_lectura` dice cuáles
+  de los importados están marcados y `extracto.comparar` los deja fuera. El cotejo a mano es por
+  pago, sin débito: no lo toca.
 - **Un pago ya atado a otro débito no explica este** (Codex en #240): `pagos_para_explicar_lectura`
   no devuelve los pagos que un cotejo vigente ya ata a un débito, como `extracto.comparar` aparta al
   subir los pagos de los débitos ya atados. Un pago cotejado a mano sí sigue explicando.
@@ -100,7 +105,8 @@ EXPORTAR_NUEVO = """    return query
 EXIGIR_LECTURA = "nucleo.exigir_lectura_extracto(uuid, uuid, uuid, text)"
 MOVIMIENTOS = "nucleo.movimientos_sin_cotejo_lectura(uuid, text, uuid)"
 PAGOS = "nucleo.pagos_para_explicar_lectura(text[], date, date, uuid, text, uuid)"
-RUTAS = (PENDIENTES, REGISTRAR, MOVIMIENTOS, PAGOS, MARCAR)
+MARCADOS = "nucleo.no_es_pago_lectura(uuid[], uuid, text, uuid)"
+RUTAS = (PENDIENTES, REGISTRAR, MOVIMIENTOS, PAGOS, MARCAR, MARCADOS)
 
 TABLA = """
 create table nucleo.aviso_pendientes (
@@ -278,6 +284,24 @@ create function nucleo.pagos_para_explicar_lectura(numeros text[], desde date, h
        order by f.pago_id;
   end
   $$;
+
+-- De los débitos que se acaban de importar, los marcados: el cotejo automático no los compara con
+-- ningún pago (Codex en #240, sobre 6b2de4d). Lo que no deja cotejarlos es el trigger de abajo.
+create function nucleo.no_es_pago_lectura(movimientos uuid[], actor uuid, origen_pedido text,
+                                          sesion uuid)
+  returns setof uuid
+  language plpgsql volatile security definer
+  set search_path = pg_catalog, pg_temp
+  as $$
+  declare
+    c uuid := plataforma.consorcio_actual();
+  begin
+    perform nucleo.exigir_lectura_extracto(c, actor, sesion, origen_pedido);
+    return query
+      select y.movimiento_id from nucleo.movimiento_no_es_pago y
+       where y.consorcio_id = c and y.movimiento_id = any(movimientos);
+  end
+  $$;
 """
 
 NO_ES_PAGO = """
@@ -307,6 +331,29 @@ create trigger historia_movimiento_no_es_pago before update or delete
 create trigger historia_movimiento_no_es_pago_truncate before truncate
   on nucleo.movimiento_no_es_pago
   for each statement execute function nucleo.negar_cambio_historia_orden_pago();
+
+-- Un débito marcado no se coteja con ningún pago, por ningún camino: la regla está en la tabla
+-- del cotejo y no en cada función que inserta (Codex en #240, sobre 6b2de4d). El cotejo a mano no
+-- tiene débito (`movimiento_id` nulo): no lo alcanza.
+create function nucleo.negar_cotejo_de_no_es_pago()
+  returns trigger
+  language plpgsql
+  set search_path = pg_catalog, pg_temp
+  as $$
+  begin
+    if new.movimiento_id is not null and exists (
+        select 1 from nucleo.movimiento_no_es_pago y
+         where y.consorcio_id = new.consorcio_id and y.movimiento_id = new.movimiento_id) then
+      raise exception 'ese débito no es el pago de una orden: no se coteja con un pago'
+        using errcode = 'P0001', hint = 'movimiento_no_es_pago';
+    end if;
+    return new;
+  end
+  $$;
+revoke all on function nucleo.negar_cotejo_de_no_es_pago() from public;
+create trigger cotejo_sin_no_es_pago before insert or update of movimiento_id
+  on nucleo.cotejo_pago
+  for each row execute function nucleo.negar_cotejo_de_no_es_pago();
 
 -- Las reglas de cotejar: la facultad, el gesto y el turno por consorcio. Repetir no hace nada.
 create function nucleo.marcar_no_es_pago(movimiento uuid, motivo text, actor uuid,
@@ -431,6 +478,8 @@ def downgrade() -> None:
     op.execute(exportar.replace(EXPORTAR_NUEVO, ""))
     for funcion in (*RUTAS, EXIGIR_LECTURA):
         op.execute(f"drop function {funcion}")
+    op.execute("drop trigger cotejo_sin_no_es_pago on nucleo.cotejo_pago")
+    op.execute("drop function nucleo.negar_cotejo_de_no_es_pago()")
     op.execute("drop table nucleo.movimiento_no_es_pago")
     op.execute("drop table nucleo.aviso_pendientes")
     cuerpo = _cuerpo(_definicion(INTERNA), INTERNA)

@@ -1,6 +1,7 @@
 """Leer un extracto y compararlo con los pagos, sin base. Datos SINTETICOS / NO REAL."""
 
 import hashlib
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from uuid import uuid4
@@ -293,6 +294,15 @@ def test_por_numero_en_otra_moneda_no_coincide():
 def test_por_importe_y_fecha_en_otra_moneda_no_coincide():
     assert _comparar([_m(numero=None)], [_p(moneda="USD")]).pares == []
     assert len(_comparar([_m(numero=None)], [_p()]).pares) == 1  # control
+
+
+def test_un_debito_marcado_como_que_no_es_pago_no_se_compara():
+    """`0098`: ni por número ni por fecha e importe, y tampoco cuenta como «del banco»."""
+    for numero in ("0048", None):
+        marcado = replace(_m(numero=numero), no_es_pago=True)
+        r = _comparar([marcado], [_p()])
+        assert (r.pares, r.sin_pago, len(r.sin_movimiento)) == ([], [], 1)
+        assert len(_comparar([_m(numero=numero)], [_p()]).pares) == 1  # control
 
 
 def test_el_hash_de_pesos_no_cambia_y_el_de_otra_moneda_si():

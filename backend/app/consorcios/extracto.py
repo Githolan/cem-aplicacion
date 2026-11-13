@@ -440,6 +440,8 @@ class MovimientoGuardado:
     numero_operacion: str | None
     pago_id: UUID | None
     """El pago que ya tiene por un extracto anterior."""
+    no_es_pago: bool = False
+    """Quien concilia dijo que no es el pago de una orden (`0098`): no se compara con un pago."""
 
 
 @dataclass(frozen=True)
@@ -472,7 +474,7 @@ def comparar(
     por_id = {p.pago_id: p for p in pagos}
     usados = {m.pago_id for m in movimientos if m.pago_id is not None}
     ya_atados = sum(1 for m in movimientos if m.pago_id is not None)
-    pendientes = [m for m in movimientos if m.pago_id is None]
+    pendientes = [m for m in movimientos if m.pago_id is None and not m.no_es_pago]
     por_numero = {p.numero_operacion: p for p in pagos}
 
     pares = []

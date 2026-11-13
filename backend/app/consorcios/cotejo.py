@@ -81,14 +81,18 @@ ERRORES = {
     "movimiento_no_coincide": (
         409, CodigoError.MOVIMIENTO_NO_COINCIDE, "Ese movimiento no coincide con el pago.",
     ),
+    "movimiento_no_es_pago": (
+        409, CodigoError.MOVIMIENTO_YA_EXPLICADO,
+        "Ese débito está marcado como que no es el pago de una orden: no se coteja con un pago.",
+    ),
 }  # fmt: skip
+"""Además de los de `egresos`: `no_encontrado` y las separaciones, igual que al conciliar."""
 ERRORES_NO_ES_PAGO = {
     "estado_invalido": (
         409, CodigoError.MOVIMIENTO_YA_EXPLICADO, "Ese débito ya lo explica un pago.",
     ),
 }  # fmt: skip
 """Además de los de `egresos`: `no_encontrado` y `motivo_con_cuenta`."""
-"""Además de los de `egresos`: `no_encontrado` y las separaciones, igual que al conciliar."""
 
 RESPUESTAS_LECTURA = {
     403: {"description": "Sin `egresos.conciliar_pago`, sin el modo, o falta renovar la sesión."}
@@ -395,6 +399,12 @@ def _comparar_y_cotejar(
             "s": columnas.signo.value, "moneda": columnas.moneda,
         },
     ).mappings().all()  # fmt: skip
+    # Los marcados como «no es el pago de una orden» no se comparan: la base tampoco los coteja.
+    marcados = set(_ejecutar(
+        conn, permiso,
+        "select * from nucleo.no_es_pago_lectura(cast(:m as uuid[]), :actor, 'api', :sesion)",
+        {"m": [g["movimiento_id"] for g in guardados]},
+    ).scalars())  # fmt: skip
     movimientos = [
         extracto.MovimientoGuardado(
             id=g["movimiento_id"],
@@ -403,6 +413,7 @@ def _comparar_y_cotejar(
             moneda=g["moneda"],
             numero_operacion=g["numero_operacion"],
             pago_id=g["pago_id"],
+            no_es_pago=g["movimiento_id"] in marcados,
         )  # fmt: skip
         for g in guardados
     ]
