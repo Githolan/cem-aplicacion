@@ -19,7 +19,7 @@ import { SeccionPrivacidad } from "./SeccionPrivacidad";
 import { RUTA_SEGUNDO_FACTOR } from "./SegundoFactor";
 import { useAEntrar } from "./sesionEncima";
 
-// Página /cuenta ("Mi cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
+// Página /cuenta ("Cuenta", RF04): quién es la persona de la sesión, sus sesiones vigentes
 // con la actual marcada (cada una se puede cerrar, o todas las otras de una vez), salir, y el
 // estado del segundo factor con el enlace a su página, y la contraseña (SeccionContrasena). Sin sesión manda a /entrar, igual que
 // después de cerrar la sesión actual. Cada parte se lee por su lado: si una falla, esa parte dice qué
@@ -102,7 +102,7 @@ function FallaDeParte({ mensaje, deshabilitado, alReintentar }: FallaDeParteProp
       <p className="aviso-error" role="alert">
         {mensaje}
       </p>
-      <button type="button" onClick={alReintentar} disabled={deshabilitado}>
+      <button className="secundario" type="button" onClick={alReintentar} disabled={deshabilitado}>
         Reintentar
       </button>
     </>
@@ -217,7 +217,7 @@ export function Cuenta() {
           return;
         }
         quitar((s) => s.id !== sesion.id);
-        setAviso({ texto: `Listo: cerramos la sesión de ${sesion.dispositivo}.`, ok: true });
+        setAviso({ texto: `Listo: se cerró la sesión de ${sesion.dispositivo}.`, ok: true });
       })
       .catch(atajar)
       .finally(() => setEnviando(false));
@@ -238,8 +238,8 @@ export function Cuenta() {
         setAviso({
           texto:
             data.revocadas === 1
-              ? "Listo: cerramos 1 sesión en otro dispositivo."
-              : `Listo: cerramos ${data.revocadas} sesiones en otros dispositivos.`,
+              ? "Listo: se cerró 1 sesión en otro dispositivo."
+              : `Listo: se cerraron ${data.revocadas} sesiones en otros dispositivos.`,
           ok: true,
         });
       })
@@ -272,12 +272,12 @@ export function Cuenta() {
 
   return (
     <>
-      <h1>Mi cuenta</h1>
+      <h1>Cuenta</h1>
 
       {lista !== null && (
         <>
           <section aria-labelledby={`${id}-yo`} className="tarjeta">
-            <h2 id={`${id}-yo`}>Tus datos</h2>
+            <h2 id={`${id}-yo`}>Datos de la cuenta</h2>
             {fallaDe("yo", lista.yo)}
             {lista.yo.ok && (
               <dl className="detalles">
@@ -293,7 +293,7 @@ export function Cuenta() {
           </section>
 
           <section ref={tarjetaSesiones} aria-labelledby={`${id}-sesiones`} className="tarjeta">
-            <h2 id={`${id}-sesiones`}>Dónde tenés la sesión abierta</h2>
+            <h2 id={`${id}-sesiones`}>Sesiones abiertas</h2>
             <div role="status" aria-live="polite">
               {aviso && (
                 <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
@@ -339,7 +339,7 @@ export function Cuenta() {
           </section>
 
           <section aria-labelledby={`${id}-factor`} className="tarjeta">
-            <h2 id={`${id}-factor`}>Segundo factor</h2>
+            <h2 id={`${id}-factor`}>Confirmación con PIN, huella o código</h2>
             {fallaDe("segundoFactor", lista.segundoFactor)}
             {/* Los códigos llegan una sola vez: van en una hoja que deja inerte el resto de la
                 aplicación (navegación y salir incluidas) y no se cierra con Escape; solo con «Ya los
@@ -360,17 +360,17 @@ export function Cuenta() {
                 {llaveActivada && <p className="aviso-ok">Listo: la llave quedó activada.</p>}
                 <p>
                   {lista.segundoFactor.valor
-                    ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
+                    ? "Está activado: las acciones delicadas piden confirmar la identidad."
                     : "No está activado."}
                 </p>
                 {!lista.segundoFactor.valor && <ActivarLlave alActivar={activarLlave} alOcupar={setActivando} />}
                 <p>
                   <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
                     {lista.segundoFactor.valor
-                      ? "Ver el segundo factor"
+                      ? "Ver la confirmación"
                       : llaveDisponible()
                         ? "Otras opciones"
-                        : "Activar el segundo factor"}
+                        : "Activar la confirmación"}
                   </Link>
                 </p>
               </>
@@ -419,7 +419,7 @@ export function Cuenta() {
         {pantalla.tipo === "sin_servicio" && (
           <>
             <p className="aviso-error">{pantalla.mensaje}</p>
-            <button type="button" onClick={reintentarTodo}>
+            <button className="secundario" type="button" onClick={reintentarTodo}>
               Reintentar
             </button>
           </>

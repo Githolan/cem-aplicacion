@@ -142,7 +142,7 @@ test.describe("cotejar con el banco", () => {
     await simularCotejo(page, baseURL!);
     await page.goto("/pagos/cotejo");
     const extracto = page.getByRole("heading", { name: "Subir el extracto" });
-    const lista = page.getByRole("heading", { name: "O tildá a mano" });
+    const lista = page.getByRole("heading", { name: "O marcar a mano" });
     await expect(lista).toBeVisible();
     const [a, b] = [await extracto.boundingBox(), await lista.boundingBox()];
     if ((page.viewportSize()?.width ?? 0) >= ANCHO_PC_PX) expect(b?.x).toBeGreaterThan(a?.x ?? 0);

@@ -55,7 +55,7 @@ del propietario del 09-11-2026, comentario 28; antes 30 días). Ya no hay sesió
 lo económico: lo que mueve dinero pide el segundo factor de los últimos 10 minutos. La migración
 0091 impone el mismo tope."""
 VIGENCIA_SEGUNDO_FACTOR_RECIENTE = timedelta(minutes=10)
-CONFIRMAR_QUE_SOS_VOS = "Para esto tenés que confirmar que sos vos."
+CONFIRMAR_QUE_SOS_VOS = "Para esto hay que confirmar la identidad con PIN, huella o código."
 """Lo que se le dice a quien le falta la verificación reciente, sea cual sea su medio."""
 """TB-CEM-3: el segundo factor verificado en la sesión en los últimos 10 minutos."""
 RETENCION_ACCESO = timedelta(days=90)
@@ -220,5 +220,7 @@ def exigir_csrf(request: Request, token_sesion: str) -> None:
     enviado = request.headers.get(ENCABEZADO_CSRF, "")
     if not hmac.compare_digest(enviado.encode(), token_csrf(token_sesion).encode()):
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )

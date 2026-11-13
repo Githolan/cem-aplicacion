@@ -8,7 +8,7 @@ import { AvisoLlegada } from "./AvisoLlegada";
 // El aviso llega en `state.aviso` de la navegación: se muestra en la pantalla de llegada, sigue si
 // una redirección (`replace`) lleva a otra, y se va con la navegación siguiente sin reaparecer.
 
-const AVISO = "Entraste.";
+const AVISO = "Listo: sesión abierta.";
 
 function Pantallas() {
   return (

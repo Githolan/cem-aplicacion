@@ -5,6 +5,7 @@ import { abrirHoja } from "./pilaDeHojas";
 function hoja(encima = false) {
   const fondo = document.createElement("div");
   const boton = document.createElement("button");
+  boton.className = "secundario"; // solo foco: no es una pantalla con su botón principal
   fondo.append(boton);
   document.body.append(fondo);
   return { fondo, boton, abrir: () => abrirHoja({ fondo, encima, enfocar: () => boton.focus() }) };
@@ -15,6 +16,7 @@ describe("pila de hojas", () => {
 
   beforeEach(() => {
     pagina = document.createElement("button");
+    pagina.className = "secundario";
     document.body.append(pagina);
     pagina.focus();
   });

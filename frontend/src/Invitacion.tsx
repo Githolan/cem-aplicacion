@@ -101,7 +101,7 @@ export function Invitacion() {
         headers: encabezadoCsrf(),
       })
       .then(({ error, response }) => {
-        if (error === undefined) irAlInicio(`Listo: ya sos parte de ${invitacion?.consorcio}.`);
+        if (error === undefined) irAlInicio(`Listo: la cuenta ya es parte de ${invitacion?.consorcio}.`);
         else if (response.status === ESTADO_INVALIDA) setEstado("invalida");
         else if (response.status === ESTADO_CONFLICTO && "codigo" in error) {
           setFalla(error.mensaje);
@@ -130,11 +130,11 @@ export function Invitacion() {
             <dd>{TIPOS[invitacion.tipo]}</dd>
             <dt>Correo</dt>
             <dd>{invitacion.correo}</dd>
-            <dt>Te invitó</dt>
+            <dt>Invitó</dt>
             <dd>{invitacion.invitada_por ?? "El equipo de Consorcio en Mano"}</dd>
           </dl>
           <form className="formulario" onSubmit={aceptar}>
-            <label htmlFor={`${id}-nombre`}>Tu nombre</label>
+            <label htmlFor={`${id}-nombre`}>Nombre</label>
             <input
               id={`${id}-nombre`}
               type="text"
@@ -157,22 +157,22 @@ export function Invitacion() {
           <>
             <p className="aviso-error">
               Esta invitación no sirve: puede haber vencido, haberse usado o haber sido retirada.
-              Pedile una nueva a quien te invitó.
+              Hay que pedir una nueva a quien invitó.
             </p>
             <EnlaceAlInicio />
           </>
         )}
         {estado === "requiere_sesion" && (
           <p className="aviso-error">
-            Ya tenés una cuenta con este correo. <Link to={RUTA_ENTRAR}>Entrá</Link> y la vas a ver
-            en el inicio, lista para aceptar.
+            Ya hay una cuenta con este correo. Después de <Link to={RUTA_ENTRAR}>entrar</Link>, la invitación
+            aparece en el inicio, lista para aceptar.
           </p>
         )}
         {estado === "otra_persona" && (
           <>
             <p className="aviso-error">
-              Estás con una cuenta que no es la del correo invitado. Salí de esa cuenta para
-              aceptarla.
+              La sesión abierta es de una cuenta que no es la del correo invitado. Hay que salir de esa
+              cuenta para aceptarla.
             </p>
             {token && <SalirDeEstaCuenta alSalir={() => consultar(token)} />}
           </>
@@ -180,7 +180,7 @@ export function Invitacion() {
         {estado === "propia" && (
           <>
             <p className="aviso-error">
-              Esta invitación la creaste vos: la tiene que aceptar la persona invitada, con su
+              Esta invitación la creó esta cuenta: la tiene que aceptar la persona invitada, con su
               propia cuenta.
             </p>
             <EnlaceAlInicio />
@@ -196,7 +196,7 @@ export function Invitacion() {
           <>
             <p className="aviso-error">{falla}</p>
             {token && (
-              <button type="button" onClick={() => consultar(token)}>
+              <button className="secundario" type="button" onClick={() => consultar(token)}>
                 Reintentar
               </button>
             )}
@@ -204,7 +204,7 @@ export function Invitacion() {
         )}
         {estado === "sin_enlace" && (
           <>
-            <p>Para aceptar una invitación, abrí el enlace que te llegó por correo.</p>
+            <p>Para aceptar una invitación hay que abrir el enlace que llegó por correo.</p>
             <EnlaceAlInicio />
           </>
         )}

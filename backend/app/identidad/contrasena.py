@@ -110,14 +110,14 @@ LIMITE_CORREO = "auth-contrasena"
 LIMITE_IP = "auth-contrasena-ip"
 LIMITE_CAMBIO = "auth-contrasena-cambio"
 
-ASUNTO_DEFINIDA = "Definiste una contraseña"
-ASUNTO_CAMBIADA = "Cambiaste tu contraseña"
+ASUNTO_DEFINIDA = "Se definió una contraseña"
+ASUNTO_CAMBIADA = "Se cambió la contraseña"
 TEXTO_AVISO = """Hola:
 
-{que} de tu cuenta de Consorcio en Mano.{cerradas}
+{que} de la cuenta de Consorcio en Mano de este correo.{cerradas}
 
-Si no fuiste vos, entrá con el enlace por correo, cambiá la contraseña, cerrá las sesiones de
-los otros dispositivos y avisá a quien administra tu consorcio.
+Si no fue la persona titular de esta cuenta: entrar con el código del correo, cambiar la
+contraseña, cerrar las sesiones de los otros dispositivos y avisar a quien administra el consorcio.
 """
 
 
@@ -239,7 +239,9 @@ def _exigir_mismo_origen(request: Request, que: str) -> None:
     if sitio is not None and sitio != rutas_auth.MISMO_ORIGEN:
         log.info("%s rechazada: otro_sitio", que)
         raise ErrorApi(
-            403, CodigoError.CSRF_INVALIDO, "No pudimos verificar el pedido. Recargá la página."
+            403,
+            CodigoError.CSRF_INVALIDO,
+            "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.",
         )
 
 
@@ -247,8 +249,8 @@ def _credenciales_invalidas() -> ErrorApi:
     return ErrorApi(
         401,
         CodigoError.CREDENCIALES_INVALIDAS,
-        "El correo o la contraseña no son correctos. Si no tenés contraseña, entrá con el"
-        " enlace por correo.",
+        "El correo o la contraseña no son correctos. Sin contraseña, se entra con el código del"
+        " correo.",
     )
 
 
@@ -317,7 +319,8 @@ def _entrada_vencida() -> ErrorApi:
     return ErrorApi(
         401,
         CodigoError.ENTRADA_VENCIDA,
-        "Pasó demasiado tiempo o hubo demasiados intentos. Volvé a escribir la contraseña.",
+        "Pasó demasiado tiempo o hubo demasiados intentos. Hay que escribir la contraseña de "
+        "nuevo.",
     )
 
 
@@ -459,7 +462,7 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
                 422,
                 CodigoError.CONTRASENA_DEBIL,
                 f"La contraseña tiene que tener al menos {LARGO_MINIMO_CONTRASENA} caracteres y"
-                " no puede ser tu correo. Una frase de varias palabras sirve.",
+                " no puede ser el correo de la cuenta. Una frase de varias palabras sirve.",
             )
         anterior = conn.execute(
             text("select hash from nucleo.contrasena for update")
@@ -500,7 +503,7 @@ def _guardar(motor: Engine, identidad: Identidad, pedido: NuevaContrasena) -> Co
             asunto=ASUNTO_CAMBIADA if anterior else ASUNTO_DEFINIDA,
             texto=TEXTO_AVISO.format(
                 que="Se cambió la contraseña" if anterior else "Se definió una contraseña",
-                cerradas=" Cerramos las sesiones de los otros dispositivos." if cerradas else "",
+                cerradas=" Se cerraron las sesiones de los otros dispositivos." if cerradas else "",
             ),
         )
     log.info(

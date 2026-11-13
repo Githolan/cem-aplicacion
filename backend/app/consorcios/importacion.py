@@ -164,7 +164,8 @@ def _encabezado(columnas: list[str]) -> tuple[tuple[str, ...], list[Problema]]:
         problemas.append(
             Problema(
                 codigo=CodigoProblema.COLUMNA_VIGENTE_HASTA,
-                mensaje="La planilla no acepta `vigente_hasta`: cargá `ultimo_dia`, el último día"
+                mensaje="La planilla no acepta `vigente_hasta`: corresponde `ultimo_dia`, el "
+                "último día"
                 " con vigencia (inclusivo).",
             )
         )
@@ -224,8 +225,9 @@ def _relacion(fila: FilaLeida, valores: dict[str, str]) -> None:
     if not correo:
         fila.problema(
             CodigoProblema.RELACION_SIN_CORREO,
-            "La relación no tiene correo: un nombre solo no identifica a nadie. Omití la fila y"
-            " agregá la relación después con una invitación.",
+            "La relación no tiene correo: un nombre solo no identifica a nadie. Hay que omitir "
+            "la fila"
+            " y agregar la relación después con una invitación.",
         )
     if not (nombre and caracter and desde):
         fila.problema(
@@ -422,7 +424,7 @@ def _unidades(conn: Connection, planes: list[Plan], gestionar: Permiso) -> None:
             p.negada_gestionar = Entidad()
             p.fila.problema(
                 CodigoProblema.FUERA_DE_ALCANCE,
-                "Esta unidad está fuera de tu alcance de `padron.gestionar`.",
+                "Esta unidad está fuera del alcance de `padron.gestionar` de esta cuenta.",
             )
 
 
@@ -509,7 +511,7 @@ def _vinculos(conn: Connection, planes: list[Plan]) -> None:
             p.fila.problema(
                 CodigoProblema.CORRIGE_EXISTENTE,
                 "Se superpone con un vínculo que ya existe y no es igual: no se corrige por"
-                " importación. Finalizalo o anulalo y volvé a cargarlo.",
+                " importación. Hay que finalizarlo o anularlo y cargarlo de nuevo.",
             )
         else:
             p.vinculo = AccionVinculo.CREAR
@@ -805,7 +807,7 @@ def _aplicar(
         raise ErrorApi(
             422,
             CodigoError.IMPORTACION_CON_PROBLEMAS,
-            "La planilla tiene problemas: no se escribió nada. Pedí el informe para verlos.",
+            "La planilla tiene problemas: no se escribió nada. El informe los detalla.",
         )
     sha = planilla.sha256.hex()
     if analisis.informe.sin_cambios:
@@ -827,8 +829,9 @@ def _aplicar(
             raise ErrorApi(
                 409,
                 CodigoError.IMPORTACION_CON_PROBLEMAS,
-                "El padrón cambió mientras se aplicaba la planilla: no se escribió nada. Pedí el"
-                " informe de nuevo.",
+                "El padrón cambió mientras se aplicaba la planilla: no se escribió nada. Hay "
+                "que pedir"
+                " el informe de nuevo.",
             ) from e
         raise
 

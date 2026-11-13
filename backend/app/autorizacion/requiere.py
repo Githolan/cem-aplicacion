@@ -6,7 +6,9 @@ la entidad (la unidad de una invitación) las verifica la ruta con `permiso.veri
 apenas la conoce y antes de cualquier efecto.
 
 Una denegación responde el error genérico (403, o el 404 que pida la ruta para no revelar que
-algo existe) y deja el **motivo interno** en la auditoría encadenada del consorcio. El 404 por
+algo existe) y deja el **motivo interno** en la auditoría encadenada del consorcio. La única
+excepción es la separación de funciones en un 403: quien pide ya participó de eso, y se le dice
+cómo (`ya_participo`, pregunta 10 del propietario). El 404 por
 falta de ámbito no se audita en el consorcio: quien lo recibe no tiene nada que ver con él.
 
 Una acción que no está en las políticas es un error de programación: `requiere` falla al
@@ -20,6 +22,7 @@ from typing import Annotated
 from uuid import UUID
 
 from cem_contracts.errores import CodigoError
+from cem_contracts.politicas import CodigoSeparacion
 from fastapi import Depends, Request
 from sqlalchemy import Connection, text
 
@@ -39,8 +42,8 @@ from app.identidad import sesiones
 
 log = logging.getLogger(__name__)
 
-NO_ENCONTRADO = "No encontramos lo que buscás."
-SIN_PERMISO = "No tenés permiso para hacer esto."
+NO_ENCONTRADO = "No se encontró lo pedido."
+SIN_PERMISO = "Esta cuenta no tiene permiso para hacer esto."
 RENOVAR = {
     Motivo.REQUIERE_SEGUNDO_FACTOR_RECIENTE: (
         CodigoError.SEGUNDO_FACTOR_REQUERIDO,
@@ -49,8 +52,69 @@ RENOVAR = {
 }
 """Las negaciones de R10 que la persona resuelve renovando la sesión. Se dicen tal cual porque el
 evaluador las mira al final (`_filtrar`): solo llegan acá si todo lo demás ya concedía."""
-VOLVER_A_ENTRAR = (CodigoError.SESION_RECIENTE_REQUERIDA, "Para esto tenés que volver a entrar.")
+VOLVER_A_ENTRAR = (CodigoError.SESION_RECIENTE_REQUERIDA, "Para esto hay que volver a entrar.")
 """La sesión de la petición ya no sirve (vencida o revocada): se resuelve entrando de nuevo."""
+
+_S = CodigoSeparacion
+_MANDATO_PROPIO = "El mandato es de esta cuenta: ese paso lo da otra persona."
+_DECISION_PROPIA = (
+    "La decisión la registró esta cuenta: la usa otra persona del Consejo o de la administración."
+)
+YA_PARTICIPO: dict[tuple[str, CodigoSeparacion], str] = {
+    ("egresos.aprobar_orden", _S.NO_ES_QUIEN_PREPARO): (
+        "La preparó esta cuenta: la aprueba otra persona del Consejo."
+    ),
+    (
+        "egresos.ejecutar_pago",
+        _S.NO_ES_QUIEN_APROBO,
+    ): "La aprobó esta cuenta: la paga otra persona.",
+    ("egresos.conciliar_pago", _S.NO_ES_QUIEN_PREPARO): (
+        "La orden la preparó esta cuenta: el pago lo concilia otra persona del Consejo."
+    ),
+    ("egresos.conciliar_pago", _S.NO_ES_QUIEN_EJECUTO): (
+        "Esta cuenta vio la cuenta bancaria o registró el pago: concilia otra persona del Consejo."
+    ),
+    ("liquidacion.revisar", _S.NO_ES_QUIEN_PREPARO): (
+        "La liquidación la preparó esta cuenta: la revisa otra persona."
+    ),
+    ("liquidacion.aprobar", _S.NO_ES_QUIEN_PREPARO): (
+        "La liquidación la preparó esta cuenta: la aprueba otra persona."
+    ),
+    ("coeficientes.aprobar", _S.NO_ES_QUIEN_PROPUSO): (
+        "Los coeficientes los propuso esta cuenta: los aprueba otra persona."
+    ),
+    ("fondo_reserva.autorizar", _S.NO_ES_QUIEN_SOLICITO): (
+        "El uso del fondo lo pidió esta cuenta: lo autoriza otra persona."
+    ),
+    ("solicitud_formal.firmar", _S.FIRMA_REPETIDA): (
+        "Esta cuenta ya firmó la solicitud: la otra firma es de otra persona."
+    ),
+    ("mandatos.alta", _S.NO_ES_SU_PROPIO_MANDATO): _MANDATO_PROPIO,
+    ("mandatos.alta", _S.NO_REGISTRO_LA_DECISION): _DECISION_PROPIA,
+    ("mandatos.baja", _S.NO_ES_SU_PROPIO_MANDATO): _MANDATO_PROPIO,
+    ("mandatos.baja", _S.NO_REGISTRO_LA_DECISION): _DECISION_PROPIA,
+    ("mandatos.resolver_revision", _S.NO_ES_SU_PROPIO_MANDATO): _MANDATO_PROPIO,
+    ("mandatos.resolver_revision", _S.NO_REGISTRO_LA_DECISION): _DECISION_PROPIA,
+    ("mandatos.desasociar_persona", _S.NO_ES_SU_PROPIO_MANDATO): _MANDATO_PROPIO,
+    ("mandatos.aprobar_asociacion", _S.NO_ES_QUIEN_EMITIO): (
+        "La invitación la emitió esta cuenta: la aprueba otra persona."
+    ),
+    ("padron.confirmar_vinculo", _S.NO_ES_SU_PROPIO_VINCULO): (
+        "El vínculo es de esta cuenta: lo confirma otra persona."
+    ),
+    ("padron.confirmar_vinculo", _S.NO_ES_QUIEN_REGISTRO): (
+        "El vínculo lo registró esta cuenta: lo confirma otra persona."
+    ),
+}
+"""Qué decirle a quien frena la separación de funciones (pregunta 10 del propietario, 13-11-2026):
+el motivo concreto. Quien la recibe ya participa de eso (lo preparó, lo aprobó, es su mandato), así
+que no se revela nada que no sepa. La falta de facultad (el mandato no lo incluye) sigue siendo
+`sin_permiso`: el evaluador mira la separación solo si la facultad ya concedía. Cada separación de
+las políticas tiene su texto: si falta uno, falla al importar (ver abajo), no en el pedido."""
+
+_SIN_TEXTO = {(p.accion, c) for p in POLITICAS.values() for c in p.separacion} - YA_PARTICIPO.keys()
+if _SIN_TEXTO:
+    raise ValueError(f"separación sin texto para la persona: {sorted(_SIN_TEXTO)!r}")
 
 
 @dataclass(frozen=True)
@@ -138,6 +202,13 @@ class Permiso:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         if decision.motivo_interno in RENOVAR:
             raise ErrorApi(403, *RENOVAR[decision.motivo_interno])
+        if (self.accion, decision.motivo_interno) in YA_PARTICIPO:
+            raise ErrorApi(
+                403,
+                CodigoError.YA_PARTICIPO,
+                YA_PARTICIPO[(self.accion, CodigoSeparacion(decision.motivo_interno))],
+                detalle={"separacion": decision.motivo_interno},
+            )
         raise ErrorApi(403, CodigoError.SIN_PERMISO, SIN_PERMISO)
 
     def _auditar(self, decision: Decision) -> None:

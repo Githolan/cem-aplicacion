@@ -18,6 +18,8 @@ type Situacion = components["schemas"]["SituacionPago"];
 afterEach(cleanup);
 
 const NEGATIVAS = new Set<AccionPago>(["retirar", "rechazar", "observar", "declarar_no_pago", "cerrar_reclamo", "cerrar_sin_pagar"]);
+/** D-13: «Anular la declaración y pagar» deshace lo declarado; va con borde rojo aunque sea secundaria. */
+const DESHACEN = new Set<AccionPago>(["retomar_pago"]);
 
 function dibujar(acciones: AccionOfrecida[]) {
   return render(
@@ -47,7 +49,7 @@ describe("botón = lo que llegó", () => {
     for (const b of screen.queryAllByRole("button")) {
       const codigo = b.getAttribute("data-accion") as AccionPago;
       if (b.getAttribute("data-tipo") === "negativa") expect(b.classList.contains("peligro")).toBe(true);
-      expect(NEGATIVAS.has(codigo) || !b.classList.contains("peligro") || b.getAttribute("data-tipo") === "principal").toBe(true);
+      expect(NEGATIVAS.has(codigo) || DESHACEN.has(codigo) || !b.classList.contains("peligro") || b.getAttribute("data-tipo") === "principal").toBe(true);
     }
     cleanup();
   });

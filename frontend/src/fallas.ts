@@ -7,10 +7,10 @@
  * edificio con la página abierta) pide recargar. Solo un pedido que no tuvo respuesta (estado 0) se
  * explica como conexión.
  */
-export const SIN_CONEXION = "No pudimos completar el pedido. Revisá la conexión y probá de nuevo.";
-export const SERVICIO_NO_DISPONIBLE = "El servicio no está disponible en este momento. Probá de nuevo en unos minutos.";
-export const LIMITE_DE_PEDIDOS = "Llegaste al límite de pedidos por ahora. Probá más tarde.";
-export const RECARGAR = "No pudimos completar el pedido. Recargá la página y probá de nuevo.";
+export const SIN_CONEXION = "No se pudo completar el pedido. Hay que revisar la conexión y reintentar.";
+export const SERVICIO_NO_DISPONIBLE = "El servicio no está disponible en este momento. Reintentar en unos minutos.";
+export const LIMITE_DE_PEDIDOS = "Se llegó al límite de pedidos por ahora. Reintentar más tarde.";
+export const RECARGAR = "No se pudo completar el pedido. Hay que recargar la página y reintentar.";
 
 const SIN_RESPUESTA = 0;
 const ESTADO_LIMITE = 429;
@@ -18,7 +18,7 @@ const ESTADO_ERROR_DEL_SERVIDOR = 500;
 
 /** Una acción sensible pide una entrada reciente. Lo resuelve la hoja de entrar encima. */
 export const CODIGO_ENTRAR_DE_NUEVO = "reautenticacion_requerida";
-export const ENTRAR_DE_NUEVO = "Por seguridad, volvé a entrar y hacelo apenas entres.";
+export const ENTRAR_DE_NUEVO = "Por seguridad, hay que volver a entrar y hacerlo apenas se entra.";
 
 export function mensajeDeFalla(estado: number, codigo: string | undefined): string {
   if (estado === SIN_RESPUESTA) return SIN_CONEXION;
@@ -33,9 +33,9 @@ export function mensajeDeFalla(estado: number, codigo: string | undefined): stri
  * dirección al abrirla, así que recargar no sirve: hay que volver a abrir el enlace.
  */
 export const SIN_CONEXION_ENLACE =
-  "No pudimos completar el pedido. Revisá la conexión y volvé a abrir el enlace en un rato.";
+  "No se pudo completar el pedido. Hay que revisar la conexión y abrir el enlace de nuevo en un rato.";
 export const REABRIR_ENLACE =
-  "No pudimos completar el pedido. Volvé a abrir el enlace desde el correo y probá de nuevo.";
+  "No se pudo completar el pedido. Hay que abrir de nuevo el enlace del correo.";
 
 export function mensajeDeFallaConEnlace(estado: number, codigo: string | undefined): string {
   const mensaje = mensajeDeFalla(estado, codigo);
@@ -52,4 +52,11 @@ export function esDeConexion(estado: number, codigo: string | undefined): boolea
 /** El `codigo` del cuerpo uniforme de error, si la respuesta lo trae. */
 export function codigoDe(error: unknown): string | undefined {
   return (error as { codigo?: string } | undefined)?.codigo;
+}
+
+/** Cuando la separación de funciones frena un acto (`ya_participo`), el servidor dice el motivo
+ * concreto a quien ya participa («La preparó esta cuenta: la aprueba otra persona del Consejo.»,
+ * pregunta 10 del propietario, 13-11-2026) y se dice tal cual. Con otro error, nada. */
+export function motivoDeSeparacion(error: unknown): string | undefined {
+  return codigoDe(error) === "ya_participo" ? (error as { mensaje: string }).mensaje : undefined;
 }

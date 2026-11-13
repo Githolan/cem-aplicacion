@@ -77,7 +77,7 @@ describe("sección de la llave", () => {
     fireEvent.change(await screen.findByLabelText("Código"), { target: { value: "k7m2q-x9p4t" } });
     fireEvent.click(screen.getByRole("button", { name: "Verificar y seguir" }));
 
-    expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
+    expect(await screen.findByText("Listo: la llave se quitó.")).not.toBeNull();
     expect(borrar).toHaveBeenCalledTimes(2);
   });
 
@@ -91,7 +91,7 @@ describe("sección de la llave", () => {
 
     await quitarConfirmando();
 
-    expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
+    expect(await screen.findByText("Listo: la llave se quitó.")).not.toBeNull();
     expect(borrar).toHaveBeenCalledOnce();
   });
 
@@ -109,7 +109,7 @@ describe("sección de la llave", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
 
     expect(await screen.findByRole("button", { name: "Quitar" })).not.toBeNull();
-    expect(screen.queryByText("Listo: quitaste la llave.")).toBeNull();
+    expect(screen.queryByText("Listo: la llave se quitó.")).toBeNull();
     expect(borrar).toHaveBeenCalledOnce();
   });
 
@@ -118,8 +118,8 @@ describe("sección de la llave", () => {
     backend({ "GET /api/v1/auth/llave": () => Response.json([LLAVE]) });
     mostrar();
 
-    expect(await screen.findByText(/Tu llave ya funciona en este dispositivo/)).not.toBeNull();
-    expect(screen.getByRole("list", { name: "Tus llaves" }).textContent).toContain("Mi PC (este dispositivo)");
+    expect(await screen.findByText(/La llave ya funciona en este dispositivo/)).not.toBeNull();
+    expect(screen.getByRole("list", { name: "Llaves de la cuenta" }).textContent).toContain("Mi PC (este dispositivo)");
     expect(screen.queryByRole("button", { name: "Agregar este dispositivo" })).toBeNull();
   });
 
@@ -130,8 +130,8 @@ describe("sección de la llave", () => {
 
     expect(await screen.findByRole("button", { name: "Agregar este dispositivo" })).not.toBeNull();
     expect(screen.getByText("Si este dispositivo no está en la lista, agregarlo.")).not.toBeNull();
-    expect(screen.queryByText(/Tu llave ya funciona en este dispositivo/)).toBeNull();
-    expect(screen.getByRole("list", { name: "Tus llaves" }).textContent).not.toContain("(este dispositivo)");
+    expect(screen.queryByText(/La llave ya funciona en este dispositivo/)).toBeNull();
+    expect(screen.getByRole("list", { name: "Llaves de la cuenta" }).textContent).not.toContain("(este dispositivo)");
   });
 
   function dispositivoConLlave(nombre: string) {
@@ -151,7 +151,7 @@ describe("sección de la llave", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Es otro equipo: agregarlo" }));
 
-    expect(await screen.findByText(/Tu llave ya funciona en este dispositivo/)).not.toBeNull();
+    expect(await screen.findByText(/La llave ya funciona en este dispositivo/)).not.toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByRole("button", { name: "Es otro equipo: agregarlo" })).toBeNull();
     expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(true);
@@ -162,7 +162,7 @@ describe("sección de la llave", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Agregar este dispositivo" }));
 
-    expect((await screen.findByRole("alert")).textContent).toBe("Este dispositivo ya tiene una llave en tu cuenta.");
+    expect((await screen.findByRole("alert")).textContent).toBe("Este dispositivo ya tiene una llave en esta cuenta.");
     // AC-35: el error se ve como error, no como texto común.
     expect(screen.getByRole("alert").className).toContain("aviso-error");
     expect(esDeEsteDispositivo(LLAVE.credencial_id)).toBe(false);
@@ -243,7 +243,7 @@ describe("informe de fricción, tanda 7", () => {
     expect(borrar).not.toHaveBeenCalled();
 
     await quitarConfirmando();
-    expect(await screen.findByText("Listo: quitaste la llave.")).not.toBeNull();
+    expect(await screen.findByText("Listo: la llave se quitó.")).not.toBeNull();
     expect(borrar).toHaveBeenCalledOnce();
   });
 

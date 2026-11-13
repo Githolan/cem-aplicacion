@@ -64,7 +64,7 @@ const TEXTO_NATURALEZA: Record<Naturaleza, string> = {
   empresa: "Empresa",
   servicio: "Servicio",
   organismo: "Organismo",
-  profesional: "Profesional (con su número profesional y la constancia del consentimiento)",
+  profesional: "Un profesional (con su número profesional y la constancia de que aceptó figurar)",
 };
 
 /** Cómo se nombra cada campo en el resumen del error: una frase por campo marcado (G-58). */
@@ -72,7 +72,7 @@ const TEXTO_CAMPO: Record<string, string> = {
   nombre: "el nombre",
   telefono: "el teléfono",
   indicaciones: "las indicaciones",
-  consentimiento_referencia: "la constancia del consentimiento",
+  consentimiento_referencia: "dónde consta que aceptó figurar",
   vigente_desde: "la fecha de inicio",
   motivo: "el motivo",
 };
@@ -103,17 +103,17 @@ const CAMPO_API: Partial<Record<keyof Datos, string>> = {
 
 /** Qué decir ante un error de una acción, según el estado, el código y los campos del 422. */
 export function mensajeDeError(estado: number, codigo: string | undefined, accion: Accion, campos: string[] = []): string {
-  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
+  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
   if (estado === ESTADO.sinPermiso)
-    return "No tenés permiso para gestionar los contactos de este edificio: hace falta la facultad de la administración o del Consejo.";
+    return "Esta cuenta no tiene permiso para gestionar los contactos de este edificio: hace falta la facultad de la administración o del Consejo.";
   if (estado === ESTADO.noEncontrado) return "Ese contacto ya no está en este edificio.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
-    return "El pedido se está procesando. Probá de nuevo en unos segundos.";
+    return "El pedido se está procesando. Reintentar en unos segundos.";
   if (estado === ESTADO.conflicto && codigo === "contacto_terminado")
-    return "Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.";
-  if (estado === ESTADO.conflicto) return "El pedido choca con el estado actual de la lista. Revisá la lista actualizada.";
+    return "Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.";
+  if (estado === ESTADO.conflicto) return "Otra persona cambió este dato recién. La lista ya está actualizada.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
-    return "Cambiaste los datos de un intento anterior. Volvé a enviar el formulario.";
+    return "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.";
   // Cada campo marcado lleva su motivo al lado (`ErrorDeCampo`); el resumen solo los nombra (G-58).
   if (estado === ESTADO.invalido) {
     const marcados = campos.length > 0 ? campos : accion === "senalar" ? ["body.motivo"] : [];
@@ -483,11 +483,11 @@ export function ContactosGestion() {
         if (accion === "agregar") cerrar();
         else cerrarFicha(false);
         const hecho: Record<Accion, string> = {
-          agregar: `agregamos el contacto ${nombre}`,
-          corregir: `corregimos el contacto ${nombre}`,
-          retirar: `retiramos el contacto ${nombre}`,
-          verificar: `quedó la constancia de que comprobaste el contacto ${nombre}`,
-          senalar: `señalamos el dato incorrecto del contacto ${nombre}`,
+          agregar: `el contacto ${nombre} quedó agregado`,
+          corregir: `el contacto ${nombre} quedó corregido`,
+          retirar: `el contacto ${nombre} se retiró`,
+          verificar: `quedó la constancia de que el contacto ${nombre} se comprobó`,
+          senalar: `quedó señalado el dato incorrecto del contacto ${nombre}`,
         };
         setAviso({ texto: `Listo: ${hecho[accion]}.`, ok: true });
         // Lo que se ve lo decide la API: la lista se vuelve a pedir.
@@ -515,7 +515,7 @@ export function ContactosGestion() {
           <p className="tarjeta">
             La administración y el Consejo mantienen la lista que todos ven en «Contactos de
             emergencia». Solo números de empresas, servicios u organismos; un profesional va con su
-            número profesional y la constancia del consentimiento. Nunca un celular personal.
+            número profesional y la constancia de que aceptó figurar. Nunca un celular personal.
           </p>
 
           {edificios.length > 1 && (
@@ -546,8 +546,8 @@ export function ContactosGestion() {
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
             {lectura.tipo === "sin_servicio" && (
               <>
-                <p>No pudimos mostrar la lista.</p>
-                <button type="button" onClick={reconsultar} disabled={enviando}>
+                <p>No se pudo mostrar la lista.</p>
+                <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
                   Consultar de nuevo
                 </button>
               </>
@@ -594,10 +594,10 @@ export function ContactosGestion() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
+                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button
+            <button className="secundario"
               type="button"
               onClick={() => {
                 setPantalla({ tipo: "cargando" });
@@ -608,7 +608,7 @@ export function ContactosGestion() {
             </button>
           </>
         )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {pantalla.tipo === "sin_consorcios" && <p>Esta cuenta todavía no participa de ningún edificio.</p>}
         {aviso && !avisoEnFicha && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
@@ -645,9 +645,9 @@ export function ContactosGestion() {
         datos={[
           { etiqueta: "Función", valor: TEXTO_FUNCION[c.funcion] },
           { etiqueta: "Nombre", valor: c.nombre },
-          { etiqueta: "Naturaleza", valor: TEXTO_NATURALEZA[c.naturaleza] },
+          { etiqueta: "De quién es el número", valor: TEXTO_NATURALEZA[c.naturaleza] },
           { etiqueta: "Teléfono", valor: c.telefono ?? "Sin teléfono" },
-          ...(c.consentimiento_referencia === null ? [] : [{ etiqueta: "Constancia del consentimiento", valor: c.consentimiento_referencia }]),
+          ...(c.consentimiento_referencia === null ? [] : [{ etiqueta: "Dónde consta que aceptó figurar", valor: c.consentimiento_referencia }]),
           ...(c.indicaciones === null ? [] : [{ etiqueta: "Indicaciones", valor: c.indicaciones }]),
           { etiqueta: "Vigencia", valor: vigencia(c) },
           { etiqueta: "Última modificación", valor: momento(c.actualizado_en) },
@@ -705,7 +705,7 @@ export function ContactosGestion() {
             </option>
           ))}
         </select>
-        <label htmlFor={`${titulo}-naturaleza`}>Naturaleza</label>
+        <label htmlFor={`${titulo}-naturaleza`}>¿De quién es el número?</label>
         <select
           id={`${titulo}-naturaleza`}
           value={datos.naturaleza}
@@ -753,7 +753,7 @@ export function ContactosGestion() {
         <ErrorDeCampo idCampo={`${titulo}-telefono`} mensaje={errorTelefono} />
         {profesional && (
           <>
-            <label htmlFor={`${titulo}-consentimiento`}>Constancia del consentimiento</label>
+            <label htmlFor={`${titulo}-consentimiento`}>¿Dónde consta que aceptó figurar? (por ejemplo: nota firmada el 3/5/2026)</label>
             <input
               id={`${titulo}-consentimiento`}
               type="text"
@@ -797,7 +797,7 @@ export function ContactosGestion() {
           <button type="submit" disabled={enviando}>
             {nuevo ? "Agregar el contacto" : "Guardar la corrección"}
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={nuevo ? cancelarAgregar : volverALaFicha} disabled={enviando}>
+          <button type="button" className="secundario" onClick={nuevo ? cancelarAgregar : volverALaFicha} disabled={enviando}>
             Cancelar
           </button>
         </p>
@@ -888,7 +888,7 @@ export function ContactosGestion() {
           >
             {texto.boton}
           </button>{" "}
-          <button type="button" className="secundario peligro" onClick={volverALaFicha} disabled={enviando}>
+          <button type="button" className="secundario" onClick={volverALaFicha} disabled={enviando}>
             Cancelar
           </button>
         </p>

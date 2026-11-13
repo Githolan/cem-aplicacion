@@ -135,13 +135,13 @@ test.describe("padrón", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
     await ficha.getByRole("button", { name: "Confirmar" }).click();
-    await page.getByLabel("Referencia del título").fill("  Contrato de locación 77  ");
+    await page.getByLabel("Documento que lo prueba").fill("  Contrato de locación 77  ");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360);
     await sinFaltasDeAccesibilidad(page);
     const enviar = await page.getByRole("button", { name: "Confirmar el vínculo" }).boundingBox();
     expect(enviar?.height).toBeGreaterThanOrEqual(44);
     await page.getByRole("button", { name: "Confirmar el vínculo" }).click();
-    await expect(page.getByText("Listo: confirmamos el vínculo de Beto Pérez con la unidad 1° A.")).toBeFocused();
+    await expect(page.getByText("Listo: quedó confirmado el vínculo de Beto Pérez con la unidad 1° A.")).toBeFocused();
     expect(envios).toHaveLength(1);
     expect(envios[0]?.camino).toBe(`${BASE}/vinculos/${V_INQ}/confirmar`);
     expect(envios[0]?.csrf).toBe(CSRF);
@@ -174,7 +174,7 @@ test.describe("padrón", () => {
     await page.getByLabel("Motivo").fill("Fin del contrato");
     await page.getByRole("button", { name: "Finalizar el vínculo" }).click();
     await page.getByRole("button", { name: "Sí, finalizar" }).click();
-    await expect(page.getByText("Listo: finalizamos el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale.")).toBeFocused();
+    await expect(page.getByText("Listo: quedó finalizado el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale.")).toBeFocused();
     expect(envios.map((e) => e.camino)).toEqual([`${BASE}/vinculos/${V_PROP}/finalizar`, `${BASE}/vinculos/${V_INQ}/finalizar`]);
     expect(envios[1]?.cuerpo).toEqual({ motivo: "Fin del contrato" });
   });
@@ -185,9 +185,9 @@ test.describe("padrón", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/padron");
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Padrón del edificio" })).toHaveCount(0);
-    await expect(page.getByText(/No tenés permiso|No hay permiso/)).toHaveCount(0);
+    await expect(page.getByText(/no tiene permiso|No hay permiso/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
   });
@@ -198,9 +198,9 @@ test.describe("padrón", () => {
     await page.goto("/padron");
     await page.getByRole("button", { name: "1° A: Beto Pérez" }).click();
     await page.getByRole("dialog", { name: "1° A: Beto Pérez" }).getByRole("button", { name: "Confirmar" }).click();
-    await page.getByLabel("Referencia del título").fill("Contrato 77");
+    await page.getByLabel("Documento que lo prueba").fill("Contrato 77");
     await page.getByRole("button", { name: "Confirmar el vínculo" }).click();
-    await expect(page.getByText("No pudimos verificar el pedido. Hace falta recargar la página.")).toBeVisible();
+    await expect(page.getByText("La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.")).toBeVisible();
     expect(envios[0]?.csrf).toBeNull();
   });
 });

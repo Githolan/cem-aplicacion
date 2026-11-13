@@ -187,7 +187,7 @@ ERRORES = {
     "no_encontrado": (404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO),
     "version_desactualizada": (
         409, CodigoError.VERSION_DESACTUALIZADA,
-        "Mientras tanto hubo otro cambio: volvé a abrirla para ver la versión vigente.",
+        "Mientras tanto hubo otro cambio: hay que abrirla de nuevo para ver cómo quedó.",
     ),
     "sin_cambios": (409, CodigoError.SIN_CAMBIOS, "No hay ningún cambio para guardar."),
     "estado_invalido": (409, CodigoError.ORDEN_NO_ADMITE, NO_ADMITE),
@@ -195,9 +195,13 @@ ERRORES = {
     "orden_inmutable": (409, CodigoError.ORDEN_NO_ADMITE, NO_ADMITE),
     "huella_distinta": (
         409, CodigoError.HUELLA_DISTINTA,
-        "La orden cambió mientras la revisabas: volvé a abrirla antes de aprobar.",
+        "La orden cambió mientras estaba abierta: hay que abrirla de nuevo antes de aprobar.",
     ),
-    "aprobacion_repetida": (409, CodigoError.APROBACION_REPETIDA, "Ya aprobaste esta versión."),
+    "aprobacion_repetida": (
+        409,
+        CodigoError.APROBACION_REPETIDA,
+        "Esta cuenta ya aprobó la orden así como está.",
+    ),
     "no_es_quien_preparo": (
         403, CodigoError.NO_ES_QUIEN_PREPARO,
         "Quien preparó la orden no la aprueba ni la rechaza.",
@@ -215,7 +219,7 @@ ERRORES = {
     ),
     "identidad_no_verificada": (
         403, CodigoError.IDENTIDAD_NO_VERIFICADA,
-        "Falta verificar una identidad en el consorcio. Soporte puede ayudarte.",
+        "Falta verificar una identidad en el consorcio. Soporte puede ayudar.",
     ),
     "proveedor_inexistente": (
         422, CodigoError.PROVEEDOR_INEXISTENTE, "Ese proveedor no existe en este consorcio.",
@@ -240,7 +244,8 @@ ERRORES = {
     ),
     "aprobacion_vencida": (
         409, CodigoError.APROBACION_VENCIDA,
-        "La aprobación tiene más de 7 días: renová la orden para que vuelva a revisión.",
+        "La aprobación tiene más de 7 días: hay que renovar la orden para que el Consejo la "
+        "apruebe de nuevo.",
     ),
     "aprobacion_vigente": (
         409, CodigoError.APROBACION_VIGENTE, "La aprobación todavía rige: no hay que renovarla.",
@@ -251,11 +256,13 @@ ERRORES = {
     ),
     "contrato_no_vigente": (
         409, CodigoError.CONTRATO_NO_VIGENTE,
-        "El contrato que respaldaba la orden ya no rige: renovala para evaluarla de nuevo.",
+        "El contrato que respaldaba la orden ya no rige: hay que renovarla para evaluarla de "
+        "nuevo.",
     ),
     "contrato_no_aplica": (
         422, CodigoError.CONTRATO_NO_APLICA,
-        "El contrato elegido no respalda esta orden: revisá el proveedor, la moneda, el importe"
+        "El contrato elegido no respalda esta orden: hay que revisar el proveedor, la moneda, "
+        "el importe"
         " máximo y que esté confirmado y vigente.",
     ),
     "contrato_ya_confirmado": (
@@ -266,7 +273,8 @@ ERRORES = {
     ),
     "proveedor_cambiado": (
         409, CodigoError.PROVEEDOR_CAMBIADO,
-        "El proveedor cambió después de preparar la orden: modificala para que vuelva a revisión.",
+        "El proveedor cambió después de preparar la orden: hay que modificarla para que el "
+        "Consejo la apruebe de nuevo.",
     ),
     "proveedor_sin_cuenta": (
         409, CodigoError.PROVEEDOR_SIN_CUENTA, "El proveedor no tiene cuenta destino.",
@@ -294,8 +302,8 @@ ERRORES = {
     ),
     "pago_en_curso": (
         409, CodigoError.PAGO_EN_CURSO,
-        "Otra persona ya vio la cuenta de este pago: esperá su comprobante, para no pagar dos"
-        " veces.",
+        "Otra persona ya vio la cuenta de este pago: hay que esperar su comprobante, para no pagar"
+        " dos veces.",
     ),
     "toma_antes_de_tiempo": (
         409, CodigoError.TOMA_ANTES_DE_TIEMPO,
@@ -303,12 +311,12 @@ ERRORES = {
     ),
     "numero_operacion_invalido": (
         422, CodigoError.NUMERO_OPERACION_INVALIDO,
-        "El número de operación no es válido: copialo tal como figura en el comprobante.",
+        "El número de operación no es válido: hay que copiarlo tal como figura en el comprobante.",
     ),
     "no_coincide_con_la_orden": (
         422, CodigoError.NO_COINCIDE_CON_LA_ORDEN,
-        "El importe, la moneda o la cuenta no son los de la orden aprobada: revisá el comprobante"
-        " o usá «Pagué otra cosa».",
+        "El importe, la moneda o la cuenta no son los de la orden aprobada: hay que revisar el"
+        " comprobante o usar «Se transfirió otro importe o a otra cuenta».",
     ),
     "fecha_operacion_invalida": (
         422, CodigoError.FECHA_OPERACION_INVALIDA,
@@ -337,12 +345,12 @@ ERRORES = {
     ),
     "motivo_con_cuenta": (
         422, CodigoError.MOTIVO_CON_CUENTA,
-        "El motivo no puede llevar el número de una cuenta: describí el problema sin copiarla."
-        " Si no es una cuenta, separá los números con una coma.",
+        "El motivo no puede llevar el número de una cuenta: hay que describir el problema sin"
+        " copiarla. Si no es una cuenta, separar los números con una coma.",
     ),
     "sin_diferencia": (
         422, CodigoError.SIN_DIFERENCIA,
-        "Lo que escribiste es lo mismo que la orden: registrá el pago, no una diferencia.",
+        "Lo escrito es lo mismo que la orden: corresponde registrar el pago, no una diferencia.",
     ),
     "diferencia_ya_resuelta": (
         409, CodigoError.DIFERENCIA_YA_RESUELTA, "El Consejo ya resolvió esa diferencia.",
@@ -380,7 +388,8 @@ cargó el CUIT), y la pantalla cierra el formulario y vuelve a pedir la lista.""
 ERRORES_CONFIRMACION = {
     "proveedor_cambiado": (
         409, CodigoError.PROVEEDOR_CAMBIADO,
-        "El proveedor cambió desde que viste el contrato: recargá y confirmá la versión nueva.",
+        "El proveedor cambió desde que se abrió el contrato: hay que recargar la página y "
+        "confirmar los datos nuevos.",
     ),
 }  # fmt: skip
 """Al confirmar un contrato, `proveedor_cambiado` es que se vio otra versión del proveedor
@@ -1802,7 +1811,7 @@ def confirmar_pago_no_realizado(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
-# --- «Pagué otra cosa» (`0075`) -----------------------------------------------------------------
+# --- «Se transfirió otro importe o a otra cuenta» (`0075`) ---------------------------------
 
 
 def _diferencias(
@@ -2581,8 +2590,8 @@ ERRORES_SIN_AMBITO = {
 @router.get(
     "/pagos-por-aclarar",
     response_model=ListaPagosPorAclarar,
-    summary="Los pagos manuales que esperan que digas si transferiste: viste la cuenta y ya no"
-    " ejecutás",
+    summary="Los pagos manuales que esperan saber si se transfirió: esta cuenta vio la cuenta"
+    " bancaria y ya no ejecuta pagos",
 )
 def pagos_por_aclarar(identidad: IdentidadDep, motor: MotorDep) -> ListaPagosPorAclarar:
     with transaccion(motor, persona_id=identidad.persona_id) as c:
@@ -2630,7 +2639,7 @@ def ejecutar_sin_ambito(conn: Connection, ctx: Contexto, sql: str, parametros: d
     "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/no-realizado",
     status_code=201,
     response_model=DeclaracionRegistrada,
-    summary="Declarar que no transferiste, sin ejecutar ya pagos en el consorcio: lo confirma otro"
+    summary="Declarar que no se transfirió, sin ejecutar ya pagos en el consorcio: lo confirma otro"
     " miembro del Consejo",
     responses=RESPUESTAS_ESCRITURA,
 )
@@ -2660,7 +2669,7 @@ def declarar_pago_no_realizado_sin_facultad(
     "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/comprobante",
     status_code=201,
     response_model=DocumentoId,
-    summary="Cargar el comprobante de lo que transferiste, sin ejecutar ya pagos en el consorcio",
+    summary="Cargar el comprobante de lo que se transfirió, sin ejecutar ya pagos en el consorcio",
     responses=RESPUESTAS_ESCRITURA,
 )
 def crear_comprobante_sin_facultad(
@@ -2749,7 +2758,7 @@ def registrar_diferencia_sin_facultad(
     "/consorcios/{consorcio_id}/pagos-por-aclarar/{orden_id}/pago",
     status_code=201,
     response_model=PagoManualRegistrado,
-    summary="Registrar lo que transferiste, sin ejecutar ya pagos en el consorcio: lo concilia"
+    summary="Registrar lo que se transfirió, sin ejecutar ya pagos en el consorcio: lo concilia"
     " otro miembro del Consejo",
     responses=RESPUESTAS_ESCRITURA,
 )

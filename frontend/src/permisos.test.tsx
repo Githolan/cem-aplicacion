@@ -20,7 +20,7 @@ const EDIFICIOS = [
   { id: C2, nombre: "Edificio Verde", vinculos: [] },
 ];
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
+const INICIO = { level: 1, name: "Consorcio en mano" };
 
 function error(codigo: string, status: number) {
   return Response.json({ codigo, mensaje: "x", detalle: null, id_correlacion: "c" }, { status });
@@ -190,7 +190,7 @@ describe("Exige", () => {
 });
 
 describe("inicio por rol", () => {
-  const MI_CUENTA = "Mi cuenta";
+  const MI_CUENTA = "Cuenta";
   const INVITAR = "Invitar a una persona";
   const MANDATOS = "Mandatos y decisiones";
   const PADRON = "Padrón del edificio";
@@ -247,7 +247,7 @@ describe("inicio por rol", () => {
   it.each<[string, Record<string, Respuesta>]>([
     ["sin conexión", { "/api/v1/me/consorcios": sinRed }],
     ["sin saber qué alcanza", { [`/api/v1/consorcios/${C1}/mis-acciones`]: sinRed }],
-  ])("%s quedan solo Mi cuenta y Contactos", async (_, extra) => {
+  ])("%s quedan solo Cuenta y Contactos", async (_, extra) => {
     vi.stubGlobal("fetch", backend({ [C1]: ADMINISTRADOR }, extra));
     abrirApp();
     expect(await enlaces()).toEqual([CONTACTOS]);
@@ -255,7 +255,7 @@ describe("inicio por rol", () => {
 
   it("«Pagos para aclarar» aparece solo si la lista trae algo", async () => {
     const CON_ALGO = { "/api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{ orden_id: "x" }] }) };
-    const nombre = "Pagos para aclarar (si dejaste de administrar)";
+    const nombre = "Pagos para aclarar (de quien dejó de administrar)";
     vi.stubGlobal("fetch", backend({ [C1]: VECINO }, CON_ALGO));
     abrirApp();
     expect(await screen.findByRole("link", { name: nombre })).toBeTruthy();
@@ -431,7 +431,7 @@ describe("el edificio elegido", () => {
     abrirApp("/padron");
     await elegirElVerde();
     fireEvent.click(screen.getByRole("link", MARCA));
-    fireEvent.click(await screen.findByRole("link", { name: "Mi cuenta" }));
+    fireEvent.click(await screen.findByRole("link", { name: "Cuenta" }));
     fireEvent.click(await screen.findByRole("button", { name: "Salir" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Ya tengo un código" }));
@@ -629,7 +629,7 @@ describe("una dirección abierta a mano sin permiso", () => {
     abrirApp(ruta);
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
     expect(caminos(simulado)).not.toContain(`/api/v1/consorcios/${C1}/${lectura}`);
-    expect(screen.queryByText(/No tenés (permiso|la facultad|acceso)/)).toBeNull();
+    expect(screen.queryByText(/no tiene (permiso|la facultad|acceso)/)).toBeNull();
   });
 });
 
@@ -640,7 +640,7 @@ describe("un 403 al leer lleva al inicio", () => {
     vi.stubGlobal("fetch", backend({ [C1]: acciones }, {}, NEGADA));
     abrirApp(ruta);
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
-    expect(screen.queryByText(/No tenés (permiso|la facultad|acceso)/)).toBeNull();
+    expect(screen.queryByText(/no tiene (permiso|la facultad|acceso)/)).toBeNull();
   });
 
   it("control: un 500 no lleva al inicio, se queda a reintentar", async () => {

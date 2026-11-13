@@ -228,7 +228,7 @@ describe("Pagos en el inicio de quien prepara", () => {
     vi.stubGlobal("fetch", backend({ acciones: { [C1]: ADMINISTRA }, bandejas: { [C1]: caida } }));
     abrir();
 
-    expect(await screen.findByText("No pudimos leer lo que tenés para hacer")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron leer los pendientes")).toBeTruthy();
     expect((await filaDePagos()).getAttribute("href")).toBe("/pagos");
   });
 });
@@ -338,10 +338,10 @@ describe("volver del alta de la verificación", () => {
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
     await screen.findByText("Nada pendiente.");
     fireEvent.click(screen.getByRole("link", { name: "Ir al alta" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Desactivar el segundo factor" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Desactivar la confirmación con código" }));
     fireEvent.click(await screen.findByRole("button", { name: "Desactivar" }));
     await screen.findByRole("heading", { level: 1, name: "Pagos" });
-    await screen.findByText("Listo: el segundo factor quedó desactivado.");
+    await screen.findByText("Listo: la confirmación con código quedó desactivada.");
   }
 
   it("sigue en el edificio con el que había llegado", async () => {

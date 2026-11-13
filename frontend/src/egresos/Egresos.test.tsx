@@ -250,12 +250,13 @@ describe("lo común de egresos", () => {
     expect(sobreLoNuevo(visto, visto, nuevo)).toEqual(nuevo);
   });
 
-  it("un sin_permiso en un acto no afirma que falta la facultad: la separación niega igual", () => {
-    expect(mensajeDeActo(403, "sin_permiso")).toMatch(/quien prepara, aprueba, ejecuta y concilia/);
-    expect(mensajeDeActo(403, "sin_permiso")).not.toMatch(/No tenés la facultad/);
-    // Control: fuera de los actos, y con otro código, el mensaje es el de siempre.
-    expect(mensajeDeError(403, "sin_permiso")).toBe("No tenés la facultad para esto en este edificio.");
-    expect(mensajeDeActo(403, "no_es_quien_aprobo")).toBe("Quien aprobó la orden no la emite.");
+  it("la separación de funciones dice el motivo concreto que manda el servidor (pregunta 10)", () => {
+    const separacion = { codigo: "ya_participo", mensaje: "La preparó esta cuenta: la aprueba otra persona del Consejo." };
+    expect(mensajeDeActo(403, separacion)).toBe("La preparó esta cuenta: la aprueba otra persona del Consejo.");
+    // Control: sin_permiso es la facultad que falta, y no el párrafo de las dos causas posibles.
+    expect(mensajeDeActo(403, { codigo: "sin_permiso", mensaje: "otro" })).toBe("Esta cuenta no tiene la facultad para esto en este edificio.");
+    expect(mensajeDeActo(403, { codigo: "sin_permiso", mensaje: "otro" })).not.toMatch(/Puede ser que/);
+    expect(mensajeDeActo(403, { codigo: "no_es_quien_aprobo", mensaje: "otro" })).toBe(mensajeDeError(403, "no_es_quien_aprobo"));
   });
 
   it("el aviso de la red no pisa un «Listo», y una falla sí lo pisa a él", () => {
@@ -312,7 +313,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cargar el CUIT" }));
     fireEvent.change(screen.getByLabelText(/^CUIT/), { target: { value: "20000000001" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar el CUIT" }));
-    expect(await screen.findByText(/Listo: cargaste el CUIT/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el CUIT de/)).toBeTruthy();
     const pedido = api.mock.calls.map(([q]) => q as Request).find((q) => q.method === "POST" && new URL(q.url).pathname === CARGA);
     expect(await pedido?.clone().json()).toEqual({ cuit: "20000000001", version_esperada: 1 });
   });
@@ -652,7 +653,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza integral" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
-    expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
+    expect(await screen.findByText("Listo: los cambios de Limpieza Ficticia SRL quedaron guardados.")).toBeTruthy();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
     expect(await enviado.json()).toMatchObject({ documento_id: DOC });
   });
@@ -670,7 +671,7 @@ describe("página /egresos/proveedores", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(AVISO_CUENTA);
     expect(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`)).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Sí, cambiar la cuenta" }));
-    expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
+    expect(await screen.findByText("Listo: los cambios de Limpieza Ficticia SRL quedaron guardados.")).toBeTruthy();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
     expect(await enviado.json()).toMatchObject({ cuenta_destino: CUENTA_NUEVA, version_esperada: 1, conservar_cuenta: false });
   });
@@ -685,7 +686,7 @@ describe("página /egresos/proveedores", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Cambiar los datos" }));
     fireEvent.change(await screen.findByLabelText("Rubro (opcional)"), { target: { value: "limpieza y jardín" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar los cambios" }));
-    expect(await screen.findByText("Listo: el proveedor quedó en la versión 2.")).toBeTruthy();
+    expect(await screen.findByText("Listo: los cambios de Limpieza Ficticia SRL quedaron guardados.")).toBeTruthy();
     expect(screen.queryByText(AVISO_CUENTA)).toBeNull();
     const enviado = unico(pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`));
     // La pantalla no tiene la cuenta completa: pide conservarla, sin mandar ninguna.
@@ -716,7 +717,7 @@ describe("página /egresos/proveedores", () => {
     expect(screen.queryByRole("button", { name: "Sí, cambiar la cuenta" })).toBeNull();
     fireEvent.click(await screen.findByRole("button", { name: "Guardar los cambios" }));
     fireEvent.click(await screen.findByRole("button", { name: "Sí, cambiar la cuenta" }));
-    expect(await screen.findByText("Listo: el proveedor quedó en la versión 3.")).toBeTruthy();
+    expect(await screen.findByText("Listo: los cambios de Limpieza Ficticia SRL quedaron guardados.")).toBeTruthy();
     const intentos = pedidos(simulado, "POST", `${BASE}/proveedores/${P1}/versiones`);
     expect(intentos).toHaveLength(2);
     expect(await (intentos[1] as Request).json()).toMatchObject({
@@ -810,14 +811,14 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     await screen.findByRole("button", { name: "Reintentar" });
     caido = false;
     volvioLaRed();
-    expect(await screen.findByText("No tenés edificios en Consorcio en Mano.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta no tiene edificios en Consorcio en Mano.")).toBeTruthy();
   });
 
   it("un 403 al leer lleva al inicio: volver a pedir no lo arregla", async () => {
     vi.stubGlobal("fetch", backend({ ...INICIO, [`GET ${BASE}/proveedores`]: () => error("sin_permiso", 403) }));
     abrir("/egresos/proveedores");
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
-    expect(screen.queryByText(/No tenés la facultad/)).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
+    expect(screen.queryByText(/no tiene la facultad/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
@@ -835,7 +836,7 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     expect(pedidos(api, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(boton);
-    expect(await screen.findByText("No tenés edificios en Consorcio en Mano.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta no tiene edificios en Consorcio en Mano.")).toBeTruthy();
     expect(pedidos(api, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
@@ -855,7 +856,7 @@ describe("fricción: el resultado y el error en el lugar justo", () => {
     fireEvent.change(screen.getByLabelText(/Razón social/), { target: { value: "Nuevo SRL" } });
     fireEvent.submit(screen.getByLabelText(/Razón social/).closest("form") as HTMLFormElement);
     expect(await screen.findByRole("button", { name: "Reintentar" })).toBeTruthy();
-    expect(screen.getByText("Listo: dimos de alta el proveedor.")).toBeTruthy();
+    expect(screen.getByText("Listo: el proveedor quedó dado de alta.")).toBeTruthy();
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 

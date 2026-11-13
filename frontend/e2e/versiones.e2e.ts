@@ -49,6 +49,7 @@ test.describe("versiones en caché", () => {
       await instalarServiceWorker(page, anterior.origen);
       // Control: esa versión, desde su caché, de verdad no conoce /entrar.
       await page.goto(`${anterior.origen}/entrar`);
+      // La versión anterior (38aca25) todavía hablaba en primera persona: su texto, no el de hoy.
       await expect(page.getByRole("heading", { level: 1 })).toHaveText("No encontramos esa página");
       await page.goto(`${anterior.origen}/`);
 
@@ -112,7 +113,7 @@ test.describe("versiones en caché", () => {
         () => (performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming).type === "reload",
       );
       expect(page.url()).toBe(url);
-      await expect(page.getByRole("heading", { level: 1 })).toHaveText("No encontramos esa página");
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("No se encontró esa página");
       await expect(page.getByRole("alert")).toHaveCount(0);
       expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistration())?.waiting ?? null)).toBeNull();
       await sinFaltasDeAccesibilidad(page);

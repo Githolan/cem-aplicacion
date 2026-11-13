@@ -280,8 +280,8 @@ describe("página /mandatos", () => {
       }),
     );
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
+    expect(screen.queryByText(/no tiene permiso/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
   });
 
@@ -318,7 +318,7 @@ describe("página /mandatos", () => {
     const titulo = await screen.findByRole("heading", { level: 2, name: "Reunión del Consejo del 5 de marzo de 2026" });
     const detalle = titulo.closest("section") as HTMLElement;
     expect(within(detalle).getByText("Acta 14, libro 3, folio 52")).toBeTruthy();
-    expect(within(detalle).getByText(/Vos: no podés usarla para dar de alta ni para remover/)).toBeTruthy();
+    expect(within(detalle).getByText(/Esta cuenta. Por eso no puede usarla para dar de alta ni para remover/)).toBeTruthy();
   });
 
   it("un detalle que ya no está (404) lo dice y vuelve a pedir la lista", async () => {
@@ -342,7 +342,7 @@ describe("página /mandatos", () => {
     fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: " Contrata al estudio " } });
     fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Contrato del 01-10" } });
     fireEvent.click(boton("Registrar decisión"));
-    expect(await screen.findByText("Listo: registramos la decisión.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la decisión quedó registrada.")).toBeTruthy();
     const post = en(pedidos(simulado, "POST", RUTA_DECISIONES), 0);
     expect(post.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(post.headers.get("Idempotency-Key")).toMatch(UUID);
@@ -351,27 +351,25 @@ describe("página /mandatos", () => {
       fecha: "2026-10-01",
       descripcion: "Contrata al estudio",
       referencia: "Contrato del 01-10",
-      sha256: null,
     });
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_DECISIONES)).toHaveLength(2));
   });
 
-  it("«Qué se decidió» y «Dónde consta» son textarea y la huella, una línea", async () => {
+  it("«Qué se decidió» y «Dónde consta» son textarea, sin pedir la huella del acta (G-48)", async () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
     await cargado();
     const form = seccion("Registrar una decisión");
     const que = within(form).getByLabelText("Qué se decidió");
     const donde = within(form).getByLabelText("Dónde consta (libro, acta y folio)");
-    const huella = within(form).getByLabelText("Huella SHA-256 del acta escaneada (opcional)");
     expect(que.tagName).toBe("TEXTAREA");
     expect(que.getAttribute("rows")).toBe("4");
     expect(que.getAttribute("maxlength")).toBe("500");
     expect(donde.tagName).toBe("TEXTAREA");
     expect(donde.getAttribute("rows")).toBe("2");
     expect(donde.getAttribute("maxlength")).toBe("300");
-    expect(huella.tagName).toBe("INPUT");
-    expect(huella.getAttribute("type")).toBe("text");
+    // G-48: nadie calcula a mano la huella de un acta; el campo ya no se pide.
+    expect(within(form).queryByLabelText(/Huella SHA-256/)).toBeNull();
     expect(within(form).getByRole("button", { name: "Registrar decisión" }).closest("form")?.className).toMatch(
       /\bformulario-movil\b/,
     );
@@ -390,7 +388,7 @@ describe("página /mandatos", () => {
     expect(enter).toBe(false);
     fireEvent.change(que, { target: { value: "   " } });
     expect(que.validity.customError).toBe(true);
-    expect(que.validationMessage).toBe("Escribí algo más que espacios.");
+    expect(que.validationMessage).toBe("Hace falta algo más que espacios.");
     fireEvent.change(que, { target: { value: " Algo " } });
     expect(que.validity.valid).toBe(true);
   });
@@ -514,7 +512,7 @@ describe("página /mandatos", () => {
     abrir();
     await cargado();
     const alta = seccion("Dar de alta un mandato");
-    expect(within(alta).getByText(/las registraste vos, y quien registra una decisión no la usa/)).toBeTruthy();
+    expect(within(alta).getByText(/las registró esta cuenta, y quien registra una decisión no la usa/)).toBeTruthy();
     expect(within(alta).queryByLabelText("Decisión que lo respalda")).toBeNull();
     expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
     fireEvent.change(within(alta).getByLabelText("Tipo de mandato"), { target: { value: "administrador_externo" } });
@@ -527,7 +525,7 @@ describe("página /mandatos", () => {
     await cargado();
     const alta = seccion("Dar de alta un mandato");
     expect(within(alta).getByText(/Todavía no hay decisiones registradas: sin una que lo respalde/)).toBeTruthy();
-    expect(within(alta).queryByText(/las registraste vos/)).toBeNull();
+    expect(within(alta).queryByText(/las registró esta cuenta/)).toBeNull();
     expect(within(alta).queryByRole("button", { name: "Dar de alta" })).toBeNull();
   });
 
@@ -538,7 +536,7 @@ describe("página /mandatos", () => {
     await completarAlta();
     fireEvent.click(boton("Dar de alta"));
     const aviso = await within(seccion("Dar de alta un mandato")).findByRole("alert");
-    expect(aviso.textContent).toMatch(/^No tenés permiso para dar este alta\./);
+    expect(aviso.textContent).toMatch(/^El mandato de esta cuenta no incluye dar este alta\./);
     expect((screen.getByLabelText("Decisión que lo respalda") as HTMLSelectElement).value).toBe(D_EQUIPO);
     expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
   });
@@ -560,7 +558,7 @@ describe("página /mandatos", () => {
     abrir();
     await completarAlta();
     fireEvent.click(boton("Dar de alta"));
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido/)).toBeTruthy();
     respuesta = () => error("administracion_ocupada", 409);
     fireEvent.click(boton("Dar de alta"));
     expect(await screen.findByText("Ya hay un mandato de administración en esas fechas en este edificio.")).toBeTruthy();
@@ -633,7 +631,7 @@ describe("página /mandatos", () => {
     fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 1" } });
     fireEvent.click(boton("Registrar decisión"));
     expect(await screen.findByText(/no puede ser posterior a hoy: se registran actos ya tomados/)).toBeTruthy();
-    expect(screen.queryByText("Listo: registramos la decisión.")).toBeNull();
+    expect(screen.queryByText("Listo: la decisión quedó registrada.")).toBeNull();
   });
 
   it("un pedido en curso (409) conserva la clave", async () => {
@@ -652,7 +650,7 @@ describe("página /mandatos", () => {
     expect(await screen.findByText(/El pedido se está procesando/)).toBeTruthy();
     enCurso = false;
     fireEvent.click(boton("Registrar decisión"));
-    await screen.findByText("Listo: registramos la decisión.");
+    await screen.findByText("Listo: la decisión quedó registrada.");
     const [primera, segunda] = pedidos(simulado, "POST", RUTA_DECISIONES).map((p) => p.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
   });
@@ -675,7 +673,7 @@ describe("página /mandatos", () => {
     expect(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${M_AE}/baja`)).toHaveLength(0);
     fireEvent.click(boton("Dar de baja"));
     fireEvent.click(boton("Sí, dar de baja"));
-    expect(await screen.findByText("Listo: dimos de baja el mandato de Estudio Sur.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el mandato de Estudio Sur quedó dado de baja.")).toBeTruthy();
     const post = en(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${M_AE}/baja`), 0);
     expect(post.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(post.headers.get("Idempotency-Key")).toMatch(UUID);
@@ -705,7 +703,7 @@ describe("página /mandatos", () => {
     fireEvent.change(screen.getByLabelText("Por qué termina"), { target: { value: "Remoción" } });
     fireEvent.click(boton("Dar de baja"));
     fireEvent.click(boton("Sí, dar de baja"));
-    await screen.findByText("Listo: dimos de baja el mandato de Estudio Sur.");
+    await screen.findByText("Listo: el mandato de Estudio Sur quedó dado de baja.");
     const cuerpo = (await en(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${M_AE}/baja`), 0).json()) as Record<string, unknown>;
     expect([cuerpo.causa, cuerpo.decision_id, cuerpo.instrumento]).toEqual(["remocion", D_EQUIPO, null]);
   });
@@ -784,12 +782,12 @@ describe("página /mandatos", () => {
     await abrirBaja();
     fireEvent.click(boton("Dar de baja"));
     fireEvent.click(boton("Sí, dar de baja"));
-    expect(await screen.findByText(/No tenés permiso para dar esta baja/)).toBeTruthy();
+    expect(await screen.findByText(/El mandato de esta cuenta no incluye dar esta baja/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Sí, dar de baja" })).toBeNull();
     respuesta = () => Response.json({ id: M_AE, causa: "renuncia", vigente_hasta: "2026-10-19" });
     fireEvent.click(boton("Dar de baja"));
     fireEvent.click(boton("Sí, dar de baja"));
-    await screen.findByText("Listo: dimos de baja el mandato de Estudio Sur.");
+    await screen.findByText("Listo: el mandato de Estudio Sur quedó dado de baja.");
     expect(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${M_AE}/baja`)).toHaveLength(2);
   });
 
@@ -871,7 +869,7 @@ describe("página /mandatos", () => {
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     respuesta = () => error("idempotencia_reutilizada", 422);
     fireEvent.click(boton("Dar de alta"));
-    expect(await screen.findByText(/Cambiaste los datos de un intento anterior/)).toBeTruthy();
+    expect(await screen.findByText(/Los datos cambiaron desde un intento anterior/)).toBeTruthy();
     respuesta = () => Response.json({ id: NUEVO }, { status: 201 });
     fireEvent.click(boton("Dar de alta"));
     await screen.findByText("Listo: el mandato quedó dado de alta.");
@@ -896,17 +894,17 @@ describe("página /mandatos", () => {
     const ver = screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") });
     fireEvent.click(ver);
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
     caida = true;
     fireEvent.click(ver);
-    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/Hay que revisar la conexión/)).toBeTruthy();
   });
 
   it("E34: la primera carga con un 503 de la aplicación dice servicio, no conexión", async () => {
     vi.stubGlobal("fetch", conConsejo({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios. El servicio no está disponible/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   describe("al terminar un envío", () => {
@@ -932,7 +930,7 @@ describe("página /mandatos", () => {
       const titulo = await screen.findByRole("heading", { level: 2, name: "Contrato de administración del 1 de octubre de 2026" });
       await waitFor(() => expect(document.activeElement).toBe(titulo));
       expect(within(titulo.closest("section") as HTMLElement).getByText("Contrato del 01-10")).toBeTruthy();
-      expect(screen.getByText("Listo: registramos la decisión.")).toBeTruthy();
+      expect(screen.getByText("Listo: la decisión quedó registrada.")).toBeTruthy();
       expect(screen.queryByRole("region", { name: "Registrar una decisión" })).toBeNull();
       const form = seccion("Registrar una decisión");
       expect(valor(form, "Tipo")).toBe("asamblea");
@@ -1006,7 +1004,7 @@ describe("página /mandatos", () => {
       abrir();
       await completarAlta();
       fireEvent.click(boton("Dar de alta"));
-      const aviso = await screen.findByText("Listo: el mandato quedó dado de alta. No pudimos abrir su detalle: buscalo en la lista.");
+      const aviso = await screen.findByText("Listo: el mandato quedó dado de alta. No se pudo abrir su detalle: está en la lista.");
       expect(aviso.className).toBe("aviso-ok");
       expect(screen.queryByRole("button", { name: "Cerrar el detalle" })).toBeNull();
       expect(pedidos(simulado, "POST", RUTA_MANDATOS)).toHaveLength(1);
@@ -1020,7 +1018,7 @@ describe("página /mandatos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron consultar los mandatos.")).toBeTruthy();
     seccion("Registrar una decisión");
     const decision = screen.getByLabelText("Qué se decidió") as HTMLTextAreaElement;
     fireEvent.change(decision, { target: { value: "A medio escribir" } });
@@ -1049,7 +1047,7 @@ describe("página /mandatos", () => {
     const { container } = abrir();
     await screen.findByRole("button", { name: "Dar de alta un mandato" });
     seccion("Dar de alta un mandato");
-    expect(await screen.findByText("No pudimos consultar quiénes pueden recibir un mandato.")).toBeTruthy();
+    expect(await screen.findByText("No se pudo consultar quiénes pueden recibir un mandato.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Consultar de nuevo", description: "Mandatos" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Consultar de nuevo", description: "Decisiones" })).toBeTruthy();
     const alta = screen.getByRole("button", { name: "Consultar de nuevo", description: "Dar de alta un mandato" });
@@ -1069,10 +1067,10 @@ describe("página /mandatos", () => {
       conConsejo({ [`GET ${RUTA_DECISIONES}`]: () => (caida ? error("error_interno", 500) : Response.json(DECISIONES)) }),
     );
     abrir();
-    await screen.findByText("No pudimos consultar las decisiones.");
+    await screen.findByText("No se pudieron consultar las decisiones.");
     expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeTruthy();
     seccion("Dar de alta un mandato");
-    expect(await screen.findByText(/no pudimos consultarlas/)).toBeTruthy();
+    expect(await screen.findByText(/no se pudieron consultar/)).toBeTruthy();
     caida = false;
     fireEvent.click(within(seccion("Dar de alta un mandato")).getByRole("button", { name: "Consultar de nuevo" }));
     expect(await screen.findByRole("button", { name: "Dar de alta" })).toBeTruthy();
@@ -1085,14 +1083,14 @@ describe("página /mandatos", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudieron consultar los edificios/)).toBeTruthy();
     // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(boton("Consultar de nuevo"));
     expect(await cargado()).toBeTruthy();
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
-    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+    expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
   });
 
   describe("al volver la red", () => {
@@ -1105,7 +1103,7 @@ describe("página /mandatos", () => {
       });
       vi.stubGlobal("fetch", simulado);
       abrir();
-      expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+      expect(await screen.findByText("No se pudieron consultar los mandatos.")).toBeTruthy();
       seccion("Registrar una decisión");
       fireEvent.change(screen.getByLabelText("Qué se decidió"), { target: { value: "A medio escribir" } });
       caida = false;
@@ -1119,11 +1117,11 @@ describe("página /mandatos", () => {
       const simulado = conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => error("error_interno", 500) });
       vi.stubGlobal("fetch", simulado);
       abrir();
-      await screen.findByText("No pudimos consultar los mandatos.");
+      await screen.findByText("No se pudieron consultar los mandatos.");
       const antes = pedidos(simulado, "GET", RUTA_MANDATOS).length;
       volvioLaRed();
       await waitFor(() => expect(pedidos(simulado, "GET", RUTA_MANDATOS).length).toBeGreaterThan(antes));
-      expect(await screen.findByText("No pudimos consultar los mandatos.")).toBeTruthy();
+      expect(await screen.findByText("No se pudieron consultar los mandatos.")).toBeTruthy();
       await waitFor(() => expect(screen.queryByText(VOLVIO_LA_RED)).toBeNull());
     });
 
@@ -1153,11 +1151,11 @@ describe("página /mandatos", () => {
         conConsejo({ "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)) }),
       );
       abrir();
-      await screen.findByText(/No pudimos consultar tus edificios/);
+      await screen.findByText(/No se pudieron consultar los edificios/);
       caido = false;
       volvioLaRed();
       expect(await cargado()).toBeTruthy();
-      expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+      expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
     });
   });
 
@@ -1248,7 +1246,7 @@ describe("página /mandatos", () => {
       abrir();
       await completarAlta();
       fireEvent.click(boton("Dar de alta"));
-      expect((await within(seccion("Dar de alta un mandato")).findByRole("alert")).textContent).toMatch(/No pudimos completar el pedido/);
+      expect((await within(seccion("Dar de alta un mandato")).findByRole("alert")).textContent).toMatch(/No se pudo completar el pedido/);
     });
 
     it("control: un «Listo» va al estado de la página, y arriba de las secciones", async () => {
@@ -1270,7 +1268,7 @@ describe("página /mandatos", () => {
     abrir();
     await cargado();
     seccion("Dar de alta un mandato");
-    expect(screen.getByText("No pudimos consultar quiénes pueden recibir un mandato.")).toBeTruthy();
+    expect(screen.getByText("No se pudo consultar quiénes pueden recibir un mandato.")).toBeTruthy();
     expect(within(seccion("Decisiones")).getByText("Asamblea del 10 de enero de 2026")).toBeTruthy();
   });
 
@@ -1312,16 +1310,16 @@ describe("página /mandatos", () => {
       };
       completar();
       fireEvent.click(boton("Registrar decisión"));
-      await screen.findByText(/No pudimos completar el pedido/);
+      await screen.findByText(/No se pudo completar el pedido/);
       fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
       expect(await screen.findByText("Eva Sosa, Consejo de propietarios")).toBeTruthy();
       expect(screen.queryByText("Ana Díaz, Consejo de propietarios")).toBeNull();
-      expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+      expect(screen.queryByText(/No se pudo completar el pedido/)).toBeNull();
       expect(screen.getByText("Todavía no hay decisiones registradas.")).toBeTruthy();
       caida = false;
       seccion("Registrar una decisión");
       fireEvent.click(boton("Registrar decisión"));
-      await screen.findByText("Listo: registramos la decisión.");
+      await screen.findByText("Listo: la decisión quedó registrada.");
       const enA = en(pedidos(simulado, "POST", RUTA_DECISIONES), 0).headers.get("Idempotency-Key");
       const enB = en(pedidos(simulado, "POST", `${BASE2}/decisiones`), 0).headers.get("Idempotency-Key");
       expect(enB).toMatch(UUID);
@@ -1376,7 +1374,7 @@ describe("página /mandatos", () => {
       soltar();
       await waitFor(() => expect(fallos).toBe(1));
       await new Promise((r) => setTimeout(r, 0));
-      expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+      expect(screen.queryByText(/No se pudo completar el pedido/)).toBeNull();
     });
   });
 
@@ -1403,7 +1401,7 @@ describe("página /mandatos", () => {
     await abrirBaja();
     fireEvent.click(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }));
     expect(screen.queryByRole("heading", { level: 3, name: "Dar de baja" })).toBeNull();
-    expect(await screen.findByText("No tenés permiso para ver ese mandato.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta no tiene permiso para ver ese mandato.")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" })).toBeNull();
   });
 
@@ -1437,7 +1435,7 @@ describe("página /mandatos", () => {
   it("sin edificios lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
     abrir();
-    expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta todavía no participa de ningún edificio.")).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, con el detalle abierto", async () => {
@@ -1461,7 +1459,7 @@ describe("página /mandatos", () => {
     }
     expect(rutas["/api/v1/consorcios/{consorcio_id}/mandatos/candidatos"]?.get).toBeTruthy();
     expect(mensajeDeError(500, undefined, "alta")).toMatch(/El servicio no está disponible/);
-    expect(mensajeDeError(403, "csrf_invalido", "baja")).toMatch(/Recargá la página/);
+    expect(mensajeDeError(403, "csrf_invalido", "baja")).toMatch(/Hay que recargarla/);
     expect(mensajeDeError(422, "codigo_desconocido", "decision")).toBe("Hay que revisar los datos del formulario.");
   });
 });
@@ -1533,7 +1531,7 @@ describe("página /mandatos: estados de pantalla mínima (documento 08, §13.1)"
     );
     abrir();
 
-    expect(await screen.findByText("No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato.")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Mandatos" })).toBeNull();
   });
 });
@@ -1579,10 +1577,10 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
 
   it("la presentación dice solo lo que la persona alcanza", () => {
     const nada = { veMandatos: false, veDecisiones: false, registra: false, daAltas: false, daBajas: false };
-    expect(presentacion({ ...nada, veMandatos: true })).toBe("Acá ves los mandatos del Consejo y de la administración del edificio.");
-    expect(presentacion({ ...nada, veDecisiones: true, registra: true })).toBe("Acá ves las decisiones del edificio. Podés registrar decisiones.");
+    expect(presentacion({ ...nada, veMandatos: true })).toBe("Acá están los mandatos del Consejo y de la administración del edificio.");
+    expect(presentacion({ ...nada, veDecisiones: true, registra: true })).toBe("Acá están las decisiones del edificio. Esta cuenta puede registrar decisiones.");
     expect(presentacion({ veMandatos: true, veDecisiones: true, registra: true, daAltas: true, daBajas: true })).toBe(
-      "Acá ves los mandatos del Consejo y de la administración del edificio y las decisiones que los respaldan. Podés registrar decisiones, dar de alta un mandato y dar de baja un mandato.",
+      "Acá están los mandatos del Consejo y de la administración del edificio y las decisiones que los respaldan. Esta cuenta puede registrar decisiones, dar de alta un mandato y dar de baja un mandato.",
     );
   });
 
@@ -1590,8 +1588,8 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     vi.stubGlobal("fetch", conAcciones(...LECTURAS));
     abrir();
     await cargado();
-    expect(screen.getByText(/^Acá ves los mandatos/)).toBeTruthy();
-    expect(screen.queryByText(/Podés (registrar|dar)/)).toBeNull();
+    expect(screen.getByText(/^Acá están los mandatos/)).toBeTruthy();
+    expect(screen.queryByText(/puede (registrar|dar)/)).toBeNull();
     expect(screen.queryByText(/lo decide la plataforma/)).toBeNull();
   });
 
@@ -1599,7 +1597,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     vi.stubGlobal("fetch", conConsejo());
     abrir();
     await cargado();
-    expect(screen.getByText(/Podés registrar decisiones, dar de alta un mandato y dar de baja un mandato\.$/)).toBeTruthy();
+    expect(screen.getByText(/Esta cuenta puede registrar decisiones, dar de alta un mandato y dar de baja un mandato\.$/)).toBeTruthy();
   });
 
   it("«Registrar una decisión» se ve con `decisiones.registrar`", async () => {
@@ -1624,7 +1622,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     abrir();
     await cargado();
     expect(screen.queryByRole("button", FORMULARIO_ALTA)).toBeNull();
-    expect(screen.queryByText(/no tenés permiso/i)).toBeNull();
+    expect(screen.queryByText(/no tiene permiso/i)).toBeNull();
   });
 
   it("«Dar de baja» se ve con `mandatos.baja`", async () => {
@@ -1689,7 +1687,7 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     await waitFor(() => expect(screen.queryByText("Consultando…")).toBeNull());
     expect(screen.queryByRole("region", { name: seccionQueFalta })).toBeNull();
     expect(pedidos(simulado, "GET", ruta)).toHaveLength(0);
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(screen.queryByText(/no tiene permiso/)).toBeNull();
   });
 
   it("con solo `decisiones.registrar` queda el formulario, sin listas y sin pedirlas", async () => {
@@ -1709,6 +1707,6 @@ describe("lo que no se puede hacer no aparece en /mandatos", () => {
     expect(screen.queryByRole("region", { name: "Decisiones" })).toBeNull();
     expect(screen.getByRole("region", { name: "Mandatos" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Dar de alta un mandato" })).toBeNull();
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(screen.queryByText(/no tiene permiso/)).toBeNull();
   });
 });

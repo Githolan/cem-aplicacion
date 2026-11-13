@@ -117,7 +117,7 @@ test.describe("PWA servida por la imagen", () => {
 
     await context.setOffline(true);
     await page.goto("/ruta-nunca-abierta");
-    await expect(page.getByRole("heading", { name: "No encontramos esa página" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No se encontró esa página" })).toBeVisible();
   });
 
   test("sin conexión el shell carga desde caché, /health no sale de caché y no lleva a /entrar", async ({
@@ -134,7 +134,7 @@ test.describe("PWA servida por la imagen", () => {
     await dejarDeSimularSesion(page);
     await context.setOffline(true);
     await page.reload();
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     await expect(page.getByRole("img", { name: "El servicio no funciona" })).toBeVisible();
     expect(new URL(page.url()).pathname).toBe("/");
   });

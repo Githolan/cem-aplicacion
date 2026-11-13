@@ -11,7 +11,7 @@ import {
   sinFaltasDeAccesibilidad,
 } from "./entorno";
 
-const TITULO_INICIO = "Tu consorcio, en tu mano";
+const TITULO_INICIO = "Consorcio en mano";
 const TITULO_ENTRAR = "Entrar a Consorcio en Mano";
 const ALTO_TACTIL_PX = 44;
 
@@ -29,7 +29,7 @@ test.describe("inicio contra el cem-backend real", () => {
     const cuerpo = (await salud.json()) as Salud;
     expect(cuerpo.sha_imagen).toBe(SHA_BACKEND);
 
-    // Un punto en la barra, con nombre accesible; la versión queda al pie de Mi cuenta.
+    // Un punto en la barra, con nombre accesible; la versión queda al pie de Cuenta.
     await expect(page.getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     await expect(page.getByRole("banner").getByRole("img", { name: "El servicio funciona" })).toBeVisible();
     await expect(page.getByText(SHA_BACKEND.slice(0, LARGO_SHA_CORTA))).toHaveCount(0);
@@ -62,9 +62,9 @@ test.describe("inicio contra el cem-backend real", () => {
     await simularPuntero(page, false);
     await simularSesion(page, "con_sesion");
     await page.goto("/");
-    await page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }).click();
+    await page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }).click();
     await expect(page).toHaveURL(/\/instalar$/);
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalá Consorcio en Mano en este dispositivo");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalar Consorcio en Mano en este dispositivo");
   });
 
   test("control: en una computadora cuyo navegador no la ofrece, no enlaza a /instalar", async ({ page }) => {
@@ -72,8 +72,8 @@ test.describe("inicio contra el cem-backend real", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/");
 
-    await expect(page.getByRole("link", { name: "Mi cuenta" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Instalá la aplicación/ })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Cuenta" })).toBeVisible();
+    await expect(page.getByRole("link", { name: /Instalar la aplicación/ })).toHaveCount(0);
   });
 
   test("la marca de la cabecera lleva al inicio y se puede tocar", async ({ page }) => {
@@ -94,8 +94,8 @@ test.describe("inicio contra el cem-backend real", () => {
     await page.context().route("**/api/v1/me/invitaciones", (ruta) => ruta.fulfill({ json: { elementos: invitaciones } }));
     await page.goto("/");
 
-    await expect(page.getByText(/abrí el enlace de la invitación que te llegó por correo/)).toBeVisible();
-    await expect(page.getByRole("region", { name: "Invitaciones para vos" })).toHaveCount(0);
+    await expect(page.getByText(/hay que abrir el enlace de la invitación que llegó por correo/)).toBeVisible();
+    await expect(page.getByRole("region", { name: "Invitaciones pendientes" })).toHaveCount(0);
 
     invitaciones = [
       {
@@ -110,9 +110,9 @@ test.describe("inicio contra el cem-backend real", () => {
     ];
     await page.reload();
 
-    const seccion = page.getByRole("region", { name: "Invitaciones para vos" });
+    const seccion = page.getByRole("region", { name: "Invitaciones pendientes" });
     await expect(seccion.getByRole("button", { name: "Aceptar la invitación" })).toBeVisible();
-    await expect(page.getByText(/abrí el enlace de la invitación que te llegó por correo/)).toHaveCount(0);
+    await expect(page.getByText(/hay que abrir el enlace de la invitación que llegó por correo/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -120,7 +120,7 @@ test.describe("inicio contra el cem-backend real", () => {
     await simularSesion(page, "con_sesion");
     const respuesta = await page.goto("/una/ruta/que/no/existe");
     expect(respuesta?.status()).toBe(200);
-    await expect(page.getByRole("heading", { name: "No encontramos esa página" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "No se encontró esa página" })).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
     await page.getByRole("link", { name: "Volver al inicio" }).click();
     await expect(page).toHaveURL(/\/$/);

@@ -77,14 +77,14 @@ válidos en 10⁶: 20 por día dan 0,006 % de acertar al azar en un día."""
 LIMITE_NOMBRE = "auth-totp"
 SIN_CACHE = {"Cache-Control": "no-store"}
 
-ASUNTO_ALTA = "Activaste la verificación en dos pasos"
-ASUNTO_BAJA = "Desactivaste la verificación en dos pasos"
+ASUNTO_ALTA = "Se activó la confirmación con código"
+ASUNTO_BAJA = "Se desactivó la confirmación con código"
 TEXTO_AVISO = """Hola:
 
-{que} tu cuenta de Consorcio en Mano.
+{que} la cuenta de Consorcio en Mano de este correo.
 
-Si no fuiste vos, entrá, cerrá las sesiones de los otros dispositivos y avisá a quien administra
-tu consorcio.
+Si no fue la persona titular de esta cuenta: entrar, cerrar las sesiones de los otros dispositivos
+y avisar a quien administra el consorcio.
 """
 
 
@@ -190,7 +190,7 @@ def exigir_entrada_reciente(conn: Connection, identidad: Identidad) -> None:
         raise ErrorApi(
             403,
             CodigoError.REAUTENTICACION_REQUERIDA,
-            "Por seguridad, salí, volvé a entrar y hacelo apenas entres.",
+            "Por seguridad, hay que salir, volver a entrar y hacerlo apenas se entra.",
             detalle={"falta": "entrar_de_nuevo"},
         )
 
@@ -295,7 +295,8 @@ def codigo_invalido() -> ErrorApi:
     return ErrorApi(
         400,
         CodigoError.SEGUNDO_FACTOR_INVALIDO,
-        "El código no sirve. Revisá que la hora del teléfono esté bien y usá el código nuevo.",
+        "El código no sirve. Hay que revisar que la hora del teléfono esté bien y usar el "
+        "código nuevo.",
         encabezados=SIN_CACHE,
     )
 
@@ -325,7 +326,11 @@ def _paso_totp(
             409,
             CodigoError.SEGUNDO_FACTOR_SIN_ALTA,
             "No hay una aplicación de autenticación"
-            + (" activa." if confirmado else " esperando confirmación. Empezá el alta de nuevo."),
+            + (
+                " activa."
+                if confirmado
+                else " esperando confirmación. Hay que empezar el alta de nuevo."
+            ),
         )
     return paso_valido(claves.descifrar(persona_id, fila.secreto_cifrado), codigo, fila.ultimo_paso)
 
@@ -399,8 +404,9 @@ def alta(
             raise ErrorApi(
                 409,
                 CodigoError.SEGUNDO_FACTOR_YA_ACTIVO,
-                "Ya tenés una aplicación de autenticación activa. Para cambiarla, primero"
-                " desactivala.",
+                "Esta cuenta ya tiene una aplicación de autenticación activa. Para cambiarla, "
+                "primero"
+                " hay que desactivarla.",
             )
         conn.execute(
             text(
@@ -452,7 +458,7 @@ async def confirmar(
         if confirmada is None:
             raise codigo_invalido()
         codigos = emitir_codigos(conn, claves, identidad.persona_id)
-        avisar(conn, identidad.persona_id, ASUNTO_ALTA, "Se activó la verificación en dos pasos de")
+        avisar(conn, identidad.persona_id, ASUNTO_ALTA, "Se activó la confirmación con código en")
     log.info("segundo factor activado", extra={"campos": {"persona_id": str(identidad.persona_id)}})
     return CodigosRecuperacion(codigos=codigos)
 
@@ -504,7 +510,7 @@ async def verificar(
     "/baja",
     status_code=204,
     response_class=Response,
-    summary="Desactivar el segundo factor",
+    summary="Desactivar la confirmación con código",
     responses={
         403: {"model": Error, "description": "Falta una verificación reciente (10 minutos)."},
     },
@@ -520,7 +526,7 @@ def baja(identidad: SegundoFactorRecienteDep, motor: MotorDep) -> Response:
             conn.execute(text("delete from nucleo.codigo_recuperacion"))
         olvidar_verificaciones(conn)
         avisar(
-            conn, identidad.persona_id, ASUNTO_BAJA, "Se desactivó la verificación en dos pasos de"
+            conn, identidad.persona_id, ASUNTO_BAJA, "Se desactivó la confirmación con código en"
         )
     log.info(
         "segundo factor desactivado", extra={"campos": {"persona_id": str(identidad.persona_id)}}

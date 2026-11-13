@@ -12,7 +12,7 @@ export type EstadoVisible = components["schemas"]["EstadoVisible"];
 
 export const VERBO: Record<Paso, string> = {
   pagar: "Ver la cuenta para pagar",
-  tomar_pago: "Tomar el pago",
+  tomar_pago: "Hacerse cargo de este pago",
   subir_comprobante: "Subir el comprobante",
   corregir: "Corregir el registro",
   enviar: "Enviar a aprobar",
@@ -108,7 +108,7 @@ export const textoRechazada = (proveedor: string, importe: string, fecha: string
   `Se rechazó la orden de ${proveedor} por ${importe}, del ${fecha}.`;
 
 export const TEXTO_LE_TOCA_A: Record<LeTocaA, string> = {
-  vos: "Te toca a vos.",
+  vos: "Le toca a esta cuenta.",
   consejo: "Le toca al Consejo.",
   quien_registro: "Le toca a quien registró el pago.",
   quien_vio_la_cuenta: "Le toca a quien vio la cuenta.",
@@ -150,27 +150,29 @@ export const AVISO_NO_TRANSFIERE = "CEM no transfiere: la transferencia se hace 
 export const AVISO_VER_LA_CUENTA =
   "Para pagar hay que ver la cuenta. Queda registrado quién la vio, y esa persona no puede conciliar este pago.";
 export const AVISO_ANTIVIRUS_TARDA =
-  "El antivirus está tardando. Podés salir: la orden queda en Pagos como «Subir el comprobante», con el archivo ya cargado.";
-export const AVISO_LECTURA_FALLO = "No pudimos leer el comprobante. Completá los datos a mano.";
-export const AVISO_ARCHIVO_RECHAZADO = "Este archivo no se puede usar: no pasó el antivirus. Subí otro.";
+  "El antivirus está tardando. Se puede salir: la orden queda en Pagos como «Subir el comprobante», con el archivo ya cargado.";
+export const AVISO_LECTURA_FALLO = "El comprobante no se pudo leer. Hay que completar los datos a mano.";
+export const AVISO_ARCHIVO_RECHAZADO = "Este archivo no se puede usar: no pasó el antivirus. Hay que subir otro.";
 export const AVISO_SIN_CUENTA =
-  "La cuenta ya no se muestra: venció la aprobación, cambió o se dio de baja el proveedor, o el contrato dejó de estar vigente. Si transferiste, registrá el pago con los datos del comprobante (si fue después del vencimiento, queda marcado fuera de término y el Consejo lo concilia con un motivo); si no, declará que no se pagó.";
+  "La cuenta ya no se muestra: venció la aprobación, cambió el proveedor o terminó el contrato. Si se transfirió, registrar el pago con el comprobante; si no, declarar que no se pagó.";
 export const AVISO_SIN_SALIDA =
-  "Nadie vio la cuenta y ya no se puede abrir: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Declará que no se pagó y después se puede volver a pagar.";
-export const AVISO_DIFERENCIA_ESPERA = "No transfieras de nuevo hasta que el Consejo decida.";
+  "Nadie vio la cuenta y ya no se puede abrir: venció la aprobación, cambió el proveedor o el contrato dejó de estar vigente. Hay que declarar que no se pagó, y después se puede volver a pagar.";
+export const AVISO_DIFERENCIA_ESPERA = "No hay que transferir de nuevo hasta que el Consejo decida.";
 export const AVISO_OTRA_COSA = "La orden no queda pagada: lo resuelve el Consejo.";
 export const AVISO_TOMAR =
-  "Antes de tomarlo, confirmá con quien vio la cuenta que no transfirió. Si la plata ya salió y vos pagás, la orden se paga dos veces.";
-export const AVISO_RETOMAR = "Retomar deja sin efecto lo que se declaró.";
-export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no transfieras de nuevo.";
+  "Antes de hacerse cargo, hay que confirmar con quien vio la cuenta que no transfirió. Si la plata ya salió y se paga otra vez, la orden se paga dos veces.";
+export const AVISO_RETOMAR = "«Anular la declaración y pagar» deja sin efecto lo que se declaró.";
+export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no hay que transferir de nuevo.";
 export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
-export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: compará los datos con el archivo.";
-export const AVISO_LO_DECIDE_EL_CONSEJO = "Juntas superan el umbral: la aprueba el Consejo.";
+export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: conviene comparar los datos con el archivo.";
 export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
 export const AVISO_VUELVE_A_APROBACION = "Para volver a pagarla, hay que enviarla a aprobar de nuevo.";
 export const AVISO_PASA_SOLA = "No pide aprobación: se puede dejar lista para pagar de nuevo.";
 /** El botón de `volver_a_pagar` cuando la orden no pasa por el Consejo: dice lo que ocurre al tocarlo. */
 export const VERBO_PASA_SOLA = "Dejar lista para pagar";
+/** En la ficha, conciliar dice qué pasa al tocarlo (P-22); en la bandeja la fila sigue diciendo «Conciliar el pago». */
+export const VERBO_CONCILIAR = "Está bien: conciliar";
+/** Debajo del motivo de observar: qué pasa después (P-22). */
+export const AVISO_OBSERVAR = "Vuelve a quien lo registró para que lo corrija.";
 export const AVISO_POR_EL_CONSEJO = "Hubo una diferencia: para volver a pagarla, la aprueba el Consejo, sea cual sea el importe.";
-export const AVISO_MODIFICAR =
-  "Esta orden ya está en revisión o aprobada: modificarla crea una versión nueva, la vuelve a revisión y las aprobaciones anteriores dejan de contar.";
+export const AVISO_MODIFICAR = "Si se cambia algo, el Consejo tiene que aprobarla de nuevo.";

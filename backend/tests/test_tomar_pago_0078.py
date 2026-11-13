@@ -305,7 +305,10 @@ def test_quien_tomo_no_concilia_lo_que_registro_el_pagador(motor_migrate, e):
     o, p = por_conciliar(motor_migrate, e)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, e.mc2, CONCILIAR, "no_es_quien_ejecuto", **datos)  # la base
-    assert codigo(conciliacion(e, e.mc2, o, p)) == (403, "sin_permiso")  # la API, antes
+    assert codigo(conciliacion(e, e.mc2, o, p)) == (
+        403,
+        "ya_participo",
+    )  # la API, antes, con el motivo
     assert ficha(e, e.mc2, o)["puede_conciliar"] is False
     assert ofrece_conciliar(e, e.mc2, o) is False
     # Control: otro consejero que no tomó sí.
@@ -319,7 +322,7 @@ def test_quien_tomo_tampoco_concilia_con_otra_cuenta(motor_migrate, motor_app, e
     otra = otra_cuenta_en_el_consejo(motor_migrate, motor_app, e, e.mc2)
     datos = {"orden": o, "pago": p, "resultado": "conforme", "motivo": None}
     niega(motor_migrate, e, otra, CONCILIAR, "no_es_quien_ejecuto", **datos)
-    assert codigo(conciliacion(e, otra, o, p)) == (403, "sin_permiso")
+    assert codigo(conciliacion(e, otra, o, p)) == (403, "ya_participo")
     assert ficha(e, otra, o)["puede_conciliar"] is False
 
 
@@ -342,7 +345,7 @@ def test_quien_tomo_no_confirma_que_no_se_pago(motor_migrate, e):
     o = tomada_por_un_consejero(motor_migrate, e)
     d = declarada(motor_migrate, e, e.adm, o)
     camino = f"ordenes-pago/{o}/pago-manual/no-realizado/{d}/confirmacion"
-    assert codigo(post(e, e.mc2, camino, {})) == (403, "sin_permiso")
+    assert codigo(post(e, e.mc2, camino, {})) == (403, "ya_participo")
     assert post(e, e.mc1, camino, {}).status_code == 200  # control
 
 
@@ -351,5 +354,5 @@ def test_quien_tomo_no_resuelve_la_diferencia(motor_migrate, e):
     d = llamar(motor_migrate, e, e.adm, DIFERENCIA, **datos_diferencia(motor_migrate, e, o))
     camino = f"ordenes-pago/{o}/pago-manual/diferencia/{d}/resolucion"
     resolver = {"resolucion": "reclamo"}
-    assert codigo(post(e, e.mc2, camino, resolver)) == (403, "sin_permiso")
+    assert codigo(post(e, e.mc2, camino, resolver)) == (403, "ya_participo")
     assert post(e, e.mc1, camino, resolver).status_code == 200  # control

@@ -120,9 +120,9 @@ test.describe("mi cuenta", () => {
     await page.setViewportSize({ width: 360, height: 740 });
     const csrf = await simularApi(page, baseURL!);
     await page.goto("/");
-    await page.getByRole("link", { name: "Mi cuenta" }).click();
+    await page.getByRole("link", { name: "Cuenta" }).click();
 
-    await expect(page.getByLabel("Tus datos").getByText("Ana Pérez")).toBeVisible();
+    await expect(page.getByLabel("Datos de la cuenta").getByText("Ana Pérez")).toBeVisible();
     // La versión pasó del inicio al pie de esta pantalla.
     await expect(page.getByText(`Compilación ${SHA_BACKEND.slice(0, LARGO_SHA_CORTA)}`)).toBeVisible();
     await expect(page.getByText(/Está activado/)).toBeVisible();
@@ -135,7 +135,7 @@ test.describe("mi cuenta", () => {
       .getByRole("button", { name: "Cerrar esta sesión" });
     await expect(cerrarOtra).toHaveAccessibleDescription("Firefox en Windows");
     await cerrarOtra.click();
-    await expect(page.getByText("Listo: cerramos la sesión de Firefox en Windows.")).toBeVisible();
+    await expect(page.getByText("Listo: se cerró la sesión de Firefox en Windows.")).toBeVisible();
     expect(csrf[`/api/v1/auth/sesiones/${OTRA}/revocar`]).toBe(CSRF);
     await sinFaltasDeAccesibilidad(page);
 
@@ -155,7 +155,7 @@ test.describe("mi cuenta", () => {
     await page.goto("/cuenta");
 
     await page.getByRole("button", { name: "Salir" }).click();
-    await expect(page.getByText(/No pudimos completar el pedido/)).toBeVisible();
+    await expect(page.getByText(/No se pudo completar el pedido/)).toBeVisible();
     expect(csrf["/api/v1/auth/salir"]).toBeNull();
     await expect(page).toHaveURL(/\/cuenta$/);
   });

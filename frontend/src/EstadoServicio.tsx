@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api, type Salud } from "./api/cliente";
 
 // El estado del servicio (rediseño de pagos, §12): un punto en la barra de Inicio y un aviso chico
-// solo si no funciona. La versión va al pie de Mi cuenta. La consulta es una sola, compartida.
+// solo si no funciona. La versión va al pie de Cuenta. La consulta es una sola, compartida.
 
 export const TEXTO_FUNCIONA = "El servicio funciona";
 export const TEXTO_NO_FUNCIONA = "El servicio no funciona";
@@ -16,7 +16,7 @@ async function consultarSalud(): Promise<Salud> {
   return data;
 }
 
-const useSalud = () => useQuery({ queryKey: ["salud"], queryFn: consultarSalud });
+const useSalud = (enabled = true) => useQuery({ queryKey: ["salud"], queryFn: consultarSalud, enabled });
 
 export function PuntoServicio() {
   const salud = useSalud();
@@ -28,19 +28,16 @@ export function PuntoServicio() {
   return <span role="img" aria-label={nombre} className={`punto-servicio ${clase}`} />;
 }
 
-export function AvisoServicio() {
-  const salud = useSalud();
-  if (!salud.isError) return null;
-  return (
-    <div className="tarjeta">
-      <p className="aviso-error" role="alert">
-        {TEXTO_NO_FUNCIONA} en este momento. Probá de nuevo en unos minutos.
-      </p>
-      <button type="button" disabled={salud.isFetching} onClick={() => void salud.refetch()}>
-        Reintentar
-      </button>
-    </div>
-  );
+/** Si el servicio no responde. El Inicio lo dice junto con las otras lecturas que fallaron, con
+ * un solo «Reintentar» para todas (AC-08). Solo con la sesión conocida: sin sesión, el inicio
+ * lleva a entrar sin consultar el servicio. */
+export function useFallaDelServicio(conSesion: boolean) {
+  const salud = useSalud(conSesion);
+  return {
+    falla: salud.isError ? `${TEXTO_NO_FUNCIONA} en este momento.` : null,
+    reintentar: () => void salud.refetch(),
+    reintentando: salud.isFetching,
+  };
 }
 
 export function PieDeVersion() {

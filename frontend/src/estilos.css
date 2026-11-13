@@ -315,7 +315,7 @@ button:disabled {
   list-style: none;
 }
 
-/* Mi cuenta: una tarjeta interna por sesión; la actual, con borde. */
+/* Cuenta: una tarjeta interna por sesión; la actual, con borde. */
 .sesiones {
   display: grid;
   gap: 0.75rem;
@@ -358,7 +358,8 @@ button:disabled {
   align-items: stretch;
 }
 
-.formulario .campo-contrasena .boton-ver {
+.formulario .campo-contrasena .boton-ver,
+.campo-contrasena .boton-ver {
   margin-top: 0;
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--border);
@@ -378,11 +379,15 @@ button:disabled {
   margin-top: 0.5rem;
 }
 
+/* Pregunta 13 del propietario (13-11-2026): las acciones secundarias, «Cancelar» y «No» van con
+   borde y sin relleno. El único relleno de color de una pantalla es su botón principal: azul para
+   avanzar, rojo si el principal es el acto negativo (`peligro`). El borde es `--border-input`
+   (3,9:1 sobre blanco), que se distingue como control. */
 .formulario .acciones .secundario,
 button.secundario {
-  border: 1px solid var(--border);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-soft);
+  border: 1px solid var(--border-input);
+  background: transparent;
+  box-shadow: none;
   color: var(--ink);
 }
 
@@ -392,19 +397,26 @@ button.sutil:disabled {
   color: var(--ink-muted);
 }
 
-/* Acciones negativas en rojo (comentarios 26 y 31): borrar, quitar, retirar, finalizar, rechazar,
-   cancelar. Todas llenas, fondo rojo y texto blanco (#fff sobre #8c1f17, 9,0:1), también la que la
-   abre o la deja de lado (`secundario peligro`, como «Cancelar») y el enlace con forma de botón. El
-   texto dice la acción: el color no es lo único que la distingue. Deshabilitado queda gris, como
-   cualquier botón; el foco es el contorno de siempre. */
-button.peligro:not(:disabled),
-.formulario .acciones .secundario.peligro:not(:disabled),
-button.secundario.peligro:not(:disabled),
-.enlace-boton.peligro {
+/* El acto negativo en rojo (comentarios 26 y 31; pregunta 13): borrar, quitar, retirar, finalizar,
+   rechazar. Cuando es el principal del diálogo o la pantalla («Sí, retirar la orden»), lleno: fondo
+   rojo y texto blanco (#fff sobre #8c1f17, 9,0:1). El botón o el enlace que solo lo ofrece
+   (`secundario peligro`, «Retirar la orden») va con borde y texto rojos, sin relleno. «Cancelar» y
+   «No» nunca van en rojo. El texto dice la acción: el color no es lo único que la distingue.
+   Deshabilitado queda gris, como cualquier botón; el foco es el contorno de siempre. */
+button.peligro:not(:disabled):not(.secundario) {
   border-color: var(--danger-text);
   background: var(--danger-text);
   box-shadow: none;
   color: var(--on-danger);
+}
+
+.formulario .acciones .secundario.peligro:not(:disabled),
+button.secundario.peligro:not(:disabled),
+.enlace-boton.peligro {
+  border-color: var(--danger-text);
+  background: transparent;
+  box-shadow: none;
+  color: var(--danger-text);
 }
 
 /* Tarjetas una al lado de la otra desde tablet. */
@@ -591,6 +603,11 @@ button.sutil {
 
   .formulario-movil > button[type="submit"] {
     justify-self: stretch;
+  }
+
+  /* El envío junto a «Cancelar» (G-43): en el teléfono, uno debajo del otro y a todo el ancho. */
+  .formulario-movil > .acciones > button {
+    flex: 1 1 100%;
   }
 
   .salidas-pago .enlace-boton {

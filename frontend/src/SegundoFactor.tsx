@@ -83,8 +83,8 @@ function volverDe(estado: unknown): string | null {
 }
 
 const ACTIVADO = {
-  aplicacion: "Listo: el segundo factor quedó activado.",
-  llave: "Listo: tu llave quedó activada.",
+  aplicacion: "Listo: la confirmación con código quedó activada.",
+  llave: "Listo: la llave quedó activada.",
 };
 
 const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
@@ -181,10 +181,10 @@ export function SegundoFactor() {
   /** El aviso para un código rechazado al confirmar. */
   function avisoDeRechazo(status: number, cuerpo: unknown): Aviso {
     if (status === ESTADO_DEMASIADOS)
-      return fallo("Hubo demasiados intentos. Esperá un rato y probá de nuevo.");
+      return fallo("Hubo demasiados intentos. Reintentar en un rato.");
     if (codigoDe(cuerpo) === CODIGO_INVALIDO)
       return fallo(
-        "El código no sirve. Revisá que la hora del teléfono esté bien y usá el código nuevo.",
+        "El código no sirve. Hay que revisar que la hora del teléfono esté bien y usar el código nuevo.",
       );
     // E53: un 5xx o un 429 no es de la conexión (regla E34 de fallas.ts).
     return fallo(mensajeDeFalla(status, codigoDe(cuerpo)));
@@ -230,7 +230,7 @@ export function SegundoFactor() {
     evento.preventDefault();
     const limpio = codigoAplicacion(codigo);
     if (!limpio) {
-      setAviso(fallo("Escribí los seis números que muestra la aplicación."));
+      setAviso(fallo("Hacen falta los seis números que muestra la aplicación."));
       return;
     }
     setEnviando(true);
@@ -245,7 +245,7 @@ export function SegundoFactor() {
           setPantalla({ tipo: "codigos", codigos: data.codigos, medio: "aplicacion" });
         } else if (codigoDe(error) === CODIGO_SIN_ALTA) {
           pasarA({ tipo: "inactivo" });
-          setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Empezá de nuevo."));
+          setAviso(fallo("El alta venció o se reemplazó desde otro dispositivo. Hay que empezar de nuevo."));
         } else rechazar(response.status, error);
       })
       .catch(() => {
@@ -262,9 +262,9 @@ export function SegundoFactor() {
     void api
       .POST("/api/v1/auth/totp/baja", { headers: encabezadoCsrf() })
       .then(({ error, response }) => {
-        if (error === undefined && response.ok) terminar("Listo: el segundo factor quedó desactivado.");
+        if (error === undefined && response.ok) terminar("Listo: la confirmación con código quedó desactivada.");
         else if (codigoDe(error) === CODIGO_REQUERIDO)
-          setPendiente({ acto: "desactivar el segundo factor", reintentar: desactivar });
+          setPendiente({ acto: "desactivar la confirmación con código", reintentar: desactivar });
         else if (response.status === ESTADO_SIN_SESION) sinSesion();
         else avisarFalla(response.status, error);
       })
@@ -281,12 +281,12 @@ export function SegundoFactor() {
   // La llave ya se ofrece arriba como la acción principal: la aplicación queda como otra opción.
   const llaveArriba = llaveDisponible();
 
-  // Los códigos no se sueltan hasta «Ya los guardé»: van en una hoja que deja inerte el resto de la
+  // Los códigos no se sueltan hasta «Códigos guardados: seguir»: van en una hoja que deja inerte el resto de la
   // aplicación (la marca de la cabecera, el aviso de versión nueva) y no se cierra con Escape.
   if (pantalla.tipo === "codigos")
     return (
       <>
-        <h1>Segundo factor</h1>
+        <h1>Confirmación con PIN, huella o código</h1>
         <Hoja titulo="Guardar los códigos de recuperación">
           <p className="aviso-ok">{ACTIVADO[pantalla.medio]}</p>
           <CodigosRecuperacion
@@ -301,12 +301,12 @@ export function SegundoFactor() {
   return (
     <>
       {altaEnCurso ? (
-        <h1>Segundo factor</h1>
+        <h1>Confirmación con PIN, huella o código</h1>
       ) : (
         <CabeceraInterna
-          titulo="Segundo factor"
+          titulo="Confirmación con PIN, huella o código"
           volver={volver ?? RUTA_CUENTA}
-          destino={volver === null ? "Mi cuenta" : "la pantalla anterior"}
+          destino={volver === null ? "Cuenta" : "la pantalla anterior"}
         />
       )}
       {altaEnCurso && (
@@ -353,7 +353,7 @@ export function SegundoFactor() {
             onClick={empezarAlta}
             disabled={enviando}
           >
-            {conLlave ? "Agregar también la aplicación" : llaveArriba ? "Usar una aplicación de códigos" : "Activar el segundo factor"}
+            {conLlave ? "Agregar también la aplicación" : llaveArriba ? "Usar una aplicación de códigos" : "Activar la confirmación"}
           </button>
         </section>
       )}
@@ -447,7 +447,7 @@ export function SegundoFactor() {
             Borra la aplicación cargada y los códigos de recuperación. Se avisa por correo.
           </p>
           <button type="button" className="peligro" onClick={() => setConfirmarBaja(true)} disabled={enviando}>
-            Desactivar el segundo factor
+            Desactivar la confirmación con código
           </button>
         </section>
       )}
@@ -479,10 +479,10 @@ export function SegundoFactor() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar el segundo factor. Revisá la conexión y probá de nuevo."
-                : `No pudimos consultar el segundo factor. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudo consultar la confirmación con PIN, huella o código. Hay que revisar la conexión y reintentar."
+                : `No se pudo consultar la confirmación con PIN, huella o código. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button type="button" onClick={reintentarConsulta}>
+            <button className="secundario" type="button" onClick={reintentarConsulta}>
               Reintentar
             </button>
           </>

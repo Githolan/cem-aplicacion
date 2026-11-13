@@ -9,7 +9,7 @@ import { useAlVolverLaRed } from "./egresos/useConsorcio";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
-import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
+import { codigoDe, esDeConexion, LIMITE_DE_PEDIDOS, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
 
 // Página /padron (H2b 2b-5, corte 4; doc/diseno/H2b_5_Diseno.md §5 del repositorio CEM): el padrón
@@ -57,10 +57,10 @@ const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: strin
     boton: "Confirmar",
     titulo: "Confirmar el vínculo",
     ayuda:
-      "Confirmar acredita el carácter sobre la unidad según el título (escritura, contrato de locación u otro), no la identidad de la persona. La referencia queda guardada en el vínculo.",
-    campo: "Referencia del título",
+      "Confirmar acredita el carácter sobre la unidad según el título, no la identidad de la persona. Por ejemplo: «Escritura n.º 123 del 4/5/2020» o «Contrato de alquiler del 1/3/2026». Queda guardado en el vínculo.",
+    campo: "Documento que lo prueba",
     si: "",
-    hecho: "confirmamos",
+    hecho: "quedó confirmado",
   },
   finalizar: {
     boton: "Finalizar",
@@ -69,7 +69,7 @@ const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: strin
       "Finalizar cierra la vigencia hoy y conserva el vínculo con quién, cuándo y por qué. La persona pierde el acceso que le daba este vínculo. No se puede deshacer.",
     campo: "Motivo",
     si: "Sí, finalizar",
-    hecho: "finalizamos",
+    hecho: "quedó finalizado",
   },
   anular: {
     boton: "Anular",
@@ -78,7 +78,7 @@ const TEXTO_ACCION: Record<Accion, { boton: string; titulo: string; ayuda: strin
       "Anular borra un vínculo cargado por error que todavía no empezó y no está confirmado. Queda constancia de la unidad, el carácter y las fechas; el motivo no queda en la auditoría. No se puede deshacer.",
     campo: "Motivo",
     si: "Sí, anular",
-    hecho: "anulamos",
+    hecho: "quedó anulado",
   },
 };
 
@@ -102,7 +102,7 @@ const TEXTO_SIN_PERMISO: Record<Accion, string> = {
 
 /** Qué decir ante un error de una acción, según el estado y el código del cuerpo uniforme. */
 export function mensajeDeError(estado: number, codigo: string | undefined, accion: Accion): string {
-  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Hace falta recargar la página.";
+  if (estado === ESTADO.sinPermiso && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
   if (estado === ESTADO.sinPermiso) return TEXTO_SIN_PERMISO[accion];
   if (estado === ESTADO.noEncontrado) return "Ese vínculo ya no está en el padrón de este edificio.";
   if (estado === ESTADO.conflicto && codigo === "idempotencia_en_curso")
@@ -346,7 +346,7 @@ export function Padron() {
         if (data === undefined) {
           const codigo = codigoDe(error);
           if (renovarClave(response.status, codigo)) clave.current = null;
-          setAviso({ texto: mensajeDeError(response.status, codigo, hecha), ok: false });
+          setAviso({ texto: motivoDeSeparacion(error) ?? mensajeDeError(response.status, codigo, hecha), ok: false });
           setPreguntando(false);
           if (cambioElPadron(response.status, codigo)) {
             cerrarFicha(false);
@@ -362,7 +362,7 @@ export function Padron() {
               ? { tipo: "ok", filas: actual.filas.map((f) => (f.vinculo_id === fila.vinculo_id ? { ...f, confirmado: true } : f)) }
               : actual,
           );
-          setAviso({ texto: `Listo: confirmamos ${quien}.`, ok: true });
+          setAviso({ texto: `Listo: quedó confirmado ${quien}.`, ok: true });
         } else {
           // Un vínculo finalizado o anulado sale del padrón (solo lista vigentes y futuros).
           setLectura((actual) =>
@@ -401,10 +401,10 @@ export function Padron() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
+                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button
+            <button className="secundario"
               type="button"
               onClick={() => {
                 setPantalla({ tipo: "cargando" });
@@ -415,7 +415,7 @@ export function Padron() {
             </button>
           </>
         )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {pantalla.tipo === "sin_consorcios" && <p>Esta cuenta todavía no participa de ningún edificio.</p>}
         {aviso && !avisoEnLaFicha && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
@@ -461,8 +461,8 @@ export function Padron() {
             {lectura.tipo === "cargando" && <p>Consultando…</p>}
             {lectura.tipo === "sin_servicio" && (
               <>
-                <p>No pudimos mostrar el padrón.</p>
-                <button type="button" onClick={reconsultar} disabled={enviando}>
+                <p>No se pudo mostrar el padrón.</p>
+                <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
                   Consultar de nuevo
                 </button>
               </>
@@ -520,9 +520,7 @@ export function Padron() {
         alCerrar={() => cerrarFicha()}
         ocupada={enviando}
         datos={[
-          { etiqueta: "Unidad", valor: f.designacion },
-          { etiqueta: "Persona", valor: f.nombre },
-          { etiqueta: "Carácter", valor: TEXTO_TIPO[f.tipo] },
+          { etiqueta: "Tipo", valor: TEXTO_TIPO[f.tipo] },
           { etiqueta: "Vigencia", valor: `${vigencia(f)}${f.iniciado ? "" : " (todavía no empezó)"}` },
           { etiqueta: "Confirmación", valor: f.confirmado ? "Confirmado con el título" : "Sin confirmar" },
         ]}
@@ -531,7 +529,7 @@ export function Padron() {
           ? acciones.length > 0 && (
               <p className="ficha-registro__acciones">
                 {acciones.map((a) => (
-                  <button key={a} type="button" className={a === "confirmar" ? "secundario" : "secundario peligro"} onClick={() => abrirAccion(a)}>
+                  <button key={a} type="button" className={a === "confirmar" ? undefined : "secundario peligro"} onClick={() => abrirAccion(a)}>
                     {TEXTO_ACCION[a].boton}
                   </button>
                 ))}
@@ -591,7 +589,7 @@ export function Padron() {
             <button type="submit" className={confirmar ? undefined : "peligro"} disabled={enviando}>
               {textos.titulo}
             </button>{" "}
-            <button type="button" className="secundario peligro" onClick={soloLaFicha} disabled={enviando}>
+            <button type="button" className="secundario" onClick={soloLaFicha} disabled={enviando}>
               Cancelar
             </button>
           </p>

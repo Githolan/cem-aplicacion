@@ -250,7 +250,7 @@ def test_quien_emitio_no_aprueba(motor_migrate, motor_app, escena):
     e = escena
     i = emitir(e["mc1"], e["cons"], e["ae"], correo_nuevo()).json()["id"]
     r = aprobar(e["mc1"], e["cons"], i)
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     [d] = denegaciones(motor_app, e["cons"], e["mc2"], e["mc1"])
     assert (d["accion"], d["motivo"]) == ("mandatos.aprobar_asociacion", "no_es_quien_emitio")
     # La base también lo impide (función y `check`).

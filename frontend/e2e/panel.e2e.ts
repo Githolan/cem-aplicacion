@@ -95,7 +95,7 @@ test.describe("panel", () => {
 
     await expect(page.getByRole("region", { name: "Órdenes de pago por estado" })).toBeVisible();
     await expect(page.getByRole("region", { name: "Pagos con el fondo de reserva" })).toBeVisible();
-    const faltantes = page.getByRole("region", { name: "Comprobantes faltantes" });
+    const faltantes = page.getByRole("region", { name: "Facturas faltantes" });
     await expect(faltantes.getByRole("link", { name: PANEL.comprobantes_faltantes[0]!.proveedor })).toHaveAttribute("href", `/pagos/${O1}`);
     expect(await sinDesplazamiento(page)).toBe(true);
     await sinFaltasDeAccesibilidad(page);

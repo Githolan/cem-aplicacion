@@ -1,5 +1,6 @@
-"""«Pagué otra cosa» para quien perdió la facultad, contra PostgreSQL real (`0079`). Datos
-SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve dinero.
+"""«Se transfirió otro importe o a otra cuenta» para quien perdió la facultad, contra PostgreSQL
+real (`0079`). Datos SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999)
+y no se mueve dinero.
 
 Decisión 3 del propietario, 07-11-2026.
 """

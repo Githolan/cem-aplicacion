@@ -7,7 +7,7 @@ import { encabezadoCsrf } from "../csrf";
 import { ENCABEZADO_IDEMPOTENCIA, importe, mensajeDeActo } from "../egresos/comun";
 import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
-import { codigoDe, SIN_CONEXION } from "../fallas";
+import { SIN_CONEXION } from "../fallas";
 import { usePuede } from "../permisos";
 import { TEXTO_ACCION } from "./textosDeAcciones";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, rutaFicha } from "./rutas";
@@ -115,7 +115,7 @@ function AvisoDeRechazo({ aviso, consorcio, aEntrar, alCambiar }: PropsAviso) {
       .then(({ data, error, response }) => {
         exigirSesion(response);
         if (data !== undefined) alCambiar();
-        else setFalla(mensajeDeActo(response.status, codigoDe(error)));
+        else setFalla(mensajeDeActo(response.status, error));
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setFalla(SIN_CONEXION)))
       .finally(() => setEnviando(false));
@@ -153,9 +153,11 @@ type Props = {
   aEntrar: () => void;
   /** Algo cambió (se vio un rechazo): la bandeja se vuelve a leer. */
   alCambiar: () => void;
+  /** Hay una ficha o un «Listo» al lado, con su propio botón principal. */
+  alLado: boolean;
 };
 
-export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar }: Props) {
+export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLado }: Props) {
   const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar } = bandeja;
   const puede = usePuede(consorcio);
   const prepara = puede("egresos.preparar_orden");
@@ -171,7 +173,8 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar }: Pro
           abajo. Un solo botón lleno: el del rol (comentario 24, 09-11-2026). */}
       {prepara && (
         <p className="salidas-pago salidas-pago--arriba">
-          <Link to={RUTA_NUEVA} state={{ consorcio }} className="enlace-boton enlace-boton--principal">
+          {/* Un solo principal por pantalla (pregunta 13): con la ficha o el «Listo» al lado, el suyo. */}
+          <Link to={RUTA_NUEVA} state={{ consorcio }} className={alLado ? "enlace-boton enlace-boton--borde" : "enlace-boton enlace-boton--principal"}>
             Preparar una orden
           </Link>
         </p>

@@ -143,7 +143,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
         {!veBandeja && <CabeceraInterna titulo="Orden de pago" volver={RUTA_PAGOS} destino="Pagos" />}
         <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={elegir} />
         {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-        {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+        {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
         <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
         {veBandeja && <AvisoPantalla aviso={aviso} />}
         {veBandeja && conPantalla && (
@@ -160,7 +160,8 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
               />
             )}
             {lectura.tipo === "ok" && (
-              <Bandeja bandeja={lectura.bandeja} consorcio={consorcio} abierta={abierta} aEntrar={aEntrar} alCambiar={alCambiar} />
+              <Bandeja bandeja={lectura.bandeja} consorcio={consorcio} abierta={abierta} aEntrar={aEntrar} alCambiar={alCambiar}
+                alLado={listo !== null || (abierta !== null && consorcio !== "" && conPantalla)} />
             )}
           </>
         )}

@@ -41,7 +41,7 @@ export function SalirDeEstaCuenta({ alSalir }: { alSalir: () => void }) {
   return (
     <>
       {falla !== null && <p className="aviso-error">{falla}</p>}
-      <button type="button" disabled={enviando} onClick={salir}>
+      <button type="button" className="secundario" disabled={enviando} onClick={salir}>
         Salir de esta cuenta
       </button>
     </>

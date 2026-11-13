@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import { api } from "./api/cliente";
@@ -19,8 +20,8 @@ import {
 // borradores viejos y los avisos de rechazo no son para hacer. Los pagos por cotejar, sí.
 
 const NADA_PARA_HACER = "Nada pendiente.";
-const DETALLE_SIN_DATO = "Lo que tenés para hacer";
-const DETALLE_SIN_LECTURA = "No pudimos leer lo que tenés para hacer";
+const DETALLE_SIN_DATO = "Pendientes";
+const DETALLE_SIN_LECTURA = "No se pudieron leer los pendientes";
 
 async function cuantoHayParaHacer(consorcio: string): Promise<number> {
   const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/pagos/bandeja", {
@@ -66,11 +67,13 @@ export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string
   };
 }
 
-type Props = Pick<ReturnType<typeof useResumenPagos>, "cantidad" | "falla" | "reintentar" | "reintentando"> & {
+type Props = Pick<ReturnType<typeof useResumenPagos>, "cantidad" | "falla"> & {
+  /** El único «Reintentar» del Inicio, cuando lo único que falló es esta tarjeta (AC-08). */
+  reintentar: ReactNode;
   edificio: string;
 };
 
-export function TarjetaPagos({ cantidad, falla, reintentar, reintentando, edificio }: Props) {
+export function TarjetaPagos({ cantidad, falla, reintentar, edificio }: Props) {
   return (
     <section className="resumen-inicio" aria-label="Pagos">
       <div className="resumen-inicio__arriba">
@@ -79,11 +82,7 @@ export function TarjetaPagos({ cantidad, falla, reintentar, reintentando, edific
       </div>
       {cantidad === null && falla === null && <p role="status">Cargando…</p>}
       {falla !== null && <p role="alert" className="aviso-error">{falla}</p>}
-      {falla !== null && (
-        <button type="button" className="secundario" disabled={reintentando} onClick={reintentar}>
-          Reintentar
-        </button>
-      )}
+      {falla !== null && reintentar}
       {cantidad !== null && cantidad > 0 && (
         <p>
           <span className="resumen-inicio__cifra">{cantidad}</span> {cosas(cantidad)} para hacer

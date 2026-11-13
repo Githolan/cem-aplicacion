@@ -32,6 +32,11 @@ class CodigoError(StrEnum):
     """Falta el encabezado `X-CSRF-Token` o no corresponde a la sesión (documento 13, §10.4)."""
     SIN_PERMISO = "sin_permiso"
     """La persona está en el consorcio pero su vínculo no le da esa acción (documento 08, §4)."""
+    YA_PARTICIPO = "ya_participo"
+    """La separación de funciones frena el acto: quien pide ya participó de esa entidad (la
+    preparó, la aprobó, vio la cuenta, es su propio mandato…). El `mensaje` dice cuál, y
+    `detalle.separacion` lleva el código de la separación (pregunta 10 del propietario, 13-11-2026).
+    No revela nada nuevo: es la participación de la propia cuenta en algo que ya ve."""
     INVITACION_INVALIDA = "invitacion_invalida"
     """La invitación no existe, venció, ya se aceptó o la retiraron (RF03). Todas las causas
     responden igual: la diferencia solo va a los registros."""

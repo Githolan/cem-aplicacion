@@ -207,7 +207,7 @@ describe("página /contactos/gestion", () => {
     escribir("Nombre", "Seguros del Plata");
     escribir(/^Teléfono/, "0810-222-3333");
     fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
-    await screen.findByText("Listo: agregamos el contacto Seguros del Plata.");
+    await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     expect(pedidos(simulado, "POST", BASE2)).toHaveLength(1);
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(0);
   });
@@ -284,7 +284,7 @@ describe("página /contactos/gestion", () => {
   it("sin conexión al pedir la lista lo dice, sin lista pero con el botón para agregar", async () => {
     vi.stubGlobal("fetch", conLista({ [`GET ${GESTION}`]: () => Promise.reject(new TypeError("Failed to fetch")) }));
     abrir();
-    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    expect(await screen.findByText("No se pudo mostrar la lista.")).toBeTruthy();
     expect(screen.getByText(SIN_CONEXION)).toBeTruthy();
     expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
     expect(screen.getByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
@@ -312,7 +312,7 @@ describe("página /contactos/gestion", () => {
     expect(screen.getByLabelText("Nombre")).toBe(nombre);
     expect(nombre.value).toBe("Bomberos");
     fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
-    expect(await screen.findByText("Listo: agregamos el contacto Bomberos.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el contacto Bomberos quedó agregado.")).toBeTruthy();
     expect(pedidos(simulado, "POST", BASE)).toHaveLength(1);
   });
 
@@ -323,7 +323,7 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText("No pudimos mostrar la lista.")).toBeTruthy();
+    expect(await screen.findByText("No se pudo mostrar la lista.")).toBeTruthy();
     caida = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
     expect(await filaDe("Emergencias: Plomería Rápida")).toBeTruthy();
@@ -340,7 +340,7 @@ describe("página /contactos/gestion", () => {
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudieron consultar los edificios/)).toBeTruthy();
     // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
@@ -360,8 +360,8 @@ describe("página /contactos/gestion", () => {
       }),
     );
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
+    expect(screen.queryByText(/no tiene permiso/)).toBeNull();
     expect(screen.queryByRole("list", { name: "Contactos para gestionar" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
   });
@@ -372,13 +372,13 @@ describe("página /contactos/gestion", () => {
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
     expect(document.activeElement).toBe(screen.getByLabelText("Función"));
-    expect(screen.queryByLabelText("Constancia del consentimiento")).toBeNull();
+    expect(screen.queryByLabelText(/Dónde consta que aceptó figurar/)).toBeNull();
     fireEvent.change(screen.getByLabelText("Función"), { target: { value: "aseguradora" } });
     escribir("Nombre", "  Seguros del Plata  ");
     escribir(/^Teléfono/, "0810-222-3333");
     fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
 
-    const aviso = await screen.findByText("Listo: agregamos el contacto Seguros del Plata.");
+    const aviso = await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     const [pedido] = pedidos(simulado, "POST", BASE);
     expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
@@ -400,19 +400,19 @@ describe("página /contactos/gestion", () => {
     vi.stubGlobal("fetch", simulado);
     abrir();
     fireEvent.click(await screen.findByRole("button", { name: "Agregar un contacto" }));
-    fireEvent.change(screen.getByLabelText("Naturaleza"), { target: { value: "profesional" } });
-    const constancia = screen.getByLabelText("Constancia del consentimiento");
+    fireEvent.change(screen.getByLabelText("¿De quién es el número?"), { target: { value: "profesional" } });
+    const constancia = screen.getByLabelText(/Dónde consta que aceptó figurar/);
     expect(constancia.hasAttribute("required")).toBe(true);
     expect(screen.getByLabelText("Teléfono").hasAttribute("required")).toBe(true);
-    escribir("Constancia del consentimiento", "Nota firmada del 20-10");
+    escribir(/Dónde consta que aceptó figurar/, "Nota firmada del 20-10");
     // Si cambia de idea, la constancia escrita no viaja con otra naturaleza.
-    fireEvent.change(screen.getByLabelText("Naturaleza"), { target: { value: "organismo" } });
-    expect(screen.queryByLabelText("Constancia del consentimiento")).toBeNull();
+    fireEvent.change(screen.getByLabelText("¿De quién es el número?"), { target: { value: "organismo" } });
+    expect(screen.queryByLabelText(/Dónde consta que aceptó figurar/)).toBeNull();
     expect(screen.getByLabelText(/^Teléfono/).hasAttribute("required")).toBe(false);
     escribir("Nombre", "Bomberos");
     escribir(/^Teléfono/, "100");
     fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
-    await screen.findByText("Listo: agregamos el contacto Bomberos.");
+    await screen.findByText("Listo: el contacto Bomberos quedó agregado.");
     const cuerpo = (await pedidos(simulado, "POST", BASE)[0]?.json()) as Record<string, unknown>;
     expect([cuerpo.naturaleza, cuerpo.consentimiento_referencia]).toEqual(["organismo", null]);
   });
@@ -424,11 +424,11 @@ describe("página /contactos/gestion", () => {
     const marta = await abrirFicha("Encargado/a: Marta Ruiz");
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Marta Ruiz");
-    expect((screen.getByLabelText("Constancia del consentimiento") as HTMLInputElement).value).toBe("Nota firmada del 20-10");
+    expect((screen.getByLabelText(/Dónde consta que aceptó figurar/) as HTMLInputElement).value).toBe("Nota firmada del 20-10");
     expect(screen.queryByLabelText(/^Desde/)).toBeNull();
     escribir("Teléfono", "11 4000-0001");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    await screen.findByText("Listo: corregimos el contacto Marta Ruiz.");
+    await screen.findByText("Listo: el contacto Marta Ruiz quedó corregido.");
     expect(await pedidos(simulado, "PUT", `${BASE}/${K2}`)[0]?.json()).toEqual({
       funcion: "encargado",
       naturaleza: "profesional",
@@ -460,7 +460,7 @@ describe("página /contactos/gestion", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("button", { name: "Agregar el contacto" })).toBeTruthy();
     soltar();
-    await screen.findByText("Listo: agregamos el contacto Seguros del Plata.");
+    await screen.findByText("Listo: el contacto Seguros del Plata quedó agregado.");
     // Control: terminado el pedido, la fila vuelve a abrir la ficha.
     expect(await abrirFicha("Encargado/a: Marta Ruiz")).toBeTruthy();
   });
@@ -484,7 +484,7 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(within(marta).getByRole("button", { name: "Corregir" }));
     escribir("Teléfono", "11 4000-0001");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    await screen.findByText("Listo: corregimos el contacto Marta Ruiz.");
+    await screen.findByText("Listo: el contacto Marta Ruiz quedó corregido.");
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
     // Ni la ficha ni las filas: nada de la lista vieja queda a mano.
     expect(screen.queryByRole("dialog")).toBeNull();
@@ -512,7 +512,7 @@ describe("página /contactos/gestion", () => {
     // «No» deja la ficha como estaba.
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
-    await screen.findByText("Listo: retiramos el contacto Plomería Rápida.");
+    await screen.findByText("Listo: el contacto Plomería Rápida se retiró.");
     const [pedido] = pedidos(simulado, "POST", `${BASE}/${K1}/retirar`);
     expect(pedido?.headers.get("Idempotency-Key")).toMatch(UUID);
     expect(await pedido?.text()).toBe("");
@@ -546,7 +546,7 @@ describe("página /contactos/gestion", () => {
     const plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Retirar" }));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirar" }));
-    expect(await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.")).toBeTruthy();
+    expect(await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.")).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
     await filaDe("Emergencias: Plomería Rápida");
     expect(screen.queryByRole("button", { name: "Sí, retirar" })).toBeNull();
@@ -564,14 +564,14 @@ describe("página /contactos/gestion", () => {
     let plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Comprobado" }));
     fireEvent.click(screen.getByRole("button", { name: "Lo comprobé" }));
-    await screen.findByText("Listo: quedó la constancia de que comprobaste el contacto Plomería Rápida.");
+    await screen.findByText("Listo: quedó la constancia de que el contacto Plomería Rápida se comprobó.");
     expect(pedidos(simulado, "POST", `${BASE}/${K1}/verificar`)).toHaveLength(1);
     plomeria = await abrirFicha("Emergencias: Plomería Rápida");
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     expect(document.activeElement).toBe(screen.getByLabelText("Motivo"));
     escribir("Motivo", " Cambió de dirección ");
     fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
-    await screen.findByText("Listo: señalamos el dato incorrecto del contacto Plomería Rápida.");
+    await screen.findByText("Listo: quedó señalado el dato incorrecto del contacto Plomería Rápida.");
     expect(await pedidos(simulado, "POST", `${BASE}/${K1}/senalar`)[0]?.json()).toEqual({ motivo: "Cambió de dirección" });
   });
 
@@ -646,7 +646,7 @@ describe("página /contactos/gestion", () => {
     respuesta = () => error("contacto_terminado", 409);
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    const aviso = await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, agregá uno nuevo.");
+    const aviso = await screen.findByText("Ese contacto ya no está vigente: para cambiarlo, hay que agregar uno nuevo.");
     expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
     await waitFor(() => expect(document.activeElement).toBe(aviso));
@@ -654,7 +654,7 @@ describe("página /contactos/gestion", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Agregar un contacto" })).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Agregar el contacto" }));
-    expect(await screen.findByText("Listo: agregamos el contacto Plomería Rápida SRL.")).toBeTruthy();
+    expect(await screen.findByText("Listo: el contacto Plomería Rápida SRL quedó agregado.")).toBeTruthy();
     const correcciones = pedidos(simulado, "PUT", `${BASE}/${K1}`);
     expect(correcciones).toHaveLength(2);
     const [alta] = pedidos(simulado, "POST", BASE);
@@ -690,7 +690,7 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(within(plomeria).getByRole("button", { name: "Corregir" }));
     escribir("Nombre", "Plomería Rápida SRL");
     fireEvent.click(screen.getByRole("button", { name: "Guardar la corrección" }));
-    expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
+    expect(await screen.findByText(/Otra persona cambió este dato recién/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
     await filaDe("Emergencias: Plomería Rápida");
     expect(screen.queryByRole("button", { name: "Guardar la corrección" })).toBeNull();
@@ -705,7 +705,7 @@ describe("página /contactos/gestion", () => {
     fireEvent.click(within(plomeria).getByRole("button", { name: "Señalar un error" }));
     escribir("Motivo", "No atiende");
     fireEvent.click(screen.getByRole("button", { name: "Señalar el error" }));
-    expect(await screen.findByText(/choca con el estado actual de la lista/)).toBeTruthy();
+    expect(await screen.findByText(/Otra persona cambió este dato recién/)).toBeTruthy();
     await waitFor(() => expect(pedidos(simulado, "GET", GESTION)).toHaveLength(2));
     const nueva = await screen.findByRole("dialog", { name: "Emergencias: Plomería Rápida" });
     expect((within(nueva).getByLabelText("Motivo") as HTMLInputElement).value).toBe("No atiende");
@@ -785,7 +785,7 @@ describe("página /contactos/gestion", () => {
     }
     fireEvent.click(within(marta).getByRole("button", { name: "Cerrar" }));
     fireEvent.click(screen.getByRole("button", { name: "Agregar un contacto" }));
-    fireEvent.change(screen.getByLabelText("Naturaleza"), { target: { value: "profesional" } });
+    fireEvent.change(screen.getByLabelText("¿De quién es el número?"), { target: { value: "profesional" } });
     expect(await faltas()).toEqual([]);
   });
 

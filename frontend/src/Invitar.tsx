@@ -66,13 +66,13 @@ const TEXTO_CAMPO: Record<string, string> = {
 /** Qué decir ante el error de invitar, según el estado y el código del cuerpo uniforme. Un 422 que
  *  marca campos lo dice el resumen de `ErrorDeCampo`, con el motivo junto a cada campo (G-23). */
 export function mensajeAlInvitar(estado: number, codigo: string | undefined): string {
-  if (estado === 403 && codigo === "csrf_invalido") return "No pudimos verificar el pedido. Recargá la página.";
-  if (estado === 403) return "No tenés permiso para invitar a esa unidad.";
-  if (estado === 404) return "Esa unidad ya no está en el consorcio. Elegí otra.";
-  if (estado === 409) return "La invitación se está procesando. Probá de nuevo en unos segundos.";
-  if (estado === 429) return "Llegaste al límite de invitaciones por ahora. Probá más tarde.";
+  if (estado === 403 && codigo === "csrf_invalido") return "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.";
+  if (estado === 403) return "Esta cuenta no tiene permiso para invitar a esa unidad.";
+  if (estado === 404) return "Esa unidad ya no está en el consorcio. Hay que elegir otra.";
+  if (estado === 409) return "La invitación se está procesando. Reintentar en unos segundos.";
+  if (estado === 429) return "Se llegó al límite de invitaciones por ahora. Reintentar más tarde.";
   if (estado === 422 && codigo === "idempotencia_reutilizada")
-    return "Cambiaste los datos de un intento anterior. Volvé a tocar «Invitar».";
+    return "Los datos cambiaron desde un intento anterior. Hay que tocar «Invitar» de nuevo.";
   if (estado === 422) return REVISAR_FORMULARIO;
   return mensajeDeFalla(estado, codigo);
 }
@@ -298,7 +298,7 @@ export function Invitar() {
         setVuelta((v) => v + 1);
         setCorreo("");
         setNombre("");
-        setAviso({ texto: `Listo: le mandamos la invitación a ${data.nombre}.`, ok: true });
+        setAviso({ texto: `Listo: la invitación a ${data.nombre} quedó enviada.`, ok: true });
       })
       .catch(atajar)
       .finally(() => setEnviando(false));
@@ -327,8 +327,8 @@ export function Invitar() {
           setAviso({
             texto:
               codigo === "csrf_invalido"
-                ? "No pudimos verificar el pedido. Recargá la página."
-                : "No tenés permiso para retirar esa invitación.",
+                ? "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso."
+                : "Esta cuenta no tiene permiso para retirar esa invitación.",
             ok: false,
           });
           return;
@@ -345,7 +345,7 @@ export function Invitar() {
         }
         if (response.status === 404) {
           setInvitaciones((actual) => (actual ?? []).filter((i) => i.id !== invitacion.id));
-          setAviso({ texto: "No encontramos esa invitación.", ok: false });
+          setAviso({ texto: "No se encontró esa invitación.", ok: false });
           return;
         }
         if (!response.ok) {
@@ -355,7 +355,7 @@ export function Invitar() {
         setInvitaciones((actual) =>
           (actual ?? []).map((i) => (i.id === invitacion.id ? { ...i, estado: "revocada" as const } : i)),
         );
-        setAviso({ texto: `Listo: retiramos la invitación de ${invitacion.nombre}.`, ok: true });
+        setAviso({ texto: `Listo: la invitación de ${invitacion.nombre} se retiró.`, ok: true });
       })
       .catch(atajar)
       .finally(() => {
@@ -389,7 +389,7 @@ export function Invitar() {
         <>
           <p className="tarjeta">
             Invitar no acredita el carácter de propietario, inquilino u ocupante: la persona entra
-            con el vínculo que elijas y queda sin confirmar hasta que alguien lo confirme con el
+            con el vínculo elegido y queda sin confirmar hasta que alguien lo confirme con el
             título.
           </p>
 
@@ -445,8 +445,8 @@ export function Invitar() {
               )}
               {unidadesFallidas && (
                 <>
-                  <p>No pudimos mostrar las unidades.</p>
-                  <button type="button" onClick={reconsultar} disabled={enviando}>
+                  <p>No se pudieron mostrar las unidades.</p>
+                  <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
                     Consultar de nuevo
                   </button>
                 </>
@@ -507,10 +507,10 @@ export function Invitar() {
           <>
             <p className="aviso-error">
               {pantalla.deConexion
-                ? "No pudimos consultar tus edificios. Revisá la conexión y volvé en un rato."
-                : `No pudimos consultar tus edificios. ${SERVICIO_NO_DISPONIBLE}`}
+                ? "No se pudieron consultar los edificios. Hay que revisar la conexión y volver en un rato."
+                : `No se pudieron consultar los edificios. ${SERVICIO_NO_DISPONIBLE}`}
             </p>
-            <button
+            <button className="secundario"
               type="button"
               onClick={() => {
                 setPantalla({ tipo: "cargando" });
@@ -521,7 +521,7 @@ export function Invitar() {
             </button>
           </>
         )}
-        {pantalla.tipo === "sin_consorcios" && <p>Todavía no participás de ningún edificio.</p>}
+        {pantalla.tipo === "sin_consorcios" && <p>Esta cuenta todavía no participa de ningún edificio.</p>}
         {aviso && (
           <p ref={textoAviso} tabIndex={-1} className={aviso.ok ? "aviso-ok" : "aviso-error"}>
             {aviso.texto}
@@ -533,15 +533,15 @@ export function Invitar() {
         <section aria-labelledby={`${id}-lista`} className="tarjeta">
           <h2 id={`${id}-lista`}>Invitaciones</h2>
           {invitaciones === null && !listaFallida && <p>Consultando…</p>}
-          {invitaciones === null && listaFallida && <p>No pudimos mostrar las invitaciones.</p>}
+          {invitaciones === null && listaFallida && <p>No se pudieron mostrar las invitaciones.</p>}
           {listaFallida && (
             <p>
-              <button type="button" onClick={reconsultar} disabled={enviando}>
+              <button className="secundario" type="button" onClick={reconsultar} disabled={enviando}>
                 Consultar de nuevo
               </button>
             </p>
           )}
-          {invitaciones?.length === 0 && <p>Todavía no hay invitaciones que puedas ver.</p>}
+          {invitaciones?.length === 0 && <p>Todavía no hay invitaciones.</p>}
           {invitaciones !== null && invitaciones.length > 0 && (
             <>
               {pendientes.length === 0 ? (

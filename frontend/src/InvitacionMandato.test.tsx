@@ -56,9 +56,9 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
 const CONSULTAR = "/api/v1/auth/invitacion-mandato/consultar";
 const ACEPTAR = "/api/v1/auth/invitacion-mandato/aceptar";
 const SALIR = "/api/v1/auth/salir";
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
-const AVISO = "Listo: tu cuenta quedó asociada a la administración de Edificio Alvear 100.";
-const CAMPO_NOMBRE = "Tu nombre (solo si la cuenta es nueva)";
+const INICIO = { level: 1, name: "Consorcio en mano" };
+const AVISO = "Listo: la cuenta quedó asociada a la administración de Edificio Alvear 100.";
+const CAMPO_NOMBRE = "Nombre (solo si la cuenta es nueva)";
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -131,7 +131,7 @@ describe("página /invitacion-mandato", () => {
     const simulado = backend(() => Response.json(aceptada("2026-01-01")));
     vi.stubGlobal("fetch", simulado);
     abrir(`${RUTA}#token=${TOKEN}`);
-    const campo = await screen.findByLabelText("Tu nombre (solo si la cuenta es nueva)");
+    const campo = await screen.findByLabelText("Nombre (solo si la cuenta es nueva)");
     expect((campo as HTMLInputElement).value).toBe("Estudio X");
     fireEvent.change(campo, { target: { value: "  Beto Estudio " } });
     fireEvent.click(await aceptarBoton());
@@ -151,13 +151,13 @@ describe("página /invitacion-mandato", () => {
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
     expect(
-      await screen.findByText(`${AVISO} El mandato empieza el 01/11/2099: desde ese día vas a ver el consorcio.`),
+      await screen.findByText(`${AVISO} El mandato empieza el 01/11/2099: desde ese día el consorcio aparece en la cuenta.`),
     ).toBeTruthy();
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
   });
 
   it.each([
-    ["invitacion_requiere_sesion", /Ya tenés una cuenta con este correo/],
+    ["invitacion_requiere_sesion", /Ya hay una cuenta con este correo/],
     ["invitacion_de_otra_persona", /no es la del correo invitado/],
     ["asociacion_incompatible_con_consejo", /el Consejo fiscaliza y no administra/],
     ["asociacion_de_si_mismo", /Quien emitió o aprobó la invitación no puede aceptarla para sí/],
@@ -172,7 +172,7 @@ describe("página /invitacion-mandato", () => {
     vi.stubGlobal("fetch", backend(() => error("idempotencia_en_curso", 409)));
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido/)).toBeTruthy();
     expect(await aceptarBoton()).toBeTruthy();
   });
 
@@ -191,7 +191,7 @@ describe("página /invitacion-mandato", () => {
     const simulado = vi.fn();
     vi.stubGlobal("fetch", simulado);
     abrir(RUTA);
-    expect(screen.getByText("Para asociar tu cuenta, abrí el enlace que te llegó por correo.")).toBeTruthy();
+    expect(screen.getByText("Para asociar la cuenta hay que abrir el enlace que llegó por correo.")).toBeTruthy();
     expect(simulado).not.toHaveBeenCalled();
   });
 
@@ -298,7 +298,7 @@ describe("ningún error de /invitacion-mandato termina sin un paso siguiente", (
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
-    expect(await screen.findByRole("link", { name: "Entrá" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "entrar" })).toBeTruthy();
     expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
     expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
   });
@@ -334,7 +334,7 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     expect(((await aceptarBoton()) as HTMLButtonElement).disabled).toBe(true);
     soltar();
 
-    expect(await screen.findByText(/tu cuenta quedó asociada/)).toBeTruthy();
+    expect(await screen.findByText(/la cuenta quedó asociada/)).toBeTruthy();
     expect(screen.queryByText("Aceptando…")).toBeNull();
   });
 
@@ -342,7 +342,7 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
     abrir(`${RUTA}#token=${TOKEN}`);
 
-    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido. Hay que revisar la conexión/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Aceptar y asociar mi cuenta" })).toBeNull();
     expect(within(screen.getByRole("main")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reintentar"]);
   });
@@ -380,7 +380,7 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
-    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido. Hay que revisar la conexión/)).toBeTruthy();
     expect(screen.queryByText(/quedó asociada/)).toBeNull();
     expect(await aceptarBoton()).toBeTruthy();
   });
@@ -422,8 +422,8 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Beto Estudio" });
 
     // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
-    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }));
-    expect(await screen.findByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }));
+    expect(await screen.findByRole("heading", { name: /Instalar Consorcio en Mano/ })).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
@@ -435,19 +435,19 @@ describe("página /invitacion-mandato: estados de pantalla mínima (documento 08
     abrir(`${RUTA}#token=${TOKEN}`);
     fireEvent.click(await aceptarBoton());
 
-    expect(await screen.findByText(/Volvé a abrir el enlace desde el correo/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(await screen.findByText(/Hay que abrir de nuevo el enlace del correo/)).toBeTruthy();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
   it.each([
     [503, "servicio_no_disponible", /El servicio no está disponible/],
     [500, "error_interno", /El servicio no está disponible/],
-    [429, "demasiadas_peticiones", /Llegaste al límite de pedidos/],
-    [422, "peticion_invalida", /Volvé a abrir el enlace desde el correo/],
+    [429, "demasiadas_peticiones", /Se llegó al límite de pedidos/],
+    [422, "peticion_invalida", /Hay que abrir de nuevo el enlace del correo/],
   ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
     vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
     abrir(`${RUTA}#token=${TOKEN}`);
 
     expect(await screen.findByText(texto)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 });

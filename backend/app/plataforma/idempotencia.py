@@ -153,7 +153,7 @@ def _guardada(
         raise ErrorApi(
             422,
             CodigoError.IDEMPOTENCIA_REUTILIZADA,
-            "Esa clave de reintento ya se usó con otros datos. Generá una nueva.",
+            "Esa clave de reintento ya se usó con otros datos. Hace falta una nueva.",
         )
     return Response(
         guardada.respuesta,
@@ -267,6 +267,6 @@ def _esperar_turno(conn: Connection, claves: dict[str, Any]) -> None:
         raise ErrorApi(
             409,
             CodigoError.IDEMPOTENCIA_EN_CURSO,
-            "Ese pedido todavía se está procesando. Probá de nuevo en unos segundos.",
+            "Ese pedido todavía se está procesando. Reintentar en unos segundos.",
         ) from e
     conn.execute(text("select set_config('lock_timeout', :t, true)"), {"t": previo})

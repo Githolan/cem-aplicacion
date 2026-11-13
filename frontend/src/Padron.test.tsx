@@ -189,8 +189,9 @@ describe("página /padron", () => {
     expect((await filaDe("1° A: Ana Ruiz")).textContent).toBe("1° A: Ana Ruiz Propietario/a · Confirmado");
     expect((await filaDe("2° B: Carla Gómez")).textContent).toBe("2° B: Carla Gómez Propietario/a · Sin confirmar · Todavía no empezó");
     const ana = await abrirFicha("1° A: Ana Ruiz");
-    expect(within(ana).getByText("1° A")).toBeTruthy();
-    expect(within(ana).getByText("Ana Ruiz")).toBeTruthy();
+    // G-33: la unidad y el nombre van en el título, sin repetirse en las filas.
+    expect(within(ana).getByRole("heading", { name: "1° A: Ana Ruiz" })).toBeTruthy();
+    expect(within(ana).queryByText("Ana Ruiz")).toBeNull();
     expect(within(ana).getByText("Propietario/a")).toBeTruthy();
     expect(within(ana).getByText("Desde el 1 de marzo de 2024, sin fecha de fin")).toBeTruthy();
     expect(within(ana).getByText("Confirmado con el título")).toBeTruthy();
@@ -277,9 +278,9 @@ describe("página /padron", () => {
   it("un 403 al leer el padrón lleva al inicio, sin una pantalla de «sin permiso»", async () => {
     vi.stubGlobal("fetch", conPadron({ ...INICIO_CON_SESION, [`GET ${RUTA_PADRON}`]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Padrón del edificio" })).toBeNull();
-    expect(screen.queryByText(/No tenés permiso|No hay permiso/)).toBeNull();
+    expect(screen.queryByText(/no tiene permiso|No hay permiso/)).toBeNull();
   });
 
   it("confirma con CSRF, una clave de reintento y la referencia; actualiza la fila y vuelve a pedir el padrón", async () => {
@@ -294,13 +295,13 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    const campo = screen.getByLabelText("Referencia del título");
+    const campo = screen.getByLabelText("Documento que lo prueba");
     expect(document.activeElement).toBe(campo);
     expect(campo.getAttribute("maxlength")).toBe("300");
-    escribir("Referencia del título", "  Contrato de locación del 01-03-2024  ");
+    escribir("Documento que lo prueba", "  Contrato de locación del 01-03-2024  ");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
 
-    const aviso = await screen.findByText("Listo: confirmamos el vínculo de Beto Pérez con la unidad 1° A.");
+    const aviso = await screen.findByText("Listo: quedó confirmado el vínculo de Beto Pérez con la unidad 1° A.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     const [pedido] = pedidos(simulado, "POST", confirmarRuta(V_INQ));
     expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
@@ -325,13 +326,13 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
-    await screen.findByText(/^Listo: confirmamos/);
+    await screen.findByText(/^Listo: quedó confirmado el vínculo/);
     await waitFor(() => expect(vueltas).toBe(2));
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByText("Listo: confirmamos el vínculo de Beto Pérez con la unidad 1° A.")).toBeTruthy();
-    expect(screen.getByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    expect(screen.getByText("Listo: quedó confirmado el vínculo de Beto Pérez con la unidad 1° A.")).toBeTruthy();
+    expect(screen.getByText("No se pudo mostrar el padrón.")).toBeTruthy();
   });
 
   it("finalizar pide el motivo y una confirmación explícita antes de enviar", async () => {
@@ -358,7 +359,7 @@ describe("página /padron", () => {
     fireEvent.click(si);
 
     expect(
-      await screen.findByText("Listo: finalizamos el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale."),
+      await screen.findByText("Listo: quedó finalizado el vínculo de Beto Pérez con la unidad 1° A. Desde el 24 de octubre de 2026 ya no vale."),
     ).toBeTruthy();
     const [pedido] = pedidos(simulado, "POST", finalizarRuta(V_INQ));
     expect(pedido?.headers.get("X-CSRF-Token")).toBe("abc123");
@@ -394,7 +395,7 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     expect(await screen.findByText(new RegExp(`^${texto.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`))).toBeTruthy();
     // Un 404 o un 409 dejan la lista vieja: se vuelve a pedir.
@@ -440,13 +441,13 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     const aviso = await within(beto).findByRole("alert");
     expect(aviso.textContent).toMatch(/^Hay que revisar la referencia/);
     expect(aviso.closest("form")).toBeTruthy();
     expect(estadoDePantalla().textContent).toBe("");
-    expect((screen.getByLabelText("Referencia del título") as HTMLInputElement).value).toBe("Escritura 1234");
+    expect((screen.getByLabelText("Documento que lo prueba") as HTMLInputElement).value).toBe("Escritura 1234");
   });
 
   it("control: un rechazo que cierra el formulario queda en el estado de la página", async () => {
@@ -454,11 +455,11 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     expect(await within(estadoDePantalla()).findByText("Ese vínculo ya estaba confirmado.")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.queryByLabelText("Referencia del título")).toBeNull();
+    expect(screen.queryByLabelText("Documento que lo prueba")).toBeNull();
   });
 
   it("el estado de la página va arriba de la lista", async () => {
@@ -476,7 +477,7 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     const enviar = () => fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     enviar();
     await screen.findByText(/El servicio no está disponible/);
@@ -500,10 +501,10 @@ describe("página /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 1234");
+    escribir("Documento que lo prueba", "Escritura 1234");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     await screen.findByText(/El servicio no está disponible/);
-    escribir("Referencia del título", "Escritura 1235");
+    escribir("Documento que lo prueba", "Escritura 1235");
     fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
     await waitFor(() => expect(pedidos(simulado, "POST", confirmarRuta(V_INQ))).toHaveLength(2));
     const [a, b] = pedidos(simulado, "POST", confirmarRuta(V_INQ)).map((p) => p.headers.get("Idempotency-Key"));
@@ -557,7 +558,7 @@ describe("página /padron", () => {
   it("sin edificios lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
     abrir();
-    expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta todavía no participa de ningún edificio.")).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe, con la lista, la ficha y cada formulario abierto", async () => {
@@ -606,7 +607,7 @@ describe("página /padron", () => {
     expect(document.activeElement).toBe(si);
     fireEvent.click(si);
 
-    const aviso = await screen.findByText("Listo: anulamos el vínculo de Carla Gómez con la unidad 2° B.");
+    const aviso = await screen.findByText("Listo: quedó anulado el vínculo de Carla Gómez con la unidad 2° B.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(screen.queryByRole("dialog")).toBeNull();
     const [pedido] = pedidos(simulado, "POST", anularRuta(V_FUT));
@@ -718,7 +719,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     const seccion = screen.getByRole("region", { name: "Vínculos por unidad" });
     expect(within(seccion).queryByText("Consultando…")).toBeNull();
-    expect(within(seccion).getByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    expect(within(seccion).getByText("No se pudo mostrar el padrón.")).toBeTruthy();
   });
 
   it("el padrón que no se pudo consultar se reintenta en la misma pantalla y el error se va", async () => {
@@ -729,7 +730,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     vi.stubGlobal("fetch", simulado);
     abrir();
     const seccion = await screen.findByRole("region", { name: "Vínculos por unidad" });
-    expect(await within(seccion).findByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    expect(await within(seccion).findByText("No se pudo mostrar el padrón.")).toBeTruthy();
     caido = false;
     fireEvent.click(within(seccion).getByRole("button", { name: "Consultar de nuevo" }));
     expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
@@ -746,7 +747,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     fireEvent.click(await screen.findByRole("button", { name: "Consultar de nuevo" }));
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON)).toHaveLength(2));
     expect(await screen.findByRole("button", { name: "Consultar de nuevo" })).toBeTruthy();
-    expect(screen.getByText("No pudimos mostrar el padrón.")).toBeTruthy();
+    expect(screen.getByText("No se pudo mostrar el padrón.")).toBeTruthy();
   });
 
   it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
@@ -756,14 +757,14 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudieron consultar los edificios/)).toBeTruthy();
     // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
     expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
-    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+    expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
   });
 
   it("sin conexión al consultar el padrón lo dice", async () => {
@@ -773,7 +774,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/Hay que revisar la conexión/)).toBeTruthy();
   });
 
   describe("al volver la red", () => {
@@ -786,7 +787,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       });
       vi.stubGlobal("fetch", simulado);
       abrir();
-      await screen.findByText("No pudimos mostrar el padrón.");
+      await screen.findByText("No se pudo mostrar el padrón.");
       caido = false;
       volvioLaRed();
       expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
@@ -798,7 +799,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       const simulado = conPadron({ [`GET ${RUTA_PADRON}`]: () => error("servicio_no_disponible", 503) });
       vi.stubGlobal("fetch", simulado);
       abrir();
-      await screen.findByText("No pudimos mostrar el padrón.");
+      await screen.findByText("No se pudo mostrar el padrón.");
       const antes = pedidos(simulado, "GET", RUTA_PADRON).length;
       volvioLaRed();
       await waitFor(() => expect(pedidos(simulado, "GET", RUTA_PADRON).length).toBeGreaterThan(antes));
@@ -812,7 +813,7 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
       abrir();
       const beto = await abrirFicha("1° A: Beto Pérez");
       fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-      escribir("Referencia del título", "Escritura 1234");
+      escribir("Documento que lo prueba", "Escritura 1234");
       fireEvent.click(screen.getByRole("button", { name: "Confirmar el vínculo" }));
       await within(beto).findByRole("alert");
       const lecturas = pedidos(simulado, "GET", RUTA_PADRON).length;
@@ -830,11 +831,11 @@ describe("página /padron: estados de pantalla mínima (documento 08, §13.1)", 
         conPadron({ "GET /api/v1/me/consorcios": () => (caido ? error("servicio_no_disponible", 503) : Response.json(CONSORCIOS)) }),
       );
       abrir();
-      await screen.findByText(/No pudimos consultar tus edificios/);
+      await screen.findByText(/No se pudieron consultar los edificios/);
       caido = false;
       volvioLaRed();
       expect(await filaDe("1° A: Ana Ruiz")).toBeTruthy();
-      expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+      expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
     });
   });
 });
@@ -931,7 +932,7 @@ describe("lo que no se puede hacer no aparece en /padron", () => {
     abrir();
     const beto = await abrirFicha("1° A: Beto Pérez");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar" }));
-    escribir("Referencia del título", "Escritura 123");
+    escribir("Documento que lo prueba", "Escritura 123");
     fireEvent.click(within(beto).getByRole("button", { name: "Confirmar el vínculo" }));
     expect(await screen.findByText(/No hay permiso para confirmar este vínculo/)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1, name: "Padrón del edificio" })).toBeTruthy();

@@ -56,8 +56,8 @@ function pedidosDe(simulado: ReturnType<typeof vi.fn>): Request[] {
 const CONSULTAR = "/api/v1/auth/invitacion/consultar";
 const ACEPTAR = "/api/v1/auth/invitacion/aceptar";
 const SALIR = "/api/v1/auth/salir";
-const INICIO = { level: 1, name: "Tu consorcio, en tu mano" };
-const AVISO = "Listo: ya sos parte de Edificio Alvear 100.";
+const INICIO = { level: 1, name: "Consorcio en mano" };
+const AVISO = "Listo: la cuenta ya es parte de Edificio Alvear 100.";
 
 type Respuesta = () => Response | Promise<Response>;
 
@@ -125,7 +125,7 @@ describe("página /invitacion", () => {
     vi.stubGlobal("fetch", pedido);
     abrir(`/invitacion#token=${TOKEN}`);
 
-    const nombre = await screen.findByLabelText("Tu nombre");
+    const nombre = await screen.findByLabelText("Nombre");
     fireEvent.change(nombre, { target: { value: "  Alberto " } });
     fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
 
@@ -147,7 +147,7 @@ describe("página /invitacion", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    await screen.findByText(/ya sos parte/);
+    await screen.findByText(/ya es parte/);
     expect(aceptacionesDe(pedido)[0]?.headers.get("X-CSRF-Token")).toBe("abc123");
   });
 
@@ -157,9 +157,9 @@ describe("página /invitacion", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/Ya tenés una cuenta con este correo/)).toBeTruthy();
-    expect(screen.getByText(/la vas a ver en el inicio, lista para aceptar/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Entrá" }).getAttribute("href")).toBe("/entrar");
+    expect(await screen.findByText(/Ya hay una cuenta con este correo/)).toBeTruthy();
+    expect(screen.getByText(/la invitación aparece en el inicio, lista para aceptar/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "entrar" }).getAttribute("href")).toBe("/entrar");
   });
 
   it("si la sesión es de otra persona, lo dice", async () => {
@@ -177,7 +177,7 @@ describe("página /invitacion", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/Esta invitación la creaste vos/)).toBeTruthy();
+    expect(await screen.findByText(/Esta invitación la creó esta cuenta/)).toBeTruthy();
     expect(screen.queryByText(/no es la del correo invitado/)).toBeNull();
   });
 
@@ -194,7 +194,7 @@ describe("página /invitacion", () => {
     vi.stubGlobal("fetch", pedido);
     abrir("/invitacion");
 
-    expect(screen.getByText(/abrí el enlace que te llegó por correo/)).toBeTruthy();
+    expect(screen.getByText(/hay que abrir el enlace que llegó por correo/)).toBeTruthy();
     expect(pedido).not.toHaveBeenCalled();
   });
 
@@ -266,7 +266,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))));
     abrir(`/invitacion#token=${TOKEN}`);
 
-    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido. Hay que revisar la conexión/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Aceptar la invitación" })).toBeNull();
     expect(within(screen.getByRole("main")).getAllByRole("button").map((b) => b.textContent)).toEqual(["Reintentar"]);
   });
@@ -318,23 +318,23 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/No pudimos completar el pedido. Revisá la conexión/)).toBeTruthy();
-    expect(screen.queryByText(/ya sos parte/)).toBeNull();
+    expect(await screen.findByText(/No se pudo completar el pedido. Hay que revisar la conexión/)).toBeTruthy();
+    expect(screen.queryByText(/ya es parte/)).toBeNull();
     expect(screen.getByRole("button", { name: "Aceptar la invitación" })).toBeTruthy();
   });
 
   it("un 503 al aceptar deja el formulario con el nombre escrito y el error, sin ir al inicio", async () => {
     vi.stubGlobal("fetch", backend(() => error("servicio_no_disponible", 503)));
     abrir(`/invitacion#token=${TOKEN}`);
-    fireEvent.change(await screen.findByLabelText("Tu nombre"), { target: { value: "Alberto" } });
+    fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Alberto" } });
     fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
 
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    expect((screen.getByLabelText("Tu nombre") as HTMLInputElement).value).toBe("Alberto");
+    expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Alberto");
     expect((screen.getByRole("button", { name: "Aceptar la invitación" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.getByRole("heading", { name: "Edificio Alvear 100" })).toBeTruthy();
     expect(screen.queryByRole("heading", INICIO)).toBeNull();
-    expect(screen.queryByText(/ya sos parte/)).toBeNull();
+    expect(screen.queryByText(/ya es parte/)).toBeNull();
     // Es un error del pedido, no de la consulta: el «Reintentar» de la consulta no aparece.
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
@@ -344,7 +344,7 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     const pedido = backend(() => (caido ? error("servicio_no_disponible", 503) : Response.json(ACEPTADA)));
     vi.stubGlobal("fetch", pedido);
     abrir(`/invitacion#token=${TOKEN}`);
-    fireEvent.change(await screen.findByLabelText("Tu nombre"), { target: { value: "Alberto" } });
+    fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Alberto" } });
     fireEvent.click(screen.getByRole("button", { name: "Aceptar la invitación" }));
     await screen.findByText(/El servicio no está disponible/);
 
@@ -359,8 +359,8 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     expect(await aceptaciones[1]?.json()).toEqual({ token: TOKEN, nombre: "Alberto" });
 
     // A otra pantalla: el aviso se va. Y de vuelta al inicio (pasando por /entrar) no reaparece.
-    fireEvent.click(screen.getByRole("link", { name: "Instalá la aplicación en este dispositivo" }));
-    expect(await screen.findByRole("heading", { name: /Instalá Consorcio en Mano/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Instalar la aplicación en este dispositivo" }));
+    expect(await screen.findByRole("heading", { name: /Instalar Consorcio en Mano/ })).toBeTruthy();
     expect(screen.queryByText(AVISO)).toBeNull();
     fireEvent.click(screen.getByRole("link", { name: "Seguir sin instalar" }));
     expect(await screen.findByRole("heading", INICIO)).toBeTruthy();
@@ -372,20 +372,20 @@ describe("página /invitacion: estados de pantalla mínima (documento 08, §13.1
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", { name: "Aceptar la invitación" }));
 
-    expect(await screen.findByText(/Volvé a abrir el enlace desde el correo/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(await screen.findByText(/Hay que abrir de nuevo el enlace del correo/)).toBeTruthy();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
   it.each([
     [503, "servicio_no_disponible", /El servicio no está disponible/],
     [500, "error_interno", /El servicio no está disponible/],
-    [429, "demasiadas_peticiones", /Llegaste al límite de pedidos/],
-    [422, "peticion_invalida", /Volvé a abrir el enlace desde el correo/],
+    [429, "demasiadas_peticiones", /Se llegó al límite de pedidos/],
+    [422, "peticion_invalida", /Hay que abrir de nuevo el enlace del correo/],
   ])("un %i (%s) al consultar no se explica como un problema de conexión", async (status, codigo, texto) => {
     vi.stubGlobal("fetch", vi.fn(async () => error(codigo, status)));
     abrir(`/invitacion#token=${TOKEN}`);
 
     expect(await screen.findByText(texto)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 });
 
@@ -442,7 +442,7 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
 
   it.each<[string, Respuesta, RegExp]>([
     ["un 503", () => error("servicio_no_disponible", 503), /El servicio no está disponible/],
-    ["sin red", () => Promise.reject(new TypeError("Failed to fetch")), /Revisá la conexión/],
+    ["sin red", () => Promise.reject(new TypeError("Failed to fetch")), /Hay que revisar la conexión/],
   ])("con %s al salir lo dice, se queda ahí y deja probar de nuevo", async (_, salir, mensaje) => {
     const pedido = backend(OTRA_CUENTA, undefined, salir);
     vi.stubGlobal("fetch", pedido);
@@ -461,7 +461,7 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
 
   it.each<[string, () => Response, RegExp]>([
     ["no sirve", () => error("invitacion_invalida", 404), /Esta invitación no sirve/],
-    ["la creó quien la abre", () => error("invitacion_propia", 409), /Esta invitación la creaste vos/],
+    ["la creó quien la abre", () => error("invitacion_propia", 409), /Esta invitación la creó esta cuenta/],
   ])("si %s, lleva al inicio", async (_, rechazo, texto) => {
     vi.stubGlobal("fetch", backend(rechazo));
     abrir(`/invitacion#token=${TOKEN}`);
@@ -501,7 +501,7 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
     abrir(`/invitacion#token=${TOKEN}`);
     fireEvent.click(await screen.findByRole("button", ACEPTAR_LA));
 
-    expect(await screen.findByRole("link", { name: "Entrá" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "entrar" })).toBeTruthy();
     expect(screen.queryByRole("link", AL_INICIO)).toBeNull();
     expect(screen.queryByRole("button", SALIR_DE_ESTA)).toBeNull();
   });
@@ -521,7 +521,7 @@ describe("ningún error de /invitacion termina sin un paso siguiente", () => {
     expect(screen.getByRole("link", AL_INICIO)).toBeTruthy();
     expect(screen.queryByRole("button", ACEPTAR_LA)).toBeNull();
     expect(screen.queryByText(OTRA_PERSONA)).toBeNull();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   it("con otra cuenta no tiene faltas de accesibilidad detectables por axe", async () => {

@@ -658,7 +658,7 @@ def test_rutas_de_contratos_franja_y_emision(motor_migrate, e):
     # Otra versión del proveedor que la vista: 409 con el mensaje de la confirmación (0053).
     r = post(e, e.mc1, f"contratos/{k}/confirmacion", vista | {"proveedor_version": 9})
     assert codigo(r) == (409, "proveedor_cambiado")
-    assert "recargá" in r.json()["mensaje"], r.json()
+    assert "hay que recargar la página" in r.json()["mensaje"], r.json()
     r = post(e, e.mc1, f"contratos/{k}/confirmacion", vista)
     assert r.status_code == 201, r.json()
     assert get(e, e.adm, "contratos").json()["elementos"][0]["estado"] == "vigente"

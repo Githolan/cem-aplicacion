@@ -201,7 +201,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
           const codigo = codigoDe(creado.error);
           if (renovarClave(creado.response.status, codigo)) claveDocumento.current = null;
           setFase({ tipo: "no_subio" });
-          setTexto(`El archivo no se subió. ${mensajeDeActo(creado.response.status, codigo)}`);
+          setTexto(`El archivo no se subió. ${mensajeDeActo(creado.response.status, creado.error)}`);
           return;
         }
         claveDocumento.current = null;
@@ -255,7 +255,7 @@ export function CargaConLectura({ consorcio, tipo, titulo, de, textoVer, deshabi
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveQuitar.current = null;
         setQuitar("nada");
-        setFalloQuitar(`El archivo no se quitó. ${mensajeDeActo(response.status, codigo)}`);
+        setFalloQuitar(`El archivo no se quitó. ${mensajeDeActo(response.status, error)}`);
         return;
       }
       claveQuitar.current = null;

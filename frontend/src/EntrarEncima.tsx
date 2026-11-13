@@ -60,15 +60,15 @@ function HojaEntrar({ correo }: { correo: string }) {
   }
 
   return (
-    <Hoja titulo="Tu sesión venció" encima>
-      <p>Entrá de nuevo para seguir. Lo que escribiste queda acá.</p>
+    <Hoja titulo="La sesión venció" encima>
+      <p>Hay que entrar de nuevo para seguir. Lo escrito queda acá.</p>
       <FormasDeEntrar correo={escrito ?? correo} alCambiarCorreo={setEscrito} alEntrar={seguir} />
       {falla !== null && (
         <>
           <p className="aviso-error" role="alert">
             {falla}
           </p>
-          <button type="button" onClick={seguir}>
+          <button className="secundario" type="button" onClick={seguir}>
             Reintentar
           </button>
         </>
@@ -111,7 +111,7 @@ export function EntrarEncima() {
     <>
       {recuperada && (
         <p className="aviso-ok aviso-fijo" role="status">
-          Seguís donde estabas.
+          La pantalla sigue donde estaba.
         </p>
       )}
       {pidiendo && pathname !== RUTA_ENTRAR && <HojaEntrar correo={correo} />}

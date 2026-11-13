@@ -279,7 +279,7 @@ RESPUESTAS_SUBIDA = {
     408: {"description": "El cuerpo no llegó entero a tiempo: no se guardó nada."},
     413: {"description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."},
     415: {"description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."},
-    503: {"description": "Demasiadas cargas a la vez: probá de nuevo en un momento."},
+    503: {"description": "Demasiadas cargas a la vez: reintentar en un momento."},
 }
 """El cuerpo y las respuestas de toda subida de un archivo (también la de `0068`)."""
 
@@ -343,7 +343,7 @@ async def subir_archivo(
         raise ErrorApi(
             503,
             CodigoError.SERVICIO_NO_DISPONIBLE,
-            "Hay muchas cargas en curso. Probá de nuevo en un momento.",
+            "Hay muchas cargas en curso. Reintentar en un momento.",
             {"Retry-After": str(ESPERA_TURNO)},
         ) from None
     try:

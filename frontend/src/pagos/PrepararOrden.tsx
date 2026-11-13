@@ -76,7 +76,7 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
       <CabeceraInterna titulo="Preparar una orden" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (

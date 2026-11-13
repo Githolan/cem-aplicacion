@@ -1,5 +1,6 @@
-"""«Pagué otra cosa» y «Volver a pagar» contra PostgreSQL real (`0075`). Datos SINTETICOS / PRUEBA /
-NO REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve dinero.
+"""«Se transfirió otro importe o a otra cuenta» y «Volver a pagar» contra PostgreSQL real (`0075`).
+Datos SINTETICOS / PRUEBA / NO REAL: ninguna cuenta es de un banco (prefijo 999) y no se mueve
+dinero.
 
 Diseño: `Rediseno_Circuito_Pagos_2026-11-06.md`, §7, §9, §14 y §17. La escena es la de
 `test_pago_manual_0055`: la administración prepara y ejecuta, mc1 aprueba y mc2 concilia.

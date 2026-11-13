@@ -46,7 +46,7 @@ test.describe("/entrar decide por la sesión", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/entrar");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     expect(new URL(page.url()).pathname).toBe("/");
   });
 

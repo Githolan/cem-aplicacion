@@ -96,7 +96,7 @@ export function PagosPorAclarar() {
   useEffect(() => {
     let vigente = true;
     function noLlego(texto: string) {
-      if (conFormulario.current) setFallaLista(`No pudimos actualizar la lista. ${texto}`);
+      if (conFormulario.current) setFallaLista(`No se pudo actualizar la lista. ${texto}`);
       else {
         setLectura({ tipo: "sin_servicio" });
         setAviso(sinPisarLoHecho(texto));
@@ -135,7 +135,7 @@ export function PagosPorAclarar() {
     () => setVuelta((v) => v + 1),
     () => {
       setEsperaAgotada(true);
-      setFallaLista("El antivirus sigue revisando el comprobante. Tocá «Actualizar» en un rato.");
+      setFallaLista("El antivirus sigue revisando el comprobante. «Actualizar» lo vuelve a mirar en un rato.");
     },
   );
   useAlVolverLaRed(fallaLista !== null, () => setVuelta((v) => v + 1));
@@ -160,21 +160,21 @@ export function PagosPorAclarar() {
         exigirSesion(response);
         if (data !== undefined) {
           clave.current = null;
-          setAviso({ texto: "Listo: declaraste que no transferiste. Ahora lo confirma otro miembro del Consejo.", ok: true });
+          setAviso({ texto: "Listo: quedó declarado que no se transfirió. Ahora lo confirma otro miembro del Consejo.", ok: true });
           setVuelta((v) => v + 1);
           return;
         }
         const codigo = codigoDe(error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
           const actual = clave.current;
-          setPendiente({ acto: "declarar que no transferiste", reintentar: () => {
+          setPendiente({ acto: "declarar que no se transfirió", reintentar: () => {
             clave.current = actual;
             declarar(p, true);
           } });
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
+        setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
         setVuelta((v) => v + 1);
       })
       .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
@@ -197,12 +197,12 @@ export function PagosPorAclarar() {
   }
 
   /** Un 403 por el segundo factor pide el código y reintenta; lo demás se avisa. */
-  function fallo(status: number, codigo: string | undefined, acto: string, reintentar: () => void): void {
-    if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
+  function fallo(status: number, error: unknown, acto: string, reintentar: () => void): void {
+    if (codigoDe(error) === SEGUNDO_FACTOR_REQUERIDO) {
       setPendiente({ acto, reintentar });
       return;
     }
-    setAviso({ texto: mensajeDeActo(status, codigo), ok: false });
+    setAviso({ texto: mensajeDeActo(status, error), ok: false });
     setVuelta((v) => v + 1);
   }
 
@@ -227,7 +227,7 @@ export function PagosPorAclarar() {
         if (creado.data === undefined) {
           const codigo = codigoDe(creado.error);
           if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
-          fallo(creado.response.status, codigo, "cargar el comprobante", () => void subirComprobante(p, elegido));
+          fallo(creado.response.status, creado.error, "cargar el comprobante", () => void subirComprobante(p, elegido));
           return;
         }
         claveCarga.current = null;
@@ -251,7 +251,7 @@ export function PagosPorAclarar() {
       if (subido.data === undefined) {
         const codigo = codigoDe(subido.error);
         if (codigo === SEGUNDO_FACTOR_REQUERIDO) {
-          fallo(subido.response.status, codigo, "subir el comprobante", () => void subirComprobante(p, elegido));
+          fallo(subido.response.status, subido.error, "subir el comprobante", () => void subirComprobante(p, elegido));
           return;
         }
         if (renovarClave(subido.response.status, codigo)) claveArchivo.current = null;
@@ -263,7 +263,7 @@ export function PagosPorAclarar() {
       sinArchivo.current = null;
       setArchivo(null);
       setEsperaAgotada(false);
-      setAviso({ texto: "Listo: subimos el comprobante. El antivirus lo revisa en unos segundos y esto se actualiza solo.", ok: true });
+      setAviso({ texto: "Listo: el comprobante se subió. El antivirus lo revisa en unos segundos y esto se actualiza solo.", ok: true });
       setVuelta((v) => v + 1);
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
@@ -278,7 +278,7 @@ export function PagosPorAclarar() {
     if (p.comprobante_id == null || !montado.current) return;
     const centavos = aCentavos(registro.importe);
     if (centavos === null) {
-      setAviso({ texto: "Escribí el importe que salió del banco.", ok: false });
+      setAviso({ texto: "Hay que escribir el importe que salió del banco.", ok: false });
       return;
     }
     if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(["otra-cosa", p.orden_id, p.version, p.huella, p.comprobante_id, registro]));
@@ -310,14 +310,14 @@ export function PagosPorAclarar() {
           clave.current = null;
           setTransfirio(null);
           setOtraCosa(false);
-          setAviso({ texto: "Listo: registraste lo que pasó. La orden no queda pagada: lo resuelve el Consejo.", ok: true });
+          setAviso({ texto: "Listo: quedó registrado lo que pasó. La orden no queda pagada: lo resuelve el Consejo.", ok: true });
           setVuelta((v) => v + 1);
           return;
         }
         const codigo = codigoDe(error);
         if (codigo !== SEGUNDO_FACTOR_REQUERIDO && renovarClave(response.status, codigo)) clave.current = null;
         const actual = clave.current;
-        fallo(response.status, codigo, "registrar lo que pasó", () => {
+        fallo(response.status, error, "registrar lo que pasó", () => {
           clave.current = actual;
           registrarOtraCosa(evento, p, true);
         });
@@ -331,7 +331,7 @@ export function PagosPorAclarar() {
     if (p.comprobante_id == null || !montado.current) return;
     const centavos = aCentavos(registro.importe);
     if (centavos === null) {
-      setAviso({ texto: "Escribí el importe tal como figura en el comprobante.", ok: false });
+      setAviso({ texto: "Hay que escribir el importe tal como figura en el comprobante.", ok: false });
       return;
     }
     if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(["registrar", p.orden_id, p.version, p.huella, p.comprobante_id, registro]));
@@ -362,14 +362,14 @@ export function PagosPorAclarar() {
         if (data !== undefined) {
           clave.current = null;
           setTransfirio(null);
-          setAviso({ texto: "Listo: registraste el pago. Ahora lo concilia otro miembro del Consejo.", ok: true });
+          setAviso({ texto: "Listo: el pago quedó registrado. Ahora lo concilia otro miembro del Consejo.", ok: true });
           setVuelta((v) => v + 1);
           return;
         }
         const codigo = codigoDe(error);
         if (codigo !== SEGUNDO_FACTOR_REQUERIDO && renovarClave(response.status, codigo)) clave.current = null;
         const actual = clave.current;
-        fallo(response.status, codigo, "registrar el pago", () => {
+        fallo(response.status, error, "registrar el pago", () => {
           clave.current = actual;
           registrar(evento, p, true);
         });
@@ -400,13 +400,13 @@ export function PagosPorAclarar() {
       {pendiente === null &&
         lectura.tipo === "ok" &&
         (lectura.elementos.length === 0 ? (
-          <p className="tarjeta">No tenés pagos para aclarar.</p>
+          <p className="tarjeta">No hay pagos para aclarar.</p>
         ) : (
           <>
             <p>
-              Viste la cuenta para pagar estas órdenes y ya no ejecutás pagos en ese edificio. Si no transferiste, declaralo:
-              sin eso, la orden no puede volver a pagarse. Si transferiste, subí el comprobante y registrá el pago: lo
-              concilia otro miembro del Consejo.
+              Esta cuenta vio la cuenta para pagar estas órdenes y ya no ejecuta pagos en ese edificio. Si no se transfirió,
+              hay que declararlo: sin eso, la orden no puede volver a pagarse. Si se transfirió, hay que subir el comprobante
+              y registrar el pago: lo concilia otro miembro del Consejo.
             </p>
             <ul className="versiones" aria-label="Pagos para aclarar">
               {lectura.elementos.map((p) => (
@@ -415,7 +415,7 @@ export function PagosPorAclarar() {
                     {p.consorcio}: {importe(p.importe_centavos, p.moneda)}
                   </h2>
                   <p>{p.concepto}</p>
-                  <p>Viste la cuenta el {momentoAlFinal(p.cuenta_vista_en)}</p>
+                  <p>Cuenta vista el {momentoAlFinal(p.cuenta_vista_en)}</p>
                   {transfirio !== p.orden_id && (
                   <form className="formulario" onSubmit={(e) => alEnviar(e, p)}>
                     <label htmlFor={`${id}-${p.orden_id}`}>Por qué no se transfirió</label>
@@ -423,18 +423,18 @@ export function PagosPorAclarar() {
                       value={motivos[p.orden_id] ?? ""}
                       onChange={(e) => setMotivos((m) => ({ ...m, [p.orden_id]: e.target.value }))} />
                     <div className="acciones">
-                      <button type="submit" className="peligro" disabled={enviando || (motivos[p.orden_id] ?? "").trim() === ""}>
-                        No transferí
+                      <button type="submit" className="secundario" disabled={enviando || (motivos[p.orden_id] ?? "").trim() === ""}>
+                        No se transfirió
                       </button>
                       <button type="button" className="secundario" disabled={enviando} onClick={() => abrirTransferi(p)}>
-                        Sí transferí
+                        Sí se transfirió
                       </button>
                     </div>
                   </form>
                   )}
                   {transfirio === p.orden_id && (
                     <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, p) : registrar(e, p))}>
-                      <h3>{otraCosa ? "Pagué otra cosa" : "Registrá la transferencia"}</h3>
+                      <h3>{otraCosa ? "Se transfirió otro importe o a otra cuenta" : "Registrar la transferencia"}</h3>
                       <p role="status">{textoDelComprobante(p)}</p>
                       {fallaLista !== null && (
                         <p className="aviso-error" role="alert">
@@ -452,7 +452,7 @@ export function PagosPorAclarar() {
                         <div className="acciones">
                           {/* Sin esto, reintentar sería volver a elegir el mismo archivo, y el navegador no avisa. */}
                           {archivo !== null && !enviando && (
-                            <button type="button" onClick={() => void subirComprobante(p, archivo)}>
+                            <button className="secundario" type="button" onClick={() => void subirComprobante(p, archivo)}>
                               Reintentar la subida
                             </button>
                           )}
@@ -498,7 +498,7 @@ export function PagosPorAclarar() {
                           <label htmlFor={`${id}-explicacion`}>Qué pasó</label>
                           <textarea id={`${id}-explicacion`} required maxLength={300} rows={3} value={registro.explicacion} disabled={enviando}
                             onChange={(e) => cambiar("explicacion", e.target.value)} />
-                          <p>Hasta 300 caracteres. No incluyas el número de una cuenta. La orden no queda pagada: lo resuelve el Consejo.</p>
+                          <p>Hasta 300 caracteres. Sin números de cuenta. La orden no queda pagada: lo resuelve el Consejo.</p>
                         </>
                       )}
                       <div className="acciones">
@@ -506,9 +506,9 @@ export function PagosPorAclarar() {
                           {otraCosa ? "Registrar lo que pasó" : "Registrar el pago"}
                         </button>
                         <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
-                          {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
+                          {otraCosa ? "Volver al registro" : "Se transfirió otro importe o a otra cuenta"}
                         </button>
-                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setTransfirio(null)}>
+                        <button type="button" className="secundario" disabled={enviando} onClick={() => setTransfirio(null)}>
                           Cancelar
                         </button>
                       </div>

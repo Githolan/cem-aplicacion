@@ -145,8 +145,8 @@ def test_la_propietaria_invita_y_sale_el_correo_con_el_enlace(app, motor_migrate
     [evento] = correos_a(motor_migrate, nuevo)
     assert evento["consorcio_id"] == e.consorcio
     carga = evento["carga"]
-    assert carga["asunto"].startswith("Te invitaron a Edificio ")
-    assert "Ana te invitó" in carga["texto"] and "3° B" in carga["texto"]
+    assert carga["asunto"].startswith("Invitación a Edificio ")
+    assert "Ana invitó a esta dirección de correo" in carga["texto"] and "3° B" in carga["texto"]
     assert "inquilino/a" in carga["texto"]
     token = token_invitacion(motor_migrate, nuevo)
     with motor_migrate.connect() as conn:
@@ -658,7 +658,7 @@ def test_el_script_invita_sin_persona_y_sin_evento(motor_migrate, monkeypatch, c
     assert script_invitar.main([*argumentos, "--unidad", str(e.u2), "--nombre", "Eva"]) == 0
     assert token_invitacion(motor_migrate, nuevo) not in capsys.readouterr().out
     carga = correos_a(motor_migrate, nuevo)[-1]["carga"]
-    assert "El equipo de Consorcio en Mano te invitó" in carga["texto"]
+    assert "El equipo de Consorcio en Mano invitó a esta dirección de correo" in carga["texto"]
     with motor_migrate.connect() as conn:
         id_, por = conn.execute(
             text("select id, invitada_por from nucleo.invitacion where correo = :c"), {"c": nuevo}
@@ -708,5 +708,8 @@ def test_el_texto_del_correo_queda_en_una_linea_por_dato():
         )
     finally:
         ev.correo.solicitar = original
-    assert capturado["asunto"] == "Te invitaron a Edificio Alvear en Consorcio en Mano"
-    assert "Ana Pérez te invitó a sumarte a Edificio Alvear" in capturado["texto"]
+    assert capturado["asunto"] == "Invitación a Edificio Alvear en Consorcio en Mano"
+    assert (
+        "Ana Pérez invitó a esta dirección de correo a sumarse a Edificio Alvear"
+        in capturado["texto"]
+    )

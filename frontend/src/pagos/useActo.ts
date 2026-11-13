@@ -80,7 +80,7 @@ export function useActo(aEntrar: () => void, alDescartar?: () => void) {
       return;
     }
     if (renovarClave(response.status, codigo)) clave.current = null;
-    setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
+    setAviso({ texto: mensajeDeActo(response.status, error), ok: false });
     acto.alFallar?.(response.status, codigo, error);
   }
 

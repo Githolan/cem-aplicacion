@@ -253,7 +253,7 @@ describe("a mano", () => {
     expect(pedidos(simulado, ANULAR)).toHaveLength(0);
     fireEvent.change(screen.getByLabelText("Por qué se deshace"), { target: { value: "SINTETICO: era otro débito" } });
     fireEvent.click(deshacer);
-    expect(await screen.findByText(/Listo: deshiciste el cotejo/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el cotejo se deshizo/)).toBeTruthy();
     const [pedido] = pedidos(simulado, ANULAR);
     expect(await pedido?.clone().json()).toEqual({ motivo: "SINTETICO: era otro débito" });
     expect(pedido?.headers.get("Idempotency-Key")).toBeTruthy();
@@ -478,7 +478,7 @@ describe("con el extracto", () => {
     expect(banco.textContent).toContain("Débito sin registrar");
     expect(banco.textContent).toContain("12.400,00");
     expect(banco.textContent).toContain("Referencia 0048213999 · 02/11/2026");
-    expect(banco.textContent).toContain("Avisale a la administración.");
+    expect(banco.textContent).toContain("Hay que avisar a la administración.");
     expect(screen.getByText("3 ya estaban cotejados.")).toBeTruthy();
     expect(screen.getByText("2 coinciden, pero falta conciliarlos.")).toBeTruthy();
     expect(screen.getByText(/1 coincide, pero lo tiene que cotejar/)).toBeTruthy();
@@ -557,7 +557,7 @@ describe("con el extracto", () => {
     abrir();
     await subir();
     const lista = (await screen.findByRole("heading", { name: /Falta revisar/ })).nextElementSibling as HTMLElement;
-    expect(lista.textContent).toContain("No pudimos leer 1 línea del archivo (línea 14).");
+    expect(lista.textContent).toContain("1 línea no se pudo leer del archivo (línea 14).");
     expect(screen.queryByText("No hay nada para mirar.")).toBeNull();
   });
 
@@ -609,7 +609,7 @@ describe("con el extracto", () => {
     vi.stubGlobal("fetch", backend({ [VISTA]: () => error("extracto_invalido", 422) }));
     abrir();
     await subir();
-    expect((await screen.findByRole("alert")).textContent).toContain("No pudimos leer el archivo");
+    expect((await screen.findByRole("alert")).textContent).toContain("El archivo no se pudo leer");
     expect(((await screen.findByLabelText("Archivo del extracto")) as HTMLInputElement).disabled).toBe(false);
   });
 

@@ -233,7 +233,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
           body: { motivo },
         }),
       alTerminar: () => {
-        setAviso({ texto: "Listo: deshiciste el cotejo. Queda en la historia y el pago vuelve a lo que falta cotejar.", ok: true });
+        setAviso({ texto: "Listo: el cotejo se deshizo. Queda en la historia y el pago vuelve a lo que falta cotejar.", ok: true });
         alListo();
         releer();
       },
@@ -251,7 +251,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
       <CabeceraInterna titulo="Cotejar con el banco" volver={RUTA_PAGOS} destino="Pagos" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       <AvisoPantalla aviso={avisoLectura} />
@@ -297,7 +297,7 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
             {(extracto.tipo === "leyendo" || (enviando && extracto.tipo === "columnas")) && <p role="status">Leyendo el extracto…</p>}
           </div>
           <section className="tarjeta" aria-labelledby="cotejo-a-mano">
-            <h2 id="cotejo-a-mano">O tildá a mano</h2>
+            <h2 id="cotejo-a-mano">O marcar a mano</h2>
             {lectura.tipo === "cargando" && <CargandoPagos />}
             {lectura.tipo === "sin_servicio" && (
               <FallaDeLectura
@@ -402,12 +402,12 @@ function ElegirColumnas({ vista, enviando, moneda: monedaSugerida, alComparar, a
       <form className="formulario" onSubmit={enviar}>
         <label htmlFor={`${id}-fecha`}>Fecha</label>
         <select id={`${id}-fecha`} required value={fecha} onChange={(e) => setFecha(e.target.value)}>
-          <option value="">Elegí una columna</option>
+          <option value="">Elegir una columna</option>
           {opciones}
         </select>
         <label htmlFor={`${id}-importe`}>Importe</label>
         <select id={`${id}-importe`} required value={monto} onChange={(e) => setMonto(e.target.value)}>
-          <option value="">Elegí una columna</option>
+          <option value="">Elegir una columna</option>
           {opciones}
         </select>
         <label htmlFor={`${id}-numero`}>Número de operación</label>
@@ -509,7 +509,7 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
                     <span className="fila-pago__importe">{importe(e.importe_centavos, e.moneda)}</span>
                   </span>
                   <span>{detalle(e.numero_operacion, e.fecha_operacion, "Operación")}</span>
-                  {!e.puede_cotejar && <span>Lo deshace otra persona del Consejo: participaste de este pago.</span>}
+                  {!e.puede_cotejar && <span>Lo deshace otra persona del Consejo: esta cuenta participó de este pago.</span>}
                 </span>
               </div>
               {e.puede_cotejar && elegido !== e.pago_id && (
@@ -528,7 +528,7 @@ function YaCotejados({ consorcio, enviando, aEntrar, avisar, deshacer }: PropsCo
                     <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
                       Deshacer el cotejo
                     </button>
-                    <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setElegido(null)}>
+                    <button type="button" className="secundario" disabled={enviando} onClick={() => setElegido(null)}>
                       Cancelar
                     </button>
                   </div>
@@ -564,13 +564,13 @@ function pendientesDelExtracto(r: Resultado): string[] {
   const textos: string[] = [];
   if (r.lineas_no_leidas > 0) {
     const lineas = r.filas_no_leidas.join(", ");
-    textos.push(`${cantidad(r.lineas_no_leidas, "No pudimos leer 1 línea", "líneas no se pudieron leer")} del archivo (línea ${lineas}).`);
+    textos.push(`${cantidad(r.lineas_no_leidas, "1 línea no se pudo leer", "líneas no se pudieron leer")} del archivo (línea ${lineas}).`);
   }
   if (r.esperan_conciliar > 0) textos.push(`${cantidad(r.esperan_conciliar, "1 coincide, pero falta conciliarlo", "coinciden, pero falta conciliarlos")}.`);
   if (r.para_otra_persona > 0) {
-    textos.push(`${cantidad(r.para_otra_persona, "1 coincide, pero lo tiene que cotejar", "coinciden, pero los tiene que cotejar")} otra persona del Consejo: participaste de ese pago.`);
+    textos.push(`${cantidad(r.para_otra_persona, "1 coincide, pero lo tiene que cotejar", "coinciden, pero los tiene que cotejar")} otra persona del Consejo: esta cuenta participó de ese pago.`);
   }
-  if (r.anulados > 0) textos.push(`${cantidad(r.anulados, "1 coincide con un cotejo que se deshizo: si corresponde, tildalo a mano", "coinciden con cotejos que se deshicieron: si corresponde, tildalos a mano")}.`);
+  if (r.anulados > 0) textos.push(`${cantidad(r.anulados, "1 coincide con un cotejo que se deshizo: si corresponde, se marca a mano", "coinciden con cotejos que se deshicieron: si corresponde, se marcan a mano")}.`);
   return textos;
 }
 
@@ -627,7 +627,7 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
                   <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                 </span>
                 <span>{detalle(m.numero_operacion, m.fecha, "Referencia")}</span>
-                <span className="fila-pago__nota">Avisale a la administración.</span>
+                <span className="fila-pago__nota">Hay que avisar a la administración.</span>
               </li>
             ))}
           </ul>
@@ -701,7 +701,7 @@ function ATildar({ elementos, tildados, maximo, enviando, alternar, alGuardar }:
                 <div className="tilde-pago">
                   <span className="tilde-pago__datos">
                     {fila}
-                    <span>Lo coteja otra persona del Consejo: participaste de este pago.</span>
+                    <span>Lo coteja otra persona del Consejo: esta cuenta participó de este pago.</span>
                   </span>
                 </div>
               )}
@@ -712,7 +712,7 @@ function ATildar({ elementos, tildados, maximo, enviando, alternar, alGuardar }:
       {lleno && <p role="status">Se marcan hasta {maximo} por vez: primero estos, y después los demás.</p>}
       {hayQuienPuede && (
         <div className="formulario">
-          <button type="submit" disabled={enviando || tildados.size === 0}>
+          <button className="secundario" type="submit" disabled={enviando || tildados.size === 0}>
             Marcar como cotejados
           </button>
         </div>

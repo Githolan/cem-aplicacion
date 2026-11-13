@@ -104,7 +104,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
       registrarLlave,
       (nuevos) => {
         if (nuevos !== null) alCodigos(nuevos);
-        else alTerminar("Listo: tu llave quedó activada.");
+        else alTerminar("Listo: la llave quedó activada.");
       },
       true,
     );
@@ -114,7 +114,7 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
     intentar(
       () => quitarLlave(llave.id),
       () => {
-        setListo("Listo: quitaste la llave.");
+        setListo("Listo: la llave se quitó.");
         consultar();
         alCambiar();
       },
@@ -140,15 +140,15 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
 
   return (
     <section aria-labelledby={`${id}-titulo`} className="tarjeta">
-      <h2 id={`${id}-titulo`}>Tu llave de acceso</h2>
+      <h2 id={`${id}-titulo`}>Llave de acceso</h2>
       <p>
-        Confirmás con el PIN, la huella o la cara de este dispositivo, sin escribir códigos y sin
+        Se confirma con el PIN, la huella o la cara de este dispositivo, sin escribir códigos y sin
         instalar nada.
       </p>
       {enEste && (
         <p className="aviso-ok">
-          Tu llave ya funciona en este dispositivo. No tenés que hacer nada más: cuando una acción lo
-          pida, confirmás ahí mismo.
+          La llave ya funciona en este dispositivo. No hace falta nada más: cuando una acción lo
+          pida, se confirma ahí mismo.
         </p>
       )}
       {listo !== null && <p className="aviso-ok">{listo}</p>}
@@ -162,13 +162,13 @@ export function SeccionLlave({ alCambiar, alCodigos, alTerminar, alOcupar }: Pro
           <p role="alert" className="aviso-error">
             {fallaConsulta}
           </p>
-          <button type="button" onClick={consultar}>
+          <button className="secundario" type="button" onClick={consultar}>
             Reintentar
           </button>
         </>
       )}
       {llaves !== null && llaves.length > 0 && (
-        <ul aria-label="Tus llaves">
+        <ul aria-label="Llaves de la cuenta">
           {llaves.map((k) => (
             <li key={k.id}>
               {k.nombre}

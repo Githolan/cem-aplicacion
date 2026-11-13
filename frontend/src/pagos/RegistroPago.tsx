@@ -38,7 +38,7 @@ import { VisorComprobante } from "./VisorComprobante";
 // Los datos se escriben del comprobante, nunca de la orden: si no, la comparación no vale. Corregir
 // abre con lo registrado, y no pide la cuenta (§8): ni una apertura nueva, ni escribirla otra vez.
 //
-// «Pagué otra cosa» (§7) usa el mismo comprobante: lo que salió del banco, y qué pasó. Siempre pide
+// «Se transfirió otro importe o a otra cuenta» (§7) usa el mismo comprobante: lo que salió del banco, y qué pasó. Siempre pide
 // la cuenta del comprobante, porque la base es la que compara y decide qué fue distinto.
 //
 // La lectura con IA (§6), si está encendida, propone: llena los campos con lo leído, nunca con lo de
@@ -102,7 +102,7 @@ type Props = {
   corregido: Pago | undefined;
   comprobante: Comprobante | null;
   subido: Subido | null;
-  /** La diferencia que se corrige (decisión 6): mismo formulario que «Pagué otra cosa», con el
+  /** La diferencia que se corrige (decisión 6): mismo formulario que «Se transfirió otro importe o a otra cuenta», con el
    * comprobante que ya tiene. Se puede dejar de corregir. */
   diferencia?: Diferencia;
   alCancelar?: () => void;
@@ -228,7 +228,7 @@ export function RegistroPago(props: Props) {
           const codigo = codigoDe(creado.error);
           if (renovarClave(creado.response.status, codigo)) claveCarga.current = null;
           setNoSubio(true);
-          setAviso({ texto: mensajeDeActo(creado.response.status, codigo), ok: false });
+          setAviso({ texto: mensajeDeActo(creado.response.status, creado.error), ok: false });
           if (cambioLaOrden(codigo) || cambioLoVisto(creado.response.status, codigo)) alCambiarLaOrden();
           return;
         }
@@ -283,7 +283,7 @@ export function RegistroPago(props: Props) {
     evento.preventDefault();
     const centavos = aCentavos(registro.importe);
     if (centavos === null) {
-      setAviso({ texto: "Escribí el importe tal como figura en el comprobante.", ok: false });
+      setAviso({ texto: "Hay que escribir el importe tal como figura en el comprobante.", ok: false });
       return;
     }
     void acto.hacer({
@@ -305,7 +305,7 @@ export function RegistroPago(props: Props) {
             documento_id: documento,
           },
         }),
-      alTerminar: () => alRegistrar("Listo: registraste el pago. Falta que otro miembro del Consejo lo concilie."),
+      alTerminar: () => alRegistrar("Listo: el pago quedó registrado. Falta que el Consejo lo concilie."),
       alFallar: (estado, codigo) => {
         if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
       },
@@ -316,12 +316,12 @@ export function RegistroPago(props: Props) {
     evento.preventDefault();
     const centavos = aCentavos(registro.importe);
     if (centavos === null) {
-      setAviso({ texto: "Escribí el importe que salió del banco.", ok: false });
+      setAviso({ texto: "Hay que escribir el importe que salió del banco.", ok: false });
       return;
     }
     void acto.hacer({
       quePide: ["otra-cosa", orden, version.numero, version.huella, registro, documento, diferencia?.id],
-      nombre: corrigeDiferencia ? "corregir lo que registraste" : "registrar lo que pasó",
+      nombre: corrigeDiferencia ? "corregir lo registrado" : "registrar lo que pasó",
       pedir: (clave) => {
         const cuerpo = {
           version: version.numero,
@@ -348,7 +348,7 @@ export function RegistroPago(props: Props) {
           body: cuerpo,
         });
       },
-      alTerminar: () => alRegistrar(corrigeDiferencia ? `Listo: corregiste lo que registraste. ${AVISO_OTRA_COSA}` : `Listo: registraste lo que pasó. ${AVISO_OTRA_COSA}`),
+      alTerminar: () => alRegistrar(corrigeDiferencia ? `Listo: lo registrado quedó corregido. ${AVISO_OTRA_COSA}` : `Listo: quedó registrado lo que pasó. ${AVISO_OTRA_COSA}`),
       alFallar: (estado, codigo) => {
         if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
       },
@@ -381,7 +381,7 @@ export function RegistroPago(props: Props) {
         )}
         {(subiendo || revisando || leyendo) && (
           <div role="status">
-            <h3>Estamos revisando el comprobante</h3>
+            <h3>Revisando el comprobante</h3>
             <ol className="avance-comprobante">
               <li aria-current={subiendo ? "step" : undefined}>{subiendo ? "Subiendo el archivo…" : "Subido"}</li>
               <li aria-current={revisando ? "step" : undefined}>{revisando ? "El antivirus lo está revisando…" : "Antivirus"}</li>
@@ -397,7 +397,7 @@ export function RegistroPago(props: Props) {
         )}
         {noSubio && elegido !== null && !subiendo && (
           <div className="zona-comprobante">
-            <button type="button" disabled={enviando} onClick={() => void subir(elegido)}>
+            <button className="secundario" type="button" disabled={enviando} onClick={() => void subir(elegido)}>
               Reintentar
             </button>
             <button type="button" className="secundario" disabled={enviando} onClick={() => setNoSubio(false)}>
@@ -406,7 +406,7 @@ export function RegistroPago(props: Props) {
           </div>
         )}
         {!enCurso && !leyendo && !corrigeDiferencia && (!pregunta || cambiaArchivo) && (
-          <SubirArchivo titulo={comprobante === null ? "Subir el comprobante" : "Cambiar el comprobante"} de="del comprobante"
+          <SubirArchivo titulo={comprobante === null ? "Comprobante de la transferencia" : "Cambiar el comprobante de la transferencia"} de="del comprobante"
             tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} reemplaza={comprobante !== null} deshabilitada={enviando} alElegir={elegir} />
         )}
       </section>
@@ -417,7 +417,7 @@ export function RegistroPago(props: Props) {
         <div className="formulario">
           <h3>¿Qué pasó?</h3>
           <div className="acciones">
-            <button type="button" className="secundario" disabled={enviando} onClick={() => setCambiaArchivo(true)}>
+            <button type="button" disabled={enviando} onClick={() => setCambiaArchivo(true)}>
               Es otro comprobante: cambiarlo
             </button>
             <button
@@ -433,7 +433,7 @@ export function RegistroPago(props: Props) {
             </button>
             {puedeOtraCosa && (
               <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa(true)}>
-                Pagué otra cosa
+                Se transfirió otro importe o a otra cuenta
               </button>
             )}
           </div>
@@ -444,8 +444,8 @@ export function RegistroPago(props: Props) {
         <form className="formulario" onSubmit={(e) => (otraCosa ? registrarOtraCosa(e, documentoDelRegistro) : registrar(e, documentoDelRegistro))}>
           {otraCosa ? (
             <>
-              <h3>{corrigeDiferencia ? "Corregir lo registrado" : "Pagué otra cosa"}</h3>
-              <p>Escribí lo que salió del banco, tal como figura en el comprobante.{corrigeDiferencia && " Lo anterior queda en la historia."}</p>
+              <h3>{corrigeDiferencia ? "Corregir lo registrado" : "Se transfirió otro importe o a otra cuenta"}</h3>
+              <p>Lo que salió del banco, tal como figura en el comprobante.{corrigeDiferencia && " Lo anterior queda en la historia."}</p>
             </>
           ) : (
             <>
@@ -459,17 +459,17 @@ export function RegistroPago(props: Props) {
                   </p>
                   {leida.titular_distinto && (
                     <p role="note">
-                      El comprobante dice que el titular es «{leida.titular_destino}» y la orden es a {version.razon_social}. Mirá que sea el mismo.
+                      El comprobante dice que el titular es «{leida.titular_destino}» y la orden es a {version.razon_social}. Tiene que ser el mismo.
                     </p>
                   )}
                 </>
               ) : (
                 <p>
                   {corrige
-                    ? "Cambiá lo que está mal. Queda registrado qué cambió y quién lo cambió."
+                    ? "Corregir lo que está mal. Queda registrado qué cambió y quién lo cambió."
                     : leida !== null
-                      ? "Revisá lo que se leyó del comprobante y completá lo que falta."
-                      : "Escribí los datos como figuran en el comprobante."}
+                      ? "Revisar lo que se leyó del comprobante y completar lo que falta."
+                      : "Los datos van como figuran en el comprobante."}
                 </p>
               )}
             </>
@@ -503,8 +503,8 @@ export function RegistroPago(props: Props) {
           )}
           {corrige && !otraCosa ? (
             <p>
-              Cuenta de destino: {cuentaEnmascarada(version.cuenta_ultimos_digitos)}, la que ya registraste. Si la plata fue a otra
-              cuenta, usá «Pagué otra cosa».
+              Cuenta de destino: {cuentaEnmascarada(version.cuenta_ultimos_digitos)}, la que ya está registrada. Si la plata fue a otra
+              cuenta, corresponde «Se transfirió otro importe o a otra cuenta».
             </p>
           ) : cuentaLeida && !otraCosa ? null : (
             <>
@@ -518,7 +518,7 @@ export function RegistroPago(props: Props) {
               <label htmlFor={`${id}-explicacion`}>Qué pasó</label>
               <textarea id={`${id}-explicacion`} required maxLength={300} rows={3} aria-describedby={`${id}-explicacion-ayuda`}
                 value={registro.explicacion} disabled={enviando} onChange={(e) => cambiar("explicacion", e.target.value)} />
-              <p id={`${id}-explicacion-ayuda`}>Hasta 300 caracteres. No incluyas el número de una cuenta.</p>
+              <p id={`${id}-explicacion-ayuda`}>Hasta 300 caracteres. Sin números de cuenta.</p>
             </>
           )}
           <div className="acciones">
@@ -532,16 +532,16 @@ export function RegistroPago(props: Props) {
             )}
             {puedeOtraCosa && !corrigeDiferencia && (
               <button type="button" className="secundario" disabled={enviando} onClick={() => setOtraCosa((v) => !v)}>
-                {otraCosa ? "Volver al registro" : "Pagué otra cosa"}
+                {otraCosa ? "Volver al registro" : "Se transfirió otro importe o a otra cuenta"}
               </button>
             )}
             {alCancelar !== undefined && (
-              <button type="button" className="secundario peligro" disabled={enviando} onClick={alCancelar}>
+              <button type="button" className="secundario" disabled={enviando} onClick={alCancelar}>
                 Cancelar
               </button>
             )}
           </div>
-          <p>{otraCosa ? AVISO_OTRA_COSA : "Queda pagada cuando otro miembro del Consejo lo concilie."}</p>
+          <p>{otraCosa ? AVISO_OTRA_COSA : "Queda pagada cuando el Consejo lo concilie."}</p>
         </form>
       )}
     </div>

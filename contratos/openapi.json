@@ -807,6 +807,7 @@
           "codigo_invalido",
           "csrf_invalido",
           "sin_permiso",
+          "ya_participo",
           "invitacion_invalida",
           "invitacion_requiere_sesion",
           "invitacion_de_otra_persona",
@@ -11402,7 +11403,7 @@
                 }
               }
             },
-            "description": "Falta confirmar que sos vos."
+            "description": "Falta confirmar la identidad con PIN, huella o código."
           },
           "422": {
             "content": {
@@ -11443,7 +11444,7 @@
                 }
               }
             },
-            "description": "Falta confirmar que sos vos."
+            "description": "Falta confirmar la identidad con PIN, huella o código."
           }
         },
         "summary": "Empezar el alta de una llave",
@@ -11573,7 +11574,7 @@
                 }
               }
             },
-            "description": "No hay una llave tuya con ese identificador."
+            "description": "Esta cuenta no tiene una llave con ese identificador."
           },
           "422": {
             "content": {
@@ -11794,7 +11795,7 @@
             "description": "Falta una verificación reciente (10 minutos)."
           }
         },
-        "summary": "Desactivar el segundo factor",
+        "summary": "Desactivar la confirmación con código",
         "tags": [
           "identidad"
         ]
@@ -13496,7 +13497,7 @@
             "description": "Validation Error"
           },
           "503": {
-            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
           }
         },
         "summary": "Subir un archivo de un documento: entra en cuarentena hasta que se analiza",
@@ -17578,7 +17579,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Cargar el comprobante de lo que transferiste, sin ejecutar ya pagos en el consorcio",
+        "summary": "Cargar el comprobante de lo que se transfirió, sin ejecutar ya pagos en el consorcio",
         "tags": [
           "egresos"
         ]
@@ -17688,7 +17689,7 @@
             "description": "Validation Error"
           },
           "503": {
-            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
           }
         },
         "summary": "Subir el archivo del comprobante, sin ejecutar ya pagos en el consorcio: entra en cuarentena hasta que se analiza",
@@ -17852,7 +17853,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Declarar que no transferiste, sin ejecutar ya pagos en el consorcio: lo confirma otro miembro del Consejo",
+        "summary": "Declarar que no se transfirió, sin ejecutar ya pagos en el consorcio: lo confirma otro miembro del Consejo",
         "tags": [
           "egresos"
         ]
@@ -17936,7 +17937,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Registrar lo que transferiste, sin ejecutar ya pagos en el consorcio: lo concilia otro miembro del Consejo",
+        "summary": "Registrar lo que se transfirió, sin ejecutar ya pagos en el consorcio: lo concilia otro miembro del Consejo",
         "tags": [
           "egresos"
         ]
@@ -18285,7 +18286,7 @@
             "description": "El archivo no se puede leer como un extracto (`extracto_invalido`)."
           },
           "503": {
-            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
           }
         },
         "summary": "Las columnas de un extracto, para elegir qué es cada una. No guarda nada",
@@ -18527,7 +18528,7 @@
             "description": "El archivo no se puede leer como un extracto (`extracto_invalido`)."
           },
           "503": {
-            "description": "Demasiadas cargas a la vez: probá de nuevo en un momento."
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
           }
         },
         "summary": "Subir un extracto: lo que coincide queda cotejado, y responde lo que hay que mirar. No cambia ninguna orden",
@@ -19641,7 +19642,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Los pagos manuales que esperan que digas si transferiste: viste la cuenta y ya no ejecutás",
+        "summary": "Los pagos manuales que esperan saber si se transfirió: esta cuenta vio la cuenta bancaria y ya no ejecuta pagos",
         "tags": [
           "egresos"
         ]
@@ -19888,7 +19889,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Avisar que guardé la copia: el caso queda resuelto",
+        "summary": "Avisar que la copia quedó guardada: el caso queda resuelto",
         "tags": [
           "privacidad"
         ]

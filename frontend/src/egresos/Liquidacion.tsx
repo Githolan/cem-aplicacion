@@ -34,6 +34,7 @@ import { exigirSesion, SinSesion, useAlVolverLaRed, useConsorcio, useMontado } f
 type Resumen = components["schemas"]["Liquidacion"];
 type Detalle = components["schemas"]["LiquidacionDetalle"];
 type Liquidable = components["schemas"]["OrdenLiquidable"];
+type EstadoLiquidacion = Resumen["estado"];
 
 export const RUTA_LIQUIDACION = "/liquidacion";
 
@@ -68,6 +69,24 @@ function aniosOfrecidos(hoy = new Date()): string[] {
 const FORMATO_PERIODO = new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric", timeZone: "UTC" });
 /** «2026-10-01» como «octubre de 2026». */
 export const periodo = (iso: string) => FORMATO_PERIODO.format(new Date(`${iso}T00:00:00Z`));
+const FORMATO_DIA = new Intl.DateTimeFormat("es-AR", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+const dia = (iso: string) => FORMATO_DIA.format(new Date(`${iso}T00:00:00Z`));
+const conMayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1);
+
+/** El nombre del estado de una liquidación, sin el código del servidor (AC-46). */
+const NOMBRE_ESTADO_LIQUIDACION: Record<EstadoLiquidacion, string> = {
+  borrador: "Borrador",
+  descartada: "Descartada",
+  publicada: "Publicada",
+};
+
+/** «Octubre de 2026 · Borrador»; la versión solo si el período tiene más de una (AC-46). */
+export const tituloDeLiquidacion = (iso: string, estado: EstadoLiquidacion, version: number) =>
+  `${conMayuscula(periodo(iso))} · ${NOMBRE_ESTADO_LIQUIDACION[estado]}${version > 1 ? ` (versión ${version})` : ""}`;
+
+/** El grupo de gasto con palabras: «expensas_comunes» → «Expensas comunes» (AC-46). El código lo
+ * define el esquema de coeficientes; la pantalla no lo muestra crudo. */
+export const nombreDeGrupo = (codigo: string) => conMayuscula(codigo.replaceAll("_", " "));
 
 /** "2026-10-01" → "2026-11-01": el primer día del mes siguiente, sin la zona del navegador. */
 export function mesSiguiente(iso: string): string {
@@ -210,10 +229,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (data !== undefined) {
           clave.current = null;
           const texto = {
-            preparar: "Listo: abriste el borrador del período.",
-            agregar: "Listo: agregaste el gasto. La simulación ya lo reparte.",
-            quitar: "Listo: quitaste el gasto del borrador.",
-            descartar: "Listo: descartaste el borrador. Sus gastos vuelven a estar disponibles y el período admite uno nuevo.",
+            preparar: "Listo: el borrador del período quedó abierto.",
+            agregar: "Listo: el gasto quedó agregado. La simulación ya lo reparte.",
+            quitar: "Listo: el gasto salió del borrador.",
+            descartar: "Listo: el borrador se descartó. Sus gastos vuelven a estar disponibles y el período admite uno nuevo.",
           }[acto.tipo];
           setAviso({ texto, ok: true });
           if (acto.tipo === "preparar") {
@@ -300,7 +319,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={enviando} elegir={setConsorcio} />
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       {pendiente !== null && (
@@ -371,7 +390,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                 <ul className="filas-registro" aria-label="Liquidaciones">
                   {liquidaciones.map((l) => (
                     <li key={l.id}>
-                      <FilaDeRegistro titulo={`${periodo(l.periodo)}, versión ${l.version} (${l.estado})`}
+                      <FilaDeRegistro titulo={tituloDeLiquidacion(l.periodo, l.estado, l.version)}
                         alAbrir={() => {
                           // La abierta no se reabre: lo escrito en su borrador queda.
                           if (abierta !== l.id) abrir(l.id);
@@ -384,7 +403,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {fallaDetalle !== null && (
                 <section className="tarjeta" aria-label="Detalle de la liquidación">
                   <p className="aviso-error" role="alert">
-                    No pudimos abrir esta liquidación. {fallaDetalle}
+                    No se pudo abrir esta liquidación. {fallaDetalle}
                   </p>
                   <Reintentar alReintentar={() => setVuelta((v) => v + 1)}>
                     <button type="button" className="secundario" onClick={volverALaLista}>
@@ -397,18 +416,18 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               {detalle !== null && simulacion !== undefined && (
                 <section className="tarjeta" aria-label={`Borrador de ${periodo(detalle.liquidacion.periodo)}`}>
                   <h2>
-                    {periodo(detalle.liquidacion.periodo)}, versión {detalle.liquidacion.version}
+                    {tituloDeLiquidacion(detalle.liquidacion.periodo, detalle.liquidacion.estado, detalle.liquidacion.version)}
                   </h2>
 
                   <h3>Gastos</h3>
                   {detalle.gastos.length === 0 ? (
-                    <p>Todavía no agregaste gastos.</p>
+                    <p>Todavía no hay gastos agregados.</p>
                   ) : (
                     <ul className="versiones" aria-label="Gastos del borrador">
                       {detalle.gastos.map((g) => (
                         <li key={g.id}>
-                          {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} (grupo {g.grupo},
-                          esquema versión {g.esquema_version}; pagada el {g.pagada_el}){" "}
+                          {g.razon_social}: {importe(g.importe_centavos, g.moneda)}, {g.concepto} ({nombreDeGrupo(g.grupo)},
+                          pagada el {dia(g.pagada_el)}){" "}
                           {detalle.liquidacion.estado === "borrador" && (
                             <button type="button" className="secundario peligro" disabled={enviando}
                               aria-label={`Quitar ${g.razon_social}, ${importe(g.importe_centavos, g.moneda)}`}
@@ -431,7 +450,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         <label htmlFor={`${id}-orden`}>Orden pagada</label>
                         <select id={`${id}-orden`} required value={orden} disabled={enviando}
                           onChange={(e) => setOrden(e.target.value)}>
-                          <option value="">Elegí una orden</option>
+                          <option value="">Elegir una orden</option>
                           {ofrecibles.map((o) => (
                             <option key={o.orden_id} value={o.orden_id}>
                               {o.razon_social}: {importe(o.importe_centavos, o.moneda)}, {o.concepto}
@@ -441,10 +460,10 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         <label htmlFor={`${id}-grupo`}>Grupo de gasto</label>
                         <select id={`${id}-grupo`} required value={grupo} disabled={enviando}
                           onChange={(e) => setGrupo(e.target.value)}>
-                          <option value="">Elegí un grupo</option>
+                          <option value="">Elegir un grupo</option>
                           {detalle.grupos.map((g) => (
                             <option key={g.grupo} value={g.grupo}>
-                              {g.grupo} (esquema versión {g.esquema_version})
+                              {nombreDeGrupo(g.grupo)}
                             </option>
                           ))}
                         </select>
@@ -487,7 +506,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                             <th scope="col">Unidad</th>
                             {grupos.map((g) => (
                               <th key={g} scope="col">
-                                {g}
+                                {nombreDeGrupo(g)}
                               </th>
                             ))}
                             <th scope="col">Total</th>

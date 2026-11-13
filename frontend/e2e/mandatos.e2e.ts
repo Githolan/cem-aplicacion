@@ -168,7 +168,8 @@ test.describe("mandatos", () => {
     await expect(decision.locator("textarea")).toHaveCount(2);
     await expect(decision.getByLabel("Qué se decidió")).toHaveAttribute("rows", "4");
     await expect(decision.getByLabel("Dónde consta (libro, acta y folio)")).toHaveAttribute("rows", "2");
-    await expect(decision.getByLabel("Huella SHA-256 del acta escaneada (opcional)")).toHaveJSProperty("tagName", "INPUT");
+    // G-48: la huella del acta ya no se pide a mano.
+    await expect(decision.getByLabel(/Huella SHA-256/)).toHaveCount(0);
     await decision.getByLabel("Qué se decidió").fill("Designa al Consejo");
     await decision.getByLabel("Qué se decidió").press("Enter");
     await expect(decision.getByLabel("Qué se decidió")).toHaveValue("Designa al Consejo");
@@ -204,9 +205,9 @@ test.describe("mandatos", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/mandatos");
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Mandatos y decisiones" })).toHaveCount(0);
-    await expect(page.getByText(/No tenés permiso/)).toHaveCount(0);
+    await expect(page.getByText(/no tiene permiso/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
   });
@@ -225,13 +226,13 @@ test.describe("mandatos", () => {
     await expect(page.getByRole("button", { name: "Sí, dar de baja" })).toBeFocused();
     await sinFaltasDeAccesibilidad(page);
     await page.getByRole("button", { name: "Sí, dar de baja" }).click();
-    await expect(page.getByText(/No tenés permiso para dar esta baja/)).toBeFocused();
+    await expect(page.getByText(/El mandato de esta cuenta no incluye dar esta baja/)).toBeFocused();
     await sinFaltasDeAccesibilidad(page);
 
     await page.getByLabel("Asamblea que lo remueve").selectOption(D_EQUIPO);
     await page.getByRole("button", { name: "Dar de baja", exact: true }).click();
     await page.getByRole("button", { name: "Sí, dar de baja" }).click();
-    await expect(page.getByText("Listo: dimos de baja el mandato de Estudio Sur.")).toBeVisible();
+    await expect(page.getByText("Listo: el mandato de Estudio Sur quedó dado de baja.")).toBeVisible();
     expect(envios.map((e) => e.cuerpo.decision_id)).toEqual([D_NEGADA, D_EQUIPO]);
     // Otro intento (otra asamblea): otra clave.
     expect(envios[1]?.clave).not.toBe(envios[0]?.clave);
@@ -247,7 +248,7 @@ test.describe("mandatos", () => {
     await alta.getByLabel("Decisión que lo respalda").selectOption(D_EQUIPO);
     await alta.getByLabel("Desde").fill("2026-11-01");
     await alta.getByRole("button", { name: "Dar de alta" }).click();
-    await expect(page.getByText("No pudimos verificar el pedido. Recargá la página.")).toBeVisible();
+    await expect(page.getByText("La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso.")).toBeVisible();
     expect(envios[0]?.csrf).toBeNull();
   });
 });

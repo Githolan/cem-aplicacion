@@ -250,7 +250,7 @@ describe("página /invitaciones", () => {
     fireEvent.change(screen.getByLabelText("Unidad"), { target: { value: U2 } });
     fireEvent.change(screen.getByLabelText("Vínculo con la unidad"), { target: { value: "ocupante" } });
     fireEvent.click(invitarBoton());
-    expect(await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
     const post = en(pedidos(simulado, "POST", RUTA_LISTA), 0);
     expect(post.headers.get("X-CSRF-Token")).toBe("abc123");
     expect(post.headers.get("Idempotency-Key")).toMatch(UUID);
@@ -274,10 +274,10 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    expect(await screen.findByText(/No pudimos completar el pedido/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudo completar el pedido/)).toBeTruthy();
     caida = false;
     fireEvent.click(invitarBoton());
-    await screen.findByText(/Listo: le mandamos/);
+    await screen.findByText(/Listo: la invitación a/);
     const [primera, segunda] = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
     expect(segunda).toBe(primera);
     await completar("Eva Sosa", "eva@ejemplo.com");
@@ -296,7 +296,7 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    await screen.findByText(/No pudimos completar el pedido/);
+    await screen.findByText(/No se pudo completar el pedido/);
     fireEvent.change(screen.getByLabelText("Correo"), { target: { value: "dora.ruiz@ejemplo.com" } });
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
@@ -305,12 +305,12 @@ describe("página /invitaciones", () => {
   });
 
   it.each([
-    [403, "sin_permiso", "No tenés permiso para invitar a esa unidad."],
-    [403, "csrf_invalido", "No pudimos verificar el pedido. Recargá la página."],
-    [404, "no_encontrado", "Esa unidad ya no está en el consorcio. Elegí otra."],
-    [409, "idempotencia_en_curso", "La invitación se está procesando. Probá de nuevo en unos segundos."],
+    [403, "sin_permiso", "Esta cuenta no tiene permiso para invitar a esa unidad."],
+    [403, "csrf_invalido", "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso."],
+    [404, "no_encontrado", "Esa unidad ya no está en el consorcio. Hay que elegir otra."],
+    [409, "idempotencia_en_curso", "La invitación se está procesando. Reintentar en unos segundos."],
     [422, "peticion_invalida", "Hay que revisar los datos del formulario."],
-    [429, "demasiadas_peticiones", "Llegaste al límite de invitaciones por ahora. Probá más tarde."],
+    [429, "demasiadas_peticiones", "Se llegó al límite de invitaciones por ahora. Reintentar más tarde."],
   ])("un %i (%s) se explica sin tocar la lista", async (estado, codigo, texto) => {
     const simulado = conConsorcio({ [`POST ${RUTA_LISTA}`]: () => error(codigo, estado) });
     vi.stubGlobal("fetch", simulado);
@@ -331,7 +331,7 @@ describe("página /invitaciones", () => {
     await screen.findByText(/se está procesando/);
     respuesta = () => error("sin_permiso", 403);
     fireEvent.click(invitarBoton());
-    await screen.findByText(/No tenés permiso/);
+    await screen.findByText(/Esta cuenta no tiene permiso/);
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(3));
     const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
@@ -345,7 +345,7 @@ describe("página /invitaciones", () => {
     await completar();
     fireEvent.click(invitarBoton());
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   it("E34: sin respuesta se habla de la conexión; con un 502 sin cuerpo de la aplicación, del servicio", async () => {
@@ -360,13 +360,13 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    expect(await screen.findByText(/Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/Hay que revisar la conexión/)).toBeTruthy();
     caida = false;
     await waitFor(() => expect(invitarBoton()).not.toHaveProperty("disabled", true));
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(2));
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   it("un 5xx del proxy conserva la clave: el reintento recibe lo que el backend guardó", async () => {
@@ -380,7 +380,7 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect(invitarBoton()).not.toHaveProperty("disabled", true));
     respuesta = () => error("sin_permiso", 403);
     fireEvent.click(invitarBoton());
-    await screen.findByText(/No tenés permiso/);
+    await screen.findByText(/Esta cuenta no tiene permiso/);
     fireEvent.click(invitarBoton());
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(3));
     const claves = pedidos(simulado, "POST", RUTA_LISTA).map((p) => p.headers.get("Idempotency-Key"));
@@ -407,7 +407,7 @@ describe("página /invitaciones", () => {
     for (const campo of ["Unidad", "Vínculo con la unidad", "Nombre", "Correo"])
       expect((screen.getByLabelText(campo) as HTMLInputElement).disabled).toBe(true);
     soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
-    expect(await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).disabled).toBe(false);
   });
 
@@ -434,13 +434,13 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect(pedidos(simulado, "POST", RUTA_LISTA)).toHaveLength(1));
     expect((screen.getByLabelText("Edificio") as HTMLSelectElement).disabled).toBe(true);
     soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
-    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     expect((screen.getByLabelText("Edificio") as HTMLSelectElement).disabled).toBe(false);
   });
 
   it.each([
-    ["csrf_invalido", "No pudimos verificar el pedido. Recargá la página."],
-    ["sin_permiso", "No tenés permiso para retirar esa invitación."],
+    ["csrf_invalido", "La página quedó abierta mucho tiempo. Hay que recargarla y repetir el paso."],
+    ["sin_permiso", "Esta cuenta no tiene permiso para retirar esa invitación."],
   ])("retirar con 403 %s lo explica en vez de culpar a la conexión", async (codigo, texto) => {
     const ruta = `${RUTA_LISTA}/${PENDIENTE}/revocar`;
     vi.stubGlobal("fetch", conConsorcio({ [`POST ${ruta}`]: () => error(codigo, 403) }));
@@ -475,7 +475,7 @@ describe("página /invitaciones", () => {
     await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
     fallar(new TypeError("sin red"));
     await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText(/No pudimos completar el pedido/)).toBeNull();
+    expect(screen.queryByText(/No se pudo completar el pedido/)).toBeNull();
   });
 
   it("G-23: un 422 del correo marca el correo, con su motivo al lado, y no habla del nombre", async () => {
@@ -514,9 +514,9 @@ describe("página /invitaciones", () => {
     await completar();
     fireEvent.click(invitarBoton());
     // Control: el «Listo» se ve.
-    expect(await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
     await abrirFicha("Beto Pérez, 1° A");
-    expect(screen.queryByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeNull();
+    expect(screen.queryByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeNull();
   });
 
   it("retirar pide confirmación; «No» no manda nada y «Sí» retira con CSRF", async () => {
@@ -538,7 +538,7 @@ describe("página /invitaciones", () => {
     expect(pedidos(simulado, "POST", ruta)).toHaveLength(0);
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
-    expect(await screen.findByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la invitación de Beto Pérez se retiró.")).toBeTruthy();
     expect(en(pedidos(simulado, "POST", ruta), 0).headers.get("X-CSRF-Token")).toBe("abc123");
     await waitFor(() => expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(2));
     const fila = screen.getByText("Beto Pérez, 1° A").closest("li") as HTMLElement;
@@ -575,7 +575,7 @@ describe("página /invitaciones", () => {
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
-    const aviso = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
+    const aviso = await screen.findByText("Listo: la invitación de Beto Pérez se retiró.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(document.activeElement).not.toBe(document.body);
   });
@@ -609,12 +609,12 @@ describe("página /invitaciones", () => {
     const si = screen.getByRole("button", { name: "Sí, retirarla" });
     si.focus();
     fireEvent.click(si);
-    const retiro = await screen.findByText("Listo: retiramos la invitación de Beto Pérez.");
+    const retiro = await screen.findByText("Listo: la invitación de Beto Pérez se retiró.");
     await waitFor(() => expect(document.activeElement).toBe(retiro));
     const correo = screen.getByLabelText("Correo");
     correo.focus();
     fireEvent.submit(correo.closest("form") as HTMLFormElement);
-    const aviso = await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    const aviso = await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
@@ -631,7 +631,7 @@ describe("página /invitaciones", () => {
     const correo = screen.getByLabelText("Correo");
     correo.focus();
     fireEvent.submit(correo.closest("form") as HTMLFormElement);
-    const aviso = await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    const aviso = await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(antes(invitarBoton(), aviso)).toBe(true);
     expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
@@ -642,7 +642,7 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    const aviso = await screen.findByText("No tenés permiso para invitar a esa unidad.");
+    const aviso = await screen.findByText("Esta cuenta no tiene permiso para invitar a esa unidad.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
     expect(antes(invitarBoton(), aviso)).toBe(true);
     expect(antes(aviso, screen.getByRole("heading", { level: 2, name: "Invitaciones" }))).toBe(true);
@@ -657,7 +657,7 @@ describe("página /invitaciones", () => {
     // Control: nada tiene el foco al tocar el botón.
     expect(document.activeElement).toBe(document.body);
     fireEvent.click(invitarBoton());
-    const aviso = await screen.findByText("No tenés permiso para invitar a esa unidad.");
+    const aviso = await screen.findByText("Esta cuenta no tiene permiso para invitar a esa unidad.");
     await waitFor(() => expect(document.activeElement).toBe(aviso));
   });
 
@@ -683,7 +683,7 @@ describe("página /invitaciones", () => {
     titulo.tabIndex = -1;
     titulo.focus();
     soltar(Response.json(invitacion(NUEVA, "Dora Ruiz", "pendiente", "dora@ejemplo.com"), { status: 201 }));
-    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(correo.disabled).toBe(false));
     expect(document.activeElement).toBe(titulo);
   });
@@ -711,11 +711,11 @@ describe("página /invitaciones", () => {
     abrir();
     await completar();
     fireEvent.click(invitarBoton());
-    await screen.findByText("Listo: le mandamos la invitación a Dora Ruiz.");
+    await screen.findByText("Listo: la invitación a Dora Ruiz quedó enviada.");
     await waitFor(() => expect(listas).toBe(2));
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
-    await screen.findByText(/Listo: retiramos la invitación de Beto Pérez/);
+    await screen.findByText(/Listo: la invitación de Beto Pérez se retiró/);
     await waitFor(() => expect(listas).toBe(3));
     soltarVieja(Response.json(LISTA));
     await new Promise((r) => setTimeout(r, 0));
@@ -728,8 +728,8 @@ describe("página /invitaciones", () => {
   it("E34: la primera carga con un 503 de la aplicación dice servicio; sin respuesta, conexión", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => error("servicio_no_disponible", 503) }));
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios. El servicio no está disponible/)).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. El servicio no está disponible/)).toBeTruthy();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   it("E34: la primera carga sin respuesta habla de la conexión", async () => {
@@ -742,7 +742,7 @@ describe("página /invitaciones", () => {
       }),
     );
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios. Revisá la conexión/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudieron consultar los edificios. Hay que revisar la conexión/)).toBeTruthy();
   });
 
   it("E34: retirar con un 429 dice que llegó al límite, no que el servicio cayó", async () => {
@@ -752,7 +752,7 @@ describe("página /invitaciones", () => {
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.click(await retirarDe("Beto Pérez, 1° A"));
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
-    expect(await screen.findByText(/Llegaste al límite de pedidos/)).toBeTruthy();
+    expect(await screen.findByText(/Se llegó al límite de pedidos/)).toBeTruthy();
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 
@@ -773,7 +773,7 @@ describe("página /invitaciones", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     await waitFor(() => expect(listas).toBe(2));
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
+    expect(screen.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeTruthy();
     expect(screen.queryByText(/El servicio no está disponible/)).toBeNull();
   });
 
@@ -795,8 +795,8 @@ describe("página /invitaciones", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sí, retirarla" }));
     await waitFor(() => expect(listas).toBe(2));
     await new Promise((r) => setTimeout(r, 0));
-    expect(screen.getByText("Listo: retiramos la invitación de Beto Pérez.")).toBeTruthy();
-    expect(screen.queryByText(/Revisá la conexión/)).toBeNull();
+    expect(screen.getByText("Listo: la invitación de Beto Pérez se retiró.")).toBeTruthy();
+    expect(screen.queryByText(/Hay que revisar la conexión/)).toBeNull();
   });
 
   it("E34: retirar con un 500 de la aplicación lo explica como servicio y deja la invitación pendiente", async () => {
@@ -822,7 +822,7 @@ describe("página /invitaciones", () => {
     abrir();
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
-    expect(await screen.findByText("Todavía no hay invitaciones que puedas ver.")).toBeTruthy();
+    expect(await screen.findByText("Todavía no hay invitaciones.")).toBeTruthy();
     expect(within(screen.getByLabelText("Unidad")).getAllByRole("option").map((o) => o.textContent)).toEqual(["9° Z", "9° Y"]);
   });
 
@@ -847,7 +847,7 @@ describe("página /invitaciones", () => {
   it("sin edificios lo dice", async () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
     abrir();
-    expect(await screen.findByText("Todavía no participás de ningún edificio.")).toBeTruthy();
+    expect(await screen.findByText("Esta cuenta todavía no participa de ningún edificio.")).toBeTruthy();
   });
 
   it("no tiene faltas de accesibilidad detectables por axe", async () => {
@@ -921,7 +921,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     abrir();
 
     const lista = await screen.findByRole("region", { name: "Invitaciones" });
-    expect(await within(lista).findByText("Todavía no hay invitaciones que puedas ver.")).toBeTruthy();
+    expect(await within(lista).findByText("Todavía no hay invitaciones.")).toBeTruthy();
     expect(within(lista).queryByRole("list")).toBeNull();
   });
 
@@ -932,7 +932,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     expect(await screen.findByText(/El servicio no está disponible/)).toBeTruthy();
     const lista = screen.getByRole("region", { name: "Invitaciones" });
     expect(within(lista).queryByText("Consultando…")).toBeNull();
-    expect(within(lista).getByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
+    expect(within(lista).getByText("No se pudieron mostrar las invitaciones.")).toBeTruthy();
   });
 
   it("la lista que no se pudo consultar se reintenta sin perder lo escrito, y el error se va", async () => {
@@ -943,7 +943,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     vi.stubGlobal("fetch", simulado);
     abrir();
     const lista = await screen.findByRole("region", { name: "Invitaciones" });
-    expect(await within(lista).findByText("No pudimos mostrar las invitaciones.")).toBeTruthy();
+    expect(await within(lista).findByText("No se pudieron mostrar las invitaciones.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
     caida = false;
     fireEvent.click(within(lista).getByRole("button", { name: "Consultar de nuevo" }));
@@ -970,7 +970,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText("No pudimos mostrar las unidades.")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron mostrar las unidades.")).toBeTruthy();
     expect((invitarBoton() as HTMLButtonElement).disabled).toBe(true);
     await screen.findByText("Beto Pérez, 1° A");
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Dora Ruiz" } });
@@ -979,7 +979,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U1));
     expect((invitarBoton() as HTMLButtonElement).disabled).toBe(false);
     expect((screen.getByLabelText("Nombre") as HTMLInputElement).value).toBe("Dora Ruiz");
-    expect(screen.queryByText("No pudimos mostrar las unidades.")).toBeNull();
+    expect(screen.queryByText("No se pudieron mostrar las unidades.")).toBeNull();
     expect(document.querySelector(".aviso-error")).toBeNull();
     expect(pedidos(simulado, "GET", RUTA_UNIDADES)).toHaveLength(2);
     // Control: la lista estaba bien y no se volvió a pedir; ya no hay nada que reintentar.
@@ -1017,10 +1017,10 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
       }),
     );
     abrir();
-    expect(await screen.findByText("No pudimos mostrar las unidades.")).toBeTruthy();
+    expect(await screen.findByText("No se pudieron mostrar las unidades.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
     await waitFor(() => expect((screen.getByLabelText("Unidad") as HTMLSelectElement).value).toBe(U2));
-    expect(screen.queryByText("No pudimos mostrar las unidades.")).toBeNull();
+    expect(screen.queryByText("No se pudieron mostrar las unidades.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull();
   });
 
@@ -1042,7 +1042,7 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     fireEvent.click(reintentar);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Consultar de nuevo" })).toBeNull());
     expect(pedidos(simulado, "GET", RUTA_LISTA)).toHaveLength(3);
-    expect(screen.getByText("Listo: le mandamos la invitación a Dora Ruiz.")).toBeTruthy();
+    expect(screen.getByText("Listo: la invitación a Dora Ruiz quedó enviada.")).toBeTruthy();
   });
 
   it("los edificios que no se pudieron consultar se reintentan sin salir de la pantalla", async () => {
@@ -1052,14 +1052,14 @@ describe("página /invitaciones: estados de pantalla mínima (documento 08, §13
     });
     vi.stubGlobal("fetch", simulado);
     abrir();
-    expect(await screen.findByText(/No pudimos consultar tus edificios/)).toBeTruthy();
+    expect(await screen.findByText(/No se pudieron consultar los edificios/)).toBeTruthy();
     // Control: la primera carga pidió una vez la pantalla y otra permisos.tsx, aun con StrictMode.
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(2);
     caido = false;
     fireEvent.click(screen.getByRole("button", { name: "Consultar de nuevo" }));
     expect(await screen.findByText("Beto Pérez, 1° A")).toBeTruthy();
     expect(pedidos(simulado, "GET", "/api/v1/me/consorcios")).toHaveLength(3);
-    expect(screen.queryByText(/No pudimos consultar tus edificios/)).toBeNull();
+    expect(screen.queryByText(/No se pudieron consultar los edificios/)).toBeNull();
   });
 });
 
@@ -1128,7 +1128,7 @@ describe("lo que no se puede hacer no aparece en /invitaciones", () => {
   ])("un 403 al leer %s lleva al inicio", async (_, ruta) => {
     vi.stubGlobal("fetch", conConsorcio({ ...INICIO_CON_SESION, [ruta]: () => error("sin_permiso", 403) }));
     abrir();
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
-    expect(screen.queryByText(/No tenés permiso/)).toBeNull();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
+    expect(screen.queryByText(/no tiene permiso/)).toBeNull();
   });
 });

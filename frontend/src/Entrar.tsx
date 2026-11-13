@@ -117,7 +117,7 @@ export function Entrar() {
         if (error === undefined) {
           olvidarToken();
           recordarFormaDeEntrar("correo");
-          terminarEntrada("Entraste.");
+          terminarEntrada("Listo: sesión abierta.");
         } else if (response.status === ESTADO_ENLACE_INVALIDO || response.status === ESTADO_TOKEN_MAL_FORMADO) {
           olvidarToken();
           setEstado({ tipo: "rechazado" });
@@ -163,7 +163,7 @@ export function Entrar() {
         {estado.tipo === "fallo" && token !== null && (
           <>
             <p className="aviso-error">{estado.mensaje}</p>
-            <button type="button" onClick={() => canjear(token)}>
+            <button className="secundario" type="button" onClick={() => canjear(token)}>
               Reintentar
             </button>
           </>

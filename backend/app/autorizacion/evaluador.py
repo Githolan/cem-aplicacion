@@ -56,7 +56,9 @@ CAUSA_ERROR_CARGA = "error_carga"
 
 
 class Motivo(StrEnum):
-    """Motivos internos: van a la auditoría, nunca en la respuesta (403 o 404 genéricos)."""
+    """Motivos internos: van a la auditoría, nunca en la respuesta (403 o 404 genéricos). Un código
+    de separación (`CodigoSeparacion`) sí sale en un 403, como `ya_participo`
+    (`requiere.YA_PARTICIPO`)."""
 
     CONCEDIDO_POR_VINCULO = "concedido_por_vinculo"
     CONCEDIDO_POR_AMBITO = "concedido_por_ambito"

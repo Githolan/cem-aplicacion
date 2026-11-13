@@ -6,7 +6,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 import { AGENTE_IPHONE, simularPuntero, simularSesion, simularStandalone, sinFaltasDeAccesibilidad } from "./entorno";
 
-const TITULO = "Instalá Consorcio en Mano en este dispositivo";
+const TITULO = "Instalar Consorcio en Mano en este dispositivo";
 const BOTON = "Instalar la aplicación";
 
 // Chrome solo dispara `beforeinstallprompt` fuera de incógnito y cuando juzga que hubo uso
@@ -63,7 +63,7 @@ test.describe("página /instalar", () => {
       await pagina.evaluate(() => navigator.serviceWorker.ready);
       await pagina.reload();
       await expect(pagina.getByRole("button", { name: BOTON })).toBeVisible();
-      await expect(pagina.getByText("Tocá el botón y confirmá.")).toBeVisible();
+      await expect(pagina.getByText("Tocar el botón y confirmar.")).toBeVisible();
       await sinFaltasDeAccesibilidad(pagina);
     } finally {
       await contexto.close();
@@ -74,7 +74,7 @@ test.describe("página /instalar", () => {
   test("sin beforeinstallprompt explica cómo instalar desde el menú", async ({ page }) => {
     await page.goto("/instalar");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO);
-    await expect(page.getByText(/Tocá el menú \(los tres puntos\)/)).toBeVisible();
+    await expect(page.getByText(/Tocar el menú \(los tres puntos\)/)).toBeVisible();
     await expect(page.locator("ol.pasos li")).toHaveCount(2);
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
@@ -85,7 +85,7 @@ test.describe("página /instalar", () => {
     await page.goto("/instalar");
     await ofrecerInstalacion(page, "accepted");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalá Consorcio en Mano en esta computadora");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Instalar Consorcio en Mano en esta computadora");
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -94,11 +94,11 @@ test.describe("página /instalar", () => {
     await simularSesion(page, "con_sesion");
     await page.goto("/instalar");
 
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Tu consorcio, en tu mano");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Consorcio en mano");
     expect(new URL(page.url()).pathname).toBe("/");
     await expect(page.getByRole("button", { name: BOTON })).toHaveCount(0);
     await expect(page.locator("ol.pasos")).toHaveCount(0);
-    await expect(page.getByRole("link", { name: "Instalá la aplicación en este dispositivo" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Instalar la aplicación en este dispositivo" })).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
   });
 
@@ -138,7 +138,7 @@ test.describe("página /instalar", () => {
     await recarga;
 
     await expect(page.getByText(/No se instaló/)).toHaveCount(0);
-    await expect(page.getByText(/Tocá el menú/)).toBeVisible();
+    await expect(page.getByText(/Tocar el menú/)).toBeVisible();
   });
 
   test("terminada la instalación sigue a /entrar con el aviso", async ({ page }) => {
@@ -156,7 +156,7 @@ test.describe("página /instalar", () => {
 
     await expect(page).toHaveURL(/\/entrar$/);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(TITULO_ENTRAR);
-    await expect(page.getByText(/Ya está instalada. Seguí acá/)).toBeVisible();
+    await expect(page.getByText(/Ya está instalada. Se puede seguir acá/)).toBeVisible();
     await sinFaltasDeAccesibilidad(page);
   });
 });
@@ -173,7 +173,7 @@ test.describe("página /instalar en iPhone", () => {
     await expect(pasos.nth(0)).toContainText("Safari");
     await expect(pasos.nth(1)).toContainText("Compartir");
     await expect(pasos.nth(2)).toContainText("Agregar a inicio");
-    await expect(page.getByText(/Tocá el menú/)).toHaveCount(0);
+    await expect(page.getByText(/Tocar el menú/)).toHaveCount(0);
     await sinFaltasDeAccesibilidad(page);
   });
 });

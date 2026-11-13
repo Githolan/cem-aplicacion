@@ -221,7 +221,7 @@ def test_a15_quien_registro_la_asamblea_no_la_usa_para_revisar(pendiente, motor_
     e = pendiente
     propia = decidir(motor_app, e["cons"], e["adm"])
     r = revisar_http(e["adm"], e["cons"], e["m"], propia, e["hoy"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     assert _motivos(motor_app, e, e["adm"]) == [
         ("mandatos.resolver_revision", "no_registro_la_decision")
     ]

@@ -462,7 +462,7 @@ describe("bandeja", () => {
       [`GET ${BASE}/pagos/bandeja`]: () => error("sin_permiso", 403),
     }));
     abrir("/pagos");
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
   });
 
   it("con varios edificios se elige cuál, y cambiar sale de la ficha de otro", async () => {
@@ -562,7 +562,7 @@ describe("el ancho de la pantalla", () => {
     vi.stubGlobal("fetch", api);
     abrir(`/pagos/${O1}`);
     const leidas = pedidos(api, "GET", `${BASE}/pagos/bandeja`).length;
-    fireEvent.click(await boton("Conciliar el pago"));
+    fireEvent.click(await boton("Está bien: conciliar"));
     expect(await screen.findByText(/Listo: quedó conciliado/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas));
@@ -599,7 +599,7 @@ describe("el ancho de la pantalla", () => {
     });
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(screen.getByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
-    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    expect(screen.queryByText("Revisando el comprobante")).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`)).toHaveLength(lecturas);
   });
 
@@ -693,7 +693,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     ["subir_comprobante", SUBIR, "Elegir un archivo", "puede_subir_comprobante"],
     ["corregir", CORREGIR, "Guardar la corrección", "puede_corregir"],
     ["declarar_no_pago", ficha({ situacion: "pagando", paso: "declarar_no_pago", puede_declarar: true }), "Declarar que no se pagó", "puede_declarar"],
-    ["conciliar", CONCILIAR, "Conciliar el pago", "puede_conciliar"],
+    ["conciliar", CONCILIAR, "Está bien: conciliar", "puede_conciliar"],
     [
       "confirmar_no_pago",
       ficha({ situacion: "no_pago_declarado", paso: "confirmar_no_pago", puede_confirmar: true, declaracion_vigente: DECLARACION }),
@@ -804,7 +804,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
     });
     expect(await screen.findByText(TEXTO_ALERTA_FRACCIONAMIENTO)).toBeTruthy();
-    expect(screen.getByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeTruthy();
+    expect(screen.getByText("Hay otras órdenes recientes de este proveedor. Sumadas pasan el tope del edificio o el máximo del contrato, así que esta la aprueba el Consejo.")).toBeTruthy();
     fireEvent.click(await boton("Enviar a aprobar"));
     expect(await screen.findByText("Listo: la orden quedó esperando aprobación. Le toca al Consejo.")).toBeTruthy();
   });
@@ -821,7 +821,7 @@ describe("ficha: cada paso tiene su botón, y sin su `puede_*` no aparece", () =
     });
     fireEvent.click(await boton("Enviar a aprobar"));
     expect(await screen.findByText("Listo: la orden no pide aprobación y quedó lista para pagar.")).toBeTruthy();
-    expect(screen.queryByText("Juntas superan el umbral: la aprueba el Consejo.")).toBeNull();
+    expect(screen.queryByText("Hay otras órdenes recientes de este proveedor. Sumadas pasan el tope del edificio o el máximo del contrato, así que esta la aprueba el Consejo.")).toBeNull();
   });
 
   it("control: decidida, la alerta ya no se ve y la franja dice lo que pasó", async () => {
@@ -902,7 +902,7 @@ describe("pagar", () => {
     const api = circuito();
     fireEvent.click(await boton("Ver la cuenta para pagar"));
     expect(await screen.findByText(CUENTA)).toBeTruthy();
-    expect(screen.getByText(/mirá que el titular sea/).textContent).toContain("Limpieza Ficticia SRL");
+    expect(screen.getByText(/el titular debe ser/).textContent).toContain("Limpieza Ficticia SRL");
     expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/emitir`, `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]);
     const [emision] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/emitir`);
     expect(await cuerpo(emision)).toEqual({ version: 1, huella: H1 });
@@ -964,7 +964,7 @@ describe("pagar", () => {
   it("quien no puede ver la cuenta recibe el error en la ficha y no hay cuenta", async () => {
     abrirFicha(PAGAR, { [`POST ${BASE}/ordenes-pago/${O1}/emitir`]: () => error("sin_permiso", 403) });
     fireEvent.click(await boton("Ver la cuenta para pagar"));
-    expect((await screen.findByRole("alert")).textContent).toContain("personas distintas");
+    expect((await screen.findByRole("alert")).textContent).toContain("Esta cuenta no tiene la facultad");
     expect(document.body.textContent).not.toContain(CUENTA);
   });
 
@@ -1052,7 +1052,7 @@ describe("registrar y corregir", () => {
     expect((screen.getByLabelText(/^CBU\/CVU de destino/) as HTMLInputElement).value).toBe("");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
-    expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el pago quedó registrado/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toEqual({
       version: 1, huella: H1, lectura_mal: false, numero_operacion: "0001-234567", fecha_operacion: "2026-10-31", importe_centavos: 1_500_000, moneda: "ARS",
@@ -1073,7 +1073,7 @@ describe("registrar y corregir", () => {
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     expect(await boton("Reintentar")).toBeTruthy();
-    expect(screen.getByText(/Listo: registraste el pago/)).toBeTruthy();
+    expect(screen.getByText(/Listo: el pago quedó registrado/)).toBeTruthy();
   });
 
   it("un error queda en la ficha con lo escrito", async () => {
@@ -1094,7 +1094,7 @@ describe("registrar y corregir", () => {
     });
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     fireEvent.change(screen.getByLabelText("Importe que salió del banco"), { target: { value: "12.500,50" } });
     fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: " Me equivoqué " } });
     fireEvent.click(await boton("Registrar lo que pasó"));
@@ -1110,7 +1110,7 @@ describe("registrar y corregir", () => {
     });
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     const moneda = screen.getByLabelText("Moneda que salió del banco") as HTMLInputElement;
     expect(moneda.value).toBe("ARS");
     fireEvent.change(moneda, { target: { value: "usd" } });
@@ -1127,7 +1127,7 @@ describe("registrar y corregir", () => {
     });
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
-    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     fireEvent.change(screen.getByLabelText("Qué pasó"), { target: { value: "Nada" } });
     fireEvent.click(await boton("Registrar lo que pasó"));
     expect((await screen.findByRole("alert")).textContent).toContain("es lo mismo que la orden");
@@ -1137,14 +1137,14 @@ describe("registrar y corregir", () => {
   it("sin poder registrar no ofrece pagué otra cosa", async () => {
     abrirFicha({ ...LISTO, puede_registrar: false });
     await screen.findByLabelText("Número de operación");
-    expect(screen.queryByRole("button", { name: "Pagué otra cosa" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Se transfirió otro importe o a otra cuenta" })).toBeNull();
   });
 
   it("al corregir, pagué otra cosa pide la cuenta del comprobante", async () => {
     abrirFicha(CORREGIR);
     await screen.findByLabelText("Número de operación");
     expect(screen.queryByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeNull();
-    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     expect(screen.getByLabelText("CBU/CVU de destino (como figura en el comprobante)")).toBeTruthy();
   });
 
@@ -1181,7 +1181,7 @@ describe("registrar y corregir", () => {
 
     it("a quien espera le dice que no transfiera, sin botones de resolver", async () => {
       abrirFicha(ficha({ ...RESOLVER, paso: "espera_resolver", le_toca_a: "consejo", puede_resolver_diferencia: false }));
-      expect(await screen.findByText(/No transfieras de nuevo/)).toBeTruthy();
+      expect(await screen.findByText(/No hay que transferir de nuevo/)).toBeTruthy();
       expect(screen.queryByRole("button", { name: /^(Dar por pagado lo real|Reclamar la devolución)$/ })).toBeNull();
     });
 
@@ -1231,7 +1231,7 @@ describe("registrar y corregir", () => {
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
     await verificarCodigo();
-    expect(await screen.findByText(/Listo: registraste el pago/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el pago quedó registrado/)).toBeTruthy();
     const registros = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`);
     expect(registros).toHaveLength(2);
     expect(new Set(claves(registros)).size).toBe(1);
@@ -1241,17 +1241,17 @@ describe("registrar y corregir", () => {
     const api = abrirFicha(CORREGIR, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    expect((await screen.findByText(/no transfieras de nuevo/)).textContent).toContain("No coincide el número");
+    expect((await screen.findByText(/no hay que transferir de nuevo/)).textContent).toContain("No coincide el número");
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
     expect(await boton("Ver más grande")).toBeTruthy();
     expect((await screen.findByLabelText<HTMLInputElement>("Número de operación")).value).toBe("0001234567");
     expect(screen.getByLabelText<HTMLInputElement>("Fecha de la transferencia").value).toBe("2026-10-31");
     expect(screen.getByLabelText<HTMLInputElement>(/^Importe transferido/).value).toBe("15.000,00");
     expect(screen.queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
-    expect(screen.getByText(/la que ya registraste/).textContent).toContain(CUENTA.slice(-4));
+    expect(screen.getByText(/la que ya está registrada/).textContent).toContain(CUENTA.slice(-4));
     fireEvent.change(screen.getByLabelText("Número de operación"), { target: { value: "0001-999" } });
     fireEvent.click(await boton("Guardar la corrección"));
-    await screen.findByText(/Listo: registraste el pago/);
+    await screen.findByText(/Listo: el pago quedó registrado/);
     // Una sola escritura: ni `pago-manual/cuenta`, ni otra subida.
     expect(escrituras(api)).toEqual([`${BASE}/ordenes-pago/${O1}/pago-manual`]);
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toEqual({
@@ -1382,7 +1382,7 @@ describe("el comprobante en un paso", () => {
     conEsperaManual();
     const { api, cambiar } = conSubida();
     await elegir();
-    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     expect(await screen.findByText("El antivirus lo está revisando…")).toBeTruthy();
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
     sinBoton("Actualizar comprobantes");
@@ -1390,7 +1390,7 @@ describe("el comprobante en un paso", () => {
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect(await screen.findByLabelText("Número de operación")).toBeTruthy();
     expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
-    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    expect(screen.queryByText("Revisando el comprobante")).toBeNull();
     // Dejó de consultar.
     const lecturas = pedidos(api, "GET", `${BASE}/pagos/${O1}`).length;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA * 3));
@@ -1402,7 +1402,7 @@ describe("el comprobante en un paso", () => {
     const colgadas: ((r: Response) => void)[] = [];
     let responder = (): Response | Promise<Response> => Response.json(EN_REVISION);
     abrirFicha(EN_REVISION, { [`GET ${BASE}/pagos/${O1}`]: () => responder() });
-    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     responder = () => new Promise<Response>((r) => colgadas.push(r));
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     await waitFor(() => expect(colgadas).toHaveLength(1));
@@ -1414,7 +1414,7 @@ describe("el comprobante en un paso", () => {
       await Promise.resolve();
     });
     expect(screen.getByLabelText("Número de operación")).toBeTruthy();
-    expect(screen.queryByText("Estamos revisando el comprobante")).toBeNull();
+    expect(screen.queryByText("Revisando el comprobante")).toBeNull();
   });
 
   it("registra con el comprobante actual: el documento no se elige", async () => {
@@ -1425,14 +1425,14 @@ describe("el comprobante en un paso", () => {
     await screen.findByLabelText("Número de operación");
     escribirRegistro();
     fireEvent.click(await boton("Registrar el pago"));
-    await screen.findByText(/Listo: registraste el pago/);
+    await screen.findByText(/Listo: el pago quedó registrado/);
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual`)[0])).toMatchObject({ documento_id: NUEVO });
   });
 
   it("tras un minuto avisa que se puede salir y sigue consultando", async () => {
     conEsperaManual();
     const api = abrirFicha(EN_REVISION);
-    await screen.findByText("Estamos revisando el comprobante");
+    await screen.findByText("Revisando el comprobante");
     await act(() => vi.advanceTimersByTimeAsync(ESPERA * 19));
     expect(screen.queryByText(AVISO_ANTIVIRUS_TARDA)).toBeNull();
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
@@ -1444,7 +1444,7 @@ describe("el comprobante en un paso", () => {
 
   it("al volver a la ficha con un archivo en revisión sigue la consulta, sin subir nada", async () => {
     const api = abrirFicha(EN_REVISION);
-    expect(await screen.findByText("Estamos revisando el comprobante")).toBeTruthy();
+    expect(await screen.findByText("Revisando el comprobante")).toBeTruthy();
     expect(escrituras(api)).toEqual([]);
     expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
   });
@@ -1453,7 +1453,7 @@ describe("el comprobante en un paso", () => {
     conEsperaManual();
     const { cambiar } = conSubida();
     await elegir();
-    await screen.findByText("Estamos revisando el comprobante");
+    await screen.findByText("Revisando el comprobante");
     cambiar(RECHAZADO);
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect((await screen.findByRole("alert")).textContent).toBe(AVISO_ARCHIVO_RECHAZADO);
@@ -1477,7 +1477,7 @@ describe("el comprobante en un paso", () => {
     await boton("Elegir un archivo");
     expect(screen.getByText("Soltar otro archivo acá")).toBeTruthy();
     await elegir();
-    await screen.findByText("Estamos revisando el comprobante");
+    await screen.findByText("Revisando el comprobante");
     // Mientras se revisa el nuevo, no se registra con el anterior.
     sinBoton("Registrar el pago");
     actual = APROBADO;
@@ -1543,7 +1543,7 @@ describe("el comprobante en un paso", () => {
       [`GET ${BASE}/pagos/${O1}`]: lectura,
     }));
     abrir(`/pagos/${O1}`);
-    await screen.findByText("Estamos revisando el comprobante");
+    await screen.findByText("Revisando el comprobante");
     caido = true;
     await act(() => vi.advanceTimersByTimeAsync(ESPERA));
     expect(await screen.findByRole("alert")).toBeTruthy();
@@ -1570,7 +1570,7 @@ describe("la lectura con IA del comprobante", () => {
   const NO_LEIDA = { ...LISTO, lectura_comprobante: leida({ ...VACIA, estado: "no_leida" }) };
   const COINCIDE = { ...LISTO, lectura_comprobante: leida() };
   const OTRO_IMPORTE = { ...LISTO, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_la_orden: ["importe"] }) };
-  const TEXTO_FALLO = "No pudimos leer el comprobante. Completá los datos a mano.";
+  const TEXTO_FALLO = "El comprobante no se pudo leer. Hay que completar los datos a mano.";
   const valor = (etiqueta: string | RegExp) => (screen.getByLabelText(etiqueta) as HTMLInputElement).value;
   /** Los importes llevan un espacio duro después del signo. */
   const sinDuros = (texto: string | null) => texto?.replaceAll(" ", " ");
@@ -1596,7 +1596,7 @@ describe("la lectura con IA del comprobante", () => {
     expect(screen.queryByLabelText(/^CBU\/CVU de destino/)).toBeNull();
     expect(screen.queryByLabelText(/^Importe transferido/)).toBeNull();
     fireEvent.click(await boton("Registrar el pago"));
-    await screen.findByText(/Listo: registraste el pago/);
+    await screen.findByText(/Listo: el pago quedó registrado/);
     const enviado = await cuerpo(pedidos(api, "POST", RUTA_REGISTRO)[0]);
     expect(enviado).toMatchObject({ importe_centavos: 1_500_000, numero_operacion: "0048213377", fecha_operacion: "2026-11-05" });
     expect(enviado).not.toHaveProperty("cuenta_destino");
@@ -1612,7 +1612,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("lo que no se leyó queda vacío: nunca se llena con lo de la orden", async () => {
     abrirFicha({ ...LISTO, lectura_comprobante: leida({ ...VACIA, numero_operacion: "0048213377" }) });
-    expect(await screen.findByText("Revisá lo que se leyó del comprobante y completá lo que falta.")).toBeTruthy();
+    expect(await screen.findByText("Revisar lo que se leyó del comprobante y completar lo que falta.")).toBeTruthy();
     expect(valor("Número de operación")).toBe("0048213377");
     expect(valor(/^Importe transferido/)).toBe("");
     expect(valor(/^CBU\/CVU de destino/)).toBe("");
@@ -1626,7 +1626,7 @@ describe("la lectura con IA del comprobante", () => {
     expect(screen.queryByLabelText("Número de operación")).toBeNull();
     expect(await boton("Es otro comprobante: cambiarlo")).toBeTruthy();
     expect(await boton("Se leyó mal: corregir el dato")).toBeTruthy();
-    expect(await boton("Pagué otra cosa")).toBeTruthy();
+    expect(await boton("Se transfirió otro importe o a otra cuenta")).toBeTruthy();
     await sinFaltasDeAccesibilidad(document.body);
   });
 
@@ -1681,7 +1681,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("pagué otra cosa arranca con lo leído", async () => {
     abrirFicha(OTRO_IMPORTE);
-    fireEvent.click(await boton("Pagué otra cosa"));
+    fireEvent.click(await boton("Se transfirió otro importe o a otra cuenta"));
     expect(valor("Importe que salió del banco")).toBe("8.500,00");
     expect(valor("Número de operación")).toBe("0048213377");
     expect(screen.queryByRole("alert")).toBeNull();
@@ -1707,7 +1707,7 @@ describe("la lectura con IA del comprobante", () => {
 
   it("control: con la lectura apagada no dice nada y es el formulario de siempre", async () => {
     abrirFicha(LISTO);
-    expect(await screen.findByText("Escribí los datos como figuran en el comprobante.")).toBeTruthy();
+    expect(await screen.findByText("Los datos van como figuran en el comprobante.")).toBeTruthy();
     expect(screen.queryByText(TEXTO_FALLO)).toBeNull();
     expect(valor(/^CBU\/CVU de destino/)).toBe("");
   });
@@ -1765,16 +1765,16 @@ describe("la lectura con IA del comprobante", () => {
   });
 
   const CONCILIAR_DISTINTO = { ...CONCILIAR, lectura_comprobante: leida({ importe_centavos: 850_000, distinto_de_la_orden: ["importe"], distinto_de_lo_registrado: ["importe"] }) };
-  const nombres = () => screen.getAllByRole("button").map((b) => b.textContent).filter((t) => t === "Conciliar el pago" || t === "Observar");
+  const nombres = () => screen.getAllByRole("button").map((b) => b.textContent).filter((t) => t === "Está bien: conciliar" || t === "No coincide: devolverlo a corregir");
 
-  it("si lo leído difiere de lo registrado, el Consejo lo ve y Observar pasa a principal", async () => {
+  it("si lo leído difiere de lo registrado, el Consejo lo ve y «No coincide» pasa a principal", async () => {
     abrirFicha(CONCILIAR_DISTINTO);
     expect(sinDuros((await screen.findByRole("alert")).textContent)).toContain("El comprobante dice $ 8.500,00 y registraron $ 15.000,00.");
-    await boton("Conciliar el pago");
-    expect(nombres()).toEqual(["Observar", "Conciliar el pago"]);
+    await boton("Está bien: conciliar");
+    expect(nombres()).toEqual(["No coincide: devolverlo a corregir", "Está bien: conciliar"]);
     // Observar es una acción negativa: principal y en rojo (comentario 26).
-    expect((await boton("Observar")).className).toBe("peligro");
-    expect((await boton("Conciliar el pago")).className).toBe("secundario");
+    expect((await boton("No coincide: devolverlo a corregir")).className).toBe("peligro");
+    expect((await boton("Está bien: conciliar")).className).toBe("secundario");
   });
 
   it("conforme sigue, porque la lectura puede equivocarse", async () => {
@@ -1782,7 +1782,7 @@ describe("la lectura con IA del comprobante", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conciliar el pago"));
+    fireEvent.click(await boton("Está bien: conciliar"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme" });
   });
@@ -1799,24 +1799,24 @@ describe("la lectura con IA del comprobante", () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ coincide_con_lo_registrado: true }) });
     expect(await screen.findByText("La lectura del comprobante coincide con lo registrado.")).toBeTruthy();
     expect(screen.queryByText(/quedó incompleta/)).toBeNull();
-    await boton("Conciliar el pago");
-    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
+    await boton("Está bien: conciliar");
+    expect(nombres()).toEqual(["Está bien: conciliar", "No coincide: devolverlo a corregir"]);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("una lectura parcial o vacía no dice que coincida: dice que quedó incompleta", async () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA }) });
-    expect(await screen.findByText("La lectura del comprobante quedó incompleta: compará los datos con el archivo.")).toBeTruthy();
+    expect(await screen.findByText("La lectura del comprobante quedó incompleta: conviene comparar los datos con el archivo.")).toBeTruthy();
     expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
-    await boton("Conciliar el pago");
-    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
+    await boton("Está bien: conciliar");
+    expect(nombres()).toEqual(["Está bien: conciliar", "No coincide: devolverlo a corregir"]);
   });
 
   it("una moneda distinta se avisa aunque el importe no se haya leído", async () => {
     abrirFicha({ ...CONCILIAR, lectura_comprobante: leida({ ...VACIA, moneda: "USD", distinto_de_lo_registrado: ["moneda"] }) });
     expect((await screen.findByRole("alert")).textContent).toContain("El comprobante dice USD y registraron ARS.");
-    await boton("Conciliar el pago");
-    expect(nombres()).toEqual(["Observar", "Conciliar el pago"]);
+    await boton("Está bien: conciliar");
+    expect(nombres()).toEqual(["No coincide: devolverlo a corregir", "Está bien: conciliar"]);
   });
 
   it("antes de registrar, también: otra moneda sin importe pregunta qué pasó", async () => {
@@ -1828,9 +1828,9 @@ describe("la lectura con IA del comprobante", () => {
 
   it("control: sin lectura no dice que coincida", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     expect(screen.queryByText("La lectura del comprobante coincide con lo registrado.")).toBeNull();
-    expect(nombres()).toEqual(["Conciliar el pago", "Observar"]);
+    expect(nombres()).toEqual(["Está bien: conciliar", "No coincide: devolverlo a corregir"]);
   });
 
   it("al resolver una diferencia también se ve lo leído", async () => {
@@ -1861,7 +1861,7 @@ describe("copiar", () => {
     vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { clipboard: { writeText: () => Promise.reject(new Error("no")) } }));
     await conLaCuenta();
     fireEvent.click(await boton("Copiar el CBU"));
-    const campo = await screen.findByLabelText<HTMLInputElement>("Copiá el CBU");
+    const campo = await screen.findByLabelText<HTMLInputElement>("Para copiar a mano: el CBU");
     expect(campo.value).toBe(CUENTA);
     expect([campo.selectionStart, campo.selectionEnd]).toEqual([0, CUENTA.length]);
   });
@@ -1870,12 +1870,12 @@ describe("copiar", () => {
     vi.stubGlobal("navigator", Object.assign(Object.create(navigator) as Navigator, { clipboard: undefined }));
     await conLaCuenta();
     fireEvent.click(await boton("Copiar el importe"));
-    expect((await screen.findByLabelText<HTMLInputElement>("Copiá el importe")).value).toBe("15000,00");
+    expect((await screen.findByLabelText<HTMLInputElement>("Para copiar a mano: el importe")).value).toBe("15000,00");
   });
 
   it("el titular a la vista, con el texto del diseño", async () => {
     await conLaCuenta();
-    expect(screen.getByText(/Antes de confirmar en tu banco, mirá que el titular sea/).textContent).toContain("Limpieza Ficticia SRL");
+    expect(screen.getByText(/Antes de confirmar en el banco: el titular debe ser/).textContent).toContain("Limpieza Ficticia SRL");
   });
 
   it("control: antes de ver la cuenta no hay nada para copiar", async () => {
@@ -1893,7 +1893,7 @@ describe("no se pagó", () => {
     fireEvent.click(await boton("Declarar que no se pagó"));
     fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "No había saldo" } });
     fireEvent.click(await boton("Declarar que no se pagó"));
-    expect(await screen.findByText(/Listo: declaraste que no se pagó/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: quedó declarado que no se pagó/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado`)[0])).toEqual({ version: 1, motivo: "No había saldo" });
   });
@@ -1915,7 +1915,7 @@ describe("no se pagó", () => {
     fireEvent.click(await boton("Declarar que no se pagó"));
     fireEvent.change(await screen.findByLabelText("Por qué no se pagó"), { target: { value: "Venció" } });
     fireEvent.click(await boton("Declarar que no se pagó"));
-    await screen.findByText(/Listo: declaraste/);
+    await screen.findByText(/Listo: quedó declarado/);
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
   });
 
@@ -1951,7 +1951,7 @@ describe("no se pagó", () => {
     expect(await screen.findByText(/Dijo que la lectura estaba mal/)).toBeTruthy();
     cleanup();
     abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago()]) });
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     expect(screen.queryByText(/Dijo que la lectura estaba mal/)).toBeNull();
   });
 
@@ -1994,11 +1994,11 @@ describe("no se pagó", () => {
     const api = abrirFicha({ ...SUBIR, paso: "tomar_pago", puede_subir_comprobante: false, puede_registrar: false, puede_reabrir_cuenta: false, puede_tomar: true }, {
       [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/tomar`]: () => Response.json(tomado, { status: 201 }),
     });
-    fireEvent.click(await boton("Tomar el pago"));
-    expect(screen.getByRole("alert").textContent).toMatch(/confirmá con quien vio la cuenta/);
+    fireEvent.click(await boton("Hacerse cargo de este pago"));
+    expect(screen.getByRole("alert").textContent).toMatch(/hay que confirmar con quien vio la cuenta/);
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`)).toHaveLength(0);
-    fireEvent.click(await boton("No se transfirió: tomar el pago"));
-    await screen.findByText(/Listo: tomaste el pago/);
+    fireEvent.click(await boton("Nadie transfirió: hacerse cargo del pago"));
+    await screen.findByText(/Listo: el pago quedó a cargo de esta cuenta/);
     const [pedido] = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/tomar`);
     expect(await cuerpo(pedido)).toMatchObject({ no_se_transfirio: true });
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(0);
@@ -2006,8 +2006,8 @@ describe("no se pagó", () => {
 
   it("mientras espera, sin el plazo cumplido, no ofrece tomar el pago y dice desde cuándo", async () => {
     abrirFicha({ ...SUBIR, paso: "espera_comprobante", puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false, puede_reabrir_cuenta: false, tomar_desde: "2026-11-08T12:00:00Z" });
-    expect(await screen.findByText(/vas a poder tomar el pago/)).toBeTruthy();
-    sinBoton("Tomar el pago");
+    expect(await screen.findByText(/otra persona puede hacerse cargo del pago/)).toBeTruthy();
+    sinBoton("Hacerse cargo de este pago");
   });
 
   it("con una declaración vigente no ofrece pagar y dice en qué quedó", async () => {
@@ -2018,16 +2018,16 @@ describe("no se pagó", () => {
     expect(await screen.findByText(/No había saldo/)).toBeTruthy();
     expect(screen.getByText(filaDe("no_pago_declarado", "espera_confirmar").que_decir)).toBeTruthy();
     sinBoton("Ver la cuenta para pagar");
-    sinBoton("Retomar el pago");
+    sinBoton("Anular la declaración y pagar");
   });
 
-  it("«Retomar el pago» avisa antes y abre la cuenta", async () => {
+  it("«Anular la declaración y pagar» avisa antes y abre la cuenta", async () => {
     const api = abrirFicha(ficha({
       orden: orden({ estado: "en_ejecucion" }), situacion: "no_pago_declarado", paso: "espera_confirmar", puede_reabrir_cuenta: true,
       declaracion_vigente: DECLARACION, ejecucion: ejecucion([], [DECLARACION]),
     }), { [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`]: () => Response.json(CUENTA_DEL_ACTO) });
     expect(await screen.findByText(AVISO_RETOMAR)).toBeTruthy();
-    fireEvent.click(await boton("Retomar el pago"));
+    fireEvent.click(await boton("Anular la declaración y pagar"));
     expect(await screen.findByText(CUENTA)).toBeTruthy();
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/pago-manual/cuenta`)).toHaveLength(1);
   });
@@ -2038,7 +2038,7 @@ describe("no se pagó", () => {
       declaracion_vigente: DECLARACION, ejecucion: ejecucion([], [DECLARACION]),
     }), { [`POST ${BASE}/ordenes-pago/${O1}/pago-manual/no-realizado/${DECL}/confirmacion`]: () => Response.json({ id: DECL, orden_id: O1 }) });
     fireEvent.click(await boton("Confirmar que no se pagó"));
-    expect(await screen.findByText(/Listo: confirmaste que no se pagó/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: quedó confirmado que no se pagó/)).toBeTruthy();
     expect(lugar()).toBe("/pagos");
     expect(escrituras(api)).toHaveLength(1);
   });
@@ -2091,10 +2091,14 @@ describe("preparar, enviar y renovar", () => {
   it("cambiar la moneda descarta el contrato elegido", async () => {
     vi.stubGlobal("fetch", backend(LECTURAS));
     abrir("/pagos/nueva");
+    // P-14: sin un contrato que aplique (proveedor y moneda), el campo no se muestra.
+    fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
     const elegir = (await screen.findByLabelText("Contrato o abono (opcional)")) as HTMLSelectElement;
     fireEvent.change(elegir, { target: { value: K1 } });
     fireEvent.change(screen.getByLabelText("Moneda"), { target: { value: "USD" } });
-    expect(elegir.value).toBe("");
+    expect(screen.queryByLabelText("Contrato o abono (opcional)")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Moneda"), { target: { value: "ARS" } });
+    expect((screen.getByLabelText("Contrato o abono (opcional)") as HTMLSelectElement).value).toBe("");
   });
 
   it("guardar de nuevo tras un 500 lleva la misma clave; cambiar un dato es otro intento", async () => {
@@ -2142,7 +2146,7 @@ describe("preparar, enviar y renovar", () => {
     });
     vi.stubGlobal("fetch", api);
     abrir("/pagos/nueva");
-    fireEvent.click(await screen.findByRole("link", { name: "cargalo en Proveedores" }));
+    fireEvent.click(await screen.findByRole("link", { name: "cargarlo en Proveedores" }));
     fireEvent.click(await boton("Dar de alta un proveedor"));
     fireEvent.change(await screen.findByLabelText(/CUIT/), { target: { value: "20000000001" } });
     fireEvent.change(screen.getByLabelText(/Razón social/), { target: { value: "Limpieza Ficticia SRL" } });
@@ -2150,7 +2154,7 @@ describe("preparar, enviar y renovar", () => {
     fireEvent.submit(document.querySelector("form") as HTMLFormElement);
     expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
     await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1));
-    expect(screen.getByText("Listo: dimos de alta el proveedor.")).toBeTruthy();
+    expect(screen.getByText("Listo: el proveedor quedó dado de alta.")).toBeTruthy();
   });
 
   it("enviar lleva a la bandeja con el resultado", async () => {
@@ -2250,18 +2254,19 @@ describe("preparar, enviar y renovar", () => {
   describe("modificar", () => {
     const EN_REVISION = { ...APROBAR, paso: "espera_aprobar" as const, le_toca_a: "consejo" as const, puede_aprobar: false, puede_rechazar: false, puede_modificar: true };
 
-    it("con aprobaciones en juego, avisa antes de crear la versión nueva", async () => {
+    it("con aprobaciones en juego, lo avisa al abrir y guarda con un solo botón (P-32)", async () => {
       const api = abrirFicha(EN_REVISION, {
         ...LECTURAS,
         [`POST ${BASE}/ordenes-pago/${O1}/versiones`]: () => Response.json({ id: O1, version: 2 }, { status: 201 }),
       });
       fireEvent.click(await boton("Modificar la orden"));
-      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
-      fireEvent.click(await boton("Guardar la orden"));
+      // El aviso está antes de completar nada, no después de tocar guardar.
       expect(await screen.findByText(AVISO_MODIFICAR)).toBeTruthy();
+      fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Otro concepto" } });
       expect(escrituras(api)).toEqual([]);
-      fireEvent.click(await boton("Sí, crear la versión nueva"));
-      expect(await screen.findByText("Listo: guardamos la versión nueva.")).toBeTruthy();
+      fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
+      expect(await screen.findByText("Listo: los cambios quedaron guardados.")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Sí, crear la versión nueva" })).toBeNull();
       expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[0])).toMatchObject({ version_esperada: 1, concepto: "Otro concepto" });
       expect(screen.queryByLabelText("Concepto")).toBeNull();
     });
@@ -2274,7 +2279,7 @@ describe("preparar, enviar y renovar", () => {
       fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
       fireEvent.click(await boton("Guardar la orden"));
-      await screen.findByText("Listo: guardamos la versión nueva.");
+      await screen.findByText("Listo: los cambios quedaron guardados.");
       expect(escrituras(api)).toHaveLength(1);
       expect(screen.queryByText(AVISO_MODIFICAR)).toBeNull();
     });
@@ -2459,7 +2464,7 @@ describe("preparar, enviar y renovar", () => {
       expect(screen.getByRole("alert").textContent).toContain("ya no rige");
     });
 
-    it("si la orden cambió, queda lo escrito sobre la versión nueva, con lo ajeno, y se vuelve a confirmar", async () => {
+    it("si la orden cambió, queda lo escrito sobre la versión nueva, con lo ajeno, y se vuelve a guardar", async () => {
       let actual: Ficha = EN_REVISION;
       const api = abrirFicha(() => actual, {
         ...LECTURAS,
@@ -2473,13 +2478,11 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar la orden"));
       fireEvent.change(await screen.findByLabelText("Concepto"), { target: { value: "Mío" } });
-      fireEvent.click(await boton("Guardar la orden"));
-      fireEvent.click(await boton("Sí, crear la versión nueva"));
+      fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
       await waitFor(() => expect((screen.getByLabelText("Importe") as HTMLInputElement).value).toContain("20"));
       expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("Mío");
-      sinBoton("Sí, crear la versión nueva");
-      fireEvent.click(await boton("Guardar la orden"));
-      fireEvent.click(await boton("Sí, crear la versión nueva"));
+      expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)).toHaveLength(1);
+      fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
       await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)).toHaveLength(2));
       expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/versiones`)[1])).toMatchObject({ version_esperada: 2, importe_centavos: 2_000_000 });
     });
@@ -2495,8 +2498,7 @@ describe("preparar, enviar y renovar", () => {
       });
       fireEvent.click(await boton("Modificar la orden"));
       await screen.findByLabelText("Concepto");
-      fireEvent.click(await boton("Guardar la orden"));
-      fireEvent.click(await boton("Sí, crear la versión nueva"));
+      fireEvent.click(await boton("Guardar y enviar a aprobar de nuevo"));
       await waitFor(() => expect(screen.queryByLabelText("Concepto")).toBeNull());
     });
 
@@ -2606,7 +2608,7 @@ describe("aprobar y rechazar", () => {
     await listoParaAprobar();
     fireEvent.click(await boton("Aprobar la orden"));
     await verificarCodigo();
-    expect(await screen.findByText("Listo: aprobaste la versión 1.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeTruthy();
     const aprobaciones = pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`);
     expect(new Set(claves(aprobaciones)).size).toBe(1);
     expect(await cuerpo(aprobaciones[0])).toEqual({ version: 1, huella: H1 });
@@ -2637,7 +2639,7 @@ describe("aprobar y rechazar", () => {
       await new Promise((r) => setTimeout(r, 20));
     });
     expect(lugar()).toBe(`/pagos/${O2}`);
-    expect(screen.queryByText("Listo: aprobaste la versión 1.")).toBeNull();
+    expect(screen.queryByText("Listo: la orden quedó aprobada por esta cuenta.")).toBeNull();
     expect(pedidos(api, "GET", `${BASE}/pagos/bandeja`).length).toBeGreaterThan(leidas);
   });
 
@@ -2665,7 +2667,7 @@ describe("aprobar y rechazar", () => {
     await listoParaAprobar();
     fireEvent.click(await boton("Aprobar la orden"));
     expect(await screen.findByText(/Cambió el importe/)).toBeTruthy();
-    expect(screen.getByRole("alert").textContent).toContain("Revisá la versión nueva");
+    expect(screen.getByRole("alert").textContent).toContain("Esta es la versión nueva");
     expect(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/aprobaciones`)).toHaveLength(1);
   });
 
@@ -2689,7 +2691,7 @@ describe("aprobar y rechazar", () => {
     expect(enviar.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Motivo del rechazo"), { target: { value: "Falta el presupuesto" } });
     fireEvent.click(enviar);
-    expect(await screen.findByText("Listo: rechazaste la orden.")).toBeTruthy();
+    expect(await screen.findByText("Listo: la orden se rechazó.")).toBeTruthy();
     expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago/${O1}/rechazar`)[0])).toEqual({ version: 1, motivo: "Falta el presupuesto" });
   });
 
@@ -2774,7 +2776,7 @@ describe("conciliar", () => {
 
   it("la fecha de la transferencia se lee día, mes y año", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     expect(screen.getByText("31/10/2026")).toBeTruthy();
     expect(screen.queryByText("2026-10-31")).toBeNull();
   });
@@ -2786,7 +2788,7 @@ describe("conciliar", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("conciliar", "para_conciliar", { orden_id: O2 })),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conciliar el pago"));
+    fireEvent.click(await boton("Está bien: conciliar"));
     expect(await screen.findByRole("heading", { name: "Ascensores Ficticios SA" })).toBeTruthy();
     expect(lugar()).toBe(`/pagos/${O2}`);
     expect(await screen.findByText(/Listo: quedó conciliado el pago a .+\. Sigue este, 1 de 1\.$/)).toBeTruthy();
@@ -2798,19 +2800,19 @@ describe("conciliar", () => {
       [`GET ${BASE}/pagos/bandeja`]: bandejaCon(elemento("aprobar", "para_aprobar", { orden_id: O2 })),
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    fireEvent.click(await boton("Conciliar el pago"));
+    fireEvent.click(await boton("Está bien: conciliar"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(lugar()).toBe("/pagos");
   });
 
   it("observar exige el motivo", async () => {
     const api = abrirFicha(CONCILIAR, { [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }) });
-    fireEvent.click(await boton("Observar"));
-    const enviar = (await boton("Observar el pago")) as HTMLButtonElement;
+    fireEvent.click(await boton("No coincide: devolverlo a corregir"));
+    const enviar = (await boton("Devolverlo a corregir")) as HTMLButtonElement;
     expect(enviar.disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("Qué no coincide"), { target: { value: "El número" } });
     fireEvent.click(enviar);
-    expect(await screen.findByText(/Listo: observaste el pago/)).toBeTruthy();
+    expect(await screen.findByText(/Listo: el pago volvió a quien lo registró/)).toBeTruthy();
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "observado", motivo: "El número" });
   });
 
@@ -2818,10 +2820,10 @@ describe("conciliar", () => {
     const api = abrirFicha({ ...CONCILIAR, ejecucion: ejecucion([pago({ fuera_de_termino: true })]) }, {
       [`POST ${RUTA_CONCILIACION}`]: () => Response.json({ id: PAGO, orden_id: O1 }, { status: 201 }),
     });
-    expect(await screen.findByText(/Para darlo por conforme, escribí por qué lo aceptás/)).toBeTruthy();
-    fireEvent.click(await boton("Conciliar el pago"));
+    expect(await screen.findByText(/Para darlo por conforme hace falta el motivo/)).toBeTruthy();
+    fireEvent.click(await boton("Está bien: conciliar"));
     expect(escrituras(api)).toEqual([]);
-    fireEvent.change(await screen.findByLabelText("Por qué lo aceptás fuera de término"), { target: { value: "Lo autorizó el Consejo" } });
+    fireEvent.change(await screen.findByLabelText("Motivo para aceptarlo fuera de término"), { target: { value: "Lo autorizó el Consejo" } });
     fireEvent.click(await boton("Dar el pago por conforme"));
     await screen.findByText(/Listo: quedó conciliado/);
     expect(await cuerpo(pedidos(api, "POST", RUTA_CONCILIACION)[0])).toEqual({ resultado: "conforme", motivo: "Lo autorizó el Consejo" });
@@ -2829,7 +2831,7 @@ describe("conciliar", () => {
 
   it("«Ver más grande» abre el mismo comprobante en una hoja, sin volver a pedirlo, y Escape la cierra", async () => {
     const api = abrirFicha(CONCILIAR);
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     await screen.findByRole("img", { name: "Comprobante de la transferencia" });
     const pedidosAntes = pedidos(api, "GET", CONTENIDO).length;
     fireEvent.click(await boton("Ver más grande"));
@@ -2845,7 +2847,7 @@ describe("conciliar", () => {
 
   it("muestra el comprobante y, al lado, la orden contra lo registrado, con la cuenta y quién registró", async () => {
     abrirFicha(CONCILIAR);
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     expect((await screen.findByRole("img", { name: "Comprobante de la transferencia" })).getAttribute("src")).toBe("blob:sintetico");
     const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
     expect(within(tabla).getAllByText(/15\.000,00/)).toHaveLength(2);
@@ -2858,7 +2860,7 @@ describe("conciliar", () => {
     abrirFicha(CONCILIAR, {
       [REVISION]: () => Response.json({ orden: CONCILIAR.orden, versiones: CONCILIAR.versiones.map((x) => ({ ...x, cuenta_destino: null })), puede_aprobar: false, puede_rechazar: false }),
     });
-    await boton("Conciliar el pago");
+    await boton("Está bien: conciliar");
     const tabla = screen.getByRole("table", { name: "La orden contra lo registrado" });
     expect(within(tabla).getByText(`…${CUENTA.slice(-4)}`)).toBeTruthy();
     await waitFor(() => expect(document.body.textContent).not.toContain(CUENTA));
@@ -2874,14 +2876,14 @@ describe("conciliar", () => {
   it("quien vio la cuenta no recibe los botones: decide `puede_conciliar`", async () => {
     abrirFicha({ ...CONCILIAR, paso: "espera_conciliar", le_toca_a: "consejo", puede_conciliar: false });
     expect(await screen.findByText(filaDe("falta_conciliar", "espera_conciliar").que_decir)).toBeTruthy();
-    sinBoton("Conciliar el pago");
-    sinBoton("Observar");
+    sinBoton("Está bien: conciliar");
+    sinBoton("No coincide: devolverlo a corregir");
   });
 
   it("si igual llega un 403, se dice en la ficha", async () => {
     abrirFicha(CONCILIAR, { [`POST ${RUTA_CONCILIACION}`]: () => error("sin_permiso", 403) });
-    fireEvent.click(await boton("Conciliar el pago"));
-    expect((await screen.findByRole("alert")).textContent).toContain("personas distintas");
+    fireEvent.click(await boton("Está bien: conciliar"));
+    expect((await screen.findByRole("alert")).textContent).toContain("Esta cuenta no tiene la facultad");
     expect(lugar()).toBe(`/pagos/${O1}`);
   });
 
@@ -2897,7 +2899,7 @@ describe("conciliar", () => {
 
     it("sin comprobante en la ficha no lo pide", async () => {
       const api = abrirFicha({ ...CONCILIAR, comprobante_actual: null });
-      await boton("Conciliar el pago");
+      await boton("Está bien: conciliar");
       expect(pedidos(api, "GET", CONTENIDO)).toHaveLength(0);
     });
 
@@ -2931,7 +2933,7 @@ describe("conciliar", () => {
       abrirFicha(CONCILIAR, {
         [`GET ${CONTENIDO}`]: () => new Response(new Blob(["%PDF roto"], { type: "application/pdf" }), { headers: { "Content-Type": "application/pdf" } }),
       });
-      expect((await screen.findByRole("alert")).textContent).toContain("No pudimos mostrar este PDF");
+      expect((await screen.findByRole("alert")).textContent).toContain("No se pudo mostrar este PDF");
     });
   });
 });
@@ -2944,7 +2946,7 @@ describe("consultar pagos: el comprobante en pantalla", () => {
     }));
     expect(await screen.findByRole("img", { name: "Comprobante de la transferencia" })).toBeTruthy();
     expect(screen.queryByLabelText("Archivo del comprobante")).toBeNull();
-    sinBoton("Conciliar el pago");
+    sinBoton("Está bien: conciliar");
   });
 
   it("control: quien no puede abrirlo no recibe el comprobante y no se pide", async () => {
@@ -3088,7 +3090,7 @@ describe("consultar pagos", () => {
   it("sin resultados lo dice", async () => {
     vi.stubGlobal("fetch", backend({ [`GET ${BASE}/pagos/consulta`]: () => Response.json({ elementos: [], siguiente: null }) }));
     abrir("/pagos/consulta");
-    expect(await screen.findByText("No encontramos pagos.")).toBeTruthy();
+    expect(await screen.findByText("No se encontraron pagos.")).toBeTruthy();
   });
 
   it("si la lectura falla, ofrece Reintentar", async () => {
@@ -3100,7 +3102,7 @@ describe("consultar pagos", () => {
     const reintentar = await boton("Reintentar");
     caido = false;
     fireEvent.click(reintentar);
-    expect(await screen.findByText("No encontramos pagos.")).toBeTruthy();
+    expect(await screen.findByText("No se encontraron pagos.")).toBeTruthy();
   });
 });
 
@@ -3151,7 +3153,7 @@ describe("rutas y navegación", () => {
   it("una dirección abierta a mano sin permiso lleva al inicio", async () => {
     vi.stubGlobal("fetch", backend({ ...INICIO, [`GET ${BASE}/mis-acciones`]: alcanza("contactos.ver") }));
     abrir("/pagos");
-    expect(await screen.findByRole("heading", { level: 1, name: "Tu consorcio, en tu mano" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "Consorcio en mano" })).toBeTruthy();
     await waitFor(() => expect(lugar()).toBe("/"));
   });
 
@@ -3237,7 +3239,7 @@ describe("la factura arriba de la orden (0088)", () => {
     await vuelta();
     expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
     expect(valor("Concepto")).toBe("Limpieza de noviembre");
-    expect(valor("Comprobante (opcional)")).toBe("B 0001-00000077");
+    expect(valor("Número de la factura (opcional)")).toBe("B 0001-00000077");
     expect(valor("Importe")).toMatch(/23\.?456/);
     expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1);
     // Proveedor, importe, moneda, concepto y comprobante: cada uno marcado hasta revisarlo.
@@ -3290,7 +3292,7 @@ describe("la factura arriba de la orden (0088)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Preparar una orden" })).toBeTruthy();
     await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(P1));
     expect(valor("Concepto")).toBe("Limpieza de noviembre");
-    expect(valor("Comprobante (opcional)")).toBe("B 0001-00000077");
+    expect(valor("Número de la factura (opcional)")).toBe("B 0001-00000077");
     expect(await boton("Ver la factura")).toBeTruthy();
     expect(await guardar(api)).toMatchObject({ factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600 });
   });
@@ -3698,7 +3700,7 @@ describe("la factura arriba de la orden (0088)", () => {
       // El proveedor del primer edificio no pasa al segundo: queda en blanco (comentario 26).
       await waitFor(() => expect((screen.getByLabelText("Proveedor") as HTMLSelectElement).value).toBe(""));
       expect((screen.getByLabelText("Concepto") as HTMLInputElement).value).toBe("");
-      expect((screen.getByLabelText("Comprobante (opcional)") as HTMLInputElement).value).toBe("");
+      expect((screen.getByLabelText("Número de la factura (opcional)") as HTMLInputElement).value).toBe("");
       sinBoton("Ver la factura");
       fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "15000" } });
       fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P3 } });
@@ -3853,9 +3855,9 @@ describe("tanda 1 de fricción: después de un acto y al preparar", () => {
       },
     }));
     abrir("/pagos");
-    fireEvent.click(await boton("Conciliar el pago"));
+    fireEvent.click(await boton("Está bien: conciliar"));
     expect(await screen.findByText("No hay nada más que hacer con ella.")).toBeTruthy();
-    sinBoton("Conciliar el pago");
+    sinBoton("Está bien: conciliar");
     fireEvent.click(await boton("Seguir con lo pendiente (1)"));
     expect(await screen.findByRole("heading", { level: 2, name: "Ascensores Ficticios SA" })).toBeTruthy();
   });

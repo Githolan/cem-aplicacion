@@ -1,0 +1,40 @@
+{
+  "descripcion": "Regla de redacción de toda la aplicación (pregunta 9 del propietario, 13-11-2026): impersonal y en infinitivo, sin voseo, sin tuteo, sin «usted» y sin primera persona del sistema ni de quien usa la aplicación. La leen la prueba del frontend (src/redaccion.test.ts, sobre cada texto del código) y cem_contracts.redaccion (mensajes del backend y textos del contrato). Las palabras se comparan en minúscula y enteras: «vos» dentro de «devolvemos» o «sos» dentro de «Sosa» no cuentan. Los controles de abajo los tienen que clasificar igual las dos implementaciones.",
+  "segunda_persona": ["vos", "vas", "estás", "te", "tu", "tus", "ti", "contigo", "tuyo", "tuya", "tuyos", "tuyas", "usted", "ustedes", "sos"],
+  "voseo_terminaciones": ["ás", "és", "ís"],
+  "voseo_no_son": ["más", "además", "atrás", "detrás", "jamás", "quizás", "demás", "después", "través", "inglés", "francés", "interés", "revés", "país", "países", "anís", "compás"],
+  "preterito_terminaciones": ["aste", "iste"],
+  "preterito_no_son": ["contraste", "desgaste", "existe", "consiste", "insiste", "persiste", "resiste", "asiste", "subsiste", "triste", "chiste"],
+  "primera_plural_terminaciones": ["amos", "emos", "imos"],
+  "primera_plural_no_son": ["préstamos", "reclamos", "ramos", "tramos", "últimos", "mínimos", "máximos", "próximos", "legítimos", "primos", "extremos", "décimos", "centésimos", "anónimos"],
+  "imperativo_al_empezar_no_son": ["está", "estará", "será", "qué", "sí", "así", "aquí", "ahí", "allí", "acá", "allá", "podrá", "habrá", "quedará", "tendrá", "hará", "irá", "dé", "sé", "también"],
+  "formas": [
+    "revisá", "mirá", "elegí", "escribí", "tocá", "probá", "volvé", "hacé", "recargá", "pedí", "seguí", "abrí", "salí", "entrá", "agregá", "cargá", "usá", "subí", "soltá", "tildá", "copiá", "fijate", "acordate", "sumate", "avisale", "pedile", "copialo", "copiala", "escribilos", "escribilo", "abrila", "abrilo", "hablalo", "buscalo", "hacelo", "esperá", "confirmá", "declará", "registrá", "completá", "ingresá", "intentá", "andá", "decí", "poné", "guardá", "descargá", "cerrá", "activá", "pegá", "contá", "llamá", "consultá", "verificá", "chequeá", "evitá", "asegurate", "olvidate", "cambiá", "avisá", "ignorá", "renová", "separá", "describí", "bajá", "omití", "empezá", "generá", "iniciá", "repetí", "instalá", "compará", "buscá", "mandá", "mirabas", "revisabas", "editabas", "esperabas", "estabas", "tenías", "podías", "renovala", "revisalo", "elegilas", "elegila", "modificala", "avisanos", "anulalo", "tildalos", "tildalo", "cargalo", "comparalos", "desactivala", "declaralo", "quitalos", "registralo", "finalizalo", "escribila",
+    "transfieras", "pagues", "incluyas", "escribas", "elijas", "puedas", "entres", "hagas", "toques", "cierres", "uses", "subas", "olvides", "compartas", "borres", "copies", "digas", "hayas", "quieras", "prefieras", "tengas", "vuelvas", "sepas",
+    "pagué", "transferí", "guardé", "recibí", "vi", "hice", "confirmo", "acepto", "declaro", "me", "hacerme", "conmigo", "nos", "nuestro", "nuestra", "nuestros", "nuestras"
+  ],
+  "control_con_falta": [
+    "Te toca a vos.",
+    "No tenés edificios.",
+    "Revisá los datos del formulario.",
+    "Listo: rechazaste la orden.",
+    "Pagué otra cosa",
+    "No transfieras de nuevo.",
+    "Estamos revisando el archivo.",
+    "Completamos los datos por vos.",
+    "Elegí la decisión",
+    "Copialo del comprobante.",
+    "Le avisamos a usted."
+  ],
+  "control_sin_falta": [
+    "Le toca a esta cuenta.",
+    "Listo: la orden se rechazó.",
+    "Los archivos nuevos y sus motivos: la Sra. Sosa vive detrás, además están los pasos de este estudio.",
+    "Está pendiente. Después se concilia; quizás haga falta el extracto.",
+    "Existe un contraste entre los últimos préstamos y los reclamos.",
+    "Hay que revisar los datos del formulario.",
+    "Sí: se registró el pago. Así queda.",
+    "Propietario/a de la unidad 3A",
+    "La aprobación vence el 12 de noviembre: después hay que renovarla."
+  ]
+}

@@ -202,7 +202,7 @@ function conservaCuenta(f: Formulario, d: Datos): boolean {
 export const AVISO_CUENTA =
   "Cambiar la cuenta crea una versión nueva del proveedor. Las órdenes ya preparadas siguen apuntando a la versión anterior; las nuevas usan la cuenta nueva. Un cambio material obliga a una revisión nueva cuando corresponde.";
 
-export const AVISO_PROVEEDOR_CAMBIO = "El proveedor cambió mientras lo editabas. Revisá los datos y volvé a guardar.";
+export const AVISO_PROVEEDOR_CAMBIO = "El proveedor cambió mientras estaba abierto. Hay que revisar los datos y guardar de nuevo.";
 
 type PropsDelEdificio = ReturnType<typeof useConsorcio> & { vuelveAPreparar: boolean; factura: DesdeLaFactura | null };
 
@@ -463,10 +463,10 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           cerrar();
           const hecho =
             f.modo === "alta"
-              ? "Listo: dimos de alta el proveedor."
+              ? "Listo: el proveedor quedó dado de alta."
               : f.modo === "cuit"
-                ? `Listo: cargaste el CUIT y el proveedor quedó en la versión ${data.version}. Una orden ya aprobada hay que modificarla.`
-                : `Listo: el proveedor quedó en la versión ${data.version}.`;
+                ? `Listo: el CUIT de ${f.proveedor.razon_social} quedó cargado. Una orden ya aprobada hay que modificarla para que lo lleve.`
+                : `Listo: los cambios de ${comunes.razon_social} quedaron guardados.`;
           if (f.modo === "alta" && vuelveAPreparar) {
             navegar(RUTA_NUEVA, { state: { ...(factura?.orden ?? {}), consorcio, proveedor: data.id, aviso: hecho } });
             return;
@@ -521,7 +521,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         elegir={setConsorcio} />
 
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">No tenés edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
 
       <AvisoPantalla aviso={aviso} />
@@ -597,14 +597,16 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
               )}
               <div className="formulario">
                 <div className="acciones">
-                  <button type="button" onClick={() => abrir({ modo: "cambio", proveedor: ficha.proveedor })}>
-                    Cambiar los datos
-                  </button>
+                  {/* Un solo botón principal (P-27): cargar el CUIT mientras falte; si no, cambiar los datos. */}
                   {ficha.proveedor.cuit === null && (
                     <button type="button" onClick={() => abrir({ modo: "cuit", proveedor: ficha.proveedor })}>
                       Cargar el CUIT
                     </button>
                   )}
+                  <button type="button" className={ficha.proveedor.cuit === null ? "secundario" : undefined}
+                    onClick={() => abrir({ modo: "cambio", proveedor: ficha.proveedor })}>
+                    Cambiar los datos
+                  </button>
                   <button
                     type="button"
                     className="secundario"
@@ -623,13 +625,13 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           {formulario?.modo === "cuit" && (
             <form className="formulario tarjeta" onSubmit={enviar} aria-labelledby={`${id}-form`}>
               <h2 id={`${id}-form`}>Cargar el CUIT de {formulario.proveedor.razon_social}</h2>
-              <p>Se carga una sola vez y después no cambia: revisalo antes de guardar. Deja una versión nueva del proveedor.</p>
+              <p>Se carga una sola vez y después no cambia: conviene revisarlo antes de guardar.</p>
               <CampoCuit id={`${id}-cuit`} valor={datos.cuit} deshabilitado={enviando} error={errores.cuit} alCambiar={(v) => cambiar("cuit", v)} />
               <div className="acciones">
                 <button type="submit" disabled={enviando}>
                   Guardar el CUIT
                 </button>
-                <button type="button" className="secundario peligro" disabled={enviando} onClick={cancelar}>
+                <button type="button" className="secundario" disabled={enviando} onClick={cancelar}>
                   Cancelar
                 </button>
               </div>
@@ -729,7 +731,7 @@ function ProveedoresDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                   aria-describedby={formulario.modo === "alta" && respaldoEnEspera ? `${id}-espera` : undefined}>
                   {confirmarCuenta ? "Sí, cambiar la cuenta" : formulario.modo === "alta" ? "Dar de alta el proveedor" : "Guardar los cambios"}
                 </button>
-                <button type="button" className="secundario peligro" disabled={enviando} onClick={cancelar}>
+                <button type="button" className="secundario" disabled={enviando} onClick={cancelar}>
                   Cancelar
                 </button>
               </div>

@@ -304,7 +304,7 @@ def test_quien_registro_el_vinculo_no_lo_confirma(motor_migrate, motor_app, esce
     e = escena
     with cliente(e["admin"]) as c:
         r = confirmar(c, e["cons"], e["v_inq_admin"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     [d] = denegaciones(motor_app, e["cons"], e["admin"], e["admin"])
     assert (d["accion"], d["motivo"]) == ("padron.confirmar_vinculo", "no_es_quien_registro")
     assert fila_vinculo(motor_migrate, e["v_inq_admin"])["confirmado_en"] is None

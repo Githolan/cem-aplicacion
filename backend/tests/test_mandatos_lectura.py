@@ -101,7 +101,7 @@ def test_es_propio_coincide_con_lo_que_decide_la_baja(escena, motor_app):  # noq
     detalle = _url(e["cons"], f"mandatos/{e['m_mc1']}")
     assert _get(e["mc1"], detalle).json()["es_propio"] is True
     r = baja_http(e["mc1"], e["cons"], e["m_mc1"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     assert _motivos(motor_app, e, e["mc1"]) == [("mandatos.baja", "no_es_su_propio_mandato")]
     # Control: para otra persona no es propio, y la ruta concede.
     assert _get(e["mc2"], detalle).json()["es_propio"] is False
@@ -183,7 +183,7 @@ def test_la_lista_de_decisiones_coincide_con_lo_que_decide_a15(escena, motor_mig
     # A15 compara seres humanos: otra cuenta de quien la registró tampoco la usa.
     assert _decisiones(otra, e["cons"]) == {propia: (True, False), equipo: (False, True)}
     r = alta_http(otra, e["cons"], propia, persona_id=e["vecina"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
     assert _motivos(motor_app, e, otra) == [("mandatos.alta", "no_registro_la_decision")]
     # El detalle dice lo mismo que la lista.
     detalle = _get(otra, _url(e["cons"], f"decisiones/{propia}")).json()
@@ -204,7 +204,7 @@ def test_una_cuenta_separada_ya_no_registra_por_quien_lee(escena, motor_migrate,
     # Control: con la cuenta vinculada, la decisión es de quien lee y la ruta niega.
     assert _decisiones(e["mc1"], e["cons"])[registrada] == (True, False)
     r = alta_http(e["mc1"], e["cons"], registrada, persona_id=e["vecina"])
-    assert (r.status_code, r.json()["codigo"]) == (403, "sin_permiso")
+    assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
 
     with motor_migrate.begin() as c:
         c.execute(
