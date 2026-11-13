@@ -406,3 +406,85 @@ describe("informe de fricción, tanda 7 (AC-34)", () => {
     expect(ultimoMetodo()).toBe("llave");
   });
 });
+
+describe("tanda 7, revisión de #237: el alta de la llave dentro de la hoja no se puede cancelar a medias", () => {
+  beforeEach(() => {
+    document.cookie = "__Host-cem_csrf=x";
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator, "credentials");
+  });
+
+  it("con el alta en camino, Cancelar y Escape no cierran la hoja; al llegar, muestra los códigos", async () => {
+    const vacio = new ArrayBuffer(1);
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: {
+        create: async () => ({
+          id: "x",
+          rawId: vacio,
+          type: "public-key",
+          getClientExtensionResults: () => ({}),
+          response: { clientDataJSON: vacio, attestationObject: vacio, getTransports: () => [] },
+        }),
+      },
+    });
+    const codigos = Array.from({ length: 10 }, (_, i) => `abcd${i + 2}-fgh${i + 2}k`);
+    let soltar: () => void = () => undefined;
+    const alta = new Promise<Response>((resolver) => {
+      soltar = () => resolver(Response.json({ id: "1", codigos_recuperacion: codigos }, { status: 201 }));
+    });
+    backend({
+      "GET /api/v1/auth/totp": estadoTotp(false, 0),
+      "POST /api/v1/auth/llave/alta/opciones": () =>
+        Response.json({ opciones: { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } } }),
+      "POST /api/v1/auth/llave/alta": () => alta as unknown as Response,
+    });
+    const alCancelar = vi.fn();
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={alCancelar} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    const cancelar = await screen.findByRole("button", { name: "Cancelar" });
+    await waitFor(() => expect(cancelar).toHaveProperty("disabled", true));
+    fireEvent.click(cancelar);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(alCancelar).not.toHaveBeenCalled();
+
+    soltar();
+    expect(await titulo("Guardar los códigos de recuperación")).toBeTruthy();
+    expect(alCancelar).not.toHaveBeenCalled();
+  });
+
+  it("control: si el alta falla, Cancelar vuelve a funcionar", async () => {
+    vi.stubGlobal("PublicKeyCredential", class {});
+    Object.defineProperty(navigator, "credentials", {
+      configurable: true,
+      value: { create: () => Promise.reject(new DOMException("no", "NotAllowedError")) },
+    });
+    backend({
+      "GET /api/v1/auth/totp": estadoTotp(false, 0),
+      "POST /api/v1/auth/llave/alta/opciones": () =>
+        Response.json({ opciones: { challenge: "AAAA", user: { id: "AAAA", name: "a", displayName: "a" } } }),
+    });
+    const alCancelar = vi.fn();
+    render(
+      <MemoryRouter>
+        <PedirCodigo acto="aprobar la orden" alVerificar={() => undefined} alCancelar={alCancelar} />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(alCancelar).toHaveBeenCalledOnce();
+  });
+});

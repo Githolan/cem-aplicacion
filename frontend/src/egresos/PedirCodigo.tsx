@@ -116,6 +116,9 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   const [codigo, setCodigo] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // El alta de la llave en curso: la hoja no se cierra hasta que termine (y, con códigos, hasta
+  // «Ya los guardé»). Revisión de #237.
+  const [activando, setActivando] = useState(false);
   const campo = useRef<HTMLInputElement>(null);
   const llave = useRef<AbortController | null>(null);
 
@@ -309,17 +312,22 @@ export function PedirCodigo({ acto, alVerificar, alCancelar }: Props) {
   if (paso.tipo === "sin_alta") {
     const conLlave = llaveDisponible();
     return (
-      <Hoja key="sin_alta" titulo="Falta la verificación en dos pasos" alEscapar={alCancelar}>
+      <Hoja key="sin_alta" titulo="Falta la verificación en dos pasos" alEscapar={activando ? undefined : alCancelar}>
         <p>
           Para {acto} hace falta la verificación en dos pasos.
           {conLlave && " Se activa acá mismo, con el PIN, la huella o la cara de este dispositivo."}
         </p>
         <ActivarLlave
+          alOcupar={setActivando}
           alActivar={(codigos) => (codigos === null ? alVerificar() : setPaso({ tipo: "codigos", codigos }))}
         />
         <SinAlta conLlave={conLlave} />
         <div className="formulario">
-          <div className="acciones">{cancelar}</div>
+          <div className="acciones">
+            <button type="button" className="secundario peligro" disabled={activando} onClick={alCancelar}>
+              Cancelar
+            </button>
+          </div>
         </div>
       </Hoja>
     );

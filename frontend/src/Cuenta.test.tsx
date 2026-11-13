@@ -946,6 +946,31 @@ describe("informe de fricción, tanda 7", () => {
     expect(screen.queryByRole("button", { name: "Activar con PIN, huella o cara" })).toBeNull();
   });
 
+  it("AC-21 (revisión de #237): los códigos van en una hoja que deja inerte la aplicación y no se cierra con Escape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      conSesion({
+        "POST /api/v1/auth/llave/alta/opciones": () => Response.json({ opciones: OPCIONES_DE_ALTA }),
+        "POST /api/v1/auth/llave/alta": () =>
+          Response.json({ id: "01a1a3a8-c5e2-7b8e-8a84-aa8992c79f3d", codigos_recuperacion: CODIGOS }, { status: 201 }),
+      }),
+    );
+    const { container } = abrir();
+
+    fireEvent.click(await enPantalla().findByRole("button", { name: "Activar con PIN, huella o cara" }));
+    const hoja = await screen.findByRole("dialog", { name: "Guardar los códigos de recuperación" });
+    expect(within(hoja).getByRole("list", { name: "Códigos de recuperación" })).toBeTruthy();
+    // La navegación, «Salir» y el resto de la página quedan inertes: no se puede ir sin guardarlos.
+    expect(container.inert).toBe(true);
+    expect(container.contains(screen.getByRole("button", { name: "Salir", hidden: true }))).toBe(true);
+    fireEvent.keyDown(hoja, { key: "Escape" });
+    expect(screen.getByRole("dialog", { name: "Guardar los códigos de recuperación" })).toBeTruthy();
+
+    fireEvent.click(within(hoja).getByRole("button", { name: "Ya los guardé" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(container.inert).toBe(false);
+  });
+
   it("AC-21, control: con el segundo factor activado no ofrece activarlo", async () => {
     vi.stubGlobal("fetch", conSesion({}, TOTP_ACTIVO));
     abrir();

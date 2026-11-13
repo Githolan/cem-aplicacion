@@ -10,6 +10,7 @@ import { borrarCopias } from "./copiaContactos";
 import { encabezadoCsrf } from "./csrf";
 import { PieDeVersion } from "./EstadoServicio";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
+import { Hoja } from "./Hoja";
 import { llaveDisponible } from "./llaveAcceso";
 import { olvidarEdificio } from "./permisos";
 import { type EstadoContrasena, SeccionContrasena } from "./SeccionContrasena";
@@ -115,6 +116,7 @@ export function Cuenta() {
   const [aviso, setAviso] = useState<Aviso | null>(null);
   const [codigosNuevos, setCodigosNuevos] = useState<string[] | null>(null);
   const [llaveActivada, setLlaveActivada] = useState(false);
+  const [activando, setActivando] = useState(false);
   const consultado = useRef(false);
   const textoAviso = useRef<HTMLParagraphElement>(null);
 
@@ -335,14 +337,21 @@ export function Cuenta() {
           <section aria-labelledby={`${id}-factor`} className="tarjeta">
             <h2 id={`${id}-factor`}>Segundo factor</h2>
             {fallaDe("segundoFactor", lista.segundoFactor)}
+            {/* Los códigos llegan una sola vez: van en una hoja que deja inerte el resto de la
+                aplicación (navegación y salir incluidas) y no se cierra con Escape; solo con «Ya los
+                guardé». Mientras el alta está en curso, otra hoja igual impide irse (revisión de #237). */}
+            {activando && (
+              <Hoja titulo="Activando la llave">
+                <p role="status">Seguir lo que pide el dispositivo: PIN, huella o cara.</p>
+              </Hoja>
+            )}
             {codigosNuevos !== null && (
-              <>
-                <h3>Guardar los códigos de recuperación</h3>
+              <Hoja titulo="Guardar los códigos de recuperación">
                 <p className="aviso-ok">Listo: la llave quedó activada.</p>
                 <CodigosRecuperacion codigos={codigosNuevos} medio="llave" alGuardar={() => setCodigosNuevos(null)} />
-              </>
+              </Hoja>
             )}
-            {codigosNuevos === null && lista.segundoFactor.ok && (
+            {lista.segundoFactor.ok && (
               <>
                 {llaveActivada && <p className="aviso-ok">Listo: la llave quedó activada.</p>}
                 <p>
@@ -350,7 +359,7 @@ export function Cuenta() {
                     ? "Está activado: las acciones delicadas te piden confirmar que sos vos."
                     : "No está activado."}
                 </p>
-                {!lista.segundoFactor.valor && <ActivarLlave alActivar={activarLlave} />}
+                {!lista.segundoFactor.valor && <ActivarLlave alActivar={activarLlave} alOcupar={setActivando} />}
                 <p>
                   <Link to={RUTA_SEGUNDO_FACTOR} className="enlace-suelto">
                     {lista.segundoFactor.valor
