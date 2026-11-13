@@ -20,21 +20,39 @@ poder abrirla (la aprobación venció, por ejemplo), `renovar` no sirve: la base
 orden aprobada. La salida es declarar que no se pagó, y después volver a pagar.
 
 **`para_pagar` no tiene `espera_*`:** §2 no lo define: a quien no le toca pagar no le aparece.
+
+**Qué se muestra lo dice la tabla de la pantalla** (`cem_contracts.pantalla_pagos`, informe de
+fricción, parte 4): en qué lista va cada par situación y paso, cuál es la acción principal y cuáles
+las demás, el nombre del estado y la barra. Una acción se ofrece solo si su `puede_*` es verdadero:
+la tabla no concede nada.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from uuid import UUID
 
 from cem_contracts.egresos import (
-    GRUPO_DE_PASO,
+    AccionOfrecida,
+    AccionPago,
+    AvisoRechazo,
+    BarraPago,
     ElementoBandejaPagos,
     EstadoOrdenPago,
+    EstadoVisible,
+    Franja,
     GrupoPago,
     LeTocaA,
+    LugarEnLaBarra,
     OrdenPago,
+    OrdenParecida,
     PasoPago,
     SituacionPago,
+    TipoAccion,
 )
+from cem_contracts.pantalla_pagos import FilaPantalla, cargar
+
+PANTALLA = cargar()
+"""La tabla de la pantalla de pagos. Inválida, el backend no arranca."""
 
 
 @dataclass(frozen=True)
@@ -50,6 +68,10 @@ class HechosPago:
     diferencia_sin_resolver: bool = False
     reclamo_abierto: bool = False
     pagada_de_menos: bool = False
+    cotejada: bool = False
+    """El pago de la orden pagada se cotejó con el banco y el cotejo sigue vigente (P-05)."""
+    cerrada_sin_pago: bool = False
+    """No se pagó y alguien la cerró porque ya no hace falta pagarla (decisión 12, `0096`)."""
 
 
 @dataclass(frozen=True)
@@ -83,8 +105,12 @@ SIN_ACCIONES = AccionesOrden()
 """La función de la base lee solo las órdenes en curso y las pagadas de menos: las demás no admiten
 estas acciones."""
 
-SE_VAN_SOLOS = {PasoPago.RECHAZADA, PasoPago.PREPARAR_FALTANTE}
-"""Órdenes cerradas: nada las saca de la bandeja, así que quedan `CEM_PAGOS_DIAS_BANDEJA` días."""
+SE_VAN_SOLOS = {PasoPago.PREPARAR_FALTANTE}
+"""Órdenes cerradas: nada las saca de la bandeja, así que quedan `CEM_PAGOS_DIAS_BANDEJA` días.
+Una rechazada ya no está en la bandeja: se avisa una vez a quien la preparó (decisión 3)."""
+
+SIN_PARECIDAS = {EstadoOrdenPago.RECHAZADA, EstadoOrdenPago.RETIRADA}
+"""Lo que no se va a pagar no cuenta como otra orden igual, como en el fraccionamiento (`0093`)."""
 
 MODIFICABLES = {
     EstadoOrdenPago.BORRADOR,
@@ -110,7 +136,10 @@ def situacion_de(estado: EstadoOrdenPago, hechos: HechosPago) -> SituacionPago:
     """§3. Una diferencia manda: lo que pasó de verdad ya se dijo, y un registro observado o una
     declaración anteriores quedaron atrás."""
     if estado in SITUACION_POR_ESTADO:
-        return SITUACION_POR_ESTADO[estado]
+        situacion = SITUACION_POR_ESTADO[estado]
+        if situacion == SituacionPago.PAGADA and hechos.cotejada:
+            return SituacionPago.PAGADA_Y_COTEJADA
+        return situacion
     if hechos.diferencia_sin_resolver:
         return SituacionPago.CON_DIFERENCIA
     if hechos.reclamo_abierto:
@@ -184,8 +213,10 @@ def paso_de(situacion: SituacionPago, a: AccionesOrden, prepara: bool) -> PasoPa
                 return PasoPago.SUBIR_COMPROBANTE
             return PasoPago.ESPERA_CONFIRMAR
         case SituacionPago.NO_SE_PAGO:
-            return PasoPago.VOLVER_A_PAGAR if prepara else None
-        case SituacionPago.PAGADA:
+            return PasoPago.VOLVER_A_PAGAR if prepara and not a.cerrada_sin_pago else None
+        case SituacionPago.PAGADA | SituacionPago.PAGADA_Y_COTEJADA:
+            # Cotejada es terminada (§4.2, regla 3), con una excepción explícita en la tabla
+            # (decisión 2 del 13-11): pagada de menos conserva preparar lo que falta.
             return PasoPago.PREPARAR_FALTANTE if prepara and a.pagada_de_menos else None
         case SituacionPago.CON_DIFERENCIA | SituacionPago.RECLAMO:
             return (
@@ -216,27 +247,178 @@ def le_toca_a(paso: PasoPago, hechos: HechosPago) -> LeTocaA:
             return LeTocaA.VOS
 
 
+def estado_visible(situacion: SituacionPago) -> EstadoVisible:
+    return PANTALLA.situaciones[situacion].estado
+
+
+def barra_de(situacion: SituacionPago, orden: OrdenPago, ahora: datetime) -> BarraPago | None:
+    """La barra depende de la orden, no de quien mira (§4.2, regla 4). Con la aprobación vencida,
+    Pagar sigue siendo el paso actual, con el aviso."""
+    barra = PANTALLA.situaciones[situacion].barra
+    vencida = orden.aprobacion_vence_en is not None and orden.aprobacion_vence_en <= ahora
+    if barra is not None and situacion == SituacionPago.PARA_PAGAR and vencida:
+        return barra.model_copy(update={"actual": LugarEnLaBarra.ALERTA})
+    return barra
+
+
+def fila_de(situacion: SituacionPago, paso: PasoPago | None) -> FilaPantalla:
+    return PANTALLA.fila(situacion, paso)
+
+
+def acciones_ofrecidas(
+    fila: FilaPantalla, puede: dict[AccionPago, bool], comprobante_no_coincide: bool = False
+) -> list[AccionOfrecida]:
+    """Las acciones de la fila que la base acepta hoy, en el orden en que se dibujan. Sin el sí de
+    la base, una acción no se ofrece aunque la tabla la nombre."""
+    botones = fila
+    if comprobante_no_coincide and fila.si_el_comprobante_no_coincide is not None:
+        botones = fila.si_el_comprobante_no_coincide
+    ofrecidas = []
+    for tipo, codigos in (
+        (TipoAccion.PRINCIPAL, [botones.principal] if botones.principal else []),
+        (TipoAccion.SECUNDARIA, botones.secundarias),
+        (TipoAccion.NEGATIVA, botones.negativas),
+    ):
+        ofrecidas += [AccionOfrecida(codigo=c, tipo=tipo) for c in codigos if puede.get(c, False)]
+    return ofrecidas
+
+
+def cuenta_para_parecidas(o: OrdenPago) -> bool:
+    """Lo que se compara al buscar órdenes parecidas (decisiones 5 y 4 del propietario, 12 y
+    13-11-2026). Lo que no se va a pagar no cuenta, como en el fraccionamiento. Una orden rutinaria,
+    respaldada por un contrato o abono, tampoco: repetirse es lo que se espera de ella."""
+    return o.estado not in SIN_PARECIDAS and o.franja != Franja.RUTINARIA
+
+
+type ClaveParecida = tuple[UUID, int, str]
+
+
+def clave_parecida(proveedor_id: UUID, importe_centavos: int, moneda: str) -> ClaveParecida:
+    return (proveedor_id, importe_centavos, moneda)
+
+
+def _la_mas_cercana(momento: datetime, candidatas: list[OrdenPago], ventana: timedelta):
+    cerca = [x for x in candidatas if abs(x.creada_en - momento) <= ventana]
+    return min(cerca, key=lambda y: (abs(y.creada_en - momento), str(y.id)), default=None)
+
+
+def parecidas(
+    ordenes: list[OrdenPago], situaciones: dict[UUID, SituacionPago], dias: int
+) -> dict[UUID, OrdenParecida]:
+    """Decisión 5 del propietario (12-11-2026): otra orden del mismo proveedor, el mismo importe y
+    la misma moneda preparada con menos de `dias` días de diferencia. De varias, la más cercana en
+    el tiempo. Solo avisa: dos pagos iguales pueden ser legítimos.
+
+    Se agrupa por proveedor, importe y moneda y, dentro de cada grupo ordenado por fecha, la más
+    cercana a una orden es su vecina de un lado o del otro: n log n, no todos los pares."""
+    ventana = timedelta(days=dias)
+    grupos: dict[ClaveParecida, list[OrdenPago]] = {}
+    for o in ordenes:
+        if cuenta_para_parecidas(o):
+            clave = clave_parecida(o.proveedor_id, o.importe_centavos, o.moneda)
+            grupos.setdefault(clave, []).append(o)
+    resultado = {}
+    for grupo in grupos.values():
+        grupo.sort(key=lambda y: (y.creada_en, str(y.id)))
+        for i, o in enumerate(grupo):
+            vecinas = grupo[max(i - 1, 0) : i] + grupo[i + 1 : i + 2]
+            x = _la_mas_cercana(o.creada_en, vecinas, ventana)
+            if x is not None:
+                resultado[o.id] = OrdenParecida(
+                    orden_id=x.id,
+                    creada_en=x.creada_en,
+                    estado_visible=estado_visible(situaciones[x.id]),
+                )
+    return resultado
+
+
+def parecida_a(
+    clave: ClaveParecida,
+    momento: datetime,
+    ordenes: list[OrdenPago],
+    dias: int,
+    salvo: UUID | None = None,
+) -> OrdenPago | None:
+    """La orden parecida a una que todavía no se guardó (o a una versión nueva de `salvo`), para
+    avisar antes de guardar (decisión 4 del 13-11). Solo mira las de su grupo."""
+    candidatas = [
+        o
+        for o in ordenes
+        if o.id != salvo
+        and cuenta_para_parecidas(o)
+        and clave_parecida(o.proveedor_id, o.importe_centavos, o.moneda) == clave
+    ]
+    return _la_mas_cercana(momento, candidatas, timedelta(days=dias))
+
+
+def avisos_de_rechazo(
+    ordenes: list[OrdenPago], prepara: bool, para_avisar: set[UUID]
+) -> list[AvisoRechazo]:
+    """Las rechazadas que se avisan arriba de la bandeja (decisión 3): `para_avisar` son las que
+    preparó quien pide y todavía no vio. De la más nueva a la más vieja."""
+    if not prepara or not fila_de(SituacionPago.RECHAZADA, PasoPago.RECHAZADA).aviso_una_vez:
+        return []
+    avisos = [
+        AvisoRechazo(
+            orden_id=o.id,
+            proveedor=o.razon_social,
+            concepto=o.concepto,
+            importe_centavos=o.importe_centavos,
+            moneda=o.moneda,
+            proveedor_id=o.proveedor_id,
+            motivo=o.motivo_rechazo or "",
+            creada_en=o.creada_en,
+            rechazada_en=o.actualizada_en,
+        )  # fmt: skip
+        for o in ordenes
+        if o.estado == EstadoOrdenPago.RECHAZADA and o.id in para_avisar
+    ]
+    return sorted(avisos, key=lambda a: a.rechazada_en, reverse=True)
+
+
+@dataclass(frozen=True)
+class Plazos:
+    cerradas_desde: datetime
+    """Lo pagado de menos antes de esto queda solo en la consulta."""
+    viejos_desde: datetime
+    """Un borrador sin movimiento desde antes pasa a «Borradores viejos» (decisión 4)."""
+    dias_repetida: int
+    """La ventana del aviso de orden repetida (decisión 5)."""
+
+
 def bandeja(
     ordenes: list[OrdenPago],
     acciones: dict,
     prepara: bool,
-    cerradas_desde: datetime,
+    plazos: Plazos,
 ) -> list[ElementoBandejaPagos]:
-    """Lo que quien pide tiene que ver ahora, por grupo y de lo más viejo a lo más nuevo. Lo
-    rechazado o lo pagado de menos antes de `cerradas_desde` queda solo en la consulta."""
+    """Lo que quien pide tiene que ver ahora, por grupo y de lo más viejo a lo más nuevo. La lista
+    de cada orden la dice la tabla de la pantalla; sin lista, la orden no está en la bandeja."""
     grupos = list(GrupoPago)
+    situaciones = {o.id: situacion_de(o.estado, acciones.get(o.id, SIN_ACCIONES)) for o in ordenes}
+    repetidas = parecidas(ordenes, situaciones, plazos.dias_repetida)
     filas = []
     for o in ordenes:
         a = acciones.get(o.id, SIN_ACCIONES)
-        paso = paso_de(situacion_de(o.estado, a), a, prepara)
-        if paso is None or (paso in SE_VAN_SOLOS and o.actualizada_en < cerradas_desde):
+        situacion = situaciones[o.id]
+        paso = paso_de(situacion, a, prepara)
+        if paso is None or (paso in SE_VAN_SOLOS and o.actualizada_en < plazos.cerradas_desde):
             continue
-        grupo = GRUPO_DE_PASO[paso]
+        fila = fila_de(situacion, paso)
+        grupo = fila.lista
+        if grupo is None:
+            continue
+        if fila.lista_si_viejo is not None and o.actualizada_en < plazos.viejos_desde:
+            grupo = fila.lista_si_viejo
         filas.append((grupos.index(grupo), o.actualizada_en, ElementoBandejaPagos(
             orden_id=o.id, proveedor=o.razon_social, concepto=o.concepto,
             importe_centavos=o.importe_centavos, moneda=o.moneda, paso=paso, grupo=grupo,
             le_toca_a=le_toca_a(paso, a),
             lectura_disputada=a.lectura_disputada and paso == PasoPago.CONCILIAR,
+            situacion=situacion, estado_visible=estado_visible(situacion),
+            principal=fila.principal, pendiente=PANTALLA.listas[grupo].pendiente,
+            creada_en=o.creada_en, actualizada_en=o.actualizada_en,
+            posible_duplicada_de=repetidas.get(o.id),
         )))  # fmt: skip
     filas.sort(key=lambda f: f[:2])
     return [f[2] for f in filas]

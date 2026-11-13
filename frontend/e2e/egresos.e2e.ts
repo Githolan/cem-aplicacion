@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
+import { accionesDe, deLaFila, deLaTabla } from "../src/pagos/pantallaDePrueba";
 import { simularPermisos, sinFaltasDeAccesibilidad } from "./entorno";
 
 // Las páginas de egresos servidas por el nginx de la imagen, con su CSP real y la API simulada
@@ -231,6 +232,16 @@ const GRUPO_DE: Record<string, string> = {
   subir_comprobante: "para_pagar",
 };
 
+/** La ficha como la arma el servidor: estado, barra, frase y acciones salen de la tabla real de la
+ * pantalla (`contratos/cem_contracts/pantallas_datos/pagos.json`) y de los `puede_*` simulados. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- las fichas simuladas son objetos sueltos
+function completar(f: any): object {
+  const noCoincide = f.paso === "conciliar" && (f.lectura_comprobante?.distinto_de_lo_registrado.length ?? 0) > 0;
+  const completa = { esperando_desde: null, cotejado_en: null, posible_duplicada_de: null, cierre_sin_pago: null,
+    puede_cerrar_sin_pagar: false, puede_retirar: false, ...f, ...deLaTabla(f.situacion, f.paso) };
+  return { ...completa, acciones: accionesDe(completa, noCoincide) };
+}
+
 /** La API del circuito con una orden. La ficha cambia con el acto, como en el servidor. */
 async function simularPagos(
   pagina: Page,
@@ -249,9 +260,11 @@ async function simularPagos(
     const c = `/api/v1/consorcios/${A}`;
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
     if (camino === `${c}/pagos/bandeja`)
-      return ruta.fulfill({ json: { elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA, concepto: ORDEN_A.concepto,
-        importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""], lectura_disputada: false, le_toca_a: "vos" }] } });
-    if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: actual });
+      return ruta.fulfill({ json: { avisos_rechazo: [], por_cotejar: 0, elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA,
+        concepto: ORDEN_A.concepto, importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""],
+        lectura_disputada: false, le_toca_a: "vos", creada_en: "2026-10-30T12:00:00Z", actualizada_en: "2026-10-31T12:00:00Z",
+        posible_duplicada_de: null, ...deLaFila(inicial.paso as never, GRUPO_DE[inicial.paso ?? ""] as never) }] } });
+    if (camino === `${c}/pagos/${ORDEN}`) return ruta.fulfill({ json: completar(actual) });
     if (camino === `${c}/ordenes-pago/${ORDEN}/revision`)
       return ruta.fulfill({ json: { orden: ORDEN_A, versiones: [version(CUENTA)], puede_aprobar: true, puede_rechazar: true } });
     if (camino === `${c}/documentos/${COMPROBANTE}/versiones/${ARCHIVO}/contenido`)
@@ -364,7 +377,7 @@ test.describe("circuito de pagos", () => {
 
   test("el importe abre el teclado numérico y al salir se ve con centavos", async ({ page, baseURL }) => {
     await simularPagos(page, baseURL!, CON_COMPROBANTE);
-    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
     const campo = page.getByLabel(/^Importe transferido/);
     await expect(campo).toHaveAttribute("inputmode", "decimal");
@@ -386,7 +399,7 @@ test.describe("circuito de pagos", () => {
     await abrirLaFicha(page);
     await expect(page.getByText("Posible fraccionamiento: existen órdenes recientes relacionadas")).toBeVisible();
     await expect(page.getByText(CUENTA)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Aprobar esta versión" })).toBeEnabled();
+    await expect(page.getByRole("button", { name: "Aprobar la orden" })).toBeEnabled();
     await expect(page.getByRole("button", { name: "Rechazar", exact: true })).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
@@ -412,7 +425,7 @@ test.describe("circuito de pagos", () => {
     await expect(page.getByRole("table", { name: "La orden contra lo registrado" }).getByText(CUENTA)).toBeVisible();
     await expect(page.getByText("0001234567")).toBeVisible();
     await expect(page.getByText(/Marta Ficticia/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "Conforme" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Conciliar el pago" })).toBeVisible();
     await sinDesbordar(page);
     await sinFaltasDeAccesibilidad(page);
     expect(errores).toEqual([]);
@@ -470,7 +483,7 @@ test.describe("circuito de pagos", () => {
   test("elegir el archivo dispara todo y la ficha sigue sola hasta los datos", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     const hechos = await simularPagos(page, baseURL!, SUBIENDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
-    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [] } }));
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
     // En todos los anchos, a la vez: soltar, la cámara, la galería y el archivo (comentario 32).
     await expect(page.getByText("Soltar el archivo acá")).toBeVisible();
@@ -534,13 +547,13 @@ test.describe("circuito de pagos", () => {
     expect(errores).toEqual([]);
   });
 
-  test("conciliar: si el comprobante dice otra cosa, Observar es el principal y Conforme sigue", async ({ page, baseURL }) => {
+  test("conciliar: si el comprobante dice otra cosa, Observar es el principal y Conciliar sigue", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, CONCILIAR_DISTINTO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await abrirLaFicha(page);
     await expect(page.getByRole("alert").filter({ hasText: "El comprobante dice" })).toContainText("registraron");
     const observar = page.getByRole("button", { name: "Observar", exact: true });
-    const conforme = page.getByRole("button", { name: "Conforme", exact: true });
+    const conforme = page.getByRole("button", { name: "Conciliar el pago", exact: true });
     await expect(observar).toBeVisible();
     await expect(conforme).toBeVisible();
     await expect(conforme).toHaveClass(/secundario/);

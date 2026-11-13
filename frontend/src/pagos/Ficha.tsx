@@ -15,6 +15,7 @@ import {
   ESTADO,
   importe,
   importeParaCopiar,
+  mensajeDeActo,
   mensajeDeError,
   fechaLegible,
   momento,
@@ -28,14 +29,17 @@ import {
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
+import { Acciones } from "./Acciones";
+import type { AccionPago } from "./textosDeAcciones";
+import { Barra } from "./Barra";
 import { BotonCopiar } from "./BotonCopiar";
-import { CaminoOrden } from "./CaminoOrden";
 import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
-import { RUTA_NUEVA } from "./rutas";
+import { RUTA_NUEVA, rutaFicha } from "./rutas";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
@@ -47,7 +51,6 @@ import {
   AVISO_VUELVE_A_APROBACION,
   AVISO_NO_TRANSFIERAS,
   AVISO_NO_TRANSFIERE,
-  AVISO_PROVEEDOR_CAMBIADO,
   AVISO_RETOMAR,
   AVISO_SE_PUEDE_RETIRAR,
   AVISO_SIN_CUENTA,
@@ -55,24 +58,28 @@ import {
   AVISO_TOMAR,
   AVISO_VER_LA_CUENTA,
   CONFIRMAR_RETIRAR,
+  fechaCorta,
   NO_RETIRAR,
+  NOMBRE_ESTADO,
   type Paso,
+  PREGUNTA_CERRAR_SIN_PAGAR,
   PREGUNTA_RETIRAR,
-  RETIRAR,
+  TEXTO_CERRADA_SIN_PAGO,
   TEXTO_RETIRADA,
+  textoCierreSinPago,
+  textoRepetida,
   textoRetiro,
   TEXTO_LE_TOCA_A,
-  VERBO,
+  TONO_ESTADO,
   VERBO_PASA_SOLA,
-  TEXTO_SITUACION,
-  TONO_SITUACION,
 } from "./textos";
 import { useActo } from "./useActo";
 import { VisorComprobante } from "./VisorComprobante";
 
-// La ficha de una orden, una sola para todos los estados (§3). No deduce nada: lo que dice sale de
-// `situacion`, y lo que ofrece, de `paso` y `puede_*`, que el servidor saca de las reglas de la
-// base. Revisar no es una pantalla más: la ficha muestra los datos y el botón principal confirma.
+// La ficha de una orden, una sola para todos los estados (§3). No deduce nada: el estado, la barra,
+// la frase y las acciones (`acciones: [{codigo, tipo}]`) los manda el servidor, que los saca de la
+// tabla de la pantalla y de lo que la base acepta (informe de fricción, parte 4). Revisar no es una
+// pantalla más: la ficha muestra los datos y el botón principal confirma.
 //
 // La cuenta completa no viaja con la ficha. Llega con el acto de ejecución o, a quien decide la
 // orden o concilia su pago, con `ordenes-pago/{id}/revision`, porque es lo que aprueba y lo que
@@ -84,15 +91,15 @@ type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
-type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar";
+/** El único campo de los formularios de motivo, por su nombre en la pantalla. */
+const CAMPOS_MOTIVO = { motivo: "el motivo" } as const;
+
+type ConMotivo = "rechazar" | "declarar" | "conforme" | "observar" | "cerrar" | "cerrar_sin_pagar";
 type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Resolucion = components["schemas"]["ResolucionDiferencia"];
 type LecturaComprobante = components["schemas"]["LecturaComprobante"];
 /** Lo que se registró con el comprobante: un pago o lo que salió del banco. */
 type Registrado = { centavos: number; moneda: string; numero_operacion: string; fecha_operacion: string };
-
-/** Los pasos en que quien puede declarar tiene a mano «No se pudo pagar». */
-const SE_DECLARA = new Set<Paso | null>(["subir_comprobante", "corregir", "declarar_no_pago", "espera_comprobante"]);
 
 /** El importe de la API en centavos: es decimal y siempre positivo. */
 function centavosReales(d: Diferencia): number {
@@ -197,6 +204,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const [retirando, setRetirando] = useState(false);
   const [conMotivo, setConMotivo] = useState<ConMotivo | null>(null);
   const [motivo, setMotivo] = useState("");
+  // El error del motivo se dice junto al campo (tanda 3): p. ej. un número de cuenta escrito ahí.
+  const [erroresMotivo, setErroresMotivo] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** La cuenta que se decide, con la versión que muestra; `cuenta` nula si no hay qué mostrar. */
   const [decision, setDecision] = useState<{ version: number; cuenta: string | null } | null>(null);
   const [vueltaDecision, setVueltaDecision] = useState(0);
@@ -292,6 +301,12 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
   const releer = () => setVuelta((v) => v + 1);
 
+  /** Un acto con motivo que falla: el campo marcado, si el error nombra el motivo; lo demás, como siempre. */
+  function fallaDelMotivo(estado: number, codigo: string | undefined, error: unknown) {
+    setErroresMotivo(soloDe(erroresDe(error, mensajeDeActo(estado, codigo)), CAMPOS_MOTIVO));
+    siCambio(estado, codigo);
+  }
+
   function siCambio(estado: number, codigo: string | undefined) {
     if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) {
       releer();
@@ -340,8 +355,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
       return cambios.length === 0 ? [] : [{ numero: x.numero, cambios }];
     });
   const enDecision = situacion === "borrador" || situacion === "en_revision";
-  const registra = paso === "corregir" ? ficha.puede_corregir : paso === "subir_comprobante" && ficha.puede_subir_comprobante;
-  const declara = ficha.puede_declarar && SE_DECLARA.has(paso);
+  /** Lo que el servidor ofrece a quien mira: la ficha no ofrece nada más. */
+  const ofrece = (codigo: AccionPago) => ficha.acciones.some((a) => a.codigo === codigo);
+  const corrige = ofrece("corregir");
+  const registra = corrige || ofrece("subir_comprobante");
+  const declara = ofrece("declarar_no_pago");
   const conVisor = ficha.comprobante_actual !== null && !registra;
   const comprobanteLeido = ficha.lectura_comprobante;
   const registrado: Registrado | null =
@@ -353,12 +371,15 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   // Lo ve quien decide sobre lo registrado. Si no coincide, Observar pasa a ser el botón principal.
   const decideElPago = (paso === "conciliar" || ficha.puede_resolver_diferencia) && registrado !== null && comprobanteLeido !== null;
   const lecturaDistinta = decideElPago && comprobanteLeido.distinto_de_lo_registrado.length > 0;
+  /** Si el acto principal sigue con la próxima orden del mismo paso (la tabla lo dice). */
+  const seguir: Seguir | undefined = ficha.despues === "mismo_paso" && paso !== null ? { paso, abierta: montado } : undefined;
   const lecturaIgual = decideElPago && comprobanteLeido.coincide_con_lo_registrado;
   // Sin diferencias no quiere decir que coincida: lo que no se leyó no se comparó.
   const lecturaIncompleta = decideElPago && comprobanteLeido.estado === "leida" && !lecturaDistinta && !lecturaIgual;
 
   function escribir(cual: ConMotivo) {
     setMotivo("");
+    setErroresMotivo(SIN_ERRORES);
     setConMotivo(cual);
   }
 
@@ -493,7 +514,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { version: v.numero, motivo: texto },
         }),
       alTerminar: () => terminar("Listo: rechazaste la orden."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -508,7 +529,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { version: v.numero, motivo: texto },
         }),
       alTerminar: () => terminar("Listo: declaraste que no se pagó. Lo confirma otro miembro del Consejo."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -527,9 +548,9 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           resultado === "conforme"
             ? `Listo: quedó conciliado el pago a ${v.razon_social}.`
             : "Listo: observaste el pago. Quien lo registró tiene que corregirlo.",
-          { paso: "conciliar", abierta: montado },
+          seguir,
         ),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -588,7 +609,24 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           body: { motivo: texto },
         }),
       alTerminar: () => terminar("Listo: cerraste el reclamo sin recuperar la plata. La diferencia queda en la historia."),
-      alFallar: siCambio,
+      alFallar: fallaDelMotivo,
+    });
+  }
+
+  /** Decisión 12 (12-11-2026): no hace falta pagarla. Queda «No se pagó», con quién, cuándo y por
+   * qué, y sale de la bandeja. */
+  function cerrarSinPagar(texto: string) {
+    void acto.hacer({
+      quePide: ["cerrar-sin-pagar", orden, v.numero, texto],
+      nombre: "cerrar la orden sin pagar",
+      pedir: (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/cerrar-sin-pagar", {
+          headers: encabezadoCsrf(),
+          params: { path: ruta, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          body: { version_esperada: v.numero, motivo: texto },
+        }),
+      alTerminar: () => terminar(TEXTO_CERRADA_SIN_PAGO),
+      alFallar: fallaDelMotivo,
     });
   }
 
@@ -675,15 +713,17 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
     else if (conMotivo === "cerrar") {
       if (diferencia !== null) cerrarReclamo(diferencia, texto);
     }
+    else if (conMotivo === "cerrar_sin_pagar") cerrarSinPagar(texto);
     else if (pago !== undefined) conciliar(pago.id, conMotivo === "observar" ? "observado" : "conforme", texto);
   }
 
   // Lo que se escribe para decidir, sobre la misma ficha. Sin la acción, el formulario se va.
   const motivoAbierto =
-    (conMotivo === "rechazar" && ficha.puede_rechazar) ||
+    (conMotivo === "rechazar" && ofrece("rechazar")) ||
     (conMotivo === "declarar" && declara) ||
-    (conMotivo === "cerrar" && ficha.puede_recuperar) ||
-    ((conMotivo === "conforme" || conMotivo === "observar") && ficha.puede_conciliar)
+    (conMotivo === "cerrar" && ofrece("cerrar_reclamo")) ||
+    (conMotivo === "cerrar_sin_pagar" && ofrece("cerrar_sin_pagar")) ||
+    ((conMotivo === "conforme" || conMotivo === "observar") && ofrece("conciliar"))
       ? conMotivo
       : null;
   const TEXTOS_MOTIVO: Record<ConMotivo, { etiqueta: string; boton: string; largo: number }> = {
@@ -692,9 +732,59 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
     conforme: { etiqueta: "Por qué lo aceptás fuera de término", boton: "Dar el pago por conforme", largo: 300 },
     observar: { etiqueta: "Qué no coincide", boton: "Observar el pago", largo: 300 },
     cerrar: { etiqueta: "Por qué se cierra sin recuperar", boton: "Cerrar sin recuperar", largo: 300 },
+    cerrar_sin_pagar: { etiqueta: "Por qué ya no hace falta pagarla", boton: "Cerrar sin pagar", largo: 300 },
   };
 
-  const estaModificando = modificando && ficha.puede_modificar;
+  const estaModificando = modificando && ofrece("modificar");
+  /** Lo que hace cada acción que el servidor ofrece. Las de formulario o enlace no pasan por acá. */
+  function elegir(codigo: AccionPago) {
+    switch (codigo) {
+      case "enviar": return enviar();
+      case "modificar": return setModificando(true);
+      case "retirar": return setRetirando(true);
+      case "aprobar": return aprobar();
+      case "rechazar": return escribir("rechazar");
+      case "renovar": return renovar();
+      case "pagar": return verCuenta();
+      case "ver_cuenta_de_nuevo":
+      case "retomar_pago": return abrirCuenta();
+      case "tomar_pago": return setConfirmaToma(true);
+      case "declarar_no_pago": return escribir("declarar");
+      case "conciliar":
+        if (pago === undefined) return;
+        return pago.fuera_de_termino ? escribir("conforme") : conciliar(pago.id, "conforme", null);
+      case "observar": return escribir("observar");
+      case "confirmar_no_pago":
+        if (declaracion !== null) confirmarNoPago(declaracion.id);
+        return;
+      case "recuperar":
+        if (diferencia !== null) recuperar(diferencia);
+        return;
+      case "cerrar_reclamo": return escribir("cerrar");
+      case "corregir_diferencia": return setCorrigeDiferencia(true);
+      case "volver_a_pagar": return volverAPagar();
+      case "cerrar_sin_pagar": return escribir("cerrar_sin_pagar");
+      default: return;
+    }
+  }
+  // Lo que ya está abierto en la pantalla esconde el botón que lo abrió.
+  const ocultas = new Set<AccionPago>([
+    ...(confirmaToma ? (["tomar_pago"] as const) : []),
+    ...(retirando ? (["retirar"] as const) : []),
+    ...(corrigeDiferencia ? (["corregir_diferencia"] as const) : []),
+    ...(cuentaVista !== null ? (["pagar", "ver_cuenta_de_nuevo", "retomar_pago"] as const) : []),
+  ]);
+  const falta = diferencia?.falta_centavos;
+  const enlaces = {
+    preparar_otra: { a: RUTA_NUEVA, estado: { consorcio, proveedor: v.proveedor_id } },
+    ...(falta != null && {
+      preparar_faltante: {
+        a: RUTA_NUEVA,
+        estado: { consorcio, proveedor: v.proveedor_id, importe: aTexto(falta), moneda: v.moneda, concepto: `Lo que faltó de: ${v.concepto}` },
+      },
+    }),
+  };
+  const repetida = ficha.posible_duplicada_de;
   const elegida: Resolucion = diferencia?.se_puede_dar_por_pagada ? (resolucion ?? "pagada_por_lo_real") : "reclamo";
 
   return (
@@ -718,8 +808,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           <div className="ficha-pago__resumen">
             <div className="ficha-pago__arriba">
               <p>Importe de la orden</p>
-              <p className="etiqueta-situacion" data-tono={TONO_SITUACION[situacion]}>
-                {TEXTO_SITUACION[situacion]}
+              <p className="etiqueta-situacion" data-tono={TONO_ESTADO[ficha.estado_visible]}>
+                {NOMBRE_ESTADO[ficha.estado_visible]}
               </p>
             </div>
             <div className="fila-importe">
@@ -729,7 +819,25 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
             <h2 id={`${id}-titulo`}>{v.razon_social}</h2>
             <p>{v.concepto}</p>
           </div>
-          <CaminoOrden situacion={situacion} paso={paso} />
+          <Barra barra={ficha.barra} />
+          {/* Lo que pasa con esta orden y desde cuándo espera (P-16). */}
+          <p>
+            {ficha.que_decir}
+            {ficha.esperando_desde !== null && ` Desde el ${fechaCorta(ficha.esperando_desde)}.`}
+          </p>
+          {repetida !== null && (
+            <p className="aviso-info" role="note">
+              {textoRepetida(fechaCorta(repetida.creada_en), repetida.estado_visible)}{" "}
+              <Link to={rutaFicha(repetida.orden_id)} state={{ consorcio }} className="enlace-suelto">
+                Ver la otra orden
+              </Link>
+            </p>
+          )}
+          {ficha.cierre_sin_pago !== null && (
+            <p className="aviso-info" role="note">
+              {textoCierreSinPago(ficha.cierre_sin_pago.cerrada_por_nombre, momento(ficha.cierre_sin_pago.cerrada_en), ficha.cierre_sin_pago.motivo)}
+            </p>
+          )}
 
           {enDecision && v.alerta_fraccionamiento && (
             <p className="aviso-error" role="note">
@@ -743,7 +851,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               <strong>Motivo del rechazo:</strong> {ficha.orden.motivo_rechazo}
             </p>
           )}
-          {situacion === "no_se_pago" && (
+          {situacion === "no_se_pago" && ficha.cierre_sin_pago === null && (
             <p>
               {diferencia?.cerrada_en != null
                 ? `Se cerró el reclamo sin recuperar la plata: ${diferencia.motivo_cierre}.`
@@ -780,7 +888,6 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               {ficha.puede_registrar && !ficha.puede_reabrir_cuenta && " Si transferiste vos, registralo ahora."}
             </p>
           )}
-          {ficha.le_toca_a !== null && ficha.le_toca_a !== "vos" && <p>{TEXTO_LE_TOCA_A[ficha.le_toca_a]}</p>}
           {situacion === "en_revision" && ficha.puede_retirar && <p>{AVISO_SE_PUEDE_RETIRAR}</p>}
           {situacion === "retirada" && ficha.retiro !== null && (
             <p className="aviso-info" role="note">
@@ -987,11 +1094,6 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   {AVISO_SIN_SALIDA}
                 </p>
               )}
-              {paso === "modificar" && (
-                <p className="aviso-error" role="note">
-                  {AVISO_PROVEEDOR_CAMBIADO}
-                </p>
-              )}
               {paso === "tomar_pago" && <p className="aviso-info" role="note">Quien vio la cuenta no registró el pago ni dijo que no salió.</p>}
               {confirmaToma && ficha.puede_tomar && (
                 <p className="aviso-error" role="alert">
@@ -1003,7 +1105,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
               <div hidden={motivoAbierto !== null}>
                   {registra && (
-                    <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={paso === "corregir" ? pago : undefined}
+                    <RegistroPago key={paso} consorcio={consorcio} orden={orden} version={v} corregido={corrige ? pago : undefined}
                       comprobante={ficha.comprobante_actual} subido={ficha.comprobante_subido} lectura={comprobanteLeido}
                       puedeOtraCosa={ficha.puede_registrar} acto={acto} aEntrar={aEntrar}
                       alRegistrar={(texto) => terminar(texto)} releer={releer}
@@ -1012,7 +1114,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                         alCambiar();
                       }} />
                   )}
-                  {corrigeDiferencia && ficha.puede_corregir_diferencia && diferencia !== null && (
+                  {corrigeDiferencia && ofrece("corregir_diferencia") && diferencia !== null && (
                     <RegistroPago key={`diferencia-${diferencia.id}`} consorcio={consorcio} orden={orden} version={v} corregido={undefined}
                       diferencia={diferencia} alCancelar={() => setCorrigeDiferencia(false)} comprobante={ficha.comprobante_actual} subido={null}
                       lectura={null} puedeOtraCosa={false} acto={acto} aEntrar={aEntrar}
@@ -1022,7 +1124,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                         alCambiar();
                       }} />
                   )}
-                  {ficha.puede_resolver_diferencia && diferencia !== null && (
+                  {ofrece("resolver_diferencia") && diferencia !== null && (
                     <fieldset className="formulario">
                       <legend>Qué hacemos</legend>
                       {diferencia.se_puede_dar_por_pagada && (
@@ -1049,42 +1151,10 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                     </fieldset>
                   )}
                   <div className="formulario">
-                    <div className="acciones">
-                      {ficha.puede_corregir_diferencia && !corrigeDiferencia && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={() => setCorrigeDiferencia(true)}>
-                          Corregir lo que registré
-                        </button>
-                      )}
-                      {ficha.puede_recuperar && diferencia !== null && (
-                        <button type="button" disabled={enviando} onClick={() => recuperar(diferencia)}>
-                          Ya recuperamos la plata
-                        </button>
-                      )}
-                      {ficha.puede_recuperar && diferencia !== null && (
-                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => escribir("cerrar")}>
-                          Cerrar sin recuperar
-                        </button>
-                      )}
-                      {paso === "enviar" && ficha.puede_enviar && (
-                        <button type="button" disabled={enviando} onClick={enviar}>
-                          Enviar a aprobar
-                        </button>
-                      )}
-                      {paso === "renovar" && ficha.puede_renovar && (
-                        <button type="button" disabled={enviando} onClick={renovar}>
-                          Renovar la aprobación
-                        </button>
-                      )}
-                      {paso === "volver_a_pagar" && ficha.puede_modificar && (
-                        <button type="button" disabled={enviando} onClick={volverAPagar}>
-                          {pasaSola ? VERBO_PASA_SOLA : VERBO.volver_a_pagar}
-                        </button>
-                      )}
-                      {ficha.puede_aprobar && (
-                        <button type="button" disabled={enviando || cuentaDecidida === null} onClick={aprobar}>
-                          Aprobar esta versión
-                        </button>
-                      )}
+                    {/* Los actos de la orden: exactamente los que mandó el servidor (§4.3). */}
+                    <Acciones acciones={ficha.acciones} enviando={enviando} alElegir={elegir} ocultas={ocultas}
+                      deshabilitadas={cuentaDecidida === null ? new Set(["aprobar"]) : undefined}
+                      textos={pasaSola ? { volver_a_pagar: VERBO_PASA_SOLA } : undefined} enlaces={enlaces}>
                       {decide && faltaCuenta && (
                         <button type="button" className="secundario" disabled={enviando}
                           onClick={() => {
@@ -1094,23 +1164,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                           Volver a pedir la cuenta
                         </button>
                       )}
-                      {ficha.puede_rechazar && (
-                        <button type="button" className={ficha.puede_aprobar ? "secundario peligro" : "peligro"} disabled={enviando}
-                          onClick={() => escribir("rechazar")}>
-                          Rechazar
-                        </button>
-                      )}
-                      {paso === "pagar" && ficha.puede_pagar && cuentaVista === null && (
-                        <button type="button" disabled={enviando} onClick={verCuenta}>
-                          Ver la cuenta para pagar
-                        </button>
-                      )}
-                      {ficha.puede_tomar && !confirmaToma && (
-                        <button type="button" disabled={enviando} onClick={() => setConfirmaToma(true)}>
-                          Tomar el pago
-                        </button>
-                      )}
-                      {ficha.puede_tomar && confirmaToma && (
+                      {ofrece("tomar_pago") && confirmaToma && (
                         <>
                           <button type="button" disabled={enviando} onClick={tomar}>
                             No se transfirió: tomar el pago
@@ -1120,54 +1174,10 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                           </button>
                         </>
                       )}
-                      {ficha.puede_conciliar && pago !== undefined && (
-                        <>
-                          {lecturaDistinta && (
-                            <button type="button" className="peligro" disabled={enviando} onClick={() => escribir("observar")}>
-                              Observar
-                            </button>
-                          )}
-                          <button type="button" className={lecturaDistinta ? "secundario" : undefined} disabled={enviando}
-                            onClick={() => (pago.fuera_de_termino ? escribir("conforme") : conciliar(pago.id, "conforme", null))}>
-                            Conforme
-                          </button>
-                          {!lecturaDistinta && (
-                            <button type="button" className="secundario peligro" disabled={enviando} onClick={() => escribir("observar")}>
-                              Observar
-                            </button>
-                          )}
-                        </>
-                      )}
-                      {ficha.puede_confirmar && declaracion !== null && (
-                        <button type="button" className="peligro" disabled={enviando} onClick={() => confirmarNoPago(declaracion.id)}>
-                          Confirmar que no se pagó
-                        </button>
-                      )}
-                      {ficha.puede_reabrir_cuenta && cuentaVista === null && (
-                        <button type="button" className="secundario" disabled={enviando} onClick={abrirCuenta}>
-                          {situacion === "no_pago_declarado" ? "Retomar el pago" : "Ver la cuenta de nuevo"}
-                        </button>
-                      )}
-                      {declara && (
-                        <button type="button" className={paso === "declarar_no_pago" ? "peligro" : "secundario peligro"} disabled={enviando}
-                          onClick={() => escribir("declarar")}>
-                          No se pudo pagar
-                        </button>
-                      )}
-                      {ficha.puede_modificar && (
-                        <button type="button" className={paso === "modificar" ? undefined : "secundario"} disabled={enviando} onClick={() => setModificando(true)}>
-                          Modificar
-                        </button>
-                      )}
-                      {ficha.puede_retirar && !retirando && (
-                        <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setRetirando(true)}>
-                          {RETIRAR}
-                        </button>
-                      )}
-                    </div>
+                    </Acciones>
                   </div>
                   {/* Primero pregunta: retirar no se deshace (comentario 23, 09-11-2026). */}
-                  {ficha.puede_retirar && retirando && (
+                  {ofrece("retirar") && retirando && (
                     <div className="formulario">
                       <p>{PREGUNTA_RETIRAR}</p>
                       <div className="acciones">
@@ -1183,9 +1193,15 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               </div>
               {motivoAbierto !== null && (
                 <form className="formulario" onSubmit={enviarMotivo}>
+                  {motivoAbierto === "cerrar_sin_pagar" && <p>{PREGUNTA_CERRAR_SIN_PAGAR}</p>}
                   <label htmlFor={`${id}-motivo`}>{TEXTOS_MOTIVO[motivoAbierto].etiqueta}</label>
                   <input id={`${id}-motivo`} required maxLength={TEXTOS_MOTIVO[motivoAbierto].largo} value={motivo} disabled={enviando}
-                    onChange={(e) => setMotivo(e.target.value)} />
+                    {...marcaDe(`${id}-motivo`, erroresMotivo.motivo)}
+                    onChange={(e) => {
+                      setMotivo(e.target.value);
+                      setErroresMotivo((errores) => sinElDe(errores, "motivo"));
+                    }} />
+                  <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={erroresMotivo.motivo} />
                   <div className="acciones">
                     {/* Dar por conforme avanza; los demás motivos son de una acción negativa. */}
                     <button type="submit" className={motivoAbierto === "conforme" ? undefined : "peligro"} disabled={enviando || motivo.trim() === ""}>
@@ -1196,21 +1212,6 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                     </button>
                   </div>
                 </form>
-              )}
-              {ficha.puede_preparar_faltante && diferencia?.falta_centavos != null && (
-                <p>
-                  <Link to={RUTA_NUEVA} className="enlace-suelto"
-                    state={{ consorcio, proveedor: v.proveedor_id, importe: aTexto(diferencia.falta_centavos), moneda: v.moneda, concepto: `Lo que faltó de: ${v.concepto}` }}>
-                    Preparar la orden por lo que falta
-                  </Link>
-                </p>
-              )}
-              {paso === "rechazada" && (
-                <p>
-                  <Link to={RUTA_NUEVA} state={{ consorcio, proveedor: v.proveedor_id }} className="enlace-suelto">
-                    Preparar otra orden
-                  </Link>
-                </p>
               )}
             </div>
             </div>
@@ -1262,6 +1263,12 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               )}
               <dt>Preparada</dt>
               <dd>{momento(v.creada_en)}</dd>
+              {ficha.cotejado_en !== null && (
+                <>
+                  <dt>Cotejada con el banco</dt>
+                  <dd>{momento(ficha.cotejado_en)}</dd>
+                </>
+              )}
             </dl>
             {cambiosPorVersion.length > 0 && (
               <>

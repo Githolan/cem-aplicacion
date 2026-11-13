@@ -28,12 +28,14 @@ nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
 import anyio
+from cem_contracts.cotejo import LIMITE_COTEJO_MAXIMO
 from cem_contracts.documentos import DocumentoId, EstadoVersion, VersionCargada
 from cem_contracts.egresos import (
     LARGO_MAXIMO_BUSQUEDA_PAGOS,
@@ -42,12 +44,15 @@ from cem_contracts.egresos import (
     MAXIMO_SALTAR_CONSULTA_PAGOS,
     SIN_CONTROLES,
     VIGENCIA_APROBACION,
+    AccionPago,
     Aprobacion,
     AprobacionRegistrada,
     BandejaPagos,
     CampoComprobante,
     CargaCuitProveedor,
     CierreReclamo,
+    CierreSinPago,
+    CierreSinPagoOrden,
     ComprobanteActual,
     ComprobantePagoNuevo,
     ComprobanteSubido,
@@ -76,6 +81,7 @@ from cem_contracts.egresos import (
     EstadoProveedor,
     FichaPago,
     FiltroConsultaPagos,
+    GrupoPago,
     LecturaCarga,
     LecturaComprobante,
     ListaContratos,
@@ -92,11 +98,13 @@ from cem_contracts.egresos import (
     OrdenPagoConVersionesRevision,
     OrdenPagoNueva,
     OrdenPagoVersionNueva,
+    OrdenParecida,
     PagoManual,
     PagoManualCambiado,
     PagoManualRegistrado,
     PagoNoRealizado,
     PagoPorAclarar,
+    ParecidaAntesDeGuardar,
     PasoPago,
     PedidoCuentaPagoManual,
     Proveedor,
@@ -106,12 +114,14 @@ from cem_contracts.egresos import (
     ProveedorSugerido,
     ProveedorVersionNueva,
     Rechazo,
+    RechazoVisto,
     RegistroDiferenciaPago,
     RegistroPagoManual,
     Renovacion,
     ResolucionDiferenciaPago,
     Retiro,
     RetiroOrdenPago,
+    SituacionPago,
     TipoCarga,
     TipoDiferencia,
     TomaPagoManual,
@@ -1079,22 +1089,81 @@ def rechazar_orden(
     responses=RESPUESTAS_ESCRITURA,
 )
 def retirar_orden(
+    request: Request,
     orden_id: UUID,
     retiro: Retiro,
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     idempotencia: IdempotenciaDep,
     motor: MotorDep,
 ) -> Response:
-    """Comentario 23 de la revisión de pantallas (09-11-2026, `0093`): solo quien la preparó y
-    solo mientras nadie aprobó la versión vigente. No mueve dinero: sin el gesto."""
+    """Comentario 23 de la revisión de pantallas (09-11-2026, `0093`) y decisión 4 del
+    propietario (12-11-2026, `0096`), con la 7 del 13-11: quien la preparó la retira siempre;
+    otra persona que prepara, solo un borrador sin movimiento hace más de
+    `CEM_PAGOS_DIAS_BORRADOR_VIEJO` días. Solo mientras nadie aprobó la versión vigente. No
+    mueve dinero: sin el gesto."""
+    dias = request.app.state.config.pagos_dias_borrador_viejo
 
     def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
         _ejecutar(
             conn, permiso,
-            "select nucleo.retirar_orden_pago(:o, :esperada, :actor, 'api', :sesion)",
-            {"o": orden_id, "esperada": retiro.version_esperada},
+            "select nucleo.retirar_orden_pago(:o, :esperada, :dias, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": retiro.version_esperada, "dias": dias},
         )  # fmt: skip
         return 200, OrdenPagoCambiada(id=orden_id, version=retiro.version_esperada)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/rechazo-visto",
+    response_model=RechazoVisto,
+    summary="«Entendido»: quien preparó una orden rechazada vio el aviso. Sale de la bandeja y"
+    " queda en la consulta",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def marcar_rechazo_visto(
+    orden_id: UUID,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Decisión 3 del propietario (12-11-2026, `0096`): queda quién lo vio y cuándo, por persona.
+    No mueve dinero: sin el gesto. Repetirlo no cambia nada."""
+
+    def efecto(conn: Connection) -> tuple[int, RechazoVisto]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.marcar_rechazo_visto(:o, :actor, 'api', :sesion)", {"o": orden_id},
+        )  # fmt: skip
+        return 200, RechazoVisto(orden_id=orden_id)
+
+    return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/cerrar-sin-pagar",
+    response_model=OrdenPagoCambiada,
+    summary="Cerrar una orden que no se pagó y ya no hace falta pagar: queda No se pagó, con"
+    " quién, cuándo y el motivo, fuera de la bandeja",
+    responses=RESPUESTAS_ESCRITURA,
+)
+def cerrar_sin_pagar(
+    orden_id: UUID,
+    cierre: CierreSinPago,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    idempotencia: IdempotenciaDep,
+    motor: MotorDep,
+) -> Response:
+    """Decisión 12 del propietario (12-11-2026, `0096`). No mueve dinero, como retirar: sin el
+    gesto. Cerrada, la orden ya no se vuelve a pagar."""
+
+    def efecto(conn: Connection) -> tuple[int, OrdenPagoCambiada]:
+        _ejecutar(
+            conn, permiso,
+            "select nucleo.cerrar_orden_sin_pago(:o, :esperada, :motivo, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": cierre.version_esperada, "motivo": cierre.motivo},
+        )  # fmt: skip
+        return 200, OrdenPagoCambiada(id=orden_id, version=cierre.version_esperada)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
@@ -2143,13 +2212,86 @@ def _retiro(c: Connection, lector: Permiso, orden: UUID) -> RetiroOrdenPago | No
     )  # fmt: skip
 
 
-def _puede_retirar(c: Connection, lector: Permiso, orden: OrdenPago, vigente) -> bool:
+def _puede_retirar(
+    c: Connection, lector: Permiso, orden: OrdenPago, vigente, viejos_desde: datetime
+) -> bool:
     """Lo que `nucleo.retirar_orden_pago` va a aceptar, para mostrar: quien prepara, la orden sin
-    aprobar, nadie aprobó la versión vigente y quien lee preparó alguna versión (por la identidad
-    guardada, `lee_quien_preparo_la_orden`)."""
+    aprobar y nadie aprobó la versión vigente. Quien preparó alguna versión la retira siempre
+    (por la identidad guardada, `lee_quien_preparo_la_orden`); otra persona, solo un borrador
+    sin movimiento desde antes de `viejos_desde` (decisiones 4 y 7, `0096`)."""
     if lector.accion != PREPARAR or orden.estado not in RETIRABLES or vigente.aprobada_por:
         return False
+    if orden.estado == EstadoOrdenPago.BORRADOR and orden.actualizada_en < viejos_desde:
+        return True
     return bool(_ejecutar(c, lector, PREPARO, {"o": orden.id}).scalar_one())
+
+
+def _cotejadas(c: Connection, lector: Permiso, orden: UUID | None) -> dict[UUID, datetime]:
+    """Cuándo se cotejó con el banco el pago de cada orden pagada (`0096`)."""
+    sql = "select * from nucleo.cotejo_de_ordenes_lectura(:o, :f, :actor, 'api', :sesion)"
+    filas = _ejecutar(c, lector, sql, {"o": orden, "f": LEE_COMO[lector.accion]}).mappings()
+    return {f["orden_id"]: f["cotejado_en"] for f in filas}
+
+
+def _cierres(c: Connection, lector: Permiso, orden: UUID | None) -> dict[UUID, CierreSinPagoOrden]:
+    """Las órdenes que no se pagaron y alguien cerró sin pagar (`0096`)."""
+    sql = "select * from nucleo.cierre_sin_pago_lectura(:o, :f, :actor, 'api', :sesion)"
+    filas = _ejecutar(c, lector, sql, {"o": orden, "f": LEE_COMO[lector.accion]}).mappings()
+    return {
+        f["orden_id"]: CierreSinPagoOrden(
+            cerrada_por_nombre=f["cerrada_por_nombre"],
+            cerrada_en=f["cerrada_en"],
+            motivo=f["motivo"],
+        )  # fmt: skip
+        for f in filas
+    }
+
+
+def _con_hechos(
+    ordenes: list[OrdenPago], acciones: dict, cotejadas: dict, cierres: dict
+) -> dict[UUID, circuito_pagos.AccionesOrden]:
+    """Las acciones de la base, con los dos hechos que no salen de ella: cotejada y cerrada."""
+    return {
+        o.id: replace(
+            acciones.get(o.id, circuito_pagos.SIN_ACCIONES),
+            cotejada=o.id in cotejadas,
+            cerrada_sin_pago=o.id in cierres,
+        )  # fmt: skip
+        for o in ordenes
+    }
+
+
+def _para_avisar(c: Connection, lector: Permiso, ordenes: list[OrdenPago]) -> set[UUID]:
+    """Las rechazadas que preparó quien pide y todavía no vio (decisión 3, `0096`)."""
+    if lector.accion != PREPARAR:
+        return set()
+    rechazadas = [o for o in ordenes if o.estado == EstadoOrdenPago.RECHAZADA]
+    if not rechazadas:
+        return set()
+    sql = "select * from nucleo.rechazos_vistos_lectura(:actor, 'api', :sesion)"
+    vistas = {f["orden_id"] for f in _ejecutar(c, lector, sql, {}).mappings()}
+    return {
+        o.id
+        for o in rechazadas
+        if o.id not in vistas and _ejecutar(c, lector, PREPARO, {"o": o.id}).scalar_one()
+    }
+
+
+def _por_cotejar(c: Connection, revisar: Permiso) -> int:
+    """Cuántos pagos conciliados puede cotejar quien pide (P-24): los de `cotejo_lectura` que la
+    base le deja cotejar. Sin lo que pide cotejar, cero, sin preguntar."""
+    if not revisar.decidir().permitido:
+        return 0
+    cuantos, despues = 0, None
+    sql = "select * from nucleo.cotejo_lectura(:d, :l, :actor, 'api', :sesion)"
+    while True:
+        filas = _ejecutar(
+            c, revisar, sql, {"d": despues, "l": LIMITE_COTEJO_MAXIMO}
+        ).mappings().all()  # fmt: skip
+        cuantos += sum(1 for f in filas if f["puede_cotejar"])
+        if len(filas) < LIMITE_COTEJO_MAXIMO:
+            return cuantos
+        despues = filas[-1]["pago_id"]
 
 
 def _toma_vigente(
@@ -2173,13 +2315,27 @@ def bandeja_pagos(
     request: Request, preparar: Preparar, revisar: Revisar, motor: MotorDep
 ) -> BandejaPagos:
     lector = _lector(preparar, revisar)
-    dias = request.app.state.config.pagos_dias_bandeja
+    config = request.app.state.config
+    ahora = datetime.now(UTC)
+    prepara = lector.accion == PREPARAR
     with _lectura(lector, _una_foto(motor)) as c:
         ordenes = _ordenes(c, lector, None)
-        acciones = _acciones(c, lector, None, _plazo_para_tomar(request))
-    return BandejaPagos(elementos=circuito_pagos.bandeja(
-        ordenes, acciones, lector.accion == PREPARAR, datetime.now(UTC) - timedelta(days=dias),
-    ))  # fmt: skip
+        acciones = _con_hechos(
+            ordenes, _acciones(c, lector, None, _plazo_para_tomar(request)),
+            _cotejadas(c, lector, None), _cierres(c, lector, None),
+        )  # fmt: skip
+        para_avisar = _para_avisar(c, lector, ordenes)
+        por_cotejar = _por_cotejar(c, revisar)
+    plazos = circuito_pagos.Plazos(
+        cerradas_desde=ahora - timedelta(days=config.pagos_dias_bandeja),
+        viejos_desde=ahora - timedelta(days=config.pagos_dias_borrador_viejo),
+        dias_repetida=config.pagos_dias_repetida,
+    )
+    return BandejaPagos(
+        elementos=circuito_pagos.bandeja(ordenes, acciones, prepara, plazos),
+        avisos_rechazo=circuito_pagos.avisos_de_rechazo(ordenes, prepara, para_avisar),
+        por_cotejar=por_cotejar,
+    )
 
 
 @router.get(
@@ -2203,7 +2359,7 @@ def consulta_pagos(
 ) -> ConsultaPagos:
     lector = _lector(preparar, revisar)
     estados = ESTADOS_DE_FILTRO[filtro]
-    with _lectura(lector, motor) as c:
+    with _lectura(lector, _una_foto(motor)) as c:
         # Uno de más, para saber si hay otra página.
         filas = _ejecutar(
             c, lector,
@@ -2212,20 +2368,68 @@ def consulta_pagos(
             {"b": busqueda, "e": None if estados is None else [e.value for e in estados],
              "l": limite + 1, "s": saltar, "f": LEE_COMO[lector.accion]},
         ).mappings().all()  # fmt: skip
+        cotejadas = _cotejadas(c, lector, None)
     elementos = []
     for f in filas[:limite]:
-        hechos = circuito_pagos.HechosPago(**{k: f[k] for k in HECHOS})
+        hechos = circuito_pagos.HechosPago(
+            **{k: f[k] for k in HECHOS}, cotejada=f["orden_id"] in cotejadas
+        )
         estado = EstadoOrdenPago(f["estado"])
+        situacion = circuito_pagos.situacion_de(estado, hechos)
         elementos.append(ElementoConsultaPagos(
             orden_id=f["orden_id"], proveedor=f["razon_social"], concepto=f["concepto"],
             importe_centavos=f["importe_centavos"], moneda=f["moneda"], estado=estado,
-            importe_pagado_centavos=f["importe_pagado_centavos"],
-            situacion=circuito_pagos.situacion_de(estado, hechos),
+            importe_pagado_centavos=f["importe_pagado_centavos"], situacion=situacion,
+            estado_visible=circuito_pagos.estado_visible(situacion),
             numero_operacion=f["numero_operacion"], fecha_operacion=f["fecha_operacion"],
-            actualizada_en=f["actualizada_en"],
+            actualizada_en=f["actualizada_en"], creada_en=f["creada_en"],
         ))  # fmt: skip
     return ConsultaPagos(
         elementos=elementos, siguiente=saltar + limite if len(filas) > limite else None
+    )
+
+
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/parecida",
+    response_model=ParecidaAntesDeGuardar,
+    summary="Antes de guardar una orden: si hay otra parecida (mismo proveedor e importe, en los"
+    " últimos días). No bloquea",
+    responses=RESPUESTAS_LECTURA,
+)
+def parecida_antes_de_guardar(
+    request: Request,
+    preparar: Preparar,
+    motor: MotorDep,
+    proveedor_id: UUID,
+    importe_centavos: Annotated[int, Query(gt=0)],
+    moneda: Annotated[str, Query(min_length=3, max_length=3)],
+    contrato_id: UUID | None = None,
+    orden_id: UUID | None = None,
+) -> ParecidaAntesDeGuardar:
+    """Decisión 4 del propietario (13-11-2026). Con un contrato o abono la orden es rutinaria: no
+    se compara. `orden_id` es la orden que se modifica, que no cuenta como otra."""
+    if contrato_id is not None:
+        return ParecidaAntesDeGuardar(parecida=None)
+    config = request.app.state.config
+    clave = circuito_pagos.clave_parecida(proveedor_id, importe_centavos, moneda)
+    with _lectura(preparar, _una_foto(motor)) as c:
+        ordenes = _ordenes(c, preparar, None)
+        otra = circuito_pagos.parecida_a(
+            clave, datetime.now(UTC), ordenes, config.pagos_dias_repetida, salvo=orden_id
+        )
+        if otra is None:
+            return ParecidaAntesDeGuardar(parecida=None)
+        hechos = _con_hechos(
+            [otra], _acciones(c, preparar, otra.id, _plazo_para_tomar(request)),
+            _cotejadas(c, preparar, otra.id), _cierres(c, preparar, otra.id),
+        )  # fmt: skip
+    situacion = circuito_pagos.situacion_de(otra.estado, hechos[otra.id])
+    return ParecidaAntesDeGuardar(
+        parecida=OrdenParecida(
+            orden_id=otra.id,
+            creada_en=otra.creada_en,
+            estado_visible=circuito_pagos.estado_visible(situacion),
+        )
     )
 
 
@@ -2246,12 +2450,18 @@ def ficha_pago(
 ) -> FichaPago:
     lector = _lector(preparar, revisar)
     prepara = lector.accion == PREPARAR
+    config = request.app.state.config
     with _lectura(lector, _una_foto(motor)) as c:
         detalle = _leer_orden_con_versiones(c, lector, orden_id)
         orden = detalle.orden
-        a = _acciones(c, lector, orden_id, _plazo_para_tomar(request)).get(
-            orden_id, circuito_pagos.SIN_ACCIONES
+        # Todas las órdenes, para el aviso de orden repetida: con su situación, la de la otra.
+        todas = _ordenes(c, lector, None)
+        cierres = _cierres(c, lector, None)
+        cotejadas = _cotejadas(c, lector, None)
+        todas_las_acciones = _con_hechos(
+            todas, _acciones(c, lector, None, _plazo_para_tomar(request)), cotejadas, cierres
         )
+        a = todas_las_acciones[orden_id]
         ejecucion = _ejecucion_vigente(c, lector, orden, a)
         ultimo = ejecucion.pagos[-1] if ejecucion is not None and ejecucion.pagos else None
         de_la_ejecucion = []
@@ -2265,9 +2475,55 @@ def ficha_pago(
         lectura = _lectura_del_comprobante(c, lector, comprobante, vigente, diferencia or ultimo)
         toma = None if ejecucion is None else _toma_vigente(c, lector, orden_id, ejecucion.id)
         retiro = _retiro(c, lector, orden_id) if orden.estado == EstadoOrdenPago.RETIRADA else None
-        puede_retirar = _puede_retirar(c, lector, orden, vigente)
+        viejos_desde = datetime.now(UTC) - timedelta(days=config.pagos_dias_borrador_viejo)
+        puede_retirar = _puede_retirar(c, lector, orden, vigente, viejos_desde)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
+    situaciones = {
+        o.id: circuito_pagos.situacion_de(o.estado, todas_las_acciones[o.id]) for o in todas
+    }
+    repetidas = circuito_pagos.parecidas(todas, situaciones, config.pagos_dias_repetida)
+    repetida = repetidas.get(orden_id)
+    fila = circuito_pagos.fila_de(situacion, paso)
+    puede_modificar = (
+        prepara and orden.estado in circuito_pagos.MODIFICABLES and not a.cerrada_sin_pago
+    )
+    puede_cerrar_sin_pagar = (
+        prepara and orden.estado == EstadoOrdenPago.FALLIDA and not a.cerrada_sin_pago
+    )
+    puede = {
+        AccionPago.ENVIAR: prepara and orden.estado == EstadoOrdenPago.BORRADOR,
+        AccionPago.MODIFICAR: puede_modificar,
+        AccionPago.RETIRAR: puede_retirar,
+        AccionPago.APROBAR: a.puede_aprobar,
+        AccionPago.RECHAZAR: a.puede_rechazar,
+        AccionPago.RENOVAR: a.puede_renovar,
+        AccionPago.PAGAR: circuito_pagos.ofrece_pagar(situacion, a),
+        AccionPago.VER_CUENTA_DE_NUEVO: situacion == SituacionPago.PAGANDO
+        and circuito_pagos.reabre_cuenta(situacion, a),
+        AccionPago.RETOMAR_PAGO: situacion == SituacionPago.NO_PAGO_DECLARADO
+        and circuito_pagos.reabre_cuenta(situacion, a),
+        AccionPago.TOMAR_PAGO: a.puede_tomar,
+        AccionPago.SUBIR_COMPROBANTE: a.puede_subir_comprobante,
+        AccionPago.CORREGIR: a.puede_corregir,
+        AccionPago.DECLARAR_NO_PAGO: a.puede_declarar,
+        AccionPago.CONCILIAR: a.puede_conciliar,
+        AccionPago.OBSERVAR: a.puede_conciliar,
+        AccionPago.CONFIRMAR_NO_PAGO: a.puede_confirmar,
+        AccionPago.RESOLVER_DIFERENCIA: a.puede_resolver_diferencia and a.diferencia_sin_resolver,
+        AccionPago.RECUPERAR: a.puede_resolver_diferencia and a.reclamo_abierto,
+        AccionPago.CERRAR_RECLAMO: a.puede_resolver_diferencia and a.reclamo_abierto,
+        AccionPago.CORREGIR_DIFERENCIA: a.puede_corregir_diferencia,
+        AccionPago.PREPARAR_FALTANTE: paso == PasoPago.PREPARAR_FALTANTE,
+        AccionPago.VOLVER_A_PAGAR: puede_modificar and orden.estado == EstadoOrdenPago.FALLIDA,
+        AccionPago.PREPARAR_OTRA: prepara and orden.estado == EstadoOrdenPago.RECHAZADA,
+        AccionPago.CERRAR_SIN_PAGAR: puede_cerrar_sin_pagar,
+    }
+    no_coincide = (
+        lectura is not None
+        and paso == PasoPago.CONCILIAR
+        and bool(lectura.distinto_de_lo_registrado)
+    )
     observacion = None
     if a.pago_observado and diferencia is None:
         observacion = ObservacionVigente(
@@ -2277,14 +2533,22 @@ def ficha_pago(
     return FichaPago(
         orden=orden, versiones=detalle.versiones, situacion=situacion, paso=paso,
         le_toca_a=None if paso is None else circuito_pagos.le_toca_a(paso, a),
-        puede_enviar=prepara and orden.estado == EstadoOrdenPago.BORRADOR,
+        estado_visible=circuito_pagos.estado_visible(situacion),
+        acciones=circuito_pagos.acciones_ofrecidas(fila, puede, no_coincide),
+        barra=circuito_pagos.barra_de(situacion, orden, datetime.now(UTC)),
+        que_decir=fila.que_decir,
+        esperando_desde=orden.actualizada_en if fila.lista == GrupoPago.ESPERANDO else None,
+        despues=fila.despues, cotejado_en=cotejadas.get(orden_id),
+        posible_duplicada_de=repetida, cierre_sin_pago=cierres.get(orden_id),
+        puede_cerrar_sin_pagar=puede_cerrar_sin_pagar,
+        puede_enviar=puede[AccionPago.ENVIAR],
         puede_aprobar=a.puede_aprobar, puede_rechazar=a.puede_rechazar,
         puede_renovar=a.puede_renovar,
         # Con una declaración vigente, un registro observado o la cuenta ya vista no se ofrece.
         puede_pagar=circuito_pagos.ofrece_pagar(situacion, a),
         puede_reabrir_cuenta=circuito_pagos.reabre_cuenta(situacion, a),
         puede_tomar=a.puede_tomar, tomar_desde=a.tomar_desde,
-        puede_modificar=prepara and orden.estado in circuito_pagos.MODIFICABLES,
+        puede_modificar=puede_modificar,
         puede_retirar=puede_retirar, retiro=retiro,
         puede_subir_comprobante=a.puede_subir_comprobante, puede_registrar=a.puede_registrar,
         puede_declarar=a.puede_declarar,

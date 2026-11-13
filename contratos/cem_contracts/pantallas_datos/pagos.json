@@ -1,0 +1,621 @@
+{
+  "descripcion": "Contrato de la pantalla de pagos (informe de fricción, parte 4; decisiones del propietario del 12-11-2026). Una fila por situación de la orden y por el paso que la base le deja a quien mira (su relación con esa orden). Una acción se ofrece solo si su `puede_*` es verdadero: la tabla ordena, la base decide.",
+  "estados": {
+    "borrador": "Borrador",
+    "esperando_aprobacion": "Esperando aprobación",
+    "rechazada": "Rechazada",
+    "retirada": "Retirada",
+    "lista_para_pagar": "Lista para pagar",
+    "pagando": "Pagando",
+    "falta_conciliar": "Falta conciliar",
+    "observada": "Observada",
+    "no_se_pago": "No se pagó",
+    "pagada": "Pagada",
+    "pagada_y_cotejada": "Pagada y cotejada"
+  },
+  "situaciones": {
+    "borrador": {
+      "estado": "borrador",
+      "barra": {
+        "hechos": 0,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "en_revision": {
+      "estado": "esperando_aprobacion",
+      "barra": {
+        "hechos": 1,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "rechazada": {
+      "estado": "rechazada",
+      "barra": {
+        "hechos": 1,
+        "actual": "alerta"
+      },
+      "final": true
+    },
+    "retirada": {
+      "estado": "retirada",
+      "barra": null,
+      "final": true
+    },
+    "para_pagar": {
+      "estado": "lista_para_pagar",
+      "barra": {
+        "hechos": 2,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "pagando": {
+      "estado": "pagando",
+      "barra": {
+        "hechos": 2,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "no_pago_declarado": {
+      "estado": "pagando",
+      "barra": {
+        "hechos": 2,
+        "actual": "alerta"
+      },
+      "final": false
+    },
+    "falta_conciliar": {
+      "estado": "falta_conciliar",
+      "barra": {
+        "hechos": 3,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "observado": {
+      "estado": "observada",
+      "barra": {
+        "hechos": 3,
+        "actual": "alerta"
+      },
+      "final": false
+    },
+    "con_diferencia": {
+      "estado": "falta_conciliar",
+      "barra": {
+        "hechos": 3,
+        "actual": "alerta"
+      },
+      "final": false
+    },
+    "reclamo": {
+      "estado": "observada",
+      "barra": {
+        "hechos": 3,
+        "actual": "alerta"
+      },
+      "final": false
+    },
+    "pagada": {
+      "estado": "pagada",
+      "barra": {
+        "hechos": 4,
+        "actual": "ahora"
+      },
+      "final": false
+    },
+    "pagada_y_cotejada": {
+      "estado": "pagada_y_cotejada",
+      "barra": {
+        "hechos": 5,
+        "actual": null
+      },
+      "final": true
+    },
+    "no_se_pago": {
+      "estado": "no_se_pago",
+      "barra": {
+        "hechos": 2,
+        "actual": "alerta"
+      },
+      "final": false
+    }
+  },
+  "listas": {
+    "para_pagar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_corregir": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_preparar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_aprobar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_conciliar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_confirmar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_resolver": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": null
+    },
+    "para_cotejar": {
+      "pendiente": true,
+      "plegada": false,
+      "principal": "cotejar"
+    },
+    "esperando": {
+      "pendiente": false,
+      "plegada": true,
+      "principal": null
+    },
+    "borradores_viejos": {
+      "pendiente": false,
+      "plegada": true,
+      "principal": null
+    }
+  },
+  "filas": [
+    {
+      "situacion": "borrador",
+      "paso": "enviar",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "enviar",
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [
+        "retirar"
+      ],
+      "que_decir": "Falta enviarla a aprobar.",
+      "despues": "listo",
+      "lista_si_viejo": "borradores_viejos"
+    },
+    {
+      "situacion": "borrador",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Es un borrador: todavía no se envió a aprobar.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "en_revision",
+      "paso": "aprobar",
+      "lista": "para_aprobar",
+      "cuenta_como_pendiente": true,
+      "principal": "aprobar",
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [
+        "rechazar"
+      ],
+      "que_decir": "Falta aprobarla o rechazarla.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "en_revision",
+      "paso": "espera_aprobar",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [
+        "rechazar",
+        "retirar"
+      ],
+      "que_decir": "Espera la aprobación del Consejo. Si nadie la aprueba, queda esperando.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "rechazada",
+      "paso": "rechazada",
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [
+        "preparar_otra"
+      ],
+      "negativas": [],
+      "que_decir": "Se rechazó: no se modifica ni se vuelve a enviar. Para pagar lo mismo, preparar otra orden.",
+      "despues": "listo",
+      "aviso_una_vez": true
+    },
+    {
+      "situacion": "rechazada",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se rechazó: no se modifica ni se vuelve a enviar.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "retirada",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se retiró: no se aprueba ni se paga.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "para_pagar",
+      "paso": "renovar",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "renovar",
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [],
+      "que_decir": "La aprobación venció: renovarla la vuelve a aprobación.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "para_pagar",
+      "paso": "modificar",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "modificar",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "El proveedor cambió después de aprobarla: así no se puede pagar. Modificarla la vuelve a aprobación.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "para_pagar",
+      "paso": "pagar",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "pagar",
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [],
+      "que_decir": "Está lista para pagar: ver la cuenta y transferir desde el banco.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "para_pagar",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [],
+      "que_decir": "Está lista para pagar: la paga quien ejecuta los pagos.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "pagar",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "pagar",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Falta pagarla: ver la cuenta y transferir desde el banco.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "subir_comprobante",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "subir_comprobante",
+      "secundarias": [
+        "ver_cuenta_de_nuevo"
+      ],
+      "negativas": [
+        "declarar_no_pago"
+      ],
+      "que_decir": "Falta subir el comprobante de la transferencia.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "declarar_no_pago",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "declarar_no_pago",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Nadie vio la cuenta y ya no se puede abrir: falta declarar que no se pagó.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "espera_declarar",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Espera que quien ejecuta los pagos declare que no se pagó.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "tomar_pago",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "tomar_pago",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Quien vio la cuenta no registró el pago ni dijo que no salió: se puede tomar el pago.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": "espera_comprobante",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [
+        "declarar_no_pago"
+      ],
+      "que_decir": "Ya se vio la cuenta: espera el comprobante de quien la vio.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagando",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se está pagando.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "falta_conciliar",
+      "paso": "conciliar",
+      "lista": "para_conciliar",
+      "cuenta_como_pendiente": true,
+      "principal": "conciliar",
+      "secundarias": [],
+      "negativas": [
+        "observar"
+      ],
+      "que_decir": "Falta conciliar el pago: comparar lo registrado con la orden.",
+      "despues": "mismo_paso",
+      "si_el_comprobante_no_coincide": {
+        "principal": "observar",
+        "secundarias": [
+          "conciliar"
+        ],
+        "negativas": []
+      }
+    },
+    {
+      "situacion": "falta_conciliar",
+      "paso": "espera_conciliar",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Espera que el Consejo concilie el pago.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "observado",
+      "paso": "corregir",
+      "lista": "para_corregir",
+      "cuenta_como_pendiente": true,
+      "principal": "corregir",
+      "secundarias": [],
+      "negativas": [
+        "declarar_no_pago"
+      ],
+      "que_decir": "El Consejo observó el pago: falta corregir el registro.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "observado",
+      "paso": "espera_corregir",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "El Consejo observó el pago: espera que quien lo registró lo corrija.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "no_pago_declarado",
+      "paso": "confirmar_no_pago",
+      "lista": "para_confirmar",
+      "cuenta_como_pendiente": true,
+      "principal": "confirmar_no_pago",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se declaró que no se pagó: falta confirmarlo.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "no_pago_declarado",
+      "paso": "subir_comprobante",
+      "lista": "para_pagar",
+      "cuenta_como_pendiente": true,
+      "principal": "subir_comprobante",
+      "secundarias": [
+        "retomar_pago"
+      ],
+      "negativas": [
+        "declarar_no_pago"
+      ],
+      "que_decir": "Se declaró que no se pagó. Falta subir el comprobante o declarar que no se pagó.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "no_pago_declarado",
+      "paso": "espera_confirmar",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [
+        "retomar_pago"
+      ],
+      "negativas": [],
+      "que_decir": "Se declaró que no se pagó: espera la confirmación del Consejo o que declare quien vio la cuenta.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "con_diferencia",
+      "paso": "resolver_diferencia",
+      "lista": "para_resolver",
+      "cuenta_como_pendiente": true,
+      "principal": "resolver_diferencia",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se pagó otra cosa: falta decidir qué pasa con lo pagado.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "con_diferencia",
+      "paso": "espera_resolver",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [
+        "corregir_diferencia"
+      ],
+      "negativas": [],
+      "que_decir": "Se pagó otra cosa: espera la decisión del Consejo.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "reclamo",
+      "paso": "resolver_diferencia",
+      "lista": "para_resolver",
+      "cuenta_como_pendiente": true,
+      "principal": "recuperar",
+      "secundarias": [],
+      "negativas": [
+        "cerrar_reclamo"
+      ],
+      "que_decir": "Hay un reclamo abierto: falta decir si se recuperó la plata.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "reclamo",
+      "paso": "espera_resolver",
+      "lista": "esperando",
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Hay un reclamo abierto: espera la decisión del Consejo.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagada",
+      "paso": "preparar_faltante",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "preparar_faltante",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Se dio por pagado menos de lo aprobado: se puede preparar otra orden por lo que falta.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagada",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Está pagada. Falta cotejar el pago con el banco.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagada_y_cotejada",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Está pagada y cotejada con el banco.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "pagada_y_cotejada",
+      "paso": "preparar_faltante",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "preparar_faltante",
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "Está pagada y cotejada, pero se pagó menos de lo aprobado: se puede preparar otra orden por lo que falta.",
+      "despues": "listo",
+      "excepcion_regla_3": "Decisión 2 del propietario (13-11-2026): una orden pagada de menos, ya cotejada, conserva «Preparar la orden por lo que falta». Es la única fila terminada con acción principal."
+    },
+    {
+      "situacion": "no_se_pago",
+      "paso": "volver_a_pagar",
+      "lista": "para_preparar",
+      "cuenta_como_pendiente": true,
+      "principal": "volver_a_pagar",
+      "secundarias": [
+        "modificar"
+      ],
+      "negativas": [
+        "cerrar_sin_pagar"
+      ],
+      "que_decir": "No se pagó. Se puede volver a pagar o, si ya no hace falta, cerrar sin pagar.",
+      "despues": "listo"
+    },
+    {
+      "situacion": "no_se_pago",
+      "paso": null,
+      "lista": null,
+      "cuenta_como_pendiente": false,
+      "principal": null,
+      "secundarias": [],
+      "negativas": [],
+      "que_decir": "No se pagó.",
+      "despues": "listo"
+    }
+  ]
+}

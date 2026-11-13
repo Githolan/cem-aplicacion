@@ -19,7 +19,8 @@ export type Acto<T> = {
   /** `clave` va en `Idempotency-Key`; las rutas que no la piden la ignoran. */
   pedir: (clave: string) => Promise<Respuesta<T>>;
   alTerminar: (data: T) => void;
-  alFallar?: (estado: number, codigo: string | undefined) => void;
+  /** `error` es el cuerpo del error: de ahí salen los campos a marcar (`erroresDe`). */
+  alFallar?: (estado: number, codigo: string | undefined, error: unknown) => void;
   /** El pedido no llegó al servidor (sin red): el aviso ya lo dice; esto, si hay algo más que hacer. */
   alNoLlegar?: () => void;
 };
@@ -80,7 +81,7 @@ export function useActo(aEntrar: () => void, alDescartar?: () => void) {
     }
     if (renovarClave(response.status, codigo)) clave.current = null;
     setAviso({ texto: mensajeDeActo(response.status, codigo), ok: false });
-    acto.alFallar?.(response.status, codigo);
+    acto.alFallar?.(response.status, codigo, error);
   }
 
   return { enviando, setEnviando, aviso, setAviso, pendiente, setPendiente, hacer, montado };

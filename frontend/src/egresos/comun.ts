@@ -3,6 +3,7 @@ import type { MutableRefObject } from "react";
 import type { components } from "../api/tipos";
 import { REVISAR_FORMULARIO } from "../ErrorDeCampo";
 import { LIMITE_DE_PEDIDOS, mensajeDeFalla } from "../fallas";
+import { NOMBRE_ESTADO } from "../pagos/textos";
 
 // Lo común a las pantallas de egresos (H3; `doc/diseno/H3_Proveedor_Beneficiario_Cuenta.md` del
 // repositorio CEM, «Pantallas», aprobadas el 30-10-2026). Lo que la persona no puede hacer no se le
@@ -60,17 +61,19 @@ export const conLaRedDeVuelta = (actual: Aviso | null): Aviso =>
 /** La lectura que se repitió volvió a fallar y la pantalla ya lo dice: el aviso de la red se va. */
 export const sinElAvisoDeLaRed = (actual: Aviso | null): Aviso | null => (actual?.texto === VOLVIO_LA_RED ? null : actual);
 
+/** El estado guardado de la orden, con la palabra de la lista única (decisión 11, 12-11-2026): sin
+ * los hechos de la ejecución, «En verificación» es lo que falta conciliar. */
 export const TEXTO_ESTADO_ORDEN: Record<EstadoOrden, string> = {
-  borrador: "Borrador",
-  en_revision: "En revisión",
-  rechazada: "Rechazada",
-  retirada: "Retirada",
-  aprobada: "Aprobada",
-  en_ejecucion: "En ejecución",
-  en_verificacion: "En verificación",
-  pagada: "Pagada",
-  fallida: "Fallida",
-  conciliada: "Conciliada",
+  borrador: NOMBRE_ESTADO.borrador,
+  en_revision: NOMBRE_ESTADO.esperando_aprobacion,
+  rechazada: NOMBRE_ESTADO.rechazada,
+  retirada: NOMBRE_ESTADO.retirada,
+  aprobada: NOMBRE_ESTADO.lista_para_pagar,
+  en_ejecucion: NOMBRE_ESTADO.pagando,
+  en_verificacion: NOMBRE_ESTADO.falta_conciliar,
+  pagada: NOMBRE_ESTADO.pagada,
+  fallida: NOMBRE_ESTADO.no_se_pago,
+  conciliada: NOMBRE_ESTADO.pagada,
 };
 
 const TEXTO_FRANJA: Record<Franja, string> = {

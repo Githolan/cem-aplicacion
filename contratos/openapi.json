@@ -10,6 +10,54 @@
         "title": "AccionInvitacion",
         "type": "string"
       },
+      "AccionOfrecida": {
+        "properties": {
+          "codigo": {
+            "$ref": "#/components/schemas/AccionPago"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoAccion"
+          }
+        },
+        "required": [
+          "codigo",
+          "tipo"
+        ],
+        "title": "AccionOfrecida",
+        "type": "object"
+      },
+      "AccionPago": {
+        "description": "Lo que se le puede ofrecer a quien mira una orden. Que se ofrezca lo decide la base (los\n`puede_*`); en qué orden y con qué peso, la tabla de la pantalla.",
+        "enum": [
+          "enviar",
+          "modificar",
+          "retirar",
+          "aprobar",
+          "rechazar",
+          "renovar",
+          "pagar",
+          "ver_cuenta_de_nuevo",
+          "retomar_pago",
+          "tomar_pago",
+          "subir_comprobante",
+          "corregir",
+          "declarar_no_pago",
+          "conciliar",
+          "observar",
+          "confirmar_no_pago",
+          "resolver_diferencia",
+          "recuperar",
+          "cerrar_reclamo",
+          "corregir_diferencia",
+          "preparar_faltante",
+          "volver_a_pagar",
+          "preparar_otra",
+          "cerrar_sin_pagar",
+          "cotejar"
+        ],
+        "title": "AccionPago",
+        "type": "string"
+      },
       "AccionUnidad": {
         "enum": [
           "crear",
@@ -220,6 +268,64 @@
         "title": "AprobacionRegistrada",
         "type": "object"
       },
+      "AvisoRechazo": {
+        "description": "Una orden rechazada que quien la preparó todavía no vio (decisión 3 del propietario,\n12-11-2026): se le avisa arriba de la bandeja hasta que dice «Entendido». No es un pendiente.",
+        "properties": {
+          "concepto": {
+            "title": "Concepto",
+            "type": "string"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "proveedor": {
+            "title": "Proveedor",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "rechazada_en": {
+            "format": "date-time",
+            "title": "Rechazada En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "proveedor",
+          "concepto",
+          "importe_centavos",
+          "moneda",
+          "proveedor_id",
+          "motivo",
+          "creada_en",
+          "rechazada_en"
+        ],
+        "title": "AvisoRechazo",
+        "type": "object"
+      },
       "BajaMandato": {
         "description": "`POST /api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/baja`.",
         "properties": {
@@ -274,20 +380,64 @@
         "type": "object"
       },
       "BandejaPagos": {
-        "description": "`GET …/pagos/bandeja`: lo que quien pide tiene que hacer ahora, por grupo y de lo más viejo\na lo más nuevo. Lo pagado no está; lo rechazado, solo `CEM_PAGOS_DIAS_BANDEJA` días.",
+        "description": "`GET …/pagos/bandeja`: lo que quien pide tiene que hacer ahora, por grupo y de lo más viejo\na lo más nuevo. Lo pagado no está; lo rechazado, como aviso hasta que quien la preparó lo ve.",
         "properties": {
+          "avisos_rechazo": {
+            "items": {
+              "$ref": "#/components/schemas/AvisoRechazo"
+            },
+            "title": "Avisos Rechazo",
+            "type": "array"
+          },
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/ElementoBandejaPagos"
             },
             "title": "Elementos",
             "type": "array"
+          },
+          "por_cotejar": {
+            "description": "Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»). Cero si no puede cotejar.",
+            "minimum": 0.0,
+            "title": "Por Cotejar",
+            "type": "integer"
           }
         },
         "required": [
-          "elementos"
+          "elementos",
+          "avisos_rechazo",
+          "por_cotejar"
         ],
         "title": "BandejaPagos",
+        "type": "object"
+      },
+      "BarraPago": {
+        "description": "Por dónde va la orden. Depende solo de la orden, no de quién mira (§4.2, regla 4).",
+        "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LugarEnLaBarra"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo está el paso siguiente a los hechos; nulo si no hay paso actual."
+          },
+          "hechos": {
+            "description": "Cuántos pasos ya se hicieron.",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Hechos",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hechos",
+          "actual"
+        ],
+        "title": "BarraPago",
         "type": "object"
       },
       "CambioEvento": {
@@ -570,6 +720,57 @@
           "motivo"
         ],
         "title": "CierreReclamo",
+        "type": "object"
+      },
+      "CierreSinPago": {
+        "additionalProperties": false,
+        "description": "`POST …/ordenes-pago/{o}/cerrar-sin-pagar`: una orden que no se pagó y ya no hace falta\npagar (decisión 12 del propietario, 12-11-2026, `0096`). Queda No se pagó, con quién, cuándo\ny el motivo, y sale de la bandeja.",
+        "properties": {
+          "motivo": {
+            "description": "Por qué no hace falta pagarla.",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+            "title": "Motivo",
+            "type": "string"
+          },
+          "version_esperada": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version Esperada",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version_esperada",
+          "motivo"
+        ],
+        "title": "CierreSinPago",
+        "type": "object"
+      },
+      "CierreSinPagoOrden": {
+        "description": "Quién cerró sin pagar una orden que no se pagó, cuándo y por qué (`0096`).",
+        "properties": {
+          "cerrada_en": {
+            "format": "date-time",
+            "title": "Cerrada En",
+            "type": "string"
+          },
+          "cerrada_por_nombre": {
+            "title": "Cerrada Por Nombre",
+            "type": "string"
+          },
+          "motivo": {
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cerrada_por_nombre",
+          "cerrada_en",
+          "motivo"
+        ],
+        "title": "CierreSinPagoOrden",
         "type": "object"
       },
       "CodigoEntrada": {
@@ -2471,6 +2672,15 @@
         "title": "DesasociacionHecha",
         "type": "object"
       },
+      "DespuesDelActo": {
+        "description": "Qué muestra la pantalla al terminar la acción principal (decisión 1, 12-11-2026).",
+        "enum": [
+          "listo",
+          "mismo_paso"
+        ],
+        "title": "DespuesDelActo",
+        "type": "string"
+      },
       "DiferenciaPagoManual": {
         "description": "Lo que se pagó de verdad, sin la cuenta completa.",
         "properties": {
@@ -2905,9 +3115,22 @@
       "ElementoBandejaPagos": {
         "description": "Una orden en la bandeja de quien pide, sin la cuenta.",
         "properties": {
+          "actualizada_en": {
+            "format": "date-time",
+            "title": "Actualizada En",
+            "type": "string"
+          },
           "concepto": {
             "title": "Concepto",
             "type": "string"
+          },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado_visible": {
+            "$ref": "#/components/schemas/EstadoVisible"
           },
           "grupo": {
             "$ref": "#/components/schemas/GrupoPago"
@@ -2936,10 +3159,40 @@
           "paso": {
             "$ref": "#/components/schemas/PasoPago"
           },
+          "pendiente": {
+            "description": "Si cuenta como pendiente en el inicio. Lo que espera a otra persona y los borradores viejos, no.",
+            "title": "Pendiente",
+            "type": "boolean"
+          },
+          "posible_duplicada_de": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrdenParecida"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Otra orden del mismo proveedor e importe con menos de `CEM_PAGOS_DIAS_REPETIDA` días de diferencia. Solo avisa."
+          },
+          "principal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccionPago"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La acción principal de la fila, la misma que el botón principal de la ficha: el verbo de la fila es su texto (P-09). Nula si a quien mira no le toca nada."
+          },
           "proveedor": {
             "description": "La razón social de la versión vigente de la orden.",
             "title": "Proveedor",
             "type": "string"
+          },
+          "situacion": {
+            "$ref": "#/components/schemas/SituacionPago"
           }
         },
         "required": [
@@ -2951,7 +3204,14 @@
           "paso",
           "grupo",
           "le_toca_a",
-          "lectura_disputada"
+          "lectura_disputada",
+          "situacion",
+          "estado_visible",
+          "principal",
+          "pendiente",
+          "creada_en",
+          "actualizada_en",
+          "posible_duplicada_de"
         ],
         "title": "ElementoBandejaPagos",
         "type": "object"
@@ -2968,8 +3228,16 @@
             "title": "Concepto",
             "type": "string"
           },
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "estado_visible": {
+            "$ref": "#/components/schemas/EstadoVisible"
           },
           "fecha_operacion": {
             "anyOf": [
@@ -3039,7 +3307,9 @@
           "importe_pagado_centavos",
           "numero_operacion",
           "fecha_operacion",
-          "actualizada_en"
+          "actualizada_en",
+          "creada_en",
+          "estado_visible"
         ],
         "title": "ElementoConsultaPagos",
         "type": "object"
@@ -3470,6 +3740,24 @@
         "title": "EstadoVersion",
         "type": "string"
       },
+      "EstadoVisible": {
+        "description": "La única palabra de cada estado, la misma en bandeja, ficha, consulta y panel (decisión 11\ndel propietario, 12-11-2026). La da la situación, por la tabla de la pantalla; la palabra\nestá en `pantallas_datos/pagos.json` y en el frontend, y una prueba compara las dos.",
+        "enum": [
+          "borrador",
+          "esperando_aprobacion",
+          "rechazada",
+          "retirada",
+          "lista_para_pagar",
+          "pagando",
+          "falta_conciliar",
+          "observada",
+          "no_se_pago",
+          "pagada",
+          "pagada_y_cotejada"
+        ],
+        "title": "EstadoVisible",
+        "type": "string"
+      },
       "EventoConsorcio": {
         "properties": {
           "accion": {
@@ -3574,6 +3862,36 @@
       "FichaPago": {
         "description": "`GET …/pagos/{orden}`: una sola ficha para todos los estados, sin la cuenta completa. Los\n`puede_*` dicen lo que la base va a aceptar hoy de quien pide, sin contar el gesto (se pide al\nactuar); solo sirven para mostrar: la ruta y la base vuelven a decidir.",
         "properties": {
+          "acciones": {
+            "description": "Lo que se le ofrece a quien mira, en el orden en que se dibuja: a lo sumo una principal. Sale de la tabla de la pantalla y de los `puede_*`: nunca ofrece algo que la base negaría.",
+            "items": {
+              "$ref": "#/components/schemas/AccionOfrecida"
+            },
+            "title": "Acciones",
+            "type": "array"
+          },
+          "barra": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BarraPago"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Nula en una orden retirada."
+          },
+          "cierre_sin_pago": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CierreSinPagoOrden"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quién la cerró sin pagar, cuándo y por qué, si se cerró."
+          },
           "comprobante_actual": {
             "anyOf": [
               {
@@ -3596,6 +3914,19 @@
             ],
             "description": "Nulo si no subió nada, si lo último ya es el actual o si hay un registro vigente."
           },
+          "cotejado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cuándo se cotejó con el banco el pago de la orden, si está cotejado.",
+            "title": "Cotejado En"
+          },
           "declaracion_vigente": {
             "anyOf": [
               {
@@ -3606,6 +3937,9 @@
               }
             ],
             "description": "La última declaración de «no se pagó» que nadie superó ni confirmó."
+          },
+          "despues": {
+            "$ref": "#/components/schemas/DespuesDelActo"
           },
           "diferencia_vigente": {
             "anyOf": [
@@ -3636,6 +3970,22 @@
               }
             ],
             "description": "La ejecución manual de la versión vigente, si tiene."
+          },
+          "esperando_desde": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Desde cuándo espera a otra persona, si a quien mira no le toca nada.",
+            "title": "Esperando Desde"
+          },
+          "estado_visible": {
+            "$ref": "#/components/schemas/EstadoVisible"
           },
           "le_toca_a": {
             "anyOf": [
@@ -3682,8 +4032,23 @@
             ],
             "description": "Nulo si a quien mira no le toca ni espera nada."
           },
+          "posible_duplicada_de": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrdenParecida"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "puede_aprobar": {
             "title": "Puede Aprobar",
+            "type": "boolean"
+          },
+          "puede_cerrar_sin_pagar": {
+            "description": "Si puede cerrar sin pagar una orden que no se pagó (`0096`).",
+            "title": "Puede Cerrar Sin Pagar",
             "type": "boolean"
           },
           "puede_conciliar": {
@@ -3766,6 +4131,11 @@
             "title": "Puede Tomar",
             "type": "boolean"
           },
+          "que_decir": {
+            "description": "La frase de la situación, para quien mira.",
+            "title": "Que Decir",
+            "type": "string"
+          },
           "retiro": {
             "anyOf": [
               {
@@ -3818,6 +4188,16 @@
           "situacion",
           "paso",
           "le_toca_a",
+          "estado_visible",
+          "acciones",
+          "barra",
+          "que_decir",
+          "esperando_desde",
+          "despues",
+          "cotejado_en",
+          "posible_duplicada_de",
+          "cierre_sin_pago",
+          "puede_cerrar_sin_pagar",
           "puede_enviar",
           "puede_aprobar",
           "puede_rechazar",
@@ -4300,7 +4680,7 @@
         "type": "object"
       },
       "GrupoPago": {
-        "description": "Los grupos de la bandeja, en el orden en que se muestran (§2).",
+        "description": "Los grupos de la bandeja, en el orden en que se muestran (§2). Cuál le toca a cada orden lo\ndice la tabla de la pantalla (`pantallas_datos/pagos.json`, campo `lista`).",
         "enum": [
           "para_pagar",
           "para_corregir",
@@ -4309,7 +4689,9 @@
           "para_conciliar",
           "para_confirmar",
           "para_resolver",
-          "esperando"
+          "para_cotejar",
+          "esperando",
+          "borradores_viejos"
         ],
         "title": "GrupoPago",
         "type": "string"
@@ -6116,6 +6498,14 @@
         "title": "LlaveResumen",
         "type": "object"
       },
+      "LugarEnLaBarra": {
+        "enum": [
+          "ahora",
+          "alerta"
+        ],
+        "title": "LugarEnLaBarra",
+        "type": "string"
+      },
       "MandatoDadoDeBaja": {
         "properties": {
           "causa": {
@@ -7175,6 +7565,31 @@
         "title": "OrdenPagoVersionNueva",
         "type": "object"
       },
+      "OrdenParecida": {
+        "description": "Otra orden del mismo proveedor y el mismo importe, preparada con menos de\n`CEM_PAGOS_DIAS_REPETIDA` días de diferencia (decisión 5 del propietario, 12-11-2026). Es un\naviso: no bloquea nada.",
+        "properties": {
+          "creada_en": {
+            "format": "date-time",
+            "title": "Creada En",
+            "type": "string"
+          },
+          "estado_visible": {
+            "$ref": "#/components/schemas/EstadoVisible"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id",
+          "creada_en",
+          "estado_visible"
+        ],
+        "title": "OrdenParecida",
+        "type": "object"
+      },
       "OrdenesPorEstado": {
         "description": "Órdenes de un estado y una moneda, por el importe de su versión vigente. Sin borradores.",
         "properties": {
@@ -7764,6 +8179,26 @@
           "comprobantes_faltantes"
         ],
         "title": "PanelFiscalizacion",
+        "type": "object"
+      },
+      "ParecidaAntesDeGuardar": {
+        "description": "Antes de guardar una orden: si hay otra parecida (decisión 4 del propietario, 13-11-2026).\nMismo proveedor, importe y moneda, a menos de `CEM_PAGOS_DIAS_REPETIDA` días. Una orden\nrutinaria (con contrato o abono) no se compara. Es un aviso: guardar igual se puede.",
+        "properties": {
+          "parecida": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrdenParecida"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "parecida"
+        ],
+        "title": "ParecidaAntesDeGuardar",
         "type": "object"
       },
       "PasoPago": {
@@ -8474,6 +8909,21 @@
           "motivo"
         ],
         "title": "Rechazo",
+        "type": "object"
+      },
+      "RechazoVisto": {
+        "description": "Respuesta de `POST …/ordenes-pago/{o}/rechazo-visto` (decisión 3, `0096`).",
+        "properties": {
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "orden_id"
+        ],
+        "title": "RechazoVisto",
         "type": "object"
       },
       "RegistroDiferenciaPago": {
@@ -9229,9 +9679,20 @@
           "con_diferencia",
           "reclamo",
           "pagada",
+          "pagada_y_cotejada",
           "no_se_pago"
         ],
         "title": "SituacionPago",
+        "type": "string"
+      },
+      "TipoAccion": {
+        "description": "Cómo se dibuja una acción ofrecida: una sola principal por pantalla (§4.2).",
+        "enum": [
+          "principal",
+          "secundaria",
+          "negativa"
+        ],
+        "title": "TipoAccion",
         "type": "string"
       },
       "TipoActor": {
@@ -15037,6 +15498,91 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/cerrar-sin-pagar": {
+      "post": {
+        "description": "Decisión 12 del propietario (12-11-2026, `0096`). No mueve dinero, como retirar: sin el\ngesto. Cerrada, la orden ya no se vuelve a pagar.",
+        "operationId": "cerrar_sin_pagar_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__cerrar_sin_pagar_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CierreSinPago"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrdenPagoCambiada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cerrar una orden que no se pagó y ya no hace falta pagar: queda No se pagó, con quién, cuándo y el motivo, fuera de la bandeja",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/emitir": {
       "post": {
         "description": "Quien emite lee la orden como quien prepara (el paquete del administrador tiene las dos\nfacultades) y la separación se evalúa con quienes aprobaron la versión vigente (A5). La base\nvuelve a exigir todo: la franja, las aprobaciones, los 7 días, el proveedor, la cuenta y la\nseparación por identidad humana.",
@@ -16312,6 +16858,81 @@
         ]
       }
     },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/rechazo-visto": {
+      "post": {
+        "description": "Decisión 3 del propietario (12-11-2026, `0096`): queda quién lo vio y cuándo, por persona.\nNo mueve dinero: sin el gesto. Repetirlo no cambia nada.",
+        "operationId": "marcar_rechazo_visto_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__rechazo_visto_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RechazoVisto"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Otra versión, sin cambios, o el estado no lo admite."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "«Entendido»: quien preparó una orden rechazada vio el aviso. Sale de la bandeja y queda en la consulta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/renovar": {
       "post": {
         "operationId": "renovar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__renovar_post",
@@ -16398,7 +17019,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/retirar": {
       "post": {
-        "description": "Comentario 23 de la revisión de pantallas (09-11-2026, `0093`): solo quien la preparó y\nsolo mientras nadie aprobó la versión vigente. No mueve dinero: sin el gesto.",
+        "description": "Comentario 23 de la revisión de pantallas (09-11-2026, `0093`) y decisión 4 del\npropietario (12-11-2026, `0096`), con la 7 del 13-11: quien la preparó la retira siempre;\notra persona que prepara, solo un borrador sin movimiento hace más de\n`CEM_PAGOS_DIAS_BORRADOR_VIEJO` días. Solo mientras nadie aprobó la versión vigente. No\nmueve dinero: sin el gesto.",
         "operationId": "retirar_orden_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__retirar_post",
         "parameters": [
           {
@@ -17994,6 +18615,118 @@
           }
         },
         "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/parecida": {
+      "get": {
+        "description": "Decisión 4 del propietario (13-11-2026). Con un contrato o abono la orden es rutinaria: no\nse compara. `orden_id` es la orden que se modifica, que no cuenta como otra.",
+        "operationId": "parecida_antes_de_guardar_api_v1_consorcios__consorcio_id__pagos_parecida_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "importe_centavos",
+            "required": true,
+            "schema": {
+              "exclusiveMinimum": 0,
+              "title": "Importe Centavos",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "moneda",
+            "required": true,
+            "schema": {
+              "maxLength": 3,
+              "minLength": 3,
+              "title": "Moneda",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "contrato_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Contrato Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "orden_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Orden Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParecidaAntesDeGuardar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Antes de guardar una orden: si hay otra parecida (mismo proveedor e importe, en los últimos días). No bloquea",
         "tags": [
           "egresos"
         ]

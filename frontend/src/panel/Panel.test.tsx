@@ -116,7 +116,8 @@ describe("panel del Consejo", () => {
     // En el orden del circuito y con el valor escrito: no depende del color.
     const filas = within(estados).getAllByRole("row").slice(1);
     expect(filas.map((f) => f.textContent)).toEqual([
-      expect.stringMatching(/^En revisión1 orden, \$\s?500,00$/),
+      // Una sola lista de nombres de estado (decisión 11 del 12-11-2026).
+      expect.stringMatching(/^Esperando aprobación1 orden, \$\s?500,00$/),
       expect.stringMatching(/^Pagada3 órdenes, \$\s?3\.000,00$/),
     ]);
     expect(within(estados).getByRole("link", { name: "Consultar los pagos" }).getAttribute("href")).toBe("/pagos/consulta");

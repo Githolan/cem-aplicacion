@@ -15,7 +15,8 @@ import {
 } from "./permisos";
 
 // Lo que el inicio dice de Pagos, de un edificio por vez: la bandeja es de un edificio. Cuenta lo
-// mismo que la bandeja muestra para hacer: lo que espera a otra persona no es para hacer.
+// que el servidor marca como pendiente (la tabla de la pantalla): lo que espera a otra persona, los
+// borradores viejos y los avisos de rechazo no son para hacer. Los pagos por cotejar, sí.
 
 const NADA_PARA_HACER = "Nada pendiente.";
 const DETALLE_SIN_DATO = "Lo que tenés para hacer";
@@ -26,7 +27,7 @@ async function cuantoHayParaHacer(consorcio: string): Promise<number> {
     params: { path: { consorcio_id: consorcio } },
   });
   if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
-  return data.elementos.filter((e) => e.grupo !== "esperando").length;
+  return data.elementos.filter((e) => e.pendiente).length + data.por_cotejar;
 }
 
 const cosas = (cantidad: number) => (cantidad === 1 ? "cosa" : "cosas");

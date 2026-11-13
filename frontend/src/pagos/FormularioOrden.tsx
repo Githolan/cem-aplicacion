@@ -25,7 +25,8 @@ import { RUTA_PROVEEDORES } from "../egresos/Proveedores";
 import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
-import { AVISO_MODIFICAR } from "./textos";
+import { rutaFicha } from "./rutas";
+import { AVISO_MODIFICAR, fechaCorta, GUARDAR_IGUAL, textoParecidaAntes, VER_LA_OTRA } from "./textos";
 import type { ActoEnCurso } from "./useActo";
 
 // Preparar una orden o guardar una versión nueva: el proveedor se elige de la lista, nunca se
@@ -46,6 +47,7 @@ import type { ActoEnCurso } from "./useActo";
 type Proveedor = components["schemas"]["Proveedor"];
 type Contrato = components["schemas"]["Contrato"];
 type Version = components["schemas"]["VersionOrdenPago"];
+type OrdenParecida = components["schemas"]["OrdenParecida"];
 
 export const MONEDAS = ["ARS", "USD"] as const;
 /** Rechazos que se arreglan cambiando lo escrito: el formulario sigue abierto con sus datos. */
@@ -169,6 +171,11 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   const [vuelta, setVuelta] = useState(0);
   const [datos, setDatos] = useState<Datos | null>(null);
   const [confirmar, setConfirmar] = useState(false);
+  /** Otra orden parecida, encontrada al guardar (decisión 4 del 13-11-2026): se avisa y no bloquea. */
+  const [parecida, setParecida] = useState<OrdenParecida | null>(null);
+  /** Los datos con los que se eligió «Guardar igual»: con otros, se vuelve a mirar. */
+  const guardarIgual = useRef<string | null>(null);
+  const formulario = useRef<HTMLFormElement>(null);
   /** Los datos de la versión que se abrió, para saber qué cambió la persona. */
   const vistos = useRef<Datos | null>(null);
   const versionVista = modificar?.version;
@@ -296,6 +303,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   function cambiar<K extends keyof Datos>(campo: K, valor: Datos[K]) {
     revisado(campo);
     setConfirmar(false);
+    setParecida(null);
     setDatos((d) => {
       if (d === null) return d;
       const nuevo = { ...d, [campo]: valor };
@@ -315,6 +323,12 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
     }
     if (modificar?.pierdeAprobaciones === true && !confirmar) {
       setConfirmar(true);
+      return;
+    }
+    // Antes de guardar, si no es rutinaria (sin contrato ni abono), se mira si hay otra parecida.
+    const comparable = { proveedor_id: datos.proveedor, importe_centavos: centavos, moneda: datos.moneda };
+    if (datos.contrato === "" && guardarIgual.current !== JSON.stringify(comparable)) {
+      mirarParecida(comparable);
       return;
     }
     const esencial = {
@@ -360,6 +374,31 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
         }
       },
     });
+  }
+
+  /** Si hay otra orden parecida, la muestra; si no, guarda. Mirar no cambia nada. */
+  function mirarParecida(comparable: { proveedor_id: string; importe_centavos: number; moneda: string }) {
+    acto.setEnviando(true);
+    setAviso(null);
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/pagos/parecida", {
+        params: { path: { consorcio_id: consorcio }, query: { ...comparable, orden_id: modificar?.orden } },
+      })
+      .then(({ data, error, response }) => {
+        exigirSesion(response);
+        if (data === undefined) {
+          setAviso({ texto: mensajeDeActo(response.status, codigoDe(error)), ok: false });
+          return;
+        }
+        if (data.parecida !== null) {
+          setParecida(data.parecida);
+          return;
+        }
+        guardarIgual.current = JSON.stringify(comparable);
+        formulario.current?.requestSubmit();
+      })
+      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
+      .finally(() => acto.setEnviando(false));
   }
 
   /** El segundo pedido de «Guardar y enviar a aprobar», sobre la versión recién guardada. */
@@ -427,7 +466,7 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
   };
 
   return (
-    <form className="formulario tarjeta" onSubmit={guardar} aria-labelledby={`${id}-form`}>
+    <form ref={formulario} className="formulario tarjeta" onSubmit={guardar} aria-labelledby={`${id}-form`}>
       <h2 id={`${id}-form`}>{modificar === undefined ? "Preparar una orden" : "Modificar la orden"}</h2>
       <CargaConLectura consorcio={consorcio} tipo="factura" titulo="Factura" de="de la factura" textoVer="Ver la factura"
         deshabilitada={enviando} inicial={inicial?.factura ?? facturaDeLaVersion} aEntrar={aEntrar}
@@ -502,6 +541,23 @@ export function FormularioOrden({ consorcio, acto, aEntrar, aInicio, modificar, 
         <p className="aviso-error" role="alert">
           {AVISO_MODIFICAR}
         </p>
+      )}
+      {parecida !== null && (
+        <div className="aviso-info" role="alert">
+          <p>{textoParecidaAntes(fechaCorta(parecida.creada_en))}</p>
+          <div className="acciones">
+            <button type="button" className="secundario" disabled={enviando} onClick={() => {
+              guardarIgual.current = JSON.stringify({ proveedor_id: datos.proveedor, importe_centavos: aCentavos(datos.importe), moneda: datos.moneda });
+              setParecida(null);
+              formulario.current?.requestSubmit();
+            }}>
+              {GUARDAR_IGUAL}
+            </button>
+            <Link to={rutaFicha(parecida.orden_id)} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+              {VER_LA_OTRA}
+            </Link>
+          </div>
+        </div>
       )}
       {facturaEnEspera && (
         <p id={`${id}-espera`} className="aviso-info">
