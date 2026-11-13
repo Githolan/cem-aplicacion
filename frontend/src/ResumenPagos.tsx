@@ -17,18 +17,20 @@ import {
 
 // Lo que el inicio dice de Pagos, de un edificio por vez: la bandeja es de un edificio. Cuenta lo
 // que el servidor marca como pendiente (la tabla de la pantalla): lo que espera a otra persona, los
-// borradores viejos y los avisos de rechazo no son para hacer. Los pagos por cotejar, sí.
+// borradores viejos y los avisos de rechazo no son para hacer. Los pagos por cotejar, sí, y para
+// quien coteja también lo que el extracto no explica (pregunta 8): para la administración es solo
+// una consulta, como en la bandeja.
 
 const NADA_PARA_HACER = "Nada pendiente.";
 const DETALLE_SIN_DATO = "Pendientes";
 const DETALLE_SIN_LECTURA = "No se pudieron leer los pendientes";
 
-async function cuantoHayParaHacer(consorcio: string): Promise<number> {
+async function cuantoHayParaHacer(consorcio: string, coteja: boolean): Promise<number> {
   const { data, error, response } = await api.GET("/api/v1/consorcios/{consorcio_id}/pagos/bandeja", {
     params: { path: { consorcio_id: consorcio } },
   });
   if (data === undefined) throw new FallaDeLectura(mensajeDeFalla(response.status, codigoDe(error)));
-  return data.elementos.filter((e) => e.pendiente).length + data.por_cotejar;
+  return data.elementos.filter((e) => e.pendiente).length + data.por_cotejar + (coteja ? data.sin_explicar : 0);
 }
 
 const cosas = (cantidad: number) => (cantidad === 1 ? "cosa" : "cosas");
@@ -36,9 +38,10 @@ const cosas = (cantidad: number) => (cantidad === 1 ? "cosa" : "cosas");
 /** El edificio del resumen, entre los que la persona ve Pagos, y cuánto tiene para hacer en él. */
 export function useResumenPagos(porEdificio: ReadonlyMap<string, readonly string[]> | null) {
   const { edificios, consorcio, setConsorcio } = useEdificioElegido(useMisConsorcios(), REQUISITOS.pagos);
+  const coteja = cumple(porEdificio?.get(consorcio) ?? [], REQUISITOS.cotejo);
   const consulta = useQuery({
-    queryKey: ["para-hacer", consorcio],
-    queryFn: () => cuantoHayParaHacer(consorcio),
+    queryKey: ["para-hacer", consorcio, coteja],
+    queryFn: () => cuantoHayParaHacer(consorcio, coteja),
     enabled: porEdificio !== null && consorcio !== "",
     ...SIN_CACHE,
   });

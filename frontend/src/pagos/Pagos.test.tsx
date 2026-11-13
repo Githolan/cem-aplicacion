@@ -207,7 +207,7 @@ function error(codigo: string, status: number) {
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
-const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0 });
+const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 });
 const VERIFICADO = () =>
   Response.json({ verificado_en: "2026-10-31T12:00:00Z", vale_hasta: "2026-10-31T12:10:00Z", codigos_recuperacion_restantes: 9 });
 
@@ -4115,7 +4115,7 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
   it("una rechazada se avisa una vez arriba, no cuenta, y con «Entendido» se va (decisión 3, P-03)", async () => {
     let vista = false;
     const simulado = backend({
-      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: vista ? [] : [AVISO], por_cotejar: 0 }),
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: vista ? [] : [AVISO], por_cotejar: 0, sin_explicar: 0 }),
       [`POST ${RECHAZO_VISTO}`]: () => {
         vista = true;
         return Response.json({ orden_id: O2 });
@@ -4238,7 +4238,7 @@ describe("tanda 2 de fricción: bandeja honesta y contrato de la pantalla", () =
 
   it("«Para cotejar» aparece solo si hay pagos por cotejar, con su cantidad (decisión 6, P-24)", async () => {
     vi.stubGlobal("fetch", backend({
-      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 3 }),
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 3, sin_explicar: 0 }),
     }));
     abrir("/pagos");
     const grupo = await screen.findByRole("region", { name: TITULO_GRUPO.para_cotejar });

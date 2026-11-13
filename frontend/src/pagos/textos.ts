@@ -35,6 +35,10 @@ export const VERBO: Record<Paso, string> = {
   espera_corregir: "Falta corregir",
 };
 
+/** Pregunta 8 del propietario (13-11-2026): el mismo nombre en la bandeja, el cotejo y su pantalla. */
+export const TITULO_SIN_EXPLICAR = "Lo que el extracto no explica";
+export const VER_SIN_EXPLICAR = "Ver los débitos sin explicar";
+
 export const TITULO_GRUPO: Record<Grupo, string> = {
   para_pagar: "Para pagar",
   para_corregir: "Para corregir",

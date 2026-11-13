@@ -10,7 +10,7 @@ import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
 import { SIN_CONEXION } from "../fallas";
 import { usePuede } from "../permisos";
 import { TEXTO_ACCION } from "./textosDeAcciones";
-import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, rutaFicha } from "./rutas";
+import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_SIN_EXPLICAR, rutaFicha } from "./rutas";
 import {
   AVISO_LECTURA_DISPUTADA,
   ENTENDIDO,
@@ -22,7 +22,9 @@ import {
   textoRechazada,
   textoRepetida,
   TITULO_GRUPO,
+  TITULO_SIN_EXPLICAR,
   VER_LO_COTEJADO,
+  VER_SIN_EXPLICAR,
   VERBO,
 } from "./textos";
 
@@ -158,7 +160,7 @@ type Props = {
 };
 
 export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLado }: Props) {
-  const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar } = bandeja;
+  const { elementos, avisos_rechazo: avisos, por_cotejar: porCotejar, sin_explicar: sinExplicar } = bandeja;
   const puede = usePuede(consorcio);
   const prepara = puede("egresos.preparar_orden");
   /** Quien coteja llega al cotejo aunque no quede nada por cotejar: ahí está lo ya cotejado y
@@ -167,6 +169,9 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
   const grupos = [...new Set(elementos.map((e) => e.grupo))];
   const paraHacer = grupos.filter((g) => elementos.some((e) => e.grupo === g && e.pendiente));
   const plegados = grupos.filter((g) => !paraHacer.includes(g));
+  /** Lo que el extracto no explica (pregunta 8, opción c): para quien concilia es algo que mirar;
+   * para la administración, una consulta de solo lectura, abajo y sin contar como pendiente. */
+  const sinExplicarParaMirar = coteja && sinExplicar > 0;
   return (
     <div className="bandeja">
       {/* Lo que más hace quien prepara va arriba, antes de la lista (P-35, 12-11-2026); las consultas,
@@ -182,7 +187,7 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
       {avisos.map((a) => (
         <AvisoDeRechazo key={a.orden_id} aviso={a} consorcio={consorcio} aEntrar={aEntrar} alCambiar={alCambiar} />
       ))}
-      {paraHacer.length === 0 && porCotejar === 0 && (
+      {paraHacer.length === 0 && porCotejar === 0 && !sinExplicarParaMirar && (
         <div className="tarjeta bandeja-al-dia">
           <p className="etiqueta-situacion" data-tono="bien">
             Al día
@@ -206,6 +211,19 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
           </p>
         </section>
       )}
+      {sinExplicarParaMirar && (
+        <section aria-label={TITULO_SIN_EXPLICAR}>
+          <h2 className="titulo-grupo">
+            {TITULO_SIN_EXPLICAR} <span className="cantidad">{sinExplicar}</span>
+          </h2>
+          <p>Débitos del banco que ningún pago explica. La administración también los ve.</p>
+          <p className="salidas-pago">
+            <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+              {VER_SIN_EXPLICAR}
+            </Link>
+          </p>
+        </section>
+      )}
       {plegados.map((g) => (
         <Plegado key={g} grupo={g} filas={elementos.filter((e) => e.grupo === g)} consorcio={consorcio} abierta={abierta} />
       ))}
@@ -216,6 +234,11 @@ export function Bandeja({ bandeja, consorcio, abierta, aEntrar, alCambiar, alLad
         {prepara && (
           <Link to={RUTA_PROVEEDORES} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
             Proveedores
+          </Link>
+        )}
+        {!coteja && sinExplicar > 0 && (
+          <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }} className="enlace-boton enlace-boton--borde">
+            {`${TITULO_SIN_EXPLICAR} (${sinExplicar})`}
           </Link>
         )}
         {coteja && porCotejar === 0 && (

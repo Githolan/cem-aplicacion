@@ -260,7 +260,7 @@ async function simularPagos(
     const c = `/api/v1/consorcios/${A}`;
     if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
     if (camino === `${c}/pagos/bandeja`)
-      return ruta.fulfill({ json: { avisos_rechazo: [], por_cotejar: 0, elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA,
+      return ruta.fulfill({ json: { avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0, elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA,
         concepto: ORDEN_A.concepto, importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""],
         lectura_disputada: false, le_toca_a: "vos", creada_en: "2026-10-30T12:00:00Z", actualizada_en: "2026-10-31T12:00:00Z",
         posible_duplicada_de: null, ...deLaFila(inicial.paso as never, GRUPO_DE[inicial.paso ?? ""] as never) }] } });
@@ -377,7 +377,7 @@ test.describe("circuito de pagos", () => {
 
   test("el importe abre el teclado numérico y al salir se ve con centavos", async ({ page, baseURL }) => {
     await simularPagos(page, baseURL!, CON_COMPROBANTE);
-    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } }));
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
     const campo = page.getByLabel(/^Importe transferido/);
     await expect(campo).toHaveAttribute("inputmode", "decimal");
@@ -483,7 +483,7 @@ test.describe("circuito de pagos", () => {
   test("elegir el archivo dispara todo y la ficha sigue sola hasta los datos", async ({ page, baseURL }) => {
     const errores = vigilarErrores(page);
     const hechos = await simularPagos(page, baseURL!, SUBIENDO, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
-    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0 } }));
+    await page.route(`**/api/v1/consorcios/${A}/pagos/bandeja`, (ruta) => ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } }));
     await page.goto(`/pagos/${ORDEN}`);
     // En todos los anchos, a la vez: soltar, la cámara, la galería y el archivo (comentario 32).
     await expect(page.getByText("Soltar el archivo acá")).toBeVisible();

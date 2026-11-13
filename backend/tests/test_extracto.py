@@ -370,3 +370,69 @@ def test_fuera_del_periodo_o_sin_conciliar_o_cotejado_no_falta_en_el_banco():
     cotejado = _p(numero="0003", cotejado=True)
     falta = _p(numero="0004")
     assert _comparar([], [fuera, sin_conciliar, cotejado, falta]).sin_movimiento == [falta]
+
+
+# Columnas reconocidas solas (P-23) ------------------------------------------------------------
+
+
+def _encabezado_y_filas(encabezado: str, *lineas: str) -> extracto.Tabla:
+    return leer_tabla("\n".join((encabezado, *lineas)).encode(), MAXIMO)
+
+
+def test_fecha_debito_y_numero_de_operacion_se_reconocen_solas():
+    """El caso del informe (P-23): sin la pantalla de columnas."""
+    tabla = _encabezado_y_filas("Fecha;Débito;Número de operación", "05/11/2026;1.234,00;48213901")
+    assert extracto.reconocer_columnas(tabla) == ColumnasExtracto(
+        fecha="Fecha", importe="Débito", numero_operacion="Número de operación",
+        signo=SignoExtracto.SIN_SIGNO,
+    )  # fmt: skip
+
+
+def test_una_columna_de_importes_con_negativos_va_con_signo():
+    tabla = _encabezado_y_filas(
+        "Fecha;Descripción;Importe;Referencia", "05/11/2026;Transf;-1.234,00;4821"
+    )
+    assert extracto.reconocer_columnas(tabla) == COLUMNAS
+
+
+@pytest.mark.parametrize(
+    ("encabezado", "fila"),
+    [
+        # Sin ningún negativo, una columna de importes no dice cuáles son los débitos.
+        ("Fecha;Importe", "05/11/2026;1.234,00"),
+        # Dos que pueden ser la fecha, o el importe, o el número: se pregunta.
+        ("Fecha;Fecha de operación;Importe", "05/11/2026;05/11/2026;-1,00"),
+        ("Fecha;Importe;Débito", "05/11/2026;-1,00;1,00"),
+        ("Fecha;Débito;Referencia;Comprobante", "05/11/2026;1,00;A1;B2"),
+        # Sin fecha o sin importe.
+        ("Día;Débito", "05/11/2026;1,00"),
+        ("Fecha;Crédito", "05/11/2026;1,00"),
+    ],
+)
+def test_con_alguna_duda_no_se_reconocen(encabezado, fila):
+    assert extracto.reconocer_columnas(_encabezado_y_filas(encabezado, fila)) is None
+
+
+def test_control_la_misma_columna_de_importes_con_un_negativo_si_se_reconoce():
+    tabla = _encabezado_y_filas("Fecha;Importe", "05/11/2026;1.234,00", "06/11/2026;-5,00")
+    columnas = extracto.reconocer_columnas(tabla)
+    assert columnas is not None and columnas.signo == SignoExtracto.CON_SIGNO
+    assert columnas.numero_operacion is None
+
+
+def test_los_nombres_se_comparan_sin_tildes_mayusculas_ni_signos():
+    tabla = _encabezado_y_filas(
+        "FECHA;N.º de Operación;DEBITOS;Fecha valor", "05/11/2026;4821;1,00;05/11/2026"
+    )
+    columnas = extracto.reconocer_columnas(tabla)
+    assert columnas is not None
+    assert (columnas.fecha, columnas.importe, columnas.numero_operacion) == (
+        "FECHA", "DEBITOS", "N.º de Operación")  # fmt: skip
+
+
+def test_una_columna_de_debitos_con_negativos_va_con_signo():
+    """Si no, los débitos negativos se perderían: con signo, un negativo es un débito."""
+    tabla = _encabezado_y_filas("Fecha;Débito", "05/11/2026;-1.234,00")
+    columnas = extracto.reconocer_columnas(tabla)
+    assert columnas is not None and columnas.signo == SignoExtracto.CON_SIGNO
+    assert [m.importe_centavos for m in leer_movimientos(tabla, columnas).movimientos] == [123_400]

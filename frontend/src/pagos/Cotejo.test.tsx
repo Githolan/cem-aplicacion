@@ -49,7 +49,7 @@ const lista = (elementos: Elemento[], siguiente: string | null = null, maximo_pa
 
 const VISTA_NUEVA: Vista = {
   columnas: ["Fecha valor", "Detalle", "Debito", "Referencia"], muestra: ["05/11/2026", "x", "-1,00", "0048213377"],
-  signo_sugerido: "con_signo", columnas_guardadas: null,
+  signo_sugerido: "con_signo", columnas_guardadas: null, columnas_reconocidas: null,
 };
 const GUARDADAS = { fecha: "Fecha valor", importe: "Debito", numero_operacion: "Referencia", signo: "con_signo", moneda: "ARS" } as const;
 
@@ -69,7 +69,7 @@ function backend(respuestas: Respuestas) {
   const base: Respuestas = {
     "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]),
     "GET /api/v1/auth/totp": () => Response.json({ activo: true, llaves: 0, codigos_recuperacion_restantes: 9, verificado_en: null }),
-    [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 1 }),
+    [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 1, sin_explicar: 0 }),
     [LISTA]: lista([]),
   };
   return vi.fn(async (pedido: Request) => {
@@ -139,7 +139,7 @@ describe("la entrada", () => {
   it("control: a quien solo prepara no se la ofrece y la ruta lo lleva al inicio", async () => {
     const simulado = backend({
       [`GET ${BASE}/mis-acciones`]: alcanza("egresos.preparar_orden"),
-      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0 }),
+      [`GET ${BASE}/pagos/bandeja`]: () => Response.json({ elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 }),
     });
     vi.stubGlobal("fetch", simulado);
     abrir("/pagos");
@@ -459,6 +459,39 @@ describe("con el extracto", () => {
     expect([...new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams.keys()].filter((k) => k !== "moneda")).toEqual([]);
   });
 
+  // P-23: el caso del informe. Contra 3c2d638 este archivo iba a «¿Qué es cada columna?».
+  it("con las columnas reconocidas por su nombre compara enseguida y manda esas", async () => {
+    const reconocidas = { fecha: "Fecha", importe: "Débito", numero_operacion: "Número de operación", signo: "sin_signo", moneda: "ARS" } as const;
+    const simulado = backend({
+      [VISTA]: () =>
+        Response.json({
+          columnas: ["Fecha", "Débito", "Número de operación"], muestra: ["05/11/2026", "1,00", "0048213377"],
+          signo_sugerido: "sin_signo", columnas_guardadas: null, columnas_reconocidas: reconocidas,
+        } satisfies Vista),
+      [EXTRACTO]: () => Response.json(resultado()),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await subir("extracto.csv", "Fecha;Débito;Número de operación\n05/11/2026;1,00;0048213377\n");
+    await screen.findByText("12 pagos coinciden con el banco y quedaron cotejados.");
+    expect(screen.queryByRole("heading", { name: "¿Qué es cada columna?" })).toBeNull();
+    const parametros = new URL(pedidos(simulado, EXTRACTO)[0]?.url ?? "").searchParams;
+    expect(Object.fromEntries(parametros)).toEqual({ fecha: "Fecha", importe: "Débito", numero_operacion: "Número de operación", signo: "sin_signo", moneda: "ARS" });
+    // Y si no eran, «Elegir otras columnas» las trae puestas.
+    fireEvent.click(screen.getByRole("button", { name: "Elegir otras columnas" }));
+    expect((await screen.findByLabelText("Importe") as HTMLSelectElement).value).toBe("Débito");
+    expect((screen.getByLabelText("Cómo figuran los pagos") as HTMLSelectElement).value).toBe("sin_signo");
+  });
+
+  it("control: sin columnas reconocidas ni guardadas pregunta y no compara", async () => {
+    const simulado = backend({ [VISTA]: () => Response.json(VISTA_NUEVA), [EXTRACTO]: () => Response.json(resultado()) });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await subir();
+    await screen.findByRole("heading", { name: "¿Qué es cada columna?" });
+    expect(pedidos(simulado, EXTRACTO)).toEqual([]);
+  });
+
   it("muestra solo lo que hay que mirar, con la acción al lado", async () => {
     const simulado = backend({
       [VISTA]: () => Response.json({ ...VISTA_NUEVA, columnas_guardadas: GUARDADAS }),
@@ -478,7 +511,10 @@ describe("con el extracto", () => {
     expect(banco.textContent).toContain("Débito sin registrar");
     expect(banco.textContent).toContain("12.400,00");
     expect(banco.textContent).toContain("Referencia 0048213999 · 02/11/2026");
-    expect(banco.textContent).toContain("Hay que avisar a la administración.");
+    expect(banco.textContent).toContain("Queda en «Lo que el extracto no explica», que también ve la administración.");
+    // Ya no dice «avisar a la administración» sin un medio: la lista le llega (pregunta 8).
+    expect(banco.textContent).not.toContain("Hay que avisar");
+    expect(screen.getByRole("link", { name: "Ver los débitos sin explicar" }).getAttribute("href")).toBe("/pagos/extracto-sin-explicar");
     expect(screen.getByText("3 ya estaban cotejados.")).toBeTruthy();
     expect(screen.getByText("2 coinciden, pero falta conciliarlos.")).toBeTruthy();
     expect(screen.getByText(/1 coincide, pero lo tiene que cotejar/)).toBeTruthy();

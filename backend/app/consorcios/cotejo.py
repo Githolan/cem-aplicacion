@@ -30,6 +30,7 @@ from cem_contracts.cotejo import (
     CotejoAnulado,
     ListaCotejados,
     ListaCotejo,
+    ListaSinExplicar,
     MonedaExtracto,
     MovimientoSinRegistrar,
     NombreColumna,
@@ -48,7 +49,15 @@ from sqlalchemy import Connection
 from app.autorizacion.requiere import Permiso, requiere
 from app.consorcios import extracto
 from app.consorcios.documentos import ESPERA_TURNO, LECTURA_MAXIMA, _semaforo
-from app.consorcios.egresos import REVISAR, _ejecutar, _lectura
+from app.consorcios.egresos import (
+    REVISAR,
+    Preparar,
+    Revisar,
+    _ejecutar,
+    _lectura,
+    lector_del_extracto,
+    sin_explicar,
+)
 from app.contexto import MotorDep
 from app.errores import ErrorApi, sin_cache
 from app.plataforma.idempotencia import (
@@ -202,6 +211,21 @@ def anular_cotejo(
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
 
 
+@router.get(
+    "/consorcios/{consorcio_id}/pagos/extracto/sin-explicar",
+    response_model=ListaSinExplicar,
+    summary="Lo que el extracto del banco no explica: débitos sin un pago en Consorcio en Mano."
+    " Lo lee quien concilia y, solo para leer, la administración. Sin la cuenta",
+    responses={403: {"description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`,"
+                                    " sin el modo, o falta renovar la sesión."}},
+)  # fmt: skip
+def listar_sin_explicar(preparar: Preparar, revisar: Revisar, motor: MotorDep) -> ListaSinExplicar:
+    lector = lector_del_extracto(preparar, revisar)
+    with _lectura(lector, motor) as c:
+        todos = sin_explicar(c, lector)
+    return ListaSinExplicar(elementos=todos[:MAXIMO_FILAS_RESULTADO], total=len(todos))
+
+
 def _demasiado_grande(tope: int) -> ErrorApi:
     return ErrorApi(
         413, CodigoError.ARCHIVO_DEMASIADO_GRANDE,
@@ -300,6 +324,7 @@ async def columnas_del_extracto(request: Request, permiso: Leer, motor: MotorDep
         return VistaExtracto(
             columnas=tabla.columnas, muestra=extracto.muestra(tabla),
             signo_sugerido=extracto.signo_sugerido(tabla), columnas_guardadas=guardadas,
+            columnas_reconocidas=extracto.reconocer_columnas(tabla),
         )  # fmt: skip
 
     async with _Turno():

@@ -151,6 +151,11 @@ class VistaExtracto(BaseModel):
     columnas_guardadas: ColumnasExtracto | None = Field(
         description="Las del edificio, si este archivo las tiene todas."
     )
+    columnas_reconocidas: ColumnasExtracto | None = Field(
+        description="Las que se reconocen solas por su nombre (P-23): una sola columna de fecha,"
+        " una sola de importe o de débitos y, si hay, una sola de número de operación. Nula si"
+        " falta alguna o hay más de una que puede ser: entonces se pregunta."
+    )
 
 
 class MovimientoSinRegistrar(BaseModel):
@@ -162,6 +167,30 @@ class MovimientoSinRegistrar(BaseModel):
     importe_centavos: int
     moneda: str
     numero_operacion: str | None
+
+
+class MovimientoSinExplicar(BaseModel):
+    """Un débito de un extracto ya subido que ningún pago de Consorcio en Mano explica (pregunta 8
+    del propietario, 13-11-2026). Lo ven quien concilia y, solo para leer, la administración."""
+
+    model_config = ConfigDict(frozen=True)
+
+    movimiento_id: UUID
+    fecha: date
+    importe_centavos: int
+    moneda: str
+    numero_operacion: str | None
+    visto_en: datetime = Field(description="Cuándo se subió el extracto que lo trajo.")
+
+
+class ListaSinExplicar(BaseModel):
+    """`GET …/pagos/extracto/sin-explicar`: de lo más viejo a lo más nuevo, hasta
+    `MAXIMO_FILAS_RESULTADO`. Sin la cuenta ni la descripción del banco: no se guardan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    elementos: list[MovimientoSinExplicar] = Field(max_length=MAXIMO_FILAS_RESULTADO)
+    total: int = Field(ge=0)
 
 
 class ResultadoCotejo(BaseModel):

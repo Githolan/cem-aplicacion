@@ -16,8 +16,8 @@ import { REQUISITOS } from "../permisos";
 import { SubirArchivo } from "../SubirArchivo";
 import { CargandoPagos } from "./CargandoPagos";
 import { MONEDAS } from "./FormularioOrden";
-import { RUTA_PAGOS, rutaFicha } from "./rutas";
-import { EJEMPLO_EXTRACTO } from "./textos";
+import { RUTA_PAGOS, RUTA_SIN_EXPLICAR, rutaFicha } from "./rutas";
+import { EJEMPLO_EXTRACTO, TITULO_SIN_EXPLICAR, VER_SIN_EXPLICAR } from "./textos";
 import { useActo } from "./useActo";
 
 // `/pagos/cotejo`: cotejar con el banco, a mano o con el extracto (§10). Cotejar no cambia la orden
@@ -201,9 +201,12 @@ function CotejoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio
       exigirSesion(response);
       if (!montado.current) return;
       if (data === undefined) falla(mensajeDeError(response.status, codigoDe(error)));
-      else if (data.columnas_guardadas === null) setExtracto({ tipo: "columnas", archivo, vista: data });
+      // Sin columnas guardadas ni reconocidas por su nombre, se pregunta (P-23); si no, se compara
+      // enseguida, y «Elegir otras columnas» sigue en el resultado.
+      else if (data.columnas_guardadas === null && data.columnas_reconocidas === null) setExtracto({ tipo: "columnas", archivo, vista: data });
       else {
-        await comparar(archivo, data, null);
+        const reconocidas = data.columnas_guardadas === null ? data.columnas_reconocidas : null;
+        await comparar(archivo, data, reconocidas === null ? null : { ...reconocidas, moneda: moneda ?? reconocidas.moneda });
         // Sin respuesta, o esperando el código: lo que siga lo dice el aviso o el reintento.
         setExtracto((x) => (x.tipo === "leyendo" ? { tipo: "sin_archivo" } : x));
       }
@@ -376,11 +379,13 @@ type PropsColumnas = { vista: Vista; enviando: boolean; moneda: string | null; a
 
 function ElegirColumnas({ vista, enviando, moneda: monedaSugerida, alComparar, alVolver }: PropsColumnas) {
   const id = useId();
-  const { columnas, muestra, columnas_guardadas: guardadas, signo_sugerido: sugerido } = vista;
-  const [fecha, setFecha] = useState(guardadas?.fecha ?? parecida(columnas, /fecha/i));
-  const [monto, setMonto] = useState(guardadas?.importe ?? parecida(columnas, /importe|d[eé]bito|monto/i));
-  const [numero, setNumero] = useState(guardadas?.numero_operacion ?? parecida(columnas, /operaci[oó]n|referencia|comprobante/i));
-  const [signo, setSigno] = useState<Signo>(guardadas?.signo ?? sugerido);
+  const { columnas, muestra, columnas_guardadas: guardadas, columnas_reconocidas: reconocidas, signo_sugerido: sugerido } = vista;
+  /** Lo guardado del edificio y, si no, lo que el servidor reconoció por el nombre. */
+  const previas = guardadas ?? reconocidas;
+  const [fecha, setFecha] = useState(previas?.fecha ?? parecida(columnas, /fecha/i));
+  const [monto, setMonto] = useState(previas?.importe ?? parecida(columnas, /importe|d[eé]bito|monto/i));
+  const [numero, setNumero] = useState(previas?.numero_operacion ?? parecida(columnas, /operaci[oó]n|referencia|comprobante/i));
+  const [signo, setSigno] = useState<Signo>(previas?.signo ?? sugerido);
   const [moneda, setMoneda] = useState(monedaSugerida ?? guardadas?.moneda ?? "");
   const ejemplo = (columna: string) => muestra[columnas.indexOf(columna)] ?? "";
   const primeraFila = [fecha, monto, numero].filter((c) => c !== "").map(ejemplo);
@@ -627,11 +632,16 @@ function ResultadoDelExtracto({ r, consorcio, alElegirColumnas, alOtroArchivo }:
                   <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                 </span>
                 <span>{detalle(m.numero_operacion, m.fecha, "Referencia")}</span>
-                <span className="fila-pago__nota">Hay que avisar a la administración.</span>
+                <span className="fila-pago__nota">Queda en «{TITULO_SIN_EXPLICAR}», que también ve la administración.</span>
               </li>
             ))}
           </ul>
           {r.total_banco_no_aca > r.banco_no_aca.length && <p>Se ven los primeros {r.banco_no_aca.length}.</p>}
+          <p>
+            <Link to={RUTA_SIN_EXPLICAR} state={{ consorcio }}>
+              {VER_SIN_EXPLICAR}
+            </Link>
+          </p>
         </>
       )}
       {pendientes.length > 0 && (

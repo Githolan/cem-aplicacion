@@ -401,12 +401,19 @@
             "minimum": 0.0,
             "title": "Por Cotejar",
             "type": "integer"
+          },
+          "sin_explicar": {
+            "description": "Cuántos débitos de los extractos subidos ningún pago explica (pregunta 8): para quien concilia es algo que mirar; para la administración, una consulta de solo lectura. Cero para quien no lee el cotejo.",
+            "minimum": 0.0,
+            "title": "Sin Explicar",
+            "type": "integer"
           }
         },
         "required": [
           "elementos",
           "avisos_rechazo",
-          "por_cotejar"
+          "por_cotejar",
+          "sin_explicar"
         ],
         "title": "BandejaPagos",
         "type": "object"
@@ -6381,6 +6388,30 @@
         "title": "ListaSesiones",
         "type": "object"
       },
+      "ListaSinExplicar": {
+        "description": "`GET …/pagos/extracto/sin-explicar`: de lo más viejo a lo más nuevo, hasta\n`MAXIMO_FILAS_RESULTADO`. Sin la cuenta ni la descripción del banco: no se guardan.",
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/MovimientoSinExplicar"
+            },
+            "maxItems": 200,
+            "title": "Elementos",
+            "type": "array"
+          },
+          "total": {
+            "minimum": 0.0,
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "elementos",
+          "total"
+        ],
+        "title": "ListaSinExplicar",
+        "type": "object"
+      },
       "ListaUnidades": {
         "properties": {
           "elementos": {
@@ -6973,6 +7004,56 @@
         ],
         "title": "MotivoRechazo",
         "type": "string"
+      },
+      "MovimientoSinExplicar": {
+        "description": "Un débito de un extracto ya subido que ningún pago de Consorcio en Mano explica (pregunta 8\ndel propietario, 13-11-2026). Lo ven quien concilia y, solo para leer, la administración.",
+        "properties": {
+          "fecha": {
+            "format": "date",
+            "title": "Fecha",
+            "type": "string"
+          },
+          "importe_centavos": {
+            "title": "Importe Centavos",
+            "type": "integer"
+          },
+          "moneda": {
+            "title": "Moneda",
+            "type": "string"
+          },
+          "movimiento_id": {
+            "format": "uuid",
+            "title": "Movimiento Id",
+            "type": "string"
+          },
+          "numero_operacion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numero Operacion"
+          },
+          "visto_en": {
+            "description": "Cuándo se subió el extracto que lo trajo.",
+            "format": "date-time",
+            "title": "Visto En",
+            "type": "string"
+          }
+        },
+        "required": [
+          "movimiento_id",
+          "fecha",
+          "importe_centavos",
+          "moneda",
+          "numero_operacion",
+          "visto_en"
+        ],
+        "title": "MovimientoSinExplicar",
+        "type": "object"
       },
       "MovimientoSinRegistrar": {
         "description": "Un débito del banco sin pago en Consorcio en Mano, en la moneda elegida para el extracto.",
@@ -10763,6 +10844,17 @@
             ],
             "description": "Las del edificio, si este archivo las tiene todas."
           },
+          "columnas_reconocidas": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnasExtracto"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Las que se reconocen solas por su nombre (P-23): una sola columna de fecha, una sola de importe o de débitos y, si hay, una sola de número de operación. Nula si falta alguna o hay más de una que puede ser: entonces se pregunta."
+          },
           "muestra": {
             "description": "La primera línea de datos, columna por columna, sin números de cuenta.",
             "items": {
@@ -10779,7 +10871,8 @@
           "columnas",
           "muestra",
           "signo_sugerido",
-          "columnas_guardadas"
+          "columnas_guardadas",
+          "columnas_reconocidas"
         ],
         "title": "VistaExtracto",
         "type": "object"
@@ -18616,6 +18709,52 @@
           }
         },
         "summary": "Deshacer un cotejo, con motivo y las reglas de cotejar. No se borra y no vuelve a tildarse solo. No cambia la orden",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/pagos/extracto/sin-explicar": {
+      "get": {
+        "operationId": "listar_sin_explicar_api_v1_consorcios__consorcio_id__pagos_extracto_sin_explicar_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaSinExplicar"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin `egresos.revisar_orden` ni `egresos.preparar_orden`, sin el modo, o falta renovar la sesión."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Lo que el extracto del banco no explica: débitos sin un pago en Consorcio en Mano. Lo lee quien concilia y, solo para leer, la administración. Sin la cuenta",
         "tags": [
           "egresos"
         ]

@@ -247,6 +247,28 @@ def le_toca_a(paso: PasoPago, hechos: HechosPago) -> LeTocaA:
             return LeTocaA.VOS
 
 
+AVISABLES = {
+    PasoPago.APROBAR: "aprobar",
+    PasoPago.PAGAR: "pagar",
+    PasoPago.SUBIR_COMPROBANTE: "pagar",
+    PasoPago.CONCILIAR: "conciliar",
+}
+"""Pregunta 7 del propietario (13-11-2026): el correo diario va a quien tiene algo para aprobar,
+pagar o conciliar. Subir el comprobante es terminar de pagar."""
+
+
+def para_avisar(estado: EstadoOrdenPago, a: AccionesOrden, prepara: bool) -> str | None:
+    """Qué tiene que hacer con la orden quien la lee, si es algo que se avisa por correo. La misma
+    regla que la bandeja: el paso, que le toque a esa persona y que la orden esté en una lista."""
+    situacion = situacion_de(estado, a)
+    paso = paso_de(situacion, a, prepara)
+    if paso not in AVISABLES or le_toca_a(paso, a) != LeTocaA.VOS:
+        return None
+    if fila_de(situacion, paso).lista is None:
+        return None
+    return AVISABLES[paso]
+
+
 def estado_visible(situacion: SituacionPago) -> EstadoVisible:
     return PANTALLA.situaciones[situacion].estado
 

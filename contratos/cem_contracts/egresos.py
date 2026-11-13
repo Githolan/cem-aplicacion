@@ -1384,6 +1384,12 @@ class BandejaPagos(BaseModel):
         description="Cuántos pagos conciliados puede cotejar quien pide (grupo «Para cotejar»)."
         " Cero si no puede cotejar.",
     )
+    sin_explicar: int = Field(
+        ge=0,
+        description="Cuántos débitos de los extractos subidos ningún pago explica (pregunta 8):"
+        " para quien concilia es algo que mirar; para la administración, una consulta de solo"
+        " lectura. Cero para quien no lee el cotejo.",
+    )
 
 
 class ComprobanteActual(BaseModel):
