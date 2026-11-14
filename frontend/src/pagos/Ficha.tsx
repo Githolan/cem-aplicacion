@@ -1,4 +1,4 @@
-import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "../api/cliente";
@@ -40,6 +40,7 @@ import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, rutaFicha } from "./rutas";
+import { SUBIR_FACTURA, SubirFactura } from "./SubirFactura";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
@@ -90,6 +91,7 @@ import { VisorComprobante } from "./VisorComprobante";
 type FichaPago = components["schemas"]["FichaPago"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
+type FacturaAdjunta = components["schemas"]["FacturaAdjunta"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
 /** El único campo de los formularios de motivo, por su nombre en la pantalla. */
@@ -150,6 +152,20 @@ function vigenteDe(f: FichaPago): Version {
   const v = f.versiones.find((x) => x.numero === f.orden.version_vigente);
   if (v === undefined) throw new Error(`la ficha no trae la versión vigente de ${f.orden.id}`);
   return v;
+}
+
+/** La versión vigente con su factura: la propia o, si no tiene, la subida después de aprobada que
+ * pasó el antivirus (app 0099). Es la que se ve y la que lleva una modificación, como al renovar. */
+export function conFacturaAdjunta(v: Version, adjunta: FacturaAdjunta | null): Version {
+  if (v.factura_version_id != null || adjunta === null || adjunta.estado !== "disponible" || adjunta.version !== v.numero) return v;
+  return { ...v, documento_id: adjunta.documento_id, factura_version_id: adjunta.factura_version_id };
+}
+
+/** Lo que se dice de la factura subida después de aprobada (app 0099): quién, cuándo y cómo quedó. */
+export function textoDeLaAdjunta(a: FacturaAdjunta): string {
+  if (a.estado === "en_cuarentena") return `${a.adjuntada_por_nombre} subió la factura el ${momento(a.adjuntada_en)}: el antivirus la está revisando.`;
+  if (a.estado === "rechazado") return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} no pasó el antivirus.`;
+  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
 }
 
 /** Lo que cambió de una versión a la otra, para no tener que comparar a ojo. */
@@ -223,9 +239,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const versionLeida = leida?.orden.version_vigente;
   /** El archivo exacto de la factura aprobada con la versión vigente (0088), si quien mira puede
    * abrirlo; se ve en una hoja. */
-  const vigenteLeida = leida === null ? null : vigenteDe(leida);
+  const vigenteLeida = useMemo(() => (leida === null ? null : conFacturaAdjunta(vigenteDe(leida), leida.factura_adjunta)), [leida]);
   const factura = useVersionVisible(consorcio, vigenteLeida?.documento_id ?? null, vigenteLeida?.factura_version_id ?? null, aEntrar);
   const [viendoFactura, setViendoFactura] = useState(false);
+  /** «Subir la factura» que falta, en una hoja (app 0099). */
+  const [subiendoFactura, setSubiendoFactura] = useState(false);
 
   useEffect(() => {
     if (!decide) return;
@@ -1006,12 +1024,32 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   </tbody>
                 </table>
               )}
-              {factura !== null && (
+              {ficha.factura_adjunta !== null && <p className="aviso-info">{textoDeLaAdjunta(ficha.factura_adjunta)}</p>}
+              {(factura !== null || ficha.puede_subir_factura) && (
                 <div className="acciones">
-                  <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
-                    Ver la factura
-                  </button>
+                  {factura !== null && (
+                    <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
+                      Ver la factura
+                    </button>
+                  )}
+                  {/* Solo sin factura: una orden que ya la tiene no invita a subir otra. */}
+                  {ficha.puede_subir_factura && (
+                    <button type="button" className="secundario" onClick={() => setSubiendoFactura(true)}>
+                      {SUBIR_FACTURA}
+                    </button>
+                  )}
                 </div>
+              )}
+              {subiendoFactura && (
+                <SubirFactura consorcio={consorcio} orden={orden} version={v.numero}
+                  descripcion={`${v.razon_social}, ${importe(v.importe_centavos, v.moneda)}: ${v.concepto}`} aEntrar={aEntrar}
+                  alCerrar={(cambio) => {
+                    setSubiendoFactura(false);
+                    if (cambio) {
+                      releer();
+                      alCambiar();
+                    }
+                  }} />
               )}
               {viendoFactura && factura !== null && (
                 <VisorDocumento consorcio={consorcio} documento={factura.documento} version={factura.version} nombre={factura.nombre}
@@ -1220,7 +1258,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
           {estaModificando && (
             <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio}
-              modificar={{ orden, version: v, pierdeAprobaciones: situacion === "en_revision" || situacion === "para_pagar" }}
+              modificar={{ orden, version: vigenteLeida ?? v, pierdeAprobaciones: situacion === "en_revision" || situacion === "para_pagar" }}
               alGuardar={(_, texto) => {
                 setModificando(false);
                 setAviso({ texto, ok: true });

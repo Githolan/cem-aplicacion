@@ -38,7 +38,7 @@ from pydantic import (
     model_validator,
 )
 
-from cem_contracts.documentos import CategoriaDocumento, EstadoVersion, Titulo
+from cem_contracts.documentos import CategoriaDocumento, EstadoVersion, Titulo, VersionCargada
 
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
 """El tope de `bigint` en la base."""
@@ -141,6 +141,15 @@ class EstadoOrdenPago(StrEnum):
     PAGADA = "pagada"
     FALLIDA = "fallida"
     CONCILIADA = "conciliada"
+
+
+CON_FACTURA_ESPERADA = frozenset({
+    EstadoOrdenPago.APROBADA, EstadoOrdenPago.EN_EJECUCION, EstadoOrdenPago.EN_VERIFICACION,
+    EstadoOrdenPago.PAGADA, EstadoOrdenPago.CONCILIADA,
+})  # fmt: skip
+"""Desde la aprobación, la orden ya puede pagarse o se pagó, y la factura tendría que estar: son
+las «Facturas faltantes» del resumen (`0094`) y las órdenes a las que se puede subir la factura que
+falta (`0099`). Es `CON_DINERO_COMPROMETIDO` de las dos migraciones."""
 
 
 class CondicionBeneficiario(StrEnum):
@@ -376,6 +385,43 @@ class RetiroOrdenPago(BaseModel):
     retirada_por: UUID
     retirada_por_nombre: str
     retirada_en: datetime
+
+
+class FacturaAdjunta(BaseModel):
+    """La factura que se subió a una orden ya aprobada o pagada que no la tenía (decisión del
+    propietario del 13-11-2026, `0099`): queda adjunta a la versión vigente con quién y cuándo, sin
+    versión nueva y sin volver a aprobación, porque importe, proveedor y cuenta no cambian. No es
+    parte de lo que se aprobó: la huella de la versión no cambia."""
+
+    model_config = ConfigDict(frozen=True)
+
+    version: Version = Field(description="La versión de la orden a la que se adjuntó.")
+    documento_id: UUID
+    factura_version_id: UUID = Field(
+        description="La versión exacta del archivo. Se abre con"
+        " `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido` cuando `estado`"
+        " es `disponible`."
+    )
+    estado: EstadoVersion = Field(
+        description="`en_cuarentena` mientras el antivirus la revisa; `disponible`: la orden ya"
+        " tiene su factura; `rechazado`: no pasó el antivirus, no cuenta y se puede subir otra."
+    )
+    adjuntada_por: UUID
+    adjuntada_por_nombre: str
+    adjuntada_en: datetime
+
+
+class FacturaSubida(BaseModel):
+    """`POST …/ordenes-pago/{o}/factura`: el archivo quedó adjunto a la versión vigente, en
+    cuarentena. La orden sale de «Facturas faltantes» cuando el antivirus lo acepta; cómo terminó
+    el análisis se pregunta en `GET …/documentos/{documento_id}/versiones/{archivo.id}/estado`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    orden_id: UUID
+    version: Version = Field(description="La versión de la orden a la que se adjuntó: no cambia.")
+    documento_id: UUID
+    archivo: VersionCargada
 
 
 class CierreSinPago(BaseModel):
@@ -1584,6 +1630,15 @@ class FichaPago(BaseModel):
     )
     toma_vigente: TomaVigente | None = Field(
         description="Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."
+    )
+    factura_adjunta: FacturaAdjunta | None = Field(
+        description="La última factura subida a la versión vigente después de aprobada (`0099`),"
+        " si se subió alguna; la de la versión misma está en `versiones`.",
+    )
+    puede_subir_factura: bool = Field(
+        description="Si puede subir la factura que falta (`0099`): prepara órdenes y carga"
+        " documentos, la orden está aprobada o más adelante, su versión vigente no tiene factura y"
+        " no hay otra subida que esté en el antivirus o que lo haya pasado.",
     )
 
 

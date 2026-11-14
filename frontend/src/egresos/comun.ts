@@ -235,6 +235,7 @@ const MENSAJES: Record<string, string> = {
   cuit_repetido: "Ya hay un proveedor con ese CUIT en este edificio.",
   cuit_ya_cargado: "Ese proveedor ya tiene CUIT, y un CUIT no cambia.",
   documento_invalido: "El documento no existe en este edificio o no está vigente.",
+  factura_ya_adjunta: "La orden ya tiene su factura, o el antivirus está revisando otra que se subió.",
   aprobacion_vencida: "La aprobación tiene más de 7 días: hay que renovar la orden para que el Consejo la apruebe de nuevo.",
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",

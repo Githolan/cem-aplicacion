@@ -125,6 +125,8 @@ CLAVES_POR_ENTIDAD = {
                       "contrato_id", "documento_id", "factura_version_id", "alerta_fraccionamiento",
                       "preparada_por_nombre", "creada_en"},
     "orden_aprobacion": {"id", "orden_id", "version", "aprobada_por_nombre", "creada_en"},
+    "factura_adjunta": {"id", "orden_id", "version", "documento_id", "factura_version_id",
+                        "adjuntada_por_nombre", "adjuntada_en"},
     "orden_transicion": {"orden_id", "fecha", "accion", "origen", "desde", "hacia", "version",
                          "actor_nombre"},
     "umbral": {"id", "importe_centavos", "moneda", "vigente_desde", "decision_id"},
@@ -1278,6 +1280,7 @@ TABLA_DE_LA_ENTIDAD = {
     "orden": "nucleo.orden_pago",
     "orden_version": "nucleo.orden_pago_version",
     "orden_aprobacion": "nucleo.orden_pago_aprobacion",
+    "factura_adjunta": "nucleo.factura_adjunta_orden_pago",
     "umbral": "nucleo.umbral_orden_pago",
     "aprobaciones_configuradas": "nucleo.aprobaciones_orden_pago",
     "ejecucion": "nucleo.ejecucion_orden_pago",
@@ -1313,6 +1316,10 @@ COTEJAR_EXTRACTO = (
 NO_ES_PAGO = "select nucleo.marcar_no_es_pago(:movimiento, :motivo, :actor, :origen, :sesion)"
 RETIRAR_NO_ES_PAGO = (
     "select nucleo.retirar_no_es_pago(:movimiento, :motivo, :actor, :origen, :sesion)"
+)
+ADJUNTAR_FACTURA = (
+    "select nucleo.adjuntar_factura_orden_pago(:orden, :version, 'Factura SINTETICA',"
+    " 'application/pdf', 1, repeat('b', 64), :actor, :origen, :sesion)"
 )
 TRANSICIONES = (
     "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
@@ -1432,6 +1439,8 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     llamar(motor_migrate, s, s.mc1, RECHAZAR, orden=rechazada, version=1,
            motivo="SINTETICO: falta la factura")  # fmt: skip
     pagadas = [pagada(motor_migrate, s), pagada(motor_migrate, s)]
+    # La factura subida después a una pagada que no la tenía (0099).
+    llamar(motor_migrate, s, s.adm, ADJUNTAR_FACTURA, orden=pagadas[1], version=1)
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
     leida_para_carga(motor_migrate, motor_app, s)

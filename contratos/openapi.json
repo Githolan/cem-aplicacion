@@ -890,6 +890,7 @@
           "cuit_repetido",
           "cuit_ya_cargado",
           "documento_invalido",
+          "factura_ya_adjunta",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",
@@ -1152,7 +1153,7 @@
         "type": "object"
       },
       "ComprobanteFaltante": {
-        "description": "Una orden aprobada o más adelante cuya versión vigente no tiene archivo de factura.",
+        "description": "Una orden aprobada o más adelante cuya versión vigente no tiene archivo de factura, ni uno\nsubido después que haya pasado el antivirus (`0099`).",
         "properties": {
           "actualizada_en": {
             "format": "date-time",
@@ -1165,6 +1166,17 @@
           },
           "estado": {
             "$ref": "#/components/schemas/EstadoOrdenPago"
+          },
+          "factura_subida": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EstadoVersion"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cómo está el último archivo subido como factura después de aprobada (`0099`): `en_cuarentena` mientras el antivirus lo revisa, `rechazado` si no lo pasó. Nulo si no se subió ninguno."
           },
           "importe_centavos": {
             "title": "Importe Centavos",
@@ -1183,16 +1195,25 @@
             "description": "La razón social, como figura en la versión vigente.",
             "title": "Proveedor",
             "type": "string"
+          },
+          "version": {
+            "description": "La versión vigente: la que se manda al subir la factura (`0099`).",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
           }
         },
         "required": [
           "orden_id",
+          "version",
           "estado",
           "proveedor",
           "concepto",
           "importe_centavos",
           "moneda",
-          "actualizada_en"
+          "actualizada_en",
+          "factura_subida"
         ],
         "title": "ComprobanteFaltante",
         "type": "object"
@@ -3890,6 +3911,91 @@
         "title": "EventoPropio",
         "type": "object"
       },
+      "FacturaAdjunta": {
+        "description": "La factura que se subió a una orden ya aprobada o pagada que no la tenía (decisión del\npropietario del 13-11-2026, `0099`): queda adjunta a la versión vigente con quién y cuándo, sin\nversión nueva y sin volver a aprobación, porque importe, proveedor y cuenta no cambian. No es\nparte de lo que se aprobó: la huella de la versión no cambia.",
+        "properties": {
+          "adjuntada_en": {
+            "format": "date-time",
+            "title": "Adjuntada En",
+            "type": "string"
+          },
+          "adjuntada_por": {
+            "format": "uuid",
+            "title": "Adjuntada Por",
+            "type": "string"
+          },
+          "adjuntada_por_nombre": {
+            "title": "Adjuntada Por Nombre",
+            "type": "string"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoVersion",
+            "description": "`en_cuarentena` mientras el antivirus la revisa; `disponible`: la orden ya tiene su factura; `rechazado`: no pasó el antivirus, no cuenta y se puede subir otra."
+          },
+          "factura_version_id": {
+            "description": "La versión exacta del archivo. Se abre con `…/documentos/{documento_id}/versiones/{factura_version_id}/contenido` cuando `estado` es `disponible`.",
+            "format": "uuid",
+            "title": "Factura Version Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "La versión de la orden a la que se adjuntó.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "documento_id",
+          "factura_version_id",
+          "estado",
+          "adjuntada_por",
+          "adjuntada_por_nombre",
+          "adjuntada_en"
+        ],
+        "title": "FacturaAdjunta",
+        "type": "object"
+      },
+      "FacturaSubida": {
+        "description": "`POST …/ordenes-pago/{o}/factura`: el archivo quedó adjunto a la versión vigente, en\ncuarentena. La orden sale de «Facturas faltantes» cuando el antivirus lo acepta; cómo terminó\nel análisis se pregunta en `GET …/documentos/{documento_id}/versiones/{archivo.id}/estado`.",
+        "properties": {
+          "archivo": {
+            "$ref": "#/components/schemas/VersionCargada"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "orden_id": {
+            "format": "uuid",
+            "title": "Orden Id",
+            "type": "string"
+          },
+          "version": {
+            "description": "La versión de la orden a la que se adjuntó: no cambia.",
+            "exclusiveMinimum": 0.0,
+            "maximum": 2147483647.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "orden_id",
+          "version",
+          "documento_id",
+          "archivo"
+        ],
+        "title": "FacturaSubida",
+        "type": "object"
+      },
       "FaltaSegundoFactor": {
         "description": "La contraseña sirvió y la persona tiene segundo factor: falta el código\n(`POST /api/v1/auth/contrasena/segundo-factor`) desde el mismo navegador, antes de\n`vence_en`.",
         "properties": {
@@ -4039,6 +4145,17 @@
           "estado_visible": {
             "$ref": "#/components/schemas/EstadoVisible"
           },
+          "factura_adjunta": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FacturaAdjunta"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La última factura subida a la versión vigente después de aprobada (`0099`), si se subió alguna; la de la versión misma está en `versiones`."
+          },
           "le_toca_a": {
             "anyOf": [
               {
@@ -4178,6 +4295,11 @@
             "title": "Puede Subir Comprobante",
             "type": "boolean"
           },
+          "puede_subir_factura": {
+            "description": "Si puede subir la factura que falta (`0099`): prepara órdenes y carga documentos, la orden está aprobada o más adelante, su versión vigente no tiene factura y no hay otra subida que esté en el antivirus o que lo haya pasado.",
+            "title": "Puede Subir Factura",
+            "type": "boolean"
+          },
           "puede_tomar": {
             "description": "Si puede tomar el pago de quien vio la cuenta: pasó el plazo y no dijo nada.",
             "title": "Puede Tomar",
@@ -4279,7 +4401,9 @@
           "declaracion_vigente",
           "diferencia_vigente",
           "diferencias_anteriores",
-          "toma_vigente"
+          "toma_vigente",
+          "factura_adjunta",
+          "puede_subir_factura"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -16090,6 +16214,142 @@
           }
         },
         "summary": "Enviar un borrador a revisión",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/factura": {
+      "post": {
+        "description": "Decisión del propietario del 13-11-2026 (informe de fricción, AC-44): la factura que falta\nse adjunta a la versión vigente con quién y cuándo, sin versión nueva y sin volver a aprobación,\nporque importe, proveedor y cuenta no cambian. Lo puede quien carga la factura al preparar:\n`egresos.preparar_orden` sin el gesto (no mueve dinero ni cambia la orden) y la carga de\n«Facturas y comprobantes». El archivo sigue el circuito de siempre: cuarentena, antivirus y\nalmacén privado, hasta 20 MB, PDF, JPEG o PNG. La orden sale de «Facturas faltantes» cuando el\nantivirus lo acepta; si lo rechaza, se sube otro. La base vuelve a exigir todo.",
+        "operationId": "subir_factura_faltante_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__factura_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "orden_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Orden Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "La versión vigente que se vio.",
+            "in": "query",
+            "name": "version_esperada",
+            "required": true,
+            "schema": {
+              "description": "La versión vigente que se vio.",
+              "exclusiveMinimum": 0,
+              "maximum": 2147483647,
+              "title": "Version Esperada",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "El título del documento de la factura.",
+            "in": "query",
+            "name": "titulo",
+            "required": true,
+            "schema": {
+              "description": "El título del documento de la factura.",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Titulo",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FacturaSubida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "La orden no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "409": {
+            "description": "La orden no está aprobada ni más adelante (`orden_no_admite`), ya tiene otra versión (`version_desactualizada`), o ya tiene su factura o hay otra que el antivirus está revisando (`factura_ya_adjunta`)."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
+          }
+        },
+        "summary": "Subir la factura que falta a una orden aprobada o pagada: queda adjunta con quién y cuándo, sin versión nueva y sin volver a aprobación",
         "tags": [
           "egresos"
         ]

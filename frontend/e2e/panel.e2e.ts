@@ -30,9 +30,13 @@ const PANEL = {
       importe_centavos: 98_765_432_10,
       moneda: "ARS",
       actualizada_en: "2026-11-05T12:00:00Z",
+      version: 1,
+      factura_subida: null,
     },
   ],
 };
+const D1 = "55555555-5555-4555-8555-555555555555";
+const V1 = "66666666-6666-4666-8666-666666666666";
 
 function vigilarErrores(pagina: Page): string[] {
   const errores: string[] = [];
@@ -46,7 +50,7 @@ function vigilarErrores(pagina: Page): string[] {
   return errores;
 }
 
-async function simularApi(pagina: Page): Promise<string[]> {
+async function simularApi(pagina: Page, subidas: string[] = []): Promise<string[]> {
   const imprevistos: string[] = [];
   await pagina.route("**/api/v1/**", async (ruta) => {
     const pedido = ruta.request();
@@ -54,6 +58,17 @@ async function simularApi(pagina: Page): Promise<string[]> {
     if (camino === "/api/v1/auth/sesion") return ruta.fallback();
     const permisos = simularPermisos(ruta, camino);
     if (permisos !== null) return permisos;
+    // Subir la factura que falta (app 0099): el archivo crudo, con la versión y el título en la consulta.
+    if (pedido.method() === "POST" && camino === `/api/v1/consorcios/${C1}/ordenes-pago/${O1}/factura`) {
+      subidas.push(`${new URL(pedido.url()).search} ${pedido.headers()["content-type"]}`);
+      return ruta.fulfill({
+        status: 201,
+        json: { orden_id: O1, version: 1, documento_id: D1,
+                archivo: { id: V1, estado: "en_cuarentena", tipo: "image/png", tamano: 68, sha256: "a".repeat(64) } },
+      });
+    }
+    if (pedido.method() === "GET" && camino === `/api/v1/consorcios/${C1}/documentos/${D1}/versiones/${V1}/estado`)
+      return ruta.fulfill({ json: { estado: "disponible", motivo_rechazo: null } });
     if (pedido.method() === "GET") {
       if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
       if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: PANEL });
@@ -107,6 +122,42 @@ test.describe("panel", () => {
     await sinFaltasDeAccesibilidad(page);
     // Las barras son SVG en línea: la CSP no tiene que frenar nada.
     expect(await page.locator("svg.grafico__dibujo").count()).toBeGreaterThan(0);
+    expect(errores).toEqual([]);
+    expect(imprevistos).toEqual([]);
+  });
+});
+
+test.describe("subir la factura que falta (app 0099)", () => {
+  // Un PNG de 1x1: SINTETICO.
+  const PNG = Buffer.from(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000" + "1f15c4890000000d4944415478da63f8cfc0f01f0005000100ff899973" + "1d0000000049454e44ae426082",
+    "hex",
+  );
+
+  test("en un teléfono de 360 px la hoja entra, sube el archivo y dice lo que pasó", async ({ page }) => {
+    const errores = vigilarErrores(page);
+    await page.setViewportSize({ width: ANCHO_TELEFONO_PX, height: 740 });
+    const subidas: string[] = [];
+    const imprevistos = await simularApi(page, subidas);
+    await simularSesion(page, "con_sesion");
+    await page.goto("/panel");
+
+    const faltantes = page.getByRole("region", { name: "Facturas faltantes" });
+    await faltantes.getByRole("button", { name: "Subir la factura", exact: true }).click();
+    const hoja = page.getByRole("dialog", { name: "Subir la factura", exact: true });
+    await expect(hoja).toBeVisible();
+    expect(await sinDesplazamiento(page)).toBe(true);
+    await sinFaltasDeAccesibilidad(page);
+
+    await hoja.getByLabel("Archivo de la factura", { exact: true }).setInputFiles({ name: "Factura 0001.png", mimeType: "image/png", buffer: PNG });
+    await expect(hoja.getByText("Listo: la factura quedó adjunta a la orden. El antivirus la está revisando.")).toBeVisible();
+    expect(subidas).toEqual(["?version_esperada=1&titulo=Factura%200001 image/png"]);
+    // La hoja pregunta cada 3 s cómo terminó el antivirus.
+    await expect(hoja.getByText(/^El antivirus aceptó la factura/)).toBeVisible({ timeout: 10_000 });
+    expect(await sinDesplazamiento(page)).toBe(true);
+    await sinFaltasDeAccesibilidad(page);
+    await hoja.getByRole("button", { name: "Cerrar", exact: true }).click();
+    await expect(hoja).toBeHidden();
     expect(errores).toEqual([]);
     expect(imprevistos).toEqual([]);
   });

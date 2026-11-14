@@ -74,6 +74,7 @@ from cem_contracts.errores import CodigoError
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse, StreamingResponse
 from psycopg.errors import InsufficientPrivilege
+from pydantic import BaseModel
 from sqlalchemy import Connection, text
 from sqlalchemy.exc import DBAPIError
 
@@ -330,14 +331,22 @@ async def subir_version(
 
 NuevaVersion = Callable[[Connection, str, int, str], object]
 """Crea la fila de la versión en la base (con su autorización) y devuelve `id` y `clave_objeto`."""
+Respuesta = Callable[[object, VersionCargada], BaseModel]
+"""Con la fila que devolvió `nueva` y la versión cargada, la respuesta de la ruta (`0099`)."""
 
 
 async def subir_archivo(
-    request: Request, ctx: Contexto, clave: str, motor, nueva: NuevaVersion
+    request: Request,
+    ctx: Contexto,
+    clave: str,
+    motor,
+    nueva: NuevaVersion,
+    respuesta: Respuesta | None = None,
 ) -> Response:
     """Lee el archivo con su tope, comprueba el tipo real, crea la versión con `nueva`, lo guarda
     en el almacén y encola el análisis, todo bajo la misma clave de reintento. La autorización de
-    cada ruta va antes y adentro de `nueva`; esta es la parte común (también la de `0068`)."""
+    cada ruta va antes y adentro de `nueva`; esta es la parte común (también la de `0068` y la de
+    `0099`). Sin `respuesta`, responde la versión cargada."""
     declarado = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if declarado not in {t.value for t in TipoArchivo}:
         raise _no_admitido()
@@ -384,9 +393,10 @@ async def subir_archivo(
                 clave_unica=f"{TRABAJO_VERIFICAR}:{fila.id}",
                 maximo_intentos=INTENTOS_VERIFICAR,
             )
-            return 201, VersionCargada(
+            cargada = VersionCargada(
                 id=fila.id, estado="en_cuarentena", tipo=tipo, tamano=len(cuerpo), sha256=suma
             )
+            return 201, cargada if respuesta is None else respuesta(fila, cargada)
 
         return await anyio.to_thread.run_sync(lambda: responder_una_vez(motor, ctx, pedido, efecto))
     finally:
