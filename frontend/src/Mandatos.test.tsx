@@ -2371,6 +2371,32 @@ describe("tanda 11 de fricción en /mandatos", () => {
       expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0);
     });
 
+    it("al cambiar de edificio, la respuesta del antivirus que estaba en camino no trae las actas del anterior (Codex en #245)", async () => {
+      let soltar: (r: Response) => void = () => undefined;
+      const C2_BASE = `/api/v1/consorcios/${C2}`;
+      const simulado = conSubida(() => "en_cuarentena", {
+        "GET /api/v1/me/consorcios": () => Response.json([...CONSORCIOS, { id: C2, nombre: "Edificio Verde", vinculos: [] }]),
+        [`GET ${C2_BASE}/mandatos`]: () => Response.json({ elementos: [] }),
+        [`GET ${C2_BASE}/decisiones`]: () => Response.json({ elementos: [] }),
+        [`GET ${C2_BASE}/mandatos/candidatos`]: () => Response.json({ elementos: [] }),
+        [`GET ${C2_BASE}/documentos`]: () => Response.json({ documentos: [] }),
+        [`GET ${ESTADO_VERSION}`]: () => new Promise<Response>((r) => (soltar = r)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      await within(form).findByText(/^Listo: el acta «Acta 15 de asamblea» se subió a Documentos\./);
+      await waitFor(() => expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0));
+      fireEvent.change(screen.getByLabelText("Edificio"), { target: { value: C2 } });
+      const antes = pedidos(simulado, "GET", RUTA_DOCUMENTOS).length;
+      soltar(Response.json({ estado: "disponible", motivo_rechazo: null }));
+      // Control de que la respuesta llegó: se espera un ciclo y no se pidió la lista del anterior.
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pedidos(simulado, "GET", RUTA_DOCUMENTOS)).toHaveLength(antes);
+      expect(screen.queryByText(LISTO_ELEGIDA)).toBeNull();
+    });
+
     it("un archivo rechazado por el antivirus lo dice y no se ofrece", async () => {
       const simulado = conSubida(() => "rechazado", {
         [`GET ${ESTADO_VERSION}`]: () => Response.json({ estado: "rechazado", motivo_rechazo: "infectado" }),

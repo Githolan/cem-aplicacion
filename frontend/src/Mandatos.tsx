@@ -459,6 +459,9 @@ export function Mandatos() {
   const cargaDocumentos = puede("documentos.cargar", "documentos.cargar_operativos");
   const [actas, setActas] = useState<Lectura<Documento> | null>(null);
   const pedidoActas = useRef(0);
+  /** Sube al cambiar de edificio: una respuesta del acta pedida antes (subida o antivirus) no toca
+   * la pantalla del edificio nuevo (Codex en #245). */
+  const edificioVigente = useRef(0);
   const [actaElegida, setActaElegida] = useState("");
   const [viendoActa, setViendoActa] = useState<{ documento: string; version: string; titulo: string } | null>(null);
   // Subir el acta desde «Registrar una decisión» (G-15): los dos pasos de Documentos (crear el
@@ -1038,9 +1041,11 @@ export function Mandatos() {
     alEstadoActa.current = true;
     setEnviando(true);
     setEstadoActa(null);
+    const generacion = edificioVigente.current;
     try {
-      const documento = actaCreada?.documento ?? (await crearActa(titulo));
-      if (documento !== null) await subirArchivoActa(documento, titulo, archivoActa, actaCreada === null);
+      const documento = actaCreada?.documento ?? (await crearActa(titulo, generacion));
+      if (documento !== null && generacion === edificioVigente.current)
+        await subirArchivoActa(documento, titulo, archivoActa, actaCreada === null, generacion);
     } finally {
       setEnviando(false);
     }
@@ -1048,7 +1053,7 @@ export function Mandatos() {
 
   /** Primer paso: el documento en «Actas y decisiones», con la fecha del acto (o la de hoy si todavía
    * no se cargó). Devuelve su id, o nulo si no se creó (lo dice el aviso del acta). */
-  async function crearActa(titulo: string): Promise<string | null> {
+  async function crearActa(titulo: string, generacion: number): Promise<string | null> {
     claveCrearActa.current ??= crypto.randomUUID();
     try {
       const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
@@ -1057,6 +1062,7 @@ export function Mandatos() {
         body: { categoria: CATEGORIA_ACTAS, titulo, fecha: fechaDecision === "" ? hoyDelDispositivo() : fechaDecision },
       });
       exigirSesion(response);
+      if (generacion !== edificioVigente.current) return null;
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveCrearActa.current = null;
@@ -1069,13 +1075,13 @@ export function Mandatos() {
       return data.id;
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
-      else avisarActa(SIN_CONEXION, false);
+      else if (generacion === edificioVigente.current) avisarActa(SIN_CONEXION, false);
       return null;
     }
   }
 
   /** Segundo paso: el archivo crudo, con su tipo como `Content-Type`, igual que en Documentos. */
-  async function subirArchivoActa(documento: string, titulo: string, elegido: File, recienCreado: boolean) {
+  async function subirArchivoActa(documento: string, titulo: string, elegido: File, recienCreado: boolean, generacion: number) {
     claveSubirActa.current ??= crypto.randomUUID();
     // Si el documento se acaba de crear y el archivo no entra, el documento queda sin archivo: se
     // dice, y el reintento sube el archivo a ese mismo documento.
@@ -1095,6 +1101,7 @@ export function Mandatos() {
         bodySerializer: (cuerpo) => cuerpo,
       });
       exigirSesion(response);
+      if (generacion !== edificioVigente.current) return;
       if (data === undefined) {
         const codigo = codigoDe(error);
         if (renovarClave(response.status, codigo)) claveSubirActa.current = null;
@@ -1110,7 +1117,7 @@ export function Mandatos() {
       pedirActas(documento);
     } catch (e: unknown) {
       if (e instanceof SinSesion) aEntrar();
-      else fallo(SIN_CONEXION);
+      else if (generacion === edificioVigente.current) fallo(SIN_CONEXION);
     }
   }
 
@@ -1118,6 +1125,7 @@ export function Mandatos() {
   function mirarActaEnRevision() {
     if (actaEnRevision === null) return;
     const cual = actaEnRevision;
+    const generacion = edificioVigente.current;
     const noSeSupo = `No se pudo consultar si el acta «${cual.titulo}» ya pasó la revisión del antivirus: se vuelve a consultar sola.`;
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
@@ -1125,6 +1133,7 @@ export function Mandatos() {
       })
       .then(({ data, response }) => {
         exigirSesion(response);
+        if (generacion !== edificioVigente.current) return;
         if (data === undefined) avisarActa(noSeSupo, false);
         else if (data.estado === "disponible") pedirActas(cual.documento);
         else if (data.estado === "rechazado") {
@@ -1134,7 +1143,7 @@ export function Mandatos() {
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
-        else avisarActa(noSeSupo, false);
+        else if (generacion === edificioVigente.current) avisarActa(noSeSupo, false);
       });
   }
   const antivirusTarda = useConsultaDelAntivirus(abierto === "decision" && actaEnRevision !== null, mirarActaEnRevision);
@@ -1304,6 +1313,7 @@ export function Mandatos() {
     // Nada del edificio anterior queda elegible mientras llegan los datos del nuevo.
     for (const clave of [claveDecision, claveAlta, claveBaja]) clave.current = null;
     pedidoActas.current += 1;
+    edificioVigente.current += 1;
     setActas(null);
     setActaElegida("");
     cerrarSubidaActa();
