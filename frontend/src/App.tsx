@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import { Link, Navigate, Route, Routes } from "react-router";
 
 import { Contactos, RUTA_CONTACTOS } from "./Contactos";
-import { ContactosGestion, RUTA_CONTACTOS_GESTION } from "./ContactosGestion";
 import { Cuenta, RUTA_CUENTA } from "./Cuenta";
 import { Documentos, RUTA_DOCUMENTOS } from "./Documentos";
 import { AvisoLlegada } from "./AvisoLlegada";
@@ -167,13 +166,15 @@ function FilaDeInicio({ enlace }: { enlace: Pick<EnlaceDeInicio, "ruta" | "texto
   );
 }
 
-/** Las pantallas que reemplazó el circuito de pagos: un enlace viejo sigue llegando. */
+/** Las pantallas que reemplazó otra (el circuito de pagos; los contactos en una sola, G-52 y G-53):
+ * un enlace viejo o un marcador siguen llegando. */
 const RUTAS_VIEJAS: readonly (readonly [string, string])[] = [
   ["/egresos/ordenes", RUTA_PAGOS],
   ["/egresos/revision", RUTA_PAGOS],
   ["/egresos/pagos", RUTA_PAGOS],
   ["/egresos/conciliacion", RUTA_PAGOS],
   ["/egresos/por-aclarar", RUTA_POR_ACLARAR],
+  ["/contactos/gestion", RUTA_CONTACTOS],
 ];
 
 async function hayPagosPorAclarar(): Promise<boolean> {
@@ -374,7 +375,6 @@ export function App() {
           <Route path={RUTA_MANDATOS} element={<Exige requisito={REQUISITOS.mandatos}><Mandatos /></Exige>} />
           <Route path={RUTA_PADRON} element={<Exige requisito={REQUISITOS.padron}><Padron /></Exige>} />
           <Route path={RUTA_CONTACTOS} element={<Exige requisito={REQUISITOS.contactos}><Contactos /></Exige>} />
-          <Route path={RUTA_CONTACTOS_GESTION} element={<Exige requisito={REQUISITOS.contactosGestion}><ContactosGestion /></Exige>} />
           <Route path={RUTA_DOCUMENTOS} element={<Exige requisito={REQUISITOS.documentos}><Documentos /></Exige>} />
           <Route path={RUTA_SEGUNDO_FACTOR} element={<SegundoFactor />} />
           <Route path={RUTA_PROVEEDORES} element={<Exige requisito={REQUISITOS.proveedores}><Proveedores /></Exige>} />

@@ -168,6 +168,62 @@ interface PaginaConDatos {
   api: Respuestas;
 }
 
+/** Dos contactos: uno de una empresa y uno de un profesional con un dato señalado. */
+const ASCENSORES = {
+  id: "33333333-3333-4333-8333-333333333333",
+  funcion: "emergencias",
+  naturaleza: "empresa",
+  nombre: "Ascensores del Sur",
+  telefono: "0800-555-1234",
+  indicaciones: "De 8 a 20; fuera de hora, el número de guardia que atiende los fines de semana",
+  vigente_desde: "2026-01-01",
+  vigente_hasta: null,
+  actualizado_en: "2026-10-20T15:00:00Z",
+  verificado_en: null,
+  observado: false,
+};
+const PLOMERIA = {
+  id: "44444444-4444-4444-8444-444444444444",
+  funcion: "emergencias",
+  naturaleza: "profesional",
+  nombre: "Plomería Rápida",
+  telefono: "11 4000-0000",
+  indicaciones: "De 8 a 20; fuera de hora, el número de guardia",
+  vigente_desde: "2026-10-01",
+  vigente_hasta: null,
+  actualizado_en: "2026-10-20T15:00:00Z",
+  verificado_en: null,
+  observado: true,
+};
+const CONTACTOS_API: Respuestas = {
+  "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+  [`GET /api/v1/consorcios/${C1}/contactos`]: {
+    elementos: [ASCENSORES, PLOMERIA],
+    actualizada_en: "2026-10-20T15:00:00Z",
+    zona_horaria: "America/Argentina/Buenos_Aires",
+  },
+  [`GET /api/v1/consorcios/${C1}/contactos/gestion`]: {
+    elementos: [
+      {
+        ...ASCENSORES,
+        consentimiento_referencia: null,
+        observacion: null,
+        actualizado_por: "99999999-9999-4999-8999-999999999999",
+        verificado_por: null,
+        observado_por: null,
+      },
+      {
+        ...PLOMERIA,
+        consentimiento_referencia: "Nota firmada del 20-10",
+        observacion: "El teléfono no atiende",
+        actualizado_por: "99999999-9999-4999-8999-999999999999",
+        verificado_por: null,
+        observado_por: "99999999-9999-4999-8999-999999999999",
+      },
+    ],
+  },
+};
+
 const PAGINAS_CON_DATOS: PaginaConDatos[] = [
   {
     ruta: "/cuenta",
@@ -305,61 +361,19 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     },
   },
   {
+    // Con todas las acciones de las políticas (`simularPermisos`), la persona gestiona: /contactos lee
+    // la lista general (la copia sin conexión) y la de gestión, y muestra esta con sus actos (G-52).
     ruta: "/contactos",
     url: "/contactos",
-    cargada: "Emergencias: Ascensores del Sur",
-    api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
-      [`GET /api/v1/consorcios/${C1}/contactos`]: {
-        elementos: [
-          {
-            id: "33333333-3333-4333-8333-333333333333",
-            funcion: "emergencias",
-            naturaleza: "empresa",
-            nombre: "Ascensores del Sur",
-            telefono: "0800-555-1234",
-            indicaciones: "De 8 a 20; fuera de hora, el número de guardia que atiende los fines de semana",
-            vigente_desde: "2026-01-01",
-            vigente_hasta: null,
-            actualizado_en: "2026-10-20T15:00:00Z",
-            verificado_en: null,
-            observado: false,
-          },
-        ],
-        actualizada_en: "2026-10-20T15:00:00Z",
-        zona_horaria: "America/Argentina/Buenos_Aires",
-      },
-    },
+    cargada: ["Emergencias: Ascensores del Sur", "Emergencias: Plomería Rápida", "Agregar un contacto"],
+    api: CONTACTOS_API,
   },
   {
+    // La dirección de antes lleva a la misma pantalla (G-53).
     ruta: "/contactos/gestion",
     url: "/contactos/gestion",
-    cargada: "Emergencias: Plomería Rápida",
-    api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
-      [`GET /api/v1/consorcios/${C1}/contactos/gestion`]: {
-        elementos: [
-          {
-            id: "33333333-3333-4333-8333-333333333333",
-            funcion: "emergencias",
-            naturaleza: "profesional",
-            nombre: "Plomería Rápida",
-            telefono: "11 4000-0000",
-            indicaciones: "De 8 a 20; fuera de hora, el número de guardia",
-            vigente_desde: "2026-10-01",
-            vigente_hasta: null,
-            actualizado_en: "2026-10-20T15:00:00Z",
-            verificado_en: null,
-            observado: true,
-            consentimiento_referencia: "Nota firmada del 20-10",
-            observacion: "El teléfono no atiende",
-            actualizado_por: "99999999-9999-4999-8999-999999999999",
-            verificado_por: null,
-            observado_por: "99999999-9999-4999-8999-999999999999",
-          },
-        ],
-      },
-    },
+    cargada: ["Emergencias: Plomería Rápida", "Agregar un contacto"],
+    api: CONTACTOS_API,
   },
   {
     ruta: "/documentos",

@@ -184,7 +184,7 @@ function accionesDeCarga(categoria: Categoria): string[] {
     : ["documentos.cargar"];
 }
 
-/** Si el intento terminó y el próximo lleva otra clave (igual que en /contactos/gestion). */
+/** Si el intento terminó y el próximo lleva otra clave (igual que en la gestión de /contactos). */
 function renovarClave(estado: number, codigo: string | undefined): boolean {
   if (codigo === "idempotencia_reutilizada") return true;
   return estado < ESTADO.errorDelServidor && codigo !== "idempotencia_en_curso";

@@ -53,11 +53,16 @@ function error(codigo: string, status: number) {
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
-/** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
+/** Por omisión, `mis-acciones` dice lo que alcanza quien solo ve los contactos (sin
+ * `contactos.gestionar`). La gestión dentro de /contactos se prueba en ContactosGestion.test.tsx. */
+const SOLO_VER = ["contactos.ver"];
+
+/** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba, también la
+ * lista de gestión, que a quien solo ve los contactos nunca se le pide. */
 function backend(respuestas: Respuestas) {
   return vi.fn(async (pedido: Request) => {
     const clave = `${pedido.method} ${new URL(pedido.url).pathname}`;
-    const respuesta = respuestas[clave] ?? alcanzaTodo(clave);
+    const respuesta = respuestas[clave] ?? (alcanzaTodo(clave) === undefined ? undefined : alcanza(...SOLO_VER));
     if (respuesta === undefined) throw new Error(`pedido no previsto: ${clave}`);
     return respuesta();
   });
@@ -538,76 +543,66 @@ describe("copia de los contactos", () => {
 });
 
 describe("lo que no se puede hacer no aparece en /contactos", () => {
-  const conAcciones = (...acciones: string[]) =>
+  const GESTION = `${RUTA(C1)}/gestion`;
+  const conAcciones = (acciones: () => Response) =>
     backend({
       "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
       [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
-      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", ...acciones),
+      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: acciones,
     });
 
-  it("con `contactos.gestionar`, «Agregar un contacto» arriba y en la ficha de cada contacto «Corregir» y «Retirar», en rojo", async () => {
-    vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
-    abrir();
-    const agregar = await screen.findByRole("link", { name: "Agregar un contacto" });
-    expect(agregar.getAttribute("href")).toBe("/contactos/gestion");
-    // G-60: es el botón principal de la pantalla y va antes de la lista, como en la gestión.
-    expect(agregar.className).toBe("enlace-boton enlace-boton--principal");
-    const lista = screen.getByRole("list", { name: "Contactos de emergencia" });
-    expect(agregar.compareDocumentPosition(lista) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // El botón dice lo que hace (comentario 25): ya no hay «Gestionar la lista».
-    expect(screen.queryByRole("link", { name: "Gestionar la lista" })).toBeNull();
-    // En la lista, nada para corregir ni retirar: eso va en la ficha.
-    expect(screen.queryByRole("link", { name: "Retirar" })).toBeNull();
-    for (const titulo of await nombres()) {
-      const ficha = await abrirFicha(titulo);
-      expect(within(ficha).getByRole("link", { name: "Corregir" }).getAttribute("href")).toBe("/contactos/gestion");
-      expect(within(ficha).getByRole("link", { name: "Retirar" }).className).toBe("enlace-boton peligro");
-      fireEvent.click(within(ficha).getByRole("button", { name: "Cerrar" }));
-    }
-    // Si el enlace se ve, la persona alcanza la acción: no hace falta aclarar para quién es.
-    expect(screen.queryByText(/administración y Consejo/)).toBeNull();
-  });
-
-  it("G-52: la ficha ofrece también «Marcar como comprobado» y «Señalar un error», que abren ese acto en la gestión", async () => {
-    vi.stubGlobal("fetch", conAcciones("contactos.gestionar"));
-    abrir();
-    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
-    expect(within(ficha).getAllByRole("link").map((a) => a.textContent)).toEqual([
-      "0800-555-1234",
-      "Corregir",
-      "Marcar como comprobado",
-      "Señalar un error",
-      "Retirar",
-    ]);
-    expect(within(ficha).getByRole("link", { name: "Marcar como comprobado" }).getAttribute("href")).toBe("/contactos/gestion");
-    expect(within(ficha).getByRole("link", { name: "Señalar un error" }).getAttribute("href")).toBe("/contactos/gestion");
-  });
-
-  it("G-54: un contacto ya señalado no ofrece «Señalar un error» otra vez; sí «Marcar como comprobado»", async () => {
-    vi.stubGlobal(
-      "fetch",
-      backend({
-        "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
-        [`GET ${RUTA(C1)}`]: () => Response.json({ ...LISTA, elementos: [contacto(K1, "Ascensores del Sur", { observado: true })] }),
-        [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", "contactos.gestionar"),
-      }),
-    );
-    abrir();
-    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
-    expect(within(ficha).queryByRole("link", { name: "Señalar un error" })).toBeNull();
-    expect(within(ficha).getByRole("link", { name: "Marcar como comprobado" })).toBeTruthy();
-  });
-
-  it("control: sin `contactos.gestionar` la lista se ve y ni agregar ni corregir ni retirar", async () => {
-    vi.stubGlobal("fetch", conAcciones());
+  it("sin `contactos.gestionar` la lista se ve, nunca se pide la de gestión y no hay ningún acto", async () => {
+    const simulado = conAcciones(alcanza("contactos.ver"));
+    vi.stubGlobal("fetch", simulado);
     abrir();
     await nombres();
-    expect(screen.queryByRole("link", { name: "Agregar un contacto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
     const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
     expect(within(ficha).getByRole("link", { name: "0800-555-1234" })).toBeTruthy();
-    expect(within(ficha).queryByRole("link", { name: "Corregir" })).toBeNull();
-    expect(within(ficha).queryByRole("link", { name: "Retirar" })).toBeNull();
     expect(within(ficha).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cerrar"]);
+    expect(within(ficha).queryByRole("link", { name: "Corregir" })).toBeNull();
     expect(screen.queryByText(/administración y Consejo/)).toBeNull();
+    // Control: ya se supo qué alcanza la persona (se pidió `mis-acciones`), y aun así nada de gestión.
+    expect(veces(simulado, `/api/v1/consorcios/${C1}/mis-acciones`)).toBeGreaterThan(0);
+    expect(veces(simulado, RUTA(C1))).toBe(1);
+    expect(veces(simulado, GESTION)).toBe(0);
+  });
+
+  it("si no se pudo saber qué alcanza la persona, tampoco se pide la lista de gestión", async () => {
+    const simulado = conAcciones(() => error("servicio_no_disponible", 503));
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await nombres()).toEqual(["Emergencias: Ascensores del Sur", "Emergencias: Guardia de gas"]);
+    expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
+    expect(veces(simulado, GESTION)).toBe(0);
+  });
+
+  it("control: con `contactos.gestionar` sí se pide la de gestión, y la pantalla ofrece agregar", async () => {
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: () => Response.json(LISTA),
+      [`GET ${GESTION}`]: () => Response.json({ elementos: [] }),
+      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", "contactos.gestionar"),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByRole("button", { name: "Agregar un contacto" })).toBeTruthy();
+    expect(veces(simulado, GESTION)).toBe(1);
+  });
+
+  it("sin conexión, quien gestiona ve la copia sin ningún acto y no pide la lista de gestión", async () => {
+    guardar(C1, "Edificio Azul", LISTA);
+    const simulado = backend({
+      "GET /api/v1/me/consorcios": () => Response.json(CONSORCIOS),
+      [`GET ${RUTA(C1)}`]: sinRed,
+      [`GET /api/v1/consorcios/${C1}/mis-acciones`]: alcanza("contactos.ver", "contactos.gestionar"),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    expect(await screen.findByText(/Esta es la copia guardada el /)).toBeTruthy();
+    const ficha = await abrirFicha("Emergencias: Ascensores del Sur");
+    expect(within(ficha).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cerrar"]);
+    expect(screen.queryByRole("button", { name: "Agregar un contacto" })).toBeNull();
+    expect(veces(simulado, GESTION)).toBe(0);
   });
 });
