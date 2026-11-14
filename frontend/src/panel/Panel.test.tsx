@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
@@ -9,7 +9,10 @@ import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
+import { TEXTO_SUBIENDO } from "../CargaConLectura";
+import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
 import { faltantesPorEstado, gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
+import { TEXTO_LA_SUBE_LA_ADMINISTRACION } from "./Panel";
 
 // Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
 // proveedor ni importe real.
@@ -33,9 +36,9 @@ const DATOS: Panel = {
   ],
   comprobantes_faltantes: [
     { orden_id: O1, estado: "pagada", proveedor: "Limpieza Ficticia SRL", concepto: "Limpieza de octubre",
-      importe_centavos: 100000, moneda: "ARS", actualizada_en: "2026-10-31T12:00:00Z" },
+      importe_centavos: 100000, moneda: "ARS", actualizada_en: "2026-10-31T12:00:00Z", version: 1, factura_subida: null },
     { orden_id: O2, estado: "aprobada", proveedor: "Ascensores Ficticios SA", concepto: "Abono de noviembre",
-      importe_centavos: 80000, moneda: "ARS", actualizada_en: "2026-11-05T12:00:00Z" },
+      importe_centavos: 80000, moneda: "ARS", actualizada_en: "2026-11-05T12:00:00Z", version: 2, factura_subida: null },
   ],
 };
 const VACIO: Panel = { ordenes_por_estado: [], gasto_pagado: [], comprobantes_faltantes: [] };
@@ -266,5 +269,268 @@ describe("informe de fricción, tanda 9", () => {
     vi.stubGlobal("fetch", backend({ "GET /api/v1/me/consorcios": () => Response.json([]) }));
     abrir();
     expect(await screen.findByText("Esta cuenta no tiene edificios en Consorcio en Mano.")).toBeTruthy();
+  });
+});
+
+describe("subir la factura que falta (app 0099, AC-44)", () => {
+  const DOC = "55555555-5555-4555-8555-555555555555";
+  const ARCHIVO = "66666666-6666-4666-8666-666666666666";
+  const SUBIDA = `/api/v1/consorcios/${C1}/ordenes-pago/${O2}/factura`;
+  const ESTADO_ARCHIVO = `GET /api/v1/consorcios/${C1}/documentos/${DOC}/versiones/${ARCHIVO}/estado`;
+  const PDF = new File(["%PDF-1.4 SINTETICO"], "Factura 0001.pdf", { type: "application/pdf" });
+  const SUBIDA_OK = () =>
+    Response.json(
+      { orden_id: O2, version: 2, documento_id: DOC,
+        archivo: { id: ARCHIVO, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: "a".repeat(64) } },
+      { status: 201 },
+    );
+  const PREPARA = alcanza("fiscalizacion.ver_panel", "egresos.preparar_orden", "documentos.cargar", "egresos.revisar_orden");
+  const ESPERA = 3000;
+  const conEsperaManual = () => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** El resumen como queda: sin O2 una vez que el antivirus aceptó su factura. */
+  function servidor(estado: () => Response, extra: Respuestas = {}) {
+    let aceptada = false;
+    const api = backend({
+      [ACCIONES]: PREPARA,
+      [PANEL]: () =>
+        Response.json(aceptada ? { ...DATOS, comprobantes_faltantes: DATOS.comprobantes_faltantes.slice(0, 1) } : DATOS),
+      [`POST ${SUBIDA}`]: SUBIDA_OK,
+      [ESTADO_ARCHIVO]: () => {
+        const r = estado();
+        aceptada = r.status === 200;
+        return r;
+      },
+      ...extra,
+    });
+    vi.stubGlobal("fetch", api);
+    return api;
+  }
+
+  async function abrirLaHoja() {
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const fila = within(faltantes).getByRole("row", { name: /Ascensores Ficticios SA/ });
+    fireEvent.click(await within(fila).findByRole("button", { name: SUBIR_FACTURA }));
+    return screen.findByRole("dialog", { name: SUBIR_FACTURA });
+  }
+
+  it("sube, dice «Listo», y cuando el antivirus la acepta la orden sale de la lista", async () => {
+    conEsperaManual();
+    const api = servidor(() => Response.json({ estado: "disponible", motivo_rechazo: null }));
+    const { container } = abrir();
+    const hoja = await abrirLaHoja();
+    expect(within(hoja).getByText(/Ascensores Ficticios SA/)).toBeTruthy();
+    expect(within(hoja).getByText(/no vuelve a aprobación/)).toBeTruthy();
+    await sinViolaciones(container.ownerDocument.body);
+
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    // La versión que se vio y el nombre del archivo como título; el archivo crudo, con su tipo.
+    const [pedido] = api.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST");
+    const url = new URL(pedido!.url);
+    expect(url.pathname).toBe(SUBIDA);
+    expect([url.searchParams.get("version_esperada"), url.searchParams.get("titulo")]).toEqual(["2", "Factura 0001"]);
+    expect(pedido!.headers.get("Content-Type")).toBe("application/pdf");
+    expect(pedido!.headers.get("Idempotency-Key")).toBeTruthy();
+    // Mientras el antivirus revisa, no se elige otro archivo.
+    expect(within(hoja).queryByLabelText("Archivo de la factura")).toBeNull();
+
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await within(hoja).findByText(TEXTO_ACEPTADA)).toBeTruthy();
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    await waitFor(() => expect(within(faltantes).queryByText("Ascensores Ficticios SA")).toBeNull());
+    expect(within(faltantes).getByText("Limpieza Ficticia SRL")).toBeTruthy(); // control: la otra sigue
+  });
+
+  it("si el antivirus la rechaza lo dice y deja elegir otro archivo", async () => {
+    conEsperaManual();
+    servidor(() => Response.json({ estado: "rechazado", motivo_rechazo: "virus" }));
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    await within(hoja).findByText(TEXTO_LISTO);
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect((await within(hoja).findByRole("alert")).textContent).toBe(TEXTO_RECHAZADA);
+    expect(within(hoja).getByLabelText("Archivo de la factura")).toBeTruthy();
+    expect(within(hoja).queryByText(TEXTO_ACEPTADA)).toBeNull();
+  });
+
+  it("un error del servidor se dice dentro de la hoja y se puede elegir otra vez", async () => {
+    servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => error("factura_ya_adjunta", 409),
+    });
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    const aviso = await within(hoja).findByRole("alert");
+    expect(aviso.textContent).toMatch(/^La factura no se subió\. La orden ya tiene su factura/);
+    expect(within(hoja).queryByText(TEXTO_LISTO)).toBeNull();
+    expect(within(hoja).getByLabelText("Archivo de la factura")).toBeTruthy();
+  });
+
+  it("sin cargar documentos no se ofrece, y una factura en el antivirus tampoco ofrece otra", async () => {
+    const enRevision: Panel = {
+      ...DATOS,
+      comprobantes_faltantes: [DATOS.comprobantes_faltantes[0]!, { ...DATOS.comprobantes_faltantes[1]!, factura_subida: "en_cuarentena" }],
+    };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(DATOS), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.preparar_orden") }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    await within(faltantes).findByRole("link", { name: "Limpieza Ficticia SRL" });
+    expect(within(faltantes).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+    cleanup();
+
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: PREPARA }));
+    abrir();
+    const otra = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const [limpieza, ascensores] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
+    // Control: la que falta sí la ofrece.
+    expect(await within(limpieza!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
+    expect(within(ascensores!).getByText("El antivirus la está revisando")).toBeTruthy();
+    expect(within(ascensores!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+  });
+
+  it("si se perdió la respuesta, elegir el mismo archivo reintenta con la misma clave; otro archivo, con otra", async () => {
+    let intentos = 0;
+    const api = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => {
+        intentos += 1;
+        // La primera vez el servidor guardó la subida pero la respuesta no llegó.
+        if (intentos === 1) throw new TypeError("Failed to fetch");
+        return intentos === 2 ? SUBIDA_OK() : error("factura_ya_adjunta", 409);
+      },
+    });
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    expect((await within(hoja).findByRole("alert")).textContent).toMatch(/^La factura no se subió\. No se pudo completar/);
+    const mismo = new File(["%PDF-1.4 SINTETICO"], PDF.name, { type: PDF.type, lastModified: PDF.lastModified });
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [mismo] } });
+    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    const claves = () =>
+      api.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST").map((r) => r.headers.get("Idempotency-Key"));
+    const [primera, segunda] = claves();
+    expect(primera).toBeTruthy();
+    expect(segunda).toBe(primera);
+    cleanup();
+
+    // Control: después de una falla, otro archivo es otro pedido y lleva otra clave.
+    intentos = 0;
+    const otraApi = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => {
+        intentos += 1;
+        if (intentos === 1) throw new TypeError("Failed to fetch");
+        return SUBIDA_OK();
+      },
+    });
+    abrir();
+    const otraHoja = await abrirLaHoja();
+    fireEvent.change(within(otraHoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    await within(otraHoja).findByRole("alert");
+    const otro = new File(["%PDF-1.4 OTRO SINTETICO"], "Factura 0002.pdf", { type: "application/pdf" });
+    fireEvent.change(within(otraHoja).getByLabelText("Archivo de la factura"), { target: { files: [otro] } });
+    await within(otraHoja).findByText(TEXTO_LISTO);
+    const [a, z] = otraApi.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST").map((r) => r.headers.get("Idempotency-Key"));
+    expect(z).not.toBe(a);
+  });
+
+  it("mientras la factura se envía, la hoja no se cierra ni con Escape, y el navegador avisa al salir", async () => {
+    let responder: (r: Response) => void = () => undefined;
+    const api = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => new Promise<Response>((r) => (responder = r)),
+    });
+    abrir();
+    const hoja = await abrirLaHoja();
+    const salir = () => {
+      const evento = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(evento);
+      return evento.defaultPrevented;
+    };
+    expect(salir()).toBe(false); // control: sin envío, no avisa
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    expect(await within(hoja).findByText(TEXTO_SUBIENDO)).toBeTruthy();
+    const cerrar = within(hoja).getByRole("button", { name: "Cerrar" }) as HTMLButtonElement;
+    expect(cerrar.disabled).toBe(true);
+    fireEvent.keyDown(hoja, { key: "Escape" });
+    fireEvent.click(cerrar);
+    expect(screen.getByRole("dialog", { name: SUBIR_FACTURA })).toBeTruthy();
+    expect(salir()).toBe(true);
+
+    // Confirmada la subida, se cierra y la pantalla de atrás se vuelve a leer.
+    responder(SUBIDA_OK());
+    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    expect(salir()).toBe(false);
+    const lecturas = api.mock.calls.filter((c) => new URL((c as unknown as [Request])[0].url).pathname === PANEL.split(" ")[1]).length;
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: SUBIR_FACTURA })).toBeNull());
+    await waitFor(() =>
+      expect(api.mock.calls.filter((c) => new URL((c as unknown as [Request])[0].url).pathname === PANEL.split(" ")[1]).length).toBeGreaterThan(lecturas),
+    );
+  });
+
+  it("cerrada la hoja mientras el antivirus revisa, la fila sigue y dice el rechazo", async () => {
+    conEsperaManual();
+    let factura: "en_cuarentena" | "rechazado" | null = null;
+    const datos = (): Panel => ({
+      ...DATOS,
+      comprobantes_faltantes: DATOS.comprobantes_faltantes.map((f) => (f.orden_id === O2 ? { ...f, factura_subida: factura } : f)),
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [ACCIONES]: PREPARA,
+        [PANEL]: () => Response.json(datos()),
+        [`POST ${SUBIDA}`]: () => {
+          factura = "en_cuarentena";
+          return SUBIDA_OK();
+        },
+        [ESTADO_ARCHIVO]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+      }),
+    );
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    await within(hoja).findByText(TEXTO_LISTO);
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    const fila = () => within(faltantes).getByRole("row", { name: /Ascensores Ficticios SA/ });
+    expect(await within(faltantes).findByText("El antivirus la está revisando")).toBeTruthy();
+    expect(within(fila()).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+
+    // El antivirus termina después de cerrar la hoja: la fila lo dice sola y vuelve a ofrecerla.
+    factura = "rechazado";
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await within(faltantes).findByText("La subida no pasó el antivirus")).toBeTruthy();
+    expect(within(fila()).getByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
+  });
+
+  it("al Consejo, que no prepara, la fila le dice que la sube la administración", async () => {
+    const enRevision: Panel = {
+      ...DATOS,
+      comprobantes_faltantes: [DATOS.comprobantes_faltantes[0]!, { ...DATOS.comprobantes_faltantes[1]!, factura_subida: "en_cuarentena" }],
+    };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.revisar_orden") }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const tabla = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
+    const [limpieza, ascensores] = within(tabla).getAllByRole("row").slice(1);
+    expect(await within(limpieza!).findByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeTruthy();
+    expect(within(limpieza!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+    // Mientras el antivirus revisa la subida, la fila dice eso y no quién la sube.
+    expect(within(ascensores!).getByText("El antivirus la está revisando")).toBeTruthy();
+    expect(within(ascensores!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
+    cleanup();
+
+    // Control: quien prepara y carga ve el botón, no el aviso.
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: PREPARA }));
+    abrir();
+    const otra = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const [fila] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
+    expect(await within(fila!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
+    expect(within(fila!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
   });
 });

@@ -936,8 +936,10 @@ RUTAS = {
     "contratos_proveedor_lectura",
     # 0093: retirar una orden que nadie aprobó y leer quién la retiró (comentario 23).
     "retirar_orden_pago", "retiro_orden_pago_lectura",
+    # 0099: adjuntar la factura que falta a una orden aprobada, sin versión nueva.
+    "adjuntar_factura_orden_pago",
 }  # fmt: skip
-"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050` y `0093`)."""
+"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093` y `0099`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):
@@ -1066,12 +1068,15 @@ def test_solo_aprobar_lleva_la_orden_a_aprobada(motor_migrate):
     # `panel_comprobantes_faltantes` (0094) es una lectura `stable` del panel del Consejo.
     # `acciones_de_ordenes_de` (0098) es el cuerpo que era de `acciones_de_ordenes_lectura`, que
     # ahora solo la llama: lee el estado para decir qué botón ve cada uno y no escribe nada.
+    # `adjuntar_factura_orden_pago` (0099) solo lee el estado (aprobada o más adelante) y no
+    # escribe la orden: lo prueba `test_factura_adjunta_0099`, fila por fila.
     assert nombran == {
         "nucleo.modificar_orden_pago", "nucleo.emitir_orden_pago",
         "nucleo.registrar_aprobacion_orden_pago", "nucleo.condicion_beneficiario",
         "nucleo.aprobar_por_franja", "nucleo.renovar_orden_vencida",
         "nucleo.admite_pagar", "nucleo.admite_renovar", "nucleo.acciones_de_ordenes_de",
         "nucleo.proveedor_cambio_tras_aprobar", "nucleo.panel_comprobantes_faltantes",
+        "nucleo.adjuntar_factura_orden_pago",
     }  # fmt: skip
     with motor_migrate.connect() as c:
         cuerpo = c.execute(

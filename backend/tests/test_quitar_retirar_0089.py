@@ -47,11 +47,12 @@ pytestmark = [pytest.mark.db, pytest.mark.redis]
 # ruff: noqa: F811
 
 MIGRACION = RAIZ / "migrations" / "versions" / "0089_quitar_y_retirar_documentos.py"
+MIGRACION_0099 = RAIZ / "migrations" / "versions" / "0099_factura_adjunta_sin_version.py"
 MOTIVO = "Póliza vencida: la reemplaza la del período nuevo"
 
 
-def _migracion():
-    spec = importlib.util.spec_from_file_location("migracion_0089", MIGRACION)
+def _migracion(archivo=MIGRACION):
+    spec = importlib.util.spec_from_file_location(f"migracion_{archivo.stem[:4]}", archivo)
     modulo = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(modulo)
     return modulo
@@ -340,7 +341,8 @@ def test_cada_tabla_que_cita_documentos_esta_en_la_lista(motor_migrate):
             "select tgrelid::regclass::text from pg_trigger"
             " where tgname = 'documento_citado_vigente'"
         )).scalars())  # fmt: skip
-    citan = {t for t, _ in m.REFERENCIAS}
+    # `0099` suma la constancia de la factura adjunta a una orden aprobada.
+    citan = {t for t, _ in m.REFERENCIAS + _migracion(MIGRACION_0099).REFERENCIAS_NUEVAS}
     # Control: la búsqueda encuentra las dos que se sabe que no citan.
     assert set(m.NO_CITAN) <= en_el_catalogo
     assert en_el_catalogo == citan | set(m.NO_CITAN)

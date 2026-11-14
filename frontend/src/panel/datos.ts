@@ -6,6 +6,7 @@ import { periodo } from "../egresos/Liquidacion";
 // ordena lo que ya vino calculado de la base, para cada gráfico y su tabla. No decide nada.
 
 export type Panel = components["schemas"]["PanelFiscalizacion"];
+export type Faltante = components["schemas"]["ComprobanteFaltante"];
 type Gasto = Panel["gasto_pagado"][number];
 
 /** Una barra del gráfico: lo que mide (`valor`) y lo que dice escrito (`texto`). */

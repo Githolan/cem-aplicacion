@@ -8,12 +8,14 @@ import { type Aviso, ESTADO, importe, mensajeDeError, momento, sinLaFalla, sinPi
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { periodo } from "../egresos/Liquidacion";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
+import { SUBIR_FACTURA, SubirFactura } from "../pagos/SubirFactura";
 import {
   estaVacio,
+  type Faltante,
   faltantesPorEstado,
   gastoPorMes,
   gastoPorRubro,
@@ -27,7 +29,9 @@ import { GraficoBarras } from "./GraficoBarras";
 // Página /panel: el resumen de pagos del edificio en solo lectura (RF48; app 0094, H4a corte 1). Lo
 // decide la API con `fiscalizacion.ver_panel`; la pantalla solo muestra. Cada gráfico dice su base
 // de cálculo y, si la persona además puede abrir los pagos, un solo enlace arriba lleva a ellos
-// (regla de fricción del 05-11-2026; informe de fricción, AC-44).
+// (regla de fricción del 05-11-2026; informe de fricción, AC-44). En «Facturas faltantes», quien puede
+// cargar la factura al preparar la sube desde la fila (decisión del propietario del 13-11-2026, app
+// 0099): queda adjunta sin versión nueva y la orden sale de la lista cuando el antivirus la acepta.
 
 export const RUTA_PANEL = "/panel";
 /** El mismo nombre en el inicio, la barra, la cabecera y la facultad (informe de fricción, AC-42):
@@ -48,6 +52,7 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
   const acciones = useAcciones(consorcio);
   // Mientras no se sabe, no se ofrece: el enlace llevaría a una pantalla que puede no abrir.
   const veRegistros = acciones !== null && cumple(acciones, REQUISITOS.pagos);
+  const subeFacturas = acciones !== null && cumple(acciones, REQUISITOS.subirFactura);
 
   useEffect(() => {
     if (consorcio === "") return;
@@ -79,6 +84,11 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
+  // Una factura subida sigue en el antivirus aunque se haya cerrado su hoja: el resumen se vuelve a
+  // leer hasta que termina, para que la fila diga si la aceptó o la rechazó y vuelva a ofrecerla.
+  const facturaEnRevision =
+    lectura.tipo === "ok" && lectura.panel.comprobantes_faltantes.some((f) => f.factura_subida === "en_cuarentena");
+  useConsultaDelAntivirus(facturaEnRevision, () => setVuelta((v) => v + 1));
 
   return (
     <>
@@ -105,7 +115,8 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
             (estaVacio(lectura.panel) ? (
               <p className="tarjeta">Todavía no hay órdenes de pago en este edificio. El resumen se arma con ellas.</p>
             ) : (
-              <Contenido panel={lectura.panel} consorcio={consorcio} veRegistros={veRegistros} />
+              <Contenido panel={lectura.panel} consorcio={consorcio} veRegistros={veRegistros} subeFacturas={subeFacturas}
+                aEntrar={aEntrar} alCambiar={() => setVuelta((v) => v + 1)} />
             ))}
         </>
       )}
@@ -123,7 +134,18 @@ function EnlacePagos({ consorcio }: { consorcio: string }) {
   );
 }
 
-function Contenido({ panel, consorcio, veRegistros }: { panel: DatosPanel; consorcio: string; veRegistros: boolean }) {
+type PropsContenido = {
+  panel: DatosPanel;
+  consorcio: string;
+  veRegistros: boolean;
+  /** Si puede subir la factura que falta: prepara órdenes y carga documentos. */
+  subeFacturas: boolean;
+  aEntrar: () => void;
+  /** Una factura quedó adjunta: el resumen se vuelve a leer. */
+  alCambiar: () => void;
+};
+
+function Contenido({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCambiar }: PropsContenido) {
   const lista = monedas(panel);
   return (
     <div className="panel-consejo">
@@ -138,7 +160,9 @@ function Contenido({ panel, consorcio, veRegistros }: { panel: DatosPanel; conso
         columna="Estado de la orden"
         valor="Sin factura"
         vacio="No falta ninguna factura."
-        registros={<Faltantes panel={panel} consorcio={consorcio} veRegistros={veRegistros} />}
+        registros={
+          <Faltantes panel={panel} consorcio={consorcio} veRegistros={veRegistros} subeFacturas={subeFacturas} aEntrar={aEntrar} alCambiar={alCambiar} />
+        }
       />
     </div>
   );
@@ -207,7 +231,18 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
   );
 }
 
-function Faltantes({ panel, consorcio, veRegistros }: { panel: DatosPanel; consorcio: string; veRegistros: boolean }) {
+/** Lo que ve en la fila quien no sube facturas (el Consejo): quién lo hace. */
+export const TEXTO_LA_SUBE_LA_ADMINISTRACION = "La sube la administración.";
+
+/** Cómo está la factura de una orden que falta, en palabras. */
+export function estadoDeLaFactura(f: Faltante): string {
+  if (f.factura_subida === "en_cuarentena") return "El antivirus la está revisando";
+  if (f.factura_subida === "rechazado") return "La subida no pasó el antivirus";
+  return "Falta";
+}
+
+function Faltantes({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCambiar }: PropsContenido) {
+  const [subiendo, setSubiendo] = useState<Faltante | null>(null);
   if (panel.comprobantes_faltantes.length === 0) return null;
   return (
     <div className="tabla-lista tabla-tarjetas">
@@ -218,6 +253,7 @@ function Faltantes({ panel, consorcio, veRegistros }: { panel: DatosPanel; conso
             <th scope="col">Estado</th>
             <th scope="col">Importe</th>
             <th scope="col">Último cambio</th>
+            <th scope="col">Factura</th>
           </tr>
         </thead>
         <tbody>
@@ -236,10 +272,34 @@ function Faltantes({ panel, consorcio, veRegistros }: { panel: DatosPanel; conso
               <td data-etiqueta="Estado">{TEXTO_ESTADO_ORDEN[f.estado]}</td>
               <td data-etiqueta="Importe">{importe(f.importe_centavos, f.moneda)}</td>
               <td data-etiqueta="Último cambio">{momento(f.actualizada_en)}</td>
+              <td data-etiqueta="Factura">
+                {estadoDeLaFactura(f)}
+                {/* Mientras el antivirus revisa la subida, no se ofrece otra. Quien no la puede
+                    subir (el Consejo) sabe quién lo hace (decisión del propietario, 13-11-2026). */}
+                {f.factura_subida !== "en_cuarentena" &&
+                  (subeFacturas ? (
+                    <div className="acciones">
+                      <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
+                        {SUBIR_FACTURA}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="tabla-lista__dato">{TEXTO_LA_SUBE_LA_ADMINISTRACION}</p>
+                  ))}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+      {subiendo !== null && (
+        <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version} reemplaza={null}
+          descripcion={`${subiendo.proveedor}, ${importe(subiendo.importe_centavos, subiendo.moneda)}: ${subiendo.concepto}`}
+          aEntrar={aEntrar}
+          alCerrar={(cambio) => {
+            setSubiendo(null);
+            if (cambio) alCambiar();
+          }} />
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { type FormEvent, type RefObject, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { api } from "../api/cliente";
@@ -28,7 +28,7 @@ import {
 } from "../egresos/comun";
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
-import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
@@ -40,6 +40,7 @@ import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, rutaFicha } from "./rutas";
+import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, SubirFactura } from "./SubirFactura";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
@@ -90,6 +91,7 @@ import { VisorComprobante } from "./VisorComprobante";
 type FichaPago = components["schemas"]["FichaPago"];
 type Cuenta = components["schemas"]["CuentaParaPagoManual"];
 type Version = components["schemas"]["VersionOrdenPago"];
+type FacturaAdjunta = components["schemas"]["FacturaAdjunta"];
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "no_esta" } | { tipo: "ok"; ficha: FichaPago };
 /** El único campo de los formularios de motivo, por su nombre en la pantalla. */
@@ -150,6 +152,37 @@ function vigenteDe(f: FichaPago): Version {
   const v = f.versiones.find((x) => x.numero === f.orden.version_vigente);
   if (v === undefined) throw new Error(`la ficha no trae la versión vigente de ${f.orden.id}`);
   return v;
+}
+
+/** La versión vigente con su factura: la propia o, si no tiene, la subida después de aprobada que
+ * pasó el antivirus (app 0099). Es la que se ve y la que lleva una modificación, como al renovar. */
+export function conFacturaAdjunta(v: Version, adjunta: FacturaAdjunta | null): Version {
+  if (v.factura_version_id != null || adjunta === null || adjunta.estado !== "disponible" || adjunta.version !== v.numero) return v;
+  return { ...v, documento_id: adjunta.documento_id, factura_version_id: adjunta.factura_version_id };
+}
+
+/** Lo que se dice de la factura subida después de aprobada (app 0099): quién, cuándo y cómo quedó. */
+export function textoDeLaAdjunta(a: FacturaAdjunta): string {
+  if (a.estado === "en_cuarentena") return `${a.adjuntada_por_nombre} subió la factura el ${momento(a.adjuntada_en)}: el antivirus la está revisando.`;
+  if (a.estado === "rechazado") return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} no pasó el antivirus.`;
+  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
+  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
+}
+
+/** Lo que se dice de la subida que quiere reemplazar a la adjunta: mientras tanto, o si el antivirus
+ * la rechaza, vale la anterior (decisión del propietario del 13-11-2026). */
+export function textoDelReemplazo(a: FacturaAdjunta): string {
+  if (a.estado === "rechazado")
+    return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} para reemplazarla no pasó el antivirus: sigue valiendo la anterior.`;
+  return `${a.adjuntada_por_nombre} subió otra factura el ${momento(a.adjuntada_en)} para reemplazarla: el antivirus la está revisando. Mientras tanto vale la anterior.`;
+}
+
+/** Una subida anterior, como historia: no se borra, queda dicha con cómo terminó. */
+export function textoDeLaAnterior(a: FacturaAdjunta): string {
+  const cual = `la factura subida por ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)}`;
+  if (!a.documento_vigente) return `Borrada por soporte: ${cual}.`;
+  if (a.estado === "rechazado") return `No pasó el antivirus: ${cual}.`;
+  return `Reemplazada: ${cual}.`;
 }
 
 /** Lo que cambió de una versión a la otra, para no tener que comparar a ojo. */
@@ -223,9 +256,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const versionLeida = leida?.orden.version_vigente;
   /** El archivo exacto de la factura aprobada con la versión vigente (0088), si quien mira puede
    * abrirlo; se ve en una hoja. */
-  const vigenteLeida = leida === null ? null : vigenteDe(leida);
+  const vigenteLeida = useMemo(() => (leida === null ? null : conFacturaAdjunta(vigenteDe(leida), leida.factura_adjunta)), [leida]);
   const factura = useVersionVisible(consorcio, vigenteLeida?.documento_id ?? null, vigenteLeida?.factura_version_id ?? null, aEntrar);
   const [viendoFactura, setViendoFactura] = useState(false);
+  /** «Subir la factura» que falta o «Reemplazar la factura» adjunta, en una hoja (app 0099). */
+  const [subiendoFactura, setSubiendoFactura] = useState<{ reemplaza: string | null } | null>(null);
 
   useEffect(() => {
     if (!decide) return;
@@ -301,6 +336,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   }, [consorcio, orden, vuelta, aEntrar, aInicio, setAviso]);
 
   const releer = () => setVuelta((v) => v + 1);
+  // La factura subida (o su reemplazo) sigue en el antivirus aunque se haya cerrado su hoja: la
+  // ficha se vuelve a leer hasta que termina, para decir si la aceptó o la rechazó.
+  const facturaEnRevision =
+    leida !== null && (leida.factura_adjunta?.estado === "en_cuarentena" || leida.factura_reemplazo?.estado === "en_cuarentena");
+  useConsultaDelAntivirus(facturaEnRevision, releer);
 
   /** Un acto con motivo que falla: el campo marcado, si el error nombra el motivo; lo demás, como siempre. */
   function fallaDelMotivo(estado: number, codigo: string | undefined, error: unknown) {
@@ -1006,12 +1046,46 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   </tbody>
                 </table>
               )}
-              {factura !== null && (
+              {ficha.factura_adjunta !== null && <p className="aviso-info">{textoDeLaAdjunta(ficha.factura_adjunta)}</p>}
+              {ficha.factura_reemplazo !== null && <p className="aviso-info">{textoDelReemplazo(ficha.factura_reemplazo)}</p>}
+              {ficha.facturas_anteriores.length > 0 && (
+                <ul className="lista-simple" aria-label="Facturas anteriores">
+                  {ficha.facturas_anteriores.map((a) => (
+                    <li key={a.id}>{textoDeLaAnterior(a)}</li>
+                  ))}
+                </ul>
+              )}
+              {(factura !== null || ficha.puede_subir_factura || ficha.puede_reemplazar_factura) && (
                 <div className="acciones">
-                  <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
-                    Ver la factura
-                  </button>
+                  {factura !== null && (
+                    <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
+                      Ver la factura
+                    </button>
+                  )}
+                  {/* Solo sin factura: una orden que ya la tiene no invita a subir otra. */}
+                  {ficha.puede_subir_factura && (
+                    <button type="button" className="secundario" onClick={() => setSubiendoFactura({ reemplaza: null })}>
+                      {SUBIR_FACTURA}
+                    </button>
+                  )}
+                  {ficha.puede_reemplazar_factura && ficha.factura_adjunta !== null && (
+                    <button type="button" className="secundario" onClick={() => setSubiendoFactura({ reemplaza: ficha.factura_adjunta?.id ?? null })}>
+                      {REEMPLAZAR_FACTURA}
+                    </button>
+                  )}
                 </div>
+              )}
+              {subiendoFactura !== null && (
+                <SubirFactura consorcio={consorcio} orden={orden} version={v.numero}
+                  reemplaza={subiendoFactura.reemplaza}
+                  descripcion={`${v.razon_social}, ${importe(v.importe_centavos, v.moneda)}: ${v.concepto}`} aEntrar={aEntrar}
+                  alCerrar={(cambio) => {
+                    setSubiendoFactura(null);
+                    if (cambio) {
+                      releer();
+                      alCambiar();
+                    }
+                  }} />
               )}
               {viendoFactura && factura !== null && (
                 <VisorDocumento consorcio={consorcio} documento={factura.documento} version={factura.version} nombre={factura.nombre}
@@ -1220,7 +1294,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
 
           {estaModificando && (
             <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio}
-              modificar={{ orden, version: v, pierdeAprobaciones: situacion === "en_revision" || situacion === "para_pagar" }}
+              modificar={{ orden, version: vigenteLeida ?? v, pierdeAprobaciones: situacion === "en_revision" || situacion === "para_pagar" }}
               alGuardar={(_, texto) => {
                 setModificando(false);
                 setAviso({ texto, ok: true });

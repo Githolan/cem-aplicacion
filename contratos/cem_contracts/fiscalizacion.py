@@ -14,7 +14,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from cem_contracts.egresos import EstadoOrdenPago
+from cem_contracts.documentos import EstadoVersion
+from cem_contracts.egresos import EstadoOrdenPago, Version
 
 
 class OrdenesPorEstado(BaseModel):
@@ -49,17 +50,26 @@ class GastoPagado(BaseModel):
 
 
 class ComprobanteFaltante(BaseModel):
-    """Una orden aprobada o más adelante cuya versión vigente no tiene archivo de factura."""
+    """Una orden aprobada o más adelante cuya versión vigente no tiene archivo de factura, ni uno
+    subido después que haya pasado el antivirus (`0099`)."""
 
     model_config = ConfigDict(frozen=True)
 
     orden_id: UUID
+    version: Version = Field(
+        description="La versión vigente: la que se manda al subir la factura (`0099`)."
+    )
     estado: EstadoOrdenPago
     proveedor: str = Field(description="La razón social, como figura en la versión vigente.")
     concepto: str
     importe_centavos: int
     moneda: str
     actualizada_en: datetime
+    factura_subida: EstadoVersion | None = Field(
+        description="Cómo está el último archivo subido como factura después de aprobada"
+        " (`0099`): `en_cuarentena` mientras el antivirus lo revisa, `rechazado` si no lo pasó."
+        " Nulo si no se subió ninguno."
+    )
 
 
 class PanelFiscalizacion(BaseModel):

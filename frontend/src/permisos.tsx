@@ -226,6 +226,8 @@ export const REQUISITOS = {
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],
   ordenes: [["egresos.preparar_orden"]],
+  /** Subir la factura que falta a una orden aprobada (app 0099): lo mismo que cargarla al preparar. */
+  subirFactura: [["egresos.preparar_orden", "documentos.cargar"]],
   /** Las lecturas del circuito (`_lector`): quien prepara, y si no, quien revisa. */
   pagos: [["egresos.preparar_orden"], ["egresos.revisar_orden"]],
   /** Las reglas de conciliar: la base separa pago por pago. */
