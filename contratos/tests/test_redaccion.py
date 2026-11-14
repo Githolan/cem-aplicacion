@@ -19,13 +19,6 @@ def test_cada_control_bien_escrito_pasa(texto):
     assert faltas(texto) == [], texto
 
 
-def test_un_texto_aprobado_por_el_propietario_vale_solo_entero():
-    """«Me equivoqué» (decisión 5 del 14-11-2026) pasa tal cual; con otra palabra, es una falta."""
-    assert [a.texto for a in reglas().aprobados_por_el_propietario] == ["Me equivoqué"]
-    assert faltas("Me equivoqué") == []
-    assert faltas("Me equivoqué de cuenta") == ["me (voseo, tuteo o primera persona)"]
-
-
 def test_las_palabras_se_comparan_enteras():
     # «vos» dentro de «archivos» y «sos» dentro de «Sosa» no cuentan; sueltas, sí.
     assert faltas("Los archivos de la Sra. Sosa") == []

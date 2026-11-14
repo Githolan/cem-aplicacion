@@ -150,6 +150,10 @@ describe("la pantalla", () => {
     const fila = (await screen.findByText("Débito sin explicar")).closest("li") as HTMLElement;
     expect(fila.textContent).toContain("12.400,00");
     expect(fila.textContent).toContain("Referencia 0048213999 · 02/11/2026");
+    // Un solo punto después de la hora: «a. m.» ya trae el suyo.
+    const subido = within(fila).getByText(/^Extracto subido el /);
+    expect(subido.textContent).toMatch(/\sm\.$/);
+    expect(subido.textContent).not.toContain("..");
     // Solo para leer: en la pantalla no hay ningún botón ni enlace que haga algo.
     const seccion = screen.getByRole("region", { name: "Lo que el extracto no explica" });
     expect(within(seccion).queryByRole("button")).toBeNull();

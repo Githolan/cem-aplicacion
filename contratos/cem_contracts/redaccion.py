@@ -18,17 +18,6 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
-
-class TextoAprobado(BaseModel):
-    """Un texto que rompe la regla y el propietario aprobó tal cual, con su motivo. Vale entero:
-    el mismo texto con otra palabra al lado vuelve a ser una falta."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    texto: str
-    motivo: str
-
-
 ARCHIVO = Path(__file__).resolve().parent / "pantallas_datos" / "redaccion.json"
 
 _PALABRA = re.compile(r"[^\W\d_]+")
@@ -53,7 +42,6 @@ class Redaccion(BaseModel):
     formas: frozenset[str]
     control_con_falta: tuple[str, ...]
     control_sin_falta: tuple[str, ...]
-    aprobados_por_el_propietario: tuple[TextoAprobado, ...]
 
 
 @cache
@@ -64,8 +52,6 @@ def reglas() -> Redaccion:
 def faltas(texto: str) -> list[str]:
     """Las palabras de `texto` que rompen la regla, cada una con su motivo. Vacía si está bien."""
     r = reglas()
-    if any(a.texto == texto for a in r.aprobados_por_el_propietario):
-        return []
     encontradas: list[str] = []
     for palabra in (p.lower() for p in _PALABRA.findall(texto)):
         if palabra in r.segunda_persona:

@@ -5,7 +5,7 @@ import { CabeceraInterna } from "../CabeceraInterna";
 import { api } from "../api/cliente";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
-import { ENCABEZADO_IDEMPOTENCIA, ESTADO, fechaLegible, importe, mensajeDeActo, mensajeDeError, momento, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
+import { ENCABEZADO_IDEMPOTENCIA, ESTADO, fechaLegible, importe, mensajeDeActo, mensajeDeError, momento, momentoAlFinal, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
@@ -279,7 +279,7 @@ function SinExplicarDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                         <span className="fila-pago__importe">{importe(m.importe_centavos, m.moneda)}</span>
                       </span>
                       <span>{dato(m)}</span>
-                      <span className="fila-pago__nota">Extracto subido el {momento(m.visto_en)}.</span>
+                      <span className="fila-pago__nota">Extracto subido el {momentoAlFinal(m.visto_en)}</span>
                       {accion("marcar", m.movimiento_id)}
                     </li>
                   ))}

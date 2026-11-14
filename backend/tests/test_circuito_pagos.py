@@ -578,7 +578,7 @@ def test_la_tabla_no_ofrece_lo_que_la_base_niega():
 
 def test_anular_la_declaracion_se_ofrece_plegada_en_los_dos_pasos():
     """D-13 (decisión 5 del propietario, 14-11-2026): «Anular la declaración y pagar» va plegado
-    bajo «Me equivoqué», también para quien todavía tiene que subir el comprobante."""
+    bajo «Hubo un error», también para quien todavía tiene que subir el comprobante."""
     puede = {AccionPago.RETOMAR_PAGO: True, AccionPago.DECLARAR_NO_PAGO: True}
     espera = acciones_ofrecidas(fila_de(S.NO_PAGO_DECLARADO, P.ESPERA_CONFIRMAR), puede)
     assert [(x.codigo, x.tipo) for x in espera] == [(AccionPago.RETOMAR_PAGO, TipoAccion.PLEGADA)]

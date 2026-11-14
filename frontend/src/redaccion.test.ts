@@ -23,8 +23,6 @@ type Reglas = {
   formas: string[];
   control_con_falta: string[];
   control_sin_falta: string[];
-  /** Textos que rompen la regla y el propietario aprobó tal cual: valen enteros. */
-  aprobados_por_el_propietario: { texto: string; motivo: string }[];
 };
 
 const ARCHIVO_REGLAS = resolve(process.cwd(), "../contratos/cem_contracts/pantallas_datos/redaccion.json");
@@ -40,11 +38,9 @@ const preteritoNoSon = new Set(reglas.preterito_no_son);
 const primeraNoSon = new Set(reglas.primera_plural_no_son);
 const alEmpezarNoSon = new Set(reglas.imperativo_al_empezar_no_son);
 const termina = (palabra: string, finales: readonly string[]) => finales.some((f) => palabra.endsWith(f));
-const aprobados = new Set(reglas.aprobados_por_el_propietario.map((a) => a.texto));
 
 /** Las palabras de `texto` que rompen la regla, con su motivo (igual que `cem_contracts.redaccion.faltas`). */
 export function faltas(texto: string): string[] {
-  if (aprobados.has(texto)) return [];
   const encontradas: string[] = [];
   for (const palabra of (texto.match(/\p{L}+/gu) ?? []).map((p) => p.toLowerCase())) {
     if (segunda.has(palabra)) encontradas.push(`${palabra} (segunda persona)`);
@@ -114,11 +110,6 @@ describe("redacción impersonal (pregunta 9)", () => {
   it("control: el detector ve cada falta de los controles y no marca los textos bien escritos", () => {
     for (const texto of reglas.control_con_falta) expect(faltas(texto), texto).not.toEqual([]);
     for (const texto of reglas.control_sin_falta) expect(faltas(texto), texto).toEqual([]);
-  });
-
-  it("control: un texto aprobado por el propietario vale solo entero (como cem_contracts.redaccion)", () => {
-    expect(faltas("Me equivoqué")).toEqual([]);
-    expect(faltas("Me equivoqué de cuenta")).toEqual(["me (voseo, tuteo o primera persona)"]);
   });
 
   it("control: el recorrido encuentra un texto que se sabe que existe", () => {

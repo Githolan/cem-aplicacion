@@ -139,7 +139,8 @@ export const PREGUNTA_RETIRAR =
   "¿Retirar esta orden? Sale de la bandeja de todos y ya no se aprueba ni se paga. Queda registrado quién la retiró y cuándo, y se ve en la consulta.";
 export const TEXTO_RETIRADA = "Listo: la orden se retiró. Ya no está en la bandeja.";
 export const AVISO_SE_PUEDE_RETIRAR = "Mientras nadie la apruebe, se puede modificar o retirar.";
-export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando}. No se aprueba ni se paga.`;
+/** `cuando` cierra la frase con su punto (`momentoAlFinal`): «a. m.» ya lo trae y no se repite. */
+export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando} No se aprueba ni se paga.`;
 
 export const PASOS_DEL_CAMINO = ["Preparar", "Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
 

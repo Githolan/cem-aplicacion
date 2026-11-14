@@ -36,11 +36,5 @@
     "Sí: se registró el pago. Así queda.",
     "Propietario/a de la unidad 3A",
     "La aprobación vence el 12 de noviembre: después hay que renovarla."
-  ],
-  "aprobados_por_el_propietario": [
-    {
-      "texto": "Me equivoqué",
-      "motivo": "Decisión 5 del propietario (14-11-2026, D-13): el título del plegable de «Anular la declaración y pagar» es «Me equivoqué». Vale solo el texto entero, tal cual; cualquier otro texto con «me» sigue siendo una falta."
-    }
   ]
 }

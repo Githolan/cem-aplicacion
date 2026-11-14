@@ -45,7 +45,7 @@ describe("botón = lo que llegó", () => {
     const llenos = screen.queryAllByRole("button").filter((b) => !b.classList.contains("secundario"));
     expect(llenos.length).toBeLessThanOrEqual(1);
     // Las negativas y las plegadas (deshacen algo hecho, D-13) van en rojo; las plegadas, dentro de
-    // «Me equivoqué».
+    // «Hubo un error».
     for (const b of screen.queryAllByRole("button")) {
       const codigo = b.getAttribute("data-accion") as AccionPago;
       const tipo = b.getAttribute("data-tipo");

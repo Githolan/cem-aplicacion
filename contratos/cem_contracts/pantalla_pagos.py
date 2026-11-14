@@ -44,7 +44,7 @@ por lo que falta». Agregar otra pide una decisión, no solo marcar la fila."""
 
 DESHACEN_LO_HECHO = frozenset({AccionPago.RETOMAR_PAGO})
 """Las acciones que deshacen algo ya hecho: van solo plegadas, nunca a la vista (D-13, decisión 5
-del propietario del 14-11-2026: «Anular la declaración y pagar» bajo «Me equivoqué»). Y en un
+del propietario del 14-11-2026: «Anular la declaración y pagar» bajo «Hubo un error»). Y en un
 plegable va solo una de estas."""
 
 

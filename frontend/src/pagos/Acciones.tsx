@@ -17,7 +17,7 @@ import {
 // ningún botón de acto a mano (informe de fricción, §4.3). Lo único que decide la pantalla es lo que
 // ya está a la vista: un formulario abierto, una pregunta de confirmación o la cuenta ya mostrada
 // esconden el botón que los abrió. Lo que deshace algo ya hecho (tipo `plegada`, D-13) no queda a la
-// vista: va dentro de «Me equivoqué», con borde rojo.
+// vista: va dentro de «Hubo un error», con borde rojo.
 
 export type Enlace = { a: string; estado: unknown };
 

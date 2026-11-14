@@ -51,8 +51,8 @@ export const CON_ENLACE: ReadonlySet<AccionPago> = new Set(["preparar_otra", "pr
 const PRINCIPAL_EN_ROJO: ReadonlySet<AccionPago> = new Set(["declarar_no_pago", "confirmar_no_pago", "observar"]);
 
 /** El título del plegable de lo que deshace algo ya hecho (D-13, decisión 5 del propietario del
- * 14-11-2026): la acción no queda a la vista, para que nada invite a deshacer lo hecho sin querer. */
-export const TITULO_PLEGADAS = "Me equivoqué";
+ * 14-11-2026; texto impersonal, respuesta del 14-11): la acción no queda a la vista, para que nada invite a deshacer lo hecho sin querer. */
+export const TITULO_PLEGADAS = "Hubo un error";
 
 /** Lo que se dice dentro del plegable, antes del botón: qué deja sin efecto. */
 export const AVISO_PLEGADA: Partial<Record<AccionPago, string>> = { retomar_pago: AVISO_RETOMAR };

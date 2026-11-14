@@ -2257,7 +2257,9 @@ describe("preparar, enviar y renovar", () => {
         orden: orden({ estado: "retirada" }), versiones: [version({ aprobada_por: [] })], situacion: "retirada",
         retiro: { retirada_por: PERSONA, retirada_por_nombre: "Marta Ficticia", retirada_en: "2026-11-09T15:00:00Z" },
       }));
-      expect(await screen.findByText(/La retiró Marta Ficticia el .*No se aprueba ni se paga\./)).toBeTruthy();
+      const retiro = await screen.findByText(/La retiró Marta Ficticia el .*No se aprueba ni se paga\./);
+      expect(retiro.textContent).toMatch(/\sm\. No se aprueba ni se paga\.$/); // un solo punto después de la hora
+      expect(retiro.textContent).not.toContain("..");
       expect(screen.getByText("Retirada")).toBeTruthy();
       sinBoton(RETIRAR);
       sinBoton("Modificar la orden");
@@ -4431,7 +4433,9 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
     await waitFor(() => expect(pedidos(api, "GET", `${BASE}/pagos/${O1}`).length).toBeGreaterThan(lecturas));
     // Con la factura ya adjunta, la ficha no invita a subir otra y dice quién y cuándo.
-    expect(await screen.findByText(/^Factura subida después de aprobada la orden, por Admin Ficticia/)).toBeTruthy();
+    const adjunta = await screen.findByText(/^Factura subida después de aprobada la orden, por Admin Ficticia/);
+    expect(adjunta.textContent).toMatch(/\sm\.$/); // un solo punto después de la hora
+    expect(adjunta.textContent).not.toContain("..");
     sinBoton(SUBIR_FACTURA);
     vi.useRealTimers();
   });
@@ -4575,19 +4579,19 @@ describe("tanda 10: el código como el diseño", () => {
     declaracion_vigente: DECLARACION, ejecucion: ejecucion([], [DECLARACION]),
   } as const;
 
-  /** «Anular la declaración y pagar» plegado bajo «Me equivoqué», cerrado, con borde rojo y su aviso adentro. */
+  /** «Anular la declaración y pagar» plegado bajo «Hubo un error», cerrado, con borde rojo y su aviso adentro. */
   async function anularPlegado() {
     const anular = await screen.findByRole("button", { name: "Anular la declaración y pagar" });
     const plegable = anular.closest("details");
     expect(plegable).not.toBeNull();
     expect(plegable?.open).toBe(false);
-    expect(plegable?.querySelector("summary")?.textContent).toBe("Me equivoqué");
+    expect(plegable?.querySelector("summary")?.textContent).toBe("Hubo un error");
     expect(within(plegable as HTMLElement).getByText(AVISO_RETOMAR)).toBeTruthy();
     expect(anular.className).toBe("secundario peligro");
     return plegable as HTMLElement;
   }
 
-  it("D-13: quien declaró y espera no tiene acción a la vista; anular va plegado bajo «Me equivoqué»", async () => {
+  it("D-13: quien declaró y espera no tiene acción a la vista; anular va plegado bajo «Hubo un error»", async () => {
     abrirFicha(ficha({ ...DECLARADA, paso: "espera_confirmar" }));
     const plegable = await anularPlegado();
     const aLaVista = screen.getAllByRole("button").filter((b) => b.dataset.accion !== undefined && b.closest("details") !== plegable);

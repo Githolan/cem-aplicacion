@@ -163,8 +163,8 @@ export function conFacturaAdjunta(v: Version, adjunta: FacturaAdjunta | null): V
 export function textoDeLaAdjunta(a: FacturaAdjunta): string {
   if (a.estado === "en_cuarentena") return `${a.adjuntada_por_nombre} subió la factura el ${momento(a.adjuntada_en)}: el antivirus la está revisando.`;
   if (a.estado === "rechazado") return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} no pasó el antivirus.`;
-  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
-  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
+  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momentoAlFinal(a.adjuntada_en)}`;
+  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momentoAlFinal(a.adjuntada_en)}`;
 }
 
 /** Lo que se dice de la subida que quiere reemplazar a la adjunta: mientras tanto, o si el antivirus
@@ -929,7 +929,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           {situacion === "en_revision" && ficha.puede_retirar && <p>{AVISO_SE_PUEDE_RETIRAR}</p>}
           {situacion === "retirada" && ficha.retiro !== null && (
             <p className="aviso-info" role="note">
-              {textoRetiro(ficha.retiro.retirada_por_nombre, momento(ficha.retiro.retirada_en))}
+              {textoRetiro(ficha.retiro.retirada_por_nombre, momentoAlFinal(ficha.retiro.retirada_en))}
             </p>
           )}
 
