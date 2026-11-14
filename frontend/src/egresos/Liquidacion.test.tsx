@@ -773,3 +773,109 @@ describe("informe de fricción, tanda 9", () => {
     expect(screen.getByRole("list", { name: "Liquidaciones" })).toBeTruthy();
   });
 });
+
+describe("claves retenidas (Codex en #242)", () => {
+  it("si un «agregar» llegó pero se perdió la respuesta, quitarlo y volver a agregarlo es un pedido nuevo", async () => {
+    let detalle = SIN_GASTOS;
+    let liquidables: unknown[] = [LIQUIDABLE];
+    let perder = true;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [LIQUIDACION] }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: liquidables }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(detalle),
+      [`POST ${BASE}/liquidaciones/${L1}/gastos`]: () => {
+        // El servidor lo agrega; la primera vez la respuesta no llega.
+        detalle = CON_GASTO;
+        liquidables = [];
+        if (perder) {
+          perder = false;
+          throw new TypeError("Failed to fetch");
+        }
+        return Response.json({ id: G1 }, { status: 201 });
+      },
+      [`POST ${BASE}/liquidaciones/${L1}/gastos/${G1}/quitar`]: () => {
+        detalle = SIN_GASTOS;
+        liquidables = [LIQUIDABLE];
+        return Response.json({ id: G1 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    const borrador = await screen.findByRole("region", { name: "Borrador de octubre de 2026" });
+    fireEvent.click(within(borrador).getByRole("checkbox", { name: /Limpieza Ficticia SRL/ }));
+    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
+    // La recarga muestra el gasto: el pedido llegó.
+    fireEvent.click(await within(borrador).findByRole("button", { name: /^Quitar Limpieza Ficticia SRL/ }));
+    expect(await screen.findByText("Listo: el gasto salió del borrador.")).toBeTruthy();
+
+    const casilla = (await within(borrador).findByRole("checkbox", { name: /Limpieza Ficticia SRL/ })) as HTMLInputElement;
+    if (!casilla.checked) fireEvent.click(casilla);
+    fireEvent.click(within(borrador).getByRole("button", { name: "Agregar el gasto" }));
+    await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`)).toHaveLength(2));
+    const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones/${L1}/gastos`).map((q) => q.headers.get("Idempotency-Key"));
+    expect(segunda).not.toBe(primera);
+  });
+
+  it("si «Abrir el borrador» llegó sin respuesta y la lista ya lo muestra, abrir otro del mismo período es un pedido nuevo", async () => {
+    const L2 = L1.replace("2222-4222", "2223-4222");
+    const noviembre = { ...LIQUIDACION, id: L2, periodo: "2026-11-01" };
+    let liquidaciones: unknown[] = [noviembre];
+    let perder = true;
+    const api = backend({
+      "GET /api/v1/me/consorcios": CONSORCIOS,
+      [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: liquidaciones }),
+      [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json({ ...SIN_GASTOS, liquidacion: { ...LIQUIDACION, estado: "descartada" } }),
+      [`GET ${BASE}/liquidaciones/${L2}`]: () => Response.json({ ...SIN_GASTOS, liquidacion: noviembre }),
+      [`POST ${BASE}/liquidaciones`]: () => {
+        liquidaciones = [noviembre, LIQUIDACION];
+        if (perder) {
+          perder = false;
+          throw new TypeError("Failed to fetch");
+        }
+        return Response.json({ id: L1 }, { status: 201 });
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await elegirPeriodo("2026", "10");
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await screen.findByRole("alert");
+    // Otra lectura (abrir noviembre) ya muestra el borrador de octubre: el pedido llegó.
+    fireEvent.click(screen.getByRole("button", { name: /^Noviembre de 2026 ·/ }));
+    expect(await screen.findByRole("button", { name: /^Octubre de 2026 · Borrador/ })).toBeTruthy();
+    // Otra persona lo descarta; al abrirlo se ve descartado y el período admite uno nuevo.
+    liquidaciones = [noviembre, { ...LIQUIDACION, estado: "descartada" }];
+    fireEvent.click(screen.getByRole("button", { name: /^Octubre de 2026 · Borrador/ }));
+    expect(await screen.findByText("Ver descartados (1)")).toBeTruthy();
+    await elegirPeriodo("2026", "10");
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
+    const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
+    expect(segunda).not.toBe(primera);
+  });
+
+  it("control: tras una falla pasajera sin ninguna lectura que la muestre, repetir lleva la misma clave", async () => {
+    const api = backend({
+      ...{
+        "GET /api/v1/me/consorcios": CONSORCIOS,
+        [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [] }),
+        [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+      },
+      [`POST ${BASE}/liquidaciones`]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    vi.stubGlobal("fetch", api);
+    abrir();
+    await elegirPeriodo("2026", "10");
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await screen.findByRole("alert");
+    fireEvent.click(screen.getByRole("button", { name: "Abrir el borrador" }));
+    await vi.waitFor(() => expect(pedidos(api, "POST", `${BASE}/liquidaciones`)).toHaveLength(2));
+    const [primera, segunda] = pedidos(api, "POST", `${BASE}/liquidaciones`).map((q) => q.headers.get("Idempotency-Key"));
+    expect(segunda).toBe(primera);
+  });
+});

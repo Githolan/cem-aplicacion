@@ -50,6 +50,8 @@ type Lectura =
   | { tipo: "ok"; liquidaciones: Resumen[]; liquidables: Liquidable[] };
 /** `alCancelar`: qué queda a la vista si no se confirma (AC-53: nunca un «Cargando…» sin salida). */
 type Pendiente = { acto: string; reintentar: () => void; alCancelar?: () => void };
+/** La clave de un «agregar» que todavía no se sabe si llegó, con lo que identifica su gasto. */
+type GastoRetenido = { clave: string; liquidacion: string; orden: string; grupo: string };
 type Acto =
   | { tipo: "preparar"; periodo: string }
   | { tipo: "quitar"; liquidacion: string; gasto: string }
@@ -174,8 +176,26 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   }
   const clave = useRef<string | null>(null);
   const ultimoActo = useRef<string | null>(null);
+  /** El acto de la clave retenida en `clave`, para saber cuándo la lectura ya muestra su efecto. */
+  const actoRetenido = useRef<Acto | null>(null);
   /** Una clave por orden al agregar: repetir tras una falla pasajera no la agrega dos veces. */
-  const clavesDeGasto = useRef(new Map<string, string>());
+  const clavesDeGasto = useRef(new Map<string, GastoRetenido>());
+
+  /** Una clave retenida sirve solo para repetir el mismo pedido mientras no se sabe si llegó. Si la
+   * lectura ya muestra su efecto, ese pedido terminó: la clave se suelta y un acto igual más
+   * adelante es otro (Codex en #242: quitar el gasto y volver a agregar la misma orden reusaba la
+   * clave y el servidor devolvía la respuesta guardada sin agregar nada). Quitar y descartar no se
+   * repiten iguales: el gasto quitado y el borrador descartado ya no ofrecen ese acto. */
+  function soltarLoYaHecho(lista: readonly Resumen[], visto: Detalle | null) {
+    for (const [llave, r] of clavesDeGasto.current)
+      if (visto?.liquidacion.id === r.liquidacion && visto.gastos.some((g) => g.orden_id === r.orden && g.grupo === r.grupo))
+        clavesDeGasto.current.delete(llave);
+    const acto = actoRetenido.current;
+    if (acto?.tipo === "preparar" && lista.some((l) => l.periodo === acto.periodo && l.estado === "borrador")) {
+      clave.current = null;
+      actoRetenido.current = null;
+    }
+  }
   const montado = useMontado();
   useAlVolverLaRed(fallaDetalle !== null, () => setVuelta((v) => v + 1));
 
@@ -197,6 +217,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (!vigente) return;
         const falla = [lista, liquidables].find((r) => r.data === undefined);
         if (falla === undefined) {
+          soltarLoYaHecho(lista.data?.elementos ?? [], uno?.data ?? null);
           setLectura({ tipo: "ok", liquidaciones: lista.data?.elementos ?? [], liquidables: liquidables.data?.elementos ?? [] });
           if (uno !== null && uno.data === undefined && codigoDe(uno.error) === SEGUNDO_FACTOR_REQUERIDO) {
             const estado = uno.response.status;
@@ -247,6 +268,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     if (!montado.current) return;
     if (!reintento) soltarClaveSiCambio(clave, ultimoActo, JSON.stringify(acto));
     clave.current ??= crypto.randomUUID();
+    actoRetenido.current = acto;
     const header = { [ENCABEZADO_IDEMPOTENCIA]: clave.current };
     const headers = encabezadoCsrf();
     setEnviando(true);
@@ -344,8 +366,8 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
         if (!montado.current) return;
         setProgreso({ hechas: i, total: ordenes.length });
         const llave = `${liquidacion}:${o.orden_id}:${grupoDeGasto}`;
-        const claveDeGasto = clavesDeGasto.current.get(llave) ?? crypto.randomUUID();
-        clavesDeGasto.current.set(llave, claveDeGasto);
+        const claveDeGasto = clavesDeGasto.current.get(llave)?.clave ?? crypto.randomUUID();
+        clavesDeGasto.current.set(llave, { clave: claveDeGasto, liquidacion, orden: o.orden_id, grupo: grupoDeGasto });
         const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones/{liquidacion_id}/gastos", {
           headers: encabezadoCsrf(),
           params: {
