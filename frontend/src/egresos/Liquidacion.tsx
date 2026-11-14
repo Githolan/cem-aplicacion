@@ -5,6 +5,7 @@ import { CabeceraInterna } from "../CabeceraInterna";
 import { RUTA_INICIO } from "../enlace";
 import type { components } from "../api/tipos";
 import { encabezadoCsrf } from "../csrf";
+import { ErrorDeCampo, erroresDe, marcaDe } from "../ErrorDeCampo";
 import { FilaDeRegistro } from "../FichaDeRegistro";
 import { codigoDe, esPasajera, SIN_CONEXION } from "../fallas";
 import { Hoja } from "../Hoja";
@@ -152,6 +153,9 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
   const [motivo, setMotivo] = useState("");
   /** La hoja que pide el motivo para descartar está abierta (AC-52). */
   const [descartando, setDescartando] = useState(false);
+  /** Por qué no se descartó, dentro de la hoja: la página de atrás está inerte y no lo diría
+   * (Codex en #242). Junto al campo si es del motivo; si no, como aviso de la hoja. */
+  const [fallaDescarte, setFallaDescarte] = useState<{ motivo?: string; general?: string } | null>(null);
   const [enviando, setEnviando] = useState(false);
   /** Mientras se agregan varias: cuántas van. */
   const [progreso, setProgreso] = useState<{ hechas: number; total: number } | null>(null);
@@ -167,6 +171,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     setGrupo("");
     setMotivo("");
     setDescartando(false);
+    setFallaDescarte(null);
   }
 
   function volverALaLista() {
@@ -273,6 +278,7 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
     const headers = encabezadoCsrf();
     setEnviando(true);
     setAviso(null);
+    setFallaDescarte(null);
     const pedido =
       acto.tipo === "preparar"
         ? api.POST("/api/v1/consorcios/{consorcio_id}/liquidaciones", {
@@ -331,10 +337,19 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
           return;
         }
         if (renovarClave(response.status, codigo)) clave.current = null;
-        setAviso({ texto: mensajeDeError(response.status, codigo), ok: false });
+        const texto = mensajeDeError(response.status, codigo);
+        if (acto.tipo === "descartar") {
+          // El único dato del descarte es el motivo: un 422 es de él (el del campo, o el del servidor).
+          const delMotivo = response.status === ESTADO.invalido ? (erroresDe(error).motivo ?? (error as { mensaje: string }).mensaje) : undefined;
+          setFallaDescarte(delMotivo !== undefined ? { motivo: delMotivo } : { general: texto });
+        } else setAviso({ texto, ok: false });
         if (cambioLoVisto(response.status, codigo)) setVuelta((v) => v + 1);
       })
-      .catch((e: unknown) => (e instanceof SinSesion ? aEntrar() : setAviso({ texto: SIN_CONEXION, ok: false })))
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else if (acto.tipo === "descartar") setFallaDescarte({ general: SIN_CONEXION });
+        else setAviso({ texto: SIN_CONEXION, ok: false });
+      })
       .finally(() => setEnviando(false));
   }
 
@@ -708,22 +723,40 @@ function LiquidacionDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aI
                       Imprimir o guardar como PDF
                     </button>
                     {detalle.liquidacion.estado === "borrador" && (
-                      <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setDescartando(true)}>
+                      <button type="button" className="secundario peligro" disabled={enviando}
+                        onClick={() => {
+                          setFallaDescarte(null);
+                          setDescartando(true);
+                        }}>
                         Descartar el borrador
                       </button>
                     )}
                   </div>
-                  {descartando && detalle.liquidacion.estado === "borrador" && (
+                  {/* La hoja sigue abierta si la recarga muestra que el borrador ya no admite descartarse
+                      (lo descartó otra persona): dice por qué y solo ofrece cerrarla. */}
+                  {descartando && (
                     <Hoja titulo="Descartar el borrador" alEscapar={() => setDescartando(false)}>
                       <form className="formulario" onSubmit={(e) => descartar(e, detalle.liquidacion.id)}>
-                        <p>El borrador queda guardado como descartado y sus gastos vuelven a estar disponibles.</p>
-                        <label htmlFor={`${id}-motivo`}>Motivo para descartar el borrador</label>
-                        <input id={`${id}-motivo`} data-foco required maxLength={500} value={motivo} disabled={enviando}
-                          onChange={(e) => setMotivo(e.target.value)} />
+                        <AvisoPantalla aviso={fallaDescarte?.general === undefined ? null : { texto: fallaDescarte.general, ok: false }} />
+                        {detalle.liquidacion.estado === "borrador" && (
+                          <>
+                            <p>El borrador queda guardado como descartado y sus gastos vuelven a estar disponibles.</p>
+                            <label htmlFor={`${id}-motivo`}>Motivo para descartar el borrador</label>
+                            <input id={`${id}-motivo`} data-foco required maxLength={500} value={motivo} disabled={enviando}
+                              {...marcaDe(`${id}-motivo`, fallaDescarte?.motivo)}
+                              onChange={(e) => {
+                                setMotivo(e.target.value);
+                                setFallaDescarte((f) => (f?.motivo === undefined ? f : null));
+                              }} />
+                            <ErrorDeCampo idCampo={`${id}-motivo`} mensaje={fallaDescarte?.motivo} />
+                          </>
+                        )}
                         <div className="acciones">
-                          <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
-                            Descartar el borrador
-                          </button>
+                          {detalle.liquidacion.estado === "borrador" && (
+                            <button type="submit" className="peligro" disabled={enviando || motivo.trim() === ""}>
+                              Descartar el borrador
+                            </button>
+                          )}
                           <button type="button" className="secundario" disabled={enviando} onClick={() => setDescartando(false)}>
                             Cancelar
                           </button>

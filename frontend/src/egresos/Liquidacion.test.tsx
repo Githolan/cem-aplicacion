@@ -879,3 +879,59 @@ describe("claves retenidas (Codex en #242)", () => {
     expect(segunda).toBe(primera);
   });
 });
+
+describe("errores al descartar, dentro de la hoja (Codex en #242)", () => {
+  const LISTAS_DESCARTE = (descartar: () => Response | Promise<Response>, detalle: () => Detalle = () => SIN_GASTOS): Respuestas => ({
+    "GET /api/v1/me/consorcios": CONSORCIOS,
+    [`GET ${BASE}/liquidaciones`]: () => Response.json({ elementos: [detalle().liquidacion] }),
+    [`GET ${BASE}/liquidaciones/ordenes-liquidables`]: () => Response.json({ elementos: [] }),
+    [`GET ${BASE}/liquidaciones/${L1}`]: () => Response.json(detalle()),
+    [`POST ${BASE}/liquidaciones/${L1}/descartar`]: descartar,
+  });
+
+  async function descartarCon(motivo: string) {
+    abrir();
+    fireEvent.click(await screen.findByRole("button", { name: /^Octubre de 2026 ·/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar el borrador" }));
+    const hoja = await screen.findByRole("dialog", { name: "Descartar el borrador" });
+    fireEvent.change(within(hoja).getByLabelText("Motivo para descartar el borrador"), { target: { value: motivo } });
+    fireEvent.click(within(hoja).getByRole("button", { name: "Descartar el borrador" }));
+    return hoja;
+  }
+
+  it("sin conexión: el aviso va en la hoja, con el foco, y no en la página de atrás", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_DESCARTE(() => {
+      throw new TypeError("Failed to fetch");
+    })));
+    const hoja = await descartarCon("SINTETICO");
+    const aviso = await within(hoja).findByRole("alert");
+    expect(aviso.textContent).not.toBe("");
+    await vi.waitFor(() => expect(document.activeElement).toBe(aviso));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  });
+
+  it("si el servidor no lo admite (lo descartó otra persona), lo dice en la hoja y solo ofrece cerrarla", async () => {
+    let actual: Detalle = SIN_GASTOS;
+    vi.stubGlobal("fetch", backend(LISTAS_DESCARTE(() => {
+      actual = { ...SIN_GASTOS, liquidacion: { ...LIQUIDACION, estado: "descartada" } };
+      return error("liquidacion_no_admite", 409);
+    }, () => actual)));
+    const hoja = await descartarCon("SINTETICO");
+    expect((await within(hoja).findByRole("alert")).textContent).toMatch(/La liquidación no admite eso/);
+    await vi.waitFor(() => expect(within(hoja).queryByRole("button", { name: "Descartar el borrador" })).toBeNull());
+    expect(within(hoja).getByRole("button", { name: "Cancelar" })).toBeTruthy();
+    expect(within(hoja).getByRole("alert")).toBeTruthy();
+  });
+
+  it("un 422 del motivo va junto al campo", async () => {
+    vi.stubGlobal("fetch", backend(LISTAS_DESCARTE(() =>
+      Response.json({ codigo: "peticion_invalida", mensaje: "Falta el motivo.", detalle: null, id_correlacion: "c" }, { status: 422 }),
+    )));
+    const hoja = await descartarCon("SINTETICO");
+    const campo = within(hoja).getByLabelText("Motivo para descartar el borrador");
+    await vi.waitFor(() => expect(campo.getAttribute("aria-invalid")).toBe("true"));
+    const mensaje = document.getElementById(campo.getAttribute("aria-describedby") ?? "");
+    expect(mensaje?.textContent).toBe("Falta el motivo.");
+    expect(within(hoja).queryByRole("alert")).toBeNull();
+  });
+});
