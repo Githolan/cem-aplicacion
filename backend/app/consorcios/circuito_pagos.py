@@ -300,6 +300,7 @@ def acciones_ofrecidas(
         (TipoAccion.PRINCIPAL, [botones.principal] if botones.principal else []),
         (TipoAccion.SECUNDARIA, botones.secundarias),
         (TipoAccion.NEGATIVA, botones.negativas),
+        (TipoAccion.PLEGADA, botones.plegadas),
     ):
         ofrecidas += [AccionOfrecida(codigo=c, tipo=tipo) for c in codigos if puede.get(c, False)]
     return ofrecidas

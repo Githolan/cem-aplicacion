@@ -18,7 +18,7 @@ type Grupo = components["schemas"]["GrupoPago"];
 type EstadoVisible = components["schemas"]["EstadoVisible"];
 type Barra = components["schemas"]["BarraPago"];
 
-type Botones = { principal: AccionPago | null; secundarias: AccionPago[]; negativas: AccionPago[] };
+type Botones = { principal: AccionPago | null; secundarias: AccionPago[]; negativas: AccionPago[]; plegadas?: AccionPago[] };
 export type FilaTabla = Botones & {
   situacion: Situacion;
   paso: Paso | null;
@@ -88,6 +88,7 @@ export function accionesDe(f: Omit<Ficha, "acciones">, comprobanteNoCoincide = f
     ...(botones.principal !== null ? [{ codigo: botones.principal, tipo: "principal" as const }] : []),
     ...botones.secundarias.map((codigo) => ({ codigo, tipo: "secundaria" as const })),
     ...botones.negativas.map((codigo) => ({ codigo, tipo: "negativa" as const })),
+    ...(botones.plegadas ?? []).map((codigo) => ({ codigo, tipo: "plegada" as const })),
   ].filter((a) => puede[a.codigo]);
 }
 

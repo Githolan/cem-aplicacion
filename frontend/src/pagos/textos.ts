@@ -170,7 +170,6 @@ export const AVISO_TOMAR =
   "Antes de hacerse cargo, hay que confirmar con quien vio la cuenta que no transfirió. Si la plata ya salió y se paga otra vez, la orden se paga dos veces.";
 export const AVISO_RETOMAR = "«Anular la declaración y pagar» deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no hay que transferir de nuevo.";
-export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: conviene comparar los datos con el archivo.";
 export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
 export const AVISO_VUELVE_A_APROBACION = "Para volver a pagarla, hay que enviarla a aprobar de nuevo.";

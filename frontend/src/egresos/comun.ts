@@ -250,7 +250,9 @@ const MENSAJES: Record<string, string> = {
   sin_diferencia: "Lo escrito es lo mismo que la orden: corresponde registrar el pago, no una diferencia.",
   diferencia_ya_resuelta: "El Consejo ya resolvió esa diferencia.",
   solo_reclamo: "Un pago a otra cuenta o en otra moneda no se da por pagado: solo se puede reclamar.",
-  fecha_operacion_invalida: "La fecha no puede ser anterior a la emisión ni futura.",
+  // El límite de la base (0055 y 0067, `registrar_pago_manual` y `0075`): desde el día en que se
+  // emitió la orden al ver la cuenta para pagar, hasta hoy, en la zona horaria del edificio.
+  fecha_operacion_invalida: "Fecha de la transferencia: no puede ser anterior al día en que se vio la cuenta para pagar esta orden ni posterior a hoy.",
   comprobante_invalido: "El comprobante tiene que cargarse desde el pago de esta orden, después de ver la cuenta para pagar, seguir en «Facturas y comprobantes» y su archivo tiene que haber pasado el antivirus.",
   comprobante_de_otra_orden: "Ese comprobante ya respalda otro pago.",
   operacion_de_otra_orden: "Ese número de operación ya respalda otra orden: una transferencia paga una sola orden.",

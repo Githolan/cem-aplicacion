@@ -10,6 +10,21 @@ const ESPERA_DE_LO_ASINCRONO_MS = 10_000;
 
 configure({ asyncUtilTimeout: ESPERA_DE_LO_ASINCRONO_MS });
 
+// jsdom no trae matchMedia y el inicio pregunta el ancho (D-39): por omisión, el de un teléfono, que
+// no coincide con ninguna consulta de ancho mínimo. La prueba que necesita otro ancho lo fija con
+// `vi.stubGlobal("matchMedia", …)`, y `vi.unstubAllGlobals` vuelve a este.
+window.matchMedia = (consulta: string) =>
+  ({
+    matches: false,
+    media: consulta,
+    onchange: null,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }) as MediaQueryList;
+
 // Colores y botón principal (pregunta 13, tanda 5): cada pantalla que una prueba dibuja se revisa
 // mientras se dibuja; una falta hace fallar esa prueba (`pesoDeBotones.ts`).
 beforeEach(() => vigilarBotones());

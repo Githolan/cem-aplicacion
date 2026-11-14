@@ -8,7 +8,13 @@ import pytest
 from pydantic import ValidationError
 
 from cem_contracts.egresos import AccionPago, EstadoVisible, GrupoPago, PasoPago, SituacionPago
-from cem_contracts.pantalla_pagos import ARCHIVO, EXCEPCIONES_REGLA_3, PantallaPagos, cargar
+from cem_contracts.pantalla_pagos import (
+    ARCHIVO,
+    DESHACEN_LO_HECHO,
+    EXCEPCIONES_REGLA_3,
+    PantallaPagos,
+    cargar,
+)
 from cem_contracts.redaccion import faltas
 
 NEGATIVAS = {
@@ -71,6 +77,7 @@ def test_regla_1_a_lo_sumo_una_principal_y_ninguna_accion_dos_veces():
             todas = ([botones.principal] if botones.principal else []) + [
                 *botones.secundarias,
                 *botones.negativas,
+                *botones.plegadas,
             ]
             assert len(todas) == len(set(todas)), (f.situacion, f.paso)
 
@@ -210,3 +217,35 @@ def test_cada_par_aparece_una_vez():
         datos["filas"].append(dict(datos["filas"][0]))
 
     _rompe(repetida)
+
+
+def test_d13_anular_la_declaracion_va_plegada_en_los_dos_pasos():
+    """Decisión 5 del propietario (14-11-2026): «Anular la declaración y pagar» no queda a la vista,
+    ni para quien espera la confirmación ni para quien todavía tiene que subir el comprobante."""
+    tabla = cargar()
+    for paso in (PasoPago.ESPERA_CONFIRMAR, PasoPago.SUBIR_COMPROBANTE):
+        fila = tabla.fila(SituacionPago.NO_PAGO_DECLARADO, paso)
+        assert fila.plegadas == [AccionPago.RETOMAR_PAGO], paso
+        assert AccionPago.RETOMAR_PAGO not in fila.secundarias, paso
+    for f in tabla.filas:
+        a_la_vista = {f.principal, *f.secundarias, *f.negativas}
+        assert not a_la_vista & DESHACEN_LO_HECHO, (f.situacion, f.paso)
+        assert set(f.plegadas) <= DESHACEN_LO_HECHO, (f.situacion, f.paso)
+
+
+def test_d13_control_a_la_vista_o_plegar_otra_cosa_no_entra():
+    def _fila(datos, paso):
+        return next(
+            f for f in datos["filas"] if f["situacion"] == "no_pago_declarado" and f["paso"] == paso
+        )
+
+    def a_la_vista(datos):
+        fila = _fila(datos, "espera_confirmar")
+        fila["plegadas"] = []
+        fila["secundarias"] = ["retomar_pago"]
+
+    def otra_plegada(datos):
+        _fila(datos, "subir_comprobante")["plegadas"] = ["retomar_pago", "declarar_no_pago"]
+
+    _rompe(a_la_vista)
+    _rompe(otra_plegada)

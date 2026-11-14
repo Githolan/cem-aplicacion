@@ -1,4 +1,5 @@
 import type { components } from "../api/tipos";
+import { AVISO_RETOMAR } from "./textos";
 
 // Las palabras de cada acción que el servidor ofrece en una orden (informe de fricción, parte 4).
 // Qué se ofrece, en qué orden y con qué peso lo dice el servidor (`acciones: [{codigo, tipo}]`),
@@ -49,12 +50,16 @@ export const CON_ENLACE: ReadonlySet<AccionPago> = new Set(["preparar_otra", "pr
  * secundarias con borde: las mismas clases que el resto de las pantallas (estilos.css). */
 const PRINCIPAL_EN_ROJO: ReadonlySet<AccionPago> = new Set(["declarar_no_pago", "confirmar_no_pago", "observar"]);
 
-/** Secundarias que deshacen algo ya hecho: con borde rojo, como una negativa (D-13: «Anular la
- * declaración y pagar» deja sin efecto la declaración de que no se pagó). */
-const SECUNDARIA_EN_ROJO: ReadonlySet<AccionPago> = new Set(["retomar_pago"]);
+/** El título del plegable de lo que deshace algo ya hecho (D-13, decisión 5 del propietario del
+ * 14-11-2026): la acción no queda a la vista, para que nada invite a deshacer lo hecho sin querer. */
+export const TITULO_PLEGADAS = "Me equivoqué";
 
-/** La clase del botón según el tipo que mandó el servidor: una sola principal, llena. */
+/** Lo que se dice dentro del plegable, antes del botón: qué deja sin efecto. */
+export const AVISO_PLEGADA: Partial<Record<AccionPago, string>> = { retomar_pago: AVISO_RETOMAR };
+
+/** La clase del botón según el tipo que mandó el servidor: una sola principal, llena. Las negativas
+ * y las plegadas (deshacen algo ya hecho, D-13) van con borde rojo. */
 export function claseDe({ codigo, tipo }: AccionOfrecida): string | undefined {
   if (tipo === "principal") return PRINCIPAL_EN_ROJO.has(codigo) ? "peligro" : undefined;
-  return tipo === "negativa" || SECUNDARIA_EN_ROJO.has(codigo) ? "secundario peligro" : "secundario";
+  return tipo === "negativa" || tipo === "plegada" ? "secundario peligro" : "secundario";
 }

@@ -1305,6 +1305,9 @@ class TipoAccion(StrEnum):
     PRINCIPAL = "principal"
     SECUNDARIA = "secundaria"
     NEGATIVA = "negativa"
+    PLEGADA = "plegada"
+    """Deshace algo ya hecho: va dentro de un plegable y no queda a la vista, para que nada invite a
+    repetir ni a deshacer lo hecho sin querer (D-13, decisión 5 del propietario del 14-11-2026)."""
 
 
 class AccionOfrecida(BaseModel):

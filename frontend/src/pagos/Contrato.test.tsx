@@ -18,8 +18,6 @@ type Situacion = components["schemas"]["SituacionPago"];
 afterEach(cleanup);
 
 const NEGATIVAS = new Set<AccionPago>(["retirar", "rechazar", "observar", "declarar_no_pago", "cerrar_reclamo", "cerrar_sin_pagar"]);
-/** D-13: «Anular la declaración y pagar» deshace lo declarado; va con borde rojo aunque sea secundaria. */
-const DESHACEN = new Set<AccionPago>(["retomar_pago"]);
 
 function dibujar(acciones: AccionOfrecida[]) {
   return render(
@@ -39,17 +37,21 @@ describe("botón = lo que llegó", () => {
       ...(fila.principal !== null ? [{ codigo: fila.principal, tipo: "principal" as const }] : []),
       ...fila.secundarias.map((codigo) => ({ codigo, tipo: "secundaria" as const })),
       ...fila.negativas.map((codigo) => ({ codigo, tipo: "negativa" as const })),
+      ...(fila.plegadas ?? []).map((codigo) => ({ codigo, tipo: "plegada" as const })),
     ];
     dibujar(acciones);
     expect(nombres()).toEqual(aDibujar(acciones).map((a) => TEXTO_ACCION[a.codigo]));
     // Un solo principal: como mucho un botón lleno (sin «secundario»).
     const llenos = screen.queryAllByRole("button").filter((b) => !b.classList.contains("secundario"));
     expect(llenos.length).toBeLessThanOrEqual(1);
-    // Las negativas van en rojo.
+    // Las negativas y las plegadas (deshacen algo hecho, D-13) van en rojo; las plegadas, dentro de
+    // «Me equivoqué».
     for (const b of screen.queryAllByRole("button")) {
       const codigo = b.getAttribute("data-accion") as AccionPago;
-      if (b.getAttribute("data-tipo") === "negativa") expect(b.classList.contains("peligro")).toBe(true);
-      expect(NEGATIVAS.has(codigo) || DESHACEN.has(codigo) || !b.classList.contains("peligro") || b.getAttribute("data-tipo") === "principal").toBe(true);
+      const tipo = b.getAttribute("data-tipo");
+      if (tipo === "negativa" || tipo === "plegada") expect(b.classList.contains("peligro")).toBe(true);
+      expect(tipo === "plegada").toBe(b.closest("details") !== null);
+      expect(NEGATIVAS.has(codigo) || tipo === "plegada" || !b.classList.contains("peligro") || tipo === "principal").toBe(true);
     }
     cleanup();
   });

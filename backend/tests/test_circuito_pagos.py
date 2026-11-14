@@ -576,6 +576,21 @@ def test_la_tabla_no_ofrece_lo_que_la_base_niega():
     assert acciones_ofrecidas(fila, {}) == []  # sin el sí de la base, nada
 
 
+def test_anular_la_declaracion_se_ofrece_plegada_en_los_dos_pasos():
+    """D-13 (decisión 5 del propietario, 14-11-2026): «Anular la declaración y pagar» va plegado
+    bajo «Me equivoqué», también para quien todavía tiene que subir el comprobante."""
+    puede = {AccionPago.RETOMAR_PAGO: True, AccionPago.DECLARAR_NO_PAGO: True}
+    espera = acciones_ofrecidas(fila_de(S.NO_PAGO_DECLARADO, P.ESPERA_CONFIRMAR), puede)
+    assert [(x.codigo, x.tipo) for x in espera] == [(AccionPago.RETOMAR_PAGO, TipoAccion.PLEGADA)]
+    sube = acciones_ofrecidas(fila_de(S.NO_PAGO_DECLARADO, P.SUBIR_COMPROBANTE), puede)
+    assert [(x.codigo, x.tipo) for x in sube] == [
+        (AccionPago.DECLARAR_NO_PAGO, TipoAccion.NEGATIVA),
+        (AccionPago.RETOMAR_PAGO, TipoAccion.PLEGADA),
+    ]
+    # Control: sin el sí de la base tampoco se ofrece plegada.
+    assert acciones_ofrecidas(fila_de(S.NO_PAGO_DECLARADO, P.ESPERA_CONFIRMAR), {}) == []
+
+
 def test_si_el_comprobante_no_coincide_observar_pasa_a_principal():
     fila = fila_de(S.FALTA_CONCILIAR, P.CONCILIAR)
     puede = {AccionPago.CONCILIAR: True, AccionPago.OBSERVAR: True}

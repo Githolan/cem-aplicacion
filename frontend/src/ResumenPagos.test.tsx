@@ -416,3 +416,59 @@ describe("salidas de la bandeja según el rol", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: "Preparar una orden" })).toBeNull());
   });
 });
+
+describe("D-39: en la PC, el inicio de administración muestra solo lo que hay para hacer", () => {
+  const DE_GESTION = [...ADMINISTRA, "invitaciones.crear", "mandatos.ver", "padron.ver", "documentos.ver", "liquidacion.preparar"];
+  const POR_ACLARAR = { "GET /api/v1/pagos-por-aclarar": () => Response.json({ elementos: [{}] }) };
+
+  /** Desde 1025 px coincide la consulta de la barra lateral; en tablet y teléfono, no. */
+  function conAncho(pc: boolean) {
+    vi.stubGlobal("matchMedia", (consulta: string) => ({
+      matches: pc && consulta === "(min-width: 64.0625em)",
+      media: consulta,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+  }
+
+  const titulosDeGrupo = () => screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+
+  it("en la PC: un solo grupo «Para hacer», con Pagos y su cifra y los pagos para aclarar", async () => {
+    conAncho(true);
+    vi.stubGlobal(
+      "fetch",
+      backend({ acciones: { [C1]: DE_GESTION }, bandejas: { [C1]: conElementos("para_aprobar", "para_aprobar") }, otras: POR_ACLARAR }),
+    );
+    abrir();
+    const grupo = within(await screen.findByRole("region", { name: "Para hacer" }));
+    const pagos = await grupo.findByRole("link", { name: "Pagos", description: "2 cosas para hacer" });
+    expect(pagos.getAttribute("href")).toBe("/pagos");
+    expect(await grupo.findByRole("link", { name: "Pagos para aclarar (de quien dejó de administrar)" })).toBeTruthy();
+    expect(titulosDeGrupo()).toEqual(["Para hacer"]);
+    // Lo demás ya está en la barra lateral: no se repite en el inicio.
+    const principal = screen.getByRole("main");
+    for (const nombre of ["Invitar a una persona", "Mandatos y decisiones", "Padrón del edificio", "Documentos del edificio", "Liquidación (borrador)"])
+      expect(within(principal).queryByRole("link", { name: nombre })).toBeNull();
+  });
+
+  it("control: en tablet y teléfono, los grupos de siempre", async () => {
+    conAncho(false);
+    vi.stubGlobal(
+      "fetch",
+      backend({ acciones: { [C1]: DE_GESTION }, bandejas: { [C1]: conElementos("para_aprobar", "para_aprobar") }, otras: POR_ACLARAR }),
+    );
+    abrir();
+    expect(await screen.findByRole("link", { name: "Mandatos y decisiones" })).toBeTruthy();
+    await screen.findByRole("link", { name: "Pagos para aclarar (de quien dejó de administrar)" });
+    expect(titulosDeGrupo()).toEqual(["Personas y mandatos", "Edificio", "Dinero"]);
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+  });
+
+  it("control: en la PC, quien no prepara órdenes (Consejo) conserva su inicio", async () => {
+    conAncho(true);
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: [...CONSEJO, "mandatos.ver"] }, bandejas: { [C1]: conElementos("para_aprobar") } }));
+    abrir();
+    expect(await screen.findByRole("link", { name: "Mandatos y decisiones" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Para hacer" })).toBeNull();
+  });
+});

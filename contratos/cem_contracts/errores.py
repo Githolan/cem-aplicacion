@@ -246,8 +246,9 @@ class CodigoError(StrEnum):
     NO_COINCIDE_CON_LA_ORDEN = "no_coincide_con_la_orden"
     """El importe, la moneda o la cuenta del pago no son los de la orden aprobada."""
     FECHA_OPERACION_INVALIDA = "fecha_operacion_invalida"
-    """La fecha del pago es anterior a la emisión, futura o posterior al vencimiento de la
-    aprobación."""
+    """La fecha del pago es anterior al día de la emisión (la primera vez que se vio la cuenta para
+    pagar esa versión) o posterior a hoy, en la zona horaria del consorcio. Después del vencimiento
+    de la aprobación se registra fuera de término (0067)."""
     COMPROBANTE_INVALIDO = "comprobante_invalido"
     """El comprobante no es un documento vigente de comprobantes con un archivo que pasó el
     antivirus."""

@@ -37,6 +37,7 @@ import { SinExplicar } from "./pagos/SinExplicar";
 import { Padron, RUTA_PADRON } from "./Padron";
 import { Panel, RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
 import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
+import { CONSULTA_AL_LADO, useAncho } from "./pagos/useAncho";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
 
@@ -48,7 +49,14 @@ interface EnlaceDeInicio {
   requisito: Requisito;
 }
 
-const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeInicio[] }[] = [
+interface GrupoDeInicio {
+  titulo: string;
+  enlaces: readonly EnlaceDeInicio[];
+  /** Lleva «Pagos para aclarar» cuando quedó algo de quien dejó de administrar. */
+  conPorAclarar?: boolean;
+}
+
+const GRUPOS_DE_INICIO: readonly GrupoDeInicio[] = [
   {
     titulo: "Personas y mandatos",
     enlaces: [
@@ -96,6 +104,7 @@ const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeIni
   },
   {
     titulo: "Dinero",
+    conPorAclarar: true,
     enlaces: [
       { ruta: RUTA_PAGOS, texto: "Pagos", icono: "billetera", requisito: REQUISITOS.pagos },
       {
@@ -117,6 +126,15 @@ const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeIni
 ];
 
 const ENLACES_DE_INICIO = GRUPOS_DE_INICIO.flatMap((g) => g.enlaces);
+
+/** Desde 1025 px la barra lateral ya lista los destinos (D-39, decisión 3 del propietario del
+ * 14-11-2026): el inicio de quien prepara órdenes muestra solo lo pendiente. En teléfono y tablet,
+ * los grupos de siempre. */
+const PARA_HACER: GrupoDeInicio = {
+  titulo: "Para hacer",
+  conPorAclarar: true,
+  enlaces: ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PAGOS),
+};
 
 // El nombre del enlace es solo su título: el detalle lo acompaña como descripción.
 function FilaDeInicio({ enlace }: { enlace: Pick<EnlaceDeInicio, "ruta" | "texto" | "detalle" | "icono"> }) {
@@ -177,6 +195,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
   });
   const pagos = useResumenPagos(porEdificio);
   const servicio = useFallaDelServicio(sesion === "con_sesion");
+  const alLado = useAncho(CONSULTA_AL_LADO);
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
   if (sesion === "consultando") return <p role="status">Cargando…</p>;
   // Sin saber qué puede la persona, solo lo que le sirve igual: los contactos guardados.
@@ -185,6 +204,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
+  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [PARA_HACER] : GRUPOS_DE_INICIO;
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
   // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
   const fallaDePagos = pagos.enTarjeta && pagos.falla !== null;
@@ -248,9 +268,9 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
         />
       )}
       <div className="grupos-inicio">
-        {GRUPOS_DE_INICIO.map((g) => {
+        {grupos.map((g) => {
           const propios = g.enlaces.filter((e) => enlaces.includes(e) && !(pagos.enTarjeta && e.ruta === RUTA_PAGOS));
-          const aclarar = g.titulo === "Dinero" && porAclarar.data === true;
+          const aclarar = g.conPorAclarar === true && porAclarar.data === true;
           if (propios.length === 0 && !aclarar) return null;
           return (
             <section key={g.titulo} aria-label={g.titulo}>

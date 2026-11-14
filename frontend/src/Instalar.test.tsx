@@ -48,6 +48,9 @@ function simularNavegador(agente: string, standalone = false, punteroFino = fals
   vi.spyOn(navigator, "userAgent", "get").mockReturnValue(agente);
   vi.stubGlobal("matchMedia", (consulta: string) => ({
     matches: (standalone && consulta === "(display-mode: standalone)") || (punteroFino && consulta === "(pointer: fine)"),
+    // El inicio pregunta el ancho (D-39) y se suscribe al cambio: acá, el de un teléfono.
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
   }));
 }
 
