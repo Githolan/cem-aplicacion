@@ -139,7 +139,8 @@ export const PREGUNTA_RETIRAR =
   "¿Retirar esta orden? Sale de la bandeja de todos y ya no se aprueba ni se paga. Queda registrado quién la retiró y cuándo, y se ve en la consulta.";
 export const TEXTO_RETIRADA = "Listo: la orden se retiró. Ya no está en la bandeja.";
 export const AVISO_SE_PUEDE_RETIRAR = "Mientras nadie la apruebe, se puede modificar o retirar.";
-export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando}. No se aprueba ni se paga.`;
+/** `cuando` cierra la frase con su punto (`momentoAlFinal`): «a. m.» ya lo trae y no se repite. */
+export const textoRetiro = (nombre: string, cuando: string) => `La retiró ${nombre} el ${cuando} No se aprueba ni se paga.`;
 
 export const PASOS_DEL_CAMINO = ["Preparar", "Aprobar", "Pagar", "Conciliar", "Cotejar"] as const;
 
@@ -170,7 +171,6 @@ export const AVISO_TOMAR =
   "Antes de hacerse cargo, hay que confirmar con quien vio la cuenta que no transfirió. Si la plata ya salió y se paga otra vez, la orden se paga dos veces.";
 export const AVISO_RETOMAR = "«Anular la declaración y pagar» deja sin efecto lo que se declaró.";
 export const AVISO_NO_TRANSFIERAS = "Si la plata ya salió, no hay que transferir de nuevo.";
-export const AVISO_LECTURA_COINCIDE = "La lectura del comprobante coincide con lo registrado.";
 export const AVISO_LECTURA_INCOMPLETA = "La lectura del comprobante quedó incompleta: conviene comparar los datos con el archivo.";
 export const AVISO_LECTURA_DISPUTADA = "Dijo que la lectura estaba mal";
 export const AVISO_VUELVE_A_APROBACION = "Para volver a pagarla, hay que enviarla a aprobar de nuevo.";

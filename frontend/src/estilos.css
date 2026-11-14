@@ -140,7 +140,8 @@ h3 {
 
 /* Bandas de resultado: la palabra manda, el color acompaña. */
 .aviso-ok,
-.aviso-error {
+.aviso-error,
+.aviso-pendiente {
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-lg);
   font-weight: 600;
@@ -165,6 +166,13 @@ h3 {
 .aviso-error {
   background: var(--danger-bg);
   color: var(--danger-text);
+}
+
+/* Lo que hay que mirar antes de seguir, sin que nada haya fallado (decisión 4 del propietario,
+   14-11-2026: el titular de la cuenta, en ámbar): el color de lo pendiente. */
+.aviso-pendiente {
+  background: var(--pending-bg);
+  color: var(--pending-text);
 }
 
 .detalles {
@@ -1187,15 +1195,6 @@ main:has(.cotejo) {
   margin: 0;
   font-weight: 600;
   overflow-wrap: anywhere;
-}
-
-.avance-comprobante {
-  margin: 0.5rem 0;
-  padding-left: 1.25rem;
-}
-
-.avance-comprobante [aria-current="step"] {
-  font-weight: 600;
 }
 
 fieldset.formulario {

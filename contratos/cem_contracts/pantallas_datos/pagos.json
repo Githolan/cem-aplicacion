@@ -476,11 +476,12 @@
       "lista": "para_pagar",
       "cuenta_como_pendiente": true,
       "principal": "subir_comprobante",
-      "secundarias": [
-        "retomar_pago"
-      ],
+      "secundarias": [],
       "negativas": [
         "declarar_no_pago"
+      ],
+      "plegadas": [
+        "retomar_pago"
       ],
       "que_decir": "Se declaró que no se pagó. Falta subir el comprobante o declarar que no se pagó.",
       "despues": "listo"
@@ -491,10 +492,11 @@
       "lista": "esperando",
       "cuenta_como_pendiente": false,
       "principal": null,
-      "secundarias": [
+      "secundarias": [],
+      "negativas": [],
+      "plegadas": [
         "retomar_pago"
       ],
-      "negativas": [],
       "que_decir": "Se declaró que no se pagó: espera la confirmación del Consejo o que declare quien vio la cuenta.",
       "despues": "listo"
     },

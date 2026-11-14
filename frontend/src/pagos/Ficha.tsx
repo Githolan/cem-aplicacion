@@ -43,7 +43,6 @@ import { RUTA_NUEVA, rutaFicha } from "./rutas";
 import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, SubirFactura } from "./SubirFactura";
 import {
   AVISO_DIFERENCIA_ESPERA,
-  AVISO_LECTURA_COINCIDE,
   AVISO_LECTURA_INCOMPLETA,
   AVISO_LECTURA_DISPUTADA,
   AVISO_POR_EL_CONSEJO,
@@ -52,7 +51,6 @@ import {
   AVISO_NO_TRANSFIERAS,
   AVISO_NO_TRANSFIERE,
   AVISO_OBSERVAR,
-  AVISO_RETOMAR,
   AVISO_SE_PUEDE_RETIRAR,
   AVISO_SIN_CUENTA,
   AVISO_SIN_SALIDA,
@@ -165,8 +163,8 @@ export function conFacturaAdjunta(v: Version, adjunta: FacturaAdjunta | null): V
 export function textoDeLaAdjunta(a: FacturaAdjunta): string {
   if (a.estado === "en_cuarentena") return `${a.adjuntada_por_nombre} subió la factura el ${momento(a.adjuntada_en)}: el antivirus la está revisando.`;
   if (a.estado === "rechazado") return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} no pasó el antivirus.`;
-  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
-  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
+  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momentoAlFinal(a.adjuntada_en)}`;
+  return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momentoAlFinal(a.adjuntada_en)}`;
 }
 
 /** Lo que se dice de la subida que quiere reemplazar a la adjunta: mientras tanto, o si el antivirus
@@ -931,7 +929,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
           {situacion === "en_revision" && ficha.puede_retirar && <p>{AVISO_SE_PUEDE_RETIRAR}</p>}
           {situacion === "retirada" && ficha.retiro !== null && (
             <p className="aviso-info" role="note">
-              {textoRetiro(ficha.retiro.retirada_por_nombre, momento(ficha.retiro.retirada_en))}
+              {textoRetiro(ficha.retiro.retirada_por_nombre, momentoAlFinal(ficha.retiro.retirada_en))}
             </p>
           )}
 
@@ -950,7 +948,7 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                 <dt>Pagar antes de</dt>
                 <dd>{momento(cuentaVista.aprobacion_vence_en)}</dd>
               </dl>
-              <p className="aviso-error" role="note">
+              <p className="aviso-pendiente" role="note">
                 Antes de confirmar en el banco: el titular debe ser <strong>{v.razon_social}</strong>
               </p>
             </div>
@@ -964,7 +962,6 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
             )}
             <div className="tarjeta">
               {lecturaDistinta && <DistintoDeLoRegistrado lectura={comprobanteLeido} registrado={registrado} />}
-              {lecturaIgual && <p className="aviso-ok">{AVISO_LECTURA_COINCIDE}</p>}
               {lecturaIncompleta && <p className="aviso-info" role="note">{AVISO_LECTURA_INCOMPLETA}</p>}
               {diferencia !== null && (
                 <>
@@ -1174,7 +1171,6 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   {AVISO_TOMAR}
                 </p>
               )}
-              {ficha.puede_reabrir_cuenta && situacion === "no_pago_declarado" && <p className="aviso-info" role="note">{AVISO_RETOMAR}</p>}
 
               {/* Queda montado: ir a declarar y volver no pierde lo escrito. */}
               <div hidden={motivoAbierto !== null}>
@@ -1375,8 +1371,9 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   {ejecucion.pagos.slice(0, -1).map((p) => (
                     <li key={p.id}>
                       Operación {p.numero_operacion}, {p.fecha_operacion}: {importe(p.importe_centavos, p.moneda)}. Lo registró{" "}
-                      {p.registrado_por_nombre}, {momento(p.registrado_en)}
-                      {p.motivo_conciliacion !== null && `. Observado: ${p.motivo_conciliacion}`}
+                      {/* «a. m.» ya trae su punto: momentoAlFinal no lo repite («a. m.. Observado»). */}
+                      {p.registrado_por_nombre},{" "}
+                      {p.motivo_conciliacion === null ? momento(p.registrado_en) : `${momentoAlFinal(p.registrado_en)} Observado: ${p.motivo_conciliacion}`}
                     </li>
                   ))}
                 </ol>

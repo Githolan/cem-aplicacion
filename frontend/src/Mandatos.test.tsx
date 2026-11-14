@@ -2054,3 +2054,42 @@ describe("tanda 6 de fricción en /mandatos", () => {
     });
   });
 });
+
+describe("D-34: los mandatos que ya no rigen van plegados en «Mandatos anteriores»", () => {
+  const anterior = (id: string, nombre: string, estado: string) => ({
+    id, tipo: "miembro_consejo", nombre, cuit: null, vigente_desde: "2025-01-01", vigente_hasta: "2026-01-01", estado, con_cuenta: false,
+  });
+  const CON_ANTERIORES = {
+    elementos: [
+      ...MANDATOS.elementos,
+      anterior("e1e1e1e1-e1e1-4e1e-8e1e-e1e1e1e1e1e1", "Ciro Baja", "dado_de_baja"),
+      anterior("e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2", "Dora Fin", "terminado"),
+      anterior("e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3", "Eloy Error", "error_carga"),
+      { ...anterior("e4e4e4e4-e4e4-4e4e-8e4e-e4e4e4e4e4e4", "Fede Futuro", "futuro"), vigente_desde: "2027-01-01", vigente_hasta: null },
+    ],
+  };
+
+  it("los vigentes y los que van a regir quedan a la vista; los demás, plegados con su cantidad", async () => {
+    vi.stubGlobal("fetch", conConsejo({ [`GET ${RUTA_MANDATOS}`]: () => Response.json(CON_ANTERIORES) }));
+    abrir();
+    await cargado();
+    const lista = screen.getByRole("list", { name: "Mandatos" });
+    expect(within(lista).getByRole("button", { name: fila("Fede Futuro, Consejo de propietarios") })).toBeTruthy();
+    expect(within(lista).getByRole("button", { name: fila("Estudio Sur, Administración externa") })).toBeTruthy();
+    const anteriores = screen.getByRole("list", { name: "Mandatos anteriores" });
+    const plegable = anteriores.closest("details");
+    expect(plegable?.open).toBe(false);
+    expect(plegable?.querySelector("summary")?.textContent).toBe("Mandatos anteriores (3)");
+    for (const nombre of ["Ciro Baja", "Dora Fin", "Eloy Error"]) {
+      expect(within(lista).queryByText(new RegExp(nombre))).toBeNull();
+      expect(within(anteriores).getByRole("button", { name: fila(`${nombre}, Consejo de propietarios`) })).toBeTruthy();
+    }
+  });
+
+  it("control: sin mandatos anteriores no hay plegable", async () => {
+    vi.stubGlobal("fetch", conConsejo());
+    abrir();
+    await cargado();
+    expect(screen.queryByText(/^Mandatos anteriores/)).toBeNull();
+  });
+});

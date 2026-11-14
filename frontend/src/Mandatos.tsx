@@ -86,6 +86,10 @@ const TEXTO_ESTADO_MANDATO: Record<EstadoMandato, string> = {
   error_carga: "Anulado por error de carga",
 };
 
+/** Los que ya no rigen ni van a regir: van plegados en «Mandatos anteriores» (D-34). */
+const YA_NO_RIGEN: ReadonlySet<EstadoMandato> = new Set(["terminado", "dado_de_baja", "error_carga"]);
+const MANDATOS_ANTERIORES = "Mandatos anteriores";
+
 const TEXTO_TIPO_DECISION: Record<TipoDecision, string> = {
   asamblea: "Asamblea",
   consejo: "Reunión del Consejo",
@@ -1050,6 +1054,25 @@ export function Mandatos() {
       Consultar de nuevo
     </button>
   );
+  const listaDeMandatos = mandatos.tipo === "ok" ? mandatos.elementos : [];
+  const actuales = listaDeMandatos.filter((m) => !YA_NO_RIGEN.has(m.estado));
+  const anteriores = listaDeMandatos.filter((m) => YA_NO_RIGEN.has(m.estado));
+  const filaDeMandato = (m: Mandato) => (
+    <li key={m.id}>
+      <FilaDeRegistro
+        titulo={`${m.nombre}, ${TEXTO_TIPO_MANDATO[m.tipo]}`}
+        resumen={[
+          TEXTO_ESTADO_MANDATO[m.estado],
+          `Desde el ${dia(m.vigente_desde)}${m.vigente_hasta ? ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)` : ""}`,
+          ...(m.cuit ? [`CUIT ${m.cuit}`] : []),
+          m.con_cuenta ? "Con cuenta asociada" : "Sin cuenta asociada",
+        ].join(" · ")}
+        alAbrir={() => verMandato(m)}
+        deshabilitada={enviando}
+        abierta={detalle?.tipo === "mandato" && detalle.datos.id === m.id}
+      />
+    </li>
+  );
 
   return (
     <>
@@ -1430,26 +1453,20 @@ export function Mandatos() {
               </>
             )}
             {mandatos.tipo === "ok" && mandatos.elementos.length === 0 && <p>Todavía no hay mandatos cargados.</p>}
-            {mandatos.tipo === "ok" && mandatos.elementos.length > 0 && (
+            {mandatos.tipo === "ok" && actuales.length > 0 && (
               <ul className="filas-registro" aria-labelledby={`${id}-mandatos`}>
                 {/* Cada fila abre el detalle del mandato (comentario 21), con su baja si el rol la permite. */}
-                {mandatos.elementos.map((m) => (
-                  <li key={m.id}>
-                    <FilaDeRegistro
-                      titulo={`${m.nombre}, ${TEXTO_TIPO_MANDATO[m.tipo]}`}
-                      resumen={[
-                        TEXTO_ESTADO_MANDATO[m.estado],
-                        `Desde el ${dia(m.vigente_desde)}${m.vigente_hasta ? ` hasta el ${dia(m.vigente_hasta)} (ese día ya no rige)` : ""}`,
-                        ...(m.cuit ? [`CUIT ${m.cuit}`] : []),
-                        m.con_cuenta ? "Con cuenta asociada" : "Sin cuenta asociada",
-                      ].join(" · ")}
-                      alAbrir={() => verMandato(m)}
-                      deshabilitada={enviando}
-                      abierta={detalle?.tipo === "mandato" && detalle.datos.id === m.id}
-                    />
-                  </li>
-                ))}
+                {actuales.map(filaDeMandato)}
               </ul>
+            )}
+            {/* Lo que ya no rige queda plegado debajo (D-34, decisión 7 del propietario del 14-11-2026). */}
+            {mandatos.tipo === "ok" && anteriores.length > 0 && (
+              <details className="historial">
+                <summary>{`${MANDATOS_ANTERIORES} (${anteriores.length})`}</summary>
+                <ul className="filas-registro" aria-label={MANDATOS_ANTERIORES}>
+                  {anteriores.map(filaDeMandato)}
+                </ul>
+              </details>
             )}
           </section>
           )}

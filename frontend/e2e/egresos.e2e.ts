@@ -496,6 +496,8 @@ test.describe("circuito de pagos", () => {
     await page.getByLabel("Archivo del comprobante").setInputFiles({ name: "transferencia.png", mimeType: "image/png", buffer: PNG_SINTETICO });
     await expect(page.getByRole("img", { name: "Vista previa de transferencia.png" })).toBeVisible();
     await expect(page.getByText("Revisando el comprobante")).toBeVisible();
+    // D-24: un solo «Revisando», sin la lista de pasos.
+    await expect(page.locator(".comprobante-y-datos [role=status] ol")).toHaveCount(0);
     // Sin tocar nada: la consulta sola ve que pasó el antivirus.
     await expect(page.getByLabel("Número de operación")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole("img", { name: "Comprobante de la transferencia" })).toBeVisible();
@@ -511,8 +513,9 @@ test.describe("circuito de pagos", () => {
     const errores = vigilarErrores(page);
     await simularPagos(page, baseURL!, LEIDO_COINCIDE, { cuerpo: PNG_SINTETICO, tipo: "image/png" });
     await abrirLaFicha(page);
-    await expect(page.getByText("Importe, cuenta y titular coinciden con la orden.")).toBeVisible();
     await expect(page.getByLabel("Número de operación")).toHaveValue("0048213377");
+    // D-25: lo que coincide no se avisa; se avisa solo lo que no coincide o falta.
+    await expect(page.getByText(/coinciden con la orden/)).toHaveCount(0);
     await expect(page.getByLabel(/^CBU\/CVU de destino/)).toBeHidden();
     await expect(page.getByRole("button", { name: "Registrar el pago" })).toBeVisible();
     await sinDesbordar(page);

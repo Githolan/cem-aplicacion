@@ -6,7 +6,7 @@ que la base le deja a quien mira (su relación con esa orden: prepara, paga, dec
 - cómo se llama el estado (`estados`, la lista única de la decisión 11 del 12-11-2026) y la barra,
   que dependen solo de la situación;
 - en qué lista de la bandeja aparece, y si cuenta como pendiente;
-- la acción principal, las secundarias y las negativas, en el orden en que se dibujan;
+- la acción principal, las secundarias, las negativas y las plegadas, en el orden en que se dibujan;
 - qué decir y qué hace la pantalla después del acto principal.
 
 **La tabla no concede nada.** El backend ofrece una acción solo si su `puede_*` es verdadero, y
@@ -42,6 +42,12 @@ EXCEPCIONES_REGLA_3 = frozenset({(SituacionPago.PAGADA_Y_COTEJADA, PasoPago.PREP
 por lo que falta». Agregar otra pide una decisión, no solo marcar la fila."""
 
 
+DESHACEN_LO_HECHO = frozenset({AccionPago.RETOMAR_PAGO})
+"""Las acciones que deshacen algo ya hecho: van solo plegadas, nunca a la vista (D-13, decisión 5
+del propietario del 14-11-2026: «Anular la declaración y pagar» bajo «Hubo un error»). Y en un
+plegable va solo una de estas."""
+
+
 class _Estricto(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -64,6 +70,9 @@ class Botones(_Estricto):
     principal: AccionPago | None
     secundarias: list[AccionPago]
     negativas: list[AccionPago]
+    plegadas: list[AccionPago] = []
+    """Lo que deshace algo ya hecho: se ofrece dentro de un plegable, sin acción a la vista (D-13).
+    Va al final y en rojo; la pantalla le pone el título del plegable."""
 
 
 class FilaPantalla(Botones):
@@ -115,6 +124,14 @@ class PantallaPagos(_Estricto):
                 raise ValueError(f"{par}: marcada como excepción a la regla 3 sin necesitarlo")
             if terminada and con_algo and f.excepcion_regla_3 is None:
                 raise ValueError(f"{par}: terminada, con acción principal o lista (regla 3)")
+            for botones in (f, f.si_el_comprobante_no_coincide):
+                if botones is None:
+                    continue
+                a_la_vista = {botones.principal, *botones.secundarias, *botones.negativas}
+                if a_la_vista & DESHACEN_LO_HECHO:
+                    raise ValueError(f"{par}: lo que deshace algo hecho va plegado (D-13)")
+                if not set(botones.plegadas) <= DESHACEN_LO_HECHO:
+                    raise ValueError(f"{par}: solo va plegado lo que deshace algo hecho (D-13)")
             esperado = f.lista is not None and self.listas[f.lista].pendiente
             if f.cuenta_como_pendiente != esperado:
                 raise ValueError(

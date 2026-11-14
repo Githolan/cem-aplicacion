@@ -1,13 +1,23 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
-import { type AccionOfrecida, type AccionPago, CON_ENLACE, CON_FORMULARIO, claseDe, TEXTO_ACCION } from "./textosDeAcciones";
+import {
+  type AccionOfrecida,
+  type AccionPago,
+  AVISO_PLEGADA,
+  CON_ENLACE,
+  CON_FORMULARIO,
+  claseDe,
+  TEXTO_ACCION,
+  TITULO_PLEGADAS,
+} from "./textosDeAcciones";
 
 // Los botones de una orden: exactamente los que mandó el servidor, en su orden y con su peso (una
 // sola principal, llena; las secundarias con borde; las negativas en rojo). La ficha no escribe
 // ningún botón de acto a mano (informe de fricción, §4.3). Lo único que decide la pantalla es lo que
 // ya está a la vista: un formulario abierto, una pregunta de confirmación o la cuenta ya mostrada
-// esconden el botón que los abrió.
+// esconden el botón que los abrió. Lo que deshace algo ya hecho (tipo `plegada`, D-13) no queda a la
+// vista: va dentro de «Hubo un error», con borde rojo.
 
 export type Enlace = { a: string; estado: unknown };
 
@@ -32,30 +42,45 @@ export function aDibujar(acciones: readonly AccionOfrecida[], ocultas: ReadonlyS
 }
 
 export function Acciones({ acciones, enviando, alElegir, ocultas, deshabilitadas, textos, enlaces, children }: Props) {
-  const visibles = aDibujar(acciones, ocultas);
-  if (visibles.length === 0 && children === undefined) return null;
+  const dibujadas = aDibujar(acciones, ocultas);
+  const visibles = dibujadas.filter((a) => a.tipo !== "plegada");
+  const plegadas = dibujadas.filter((a) => a.tipo === "plegada");
+  if (visibles.length === 0 && children === undefined && plegadas.length === 0) return null;
+  const boton = (a: AccionOfrecida) => (
+    <button key={a.codigo} type="button" className={claseDe(a)} data-accion={a.codigo} data-tipo={a.tipo}
+      disabled={enviando || deshabilitadas?.has(a.codigo) === true} onClick={() => alElegir(a.codigo)}>
+      {textos?.[a.codigo] ?? TEXTO_ACCION[a.codigo]}
+    </button>
+  );
   return (
-    <div className="acciones">
-      {visibles.map((a) => {
-        const texto = textos?.[a.codigo] ?? TEXTO_ACCION[a.codigo];
-        const enlace = enlaces?.[a.codigo];
-        if (CON_ENLACE.has(a.codigo)) {
-          if (enlace === undefined) return null;
-          const clase = a.tipo === "principal" ? "enlace-boton enlace-boton--principal" : "enlace-boton enlace-boton--borde";
-          return (
-            <Link key={a.codigo} to={enlace.a} state={enlace.estado} className={clase}>
-              {texto}
-            </Link>
-          );
-        }
-        return (
-          <button key={a.codigo} type="button" className={claseDe(a)} data-accion={a.codigo} data-tipo={a.tipo}
-            disabled={enviando || deshabilitadas?.has(a.codigo) === true} onClick={() => alElegir(a.codigo)}>
-            {texto}
-          </button>
-        );
-      })}
-      {children}
-    </div>
+    <>
+      {(visibles.length > 0 || children !== undefined) && (
+        <div className="acciones">
+          {visibles.map((a) => {
+            const enlace = enlaces?.[a.codigo];
+            if (!CON_ENLACE.has(a.codigo)) return boton(a);
+            if (enlace === undefined) return null;
+            const clase = a.tipo === "principal" ? "enlace-boton enlace-boton--principal" : "enlace-boton enlace-boton--borde";
+            return (
+              <Link key={a.codigo} to={enlace.a} state={enlace.estado} className={clase}>
+                {textos?.[a.codigo] ?? TEXTO_ACCION[a.codigo]}
+              </Link>
+            );
+          })}
+          {children}
+        </div>
+      )}
+      {plegadas.length > 0 && (
+        <details className="historial">
+          <summary>{TITULO_PLEGADAS}</summary>
+          {plegadas.map((a) => (
+            <div key={a.codigo}>
+              {AVISO_PLEGADA[a.codigo] !== undefined && <p>{AVISO_PLEGADA[a.codigo]}</p>}
+              <div className="acciones">{boton(a)}</div>
+            </div>
+          ))}
+        </details>
+      )}
+    </>
   );
 }

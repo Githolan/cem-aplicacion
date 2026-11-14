@@ -333,7 +333,8 @@ ERRORES = {
     ),
     "fecha_operacion_invalida": (
         422, CodigoError.FECHA_OPERACION_INVALIDA,
-        "La fecha no puede ser anterior a la emisión ni futura.",
+        "Fecha de la transferencia: no puede ser anterior al día en que se vio la cuenta para"
+        " pagar esta orden ni posterior a hoy.",
     ),
     "comprobante_invalido": (
         422, CodigoError.COMPROBANTE_INVALIDO,

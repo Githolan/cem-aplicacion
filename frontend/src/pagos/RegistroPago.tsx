@@ -20,6 +20,7 @@ import {
   renovarClave,
 } from "../egresos/comun";
 import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
+import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, resumenDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { MONEDAS } from "./FormularioOrden";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_LECTURA_FALLO, AVISO_OTRA_COSA } from "./textos";
@@ -56,6 +57,9 @@ type Diferencia = components["schemas"]["DiferenciaPagoManual"];
 type Registro = { numero: string; fecha: string; importe: string; moneda: string; cuenta: string; explicacion: string };
 
 const hoy = () => new Date().toLocaleDateString("en-CA");
+
+/** Los campos que el servidor puede marcar en el registro (D-43): el error va junto al campo. */
+const CAMPOS_REGISTRO = { fecha_operacion: "la fecha de la transferencia" } as const;
 
 /** Lo registrado, para corregirlo. La cuenta no viaja: se vuelve a escribir del comprobante. */
 function datosDeLaDiferencia(d: Diferencia): Registro {
@@ -159,6 +163,7 @@ export function RegistroPago(props: Props) {
   const corrigeDiferencia = diferencia !== undefined;
   const [registro, setRegistro] = useState<Registro>(() => (diferencia !== undefined ? datosDeLaDiferencia(diferencia) : datosIniciales(corregido, version.moneda)));
   const [otraCosa, setOtraCosa] = useState(corrigeDiferencia);
+  const [errores, setErrores] = useState<ErroresDeCampo>(SIN_ERRORES);
   /** Lo elegido en este dispositivo: se ve enseguida, y el reintento no pide elegirlo de nuevo. */
   const [elegido, setElegido] = useState<File | null>(null);
   const [subiendo, setSubiendo] = useState(false);
@@ -279,6 +284,13 @@ export function RegistroPago(props: Props) {
     void subir(archivo);
   }
 
+  /** El rechazo que nombra un campo del registro se dice junto al campo; arriba, solo cuál corregir. */
+  function marcarCampos(estado: number, error: unknown) {
+    const marcados = soloDe(erroresDe(error, mensajeDeActo(estado, error)), CAMPOS_REGISTRO);
+    setErrores(marcados);
+    if (Object.keys(marcados).length > 0) setAviso({ texto: resumenDe(marcados, CAMPOS_REGISTRO), ok: false });
+  }
+
   function registrar(evento: FormEvent, documento: string) {
     evento.preventDefault();
     const centavos = aCentavos(registro.importe);
@@ -306,7 +318,8 @@ export function RegistroPago(props: Props) {
           },
         }),
       alTerminar: () => alRegistrar("Listo: el pago quedó registrado. Falta que el Consejo lo concilie."),
-      alFallar: (estado, codigo) => {
+      alFallar: (estado, codigo, error) => {
+        marcarCampos(estado, error);
         if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
       },
     });
@@ -349,7 +362,8 @@ export function RegistroPago(props: Props) {
         });
       },
       alTerminar: () => alRegistrar(corrigeDiferencia ? `Listo: lo registrado quedó corregido. ${AVISO_OTRA_COSA}` : `Listo: quedó registrado lo que pasó. ${AVISO_OTRA_COSA}`),
-      alFallar: (estado, codigo) => {
+      alFallar: (estado, codigo, error) => {
+        marcarCampos(estado, error);
         if (cambioLaOrden(codigo) || cambioLoVisto(estado, codigo)) alCambiarLaOrden();
       },
     });
@@ -381,12 +395,8 @@ export function RegistroPago(props: Props) {
         )}
         {(subiendo || revisando || leyendo) && (
           <div role="status">
+            {/* Sin la lista de pasos (D-24): subir, el antivirus y la lectura son un solo «Revisando». */}
             <h3>Revisando el comprobante</h3>
-            <ol className="avance-comprobante">
-              <li aria-current={subiendo ? "step" : undefined}>{subiendo ? "Subiendo el archivo…" : "Subido"}</li>
-              <li aria-current={revisando ? "step" : undefined}>{revisando ? "El antivirus lo está revisando…" : "Antivirus"}</li>
-              {leyendo && <li aria-current="step">Leyendo los datos…</li>}
-            </ol>
             {antivirusTarda && <p>{AVISO_ANTIVIRUS_TARDA}</p>}
           </div>
         )}
@@ -450,19 +460,13 @@ export function RegistroPago(props: Props) {
           ) : (
             <>
               <h3>{corrige ? "Corregir el registro" : "Registrar el pago"}</h3>
+              {/* Leído con IA, se avisa solo lo que no coincide o falta (D-25): lo que coincide no se dice. */}
               {cuentaLeida ? (
-                <>
-                  <p className="aviso-ok" role="status">
-                    {leida.titular_destino !== null && !leida.titular_distinto
-                      ? "Importe, cuenta y titular coinciden con la orden."
-                      : "Importe y cuenta coinciden con la orden."}
+                leida.titular_distinto && (
+                  <p role="note">
+                    El comprobante dice que el titular es «{leida.titular_destino}» y la orden es a {version.razon_social}. Tiene que ser el mismo.
                   </p>
-                  {leida.titular_distinto && (
-                    <p role="note">
-                      El comprobante dice que el titular es «{leida.titular_destino}» y la orden es a {version.razon_social}. Tiene que ser el mismo.
-                    </p>
-                  )}
-                </>
+                )
               ) : (
                 <p>
                   {corrige
@@ -479,7 +483,12 @@ export function RegistroPago(props: Props) {
             onChange={(e) => cambiar("numero", e.target.value)} />
           <label htmlFor={`${id}-fecha`}>Fecha de la transferencia</label>
           <input id={`${id}-fecha`} type="date" required value={registro.fecha} disabled={enviando}
-            onChange={(e) => cambiar("fecha", e.target.value)} />
+            {...marcaDe(`${id}-fecha`, errores.fecha_operacion)}
+            onChange={(e) => {
+              cambiar("fecha", e.target.value);
+              setErrores((antes) => sinElDe(antes, "fecha_operacion"));
+            }} />
+          <ErrorDeCampo idCampo={`${id}-fecha`} mensaje={errores.fecha_operacion} />
           {(!cuentaLeida || otraCosa) && (
             <>
               <label htmlFor={`${id}-importe`}>{otraCosa ? "Importe que salió del banco" : "Importe transferido (como figura en el comprobante)"}</label>
