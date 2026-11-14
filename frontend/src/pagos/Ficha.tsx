@@ -28,7 +28,7 @@ import {
 } from "../egresos/comun";
 import { AvisoPantalla, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
-import { exigirSesion, SinSesion } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { ErrorDeCampo, erroresDe, type ErroresDeCampo, marcaDe, SIN_ERRORES, sinElDe, soloDe } from "../ErrorDeCampo";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { VisorDocumento } from "../VisorDocumento";
@@ -333,6 +333,11 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   }, [consorcio, orden, vuelta, aEntrar, aInicio, setAviso]);
 
   const releer = () => setVuelta((v) => v + 1);
+  // La factura subida (o su reemplazo) sigue en el antivirus aunque se haya cerrado su hoja: la
+  // ficha se vuelve a leer hasta que termina, para decir si la aceptó o la rechazó.
+  const facturaEnRevision =
+    leida !== null && (leida.factura_adjunta?.estado === "en_cuarentena" || leida.factura_reemplazo?.estado === "en_cuarentena");
+  useConsultaDelAntivirus(facturaEnRevision, releer);
 
   /** Un acto con motivo que falla: el campo marcado, si el error nombra el motivo; lo demás, como siempre. */
   function fallaDelMotivo(estado: number, codigo: string | undefined, error: unknown) {

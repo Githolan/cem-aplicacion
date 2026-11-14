@@ -8,7 +8,7 @@ import { type Aviso, ESTADO, importe, mensajeDeError, momento, sinLaFalla, sinPi
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
 import { periodo } from "../egresos/Liquidacion";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, SinSesion, useConsorcio, useConsultaDelAntivirus } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { cumple, REQUISITOS, useAcciones } from "../permisos";
 import { RUTA_CONSULTA, rutaFicha } from "../pagos/rutas";
@@ -84,6 +84,11 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
       vigente = false;
     };
   }, [consorcio, vuelta, aEntrar, aInicio]);
+  // Una factura subida sigue en el antivirus aunque se haya cerrado su hoja: el resumen se vuelve a
+  // leer hasta que termina, para que la fila diga si la aceptó o la rechazó y vuelva a ofrecerla.
+  const facturaEnRevision =
+    lectura.tipo === "ok" && lectura.panel.comprobantes_faltantes.some((f) => f.factura_subida === "en_cuarentena");
+  useConsultaDelAntivirus(facturaEnRevision, () => setVuelta((v) => v + 1));
 
   return (
     <>

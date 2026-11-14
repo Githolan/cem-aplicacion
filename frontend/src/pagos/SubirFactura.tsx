@@ -33,6 +33,11 @@ export const TEXTO_TARDA = "El antivirus está tardando. Se puede cerrar: la ord
 const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
 const POR_OMISION = "Factura";
 
+/** Lo que distingue un archivo elegido de otro: nombre, tipo, tamaño y fecha de modificación. */
+function firmaDe(archivo: File): string {
+  return JSON.stringify([archivo.name, archivo.type, archivo.size, archivo.lastModified]);
+}
+
 export const REEMPLAZAR_FACTURA = "Reemplazar la factura";
 /** Lo que dice la hoja en cada modo: subir la que falta o reemplazar la adjunta. */
 export const TEXTOS = {
@@ -81,6 +86,8 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
+  /** El archivo del último pedido sin respuesta clara: elegirlo otra vez es reintentar ese pedido. */
+  const pedido = useRef<string | null>(null);
   const cambio = useRef(false);
   const enEspera = useRef<{ documento: string; version: string } | null>(null);
 
@@ -153,8 +160,12 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
   }
 
   function elegir(archivo: File) {
-    // Otro archivo es otro pedido: no repite la clave del anterior.
-    clave.current = null;
+    // El mismo archivo es el mismo pedido (la orden, la versión y lo que reemplaza no cambian en la
+    // hoja): si la respuesta anterior se perdió, la misma clave devuelve lo que ya quedó, sin subirlo
+    // dos veces. Otro archivo es otro pedido: no repite la clave del anterior.
+    const firma = firmaDe(archivo);
+    if (pedido.current !== firma) clave.current = null;
+    pedido.current = firma;
     void subir(archivo);
   }
 

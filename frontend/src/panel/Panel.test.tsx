@@ -393,6 +393,86 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     expect(within(ascensores!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
   });
 
+  it("si se perdió la respuesta, elegir el mismo archivo reintenta con la misma clave; otro archivo, con otra", async () => {
+    let intentos = 0;
+    const api = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => {
+        intentos += 1;
+        // La primera vez el servidor guardó la subida pero la respuesta no llegó.
+        if (intentos === 1) throw new TypeError("Failed to fetch");
+        return intentos === 2 ? SUBIDA_OK() : error("factura_ya_adjunta", 409);
+      },
+    });
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    expect((await within(hoja).findByRole("alert")).textContent).toMatch(/^La factura no se subió\. No se pudo completar/);
+    const mismo = new File(["%PDF-1.4 SINTETICO"], PDF.name, { type: PDF.type, lastModified: PDF.lastModified });
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [mismo] } });
+    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    const claves = () =>
+      api.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST").map((r) => r.headers.get("Idempotency-Key"));
+    const [primera, segunda] = claves();
+    expect(primera).toBeTruthy();
+    expect(segunda).toBe(primera);
+    cleanup();
+
+    // Control: después de una falla, otro archivo es otro pedido y lleva otra clave.
+    intentos = 0;
+    const otraApi = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => {
+        intentos += 1;
+        if (intentos === 1) throw new TypeError("Failed to fetch");
+        return SUBIDA_OK();
+      },
+    });
+    abrir();
+    const otraHoja = await abrirLaHoja();
+    fireEvent.change(within(otraHoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    await within(otraHoja).findByRole("alert");
+    const otro = new File(["%PDF-1.4 OTRO SINTETICO"], "Factura 0002.pdf", { type: "application/pdf" });
+    fireEvent.change(within(otraHoja).getByLabelText("Archivo de la factura"), { target: { files: [otro] } });
+    await within(otraHoja).findByText(TEXTO_LISTO);
+    const [a, z] = otraApi.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST").map((r) => r.headers.get("Idempotency-Key"));
+    expect(z).not.toBe(a);
+  });
+
+  it("cerrada la hoja mientras el antivirus revisa, la fila sigue y dice el rechazo", async () => {
+    conEsperaManual();
+    let factura: "en_cuarentena" | "rechazado" | null = null;
+    const datos = (): Panel => ({
+      ...DATOS,
+      comprobantes_faltantes: DATOS.comprobantes_faltantes.map((f) => (f.orden_id === O2 ? { ...f, factura_subida: factura } : f)),
+    });
+    vi.stubGlobal(
+      "fetch",
+      backend({
+        [ACCIONES]: PREPARA,
+        [PANEL]: () => Response.json(datos()),
+        [`POST ${SUBIDA}`]: () => {
+          factura = "en_cuarentena";
+          return SUBIDA_OK();
+        },
+        [ESTADO_ARCHIVO]: () => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }),
+      }),
+    );
+    abrir();
+    const hoja = await abrirLaHoja();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    await within(hoja).findByText(TEXTO_LISTO);
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    const faltantes = screen.getByRole("region", { name: "Facturas faltantes" });
+    const fila = () => within(faltantes).getByRole("row", { name: /Ascensores Ficticios SA/ });
+    expect(await within(faltantes).findByText("El antivirus la está revisando")).toBeTruthy();
+    expect(within(fila()).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+
+    // El antivirus termina después de cerrar la hoja: la fila lo dice sola y vuelve a ofrecerla.
+    factura = "rechazado";
+    await act(() => vi.advanceTimersByTimeAsync(ESPERA));
+    expect(await within(faltantes).findByText("La subida no pasó el antivirus")).toBeTruthy();
+    expect(within(fila()).getByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
+  });
+
   it("al Consejo, que no prepara, la fila le dice que la sube la administración", async () => {
     const enRevision: Panel = {
       ...DATOS,

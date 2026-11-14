@@ -4513,6 +4513,18 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     vi.useRealTimers();
   });
 
+  it("con la factura en el antivirus y la hoja cerrada, la ficha se vuelve a leer y dice el rechazo", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let actual: Ficha = ficha({ factura_adjunta: { ...ADJUNTA, estado: "en_cuarentena" } });
+    abrirFicha(() => actual);
+    expect(await screen.findByText(/el antivirus la está revisando\.$/)).toBeTruthy();
+    actual = ficha({ factura_adjunta: { ...ADJUNTA, estado: "rechazado" }, puede_subir_factura: true });
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(await screen.findByText(/no pasó el antivirus\.$/)).toBeTruthy();
+    expect(await boton(SUBIR_FACTURA)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
   it("mientras el reemplazo está en el antivirus, o si lo rechaza, vale la anterior y lo dice", async () => {
     const VALE = { ...ADJUNTA, estado: "disponible" } as const;
     const OTRA = { ...VALE, id: "78787878-7878-4878-8878-787878787878", reemplaza_a: VALE.id };
