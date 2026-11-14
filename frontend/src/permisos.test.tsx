@@ -16,8 +16,8 @@ import { ContextoVersion } from "./version";
 const C1 = "11111111-1111-4111-8111-111111111111";
 const C2 = "22222222-2222-4222-8222-222222222222";
 const EDIFICIOS = [
-  { id: C1, nombre: "Edificio Azul", vinculos: [] },
-  { id: C2, nombre: "Edificio Verde", vinculos: [] },
+  { id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] },
+  { id: C2, nombre: "Edificio Verde", vinculos: [], monedas: ["ARS"] },
 ];
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
 const INICIO = { level: 1, name: "Consorcio en mano" };
@@ -541,7 +541,7 @@ describe("el selector de edificio", () => {
   it("con tres edificios deja afuera solo el que no sirve", async () => {
     const C3 = "33333333-3333-4333-8333-333333333333";
     const simulado = backend({ [C1]: ["padron.ver"], [C2]: [] }, {
-      "/api/v1/me/consorcios": () => Response.json([...EDIFICIOS, { id: C3, nombre: "Edificio Rojo", vinculos: [] }]),
+      "/api/v1/me/consorcios": () => Response.json([...EDIFICIOS, { id: C3, nombre: "Edificio Rojo", vinculos: [], monedas: ["ARS"] }]),
       [`/api/v1/consorcios/${C3}/mis-acciones`]: () => Response.json({ acciones: ["padron.ver"] }),
     });
     vi.stubGlobal("fetch", simulado);
