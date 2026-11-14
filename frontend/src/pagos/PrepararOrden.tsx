@@ -6,7 +6,7 @@ import type { Cargado } from "../CargaConLectura";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio } from "../egresos/EstadoPantalla";
 import { PedirCodigo } from "../egresos/PedirCodigo";
-import { useConsorcio } from "../egresos/useConsorcio";
+import { monedasDe, useConsorcio } from "../egresos/useConsorcio";
 import { REQUISITOS } from "../permisos";
 import { FormularioOrden, noSeEnvio, type OrdenInicial } from "./FormularioOrden";
 import { RUTA_PAGOS, rutaFicha } from "./rutas";
@@ -95,7 +95,7 @@ function PrepararEnElEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aIni
       )}
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <div hidden={pendiente !== null}>
-          <FormularioOrden consorcio={consorcio} acto={acto} aEntrar={aEntrar} aInicio={aInicio} inicial={inicial}
+          <FormularioOrden consorcio={consorcio} monedas={monedasDe(pantalla, consorcio)} acto={acto} aEntrar={aEntrar} aInicio={aInicio} inicial={inicial}
             alGuardar={aLaFicha} alCrear={(orden) => (creada.current = orden)}
             alCancelar={() => navegar(RUTA_PAGOS, { state: { consorcio } })} />
         </div>

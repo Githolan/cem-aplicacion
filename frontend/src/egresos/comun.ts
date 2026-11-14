@@ -240,6 +240,7 @@ const MENSAJES: Record<string, string> = {
   aprobacion_vigente: "La aprobación todavía rige: no hay que renovarla.",
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",
   contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: hay que renovarla; la versión nueva va sin contrato y pide aprobación.",
+  moneda_no_habilitada: "Este edificio opera solo en pesos.",
   contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Hay que elegir otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",

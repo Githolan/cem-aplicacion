@@ -26,4 +26,17 @@ def test_error_rechaza_codigos_desconocidos():
 
 def test_vinculo_desconocido_se_rechaza():
     with pytest.raises(ValidationError):
-        ConsorcioResumen(id=uuid4(), nombre="Edificio", vinculos=["vecino"])
+        ConsorcioResumen(id=uuid4(), nombre="Edificio", vinculos=["vecino"], monedas=["ARS"])
+    # Control: con un vínculo conocido, el mismo resumen se acepta.
+    assert ConsorcioResumen(id=uuid4(), nombre="Edificio", vinculos=["inquilino"], monedas=["ARS"])
+
+
+def test_un_edificio_opera_al_menos_en_una_moneda():
+    with pytest.raises(ValidationError):
+        ConsorcioResumen(id=uuid4(), nombre="Edificio", vinculos=["inquilino"], monedas=[])
+    with pytest.raises(ValidationError):
+        ConsorcioResumen(id=uuid4(), nombre="Edificio", vinculos=["inquilino"], monedas=["pesos"])
+    # Control: pesos solos o pesos y dólares.
+    assert ConsorcioResumen(
+        id=uuid4(), nombre="Edificio", vinculos=["inquilino"], monedas=["ARS", "USD"]
+    ).monedas == ["ARS", "USD"]

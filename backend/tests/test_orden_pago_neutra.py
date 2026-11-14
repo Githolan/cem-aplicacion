@@ -176,6 +176,15 @@ def escena_economica(motor_migrate, motor_app, *, con_modo=True) -> Escena:
     )
 
 
+def habilitar_moneda(motor_app, cons, moneda: str = "USD") -> None:
+    """Como soporte (`scripts/moneda_consorcio.py`, `0100`): el edificio opera también en esa
+    moneda. Sin esto, opera solo en pesos y una orden en otra moneda se niega."""
+    with transaccion(motor_app, persona_id=None, consorcio_id=cons) as c:
+        c.execute(
+            text("select nucleo.habilitar_moneda_consorcio(:m, null, 'soporte')"), {"m": moneda}
+        )
+
+
 def exigir(motor_app, cons, cantidad: int) -> None:
     """Como soporte (`scripts/aprobaciones_orden_pago.py`): la cantidad rige desde hoy."""
     acta = decidir_equipo(motor_app, cons)
@@ -430,7 +439,9 @@ def test_modificar_crea_una_version_nueva_y_conserva_la_anterior(motor_migrate, 
     [{"importe": 1}, {"moneda": "USD"}, {"concepto": "Otro concepto SINTETICO"},
      {"proveedor": "otro"}, {"comprobante": None}, {"reserva": True}],
 )  # fmt: skip
-def test_cada_dato_esencial_cambia_la_huella(motor_migrate, e, cambio):
+def test_cada_dato_esencial_cambia_la_huella(motor_migrate, motor_app, e, cambio):
+    # Otra moneda solo en un edificio que opera en ella (`0100`).
+    habilitar_moneda(motor_app, e.cons)
     o = preparada(motor_migrate, e)
     if cambio.get("proveedor") == "otro":
         cambio = {"proveedor": e.otro}

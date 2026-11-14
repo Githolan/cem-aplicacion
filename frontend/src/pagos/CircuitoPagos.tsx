@@ -7,7 +7,7 @@ import type { components } from "../api/tipos";
 import { ESTADO, type Aviso, mensajeDeError, sinLaFalla, sinPisarLoHecho } from "../egresos/comun";
 import { ElegirConsorcio } from "../egresos/ElegirConsorcio";
 import { AvisoPantalla, ConsorcioSinServicio, FallaDeLectura } from "../egresos/EstadoPantalla";
-import { exigirSesion, SinSesion, useConsorcio } from "../egresos/useConsorcio";
+import { exigirSesion, monedasDe, SinSesion, useConsorcio } from "../egresos/useConsorcio";
 import { codigoDe, SIN_CONEXION } from "../fallas";
 import { REQUISITOS } from "../permisos";
 import { CargandoPagos } from "./CargandoPagos";
@@ -174,7 +174,7 @@ function CircuitoDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInic
       )}
       {listo === null && abierta !== null && consorcio !== "" && conPantalla && (
         <div>
-          <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} orden={abierta}
+          <Ficha key={`${abierta}-${acto}`} consorcio={consorcio} monedas={monedasDe(pantalla, consorcio)} orden={abierta}
             aEntrar={aEntrar} aInicio={aInicio} terminar={(texto, seguir, paso) => terminar(abierta, texto, seguir, paso)} alCambiar={alCambiar} />
         </div>
       )}

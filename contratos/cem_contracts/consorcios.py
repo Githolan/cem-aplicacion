@@ -4,6 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from cem_contracts.egresos import Moneda
 from cem_contracts.estados import TipoVinculo
 
 
@@ -15,6 +16,12 @@ class ConsorcioResumen(BaseModel):
     id: UUID
     nombre: str
     vinculos: list[TipoVinculo] = Field(description="Vínculos vigentes de la persona en él.")
+    monedas: list[Moneda] = Field(
+        min_length=1,
+        description="Monedas en que opera el edificio: el peso primero, siempre, y las que habilitó"
+        " el equipo (P-14, `0100`). Con una sola, el formulario de la orden no pregunta la moneda.",
+        examples=[["ARS"], ["ARS", "USD"]],
+    )
 
 
 class Unidad(BaseModel):

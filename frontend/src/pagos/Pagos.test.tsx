@@ -208,7 +208,7 @@ function error(codigo: string, status: number) {
 
 type Respuestas = Record<string, () => Response | Promise<Response>>;
 
-const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }]);
+const CONSORCIOS = () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]);
 const bandejaCon = (...elementos: Elemento[]) => () => Response.json({ elementos, avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 });
 const VERIFICADO = () =>
   Response.json({ verificado_en: "2026-10-31T12:00:00Z", vale_hasta: "2026-10-31T12:10:00Z", codigos_recuperacion_restantes: 9 });
@@ -469,7 +469,7 @@ describe("bandeja", () => {
 
   it("con varios edificios se elige cuál, y cambiar sale de la ficha de otro", async () => {
     const api = backend({
-      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Azul", vinculos: [] }, { id: C2, nombre: "Bordó", vinculos: [] }]),
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Azul", vinculos: [], monedas: ["ARS"] }, { id: C2, nombre: "Bordó", vinculos: [], monedas: ["ARS"] }]),
       [`GET ${BASE}/pagos/${O1}`]: () => Response.json(PAGAR),
       [`GET /api/v1/consorcios/${C2}/pagos/bandeja`]: bandejaCon(),
       [`GET /api/v1/consorcios/${C2}/pagos/${O1}`]: () => error("no_encontrado", 404),
@@ -2107,8 +2107,65 @@ describe("preparar, enviar y renovar", () => {
     expect(((await boton("Guardar como borrador")) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  /** Un edificio que opera también en dólares (P-14: lo habilita el equipo). */
+  const CON_DOLARES = {
+    "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS", "USD"] }]),
+  };
+
+  it("P-14: en un edificio que opera solo en pesos no se pregunta la moneda y la orden va en pesos", async () => {
+    const api = backend({
+      ...LECTURAS,
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Importe"), { target: { value: "15000" } });
+    expect(screen.queryByLabelText("Moneda")).toBeNull();
+    expect(screen.queryByText("Dólares")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Limpieza" } });
+    fireEvent.click(await boton("Guardar como borrador"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago`)[0])).toMatchObject({ moneda: "ARS", importe_centavos: 1_500_000 });
+  });
+
+  it("P-14: con el dólar habilitado se pregunta la moneda, en pesos o dólares", async () => {
+    const api = backend({
+      ...LECTURAS,
+      ...CON_DOLARES,
+      [`POST ${BASE}/ordenes-pago`]: () => Response.json({ id: O1, version: 1 }, { status: 201 }),
+      [`GET ${BASE}/pagos/${O1}`]: () => Response.json(BORRADOR),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir("/pagos/nueva");
+    const moneda = (await screen.findByLabelText("Moneda")) as HTMLSelectElement;
+    expect(moneda.value).toBe("ARS");
+    expect([...moneda.options].map((o) => [o.value, o.text])).toEqual([["ARS", "Pesos"], ["USD", "Dólares"]]);
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "150" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Repuesto importado" } });
+    fireEvent.change(moneda, { target: { value: "USD" } });
+    fireEvent.click(await boton("Guardar como borrador"));
+    await waitFor(() => expect(pedidos(api, "POST", `${BASE}/ordenes-pago`)).toHaveLength(1));
+    expect(await cuerpo(pedidos(api, "POST", `${BASE}/ordenes-pago`)[0])).toMatchObject({ moneda: "USD" });
+  });
+
+  it("P-14: si el servidor dice que el edificio opera solo en pesos, se dice eso y el formulario sigue abierto", async () => {
+    vi.stubGlobal("fetch", backend({ ...LECTURAS, ...CON_DOLARES, [`POST ${BASE}/ordenes-pago`]: () => error("moneda_no_habilitada", 422) }));
+    abrir("/pagos/nueva");
+    fireEvent.change(await screen.findByLabelText("Moneda"), { target: { value: "USD" } });
+    fireEvent.change(screen.getByLabelText("Importe"), { target: { value: "150" } });
+    fireEvent.change(screen.getByLabelText("Proveedor"), { target: { value: P1 } });
+    fireEvent.change(screen.getByLabelText("Concepto"), { target: { value: "Repuesto importado" } });
+    fireEvent.click(await boton("Guardar como borrador"));
+    expect(await screen.findByText("Este edificio opera solo en pesos.")).toBeTruthy();
+    expect(screen.getByLabelText("Concepto")).toBeTruthy();
+    expect(lugar()).toBe("/pagos/nueva");
+  });
+
   it("cambiar la moneda descarta el contrato elegido", async () => {
-    vi.stubGlobal("fetch", backend(LECTURAS));
+    vi.stubGlobal("fetch", backend({ ...LECTURAS, ...CON_DOLARES }));
     abrir("/pagos/nueva");
     // P-14: sin un contrato que aplique (proveedor y moneda), el campo no se muestra.
     fireEvent.change(await screen.findByLabelText("Proveedor"), { target: { value: P1 } });
@@ -2442,7 +2499,7 @@ describe("preparar, enviar y renovar", () => {
       ancho(true);
       const otro = `/api/v1/consorcios/${C2}`;
       const { api, lectura } = conLecturaColgada({
-        "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Azul", vinculos: [] }, { id: C2, nombre: "Bordó", vinculos: [] }]),
+        "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Azul", vinculos: [], monedas: ["ARS"] }, { id: C2, nombre: "Bordó", vinculos: [], monedas: ["ARS"] }]),
         [`GET ${otro}/pagos/bandeja`]: bandejaCon(FILA_OTRA),
         [`GET ${otro}/pagos/${O2}`]: () => Response.json(OTRA_ORDEN),
       });
@@ -3221,6 +3278,8 @@ describe("la factura arriba de la orden (0088)", () => {
   function conFactura(lecturas: Lectura[], extra: Respuestas = {}) {
     let vuelta = 0;
     const api = backend({
+      // Un edificio que opera también en dólares: la lectura completa y marca la moneda (P-14).
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS", "USD"] }]),
       [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
       [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
       [`POST ${PARA_CARGA}`]: () => Response.json({ id: FAC }, { status: 201 }),
@@ -3277,6 +3336,20 @@ describe("la factura arriba de la orden (0088)", () => {
       factura_version_id: VF, proveedor_id: P1, importe_centavos: 2_345_600, moneda: "ARS", concepto: "Limpieza de noviembre, torre A",
       comprobante: "B 0001-00000077",
     });
+  });
+
+  it("P-14: en un edificio que opera solo en pesos, una factura en dólares no cambia la moneda ni la marca", async () => {
+    conEsperaManual();
+    const api = conFactura([lectura({ moneda: "USD" })], {
+      "GET /api/v1/me/consorcios": () => Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
+    });
+    await subirFactura();
+    await vuelta();
+    expect(await screen.findByText(TEXTO_LEIDA)).toBeTruthy();
+    expect(screen.queryByLabelText("Moneda")).toBeNull();
+    // Proveedor, importe, concepto y comprobante; la moneda no, que no se pregunta.
+    expect(screen.getAllByText(MARCA_LECTURA)).toHaveLength(4);
+    expect(await guardar(api)).toMatchObject({ moneda: "ARS", importe_centavos: 2_345_600 });
   });
 
   it("si el proveedor de la factura no está cargado ofrece el alta, que viene completa, sin cuenta, y vuelve a la orden", async () => {
@@ -3495,7 +3568,7 @@ describe("la factura arriba de la orden (0088)", () => {
     const dosEdificios = () =>
       backend({
         "GET /api/v1/me/consorcios": () =>
-          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [] }]),
+          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
         [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [] }),
         [`GET /api/v1/consorcios/${C3}/proveedores`]: () => Response.json({ elementos: [] }),
       });
@@ -3699,7 +3772,7 @@ describe("la factura arriba de la orden (0088)", () => {
     const dosEdificios = () =>
       backend({
         "GET /api/v1/me/consorcios": () =>
-          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [] }]),
+          Response.json([{ id: C1, nombre: "Edificio Ficticio", vinculos: [], monedas: ["ARS"] }, { id: C3, nombre: "Otro Edificio Ficticio", vinculos: [], monedas: ["ARS"] }]),
         [`GET ${BASE}/proveedores`]: () => Response.json({ elementos: [proveedor()] }),
         [`GET ${BASE}/contratos`]: () => Response.json({ elementos: [] }),
         [`GET /api/v1/consorcios/${C3}/proveedores`]: () => Response.json({ elementos: [proveedor({ id: P3, razon_social: "Pintura Ficticia SA" })] }),

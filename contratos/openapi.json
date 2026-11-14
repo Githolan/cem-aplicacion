@@ -897,6 +897,7 @@
           "aprobaciones_insuficientes",
           "contrato_no_vigente",
           "contrato_no_aplica",
+          "moneda_no_habilitada",
           "contrato_ya_confirmado",
           "contrato_dado_de_baja",
           "proveedor_cambiado",
@@ -1391,6 +1392,28 @@
             "title": "Id",
             "type": "string"
           },
+          "monedas": {
+            "description": "Monedas en que opera el edificio: el peso primero, siempre, y las que habilitó el equipo (P-14, `0100`). Con una sola, el formulario de la orden no pregunta la moneda.",
+            "examples": [
+              [
+                "ARS"
+              ],
+              [
+                "ARS",
+                "USD"
+              ]
+            ],
+            "items": {
+              "examples": [
+                "ARS"
+              ],
+              "pattern": "^[A-Z]{3}$",
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Monedas",
+            "type": "array"
+          },
           "nombre": {
             "title": "Nombre",
             "type": "string"
@@ -1407,7 +1430,8 @@
         "required": [
           "id",
           "nombre",
-          "vinculos"
+          "vinculos",
+          "monedas"
         ],
         "title": "ConsorcioResumen",
         "type": "object"
@@ -15823,7 +15847,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`), o la moneda no es una en que opera el edificio (`moneda_no_habilitada`, `0100`)."
           }
         },
         "summary": "Preparar una orden de pago (queda en borrador, versión 1)",
@@ -17907,7 +17931,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`)."
+            "description": "El proveedor no existe (`proveedor_inexistente`), o `factura_version_id` no es un archivo `disponible` de un documento vigente del consorcio, para carga como factura o de «Facturas y comprobantes», y que no sea el comprobante de un pago (`documento_invalido`), o la moneda no es una en que opera el edificio (`moneda_no_habilitada`, `0100`)."
           }
         },
         "summary": "Modificar una orden: crea una versión nueva y la vuelve a revisión si hacía falta",
