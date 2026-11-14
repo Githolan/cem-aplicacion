@@ -49,7 +49,10 @@ def mis_consorcios(identidad: IdentidadDep, motor: MotorDep) -> list[ConsorcioRe
             text(
                 "select c.id, c.nombre,"
                 " coalesce(array_agg(v.tipo::text order by v.tipo)"
-                "          filter (where v.tipo is not null), '{}') as vinculos"
+                "          filter (where v.tipo is not null), '{}') as vinculos,"
+                # Las monedas en que opera (P-14, `0100`): el formulario de la orden pregunta la
+                # moneda solo si hay más de una.
+                " nucleo.monedas_consorcio(c.id) as monedas"
                 " from nucleo.consorcio c"
                 " left join nucleo.vinculo v on v.consorcio_id = c.id and v.persona_id = :p"
                 "  and daterange(v.vigente_desde, v.vigente_hasta)"

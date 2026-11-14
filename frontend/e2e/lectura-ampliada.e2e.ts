@@ -222,7 +222,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/invitaciones",
     cargada: "Beto Pérez, 1° A",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       [`GET /api/v1/consorcios/${C1}/unidades`]: {
         elementos: [{ id: "44444444-4444-4444-8444-444444444444", designacion: "1° A" }],
       },
@@ -250,7 +250,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/mandatos",
     cargada: "Estudio Sur, Administración externa",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       "GET /api/v1/auth/sesion": {
         persona_id: "99999999-9999-4999-8999-999999999999",
         nombre: "Ana Pérez",
@@ -286,7 +286,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/padron",
     cargada: "1° A: Beto Pérez",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       [`GET /api/v1/consorcios/${C1}/padron`]: {
         elementos: [
           // Un nombre de 100 caracteres, el tope de la base: la tarjeta no puede ensanchar la página.
@@ -309,7 +309,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/contactos",
     cargada: "Emergencias: Ascensores del Sur",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       [`GET /api/v1/consorcios/${C1}/contactos`]: {
         elementos: [
           {
@@ -336,7 +336,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/contactos/gestion",
     cargada: "Emergencias: Plomería Rápida",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       [`GET /api/v1/consorcios/${C1}/contactos/gestion`]: {
         elementos: [
           {
@@ -366,7 +366,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/documentos",
     cargada: "Acta de asamblea ordinaria",
     api: {
-      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       [`GET /api/v1/consorcios/${C1}/documentos`]: {
         documentos: [
           {
@@ -417,7 +417,7 @@ const PAGINAS_CON_DATOS: PaginaConDatos[] = [
     url: "/panel",
     cargada: ["Facturas faltantes", "Gasto pagado por rubro"],
     api: {
-      "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [] }],
+      "GET /api/v1/me/consorcios": [{ id: "11111111-1111-4111-8111-111111111111", nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }],
       "GET /api/v1/consorcios/11111111-1111-4111-8111-111111111111/panel": {
         ordenes_por_estado: [
           { estado: "en_verificacion", moneda: "ARS", cantidad: 12, importe_centavos: 123_456_789_00 },

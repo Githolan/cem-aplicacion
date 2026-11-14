@@ -70,7 +70,7 @@ async function simularApi(pagina: Page, subidas: string[] = []): Promise<string[
     if (pedido.method() === "GET" && camino === `/api/v1/consorcios/${C1}/documentos/${D1}/versiones/${V1}/estado`)
       return ruta.fulfill({ json: { estado: "disponible", motivo_rechazo: null } });
     if (pedido.method() === "GET") {
-      if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [] }] });
+      if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: C1, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }] });
       if (camino === `/api/v1/consorcios/${C1}/panel`) return ruta.fulfill({ json: PANEL });
       if (camino === `/api/v1/consorcios/${C1}/pagos/bandeja`) return ruta.fulfill({ json: { elementos: [], avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0 } });
       if (camino === "/api/v1/pagos-por-aclarar" || camino === "/api/v1/me/invitaciones")

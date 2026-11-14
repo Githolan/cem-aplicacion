@@ -71,7 +71,7 @@ async function simularApi(pagina: Page, baseURL: string, revisa: "consejero" | "
     if (permisos !== null) return permisos;
     lecturas.push(camino);
     if (camino === "/api/v1/me/consorcios")
-      return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }, { id: B, nombre: "Edificio Bordó", vinculos: [] }] });
+      return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }, { id: B, nombre: "Edificio Bordó", vinculos: [], monedas: ["ARS"] }] });
     if (camino === `/api/v1/consorcios/${A}/proveedores`)
       return ruta.fulfill({ json: { elementos: [proveedor(PROV_A, RAZON_LARGA, CUENTA.slice(-4))] } });
     if (camino === `/api/v1/consorcios/${B}/proveedores`)
@@ -259,7 +259,7 @@ async function simularPagos(
     if (permisos !== null) return permisos;
     pedidosHechos.push(`${pedido.method()} ${camino}`);
     const c = `/api/v1/consorcios/${A}`;
-    if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [] }] });
+    if (camino === "/api/v1/me/consorcios") return ruta.fulfill({ json: [{ id: A, nombre: "Edificio Azul", vinculos: [], monedas: ["ARS"] }] });
     if (camino === `${c}/pagos/bandeja`)
       return ruta.fulfill({ json: { avisos_rechazo: [], por_cotejar: 0, sin_explicar: 0, elementos: [{ orden_id: ORDEN, proveedor: RAZON_LARGA,
         concepto: ORDEN_A.concepto, importe_centavos: 12_000_000, moneda: "ARS", paso: inicial.paso, grupo: GRUPO_DE[inicial.paso ?? ""],
