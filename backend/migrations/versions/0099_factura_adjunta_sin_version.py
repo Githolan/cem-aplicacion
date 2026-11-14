@@ -40,7 +40,10 @@ ficha dice que se adjuntó después.
 
 **Quién la ve** (`nucleo.factura_adjunta_lectura`): las mismas lecturas que la orden
 (`exigir_lectura_egresos`, quien prepara o quien revisa), con el estado del archivo y el nombre de
-quien la subió, como el retiro (`retiro_orden_pago_lectura`).
+quien la subió, como el retiro (`retiro_orden_pago_lectura`). Las reglas no se repiten afuera: cada
+fila dice si su documento sigue vigente (soporte puede borrarlo; la constancia queda como historia),
+si es la que vale (`factura_adjunta_disponible`, la misma que usan el acto, «Facturas faltantes» y
+renovar) y si está en el antivirus (`factura_adjunta_en_revision`, la misma que usa el acto).
 
 **Facturas faltantes** (`nucleo.panel_comprobantes_faltantes`, otra forma: se borra y se crea).
 Una orden deja de faltar cuando la factura adjunta a su versión vigente pasó el antivirus
@@ -92,8 +95,10 @@ RENOVAR = "nucleo.renovar_orden_vencida(uuid, integer, uuid, text, uuid)"
 REFERENCIADO = "nucleo.documento_referenciado(uuid, uuid)"
 EXPORTAR_ORDENES = "nucleo.exportar_ordenes_pago(uuid, uuid)"
 
+EN_REVISION = "nucleo.factura_adjunta_en_revision(uuid, uuid, integer)"
+
 RUTAS = (ADJUNTAR, LEER)
-INTERNAS = (DISPONIBLE,)
+INTERNAS = (DISPONIBLE, EN_REVISION)
 
 TABLA = f"""
 create table {TABLA_CONSTANCIA} (
@@ -154,6 +159,23 @@ create function nucleo.factura_adjunta_disponible(c uuid, orden uuid, numero int
      limit 1
   $$;
 
+-- La constancia de una adjunta a esa versión cuyo archivo está en el antivirus, de un documento
+-- vigente; nula si no hay. A lo sumo una: el acto no deja subir otra mientras tanto.
+create function nucleo.factura_adjunta_en_revision(c uuid, orden uuid, numero integer)
+  returns uuid
+  language sql stable
+  set search_path = pg_catalog, pg_temp
+  as $$
+    select a.id
+      from nucleo.factura_adjunta_orden_pago a
+      join nucleo.version_documento x on x.id = a.factura_version_id
+      join nucleo.documento d on d.consorcio_id = a.consorcio_id and d.id = a.documento_id
+     where a.consorcio_id = c and a.orden_id = orden and a.version = numero
+       and x.estado = 'en_cuarentena' and d.estado = 'vigente'
+     order by a.adjuntada_en desc, a.id desc
+     limit 1
+  $$;
+
 create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada integer,
                                                    reemplaza uuid,
                                                    titulo_nuevo text, tipo_nuevo text,
@@ -190,12 +212,7 @@ create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada 
     select * into v from nucleo.orden_pago_version x
      where x.orden_id = orden and x.numero = o.version_vigente;
     -- Una por vez en el antivirus, sea la primera o un reemplazo.
-    if exists (select 1 from nucleo.factura_adjunta_orden_pago a
-                 join nucleo.version_documento x on x.id = a.factura_version_id
-                 join nucleo.documento y on y.consorcio_id = a.consorcio_id
-                  and y.id = a.documento_id
-                where a.consorcio_id = c and a.orden_id = orden and a.version = o.version_vigente
-                  and x.estado = 'en_cuarentena' and y.estado = 'vigente') then
+    if nucleo.factura_adjunta_en_revision(c, orden, o.version_vigente) is not null then
       raise exception 'hay otra factura en el antivirus' using errcode = 'P0001',
         hint = 'factura_ya_adjunta';
     end if;
@@ -246,7 +263,8 @@ create function nucleo.factura_adjunta_lectura(orden uuid, facultad text, actor 
                                                origen_pedido text, sesion uuid)
   returns table (id uuid, version integer, documento_id uuid, factura_version_id uuid,
                  estado text, adjuntada_por uuid, adjuntada_por_nombre text,
-                 adjuntada_en timestamptz, reemplaza_a uuid)
+                 adjuntada_en timestamptz, reemplaza_a uuid, documento_vigente boolean,
+                 vale boolean, en_revision boolean)
   language plpgsql
   security definer
   set search_path = pg_catalog, pg_temp
@@ -257,10 +275,14 @@ create function nucleo.factura_adjunta_lectura(orden uuid, facultad text, actor 
     perform nucleo.exigir_lectura_egresos(c, facultad, actor, origen_pedido, sesion);
     return query
       select a.id, a.version, a.documento_id, a.factura_version_id, x.estado, a.adjuntada_por,
-             p.nombre, a.adjuntada_en, a.reemplaza_a
+             p.nombre, a.adjuntada_en, a.reemplaza_a, y.estado = 'vigente',
+             a.factura_version_id is not distinct from
+               nucleo.factura_adjunta_disponible(c, a.orden_id, a.version),
+             a.id is not distinct from nucleo.factura_adjunta_en_revision(c, a.orden_id, a.version)
         from nucleo.factura_adjunta_orden_pago a
         join nucleo.orden_pago o on o.consorcio_id = a.consorcio_id and o.id = a.orden_id
         join nucleo.version_documento x on x.id = a.factura_version_id
+        join nucleo.documento y on y.consorcio_id = a.consorcio_id and y.id = a.documento_id
         join nucleo.persona p on p.id = a.adjuntada_por
        where a.consorcio_id = c and a.orden_id = orden
          and (facultad = 'egresos.preparar_orden' or o.estado <> 'borrador')
@@ -285,6 +307,8 @@ FALTANTES_CAMBIOS = (
         "             -- 0099: el último archivo subido después de aprobada, si hay.\n"
         "             (select x.estado from nucleo.factura_adjunta_orden_pago a\n"
         "                join nucleo.version_documento x on x.id = a.factura_version_id\n"
+        "                join nucleo.documento y on y.consorcio_id = a.consorcio_id\n"
+        "                 and y.id = a.documento_id and y.estado = 'vigente'\n"
         "               where a.consorcio_id = c and a.orden_id = o.id\n"
         "                 and a.version = o.version_vigente\n"
         "               order by a.adjuntada_en desc, a.id desc limit 1)\n",

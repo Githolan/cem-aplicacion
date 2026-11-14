@@ -3934,6 +3934,11 @@
             "title": "Documento Id",
             "type": "string"
           },
+          "documento_vigente": {
+            "description": "Falso si soporte borró su documento: ya no vale ni cuenta, y la constancia queda como historia.",
+            "title": "Documento Vigente",
+            "type": "boolean"
+          },
           "estado": {
             "$ref": "#/components/schemas/EstadoVersion",
             "description": "`en_cuarentena` mientras el antivirus la revisa; `disponible`: la orden ya tiene su factura; `rechazado`: no pasó el antivirus, no cuenta y se puede subir otra."
@@ -3980,7 +3985,8 @@
           "adjuntada_por",
           "adjuntada_por_nombre",
           "adjuntada_en",
-          "reemplaza_a"
+          "reemplaza_a",
+          "documento_vigente"
         ],
         "title": "FacturaAdjunta",
         "type": "object"
@@ -4176,7 +4182,7 @@
                 "type": "null"
               }
             ],
-            "description": "La factura subida a la versión vigente después de aprobada que vale (`0099`): la última que pasó el antivirus o, si ninguna lo pasó, la última subida; nulo si no se subió ninguna. La de la versión misma está en `versiones`."
+            "description": "La factura subida a la versión vigente después de aprobada que vale (`0099`): la última que pasó el antivirus, de un documento vigente; si ninguna vale, la última de un documento vigente (en el antivirus o rechazada); nulo si no hay. La de la versión misma está en `versiones`."
           },
           "factura_reemplazo": {
             "anyOf": [
@@ -4189,12 +4195,12 @@
             ],
             "description": "La última subida para reemplazar a `factura_adjunta`, si la hay: en el antivirus (mientras tanto vale la anterior) o rechazada (la anterior sigue valiendo)."
           },
-          "facturas_reemplazadas": {
-            "description": "Las adjuntas que pasaron el antivirus y quedaron reemplazadas, de la más vieja a la más nueva: no se borran.",
+          "facturas_anteriores": {
+            "description": "Las demás subidas a la versión vigente, de la más vieja a la más nueva, como historia: reemplazadas, rechazadas por el antivirus o con el documento borrado por soporte. No se borran.",
             "items": {
               "$ref": "#/components/schemas/FacturaAdjunta"
             },
-            "title": "Facturas Reemplazadas",
+            "title": "Facturas Anteriores",
             "type": "array"
           },
           "le_toca_a": {
@@ -4315,7 +4321,7 @@
             "type": "boolean"
           },
           "puede_reemplazar_factura": {
-            "description": "Si puede reemplazar `factura_adjunta` (decisión del propietario del 13-11-2026): las mismas facultades que subirla, la adjunta pasó el antivirus y no hay otro reemplazo en el antivirus.",
+            "description": "Si puede reemplazar `factura_adjunta` (decisión del propietario del 13-11-2026): las mismas facultades que subirla, hay una adjunta que vale y no hay otra en el antivirus.",
             "title": "Puede Reemplazar Factura",
             "type": "boolean"
           },
@@ -4342,7 +4348,7 @@
             "type": "boolean"
           },
           "puede_subir_factura": {
-            "description": "Si puede subir la factura que falta (`0099`): prepara órdenes y carga documentos, la orden está aprobada o más adelante, su versión vigente no tiene factura y no hay otra subida que esté en el antivirus o que lo haya pasado.",
+            "description": "Si puede subir la factura que falta (`0099`): prepara órdenes y carga documentos, la orden está aprobada o más adelante, su versión vigente no tiene factura, ninguna adjunta vale y no hay otra en el antivirus.",
             "title": "Puede Subir Factura",
             "type": "boolean"
           },
@@ -4450,7 +4456,7 @@
           "toma_vigente",
           "factura_adjunta",
           "factura_reemplazo",
-          "facturas_reemplazadas",
+          "facturas_anteriores",
           "puede_subir_factura",
           "puede_reemplazar_factura"
         ],

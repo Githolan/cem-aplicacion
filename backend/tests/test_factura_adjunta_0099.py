@@ -15,7 +15,8 @@ from alembic import command
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from tests.conftest import clave_idempotencia
+from scripts import documento_soporte
+from tests.conftest import clave_idempotencia, url_rol
 from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la_imagen` son fixtures)
     analizar,
     bucket,
@@ -23,6 +24,7 @@ from tests.test_documentos_2c1 import (  # noqa: F401  (`bucket` y `firmas_de_la
     pdf,
 )
 from tests.test_egresos_1a import RENOVAR, aprobada, envejecer, enviada
+from tests.test_modo_operacion import hoy_de
 from tests.test_orden_pago_neutra import (
     eventos,
     huella,
@@ -321,7 +323,7 @@ def test_reemplazar_deja_la_anterior_como_reemplazada(motor_migrate, motor_app, 
     anterior = adjunta_que_vale(motor_app, e, o)
     f = ficha(e, o)
     assert (f["puede_reemplazar_factura"], f["puede_subir_factura"]) == (True, False)
-    assert (f["factura_reemplazo"], f["facturas_reemplazadas"]) == (None, [])
+    assert (f["factura_reemplazo"], f["facturas_anteriores"]) == (None, [])
     antes = foto(motor_migrate, o)
 
     r = subir(e, o, titulo="Factura SINTETICA 0002 (NO REAL)", reemplaza=anterior["id"])
@@ -339,11 +341,11 @@ def test_reemplazar_deja_la_anterior_como_reemplazada(motor_migrate, motor_app, 
     nueva = f["factura_adjunta"]
     assert (nueva["factura_version_id"], nueva["reemplaza_a"]) == (
         r.json()["archivo"]["id"], anterior["id"])  # fmt: skip
-    assert f["facturas_reemplazadas"] == [anterior]
+    assert f["facturas_anteriores"] == [anterior]
     assert f["factura_reemplazo"] is None and f["puede_reemplazar_factura"] is True
     # El Consejo ve lo mismo: la que vale y la reemplazada.
     consejo = ficha(e, o, e.mc1)
-    assert (consejo["factura_adjunta"], consejo["facturas_reemplazadas"]) == (nueva, [anterior])
+    assert (consejo["factura_adjunta"], consejo["facturas_anteriores"]) == (nueva, [anterior])
     # Nada se borra: las dos constancias quedan, y el documento anterior no se retira.
     assert len(constancias(motor_migrate, o)) == 2
     assert codigo(retirar(e, anterior["documento_id"])) == (409, "documento_referenciado")
@@ -382,7 +384,7 @@ def test_si_el_antivirus_rechaza_el_reemplazo_sigue_valiendo_la_anterior(motor_m
     f = ficha(e, o)
     assert f["factura_adjunta"] == anterior
     assert f["factura_reemplazo"]["estado"] == "rechazado"
-    assert (f["facturas_reemplazadas"], f["puede_reemplazar_factura"]) == ([], True)
+    assert (f["facturas_anteriores"], f["puede_reemplazar_factura"]) == ([], True)
     assert str(o) not in faltantes(e)
     # Se reemplaza de nuevo, contra la misma que sigue valiendo.
     assert subir(e, o, reemplaza=anterior["id"]).status_code == 201
@@ -415,6 +417,89 @@ def test_quien_no_prepara_no_la_reemplaza(motor_migrate, motor_app, e, bucket):
     assert r.status_code == 403, r.text
     assert len(constancias(motor_migrate, o)) == 1
     assert subir(e, o, reemplaza=anterior["id"]).status_code == 201  # control: la administración
+
+
+# Soporte borra el documento de una adjunta (`scripts.documento_soporte`) ------------------------
+
+
+@pytest.fixture
+def soporte(monkeypatch):
+    monkeypatch.setenv(documento_soporte.VARIABLE_URL, url_rol("soporte_documentos"))
+
+
+def borrar_por_soporte(motor_app, e, documento_id: str) -> None:
+    """Lo que hace soporte a pedido de la administración: el documento queda borrado (lógico)."""
+    assert documento_soporte.main([
+        "borrar", "--consorcio", str(e.cons), "--documento", str(documento_id),
+        "--solicitante", str(e.adm), "--fecha-pedido", hoy_de(motor_app, e.cons).isoformat(),
+        "--referencia", "Nota SINTETICA 1/2026", "--motivo", "Cargado por error",
+    ]) == 0  # fmt: skip
+
+
+def test_borrada_por_soporte_la_adjunta_vuelve_a_faltar_y_se_sube_otra(
+    motor_migrate, motor_app, e, bucket, soporte
+):
+    o = aprobada(motor_migrate, e)
+    adjunta = adjunta_que_vale(motor_app, e, o)
+    assert str(o) not in faltantes(e)  # control: con la adjunta, no falta
+    borrar_por_soporte(motor_app, e, adjunta["documento_id"])
+
+    # Una sola regla, la de la base: ya no vale; la ficha ofrece subir otra y no reemplazarla.
+    f = ficha(e, o)
+    assert (f["factura_adjunta"], f["factura_reemplazo"]) == (None, None)
+    assert (f["puede_subir_factura"], f["puede_reemplazar_factura"]) == (True, False)
+    [historia] = f["facturas_anteriores"]
+    assert (historia["id"], historia["documento_vigente"]) == (adjunta["id"], False)
+    assert faltantes(e)[str(o)]["factura_subida"] is None
+    assert codigo(subir(e, o, reemplaza=adjunta["id"])) == (409, "factura_no_vigente")
+    # Lo que la ficha ofrece, el acto lo acepta.
+    r = subir(e, o)
+    assert r.status_code == 201, r.text
+    assert analizar(motor_app) == 1
+    assert ficha(e, o)["factura_adjunta"]["factura_version_id"] == r.json()["archivo"]["id"]
+    assert len(constancias(motor_migrate, o)) == 2  # la borrada queda como historia
+
+
+def test_borrado_el_reemplazo_vale_la_anterior_en_la_ficha_y_al_renovar(
+    motor_migrate, motor_app, e, bucket, soporte
+):
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    r = subir(e, o, reemplaza=anterior["id"])
+    assert analizar(motor_app) == 1
+    assert ficha(e, o)["factura_adjunta"]["documento_id"] == r.json()["documento_id"]  # control
+    borrar_por_soporte(motor_app, e, r.json()["documento_id"])
+
+    f = ficha(e, o)
+    assert f["factura_adjunta"] == anterior
+    assert f["factura_reemplazo"] is None
+    assert [x["documento_vigente"] for x in f["facturas_anteriores"]] == [False]
+    assert (f["puede_subir_factura"], f["puede_reemplazar_factura"]) == (False, True)
+    # La que la ficha muestra es la que lleva la renovación.
+    envejecer(motor_migrate, o, timedelta(days=8))
+    assert llamar(motor_migrate, e, e.adm, RENOVAR, orden=o, version=1) == 2
+    v2 = versiones(motor_migrate, o)[1]
+    assert str(v2["factura_version_id"]) == anterior["factura_version_id"]
+    # Y el reemplazo que la ficha ofrece, el acto lo acepta.
+    o2 = aprobada(motor_migrate, e)
+    otra = adjunta_que_vale(motor_app, e, o2)
+    s = subir(e, o2, reemplaza=otra["id"])
+    assert analizar(motor_app) == 1
+    borrar_por_soporte(motor_app, e, s.json()["documento_id"])
+    assert ficha(e, o2)["puede_reemplazar_factura"] is True
+    assert subir(e, o2, reemplaza=otra["id"]).status_code == 201
+
+
+def test_borrado_un_reemplazo_en_el_antivirus_ya_no_frena(motor_migrate, motor_app, e, bucket,
+                                                         soporte):  # fmt: skip
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    r = subir(e, o, reemplaza=anterior["id"])
+    assert ficha(e, o)["puede_reemplazar_factura"] is False  # control: en el antivirus, frena
+    borrar_por_soporte(motor_app, e, r.json()["documento_id"])
+    f = ficha(e, o)
+    assert (f["factura_reemplazo"], f["puede_reemplazar_factura"]) == (None, True)
+    assert subir(e, o, reemplaza=anterior["id"]).status_code == 201
 
 
 # Renovar ---------------------------------------------------------------------------------------
@@ -469,12 +554,14 @@ def test_las_funciones_las_ejecuta_solo_cem_app(motor_migrate):
             " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
             " where n.nspname = 'nucleo' and p.proname in ('adjuntar_factura_orden_pago',"
             " 'factura_adjunta_lectura', 'factura_adjunta_disponible',"
+            " 'factura_adjunta_en_revision',"
             " 'panel_comprobantes_faltantes') order by p.proname"
         )).all()  # fmt: skip
     camino = "search_path=pg_catalog, pg_temp"
     assert [tuple(f) for f in filas] == [
         ("adjuntar_factura_orden_pago", True, True, False, camino),
         ("factura_adjunta_disponible", False, False, False, camino),
+        ("factura_adjunta_en_revision", False, False, False, camino),
         ("factura_adjunta_lectura", True, True, False, camino),
         ("panel_comprobantes_faltantes", True, True, False, camino),
     ]

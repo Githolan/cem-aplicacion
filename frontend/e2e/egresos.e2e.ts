@@ -239,7 +239,7 @@ function completar(f: any): object {
   const noCoincide = f.paso === "conciliar" && (f.lectura_comprobante?.distinto_de_lo_registrado.length ?? 0) > 0;
   const completa = { esperando_desde: null, cotejado_en: null, posible_duplicada_de: null, cierre_sin_pago: null,
     puede_cerrar_sin_pagar: false, puede_retirar: false, factura_adjunta: null, puede_subir_factura: false,
-    factura_reemplazo: null, facturas_reemplazadas: [], puede_reemplazar_factura: false, ...f, ...deLaTabla(f.situacion, f.paso) };
+    factura_reemplazo: null, facturas_anteriores: [], puede_reemplazar_factura: false, ...f, ...deLaTabla(f.situacion, f.paso) };
   return { ...completa, acciones: accionesDe(completa, noCoincide) };
 }
 

@@ -177,9 +177,12 @@ export function textoDelReemplazo(a: FacturaAdjunta): string {
   return `${a.adjuntada_por_nombre} subió otra factura el ${momento(a.adjuntada_en)} para reemplazarla: el antivirus la está revisando. Mientras tanto vale la anterior.`;
 }
 
-/** Una adjunta que quedó reemplazada: no se borra, queda dicha. */
-export function textoDeLaReemplazada(a: FacturaAdjunta): string {
-  return `Reemplazada: la factura subida por ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)}.`;
+/** Una subida anterior, como historia: no se borra, queda dicha con cómo terminó. */
+export function textoDeLaAnterior(a: FacturaAdjunta): string {
+  const cual = `la factura subida por ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)}`;
+  if (!a.documento_vigente) return `Borrada por soporte: ${cual}.`;
+  if (a.estado === "rechazado") return `No pasó el antivirus: ${cual}.`;
+  return `Reemplazada: ${cual}.`;
 }
 
 /** Lo que cambió de una versión a la otra, para no tener que comparar a ojo. */
@@ -1045,10 +1048,10 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
               )}
               {ficha.factura_adjunta !== null && <p className="aviso-info">{textoDeLaAdjunta(ficha.factura_adjunta)}</p>}
               {ficha.factura_reemplazo !== null && <p className="aviso-info">{textoDelReemplazo(ficha.factura_reemplazo)}</p>}
-              {ficha.facturas_reemplazadas.length > 0 && (
-                <ul className="lista-simple" aria-label="Facturas reemplazadas">
-                  {ficha.facturas_reemplazadas.map((a) => (
-                    <li key={a.id}>{textoDeLaReemplazada(a)}</li>
+              {ficha.facturas_anteriores.length > 0 && (
+                <ul className="lista-simple" aria-label="Facturas anteriores">
+                  {ficha.facturas_anteriores.map((a) => (
+                    <li key={a.id}>{textoDeLaAnterior(a)}</li>
                   ))}
                 </ul>
               )}

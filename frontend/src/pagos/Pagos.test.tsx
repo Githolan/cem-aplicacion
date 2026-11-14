@@ -117,7 +117,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     acciones: [{ codigo: CALCULAR as never, tipo: "principal" }], estado_visible: "lista_para_pagar", barra: null,
     que_decir: CALCULAR, esperando_desde: null, despues: "listo", cotejado_en: null, posible_duplicada_de: null,
     cierre_sin_pago: null, puede_cerrar_sin_pagar: false, factura_adjunta: null, puede_subir_factura: false,
-    factura_reemplazo: null, facturas_reemplazadas: [], puede_reemplazar_factura: false,
+    factura_reemplazo: null, facturas_anteriores: [], puede_reemplazar_factura: false,
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
     puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
@@ -4384,7 +4384,7 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
   const SUBIDA = `${BASE}/ordenes-pago/${O1}/factura`;
   const PARA_PAGAR = ficha({ puede_subir_factura: true });
   const ADJUNTA = {
-    id: "efefefef-efef-4fef-8fef-efefefefefef", reemplaza_a: null, version: 1, documento_id: DOC_F, factura_version_id: ARCH_F, adjuntada_por: PERSONA, adjuntada_por_nombre: "Admin Ficticia",
+    id: "efefefef-efef-4fef-8fef-efefefefefef", reemplaza_a: null, documento_vigente: true, version: 1, documento_id: DOC_F, factura_version_id: ARCH_F, adjuntada_por: PERSONA, adjuntada_por_nombre: "Admin Ficticia",
     adjuntada_en: "2026-11-13T12:00:00Z",
   } as const;
 
@@ -4488,7 +4488,7 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
         );
       },
       [`GET ${BASE}/documentos/${DOC_N}/versiones/${ARCH_N}/estado`]: () => {
-        actual = ficha({ factura_adjunta: NUEVA, facturas_reemplazadas: [VALE], puede_reemplazar_factura: true });
+        actual = ficha({ factura_adjunta: NUEVA, facturas_anteriores: [VALE], puede_reemplazar_factura: true });
         return Response.json({ estado: "disponible", motivo_rechazo: null });
       },
       [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [] }),
@@ -4508,7 +4508,7 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     expect(await within(hoja).findByText(TEXTOS.reemplazar.aceptada)).toBeTruthy();
     fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
     expect(await screen.findByText(/^Factura que reemplazó a la anterior, subida por Admin Ficticia/)).toBeTruthy();
-    const reemplazadas = screen.getByRole("list", { name: "Facturas reemplazadas" });
+    const reemplazadas = screen.getByRole("list", { name: "Facturas anteriores" });
     expect(within(reemplazadas).getByText(/^Reemplazada: la factura subida por Admin Ficticia/)).toBeTruthy();
     vi.useRealTimers();
   });
@@ -4523,6 +4523,16 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     expect(await screen.findByText(/no pasó el antivirus\.$/)).toBeTruthy();
     expect(await boton(SUBIR_FACTURA)).toBeTruthy();
     vi.useRealTimers();
+  });
+
+  it("una adjunta borrada por soporte queda como historia y la ficha ofrece subir otra", async () => {
+    const BORRADA = { ...ADJUNTA, estado: "disponible", documento_vigente: false } as const;
+    abrirFicha(ficha({ facturas_anteriores: [BORRADA], puede_subir_factura: true }));
+    const anteriores = await screen.findByRole("list", { name: "Facturas anteriores" });
+    expect(within(anteriores).getByText(/^Borrada por soporte: la factura subida por Admin Ficticia/)).toBeTruthy();
+    expect(await boton(SUBIR_FACTURA)).toBeTruthy();
+    sinBoton(REEMPLAZAR_FACTURA);
+    expect(screen.queryByText(/^Factura subida después de aprobada/)).toBeNull();
   });
 
   it("mientras el reemplazo está en el antivirus, o si lo rechaza, vale la anterior y lo dice", async () => {
