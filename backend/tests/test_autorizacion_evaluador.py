@@ -15,7 +15,7 @@ from uuid import UUID
 
 import pytest
 from cem_contracts.estados import ModoOperacion, TipoVinculo
-from cem_contracts.politicas import Politica, TipoRecurso
+from cem_contracts.politicas import CodigoSeparacion, Politica, TipoRecurso
 from pydantic import ValidationError
 
 from app.autorizacion.evaluador import (
@@ -25,8 +25,10 @@ from app.autorizacion.evaluador import (
     Mandato,
     Vinculo,
     evaluar,
+    por_otra_cuenta,
 )
 from app.autorizacion.politicas import POLITICAS, PoliticasInvalidas, cargar
+from app.autorizacion.requiere import YA_PARTICIPO, YA_PARTICIPO_OTRA_CUENTA
 from tests.escenarios_autorizacion import CATALOGO, CONSORCIO, HOY, OTRO_CONSORCIO, SIMBOLOS
 
 YO = UUID("0192f0c4-0000-7000-8000-000000000001")
@@ -366,3 +368,31 @@ def test_a15_una_marca_no_tapa_a_quien_registro(marca):
     entidad = replace(TODO_PASA, decision_registrada_por=YO, **{marca: True})
     d = evaluar("mandatos.alta", contexto(facultades=(p.facultad,), modo=modo_que_pasa(p)), entidad)
     assert (d.estado, d.motivo_interno) == (403, "no_registro_la_decision")
+
+
+def test_por_otra_cuenta_distingue_la_cuenta_que_pide_de_otra_del_mismo_ser_humano():
+    """Tanda 4 (sí del propietario del 14-11-2026): para el texto, si la preparó esta cuenta u
+    otra cuenta de la misma persona. La decisión es la misma en los dos casos."""
+    p = POLITICAS["egresos.aprobar_orden"]
+    codigo = CodigoSeparacion.NO_ES_QUIEN_PREPARO
+    gemela = UUID("0192f0c4-0000-7000-8000-000000000003")
+    misma = {**IDENTIDADES, gemela: IDENTIDADES[YO]}
+    ctx = contexto(facultades=(p.facultad,), modo=modo_que_pasa(p), identidades=misma)
+    por_gemela = replace(TODO_PASA, preparado_por=gemela)
+    por_mi = replace(TODO_PASA, preparado_por=YO)
+    assert evaluar(p.accion, ctx, por_gemela).motivo_interno == codigo
+    assert evaluar(p.accion, ctx, por_mi).motivo_interno == codigo
+    assert por_otra_cuenta(codigo, ctx, por_gemela) is True
+    # Control: la preparó la cuenta que pide.
+    assert por_otra_cuenta(codigo, ctx, por_mi) is False
+
+
+def test_cada_motivo_tiene_su_texto_para_otra_cuenta_de_la_misma_persona():
+    assert YA_PARTICIPO_OTRA_CUENTA.keys() == YA_PARTICIPO.keys()
+    for clave, texto in YA_PARTICIPO_OTRA_CUENTA.items():
+        assert "otra cuenta de la misma persona" in texto.lower(), clave
+        assert "esta cuenta" not in texto.lower(), clave
+    assert (
+        YA_PARTICIPO_OTRA_CUENTA[("egresos.aprobar_orden", CodigoSeparacion.NO_ES_QUIEN_PREPARO)]
+        == "La preparó otra cuenta de la misma persona: la aprueba otra persona del Consejo."
+    )

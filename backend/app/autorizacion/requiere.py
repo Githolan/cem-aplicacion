@@ -32,6 +32,7 @@ from app.autorizacion.evaluador import (
     Entidad,
     Motivo,
     evaluar,
+    por_otra_cuenta,
     separa_seres_humanos,
 )
 from app.autorizacion.politicas import POLITICAS
@@ -111,6 +112,21 @@ el motivo concreto. Quien la recibe ya participa de eso (lo preparó, lo aprobó
 que no se revela nada que no sepa. La falta de facultad (el mandato no lo incluye) sigue siendo
 `sin_permiso`: el evaluador mira la separación solo si la facultad ya concedía. Cada separación de
 las políticas tiene su texto: si falta uno, falla al importar (ver abajo), no en el pedido."""
+
+
+def _por_otra_cuenta(texto: str) -> str:
+    """El mismo motivo cuando lo hizo otra cuenta del mismo ser humano (A13-C), no la que pide:
+    «esta cuenta» sería inexacto (tanda 4, sí del propietario del 14-11-2026)."""
+    for de, a in (
+        ("esta cuenta", "otra cuenta de la misma persona"),
+        ("Esta cuenta", "Otra cuenta de la misma persona"),
+    ):
+        if de in texto:
+            return texto.replace(de, a, 1)
+    raise ValueError(f"motivo sin «esta cuenta»: {texto!r}")
+
+
+YA_PARTICIPO_OTRA_CUENTA = {clave: _por_otra_cuenta(t) for clave, t in YA_PARTICIPO.items()}
 
 _SIN_TEXTO = {(p.accion, c) for p in POLITICAS.values() for c in p.separacion} - YA_PARTICIPO.keys()
 if _SIN_TEXTO:
@@ -203,10 +219,13 @@ class Permiso:
         if decision.motivo_interno in RENOVAR:
             raise ErrorApi(403, *RENOVAR[decision.motivo_interno])
         if (self.accion, decision.motivo_interno) in YA_PARTICIPO:
+            codigo = CodigoSeparacion(decision.motivo_interno)
+            otra = por_otra_cuenta(codigo, self.ctx.autorizacion, entidad or Entidad())
+            texto = YA_PARTICIPO_OTRA_CUENTA if otra else YA_PARTICIPO
             raise ErrorApi(
                 403,
                 CodigoError.YA_PARTICIPO,
-                YA_PARTICIPO[(self.accion, CodigoSeparacion(decision.motivo_interno))],
+                texto[(self.accion, codigo)],
                 detalle={"separacion": decision.motivo_interno},
             )
         raise ErrorApi(403, CodigoError.SIN_PERMISO, SIN_PERMISO)

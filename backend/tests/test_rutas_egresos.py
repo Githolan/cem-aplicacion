@@ -400,7 +400,10 @@ def test_quien_preparo_no_aprueba_con_otra_cuenta_del_consejo(motor_migrate, mot
     r = post(e, otra, f"ordenes-pago/{o}/aprobaciones", {"version": 1, "huella": h})
     # Pregunta 10 del propietario: a quien ya participó se le dice el motivo concreto.
     assert codigo(r) == (403, "ya_participo")
-    assert r.json()["mensaje"] == "La preparó esta cuenta: la aprueba otra persona del Consejo."
+    # La preparó otra cuenta de la misma persona, no la que pide (tanda 4, 14-11-2026).
+    assert r.json()["mensaje"] == (
+        "La preparó otra cuenta de la misma persona: la aprueba otra persona del Consejo."
+    )
     assert r.json()["detalle"] == {"separacion": "no_es_quien_preparo"}
     motivos = [d["motivo"] for d in denegaciones(motor_app, e.cons, e.mc1, otra)]
     assert motivos == ["no_es_quien_preparo"]

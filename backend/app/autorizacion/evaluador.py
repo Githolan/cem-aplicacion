@@ -362,12 +362,9 @@ def _filtrar(politica: Politica, contexto: ContextoAutorizacion, entidad: Entida
     return None
 
 
-def _separacion(
-    accion: str, codigo: CodigoSeparacion, contexto: ContextoAutorizacion, entidad: Entidad
-) -> str | None:
-    actor = contexto.persona_id
-    if actor is None:
-        return Motivo.IDENTIDAD_INDETERMINADA
+def _partes(codigo: CodigoSeparacion, entidad: Entidad) -> tuple[UUID | None, ...] | None:
+    """Con quiénes no puede coincidir quien actúa; None si la separación no aplica a esta
+    entidad (p. ej. un mandato sin cuenta o una decisión del equipo)."""
     match codigo:
         case CodigoSeparacion.NO_ES_QUIEN_PREPARO:
             otras: tuple[UUID | None, ...] = (entidad.preparado_por,)
@@ -399,12 +396,34 @@ def _separacion(
             # Distinta de todos los aprobadores (A5).
             otras = entidad.aprobado_por
         case CodigoSeparacion.FIRMA_REPETIDA:
-            # Dos firmas de personas distintas (PA36): con dos ya puestas, no hay otra.
-            if len(entidad.firmas) >= 2:
-                return Motivo.SOLICITUD_YA_EMITIDA
             otras = entidad.firmas
         case _:
             raise ValueError(f"código de separación sin implementar: {codigo!r}")
+    return otras
+
+
+def por_otra_cuenta(
+    codigo: CodigoSeparacion, contexto: ContextoAutorizacion, entidad: Entidad
+) -> bool:
+    """Si una separación que ya negó lo hizo por otra cuenta del mismo ser humano (A13-C) y no
+    por la cuenta que pide: solo para elegir el texto que se le muestra (tanda 4, sí del
+    propietario del 14-11-2026). No decide nada."""
+    otras = _partes(codigo, entidad)
+    return otras is not None and contexto.persona_id not in otras
+
+
+def _separacion(
+    accion: str, codigo: CodigoSeparacion, contexto: ContextoAutorizacion, entidad: Entidad
+) -> str | None:
+    actor = contexto.persona_id
+    if actor is None:
+        return Motivo.IDENTIDAD_INDETERMINADA
+    # Dos firmas de personas distintas (PA36): con dos ya puestas, no hay otra.
+    if codigo is CodigoSeparacion.FIRMA_REPETIDA and len(entidad.firmas) >= 2:
+        return Motivo.SOLICITUD_YA_EMITIDA
+    otras = _partes(codigo, entidad)
+    if otras is None:
+        return None
     if any(p is None for p in otras):
         return Motivo.IDENTIDAD_INDETERMINADA
     if actor in otras:

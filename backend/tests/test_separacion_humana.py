@@ -52,6 +52,10 @@ def test_alta_a_otra_cuenta_del_mismo_ser_humano_se_niega(escena, motor_migrate,
     misma_identidad(motor_migrate, e["cons"], e["mc1"], segunda)
     r = alta_http(e["mc1"], e["cons"], e["acta"], persona_id=segunda)
     assert (r.status_code, r.json()["codigo"]) == (403, "ya_participo")
+    # El mandato no es de la cuenta que pide sino de otra de la misma persona (tanda 4).
+    assert r.json()["mensaje"] == (
+        "El mandato es de otra cuenta de la misma persona: ese paso lo da otra persona."
+    )
     assert ultimo_motivo(motor_app, e, e["mc1"]) == "no_es_su_propio_mandato"
     # Control: otra persona del Consejo sí le da el alta.
     assert alta_http(e["mc2"], e["cons"], e["acta"], persona_id=segunda).status_code == 201
