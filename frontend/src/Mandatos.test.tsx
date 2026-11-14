@@ -128,7 +128,8 @@ function error(codigo: string, status: number, detalle: Record<string, unknown> 
   return Response.json({ codigo, mensaje: "x", detalle, id_correlacion: "c" }, { status });
 }
 
-type Respuestas = Record<string, () => Response>;
+// Una respuesta puede quedar retenida (una promesa) para probar lo que llega tarde.
+type Respuestas = Record<string, () => Response | Promise<Response>>;
 
 /** Un backend que responde por «MÉTODO ruta»; lo que no está previsto falla la prueba. */
 function backend(respuestas: Respuestas) {
