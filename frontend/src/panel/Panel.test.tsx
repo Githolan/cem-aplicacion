@@ -9,6 +9,7 @@ import { alcanza, alcanzaTodo } from "../accionesDePrueba";
 import { App } from "../App";
 import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
+import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
 import { faltantesPorEstado, gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
 import { TEXTO_LA_SUBE_LA_ADMINISTRACION } from "./Panel";
@@ -435,6 +436,40 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     await within(otraHoja).findByText(TEXTO_LISTO);
     const [a, z] = otraApi.mock.calls.map((c) => (c as unknown as [Request])[0]).filter((r) => r.method === "POST").map((r) => r.headers.get("Idempotency-Key"));
     expect(z).not.toBe(a);
+  });
+
+  it("mientras la factura se envía, la hoja no se cierra ni con Escape, y el navegador avisa al salir", async () => {
+    let responder: (r: Response) => void = () => undefined;
+    const api = servidor(() => Response.json({ estado: "en_cuarentena", motivo_rechazo: null }), {
+      [`POST ${SUBIDA}`]: () => new Promise<Response>((r) => (responder = r)),
+    });
+    abrir();
+    const hoja = await abrirLaHoja();
+    const salir = () => {
+      const evento = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(evento);
+      return evento.defaultPrevented;
+    };
+    expect(salir()).toBe(false); // control: sin envío, no avisa
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), { target: { files: [PDF] } });
+    expect(await within(hoja).findByText(TEXTO_SUBIENDO)).toBeTruthy();
+    const cerrar = within(hoja).getByRole("button", { name: "Cerrar" }) as HTMLButtonElement;
+    expect(cerrar.disabled).toBe(true);
+    fireEvent.keyDown(hoja, { key: "Escape" });
+    fireEvent.click(cerrar);
+    expect(screen.getByRole("dialog", { name: SUBIR_FACTURA })).toBeTruthy();
+    expect(salir()).toBe(true);
+
+    // Confirmada la subida, se cierra y la pantalla de atrás se vuelve a leer.
+    responder(SUBIDA_OK());
+    expect(await within(hoja).findByText(TEXTO_LISTO)).toBeTruthy();
+    expect(salir()).toBe(false);
+    const lecturas = api.mock.calls.filter((c) => new URL((c as unknown as [Request])[0].url).pathname === PANEL.split(" ")[1]).length;
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: SUBIR_FACTURA })).toBeNull());
+    await waitFor(() =>
+      expect(api.mock.calls.filter((c) => new URL((c as unknown as [Request])[0].url).pathname === PANEL.split(" ")[1]).length).toBeGreaterThan(lecturas),
+    );
   });
 
   it("cerrada la hoja mientras el antivirus revisa, la fila sigue y dice el rechazo", async () => {

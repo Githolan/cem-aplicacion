@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
+import { useAvisoAlSalir } from "../avisoAlSalir";
 import { TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "../archivos";
 import { TEXTO_SUBIENDO } from "../CargaConLectura";
 import { encabezadoCsrf } from "../csrf";
@@ -170,10 +171,14 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
   }
 
   const cerrar = () => alCerrar(cambio.current);
+  // Mientras el pedido viaja, la hoja no se cierra: si se cerrara, lo que el servidor confirme
+  // después no llegaría a la pantalla de atrás, que seguiría ofreciendo subirla.
+  const enviando = fase.tipo === "subiendo";
+  useAvisoAlSalir(enviando);
   const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
 
   return (
-    <Hoja titulo={textos.titulo} alEscapar={cerrar}>
+    <Hoja titulo={textos.titulo} alEscapar={enviando ? undefined : cerrar}>
       <p>{descripcion}</p>
       {fase.tipo === "revisando" && (
         <p role="status" className="aviso-ok">
@@ -208,7 +213,7 @@ export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza
         </div>
       )}
       <div className="acciones">
-        <button type="button" className="secundario" onClick={cerrar}>
+        <button type="button" className="secundario" onClick={cerrar} disabled={enviando}>
           Cerrar
         </button>
       </div>
