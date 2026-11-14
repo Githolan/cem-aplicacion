@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
 
 import { CabeceraInterna } from "../CabeceraInterna";
@@ -24,11 +24,15 @@ import {
 } from "./datos";
 import { GraficoBarras } from "./GraficoBarras";
 
-// Página /panel: el panel del Consejo en solo lectura (RF48; app 0094, H4a corte 1). Lo decide la
-// API con `fiscalizacion.ver_panel`; la pantalla solo muestra. Cada gráfico dice su base de cálculo
-// y enlaza a los pagos si la persona además puede abrirlos (regla de fricción del 05-11-2026).
+// Página /panel: el resumen de pagos del edificio en solo lectura (RF48; app 0094, H4a corte 1). Lo
+// decide la API con `fiscalizacion.ver_panel`; la pantalla solo muestra. Cada gráfico dice su base
+// de cálculo y, si la persona además puede abrir los pagos, un solo enlace arriba lleva a ellos
+// (regla de fricción del 05-11-2026; informe de fricción, AC-44).
 
 export const RUTA_PANEL = "/panel";
+/** El mismo nombre en el inicio, la barra, la cabecera y la facultad (informe de fricción, AC-42):
+ * lo ven el Consejo y la administración, así que no es «del Consejo». */
+export const TITULO_PANEL = "Resumen de pagos del edificio";
 
 type Lectura = { tipo: "cargando" } | { tipo: "sin_servicio" } | { tipo: "ok"; panel: DatosPanel };
 
@@ -78,15 +82,15 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
 
   return (
     <>
-      <CabeceraInterna titulo="Panel del Consejo" volver={RUTA_INICIO} destino="Inicio" />
+      <CabeceraInterna titulo={TITULO_PANEL} volver={RUTA_INICIO} destino="Inicio" />
       <ElegirConsorcio pantalla={pantalla} consorcio={consorcio} deshabilitado={false} elegir={setConsorcio} />
       {pantalla.tipo === "cargando" && <p role="status">Cargando…</p>}
-      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Todavía no hay edificios en Consorcio en Mano.</p>}
+      {pantalla.tipo === "sin_consorcios" && <p className="tarjeta">Esta cuenta no tiene edificios en Consorcio en Mano.</p>}
       <ConsorcioSinServicio pantalla={pantalla} reintentar={reintentar} />
       <AvisoPantalla aviso={aviso} />
       {pantalla.tipo === "lista" && consorcio !== "" && (
         <>
-          {lectura.tipo === "cargando" && <p role="status">Cargando el panel…</p>}
+          {lectura.tipo === "cargando" && <p role="status">Cargando el resumen…</p>}
           {lectura.tipo === "sin_servicio" && (
             <FallaDeLectura
               alReintentar={() => {
@@ -99,7 +103,7 @@ function PanelDelEdificio({ pantalla, consorcio, setConsorcio, aEntrar, aInicio,
           )}
           {lectura.tipo === "ok" &&
             (estaVacio(lectura.panel) ? (
-              <p className="tarjeta">Todavía no hay órdenes de pago en este edificio: el panel se arma con ellas.</p>
+              <p className="tarjeta">Todavía no hay órdenes de pago en este edificio. El resumen se arma con ellas.</p>
             ) : (
               <Contenido panel={lectura.panel} consorcio={consorcio} veRegistros={veRegistros} />
             ))}
@@ -120,12 +124,12 @@ function EnlacePagos({ consorcio }: { consorcio: string }) {
 }
 
 function Contenido({ panel, consorcio, veRegistros }: { panel: DatosPanel; consorcio: string; veRegistros: boolean }) {
-  const registros = veRegistros ? <EnlacePagos consorcio={consorcio} /> : undefined;
   const lista = monedas(panel);
   return (
     <div className="panel-consejo">
+      {veRegistros && <EnlacePagos consorcio={consorcio} />}
       {lista.map((moneda) => (
-        <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} registros={registros} />
+        <PorMoneda key={moneda} panel={panel} moneda={moneda} conMoneda={lista.length > 1} />
       ))}
       <GraficoBarras
         titulo="Facturas faltantes"
@@ -140,9 +144,9 @@ function Contenido({ panel, consorcio, veRegistros }: { panel: DatosPanel; conso
   );
 }
 
-type PropsMoneda = { panel: DatosPanel; moneda: string; conMoneda: boolean; registros: ReactNode };
+type PropsMoneda = { panel: DatosPanel; moneda: string; conMoneda: boolean };
 
-function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
+function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
   const id = useId();
   const meses = mesesConPagos(panel, moneda);
   const [elegido, setElegido] = useState("");
@@ -158,7 +162,6 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
         columna="Estado"
         valor="Órdenes e importe"
         vacio="No hay órdenes enviadas a aprobar."
-        registros={registros}
       />
       <GraficoBarras
         titulo={`Gasto pagado por mes${en}`}
@@ -166,8 +169,7 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
         barras={gastoPorMes(panel, moneda)}
         columna="Mes"
         valor="Pagado"
-        vacio="Todavía no hay pagos con fecha."
-        registros={registros}
+        vacio="Todavía no se pagó ninguna orden."
       />
       {meses.length > 0 && (
         <GraficoBarras
@@ -189,7 +191,6 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
           columna="Rubro"
           valor="Pagado"
           vacio="No hay pagos en ese mes."
-          registros={registros}
         />
       )}
       {delFondo.length > 0 && (
@@ -200,8 +201,7 @@ function PorMoneda({ panel, moneda, conMoneda, registros }: PropsMoneda) {
           columna="Mes"
           valor="Pagado con el fondo"
           vacio=""
-          registros={registros}
-        />
+          />
       )}
     </>
   );

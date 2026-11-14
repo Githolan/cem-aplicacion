@@ -35,7 +35,7 @@ import { PrepararOrden } from "./pagos/PrepararOrden";
 import { RUTA_CONSULTA, RUTA_COTEJO, RUTA_NUEVA, RUTA_PAGOS, RUTA_SIN_EXPLICAR } from "./pagos/rutas";
 import { SinExplicar } from "./pagos/SinExplicar";
 import { Padron, RUTA_PADRON } from "./Padron";
-import { Panel, RUTA_PANEL } from "./panel/Panel";
+import { Panel, RUTA_PANEL, TITULO_PANEL } from "./panel/Panel";
 import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
@@ -107,8 +107,8 @@ const GRUPOS_DE_INICIO: readonly { titulo: string; enlaces: readonly EnlaceDeIni
       },
       {
         ruta: RUTA_PANEL,
-        texto: "Panel del Consejo",
-        detalle: "Órdenes, gasto pagado y comprobantes faltantes",
+        texto: TITULO_PANEL,
+        detalle: "Órdenes por estado, lo pagado y las facturas que faltan",
         icono: "grafico",
         requisito: REQUISITOS.panel,
       },

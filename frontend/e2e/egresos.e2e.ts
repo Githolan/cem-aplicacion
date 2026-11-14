@@ -345,7 +345,7 @@ test.describe("circuito de pagos", () => {
     await simularPagos(page, baseURL!, PARA_PAGAR);
     await page.goto("/pagos");
     const navegacion = page.getByRole("navigation", { name: "Secciones" });
-    const pestana = navegacion.getByRole("link", { name: "Pagos" });
+    const pestana = navegacion.getByRole("link", { name: "Pagos", exact: true });
     await expect(page.getByRole("heading", { level: 1, name: "Pagos" })).toBeVisible();
     await expect(pestana).toBeVisible();
     expect((await pestana.boundingBox())?.height).toBeGreaterThanOrEqual(44);

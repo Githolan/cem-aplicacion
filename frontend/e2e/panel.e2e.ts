@@ -90,7 +90,7 @@ test.describe("panel", () => {
     const imprevistos = await simularApi(page);
     await simularSesion(page, "con_sesion");
     await page.goto("/");
-    await page.getByRole("link", { name: "Panel del Consejo" }).click();
+    await page.getByRole("link", { name: "Resumen de pagos del edificio" }).click();
     await expect(page).toHaveURL(/\/panel$/);
 
     await expect(page.getByRole("region", { name: "Órdenes de pago por estado" })).toBeVisible();

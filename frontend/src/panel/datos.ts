@@ -2,7 +2,7 @@ import type { components } from "../api/tipos";
 import { importe, TEXTO_ESTADO_ORDEN } from "../egresos/comun";
 import { periodo } from "../egresos/Liquidacion";
 
-// Lo que el panel del Consejo hace con la respuesta de `GET …/panel` (app 0094): solo agrupa y
+// Lo que el resumen de pagos del edificio hace con la respuesta de `GET …/panel` (app 0094): solo agrupa y
 // ordena lo que ya vino calculado de la base, para cada gráfico y su tabla. No decide nada.
 
 export type Panel = components["schemas"]["PanelFiscalizacion"];
@@ -24,18 +24,31 @@ export function monedas(panel: Panel): string[] {
   return [...new Set(todas)].sort();
 }
 
+type EstadoOrden = keyof typeof TEXTO_ESTADO_ORDEN;
+const ESTADOS_EN_ORDEN = Object.keys(TEXTO_ESTADO_ORDEN) as EstadoOrden[];
+
+/** Suma por la palabra del estado, en el orden del circuito: dos estados guardados con la misma
+ * palabra (`pagada` y `conciliada` se dicen «Pagada», decisión 11) son una sola barra. */
+function porPalabra<T extends { estado: EstadoOrden }>(filas: readonly T[], cantidad: (f: T) => number, centavos: (f: T) => number) {
+  const totales = new Map<string, { clave: string; cantidad: number; centavos: number }>();
+  for (const estado of ESTADOS_EN_ORDEN)
+    for (const f of filas.filter((x) => x.estado === estado)) {
+      const palabra = TEXTO_ESTADO_ORDEN[estado];
+      const previo = totales.get(palabra) ?? { clave: estado, cantidad: 0, centavos: 0 };
+      totales.set(palabra, { clave: previo.clave, cantidad: previo.cantidad + cantidad(f), centavos: previo.centavos + centavos(f) });
+    }
+  return [...totales].map(([etiqueta, t]) => ({ etiqueta, ...t }));
+}
+
 /** Por estado, en el orden del circuito: la cantidad de órdenes y su importe. */
 export function ordenesPorEstado(panel: Panel, moneda: string): Barra[] {
-  const orden = Object.keys(TEXTO_ESTADO_ORDEN);
-  return panel.ordenes_por_estado
-    .filter((f) => f.moneda === moneda)
-    .sort((a, b) => orden.indexOf(a.estado) - orden.indexOf(b.estado))
-    .map((f) => ({
-      clave: f.estado,
-      etiqueta: TEXTO_ESTADO_ORDEN[f.estado],
-      valor: f.cantidad,
-      texto: `${cantidadDeOrdenes(f.cantidad)}, ${importe(f.importe_centavos, moneda)}`,
-    }));
+  const filas = panel.ordenes_por_estado.filter((f) => f.moneda === moneda);
+  return porPalabra(filas, (f) => f.cantidad, (f) => f.importe_centavos).map((t) => ({
+    clave: t.clave,
+    etiqueta: t.etiqueta,
+    valor: t.cantidad,
+    texto: `${cantidadDeOrdenes(t.cantidad)}, ${importe(t.centavos, moneda)}`,
+  }));
 }
 
 function sumarPor(filas: readonly Gasto[], clave: (f: Gasto) => string): Map<string, { centavos: number; ordenes: number }> {
@@ -77,16 +90,14 @@ export function gastoPorRubro(panel: Panel, moneda: string, mes: string): Barra[
     .map(([rubro, t]) => barraDeImporte(rubro === "" ? "sin-rubro" : rubro, rubro === "" ? SIN_RUBRO : rubro, t, moneda));
 }
 
-/** Los comprobantes faltantes contados por estado de la orden, en el orden del circuito. */
+/** Las facturas faltantes contadas por estado de la orden, en el orden del circuito. */
 export function faltantesPorEstado(panel: Panel): Barra[] {
-  const cuenta = new Map<string, number>();
-  for (const f of panel.comprobantes_faltantes) cuenta.set(f.estado, (cuenta.get(f.estado) ?? 0) + 1);
-  return (Object.keys(TEXTO_ESTADO_ORDEN) as (keyof typeof TEXTO_ESTADO_ORDEN)[])
-    .filter((e) => cuenta.has(e))
-    .map((e) => {
-      const n = cuenta.get(e) ?? 0;
-      return { clave: e, etiqueta: TEXTO_ESTADO_ORDEN[e], valor: n, texto: cantidadDeOrdenes(n) };
-    });
+  return porPalabra(panel.comprobantes_faltantes, () => 1, () => 0).map((t) => ({
+    clave: t.clave,
+    etiqueta: t.etiqueta,
+    valor: t.cantidad,
+    texto: cantidadDeOrdenes(t.cantidad),
+  }));
 }
 
 export const estaVacio = (panel: Panel) =>

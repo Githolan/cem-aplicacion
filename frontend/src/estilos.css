@@ -1891,3 +1891,14 @@ button.fila-registro:disabled {
   font-weight: 700;
   cursor: pointer;
 }
+
+/* Imprimir o guardar como PDF (liquidación, AC-49): solo el contenido, sin la navegación ni los
+   controles para cargar. */
+@media print {
+  .navegacion,
+  .persona-cabecera,
+  .cabecera-interna__volver,
+  .no-imprimir {
+    display: none !important;
+  }
+}
