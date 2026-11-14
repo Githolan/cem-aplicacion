@@ -2420,6 +2420,28 @@ describe("tanda 11 de fricción en /mandatos", () => {
       expect(screen.queryByText(LISTO_ELEGIDA)).toBeNull();
     });
 
+    it("subir otra acta deja sin efecto la consulta del antivirus de la primera que estaba en camino (Codex en #245)", async () => {
+      const soltar: ((r: Response) => void)[] = [];
+      const simulado = conSubida(() => "en_cuarentena", {
+        [`GET ${ESTADO_VERSION}`]: () => new Promise<Response>((r) => soltar.push(r)),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      await within(form).findByText(/^Listo: el acta «Acta 15 de asamblea» se subió a Documentos\./);
+      await waitFor(() => expect(soltar.length).toBeGreaterThan(0));
+      // Otra subida mientras la primera sigue en revisión.
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      await waitFor(() => expect(pedidos(simulado, "POST", `${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones`)).toHaveLength(2));
+      await waitFor(() => expect(soltar.length).toBeGreaterThan(1));
+      const antes = pedidos(simulado, "GET", RUTA_DOCUMENTOS).length;
+      soltar[0]?.(Response.json({ estado: "disponible", motivo_rechazo: null }));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(pedidos(simulado, "GET", RUTA_DOCUMENTOS)).toHaveLength(antes);
+      expect(screen.queryByText(LISTO_ELEGIDA)).toBeNull();
+    });
+
     it("un archivo rechazado por el antivirus lo dice y no se ofrece", async () => {
       const simulado = conSubida(() => "rechazado", {
         [`GET ${ESTADO_VERSION}`]: () => Response.json({ estado: "rechazado", motivo_rechazo: "infectado" }),

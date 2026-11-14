@@ -459,8 +459,9 @@ export function Mandatos() {
   const cargaDocumentos = puede("documentos.cargar", "documentos.cargar_operativos");
   const [actas, setActas] = useState<Lectura<Documento> | null>(null);
   const pedidoActas = useRef(0);
-  /** Sube al cambiar de edificio y al registrar la decisión: una respuesta del acta pedida antes
-   * (subida, antivirus o lista) no toca el edificio nuevo ni la decisión siguiente (Codex en #245). */
+  /** Sube al cambiar de edificio, al registrar la decisión y al empezar otra subida: una respuesta
+   * del acta pedida antes (subida, antivirus o lista) no toca el edificio nuevo, la decisión
+   * siguiente ni el acta que la reemplaza (Codex en #245). */
   const generacionActa = useRef(0);
   const [actaElegida, setActaElegida] = useState("");
   const [viendoActa, setViendoActa] = useState<{ documento: string; version: string; titulo: string } | null>(null);
@@ -1046,6 +1047,10 @@ export function Mandatos() {
     alEstadoActa.current = true;
     setEnviando(true);
     setEstadoActa(null);
+    // Otra subida reemplaza a la anterior: lo que esa tenía en camino ya no elige nada.
+    generacionActa.current += 1;
+    pedidoActas.current += 1;
+    setActaEnRevision(null);
     const generacion = generacionActa.current;
     try {
       const documento = actaCreada?.documento ?? (await crearActa(titulo, generacion));
