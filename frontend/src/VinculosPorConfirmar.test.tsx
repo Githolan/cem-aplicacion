@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -151,11 +151,31 @@ describe("inicio: vínculos que esperan confirmación (G-26)", () => {
     expect(pedidosA(simulado, padronDe(C1))).toBe(0);
   });
 
-  it("si no se pudo leer lo dice, sin inventar un cero", async () => {
-    const falla = () => Response.json({ codigo: "error_interno", mensaje: "x", id_correlacion: "c" }, { status: 500 });
-    vi.stubGlobal("fetch", backend({ acciones: { [C1]: CONFIRMA }, padrones: { [C1]: falla } }));
+  it("si no se pudo leer lo dice, sin inventar un cero, y «Reintentar» lo vuelve a pedir", async () => {
+    let caido = true;
+    const padron = () =>
+      caido ? Response.json({ codigo: "error_interno", mensaje: "x", id_correlacion: "c" }, { status: 500 }) : filas(3, 0)();
+    const simulado = backend({ acciones: { [C1]: CONFIRMA }, padrones: { [C1]: padron } });
+    vi.stubGlobal("fetch", simulado);
     abrir();
     expect(await filaDelPadron("No se pudieron leer los vínculos sin confirmar")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/^No se pudieron leer los vínculos sin confirmar\./);
+    caido = false;
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(await filaDelPadron("3 vínculos esperan confirmación")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("en la PC, si no se pudo leer, el Padrón queda en «Para hacer» con la falla (Codex en #245)", async () => {
+    conAncho(true);
+    const falla = () => Response.json({ codigo: "error_interno", mensaje: "x", id_correlacion: "c" }, { status: 500 });
+    vi.stubGlobal("fetch", backend({ acciones: { [C1]: [...PREPARA, ...CONFIRMA] }, padrones: { [C1]: falla } }));
+    abrir();
+    const grupo = within(await screen.findByRole("region", { name: "Para hacer" }));
+    expect(
+      await grupo.findByRole("link", { name: "Padrón del edificio", description: "No se pudieron leer los vínculos sin confirmar" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeTruthy();
   });
 
   it("en la PC, con vínculos esperando, el Padrón entra en «Para hacer»", async () => {

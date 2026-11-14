@@ -43,5 +43,7 @@ export function useVinculosPorConfirmar(porEdificio: ReadonlyMap<string, readonl
   return {
     cantidad: consulta.data ?? null,
     falla: consulta.isError ? mensajeDeLectura(consulta.error) : null,
+    reintentar: () => void consulta.refetch(),
+    reintentando: consulta.isFetching,
   };
 }

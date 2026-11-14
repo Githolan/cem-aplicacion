@@ -207,9 +207,10 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
-  // En el «Para hacer» de la computadora, el Padrón entra solo si hay vínculos esperando (G-26).
+  // En el «Para hacer» de la computadora, el Padrón entra si hay vínculos esperando (G-26) o si no
+  // se pudo saber: un número desconocido no es «nada pendiente» (Codex en #245).
   const paraHacer: GrupoDeInicio =
-    vinculos.cantidad !== null && vinculos.cantidad > 0
+    vinculos.falla !== null || (vinculos.cantidad !== null && vinculos.cantidad > 0)
       ? { ...PARA_HACER, enlaces: [...PARA_HACER.enlaces, ...ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PADRON)] }
       : PARA_HACER;
   const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [paraHacer] : GRUPOS_DE_INICIO;
@@ -227,6 +228,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     ...(servicio.falla === null ? [] : [servicio]),
     ...(falla === null ? [] : [{ reintentar, reintentando }]),
     ...(fallaDePagos ? [pagos] : []),
+    ...(vinculos.falla === null ? [] : [vinculos]),
   ];
   const reintentarTodo = () => reintentables.forEach((r) => r.reintentar());
   const botonReintentar = (
@@ -234,7 +236,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       Reintentar
     </button>
   );
-  const enLaTarjeta = servicio.falla === null && falla === null;
+  const enLaTarjeta = servicio.falla === null && falla === null && vinculos.falla === null;
   return (
     <>
       {barra !== null && createPortal(<PuntoServicio />, barra)}
@@ -262,6 +264,11 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
           {falla !== null && (
             <p className="aviso-error" role="alert">
               Puede que falten secciones. {falla}
+            </p>
+          )}
+          {vinculos.falla !== null && (
+            <p className="aviso-error" role="alert">
+              {DETALLE_VINCULOS_SIN_LECTURA}. {vinculos.falla}
             </p>
           )}
           {botonReintentar}
