@@ -891,6 +891,7 @@
           "cuit_ya_cargado",
           "documento_invalido",
           "factura_ya_adjunta",
+          "factura_no_vigente",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",
@@ -3912,7 +3913,7 @@
         "type": "object"
       },
       "FacturaAdjunta": {
-        "description": "La factura que se subió a una orden ya aprobada o pagada que no la tenía (decisión del\npropietario del 13-11-2026, `0099`): queda adjunta a la versión vigente con quién y cuándo, sin\nversión nueva y sin volver a aprobación, porque importe, proveedor y cuenta no cambian. No es\nparte de lo que se aprobó: la huella de la versión no cambia.",
+        "description": "La factura que se subió a una orden ya aprobada o pagada que no la tenía (decisión del\npropietario del 13-11-2026, `0099`): queda adjunta a la versión vigente con quién y cuándo, sin\nversión nueva y sin volver a aprobación, porque importe, proveedor y cuenta no cambian. No es\nparte de lo que se aprobó: la huella de la versión no cambia. Si se reemplaza, la anterior no\nse borra: queda con su constancia y la nueva la cita en `reemplaza_a`.",
         "properties": {
           "adjuntada_en": {
             "format": "date-time",
@@ -3943,6 +3944,25 @@
             "title": "Factura Version Id",
             "type": "string"
           },
+          "id": {
+            "description": "La constancia; es lo que se manda en `reemplaza` para cambiarla.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La constancia de la adjunta que esta reemplaza; nulo en la primera.",
+            "title": "Reemplaza A"
+          },
           "version": {
             "description": "La versión de la orden a la que se adjuntó.",
             "exclusiveMinimum": 0.0,
@@ -3952,13 +3972,15 @@
           }
         },
         "required": [
+          "id",
           "version",
           "documento_id",
           "factura_version_id",
           "estado",
           "adjuntada_por",
           "adjuntada_por_nombre",
-          "adjuntada_en"
+          "adjuntada_en",
+          "reemplaza_a"
         ],
         "title": "FacturaAdjunta",
         "type": "object"
@@ -4154,7 +4176,26 @@
                 "type": "null"
               }
             ],
-            "description": "La última factura subida a la versión vigente después de aprobada (`0099`), si se subió alguna; la de la versión misma está en `versiones`."
+            "description": "La factura subida a la versión vigente después de aprobada que vale (`0099`): la última que pasó el antivirus o, si ninguna lo pasó, la última subida; nulo si no se subió ninguna. La de la versión misma está en `versiones`."
+          },
+          "factura_reemplazo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FacturaAdjunta"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "La última subida para reemplazar a `factura_adjunta`, si la hay: en el antivirus (mientras tanto vale la anterior) o rechazada (la anterior sigue valiendo)."
+          },
+          "facturas_reemplazadas": {
+            "description": "Las adjuntas que pasaron el antivirus y quedaron reemplazadas, de la más vieja a la más nueva: no se borran.",
+            "items": {
+              "$ref": "#/components/schemas/FacturaAdjunta"
+            },
+            "title": "Facturas Reemplazadas",
+            "type": "array"
           },
           "le_toca_a": {
             "anyOf": [
@@ -4271,6 +4312,11 @@
           "puede_recuperar": {
             "description": "Si puede decir que se recuperó la plata reclamada o cerrar el reclamo sin recuperarla.",
             "title": "Puede Recuperar",
+            "type": "boolean"
+          },
+          "puede_reemplazar_factura": {
+            "description": "Si puede reemplazar `factura_adjunta` (decisión del propietario del 13-11-2026): las mismas facultades que subirla, la adjunta pasó el antivirus y no hay otro reemplazo en el antivirus.",
+            "title": "Puede Reemplazar Factura",
             "type": "boolean"
           },
           "puede_registrar": {
@@ -4403,7 +4449,10 @@
           "diferencias_anteriores",
           "toma_vigente",
           "factura_adjunta",
-          "puede_subir_factura"
+          "factura_reemplazo",
+          "facturas_reemplazadas",
+          "puede_subir_factura",
+          "puede_reemplazar_factura"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -16221,7 +16270,7 @@
     },
     "/api/v1/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/factura": {
       "post": {
-        "description": "Decisión del propietario del 13-11-2026 (informe de fricción, AC-44): la factura que falta\nse adjunta a la versión vigente con quién y cuándo, sin versión nueva y sin volver a aprobación,\nporque importe, proveedor y cuenta no cambian. Lo puede quien carga la factura al preparar:\n`egresos.preparar_orden` sin el gesto (no mueve dinero ni cambia la orden) y la carga de\n«Facturas y comprobantes». El archivo sigue el circuito de siempre: cuarentena, antivirus y\nalmacén privado, hasta 20 MB, PDF, JPEG o PNG. La orden sale de «Facturas faltantes» cuando el\nantivirus lo acepta; si lo rechaza, se sube otro. La base vuelve a exigir todo.",
+        "description": "Decisión del propietario del 13-11-2026 (informe de fricción, AC-44): la factura que falta\nse adjunta a la versión vigente con quién y cuándo, sin versión nueva y sin volver a aprobación,\nporque importe, proveedor y cuenta no cambian. Lo puede quien carga la factura al preparar:\n`egresos.preparar_orden` sin el gesto (no mueve dinero ni cambia la orden) y la carga de\n«Facturas y comprobantes». El archivo sigue el circuito de siempre: cuarentena, antivirus y\nalmacén privado, hasta 20 MB, PDF, JPEG o PNG. La orden sale de «Facturas faltantes» cuando el\nantivirus lo acepta; si lo rechaza, se sube otro. La base vuelve a exigir todo.\n\nReemplazar (decisión del propietario del 13-11-2026) es el mismo acto con `reemplaza`: la\nanterior no se borra, queda con su constancia y la nueva la cita; mientras la nueva está en el\nantivirus, o si lo rechaza, vale la anterior. Nada más de la orden cambia.",
         "operationId": "subir_factura_faltante_api_v1_consorcios__consorcio_id__ordenes_pago__orden_id__factura_post",
         "parameters": [
           {
@@ -16268,6 +16317,25 @@
               "minLength": 1,
               "title": "Titulo",
               "type": "string"
+            }
+          },
+          {
+            "description": "Para reemplazar la factura adjunta que vale hoy: su `id` (el de `factura_adjunta` en la ficha). Sin él, es la primera.",
+            "in": "query",
+            "name": "reemplaza",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Para reemplazar la factura adjunta que vale hoy: su `id` (el de `factura_adjunta` en la ficha). Sin él, es la primera.",
+              "title": "Reemplaza"
             }
           },
           {
@@ -16327,7 +16395,7 @@
             "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
           },
           "409": {
-            "description": "La orden no está aprobada ni más adelante (`orden_no_admite`), ya tiene otra versión (`version_desactualizada`), o ya tiene su factura o hay otra que el antivirus está revisando (`factura_ya_adjunta`)."
+            "description": "La orden no está aprobada ni más adelante (`orden_no_admite`), ya tiene otra versión (`version_desactualizada`), o ya tiene su factura o hay otra que el antivirus está revisando (`factura_ya_adjunta`), o la que se quiso reemplazar ya no es la que vale (`factura_no_vigente`)."
           },
           "413": {
             "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
@@ -16349,7 +16417,7 @@
             "description": "Demasiadas cargas a la vez: reintentar en un momento."
           }
         },
-        "summary": "Subir la factura que falta a una orden aprobada o pagada: queda adjunta con quién y cuándo, sin versión nueva y sin volver a aprobación",
+        "summary": "Subir la factura que falta a una orden aprobada o pagada, o reemplazar la adjunta: queda adjunta con quién y cuándo, sin versión nueva y sin volver a aprobación",
         "tags": [
           "egresos"
         ]

@@ -146,7 +146,8 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
     si hay exportaciones registradas (y cuya constancia nombra un mandato): se borran. Y con
     0039, que se niega a bajar si hay casos de privacidad (que nombran personas): se borran. Y
     con 0057, que se niega a bajar si hay liquidaciones: se borran con sus gastos. Y con 0063, cuyos
-    comprobantes citan su orden: se les quita antes de borrar las órdenes.
+    comprobantes citan su orden: se les quita antes de borrar las órdenes. Y con 0099, cuya
+    constancia de la factura adjunta cita la versión de la orden y el documento: se borra antes.
     """
     reconstruir_indices_gist(motor_migrate)
     with motor_migrate.begin() as c:
@@ -262,6 +263,13 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     alter table nucleo.rechazo_visto disable trigger user;"
                 "     delete from nucleo.rechazo_visto;"
                 "     alter table nucleo.rechazo_visto enable trigger user;"
+                "   end if;"
+                # La factura adjunta después de aprobar (0099) cita la versión y el documento:
+                # va antes que las dos.
+                "   if to_regclass('nucleo.factura_adjunta_orden_pago') is not null then"
+                "     alter table nucleo.factura_adjunta_orden_pago disable trigger user;"
+                "     delete from nucleo.factura_adjunta_orden_pago;"
+                "     alter table nucleo.factura_adjunta_orden_pago enable trigger user;"
                 "   end if;"
                 "   delete from nucleo.orden_pago_aprobacion;"
                 "   delete from nucleo.orden_pago_version;"

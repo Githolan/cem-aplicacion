@@ -226,6 +226,9 @@ function PorMoneda({ panel, moneda, conMoneda }: PropsMoneda) {
   );
 }
 
+/** Lo que ve en la fila quien no sube facturas (el Consejo): quién lo hace. */
+export const TEXTO_LA_SUBE_LA_ADMINISTRACION = "La sube la administración.";
+
 /** Cómo está la factura de una orden que falta, en palabras. */
 export function estadoDeLaFactura(f: Faltante): string {
   if (f.factura_subida === "en_cuarentena") return "El antivirus la está revisando";
@@ -266,21 +269,25 @@ function Faltantes({ panel, consorcio, veRegistros, subeFacturas, aEntrar, alCam
               <td data-etiqueta="Último cambio">{momento(f.actualizada_en)}</td>
               <td data-etiqueta="Factura">
                 {estadoDeLaFactura(f)}
-                {/* Mientras el antivirus revisa la subida, no se ofrece otra. */}
-                {subeFacturas && f.factura_subida !== "en_cuarentena" && (
-                  <div className="acciones">
-                    <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
-                      {SUBIR_FACTURA}
-                    </button>
-                  </div>
-                )}
+                {/* Mientras el antivirus revisa la subida, no se ofrece otra. Quien no la puede
+                    subir (el Consejo) sabe quién lo hace (decisión del propietario, 13-11-2026). */}
+                {f.factura_subida !== "en_cuarentena" &&
+                  (subeFacturas ? (
+                    <div className="acciones">
+                      <button type="button" className="secundario" onClick={() => setSubiendo(f)}>
+                        {SUBIR_FACTURA}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="tabla-lista__dato">{TEXTO_LA_SUBE_LA_ADMINISTRACION}</p>
+                  ))}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       {subiendo !== null && (
-        <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version}
+        <SubirFactura consorcio={consorcio} orden={subiendo.orden_id} version={subiendo.version} reemplaza={null}
           descripcion={`${subiendo.proveedor}, ${importe(subiendo.importe_centavos, subiendo.moneda)}: ${subiendo.concepto}`}
           aEntrar={aEntrar}
           alCerrar={(cambio) => {

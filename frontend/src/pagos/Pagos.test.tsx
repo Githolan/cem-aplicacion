@@ -18,7 +18,7 @@ import { ContextoVersion } from "../version";
 import { cambiosDeVersion, cambiosEntreVersiones } from "./Ficha";
 import { contratosAplicables } from "./FormularioOrden";
 import { accionesDe, deLaFila, deLaTabla, filaDe, TABLA } from "./pantallaDePrueba";
-import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO } from "./SubirFactura";
+import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTOS } from "./SubirFactura";
 import { AVISO_ANTIVIRUS_TARDA, AVISO_ARCHIVO_RECHAZADO, AVISO_MODIFICAR, AVISO_RETOMAR, AVISO_SE_PUEDE_RETIRAR, AVISO_SIN_CUENTA, AVISO_SIN_SALIDA, AVISO_VER_LA_CUENTA, CONFIRMAR_RETIRAR, ENTENDIDO, fechaCorta, GUARDAR_IGUAL, NO_RETIRAR, NOMBRE_ESTADO, type Paso, PREGUNTA_CERRAR_SIN_PAGAR, PREGUNTA_RETIRAR, PREPARAR_OTRA, RETIRAR, TEXTO_CERRADA_SIN_PAGO, TEXTO_RETIRADA, textoParecidaAntes, textoRepetida, TITULO_GRUPO, VER_LA_OTRA, VER_LO_COTEJADO, VERBO } from "./textos";
 import { TEXTO_ACCION } from "./textosDeAcciones";
 
@@ -117,6 +117,7 @@ function ficha(extra: Partial<Ficha> = {}): Ficha {
     acciones: [{ codigo: CALCULAR as never, tipo: "principal" }], estado_visible: "lista_para_pagar", barra: null,
     que_decir: CALCULAR, esperando_desde: null, despues: "listo", cotejado_en: null, posible_duplicada_de: null,
     cierre_sin_pago: null, puede_cerrar_sin_pagar: false, factura_adjunta: null, puede_subir_factura: false,
+    factura_reemplazo: null, facturas_reemplazadas: [], puede_reemplazar_factura: false,
     orden: orden(), versiones: [version()], situacion: "para_pagar", paso: null, le_toca_a: null, puede_enviar: false,
     puede_aprobar: false, puede_rechazar: false, puede_renovar: false, puede_pagar: false, puede_reabrir_cuenta: false, puede_tomar: false, tomar_desde: null, toma_vigente: null, puede_corregir_diferencia: false, diferencias_anteriores: [],
     puede_modificar: false, puede_retirar: false, retiro: null, puede_subir_comprobante: false, puede_registrar: false, puede_declarar: false,
@@ -4383,7 +4384,7 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
   const SUBIDA = `${BASE}/ordenes-pago/${O1}/factura`;
   const PARA_PAGAR = ficha({ puede_subir_factura: true });
   const ADJUNTA = {
-    version: 1, documento_id: DOC_F, factura_version_id: ARCH_F, adjuntada_por: PERSONA, adjuntada_por_nombre: "Admin Ficticia",
+    id: "efefefef-efef-4fef-8fef-efefefefefef", reemplaza_a: null, version: 1, documento_id: DOC_F, factura_version_id: ARCH_F, adjuntada_por: PERSONA, adjuntada_por_nombre: "Admin Ficticia",
     adjuntada_en: "2026-11-13T12:00:00Z",
   } as const;
 
@@ -4468,5 +4469,66 @@ describe("subir la factura que falta desde la ficha (app 0099, AC-44)", () => {
     // Control: sin factura adjunta, la versión nueva va sin factura.
     api = modificarCon(null);
     expect(await guardarOtroConcepto(api)).toMatchObject({ factura_version_id: null });
+  });
+
+  it("reemplazar la factura adjunta: la nueva cita a la anterior, que queda como reemplazada", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const DOC_N = "12121212-1212-4212-8212-121212121212";
+    const ARCH_N = "34343434-3434-4434-8434-343434343434";
+    const VALE = { ...ADJUNTA, estado: "disponible" } as const;
+    const NUEVA = { ...VALE, id: "56565656-5656-4656-8656-565656565656", documento_id: DOC_N, factura_version_id: ARCH_N, reemplaza_a: VALE.id };
+    let actual: Ficha = ficha({ factura_adjunta: VALE, puede_reemplazar_factura: true });
+    const api = abrirFicha(() => actual, {
+      [`POST ${SUBIDA}`]: () => {
+        actual = ficha({ factura_adjunta: VALE, factura_reemplazo: { ...NUEVA, estado: "en_cuarentena" } });
+        return Response.json(
+          { orden_id: O1, version: 1, documento_id: DOC_N,
+            archivo: { id: ARCH_N, estado: "en_cuarentena", tipo: "application/pdf", tamano: 18, sha256: H1 } },
+          { status: 201 },
+        );
+      },
+      [`GET ${BASE}/documentos/${DOC_N}/versiones/${ARCH_N}/estado`]: () => {
+        actual = ficha({ factura_adjunta: NUEVA, facturas_reemplazadas: [VALE], puede_reemplazar_factura: true });
+        return Response.json({ estado: "disponible", motivo_rechazo: null });
+      },
+      [`GET ${BASE}/documentos`]: () => Response.json({ documentos: [] }),
+    });
+    // Con la factura adjunta no se ofrece subir otra: se ofrece reemplazarla.
+    fireEvent.click(await boton(REEMPLAZAR_FACTURA));
+    sinBoton(SUBIR_FACTURA);
+    const hoja = await screen.findByRole("dialog", { name: REEMPLAZAR_FACTURA });
+    expect(within(hoja).getByText(/La anterior no se borra: queda como reemplazada/)).toBeTruthy();
+    fireEvent.change(within(hoja).getByLabelText("Archivo de la factura"), {
+      target: { files: [new File(["%PDF-1.4 SINTETICO"], "factura.pdf", { type: "application/pdf" })] },
+    });
+    expect(await within(hoja).findByText(TEXTOS.reemplazar.listo)).toBeTruthy();
+    const url = new URL(pedidos(api, "POST", SUBIDA)[0]!.url);
+    expect([url.searchParams.get("version_esperada"), url.searchParams.get("reemplaza")]).toEqual(["1", VALE.id]);
+    await act(() => vi.advanceTimersByTimeAsync(3000));
+    expect(await within(hoja).findByText(TEXTOS.reemplazar.aceptada)).toBeTruthy();
+    fireEvent.click(within(hoja).getByRole("button", { name: "Cerrar" }));
+    expect(await screen.findByText(/^Factura que reemplazó a la anterior, subida por Admin Ficticia/)).toBeTruthy();
+    const reemplazadas = screen.getByRole("list", { name: "Facturas reemplazadas" });
+    expect(within(reemplazadas).getByText(/^Reemplazada: la factura subida por Admin Ficticia/)).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("mientras el reemplazo está en el antivirus, o si lo rechaza, vale la anterior y lo dice", async () => {
+    const VALE = { ...ADJUNTA, estado: "disponible" } as const;
+    const OTRA = { ...VALE, id: "78787878-7878-4878-8878-787878787878", reemplaza_a: VALE.id };
+    abrirFicha(ficha({ factura_adjunta: VALE, factura_reemplazo: { ...OTRA, estado: "en_cuarentena" } }));
+    expect(await screen.findByText(/para reemplazarla: el antivirus la está revisando\. Mientras tanto vale la anterior\.$/)).toBeTruthy();
+    sinBoton(REEMPLAZAR_FACTURA);
+    cleanup();
+
+    abrirFicha(ficha({ factura_adjunta: VALE, factura_reemplazo: { ...OTRA, estado: "rechazado" }, puede_reemplazar_factura: true }));
+    expect(await screen.findByText(/para reemplazarla no pasó el antivirus: sigue valiendo la anterior\.$/)).toBeTruthy();
+    expect(await boton(REEMPLAZAR_FACTURA)).toBeTruthy();
+    cleanup();
+
+    // Control: sin la facultad, la ficha dice la adjunta pero no ofrece reemplazarla.
+    abrirFicha(ficha({ factura_adjunta: VALE }));
+    expect(await screen.findByText(/^Factura subida después de aprobada la orden/)).toBeTruthy();
+    sinBoton(REEMPLAZAR_FACTURA);
   });
 });

@@ -17,6 +17,10 @@ import { SubirArchivo } from "../SubirArchivo";
 // «Listo» dice lo que pasó y la hoja pregunta hasta que el antivirus termina: si lo acepta, la orden
 // sale de «Facturas faltantes»; si lo rechaza, lo dice y se elige otro archivo. Un error se dice dentro
 // de la hoja: la pantalla de atrás está inerte.
+//
+// «Reemplazar la factura» (decisión del propietario del 13-11-2026) es la misma hoja con `reemplaza`:
+// la anterior no se borra, queda como reemplazada; mientras la nueva está en el antivirus, o si la
+// rechaza, vale la anterior. Nada más de la orden cambia.
 
 export const SUBIR_FACTURA = "Subir la factura";
 export const TEXTO_QUE_HACE =
@@ -28,6 +32,28 @@ export const TEXTO_TARDA = "El antivirus está tardando. Se puede cerrar: la ord
 /** Los estados de una subida que son del archivo y no de la orden (Documentos los explica). */
 const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
 const POR_OMISION = "Factura";
+
+export const REEMPLAZAR_FACTURA = "Reemplazar la factura";
+/** Lo que dice la hoja en cada modo: subir la que falta o reemplazar la adjunta. */
+export const TEXTOS = {
+  subir: {
+    titulo: SUBIR_FACTURA,
+    queHace: TEXTO_QUE_HACE,
+    listo: TEXTO_LISTO,
+    aceptada: TEXTO_ACEPTADA,
+    rechazada: TEXTO_RECHAZADA,
+    tarda: TEXTO_TARDA,
+  },
+  reemplazar: {
+    titulo: REEMPLAZAR_FACTURA,
+    queHace:
+      "La factura nueva reemplaza a la adjunta, con quién y cuándo. La anterior no se borra: queda como reemplazada. No cambia el importe, el proveedor ni la cuenta, y la orden no vuelve a aprobación.",
+    listo: "Listo: la factura nueva quedó adjunta. El antivirus la está revisando; mientras tanto vale la anterior.",
+    aceptada: "El antivirus aceptó la factura nueva: es la que vale para la orden. La anterior quedó como reemplazada.",
+    rechazada: "La factura nueva no pasó el antivirus: sigue valiendo la anterior. Se puede elegir otro archivo.",
+    tarda: "El antivirus está tardando. Se puede cerrar: mientras tanto vale la anterior.",
+  },
+} as const;
 
 type Fase =
   | { tipo: "elegir" }
@@ -43,12 +69,15 @@ type Props = {
   version: number;
   /** De qué orden se trata, en palabras: proveedor e importe. */
   descripcion: string;
+  /** La constancia de la adjunta que vale, para reemplazarla; nulo para subir la que falta. */
+  reemplaza: string | null;
   aEntrar: () => void;
   /** `cambio`: si quedó adjunta una factura (la pantalla de atrás se vuelve a leer). */
   alCerrar: (cambio: boolean) => void;
 };
 
-export function SubirFactura({ consorcio, orden, version, descripcion, aEntrar, alCerrar }: Props) {
+export function SubirFactura({ consorcio, orden, version, descripcion, reemplaza, aEntrar, alCerrar }: Props) {
+  const textos = reemplaza === null ? TEXTOS.subir : TEXTOS.reemplazar;
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
@@ -85,7 +114,11 @@ export function SubirFactura({ consorcio, orden, version, descripcion, aEntrar, 
         headers: { ...encabezadoCsrf(), "Content-Type": archivo.type },
         params: {
           path: { consorcio_id: consorcio, orden_id: orden },
-          query: { version_esperada: version, titulo: tituloDeArchivo(archivo, POR_OMISION, LARGO_TITULO) },
+          query: {
+            version_esperada: version,
+            titulo: tituloDeArchivo(archivo, POR_OMISION, LARGO_TITULO),
+            ...(reemplaza === null ? {} : { reemplaza }),
+          },
           header: { [ENCABEZADO_IDEMPOTENCIA]: clave.current },
         },
         // El archivo crudo, como en Documentos: `bodySerializer` lo deja pasar sin JSON.
@@ -129,27 +162,27 @@ export function SubirFactura({ consorcio, orden, version, descripcion, aEntrar, 
   const ofreceElegir = fase.tipo === "elegir" || fase.tipo === "subiendo" || fase.tipo === "rechazada";
 
   return (
-    <Hoja titulo={SUBIR_FACTURA} alEscapar={cerrar}>
+    <Hoja titulo={textos.titulo} alEscapar={cerrar}>
       <p>{descripcion}</p>
       {fase.tipo === "revisando" && (
         <p role="status" className="aviso-ok">
-          {TEXTO_LISTO}
+          {textos.listo}
         </p>
       )}
-      {fase.tipo === "revisando" && tarda && <p className="aviso-info">{TEXTO_TARDA}</p>}
+      {fase.tipo === "revisando" && tarda && <p className="aviso-info">{textos.tarda}</p>}
       {fase.tipo === "aceptada" && (
         <p role="status" className="aviso-ok">
-          {TEXTO_ACEPTADA}
+          {textos.aceptada}
         </p>
       )}
       {fase.tipo === "rechazada" && (
         <p role="alert" className="aviso-error">
-          {TEXTO_RECHAZADA}
+          {textos.rechazada}
         </p>
       )}
       {ofreceElegir && (
         <div className="formulario">
-          <p>{TEXTO_QUE_HACE}</p>
+          <p>{textos.queHace}</p>
           <SubirArchivo de="de la factura" tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} deshabilitada={fase.tipo === "subiendo"} alElegir={elegir} />
           {fase.tipo === "subiendo" && (
             <p role="status" className="aviso-info">

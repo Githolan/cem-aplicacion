@@ -391,10 +391,12 @@ class FacturaAdjunta(BaseModel):
     """La factura que se subió a una orden ya aprobada o pagada que no la tenía (decisión del
     propietario del 13-11-2026, `0099`): queda adjunta a la versión vigente con quién y cuándo, sin
     versión nueva y sin volver a aprobación, porque importe, proveedor y cuenta no cambian. No es
-    parte de lo que se aprobó: la huella de la versión no cambia."""
+    parte de lo que se aprobó: la huella de la versión no cambia. Si se reemplaza, la anterior no
+    se borra: queda con su constancia y la nueva la cita en `reemplaza_a`."""
 
     model_config = ConfigDict(frozen=True)
 
+    id: UUID = Field(description="La constancia; es lo que se manda en `reemplaza` para cambiarla.")
     version: Version = Field(description="La versión de la orden a la que se adjuntó.")
     documento_id: UUID
     factura_version_id: UUID = Field(
@@ -409,6 +411,9 @@ class FacturaAdjunta(BaseModel):
     adjuntada_por: UUID
     adjuntada_por_nombre: str
     adjuntada_en: datetime
+    reemplaza_a: UUID | None = Field(
+        description="La constancia de la adjunta que esta reemplaza; nulo en la primera."
+    )
 
 
 class FacturaSubida(BaseModel):
@@ -1632,13 +1637,27 @@ class FichaPago(BaseModel):
         description="Quién tomó el pago de la ejecución de la versión vigente, si alguien lo tomó."
     )
     factura_adjunta: FacturaAdjunta | None = Field(
-        description="La última factura subida a la versión vigente después de aprobada (`0099`),"
-        " si se subió alguna; la de la versión misma está en `versiones`.",
+        description="La factura subida a la versión vigente después de aprobada que vale (`0099`):"
+        " la última que pasó el antivirus o, si ninguna lo pasó, la última subida; nulo si no se"
+        " subió ninguna. La de la versión misma está en `versiones`.",
+    )
+    factura_reemplazo: FacturaAdjunta | None = Field(
+        description="La última subida para reemplazar a `factura_adjunta`, si la hay: en el"
+        " antivirus (mientras tanto vale la anterior) o rechazada (la anterior sigue valiendo).",
+    )
+    facturas_reemplazadas: list[FacturaAdjunta] = Field(
+        description="Las adjuntas que pasaron el antivirus y quedaron reemplazadas, de la más"
+        " vieja a la más nueva: no se borran.",
     )
     puede_subir_factura: bool = Field(
         description="Si puede subir la factura que falta (`0099`): prepara órdenes y carga"
         " documentos, la orden está aprobada o más adelante, su versión vigente no tiene factura y"
         " no hay otra subida que esté en el antivirus o que lo haya pasado.",
+    )
+    puede_reemplazar_factura: bool = Field(
+        description="Si puede reemplazar `factura_adjunta` (decisión del propietario del"
+        " 13-11-2026): las mismas facultades que subirla, la adjunta pasó el antivirus y no hay"
+        " otro reemplazo en el antivirus.",
     )
 
 

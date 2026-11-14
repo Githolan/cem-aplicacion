@@ -957,6 +957,7 @@
           "cuit_ya_cargado",
           "documento_invalido",
           "factura_ya_adjunta",
+          "factura_no_vigente",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",

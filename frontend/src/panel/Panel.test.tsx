@@ -11,6 +11,7 @@ import { ContextoVersion } from "../version";
 import { nombreDeFacultad } from "../facultades";
 import { SUBIR_FACTURA, TEXTO_ACEPTADA, TEXTO_LISTO, TEXTO_RECHAZADA } from "../pagos/SubirFactura";
 import { faltantesPorEstado, gastoPorMes, gastoPorRubro, mesesConPagos, ordenesPorEstado, type Panel, SIN_RUBRO } from "./datos";
+import { TEXTO_LA_SUBE_LA_ADMINISTRACION } from "./Panel";
 
 // Resumen de pagos del edificio (app 0094; antes «Panel del Consejo»). Datos ficticios: ningún
 // proveedor ni importe real.
@@ -390,5 +391,31 @@ describe("subir la factura que falta (app 0099, AC-44)", () => {
     expect(await within(limpieza!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
     expect(within(ascensores!).getByText("El antivirus la está revisando")).toBeTruthy();
     expect(within(ascensores!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+  });
+
+  it("al Consejo, que no prepara, la fila le dice que la sube la administración", async () => {
+    const enRevision: Panel = {
+      ...DATOS,
+      comprobantes_faltantes: [DATOS.comprobantes_faltantes[0]!, { ...DATOS.comprobantes_faltantes[1]!, factura_subida: "en_cuarentena" }],
+    };
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: alcanza("fiscalizacion.ver_panel", "egresos.revisar_orden") }));
+    abrir();
+    const faltantes = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const tabla = within(faltantes).getByRole("table", { name: "Órdenes sin factura" });
+    const [limpieza, ascensores] = within(tabla).getAllByRole("row").slice(1);
+    expect(await within(limpieza!).findByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeTruthy();
+    expect(within(limpieza!).queryByRole("button", { name: SUBIR_FACTURA })).toBeNull();
+    // Mientras el antivirus revisa la subida, la fila dice eso y no quién la sube.
+    expect(within(ascensores!).getByText("El antivirus la está revisando")).toBeTruthy();
+    expect(within(ascensores!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
+    cleanup();
+
+    // Control: quien prepara y carga ve el botón, no el aviso.
+    vi.stubGlobal("fetch", backend({ [PANEL]: () => Response.json(enRevision), [ACCIONES]: PREPARA }));
+    abrir();
+    const otra = await screen.findByRole("region", { name: "Facturas faltantes" });
+    const [fila] = within(within(otra).getByRole("table", { name: "Órdenes sin factura" })).getAllByRole("row").slice(1);
+    expect(await within(fila!).findByRole("button", { name: SUBIR_FACTURA })).toBeTruthy();
+    expect(within(fila!).queryByText(TEXTO_LA_SUBE_LA_ADMINISTRACION)).toBeNull();
   });
 });

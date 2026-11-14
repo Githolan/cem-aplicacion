@@ -55,12 +55,16 @@ aprobaciones y sus ejecuciones. El acto no toca ninguna."""
 
 
 def subir(e, o, version: int = 1, quien: UUID | None = None, archivo: bytes | None = None,
-          titulo: str = TITULO, clave: dict | None = None):  # fmt: skip
+          titulo: str = TITULO, clave: dict | None = None,
+          reemplaza: str | None = None):  # fmt: skip
     quien = quien or e.adm
+    params = {"version_esperada": version, "titulo": titulo}
+    if reemplaza is not None:
+        params["reemplaza"] = reemplaza
     with cliente(quien, e.sesion[quien]) as c:
         return c.post(
             f"/api/v1/consorcios/{e.cons}/ordenes-pago/{o}/factura",
-            params={"version_esperada": version, "titulo": titulo},
+            params=params,
             content=archivo or pdf(),
             headers={"Content-Type": "application/pdf"} | (clave or clave_idempotencia()),
         )
@@ -298,6 +302,121 @@ def test_el_documento_adjunto_ya_no_se_retira(motor_migrate, motor_app, e, bucke
     assert codigo(retirar(e, r.json()["documento_id"])) == (409, "documento_referenciado")
 
 
+# Reemplazar la factura adjunta (decisión del propietario del 13-11-2026) -------------------------
+
+ACCION_REEMPLAZO = "consorcio.orden_pago.reemplazar_factura"
+
+
+def adjunta_que_vale(motor_app, e, o) -> dict:
+    """Sube la factura a una orden aprobada y la pasa por el antivirus: la adjunta que vale."""
+    assert subir(e, o).status_code == 201
+    assert analizar(motor_app) == 1
+    adjunta = ficha(e, o)["factura_adjunta"]
+    assert adjunta["estado"] == "disponible"
+    return adjunta
+
+
+def test_reemplazar_deja_la_anterior_como_reemplazada(motor_migrate, motor_app, e, bucket):
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    f = ficha(e, o)
+    assert (f["puede_reemplazar_factura"], f["puede_subir_factura"]) == (True, False)
+    assert (f["factura_reemplazo"], f["facturas_reemplazadas"]) == (None, [])
+    antes = foto(motor_migrate, o)
+
+    r = subir(e, o, titulo="Factura SINTETICA 0002 (NO REAL)", reemplaza=anterior["id"])
+    assert r.status_code == 201, r.text
+    # Mientras el antivirus revisa la nueva, vale la anterior y no se acepta otro reemplazo.
+    f = ficha(e, o)
+    assert f["factura_adjunta"] == anterior
+    assert f["factura_reemplazo"]["estado"] == "en_cuarentena"
+    assert f["puede_reemplazar_factura"] is False
+    assert codigo(subir(e, o, reemplaza=anterior["id"])) == (409, "factura_ya_adjunta")
+    assert str(o) not in faltantes(e)
+
+    assert analizar(motor_app) == 1
+    f = ficha(e, o)
+    nueva = f["factura_adjunta"]
+    assert (nueva["factura_version_id"], nueva["reemplaza_a"]) == (
+        r.json()["archivo"]["id"], anterior["id"])  # fmt: skip
+    assert f["facturas_reemplazadas"] == [anterior]
+    assert f["factura_reemplazo"] is None and f["puede_reemplazar_factura"] is True
+    # El Consejo ve lo mismo: la que vale y la reemplazada.
+    consejo = ficha(e, o, e.mc1)
+    assert (consejo["factura_adjunta"], consejo["facturas_reemplazadas"]) == (nueva, [anterior])
+    # Nada se borra: las dos constancias quedan, y el documento anterior no se retira.
+    assert len(constancias(motor_migrate, o)) == 2
+    assert codigo(retirar(e, anterior["documento_id"])) == (409, "documento_referenciado")
+    # Ninguna otra cosa de la orden cambia: ni el estado, ni la versión, ni la huella.
+    assert foto(motor_migrate, o) == antes
+    with motor_migrate.connect() as c:
+        [evento] = c.execute(
+            text("select antes, despues from auditoria.eventos where entidad = 'orden_pago'"
+                 " and entidad_id = :o and accion = :a"), {"o": o, "a": ACCION_REEMPLAZO},
+        ).mappings().all()  # fmt: skip
+    assert evento["antes"] == {"version": 1, "documento_id": anterior["documento_id"],
+                               "factura_version_id": anterior["factura_version_id"]}  # fmt: skip
+    assert evento["despues"] == {"version": 1, "documento_id": nueva["documento_id"],
+                                 "factura_version_id": nueva["factura_version_id"]}  # fmt: skip
+
+
+def test_renovar_lleva_la_que_reemplazo(motor_migrate, motor_app, e, bucket):
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    r = subir(e, o, reemplaza=anterior["id"])
+    assert analizar(motor_app) == 1
+    envejecer(motor_migrate, o, timedelta(days=8))
+    assert llamar(motor_migrate, e, e.adm, RENOVAR, orden=o, version=1) == 2
+    v2 = versiones(motor_migrate, o)[1]
+    assert str(v2["factura_version_id"]) == r.json()["archivo"]["id"]
+    assert str(v2["factura_version_id"]) != anterior["factura_version_id"]  # control
+
+
+def test_si_el_antivirus_rechaza_el_reemplazo_sigue_valiendo_la_anterior(motor_migrate, motor_app,
+                                                                         e, bucket):  # fmt: skip
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    r = subir(e, o, archivo=pdf(js="app.alert(1)"), reemplaza=anterior["id"])
+    assert r.status_code == 201, r.text
+    assert vaciar_cola(motor_app) >= 1
+    f = ficha(e, o)
+    assert f["factura_adjunta"] == anterior
+    assert f["factura_reemplazo"]["estado"] == "rechazado"
+    assert (f["facturas_reemplazadas"], f["puede_reemplazar_factura"]) == ([], True)
+    assert str(o) not in faltantes(e)
+    # Se reemplaza de nuevo, contra la misma que sigue valiendo.
+    assert subir(e, o, reemplaza=anterior["id"]).status_code == 201
+
+
+def test_reemplazar_una_que_no_vale_se_niega(motor_migrate, motor_app, e, bucket):
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    assert subir(e, o, reemplaza=anterior["id"]).status_code == 201
+    assert analizar(motor_app) == 1
+    # La anterior ya quedó reemplazada: reemplazarla otra vez es mirar una ficha vieja.
+    assert codigo(subir(e, o, reemplaza=anterior["id"])) == (409, "factura_no_vigente")
+    assert len(constancias(motor_migrate, o)) == 2
+    # Ni en una orden sin adjunta, ni en una cuya factura es la de la versión.
+    sin = aprobada(motor_migrate, e)
+    assert ficha(e, sin)["puede_reemplazar_factura"] is False
+    assert codigo(subir(e, sin, reemplaza=anterior["id"])) == (409, "factura_no_vigente")
+    con = aprobada_con_factura(motor_migrate, e)
+    assert ficha(e, con)["puede_reemplazar_factura"] is False
+    assert codigo(subir(e, con, reemplaza=anterior["id"])) == (409, "factura_no_vigente")
+    # Control: contra la que vale, pasa.
+    assert subir(e, o, reemplaza=ficha(e, o)["factura_adjunta"]["id"]).status_code == 201
+
+
+def test_quien_no_prepara_no_la_reemplaza(motor_migrate, motor_app, e, bucket):
+    o = aprobada(motor_migrate, e)
+    anterior = adjunta_que_vale(motor_app, e, o)
+    assert ficha(e, o, e.mc1)["puede_reemplazar_factura"] is False
+    r = subir(e, o, quien=e.mc1, reemplaza=anterior["id"])
+    assert r.status_code == 403, r.text
+    assert len(constancias(motor_migrate, o)) == 1
+    assert subir(e, o, reemplaza=anterior["id"]).status_code == 201  # control: la administración
+
+
 # Renovar ---------------------------------------------------------------------------------------
 
 
@@ -334,8 +453,8 @@ def test_cem_app_no_escribe_la_constancia_ni_llama_a_la_interna(motor_app, e):
 
 def test_la_base_exige_la_facultad_de_preparar(motor_migrate, e):
     o = aprobada(motor_migrate, e)
-    adjuntar = ("select nucleo.adjuntar_factura_orden_pago(:orden, 1, :titulo, 'application/pdf',"
-                " 1, repeat('a', 64), :actor, :origen, :sesion)")  # fmt: skip
+    adjuntar = ("select nucleo.adjuntar_factura_orden_pago(:orden, 1, null, :titulo,"
+                " 'application/pdf', 1, repeat('a', 64), :actor, :origen, :sesion)")  # fmt: skip
     niega(motor_migrate, e, e.mc1, adjuntar, "42501", orden=o, titulo=TITULO)
     assert constancias(motor_migrate, o) == []
     llamar(motor_migrate, e, e.adm, adjuntar, orden=o, titulo=TITULO)  # control

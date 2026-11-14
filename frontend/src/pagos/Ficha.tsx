@@ -40,7 +40,7 @@ import { leerComoQuedo, TEXTO_ENVIADA } from "./comoQuedo";
 import { FormularioOrden } from "./FormularioOrden";
 import { RegistroPago } from "./RegistroPago";
 import { RUTA_NUEVA, rutaFicha } from "./rutas";
-import { SUBIR_FACTURA, SubirFactura } from "./SubirFactura";
+import { REEMPLAZAR_FACTURA, SUBIR_FACTURA, SubirFactura } from "./SubirFactura";
 import {
   AVISO_DIFERENCIA_ESPERA,
   AVISO_LECTURA_COINCIDE,
@@ -165,7 +165,21 @@ export function conFacturaAdjunta(v: Version, adjunta: FacturaAdjunta | null): V
 export function textoDeLaAdjunta(a: FacturaAdjunta): string {
   if (a.estado === "en_cuarentena") return `${a.adjuntada_por_nombre} subió la factura el ${momento(a.adjuntada_en)}: el antivirus la está revisando.`;
   if (a.estado === "rechazado") return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} no pasó el antivirus.`;
+  if (a.reemplaza_a !== null) return `Factura que reemplazó a la anterior, subida por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
   return `Factura subida después de aprobada la orden, por ${a.adjuntada_por_nombre}, el ${momento(a.adjuntada_en)}.`;
+}
+
+/** Lo que se dice de la subida que quiere reemplazar a la adjunta: mientras tanto, o si el antivirus
+ * la rechaza, vale la anterior (decisión del propietario del 13-11-2026). */
+export function textoDelReemplazo(a: FacturaAdjunta): string {
+  if (a.estado === "rechazado")
+    return `La factura que subió ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)} para reemplazarla no pasó el antivirus: sigue valiendo la anterior.`;
+  return `${a.adjuntada_por_nombre} subió otra factura el ${momento(a.adjuntada_en)} para reemplazarla: el antivirus la está revisando. Mientras tanto vale la anterior.`;
+}
+
+/** Una adjunta que quedó reemplazada: no se borra, queda dicha. */
+export function textoDeLaReemplazada(a: FacturaAdjunta): string {
+  return `Reemplazada: la factura subida por ${a.adjuntada_por_nombre} el ${momento(a.adjuntada_en)}.`;
 }
 
 /** Lo que cambió de una versión a la otra, para no tener que comparar a ojo. */
@@ -242,8 +256,8 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
   const vigenteLeida = useMemo(() => (leida === null ? null : conFacturaAdjunta(vigenteDe(leida), leida.factura_adjunta)), [leida]);
   const factura = useVersionVisible(consorcio, vigenteLeida?.documento_id ?? null, vigenteLeida?.factura_version_id ?? null, aEntrar);
   const [viendoFactura, setViendoFactura] = useState(false);
-  /** «Subir la factura» que falta, en una hoja (app 0099). */
-  const [subiendoFactura, setSubiendoFactura] = useState(false);
+  /** «Subir la factura» que falta o «Reemplazar la factura» adjunta, en una hoja (app 0099). */
+  const [subiendoFactura, setSubiendoFactura] = useState<{ reemplaza: string | null } | null>(null);
 
   useEffect(() => {
     if (!decide) return;
@@ -1025,7 +1039,15 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                 </table>
               )}
               {ficha.factura_adjunta !== null && <p className="aviso-info">{textoDeLaAdjunta(ficha.factura_adjunta)}</p>}
-              {(factura !== null || ficha.puede_subir_factura) && (
+              {ficha.factura_reemplazo !== null && <p className="aviso-info">{textoDelReemplazo(ficha.factura_reemplazo)}</p>}
+              {ficha.facturas_reemplazadas.length > 0 && (
+                <ul className="lista-simple" aria-label="Facturas reemplazadas">
+                  {ficha.facturas_reemplazadas.map((a) => (
+                    <li key={a.id}>{textoDeLaReemplazada(a)}</li>
+                  ))}
+                </ul>
+              )}
+              {(factura !== null || ficha.puede_subir_factura || ficha.puede_reemplazar_factura) && (
                 <div className="acciones">
                   {factura !== null && (
                     <button type="button" className="secundario" onClick={() => setViendoFactura(true)}>
@@ -1034,17 +1056,23 @@ export function Ficha({ consorcio, orden, aEntrar, aInicio, terminar: terminarAc
                   )}
                   {/* Solo sin factura: una orden que ya la tiene no invita a subir otra. */}
                   {ficha.puede_subir_factura && (
-                    <button type="button" className="secundario" onClick={() => setSubiendoFactura(true)}>
+                    <button type="button" className="secundario" onClick={() => setSubiendoFactura({ reemplaza: null })}>
                       {SUBIR_FACTURA}
+                    </button>
+                  )}
+                  {ficha.puede_reemplazar_factura && ficha.factura_adjunta !== null && (
+                    <button type="button" className="secundario" onClick={() => setSubiendoFactura({ reemplaza: ficha.factura_adjunta?.id ?? null })}>
+                      {REEMPLAZAR_FACTURA}
                     </button>
                   )}
                 </div>
               )}
-              {subiendoFactura && (
+              {subiendoFactura !== null && (
                 <SubirFactura consorcio={consorcio} orden={orden} version={v.numero}
+                  reemplaza={subiendoFactura.reemplaza}
                   descripcion={`${v.razon_social}, ${importe(v.importe_centavos, v.moneda)}: ${v.concepto}`} aEntrar={aEntrar}
                   alCerrar={(cambio) => {
-                    setSubiendoFactura(false);
+                    setSubiendoFactura(null);
                     if (cambio) {
                       releer();
                       alCambiar();

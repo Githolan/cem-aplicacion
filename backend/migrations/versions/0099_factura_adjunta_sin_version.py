@@ -17,14 +17,21 @@ transacción, con la orden bloqueada (`orden_pago_bloqueada`):
 - la orden tiene que estar aprobada o más adelante (`CON_DINERO_COMPROMETIDO`, las mismas que
   «Facturas faltantes» de `0094`; si no, `estado_invalido`) y en la versión que se vio
   (`version_desactualizada`);
-- su versión vigente no tiene factura, y no hay otra subida a esa versión en el antivirus o que lo
-  haya pasado, de un documento vigente (`factura_ya_adjunta`). Una subida que el antivirus rechazó
-  no cuenta: se sube otra.
-  Reemplazar una factura equivocada no es parte de este cambio;
+- no hay otra subida a esa versión en el antivirus, de un documento vigente
+  (`factura_ya_adjunta`);
+- para subirla por primera vez (`reemplaza` nulo), su versión vigente no tiene factura ni otra
+  adjunta que haya pasado el antivirus (`factura_ya_adjunta`). Una subida que el antivirus rechazó
+  no cuenta: se sube otra;
+- para reemplazarla (decisión del propietario del 13-11-2026), `reemplaza` es la constancia de la
+  adjunta que vale hoy: la última de esa versión que pasó el antivirus. Si ya no es esa, o la
+  factura es la de la versión, `factura_no_vigente`. La anterior no se borra: queda con su
+  constancia y la nueva la cita (`reemplaza_a`). Mientras la nueva está en el antivirus vale la
+  anterior; si el antivirus la rechaza, la anterior sigue valiendo;
 - crea el documento en «Facturas y comprobantes» (fecha: el día del consorcio), su versión con
   `nucleo.nueva_version` (cuarentena; la ruta encola el antivirus en la misma transacción), la
-  constancia y el evento `consorcio.orden_pago.adjuntar_factura` (sin `estado`: no es una
-  transición de la orden).
+  constancia y el evento `consorcio.orden_pago.adjuntar_factura` o
+  `consorcio.orden_pago.reemplazar_factura` (sin `estado`: no es una transición de la orden; el
+  reemplazo dice en `antes` qué archivo reemplaza).
 
 **Lo que no toca.** Ni `nucleo.orden_pago` (ni el estado, ni la versión vigente, ni
 `actualizada_en`) ni `nucleo.orden_pago_version` (ni la huella ni `factura_version_id`): no hay
@@ -68,13 +75,15 @@ CATEGORIA = "facturas_y_comprobantes"
 CON_DINERO_COMPROMETIDO = "('aprobada', 'en_ejecucion', 'en_verificacion', 'pagada', 'conciliada')"
 """Los de `CON_FACTURA_ESPERADA` del contrato y `CON_DINERO_COMPROMETIDO` de `0094`."""
 ACCION_AUDITADA = "consorcio.orden_pago.adjuntar_factura"
+ACCION_REEMPLAZO = "consorcio.orden_pago.reemplazar_factura"
 
 TABLA_CONSTANCIA = "nucleo.factura_adjunta_orden_pago"
 REFERENCIAS_NUEVAS = ((TABLA_CONSTANCIA, "documento_id"),)
 """Lo que esta migración suma a `REFERENCIAS` de `0089`: tablas que citan un documento."""
 
 ADJUNTAR = (
-    "nucleo.adjuntar_factura_orden_pago(uuid, integer, text, text, integer, text, uuid, text, uuid)"
+    "nucleo.adjuntar_factura_orden_pago(uuid, integer, uuid, text, text, integer, text, uuid, text,"
+    " uuid)"
 )
 LEER = "nucleo.factura_adjunta_lectura(uuid, text, uuid, text, uuid)"
 DISPONIBLE = "nucleo.factura_adjunta_disponible(uuid, uuid, integer)"
@@ -97,6 +106,11 @@ create table {TABLA_CONSTANCIA} (
   adjuntada_por       uuid not null references nucleo.persona (id),
   identidad_adjunto   uuid not null,
   adjuntada_en        timestamptz not null default now(),
+  -- La adjunta que esta reemplaza, de la misma orden y versión; nula en la primera.
+  reemplaza_a         uuid,
+  unique (orden_id, version, id),
+  foreign key (orden_id, version, reemplaza_a)
+    references {TABLA_CONSTANCIA} (orden_id, version, id),
   foreign key (consorcio_id, orden_id) references nucleo.orden_pago (consorcio_id, id),
   foreign key (orden_id, version) references nucleo.orden_pago_version (orden_id, numero),
   foreign key (consorcio_id, documento_id) references nucleo.documento (consorcio_id, id),
@@ -123,8 +137,8 @@ create trigger documento_citado_vigente before insert or update of documento_id
 """
 
 FUNCIONES = f"""
--- La factura adjunta a esa versión de la orden que pasó el antivirus, de un documento vigente; nula
--- si no hay. A lo sumo una: el acto no deja adjuntar otra mientras haya una que no fue rechazada.
+-- La factura adjunta a esa versión de la orden que vale: la última que pasó el antivirus, de un
+-- documento vigente (las anteriores quedaron reemplazadas); nula si no hay.
 create function nucleo.factura_adjunta_disponible(c uuid, orden uuid, numero integer)
   returns uuid
   language sql stable
@@ -141,6 +155,7 @@ create function nucleo.factura_adjunta_disponible(c uuid, orden uuid, numero int
   $$;
 
 create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada integer,
+                                                   reemplaza uuid,
                                                    titulo_nuevo text, tipo_nuevo text,
                                                    tamano_nuevo integer, sha256_nuevo text,
                                                    actor uuid, origen_pedido text, sesion uuid)
@@ -156,6 +171,7 @@ create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada 
     identidad uuid;
     d nucleo.documento;
     archivo record;
+    vale nucleo.factura_adjunta_orden_pago;
   begin
     -- Lo mismo que cargar la factura al preparar: la facultad de preparar, R10 sin el gesto (no
     -- mueve dinero ni cambia la orden) y la carga de la categoría.
@@ -173,16 +189,28 @@ create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada 
     end if;
     select * into v from nucleo.orden_pago_version x
      where x.orden_id = orden and x.numero = o.version_vigente;
-    if v.factura_version_id is not null
-       or exists (select 1 from nucleo.factura_adjunta_orden_pago a
-                    join nucleo.version_documento x on x.id = a.factura_version_id
-                    join nucleo.documento y on y.consorcio_id = a.consorcio_id
-                     and y.id = a.documento_id
-                   where a.consorcio_id = c and a.orden_id = orden
-                     and a.version = o.version_vigente and x.estado <> 'rechazado'
-                     and y.estado = 'vigente') then
-      raise exception 'la orden ya tiene su factura' using errcode = 'P0001',
+    -- Una por vez en el antivirus, sea la primera o un reemplazo.
+    if exists (select 1 from nucleo.factura_adjunta_orden_pago a
+                 join nucleo.version_documento x on x.id = a.factura_version_id
+                 join nucleo.documento y on y.consorcio_id = a.consorcio_id
+                  and y.id = a.documento_id
+                where a.consorcio_id = c and a.orden_id = orden and a.version = o.version_vigente
+                  and x.estado = 'en_cuarentena' and y.estado = 'vigente') then
+      raise exception 'hay otra factura en el antivirus' using errcode = 'P0001',
         hint = 'factura_ya_adjunta';
+    end if;
+    -- La adjunta que vale hoy: la misma regla que `factura_adjunta_disponible`.
+    select a.* into vale from nucleo.factura_adjunta_orden_pago a
+     where a.consorcio_id = c and a.orden_id = orden and a.version = o.version_vigente
+       and a.factura_version_id = nucleo.factura_adjunta_disponible(c, orden, o.version_vigente);
+    if reemplaza is null then
+      if v.factura_version_id is not null or vale.id is not null then
+        raise exception 'la orden ya tiene su factura' using errcode = 'P0001',
+          hint = 'factura_ya_adjunta';
+      end if;
+    elsif v.factura_version_id is not null or vale.id is distinct from reemplaza then
+      raise exception 'la factura a reemplazar no es la que vale para la orden'
+        using errcode = 'P0001', hint = 'factura_no_vigente';
     end if;
     insert into nucleo.documento (consorcio_id, categoria, titulo, fecha, cargado_por)
     values (c, '{CATEGORIA}', btrim(titulo_nuevo), nucleo.hoy_del_consorcio(c), actor)
@@ -195,21 +223,30 @@ create function nucleo.adjuntar_factura_orden_pago(orden uuid, version_esperada 
                                 origen_pedido);
     insert into nucleo.factura_adjunta_orden_pago
       (consorcio_id, orden_id, version, documento_id, factura_version_id, adjuntada_por,
-       identidad_adjunto)
-    values (c, orden, o.version_vigente, d.id, archivo.id, actor, identidad);
+       identidad_adjunto, reemplaza_a)
+    values (c, orden, o.version_vigente, d.id, archivo.id, actor, identidad, reemplaza);
     -- Sin `estado`: no es una transición de la orden (la exportación las saca de ahí).
-    perform nucleo.auditar_orden_pago(c, '{ACCION_AUDITADA}', orden, actor,
-      jsonb_build_object('version', o.version_vigente),
-      jsonb_build_object('version', o.version_vigente, 'documento_id', d.id,
-                         'factura_version_id', archivo.id));
+    if reemplaza is null then
+      perform nucleo.auditar_orden_pago(c, '{ACCION_AUDITADA}', orden, actor,
+        jsonb_build_object('version', o.version_vigente),
+        jsonb_build_object('version', o.version_vigente, 'documento_id', d.id,
+                           'factura_version_id', archivo.id));
+    else
+      perform nucleo.auditar_orden_pago(c, '{ACCION_REEMPLAZO}', orden, actor,
+        jsonb_build_object('version', o.version_vigente, 'documento_id', vale.documento_id,
+                           'factura_version_id', vale.factura_version_id),
+        jsonb_build_object('version', o.version_vigente, 'documento_id', d.id,
+                           'factura_version_id', archivo.id));
+    end if;
     return query select archivo.id, archivo.clave_objeto, d.id;
   end
   $$;
 
 create function nucleo.factura_adjunta_lectura(orden uuid, facultad text, actor uuid,
                                                origen_pedido text, sesion uuid)
-  returns table (version integer, documento_id uuid, factura_version_id uuid, estado text,
-                 adjuntada_por uuid, adjuntada_por_nombre text, adjuntada_en timestamptz)
+  returns table (id uuid, version integer, documento_id uuid, factura_version_id uuid,
+                 estado text, adjuntada_por uuid, adjuntada_por_nombre text,
+                 adjuntada_en timestamptz, reemplaza_a uuid)
   language plpgsql
   security definer
   set search_path = pg_catalog, pg_temp
@@ -219,8 +256,8 @@ create function nucleo.factura_adjunta_lectura(orden uuid, facultad text, actor 
   begin
     perform nucleo.exigir_lectura_egresos(c, facultad, actor, origen_pedido, sesion);
     return query
-      select a.version, a.documento_id, a.factura_version_id, x.estado, a.adjuntada_por,
-             p.nombre, a.adjuntada_en
+      select a.id, a.version, a.documento_id, a.factura_version_id, x.estado, a.adjuntada_por,
+             p.nombre, a.adjuntada_en, a.reemplaza_a
         from nucleo.factura_adjunta_orden_pago a
         join nucleo.orden_pago o on o.consorcio_id = a.consorcio_id and o.id = a.orden_id
         join nucleo.version_documento x on x.id = a.factura_version_id
@@ -289,7 +326,8 @@ EXPORTAR_CAMBIOS = (
         "                                'factura_version_id', f.factura_version_id,\n"
         "                                'adjuntada_por_nombre',"
         " nucleo.nombre_para_exportar(c, f.adjuntada_por, hoy),\n"
-        "                                'adjuntada_en', f.adjuntada_en)\n"
+        "                                'adjuntada_en', f.adjuntada_en,\n"
+        "                                'reemplaza_a', f.reemplaza_a)\n"
         f"        from {TABLA_CONSTANCIA} f\n"
         "       where f.consorcio_id = c\n"
         "       order by f.adjuntada_en, f.id;\n",

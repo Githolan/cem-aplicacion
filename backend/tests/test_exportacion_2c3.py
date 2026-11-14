@@ -126,7 +126,7 @@ CLAVES_POR_ENTIDAD = {
                       "preparada_por_nombre", "creada_en"},
     "orden_aprobacion": {"id", "orden_id", "version", "aprobada_por_nombre", "creada_en"},
     "factura_adjunta": {"id", "orden_id", "version", "documento_id", "factura_version_id",
-                        "adjuntada_por_nombre", "adjuntada_en"},
+                        "adjuntada_por_nombre", "adjuntada_en", "reemplaza_a"},
     "orden_transicion": {"orden_id", "fecha", "accion", "origen", "desde", "hacia", "version",
                          "actor_nombre"},
     "umbral": {"id", "importe_centavos", "moneda", "vigente_desde", "decision_id"},
@@ -1318,7 +1318,7 @@ RETIRAR_NO_ES_PAGO = (
     "select nucleo.retirar_no_es_pago(:movimiento, :motivo, :actor, :origen, :sesion)"
 )
 ADJUNTAR_FACTURA = (
-    "select nucleo.adjuntar_factura_orden_pago(:orden, :version, 'Factura SINTETICA',"
+    "select nucleo.adjuntar_factura_orden_pago(:orden, :version, null, 'Factura SINTETICA',"
     " 'application/pdf', 1, repeat('b', 64), :actor, :origen, :sesion)"
 )
 TRANSICIONES = (

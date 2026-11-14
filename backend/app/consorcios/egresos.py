@@ -28,7 +28,7 @@ nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
@@ -194,6 +194,11 @@ ERRORES = {
         "Mientras tanto hubo otro cambio: hay que abrirla de nuevo para ver cómo quedó.",
     ),
     "sin_cambios": (409, CodigoError.SIN_CAMBIOS, "No hay ningún cambio para guardar."),
+    "factura_no_vigente": (
+        409, CodigoError.FACTURA_NO_VIGENTE,
+        "La factura que se quería reemplazar ya no es la que vale para la orden. Volver a abrir"
+        " la orden.",
+    ),
     "factura_ya_adjunta": (
         409, CodigoError.FACTURA_YA_ADJUNTA,
         "La orden ya tiene su factura, o hay otra que el antivirus está revisando.",
@@ -1216,14 +1221,15 @@ def renovar_orden(
     "/consorcios/{consorcio_id}/ordenes-pago/{orden_id}/factura",
     status_code=201,
     response_model=FacturaSubida,
-    summary="Subir la factura que falta a una orden aprobada o pagada: queda adjunta con quién y"
-    " cuándo, sin versión nueva y sin volver a aprobación",
+    summary="Subir la factura que falta a una orden aprobada o pagada, o reemplazar la adjunta:"
+    " queda adjunta con quién y cuándo, sin versión nueva y sin volver a aprobación",
     openapi_extra=SUBIDA_OPENAPI,
     responses=RESPUESTAS_LECTURA | RESPUESTAS_SUBIDA | {
         404: {"description": "La orden no existe en este consorcio."},
         409: {"description": "La orden no está aprobada ni más adelante (`orden_no_admite`), ya"
               " tiene otra versión (`version_desactualizada`), o ya tiene su factura o hay otra que"
-              " el antivirus está revisando (`factura_ya_adjunta`)."},
+              " el antivirus está revisando (`factura_ya_adjunta`), o la que se quiso reemplazar ya"
+              " no es la que vale (`factura_no_vigente`)."},
     },
 )  # fmt: skip
 async def subir_factura_faltante(
@@ -1237,6 +1243,13 @@ async def subir_factura_faltante(
     cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
     clave: ClaveIdempotenciaDep,
     motor: MotorDep,
+    reemplaza: Annotated[
+        UUID | None,
+        Query(
+            description="Para reemplazar la factura adjunta que vale hoy: su `id` (el de"
+            " `factura_adjunta` en la ficha). Sin él, es la primera."
+        ),
+    ] = None,
 ) -> Response:
     """Decisión del propietario del 13-11-2026 (informe de fricción, AC-44): la factura que falta
     se adjunta a la versión vigente con quién y cuándo, sin versión nueva y sin volver a aprobación,
@@ -1244,7 +1257,11 @@ async def subir_factura_faltante(
     `egresos.preparar_orden` sin el gesto (no mueve dinero ni cambia la orden) y la carga de
     «Facturas y comprobantes». El archivo sigue el circuito de siempre: cuarentena, antivirus y
     almacén privado, hasta 20 MB, PDF, JPEG o PNG. La orden sale de «Facturas faltantes» cuando el
-    antivirus lo acepta; si lo rechaza, se sube otro. La base vuelve a exigir todo."""
+    antivirus lo acepta; si lo rechaza, se sube otro. La base vuelve a exigir todo.
+
+    Reemplazar (decisión del propietario del 13-11-2026) es el mismo acto con `reemplaza`: la
+    anterior no se borra, queda con su constancia y la nueva la cita; mientras la nueva está en el
+    antivirus, o si lo rechaza, vale la anterior. Nada más de la orden cambia."""
     await anyio.to_thread.run_sync(lambda: cargar.verificar(Entidad()))
 
     def nueva(conn: Connection, tipo: str, tamano: int, suma: str):
@@ -1252,10 +1269,10 @@ async def subir_factura_faltante(
             conn, permiso,
             "select nueva_version_id as id, nueva_clave_objeto as clave_objeto,"
             " nuevo_documento_id as documento_id"
-            " from nucleo.adjuntar_factura_orden_pago(:o, :esperada, :titulo, :t, :n, :s, :actor,"
-            " 'api', :sesion)",
-            {"o": orden_id, "esperada": version_esperada, "titulo": titulo, "t": tipo,
-             "n": tamano, "s": suma},
+            " from nucleo.adjuntar_factura_orden_pago(:o, :esperada, :reemplaza, :titulo, :t, :n,"
+            " :s, :actor, 'api', :sesion)",
+            {"o": orden_id, "esperada": version_esperada, "reemplaza": reemplaza,
+             "titulo": titulo, "t": tipo, "n": tamano, "s": suma},
         ).one()  # fmt: skip
 
     def respuesta(fila, cargada: VersionCargada) -> FacturaSubida:
@@ -1267,29 +1284,67 @@ async def subir_factura_faltante(
     return await subir_archivo(request, permiso.ctx, clave, motor, nueva, respuesta)
 
 
-def _factura_adjunta(c: Connection, lector: Permiso, orden: OrdenPago) -> FacturaAdjunta | None:
-    """La última factura subida a la versión vigente después de aprobada (`0099`), si hay."""
+@dataclass(frozen=True)
+class _Adjuntas:
+    """Las facturas subidas a la versión vigente después de aprobada (`0099`), como las cuenta la
+    base: vale la última que pasó el antivirus (`nucleo.factura_adjunta_disponible`)."""
+
+    vale: FacturaAdjunta | None
+    """La que vale; si ninguna pasó el antivirus, la última subida (en el antivirus o rechazada)."""
+    reemplazo: FacturaAdjunta | None
+    """La última subida después de la que vale, si la hay: en el antivirus o rechazada."""
+    reemplazadas: list[FacturaAdjunta]
+    """Las que pasaron el antivirus antes de la que vale: quedaron reemplazadas."""
+
+
+def _facturas_adjuntas(c: Connection, lector: Permiso, orden: OrdenPago) -> _Adjuntas:
     filas = _ejecutar(
         c, lector,
         "select * from nucleo.factura_adjunta_lectura(:o, :f, :actor, 'api', :sesion)",
         {"o": orden.id, "f": LEE_COMO[lector.accion]},
     ).mappings().all()  # fmt: skip
-    de_la_vigente = [f for f in filas if f["version"] == orden.version_vigente]
-    return FacturaAdjunta(**de_la_vigente[-1]) if de_la_vigente else None
+    de_la_vigente = [FacturaAdjunta(**f) for f in filas if f["version"] == orden.version_vigente]
+    pasaron = [i for i, f in enumerate(de_la_vigente) if f.estado == EstadoVersion.DISPONIBLE]
+    if not pasaron:
+        return _Adjuntas(de_la_vigente[-1] if de_la_vigente else None, None, [])
+    vale = pasaron[-1]
+    despues = de_la_vigente[vale + 1 :]
+    return _Adjuntas(
+        de_la_vigente[vale],
+        despues[-1] if despues else None,
+        [de_la_vigente[i] for i in pasaron[:-1]],
+    )
 
 
 def _puede_subir_factura(
-    prepara: bool, carga: bool, orden: OrdenPago, vigente, adjunta: FacturaAdjunta | None
+    prepara: bool, carga: bool, orden: OrdenPago, vigente, adjuntas: _Adjuntas
 ) -> bool:
-    """Lo que `nucleo.adjuntar_factura_orden_pago` va a aceptar, para mostrar: una orden ya
-    aprobada sin factura en su versión vigente, ni una subida después que esté en el antivirus o lo
-    haya pasado. Una orden que ya tiene factura no ofrece subir otra."""
+    """Lo que `nucleo.adjuntar_factura_orden_pago` va a aceptar sin `reemplaza`, para mostrar: una
+    orden ya aprobada sin factura en su versión vigente, ni una subida después que esté en el
+    antivirus o lo haya pasado. Una orden que ya tiene factura no ofrece subir otra."""
+    adjunta = adjuntas.vale
     return (
         prepara
         and carga
         and orden.estado in CON_FACTURA_ESPERADA
         and vigente.factura_version_id is None
         and (adjunta is None or adjunta.estado == EstadoVersion.RECHAZADO)
+    )
+
+
+def _puede_reemplazar_factura(
+    prepara: bool, carga: bool, orden: OrdenPago, vigente, adjuntas: _Adjuntas
+) -> bool:
+    """Lo que el acto va a aceptar con `reemplaza`: hay una adjunta que vale (la factura no es la
+    de la versión) y no hay otra en el antivirus."""
+    return (
+        prepara
+        and carga
+        and orden.estado in CON_FACTURA_ESPERADA
+        and vigente.factura_version_id is None
+        and adjuntas.vale is not None
+        and adjuntas.vale.estado == EstadoVersion.DISPONIBLE
+        and (adjuntas.reemplazo is None or adjuntas.reemplazo.estado == EstadoVersion.RECHAZADO)
     )
 
 
@@ -2651,10 +2706,10 @@ def ficha_pago(
         retiro = _retiro(c, lector, orden_id) if orden.estado == EstadoOrdenPago.RETIRADA else None
         viejos_desde = datetime.now(UTC) - timedelta(days=config.pagos_dias_borrador_viejo)
         puede_retirar = _puede_retirar(c, lector, orden, vigente, viejos_desde)
-        adjunta = _factura_adjunta(c, lector, orden)
-    puede_subir_factura = _puede_subir_factura(
-        prepara, cargar.decidir(Entidad()).permitido, orden, vigente, adjunta
-    )
+        adjuntas = _facturas_adjuntas(c, lector, orden)
+    carga = cargar.decidir(Entidad()).permitido
+    puede_subir_factura = _puede_subir_factura(prepara, carga, orden, vigente, adjuntas)
+    puede_reemplazar_factura = _puede_reemplazar_factura(prepara, carga, orden, vigente, adjuntas)
     situacion = circuito_pagos.situacion_de(orden.estado, a)
     paso = circuito_pagos.paso_de(situacion, a, prepara)
     situaciones = {
@@ -2740,7 +2795,9 @@ def ficha_pago(
         comprobante_subido=subido, lectura_comprobante=lectura, observacion_vigente=observacion,
         declaracion_vigente=ejecucion.declaraciones[-1] if a.declaracion_vigente else None,
         diferencia_vigente=diferencia, diferencias_anteriores=de_la_ejecucion[:-1],
-        toma_vigente=toma, factura_adjunta=adjunta, puede_subir_factura=puede_subir_factura,
+        toma_vigente=toma, factura_adjunta=adjuntas.vale, factura_reemplazo=adjuntas.reemplazo,
+        facturas_reemplazadas=adjuntas.reemplazadas, puede_subir_factura=puede_subir_factura,
+        puede_reemplazar_factura=puede_reemplazar_factura,
     )  # fmt: skip
 
 
