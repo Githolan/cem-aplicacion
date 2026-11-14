@@ -40,6 +40,7 @@ import { TarjetaPagos, useResumenPagos } from "./ResumenPagos";
 import { CONSULTA_AL_LADO, useAncho } from "./pagos/useAncho";
 import { RUTA_SEGUNDO_FACTOR, SegundoFactor } from "./SegundoFactor";
 import { useVersion } from "./version";
+import { DETALLE_VINCULOS_SIN_LECTURA, textoVinculosPorConfirmar, useVinculosPorConfirmar } from "./VinculosPorConfirmar";
 
 interface EnlaceDeInicio {
   ruta: string;
@@ -194,6 +195,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
     retry: false,
   });
   const pagos = useResumenPagos(porEdificio);
+  const vinculos = useVinculosPorConfirmar(porEdificio);
   const servicio = useFallaDelServicio(sesion === "con_sesion");
   const alLado = useAncho(CONSULTA_AL_LADO);
   if (sesion === "sin_sesion") return <Navigate to={RUTA_ENTRAR} replace />;
@@ -204,7 +206,19 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
       ? ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_CONTACTOS)
       : ENLACES_DE_INICIO.filter((e) => cumpleEnAlguno(porEdificio, e.requisito));
   const edificio = pagos.edificios.find((c) => c.id === pagos.consorcio);
-  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [PARA_HACER] : GRUPOS_DE_INICIO;
+  // En el «Para hacer» de la computadora, el Padrón entra solo si hay vínculos esperando (G-26).
+  const paraHacer: GrupoDeInicio =
+    vinculos.cantidad !== null && vinculos.cantidad > 0
+      ? { ...PARA_HACER, enlaces: [...PARA_HACER.enlaces, ...ENLACES_DE_INICIO.filter((e) => e.ruta === RUTA_PADRON)] }
+      : PARA_HACER;
+  const grupos = alLado && porEdificio !== null && cumpleEnAlguno(porEdificio, REQUISITOS.ordenes) ? [paraHacer] : GRUPOS_DE_INICIO;
+  const detalleDe = (e: EnlaceDeInicio): EnlaceDeInicio => {
+    if (e.ruta === RUTA_PAGOS) return { ...e, detalle: pagos.detalle };
+    if (e.ruta !== RUTA_PADRON) return e;
+    if (vinculos.falla !== null) return { ...e, detalle: DETALLE_VINCULOS_SIN_LECTURA };
+    if (vinculos.cantidad !== null && vinculos.cantidad > 0) return { ...e, detalle: textoVinculosPorConfirmar(vinculos.cantidad) };
+    return e;
+  };
   // Un solo «Reintentar» para todo lo que no se pudo leer (AC-08): el servicio, las secciones y la
   // tarjeta de Pagos. Vuelve a pedir solo lo que falló.
   const fallaDePagos = pagos.enTarjeta && pagos.falla !== null;
@@ -277,7 +291,7 @@ function Inicio({ barra }: { barra: HTMLElement | null }) {
               <h2 className="titulo-seccion">{g.titulo}</h2>
               <ul className="filas-inicio">
                 {propios.map((e) => (
-                  <FilaDeInicio key={e.ruta} enlace={e.ruta === RUTA_PAGOS ? { ...e, detalle: pagos.detalle } : e} />
+                  <FilaDeInicio key={e.ruta} enlace={detalleDe(e)} />
                 ))}
                 {aclarar && (
                   <FilaDeInicio
