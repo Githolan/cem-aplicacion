@@ -505,7 +505,6 @@ const PANTALLAS: [string, string, string, string][] = [
   ["/mandatos", "mandatos.ver", "mandatos", "Mandatos y decisiones"],
   ["/padron", "padron.ver", "padron", "Padrón del edificio"],
   ["/contactos", "contactos.ver", "contactos", "Contactos de emergencia"],
-  ["/contactos/gestion", "contactos.gestionar", "contactos/gestion", "Gestionar los contactos de emergencia"],
   ["/documentos", "documentos.ver", "documentos", "Documentos del edificio"],
   ["/egresos/proveedores", "egresos.preparar_orden", "proveedores", "Proveedores"],
   ["/pagos", "egresos.preparar_orden", "pagos/bandeja", "Pagos"],

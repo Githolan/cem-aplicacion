@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
 import {
@@ -13,39 +13,31 @@ import {
   leerCopias,
   vigentes,
 } from "./copiaContactos";
-import { type PedidoDeGestion, RUTA_CONTACTOS_GESTION, TEXTO_ACTO } from "./ContactosGestion";
+import { EnlaceTelefono, GestionContactos, TEXTO_FUNCION } from "./ContactosGestion";
 import { RUTA_INICIO } from "./enlace";
 import { FichaDeRegistro, FilaDeRegistro, useFichas } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
 import { codigoDe, mensajeDeFalla, SIN_CONEXION } from "./fallas";
-import { AlInicioSinEdificios, REQUISITOS, useEdificioElegido, usePuede } from "./permisos";
+import { AlInicioSinEdificios, cumple, REQUISITOS, useAcciones, useEdificioElegido } from "./permisos";
 
 // Página /contactos (H2b 2b-7b; doc/diseno/H2b_7_Diseno.md §5 del repositorio CEM): los contactos
 // de emergencia vigentes del edificio, que no son personales, para tenerlos a mano también sin
 // conexión. Cada lectura buena reemplaza la copia del edificio; un 403 o 404 es acceso perdido: la
 // borra y lleva al inicio. Un 401 borra todas. La lista de edificios descarta las copias de los que
-// ya no figuran. Si la API no
-// responde (sin red o caída), se muestra la copia con su fecha, volviendo a aplicar la vigencia con
-// el día del consorcio. La lista de gestión (`/contactos/gestion`) nunca se pide ni se guarda acá.
-// Cada contacto es una fila que abre su ficha (comentario 21); el teléfono queda a un toque al lado
-// de la fila, porque son números de emergencia. Con `contactos.gestionar` y con conexión, la ficha
-// ofrece también corregir, marcar como comprobado, señalar un error y retirar, y arriba está «Agregar
-// un contacto» (G-52, G-60): esta es la entrada de quien gestiona. Cada acto se hace en la gestión y
-// vuelve acá con el «Listo» (G-53).
+// ya no figuran. Si la API no responde (sin red o caída), se muestra la copia con su fecha, volviendo
+// a aplicar la vigencia con el día del consorcio. Cada contacto es una fila que abre su ficha
+// (comentario 21); el teléfono queda a un toque al lado de la fila, porque son números de emergencia.
+//
+// Es la única pantalla de los contactos (G-52 y G-53): quien alcanza `contactos.gestionar` en el
+// edificio ve acá mismo, con conexión, «Agregar un contacto» arriba y en la ficha de cada contacto
+// sus actos (`GestionContactos`), que se abren y terminan acá con su «Listo». La lista de gestión se
+// pide solo cuando ya se sabe que la persona tiene esa facultad (no mientras `mis-acciones` no
+// respondió) y nunca se guarda: la copia sin conexión es siempre la de la lista general, que se
+// sigue leyendo también para quien gestiona. /contactos/gestion, la pantalla de antes, lleva acá.
 
 export const RUTA_CONTACTOS = "/contactos";
 
 const ESTADO = { sinSesion: 401, sinPermiso: 403, noEncontrado: 404 } as const;
-
-const TEXTO_FUNCION: Record<Contacto["funcion"], string> = {
-  administracion: "Administración",
-  encargado: "Encargado/a",
-  emergencias: "Emergencias",
-  aseguradora: "Aseguradora",
-  proveedor_critico: "Proveedor crítico",
-  servicio_publico: "Servicio público",
-  otro: "Otro",
-};
 
 const FORMATO_MOMENTO = new Intl.DateTimeFormat("es-AR", { dateStyle: "long", timeStyle: "short" });
 const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
@@ -81,7 +73,12 @@ export function Contactos() {
     pantalla.tipo === "lista" || pantalla.tipo === "copias" ? pantalla.consorcios : SIN_EDIFICIOS,
     REQUISITOS.contactos,
   );
-  const puede = usePuede(consorcio);
+  // Solo con la respuesta de `mis-acciones` en la mano: mientras no se sabe, no se pide la lista de
+  // gestión (`usePuede` diría que sí, para que lo decida el servidor).
+  const acciones = useAcciones(consorcio);
+  const gestiona = acciones !== null && cumple(acciones, REQUISITOS.contactosGestion);
+  // Un acto de la gestión en curso: no se cambia de edificio hasta que termine.
+  const [ocupada, setOcupada] = useState(false);
   const [lectura, setLectura] = useState<Lectura>({ tipo: "cargando" });
   const fichas = useFichas<string>();
   // Cada reintento vuelve a pedir la lista del edificio.
@@ -197,6 +194,7 @@ export function Contactos() {
           <select
             id={`${id}-consorcio`}
             value={consorcio}
+            disabled={ocupada}
             onChange={(e) => {
               fichas.cerrar(false);
               setLectura({ tipo: "cargando" });
@@ -226,21 +224,19 @@ export function Contactos() {
         {pantalla.tipo !== "cargando" && pantalla.consorcios.length > 0 && estado()}
       </div>
 
-      {/* El botón dice lo que hace (comentario 25): agregar arriba, antes de la lista, con la misma forma
-          que en la gestión (G-60); necesita la lista en línea, como los actos de la ficha. */}
-      {consorcio !== "" && lectura.tipo === "en_linea" && puede("contactos.gestionar") && (
-        <p className="acciones-pantalla">
-          <Link
-            to={RUTA_CONTACTOS_GESTION}
-            state={{ consorcio, accion: "agregar" } satisfies PedidoDeGestion}
-            className="enlace-boton enlace-boton--principal"
-          >
-            Agregar un contacto
-          </Link>
-        </p>
+      {/* La gestión necesita la lista en línea: sin conexión, la copia se lee y no ofrece ningún acto. */}
+      {lectura.tipo === "en_linea" && gestiona ? (
+        <GestionContactos
+          key={consorcio}
+          consorcio={consorcio}
+          nombre={lectura.copia.nombre}
+          listaGeneral={lista(lectura.copia, false)}
+          alCambiar={() => setVuelta((v) => v + 1)}
+          alOcupar={setOcupada}
+        />
+      ) : (
+        (lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")
       )}
-
-      {(lectura.tipo === "en_linea" || lectura.tipo === "copia") && lista(lectura.copia, lectura.tipo === "copia")}
     </>
   );
 
@@ -303,12 +299,12 @@ export function Contactos() {
                   refFila={fichas.refFila(c.id)}
                   abierta={fichas.abierta === c.id}
                 />
-                {c.telefono !== null && llamar(c.telefono)}
+                {c.telefono !== null && <EnlaceTelefono telefono={c.telefono} />}
               </li>
             ))}
           </ul>
         )}
-        {enFicha !== undefined && ficha(enFicha, sinConexion)}
+        {enFicha !== undefined && ficha(enFicha)}
       </section>
     );
   }
@@ -316,28 +312,8 @@ export function Contactos() {
     return `${TEXTO_FUNCION[c.funcion]}: ${c.nombre}`;
   }
 
-  /** El teléfono como enlace para llamar, sin separadores en el número. */
-  function llamar(telefono: string) {
-    return (
-      <a className="enlace-telefono" href={`tel:${telefono.replace(/[^+0-9]/g, "")}`}>
-        {telefono}
-      </a>
-    );
-  }
-
-  /** Un acto de la gestión sobre este contacto: se hace allá y vuelve acá con el «Listo» (G-53). */
-  function acto(c: Contacto, accion: Exclude<PedidoDeGestion["accion"], "agregar">, texto: string, clase = "enlace-boton") {
-    return (
-      <Link to={RUTA_CONTACTOS_GESTION} state={{ consorcio, accion, contacto: c.id } satisfies PedidoDeGestion} className={clase}>
-        {texto}
-      </Link>
-    );
-  }
-
-  /** La ficha de un contacto. Sin conexión no ofrece ningún acto: necesitan la lista en línea. Lo ya
-   * hecho no se ofrece de nuevo: un contacto ya señalado no ofrece «Señalar un error» (G-54). */
-  function ficha(c: Contacto, sinConexion: boolean) {
-    const gestiona = !sinConexion && consorcio !== "" && puede("contactos.gestionar");
+  /** La ficha de un contacto de la lista general: solo de lectura. Los actos van en la de la gestión. */
+  function ficha(c: Contacto) {
     return (
       <FichaDeRegistro
         titulo={titulo(c)}
@@ -345,22 +321,13 @@ export function Contactos() {
         datos={[
           { etiqueta: "Función", valor: TEXTO_FUNCION[c.funcion] },
           { etiqueta: "Nombre", valor: c.nombre },
-          { etiqueta: "Teléfono", valor: c.telefono === null ? "Sin teléfono" : llamar(c.telefono) },
+          { etiqueta: "Teléfono", valor: c.telefono === null ? "Sin teléfono" : <EnlaceTelefono telefono={c.telefono} /> },
           ...(c.indicaciones === null ? [] : [{ etiqueta: "Indicaciones", valor: c.indicaciones }]),
           ...(c.observado
             ? [{ etiqueta: "Aviso", valor: "Alguien señaló un dato como incorrecto; la administración lo está revisando." }]
             : []),
         ]}
-      >
-        {gestiona && (
-          <p className="ficha-registro__acciones">
-            {acto(c, "corregir", "Corregir")}
-            {acto(c, "verificar", TEXTO_ACTO.verificar)}
-            {!c.observado && acto(c, "senalar", TEXTO_ACTO.senalar)}
-            {acto(c, "retirar", "Retirar", "enlace-boton peligro")}
-          </p>
-        )}
-      </FichaDeRegistro>
+      />
     );
   }
 }

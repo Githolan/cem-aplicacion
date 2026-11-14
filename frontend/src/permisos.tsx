@@ -222,6 +222,7 @@ export const REQUISITOS = {
   mandatos: [["mandatos.ver"], ["decisiones.ver"], ["decisiones.registrar"]],
   padron: [["padron.ver"]],
   contactos: [["contactos.ver"]],
+  /** Suma la gestión a /contactos, la misma pantalla (G-52). */
   contactosGestion: [["contactos.gestionar"]],
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],
