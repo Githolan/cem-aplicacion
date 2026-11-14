@@ -1901,3 +1901,39 @@ button.fila-registro:disabled {
     display: none !important;
   }
 }
+
+/* G-44: la fila del mandato recién dado de alta. El fondo vuelve de a poco al de las demás; el borde
+   y la marca en palabras quedan hasta el próximo paso, así el resaltado no depende solo del color. */
+.fila-nueva > button.fila-registro {
+  border-color: var(--accent);
+  animation: fila-nueva 4s ease-out forwards;
+}
+
+@keyframes fila-nueva {
+  from {
+    background: var(--accent-tint);
+  }
+
+  to {
+    background: var(--surface-raised);
+  }
+}
+
+.fila-nueva__marca {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-tint);
+  color: var(--ink);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* Sin movimiento, el resaltado queda fijo en lugar de desvanecerse. */
+@media (prefers-reduced-motion: reduce) {
+  .fila-nueva > button.fila-registro {
+    animation: none;
+    background: var(--accent-tint);
+  }
+}

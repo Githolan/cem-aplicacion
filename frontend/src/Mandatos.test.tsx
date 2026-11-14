@@ -1,16 +1,25 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import axe from "axe-core";
+import { File as ArchivoNode } from "node:buffer";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import contrato from "../../contratos/openapi.json";
-import { alcanza, alcanzaTodo } from "./accionesDePrueba";
+import { accionesDeLasPoliticas, alcanza, alcanzaTodo } from "./accionesDePrueba";
 import { App } from "./App";
 import { CUIT_INVALIDO } from "./CampoCuit";
 import { VOLVIO_LA_RED } from "./egresos/comun";
-import { ALTA_SIN_DECISION_USABLE, CAUSA_REVISION, mensajeDeError, presentacion, QUIEN_DA_EL_ALTA } from "./Mandatos";
+import {
+  ALTA_SIN_DECISION_USABLE,
+  AYUDA_DESASOCIAR,
+  CAUSA_REVISION,
+  mensajeDeError,
+  presentacion,
+  QUIEN_DA_EL_ALTA,
+  RECIEN_DADO_DE_ALTA,
+} from "./Mandatos";
 import { ContextoVersion } from "./version";
 
 const SIN_VERSION_NUEVA = { hayVersionNueva: false, actualizar: () => undefined };
@@ -212,6 +221,8 @@ async function abrirBaja() {
 
 beforeEach(() => {
   vi.spyOn(document, "cookie", "get").mockReturnValue("__Host-cem_csrf=abc123");
+  // jsdom no desplaza la página: el alta lleva su fila a la vista (G-44) y la prueba mira el pedido.
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 /** El estado de la pantalla: el primero es el de AvisoLlegada, que está vacío si no hay aviso. */
@@ -2091,5 +2102,388 @@ describe("D-34: los mandatos que ya no rigen van plegados en «Mandatos anterior
     abrir();
     await cargado();
     expect(screen.queryByText(/^Mandatos anteriores/)).toBeNull();
+  });
+});
+
+describe("tanda 11 de fricción en /mandatos", () => {
+  const RUTA_DOCUMENTOS = `${BASE}/documentos`;
+  const DOC_NUEVO = "12121212-1212-4212-8212-121212121212";
+  const V_NUEVA = "34343434-3434-4434-8434-343434343434";
+  const SHA_NUEVA = "a".repeat(64);
+  const ESTADO_VERSION = `${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones/${V_NUEVA}/estado`;
+  /** Voseo o tuteo en los textos de la pantalla (regla del propietario: impersonal con infinitivo). */
+  const VOSEO = /(^|[^\p{L}])(subí|elegí|cargá|escribí|completá|tu|tus|vos|podés|tenés|querés)(?=$|[^\p{L}])/iu;
+  const verExterno = async () => {
+    await cargado();
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
+    return screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+  };
+
+  describe("G-40: desasociar la cuenta de la administración externa", () => {
+    const CON_CUENTA = { ...DETALLE_AE, con_cuenta: true };
+    const DESASOCIAR = `${RUTA_MANDATOS}/${M_AE}/desasociar-persona`;
+    const LISTO =
+      "Listo: la cuenta quedó desasociada del mandato de Estudio Sur. El mandato sigue vigente; para asociar otra, invitar a la administración.";
+
+    it("va plegada; con el motivo la desasocia y el detalle vuelve sin cuenta y con la invitación", async () => {
+      let detalle: object = CON_CUENTA;
+      const simulado = conConsejo({
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(detalle),
+        [`POST ${DESASOCIAR}`]: () => {
+          detalle = DETALLE_AE;
+          return Response.json({ mandato_id: M_AE, sesiones_revocadas: 2 });
+        },
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await verExterno();
+      expect(screen.getByText("Con cuenta asociada")).toBeTruthy();
+      // Al abrir el detalle no está desplegada.
+      expect(screen.queryByLabelText("Por qué esa cuenta no es la de la administración")).toBeNull();
+      const desplegar = boton("Desasociar la cuenta…");
+      expect(desplegar.className).toBe("secundario peligro");
+      fireEvent.click(desplegar);
+      const campo = await screen.findByLabelText("Por qué esa cuenta no es la de la administración");
+      await waitFor(() => expect(document.activeElement).toBe(campo));
+      expect(screen.getByText(AYUDA_DESASOCIAR)).toBeTruthy();
+      const formulario = screen.getByRole("form", { name: "Desasociar la cuenta" });
+      expect(formulario.textContent).not.toMatch(VOSEO);
+      // Un acto a la vez: con la desasociación desplegada, la baja no se ofrece.
+      expect(screen.queryByRole("button", { name: "Dar de baja…" })).toBeNull();
+      fireEvent.change(campo, { target: { value: " La cuenta es de un empleado que ya no está " } });
+      fireEvent.click(boton("Desasociar la cuenta"));
+      expect(await screen.findByText(LISTO)).toBeTruthy();
+      const post = en(pedidos(simulado, "POST", DESASOCIAR), 0);
+      expect(post.headers.get("X-CSRF-Token")).toBe("abc123");
+      expect(post.headers.get("Idempotency-Key")).toMatch(UUID);
+      expect(await post.json()).toEqual({ referencia: "La cuenta es de un empleado que ya no está" });
+      // El detalle se vuelve a pedir: sin cuenta, con la invitación y sin otra desasociación.
+      expect(await screen.findByText("Sin cuenta asociada")).toBeTruthy();
+      expect(await screen.findByRole("region", { name: "Cuenta de la administración" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Desasociar la cuenta…" })).toBeNull();
+      expect(screen.getByText(LISTO)).toBeTruthy();
+      expect(pedidos(simulado, "GET", `${RUTA_MANDATOS}/${M_AE}`)).toHaveLength(2);
+      expect(pedidos(simulado, "POST", DESASOCIAR)).toHaveLength(1);
+    });
+
+    it("«Cancelar» la pliega sin mandar nada", async () => {
+      const simulado = conConsejo({ [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(CON_CUENTA) });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await verExterno();
+      fireEvent.click(boton("Desasociar la cuenta…"));
+      fireEvent.change(await screen.findByLabelText("Por qué esa cuenta no es la de la administración"), { target: { value: "Otra" } });
+      fireEvent.click(boton("Cancelar"));
+      expect(screen.queryByLabelText("Por qué esa cuenta no es la de la administración")).toBeNull();
+      expect(boton("Desasociar la cuenta…")).toBeTruthy();
+      expect(boton("Dar de baja…")).toBeTruthy();
+      expect(pedidos(simulado, "POST", DESASOCIAR)).toHaveLength(0);
+    });
+
+    it("control: no se ofrece sin la facultad, sin cuenta, en el propio ni en un mandato del Consejo", async () => {
+      const todas = accionesDeLasPoliticas();
+      const casos = [
+        { acciones: todas.filter((a) => a !== "mandatos.desasociar_persona"), id: M_AE, detalle: CON_CUENTA, titulo: "Estudio Sur, Administración externa" },
+        { acciones: todas, id: M_AE, detalle: DETALLE_AE, titulo: "Estudio Sur, Administración externa" },
+        { acciones: todas, id: M_AE, detalle: { ...CON_CUENTA, es_propio: true }, titulo: "Estudio Sur, Administración externa" },
+        {
+          acciones: todas,
+          id: M_MC,
+          detalle: { ...CON_CUENTA, id: M_MC, tipo: "miembro_consejo", nombre: "Ana Díaz", cuit: null },
+          titulo: "Ana Díaz, Consejo de propietarios",
+        },
+      ];
+      for (const caso of casos) {
+        const simulado = conConsejo({
+          [`GET ${BASE}/mis-acciones`]: () => Response.json({ acciones: caso.acciones }),
+          [`GET ${RUTA_MANDATOS}/${caso.id}`]: () => Response.json(caso.detalle),
+        });
+        vi.stubGlobal("fetch", simulado);
+        abrir();
+        await cargado();
+        fireEvent.click(screen.getByRole("button", { name: fila(caso.titulo) }));
+        await screen.findByRole("heading", { level: 2, name: caso.titulo });
+        expect(screen.queryByRole("button", { name: /^Desasociar la cuenta/ })).toBeNull();
+        expect(pedidos(simulado, "POST", `${RUTA_MANDATOS}/${caso.id}/desasociar-persona`)).toHaveLength(0);
+        cleanup();
+      }
+    });
+
+    it("un 409 «sin cuenta» lo dice y vuelve a pedir el detalle; la separación dice el motivo de la API y no lo pide", async () => {
+      let detalle: object = CON_CUENTA;
+      let respuesta = () => {
+        detalle = DETALLE_AE;
+        return error("mandato_sin_persona", 409);
+      };
+      const simulado = conConsejo({
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(detalle),
+        [`POST ${DESASOCIAR}`]: () => respuesta(),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      await verExterno();
+      fireEvent.click(boton("Desasociar la cuenta…"));
+      fireEvent.change(await screen.findByLabelText("Por qué esa cuenta no es la de la administración"), { target: { value: "No es de ellos" } });
+      fireEvent.click(boton("Desasociar la cuenta"));
+      expect(await screen.findByText("El mandato ya no tiene una cuenta asociada: el detalle ya está actualizado.")).toBeTruthy();
+      expect(await screen.findByText("Sin cuenta asociada")).toBeTruthy();
+      expect(pedidos(simulado, "GET", `${RUTA_MANDATOS}/${M_AE}`)).toHaveLength(2);
+      cleanup();
+
+      const SEPARACION = "El mandato es de esta cuenta: lo hace otra persona.";
+      detalle = CON_CUENTA;
+      respuesta = () =>
+        Response.json(
+          { codigo: "ya_participo", mensaje: SEPARACION, detalle: { separacion: "no_es_su_propio_mandato" }, id_correlacion: "c" },
+          { status: 403 },
+        );
+      const separado = conConsejo({
+        [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(detalle),
+        [`POST ${DESASOCIAR}`]: () => respuesta(),
+      });
+      vi.stubGlobal("fetch", separado);
+      abrir();
+      await verExterno();
+      fireEvent.click(boton("Desasociar la cuenta…"));
+      fireEvent.change(await screen.findByLabelText("Por qué esa cuenta no es la de la administración"), { target: { value: "No es de ellos" } });
+      fireEvent.click(boton("Desasociar la cuenta"));
+      expect(await screen.findByText(SEPARACION)).toBeTruthy();
+      // Lo escrito queda para corregir o cancelar; el detalle no se vuelve a pedir.
+      expect(screen.getByLabelText("Por qué esa cuenta no es la de la administración")).toBeTruthy();
+      expect(pedidos(separado, "GET", `${RUTA_MANDATOS}/${M_AE}`)).toHaveLength(1);
+    });
+
+    it("los mensajes propios de la desasociación, y la invitación sigue diciendo lo suyo", () => {
+      expect(mensajeDeError(403, "sin_permiso", "desasociar")).toBe("El mandato de esta cuenta no incluye desasociar la cuenta de la administración.");
+      expect(mensajeDeError(404, "no_encontrado", "desasociar")).toBe("No se encontró ese mandato en este edificio.");
+      expect(mensajeDeError(409, "mandato_no_asociable", "desasociar")).toBe("Solo se desasocia así la cuenta de una administración externa.");
+      expect(mensajeDeError(409, "mandato_no_asociable", "invitar")).toBe("Solo la cuenta de una administración externa se asocia por invitación.");
+      expect(AYUDA_DESASOCIAR).not.toMatch(VOSEO);
+    });
+  });
+
+  describe("G-15: subir el acta desde «Registrar una decisión»", () => {
+    const version = (estado: string) => ({
+      id: V_NUEVA,
+      estado,
+      motivo_rechazo: estado === "rechazado" ? "infectado" : null,
+      tipo: "application/pdf",
+      tamano: 9,
+      sha256: SHA_NUEVA,
+      subida_en: "2026-11-14T15:00:00Z",
+    });
+    const documento = (estado: string) => ({
+      id: DOC_NUEVO,
+      categoria: "actas_y_decisiones",
+      titulo: "Acta 15 de asamblea",
+      fecha: "2026-10-01",
+      cargado_en: "2026-11-14T15:00:00Z",
+      versiones: [version(estado)],
+    });
+    /** Un archivo como el del navegador: el `File` de Node, que `Request` manda tal cual (ver Documentos.test). */
+    const pdf = (nombre: string) => new ArchivoNode(["%PDF-1.7\n"], nombre, { type: "application/pdf" }) as unknown as File;
+    const LISTO_ELEGIDA = /^Listo: el acta «Acta 15 de asamblea» pasó la revisión del antivirus y quedó elegida para esta decisión\.$/;
+
+    /** Documentos sin actas hasta que se sube una; `estadoEnLista` es el de su archivo en la lista. */
+    function conSubida(estadoEnLista: () => string, extra: Respuestas = {}) {
+      let subida = false;
+      return conConsejo({
+        [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json({ documentos: subida ? [documento(estadoEnLista())] : [] }),
+        [`POST ${RUTA_DOCUMENTOS}`]: () => Response.json({ id: DOC_NUEVO }, { status: 201 }),
+        [`POST ${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones`]: () => {
+          subida = true;
+          return Response.json({ id: V_NUEVA, estado: "en_cuarentena", sha256: SHA_NUEVA, tamano: 9, tipo: "application/pdf" }, { status: 201 });
+        },
+        [`POST ${RUTA_DECISIONES}`]: () => Response.json({ id: NUEVO }, { status: 201 }),
+        ...extra,
+      });
+    }
+
+    async function llenarDecision() {
+      await cargado();
+      const form = seccion("Registrar una decisión");
+      fireEvent.change(within(form).getByLabelText("Fecha del acto"), { target: { value: "2026-10-01" } });
+      fireEvent.change(within(form).getByLabelText("Qué se decidió"), { target: { value: "Designa al Consejo" } });
+      fireEvent.change(within(form).getByLabelText("Dónde consta (libro, acta y folio)"), { target: { value: "Acta 15, libro 3" } });
+      await within(form).findByLabelText("Acta (opcional)");
+      return form;
+    }
+
+    /** Despliega la subida, elige el PDF y devuelve el grupo. */
+    function elegirActa(form: HTMLElement) {
+      fireEvent.click(within(form).getByRole("button", { name: "Subir el acta desde acá" }));
+      const subida = within(form).getByRole("group", { name: "Subir el acta" });
+      fireEvent.change(within(subida).getByLabelText("Archivo del acta"), { target: { files: [pdf("Acta 15 de asamblea.pdf")] } });
+      return subida;
+    }
+
+    it("va plegada; sube el acta con los dos pasos de Documentos y, disponible, queda elegida y la decisión la cita", async () => {
+      const simulado = conSubida(() => "disponible");
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      expect(within(form).queryByLabelText("Archivo del acta")).toBeNull();
+      const subida = elegirActa(form);
+      expect(form.textContent).not.toMatch(VOSEO);
+      // El nombre del archivo propone el título.
+      expect((within(subida).getByLabelText("Título del acta") as HTMLInputElement).value).toBe("Acta 15 de asamblea");
+      fireEvent.click(within(subida).getByRole("button", { name: "Subir el acta" }));
+      expect(await within(form).findByText(LISTO_ELEGIDA)).toBeTruthy();
+      expect((within(form).getByLabelText("Acta (opcional)") as HTMLSelectElement).value).toBe(DOC_NUEVO);
+      expect(within(form).queryByRole("group", { name: "Subir el acta" })).toBeNull();
+      const creacion = en(pedidos(simulado, "POST", RUTA_DOCUMENTOS), 0);
+      expect(creacion.headers.get("X-CSRF-Token")).toBe("abc123");
+      expect(creacion.headers.get("Idempotency-Key")).toMatch(UUID);
+      // En «Actas y decisiones», con la fecha del acto.
+      expect(await creacion.json()).toEqual({ categoria: "actas_y_decisiones", titulo: "Acta 15 de asamblea", fecha: "2026-10-01" });
+      const archivo = en(pedidos(simulado, "POST", `${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones`), 0);
+      expect(archivo.headers.get("Content-Type")).toBe("application/pdf");
+      expect(archivo.headers.get("Idempotency-Key")).toMatch(UUID);
+      expect(await archivo.text()).toBe("%PDF-1.7\n");
+      // Subir el acta no registra la decisión: la registra su propio botón, con la huella del acta.
+      expect(pedidos(simulado, "POST", RUTA_DECISIONES)).toHaveLength(0);
+      fireEvent.click(boton("Registrar decisión"));
+      await screen.findByText("Listo: la decisión quedó registrada.");
+      const cuerpo = (await en(pedidos(simulado, "POST", RUTA_DECISIONES), 0).json()) as Record<string, unknown>;
+      expect(cuerpo.sha256).toBe(SHA_NUEVA);
+    });
+
+    it("en revisión lo dice y no la ofrece; cuando el antivirus la aprueba, queda elegida", async () => {
+      let estado = "en_cuarentena";
+      const simulado = conSubida(() => estado, {
+        [`GET ${ESTADO_VERSION}`]: () => {
+          estado = "disponible";
+          return Response.json({ estado: "disponible", motivo_rechazo: null });
+        },
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      expect(await within(form).findByText(/^Listo: el acta «Acta 15 de asamblea» se subió a Documentos\. Queda «En revisión»/)).toBeTruthy();
+      const acta = within(form).getByLabelText("Acta (opcional)") as HTMLSelectElement;
+      await waitFor(() => expect(pedidos(simulado, "GET", RUTA_DOCUMENTOS)).toHaveLength(2));
+      expect(acta.value).toBe("");
+      expect([...acta.options].map((o) => o.value)).toEqual([""]);
+      // La consulta del antivirus corre sola cada pocos segundos.
+      expect(await within(form).findByText(LISTO_ELEGIDA)).toBeTruthy();
+      expect((within(form).getByLabelText("Acta (opcional)") as HTMLSelectElement).value).toBe(DOC_NUEVO);
+      expect(pedidos(simulado, "GET", ESTADO_VERSION).length).toBeGreaterThan(0);
+    });
+
+    it("un archivo rechazado por el antivirus lo dice y no se ofrece", async () => {
+      const simulado = conSubida(() => "rechazado", {
+        [`GET ${ESTADO_VERSION}`]: () => Response.json({ estado: "rechazado", motivo_rechazo: "infectado" }),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(elegirActa(form)).getByRole("button", { name: "Subir el acta" }));
+      expect(
+        await within(form).findByText(
+          "El archivo del acta «Acta 15 de asamblea» no pasó la revisión del antivirus y no se puede usar: hay que subir otro.",
+        ),
+      ).toBeTruthy();
+      const acta = within(form).getByLabelText("Acta (opcional)") as HTMLSelectElement;
+      expect(acta.value).toBe("");
+      expect([...acta.options].map((o) => o.value)).toEqual([""]);
+    });
+
+    it("si el archivo no entra, el documento creado no se repite: el reintento sube solo el archivo", async () => {
+      let intentos = 0;
+      const simulado = conSubida(() => "disponible", {
+        [`POST ${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones`]: () => {
+          intentos += 1;
+          if (intentos === 1) return error("tipo_no_admitido", 415);
+          return Response.json({ id: V_NUEVA, estado: "en_cuarentena", sha256: SHA_NUEVA, tamano: 9, tipo: "application/pdf" }, { status: 201 });
+        },
+        [`GET ${RUTA_DOCUMENTOS}`]: () => Response.json({ documentos: intentos > 1 ? [documento("disponible")] : [] }),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      const subida = elegirActa(form);
+      fireEvent.click(within(subida).getByRole("button", { name: "Subir el acta" }));
+      expect(
+        await within(form).findByText(/^El acta «Acta 15 de asamblea» quedó creada en Documentos, pero el archivo no se subió\. Solo se aceptan/),
+      ).toBeTruthy();
+      expect((within(subida).getByLabelText("Título del acta") as HTMLInputElement).disabled).toBe(true);
+      fireEvent.click(within(subida).getByRole("button", { name: "Subir el acta" }));
+      expect(await within(form).findByText(LISTO_ELEGIDA)).toBeTruthy();
+      expect(pedidos(simulado, "POST", RUTA_DOCUMENTOS)).toHaveLength(1);
+      expect(pedidos(simulado, "POST", `${RUTA_DOCUMENTOS}/${DOC_NUEVO}/versiones`)).toHaveLength(2);
+    });
+
+    it("sin archivo elegido lo dice y no manda nada", async () => {
+      const simulado = conSubida(() => "disponible");
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      fireEvent.click(within(form).getByRole("button", { name: "Subir el acta desde acá" }));
+      fireEvent.click(within(within(form).getByRole("group", { name: "Subir el acta" })).getByRole("button", { name: "Subir el acta" }));
+      expect(await within(form).findByText("Falta elegir el archivo del acta.")).toBeTruthy();
+      expect(pedidos(simulado, "POST", RUTA_DOCUMENTOS)).toHaveLength(0);
+    });
+
+    it("control: sin poder cargar documentos, el acta se elige pero no se ofrece subirla", async () => {
+      const simulado = conSubida(() => "disponible", {
+        [`GET ${BASE}/mis-acciones`]: () =>
+          Response.json({ acciones: accionesDeLasPoliticas().filter((a) => a !== "documentos.cargar" && a !== "documentos.cargar_operativos") }),
+      });
+      vi.stubGlobal("fetch", simulado);
+      abrir();
+      const form = await llenarDecision();
+      expect(within(form).getByLabelText("Acta (opcional)")).toBeTruthy();
+      expect(within(form).queryByRole("button", { name: "Subir el acta desde acá" })).toBeNull();
+      expect(within(form).queryByText(/se puede subir desde acá/)).toBeNull();
+    });
+  });
+
+  it("G-44: la fila del mandato nuevo queda resaltada, a la vista y dicha en palabras hasta el próximo paso", async () => {
+    let lista = MANDATOS;
+    const simulado = conConsejo({
+      [`GET ${RUTA_MANDATOS}`]: () => Response.json(lista),
+      [`POST ${RUTA_MANDATOS}`]: () => {
+        lista = {
+          elementos: [
+            ...MANDATOS.elementos,
+            {
+              id: NUEVO,
+              tipo: "miembro_consejo",
+              nombre: "Beto Pérez",
+              cuit: null,
+              vigente_desde: "2026-11-01",
+              vigente_hasta: null,
+              estado: "vigente",
+              con_cuenta: true,
+            },
+          ],
+        };
+        return Response.json({ id: NUEVO }, { status: 201 });
+      },
+      [`GET ${RUTA_MANDATOS}/${M_AE}`]: () => Response.json(DETALLE_AE),
+    });
+    vi.stubGlobal("fetch", simulado);
+    abrir();
+    await completarAlta();
+    // Control: antes del alta ninguna fila está resaltada.
+    expect(document.querySelector(".fila-nueva")).toBeNull();
+    fireEvent.click(boton("Dar de alta"));
+    await screen.findByText(LISTO_ALTA);
+    const nueva = (await screen.findByRole("button", { name: fila("Beto Pérez, Consejo de propietarios") })).closest("li");
+    if (nueva === null) throw new Error("la fila nueva no está en una lista");
+    expect(nueva.className).toBe("fila-nueva");
+    expect(within(nueva).getByText(RECIEN_DADO_DE_ALTA)).toBeTruthy();
+    // Se lleva a la vista la fila nueva, no otra.
+    const desplazar = vi.mocked(Element.prototype.scrollIntoView);
+    await waitFor(() => expect(desplazar.mock.contexts).toContain(nueva));
+    // Las demás filas no se marcan.
+    expect(screen.getByRole("button", { name: fila("Ana Díaz, Consejo de propietarios") }).closest("li")?.className).toBe("");
+    expect(screen.getAllByText(RECIEN_DADO_DE_ALTA)).toHaveLength(1);
+    // El próximo paso (abrir otro detalle) le saca la marca.
+    fireEvent.click(screen.getByRole("button", { name: fila("Estudio Sur, Administración externa") }));
+    await screen.findByRole("heading", { level: 2, name: "Estudio Sur, Administración externa" });
+    expect(document.querySelector(".fila-nueva")).toBeNull();
+    expect(screen.queryByText(RECIEN_DADO_DE_ALTA)).toBeNull();
   });
 });
