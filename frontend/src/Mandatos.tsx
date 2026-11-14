@@ -2,20 +2,32 @@ import { type FormEvent, type MutableRefObject, useCallback, useEffect, useId, u
 import { Link, useNavigate } from "react-router";
 
 import { api } from "./api/cliente";
+import { hoyDelDispositivo, TIPOS_DE_DOCUMENTO, tituloDeArchivo, TOPE_BYTES } from "./archivos";
 import { CampoCuit, cuitConError } from "./CampoCuit";
 import type { components } from "./api/tipos";
 import { encabezadoCsrf } from "./csrf";
-import { ErrorDeCampo, type ErroresDeCampo, erroresDe, marcaDe, resumenDe, REVISAR_FORMULARIO, sinElDe, soloDe } from "./ErrorDeCampo";
+import {
+  ErrorDeCampo,
+  type ErroresDeCampo,
+  erroresDe,
+  marcaDe,
+  resumenDe,
+  REVISAR_DATO,
+  REVISAR_FORMULARIO,
+  sinElDe,
+  soloDe,
+} from "./ErrorDeCampo";
 import { RUTA_INICIO } from "./enlace";
 import { FilaDeRegistro } from "./FichaDeRegistro";
 import { useAEntrar } from "./sesionEncima";
-import { conLaRedDeVuelta, sinElAvisoDeLaRed } from "./egresos/comun";
-import { useAlVolverLaRed, useMiPersona } from "./egresos/useConsorcio";
+import { conLaRedDeVuelta, LARGO_TITULO, sinElAvisoDeLaRed } from "./egresos/comun";
+import { useAlVolverLaRed, useConsultaDelAntivirus, useMiPersona } from "./egresos/useConsorcio";
 import { nombreDeFacultad } from "./facultades";
 import { codigoDe, esDeConexion, mensajeDeFalla, motivoDeSeparacion, SERVICIO_NO_DISPONIBLE, SIN_CONEXION } from "./fallas";
 import { REQUISITOS, useAcciones, useEdificioElegido, usePuede } from "./permisos";
+import { SubirArchivo } from "./SubirArchivo";
 import { TextoDeUnaLinea } from "./TextoDeUnaLinea";
-import { RUTA_DOCUMENTOS } from "./Documentos";
+import { MENSAJES_PROPIOS, mensajeDeError as mensajeDeCarga, RUTA_DOCUMENTOS, tamano } from "./Documentos";
 import { VisorDocumento } from "./VisorDocumento";
 
 // Página /mandatos (H2b 2b-4c, PR 2): los mandatos y las decisiones de un edificio, su detalle,
@@ -38,6 +50,10 @@ type TipoDecision = components["schemas"]["TipoDecision"];
 type CausaBaja = components["schemas"]["CausaBaja"];
 type Documento = components["schemas"]["DocumentoEnLista"];
 type InvitacionMandato = components["schemas"]["InvitacionMandato"];
+type Categoria = components["schemas"]["CategoriaDocumento"];
+
+/** La categoría de Documentos de donde sale el acta de una decisión, y adonde va la que se sube acá (G-15). */
+const CATEGORIA_ACTAS: Categoria = "actas_y_decisiones";
 
 export const RUTA_MANDATOS = "/mandatos";
 
@@ -126,7 +142,15 @@ const momento = (iso: string) => FORMATO_MOMENTO.format(new Date(iso));
 const recortar = (texto: string) => (texto.length > LARGO_OPCION ? `${texto.slice(0, LARGO_OPCION - 1)}…` : texto);
 
 /** Qué se estaba haciendo cuando la API respondió con error. */
-export type Accion = "decision" | "alta" | "baja" | "revision" | "invitar" | "aprobar_invitacion" | "retirar_invitacion";
+export type Accion =
+  | "decision"
+  | "alta"
+  | "baja"
+  | "revision"
+  | "invitar"
+  | "aprobar_invitacion"
+  | "retirar_invitacion"
+  | "desasociar";
 
 const SIN_PERMISO: Record<Accion, string> = {
   decision: "Esta cuenta no tiene permiso para registrar decisiones en este edificio.",
@@ -136,6 +160,7 @@ const SIN_PERMISO: Record<Accion, string> = {
   invitar: "El mandato de esta cuenta no incluye invitar a la administración.",
   aprobar_invitacion: "El mandato de esta cuenta no incluye aprobar esta invitación.",
   retirar_invitacion: "El mandato de esta cuenta no incluye retirar esta invitación.",
+  desasociar: "El mandato de esta cuenta no incluye desasociar la cuenta de la administración.",
 };
 
 const NO_ENCONTRADO: Record<Accion, string> = {
@@ -146,6 +171,7 @@ const NO_ENCONTRADO: Record<Accion, string> = {
   invitar: "No se encontró ese mandato en este edificio.",
   aprobar_invitacion: "La invitación cambió o se retiró mientras tanto: la lista ya está actualizada.",
   retirar_invitacion: "La invitación ya no está en este edificio: la lista ya está actualizada.",
+  desasociar: "No se encontró ese mandato en este edificio.",
 };
 
 /** El estado de un mandato del Consejo que dejó de cumplir la condición para integrarlo (G-41). */
@@ -189,6 +215,21 @@ const POR_CODIGO: Record<string, string> = {
   invitacion_no_pendiente: "La invitación ya se aprobó o se aceptó: la lista ya está actualizada.",
 };
 
+/** La marca de la fila del mandato que se acaba de dar de alta (G-44). */
+export const RECIEN_DADO_DE_ALTA = "Recién dado de alta";
+
+/** Lo que pasa al desasociar la cuenta de la administración externa (G-40, P1-c). */
+export const AYUDA_DESASOCIAR =
+  "El mandato, su CUIT y su vigencia quedan como están. Esa persona pierde el acceso: se cierran sus sesiones.";
+
+/** Los motivos de la desasociación que no se dicen igual que los de la invitación (G-40). */
+const POR_CODIGO_DESASOCIAR: Record<string, string> = {
+  mandato_sin_persona: "El mandato ya no tiene una cuenta asociada: el detalle ya está actualizado.",
+  mandato_no_asociable: "Solo se desasocia así la cuenta de una administración externa.",
+};
+/** Los rechazos de la desasociación que dicen que el detalle quedó viejo: se vuelve a pedir. */
+const DESASOCIAR_SOBRE_ESTADO_VIEJO = Object.keys(POR_CODIGO_DESASOCIAR);
+
 /** Cómo se nombra cada campo de cada formulario en el resumen del error (G-49). */
 const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
   decision: {
@@ -218,6 +259,7 @@ const NOMBRES_CAMPO: Record<Accion, Record<string, string>> = {
   invitar: { correo: "el correo", referencia: "de dónde sale el correo" },
   aprobar_invitacion: {},
   retirar_invitacion: {},
+  desasociar: { referencia: "por qué esa cuenta no es la de la administración" },
 };
 
 /** Qué decir ante el error de un envío, según el estado y el código del cuerpo uniforme. */
@@ -230,6 +272,8 @@ export function mensajeDeError(estado: number, codigo: string | undefined, accio
   if (estado === ESTADO.limite) return "Se llegó al límite de pedidos por ahora. Reintentar más tarde.";
   if (estado === ESTADO.invalido && codigo === "idempotencia_reutilizada")
     return "Los datos cambiaron desde un intento anterior. Hay que enviar el formulario de nuevo.";
+  if (estado === ESTADO.conflicto && accion === "desasociar" && codigo !== undefined && codigo in POR_CODIGO_DESASOCIAR)
+    return POR_CODIGO_DESASOCIAR[codigo] as string;
   if ((estado === ESTADO.conflicto || estado === ESTADO.invalido) && codigo !== undefined && codigo in POR_CODIGO)
     return POR_CODIGO[codigo] as string;
   if (estado === ESTADO.conflicto) return "Los datos del edificio cambiaron mientras tanto: recargar la página y revisar el formulario.";
@@ -417,6 +461,25 @@ export function Mandatos() {
   const pedidoActas = useRef(0);
   const [actaElegida, setActaElegida] = useState("");
   const [viendoActa, setViendoActa] = useState<{ documento: string; version: string; titulo: string } | null>(null);
+  // Subir el acta desde «Registrar una decisión» (G-15): los dos pasos de Documentos (crear el
+  // documento en «Actas y decisiones» y subir el archivo, que entra en cuarentena). Se elige sola
+  // cuando el antivirus la aprueba.
+  const [subeActa, setSubeActa] = useState(false);
+  const [archivoActa, setArchivoActa] = useState<File | null>(null);
+  const [tituloActa, setTituloActa] = useState("");
+  /** El último título que propuso un archivo: si la persona no lo cambió, otro archivo lo reemplaza. */
+  const tituloActaPropuesto = useRef("");
+  const [errorTituloActa, setErrorTituloActa] = useState<string | undefined>(undefined);
+  /** El documento ya creado cuyo archivo no se subió: el reintento sube solo el archivo. */
+  const [actaCreada, setActaCreada] = useState<{ documento: string; titulo: string } | null>(null);
+  /** El archivo subido que el antivirus todavía revisa: cuando queda disponible, se elige. */
+  const [actaEnRevision, setActaEnRevision] = useState<{ documento: string; version: string; titulo: string } | null>(null);
+  const [estadoActa, setEstadoActa] = useState<{ texto: string; ok: boolean } | null>(null);
+  const claveCrearActa = useRef<string | null>(null);
+  const claveSubirActa = useRef<string | null>(null);
+  const textoActa = useRef<HTMLParagraphElement | null>(null);
+  const alEstadoActa = useRef(false);
+  const primerBotonActa = useRef<HTMLButtonElement | null>(null);
 
   // La invitación de la administración externa a asociar su cuenta (G-40; A7, cuatro ojos).
   const [invitaciones, setInvitaciones] = useState<Lectura<InvitacionMandato> | null>(null);
@@ -426,6 +489,15 @@ export function Mandatos() {
   const claveInvitar = useRef<string | null>(null);
   const claveAprobar = useRef<string | null>(null);
   const claveRetirarInvitacion = useRef<string | null>(null);
+
+  // Desasociar la cuenta de la administración externa (G-40, P1-c): plegado hasta que se pide.
+  const [desasociarAbierto, setDesasociarAbierto] = useState(false);
+  const [referenciaDesasociar, setReferenciaDesasociar] = useState("");
+  const claveDesasociar = useRef<string | null>(null);
+
+  // G-44: el mandato recién dado de alta, resaltado en la lista hasta el próximo paso.
+  const [mandatoNuevo, setMandatoNuevo] = useState<string | null>(null);
+  const filaNueva = useRef<HTMLLIElement | null>(null);
 
   useEffect(() => {
     if (enviando || foco.current === null) return;
@@ -448,6 +520,23 @@ export function Mandatos() {
   useEffect(() => {
     if (bajaAbierta) primerCampoBaja.current?.focus();
   }, [bajaAbierta]);
+
+  // Al desplegar la desasociación, el foco va a su único campo (G-40).
+  useEffect(() => {
+    if (desasociarAbierto) document.getElementById(`${id}-desasociar-referencia`)?.focus();
+  }, [desasociarAbierto, id]);
+
+  // Al desplegar la subida del acta, el foco va a su primer botón (G-15).
+  useEffect(() => {
+    if (subeActa) primerBotonActa.current?.focus();
+  }, [subeActa]);
+
+  // El resultado de subir el acta toma el foco cuando termina el envío (como en Documentos).
+  useEffect(() => {
+    if (enviando || !alEstadoActa.current || estadoActa === null) return;
+    alEstadoActa.current = false;
+    textoActa.current?.focus();
+  }, [enviando, estadoActa]);
 
   // Al abrir un detalle, el foco va a su título: el lector de pantalla anuncia el resultado.
   useEffect(() => {
@@ -533,6 +622,12 @@ export function Mandatos() {
     if (abierto !== null) tituloFormulario.current?.focus();
   }, [abierto]);
 
+  // G-44: cuando la lista vuelve con el mandato recién dado de alta, su fila queda a la vista. La
+  // fila todavía no está mientras llega la lista nueva: el efecto vuelve a correr cuando llega.
+  useEffect(() => {
+    if (mandatoNuevo !== null && mandatos.tipo === "ok") filaNueva.current?.scrollIntoView({ block: "nearest" });
+  }, [mandatoNuevo, mandatos]);
+
   function cerrarFormulario() {
     (abierto === "alta" ? botonAlta : botonDecision).current?.focus();
     setErrores(null);
@@ -588,6 +683,8 @@ export function Mandatos() {
     setEnviando(true);
     setAviso(null);
     setErrores(null);
+    // El resaltado del mandato nuevo dura hasta el próximo paso (G-44).
+    setMandatoNuevo(null);
     void pedido(clave.current)
       .then(({ data, error, response }) => {
         exigirSesion(response);
@@ -644,6 +741,10 @@ export function Mandatos() {
         setDescripcionDecision("");
         setReferencia("");
         setActaElegida("");
+        // Un acta que se estaba subiendo o revisando ya no se elige para otra decisión.
+        cerrarSubidaActa();
+        setActaEnRevision(null);
+        setEstadoActa(null);
         const hecho = "Listo: la decisión quedó registrada.";
         setAviso({ texto: hecho, ok: true });
         setAbierto(null);
@@ -681,7 +782,7 @@ export function Mandatos() {
             matricula: tipoMandato === "miembro_consejo" || matricula.trim() === "" ? null : matricula.trim(),
           },
         }),
-      () => {
+      (datos) => {
         // Con el formulario vacío no se puede dar dos veces la misma alta con una clave nueva.
         setTipoMandato(TIPO_MANDATO_INICIAL);
         setPersona("");
@@ -694,6 +795,8 @@ export function Mandatos() {
         // G-44: el «Listo» con lo que pasó, sin abrir el detalle (que ofrecería deshacerlo).
         const asociar = externo ? " Para asociar la cuenta de la administración, abrir su detalle e invitarla." : "";
         setAviso({ texto: `Listo: el mandato de ${nombreAlta} quedó dado de alta y ya está en la lista.${asociar}`, ok: true });
+        // G-44: su fila queda resaltada y a la vista cuando llega la lista nueva.
+        setMandatoNuevo(datos.id);
         setAbierto(null);
       },
     );
@@ -770,6 +873,7 @@ export function Mandatos() {
     const activo = document.activeElement;
     origenDetalle.current = activo instanceof HTMLElement ? activo : null;
     setAviso(null);
+    setMandatoNuevo(null);
     pedirMandato(mandato.id);
   }
 
@@ -789,6 +893,7 @@ export function Mandatos() {
           limpiarBaja();
           limpiarRevision();
           limpiarInvitacion();
+          limpiarDesasociar();
           setCausa(data.estado === "terminado" ? "error_carga" : "renuncia");
           setDetalle({ tipo: "mandato", datos: data });
           if (admiteInvitacion(data)) pedirInvitaciones(data.id);
@@ -810,6 +915,7 @@ export function Mandatos() {
     const activo = document.activeElement;
     origenDetalle.current = activo instanceof HTMLElement ? activo : null;
     setAviso(null);
+    setMandatoNuevo(null);
     pedirDecision(decision.id);
   }
 
@@ -843,18 +949,31 @@ export function Mandatos() {
   }
 
   /** Las actas de Documentos, una vez por edificio: al abrir el formulario de la decisión o un detalle
-   * con acta. Si no se pudieron consultar, se vuelven a pedir la próxima vez. */
-  function pedirActas() {
-    if (!veActas || consorcio === "" || (actas !== null && actas.tipo !== "sin_servicio")) return;
+   * con acta. Si no se pudieron consultar, se vuelven a pedir la próxima vez. `elegir`: el acta
+   * recién subida acá, que vuelve a pedir la lista sin esperar a la próxima vez y, si ya está
+   * disponible, queda elegida (G-15). */
+  function pedirActas(elegir?: string) {
+    if (!veActas || consorcio === "") return;
+    if (elegir === undefined && actas !== null && actas.tipo !== "sin_servicio") return;
     const numero = ++pedidoActas.current;
-    setActas(CARGANDO);
+    // Al volver a pedirla por el acta nueva, la lista a la vista queda mientras llega la otra.
+    if (elegir === undefined) setActas(CARGANDO);
     void api
       .GET("/api/v1/consorcios/{consorcio_id}/documentos", { params: { path: { consorcio_id: consorcio } } })
       .then(({ data, response }) => {
         exigirSesion(response);
         if (numero !== pedidoActas.current) return;
-        if (data !== undefined) setActas({ tipo: "ok", elementos: data.documentos });
-        else setActas(response.status === ESTADO.sinPermiso ? SIN_PERMISO_DE_LECTURA : SIN_SERVICIO);
+        if (data === undefined) {
+          setActas(response.status === ESTADO.sinPermiso ? SIN_PERMISO_DE_LECTURA : SIN_SERVICIO);
+          return;
+        }
+        setActas({ tipo: "ok", elementos: data.documentos });
+        const nueva = elegir === undefined ? undefined : data.documentos.find((d) => d.id === elegir);
+        if (nueva !== undefined && nueva.categoria === CATEGORIA_ACTAS && disponibleDe(nueva) !== undefined) {
+          cambiar(claveDecision, setActaElegida, "sha256")(nueva.id);
+          setActaEnRevision(null);
+          avisarActa(`Listo: el acta «${nueva.titulo}» pasó la revisión del antivirus y quedó elegida para esta decisión.`, true);
+        }
       })
       .catch((e: unknown) => {
         if (e instanceof SinSesion) aEntrar();
@@ -865,8 +984,160 @@ export function Mandatos() {
   /** Abre uno de los dos formularios de arriba; el de la decisión pide las actas para elegir. */
   function abrirFormulario(cual: FormularioAbierto | null) {
     if (cual === "decision") pedirActas();
+    setMandatoNuevo(null);
     setAbierto(cual);
   }
+
+  /** Lo que pasó con el acta que se sube acá; `enfocar` cuando responde a un toque de la persona. */
+  function avisarActa(texto: string, ok: boolean, enfocar = false) {
+    if (enfocar) alEstadoActa.current = true;
+    setEstadoActa({ texto, ok });
+  }
+
+  function cerrarSubidaActa() {
+    tituloActaPropuesto.current = "";
+    claveCrearActa.current = null;
+    claveSubirActa.current = null;
+    setArchivoActa(null);
+    setTituloActa("");
+    setErrorTituloActa(undefined);
+    setActaCreada(null);
+    setSubeActa(false);
+  }
+
+  function cambiarTituloActa(valor: string) {
+    claveCrearActa.current = null;
+    setErrorTituloActa(undefined);
+    setTituloActa(valor);
+  }
+
+  function elegirArchivoActa(elegido: File) {
+    claveSubirActa.current = null;
+    setEstadoActa(null);
+    setArchivoActa(elegido);
+    // El nombre del archivo propone el título (como en Documentos), sin pisar uno que la persona escribió.
+    const propuesto = tituloDeArchivo(elegido, "", LARGO_TITULO);
+    if (propuesto !== "" && (tituloActa === "" || tituloActa === tituloActaPropuesto.current)) {
+      tituloActaPropuesto.current = propuesto;
+      cambiarTituloActa(propuesto);
+    }
+  }
+
+  /** «Subir el acta»: crea el documento (salvo que ya se haya creado) y sube el archivo. */
+  async function subirActa() {
+    if (archivoActa === null) {
+      avisarActa("Falta elegir el archivo del acta.", false, true);
+      return;
+    }
+    const titulo = actaCreada?.titulo ?? tituloActa.trim();
+    if (titulo === "") {
+      setErrorTituloActa("Falta el título del acta.");
+      avisarActa("Falta el título del acta.", false, true);
+      return;
+    }
+    alEstadoActa.current = true;
+    setEnviando(true);
+    setEstadoActa(null);
+    try {
+      const documento = actaCreada?.documento ?? (await crearActa(titulo));
+      if (documento !== null) await subirArchivoActa(documento, titulo, archivoActa, actaCreada === null);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  /** Primer paso: el documento en «Actas y decisiones», con la fecha del acto (o la de hoy si todavía
+   * no se cargó). Devuelve su id, o nulo si no se creó (lo dice el aviso del acta). */
+  async function crearActa(titulo: string): Promise<string | null> {
+    claveCrearActa.current ??= crypto.randomUUID();
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos", {
+        headers: encabezadoCsrf(),
+        params: { path: { consorcio_id: consorcio }, header: { [ENCABEZADO_IDEMPOTENCIA]: claveCrearActa.current } },
+        body: { categoria: CATEGORIA_ACTAS, titulo, fecha: fechaDecision === "" ? hoyDelDispositivo() : fechaDecision },
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) claveCrearActa.current = null;
+        const campos = erroresDe(error, REVISAR_DATO, MENSAJES_PROPIOS);
+        setErrorTituloActa(campos.titulo);
+        avisarActa(mensajeDeCarga(response.status, codigo, "crear", Object.keys(campos).map((c) => `body.${c}`)), false);
+        return null;
+      }
+      claveCrearActa.current = null;
+      return data.id;
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else avisarActa(SIN_CONEXION, false);
+      return null;
+    }
+  }
+
+  /** Segundo paso: el archivo crudo, con su tipo como `Content-Type`, igual que en Documentos. */
+  async function subirArchivoActa(documento: string, titulo: string, elegido: File, recienCreado: boolean) {
+    claveSubirActa.current ??= crypto.randomUUID();
+    // Si el documento se acaba de crear y el archivo no entra, el documento queda sin archivo: se
+    // dice, y el reintento sube el archivo a ese mismo documento.
+    const fallo = (texto: string) => {
+      if (recienCreado) setActaCreada({ documento, titulo });
+      avisarActa(recienCreado ? `El acta «${titulo}» quedó creada en Documentos, pero el archivo no se subió. ${texto}` : texto, false);
+    };
+    try {
+      const { data, error, response } = await api.POST("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones", {
+        headers: { ...encabezadoCsrf(), "Content-Type": elegido.type },
+        params: {
+          path: { consorcio_id: consorcio, documento_id: documento },
+          header: { [ENCABEZADO_IDEMPOTENCIA]: claveSubirActa.current },
+        },
+        // El generador tipa `format: binary` como texto; el cuerpo es el archivo tal cual.
+        body: elegido as unknown as string,
+        bodySerializer: (cuerpo) => cuerpo,
+      });
+      exigirSesion(response);
+      if (data === undefined) {
+        const codigo = codigoDe(error);
+        if (renovarClave(response.status, codigo)) claveSubirActa.current = null;
+        fallo(mensajeDeCarga(response.status, codigo, "subir", [], response.headers.has("Retry-After")));
+        return;
+      }
+      cerrarSubidaActa();
+      setActaEnRevision({ documento, version: data.id, titulo });
+      avisarActa(
+        `Listo: el acta «${titulo}» se subió a Documentos. Queda «En revisión» mientras el antivirus la analiza, de unos segundos a unos minutos; cuando quede disponible, se elige sola acá. Mientras tanto, la decisión se puede registrar sin ella.`,
+        true,
+      );
+      pedirActas(documento);
+    } catch (e: unknown) {
+      if (e instanceof SinSesion) aEntrar();
+      else fallo(SIN_CONEXION);
+    }
+  }
+
+  /** Cómo va el acta subida acá: disponible (se elige), rechazada o todavía en revisión. */
+  function mirarActaEnRevision() {
+    if (actaEnRevision === null) return;
+    const cual = actaEnRevision;
+    const noSeSupo = `No se pudo consultar si el acta «${cual.titulo}» ya pasó la revisión del antivirus: se vuelve a consultar sola.`;
+    void api
+      .GET("/api/v1/consorcios/{consorcio_id}/documentos/{documento_id}/versiones/{version_id}/estado", {
+        params: { path: { consorcio_id: consorcio, documento_id: cual.documento, version_id: cual.version } },
+      })
+      .then(({ data, response }) => {
+        exigirSesion(response);
+        if (data === undefined) avisarActa(noSeSupo, false);
+        else if (data.estado === "disponible") pedirActas(cual.documento);
+        else if (data.estado === "rechazado") {
+          setActaEnRevision(null);
+          avisarActa(`El archivo del acta «${cual.titulo}» no pasó la revisión del antivirus y no se puede usar: hay que subir otro.`, false);
+        }
+      })
+      .catch((e: unknown) => {
+        if (e instanceof SinSesion) aEntrar();
+        else avisarActa(noSeSupo, false);
+      });
+  }
+  const antivirusTarda = useConsultaDelAntivirus(abierto === "decision" && actaEnRevision !== null, mirarActaEnRevision);
 
   /** Un mandato externo sin cuenta, que todavía rige o va a regir, admite la invitación (A7). */
   function admiteInvitacion(m: MandatoDetalle): boolean {
@@ -972,6 +1243,42 @@ export function Mandatos() {
     );
   }
 
+  /** Una administración externa con cuenta, que no es la de quien mira, admite desasociarla (G-40, P1-c). */
+  function admiteDesasociar(m: MandatoDetalle): boolean {
+    return m.tipo === "administrador_externo" && m.con_cuenta && !m.es_propio && puede("mandatos.desasociar_persona");
+  }
+
+  function limpiarDesasociar() {
+    claveDesasociar.current = null;
+    setDesasociarAbierto(false);
+    setReferenciaDesasociar("");
+  }
+
+  /** Desasociar la cuenta que no es la de la administración: el mandato queda como estaba, sin cuenta. */
+  function desasociar(evento: FormEvent, mandato: MandatoDetalle) {
+    evento.preventDefault();
+    enviar(
+      claveDesasociar,
+      "desasociar",
+      (clave) =>
+        api.POST("/api/v1/consorcios/{consorcio_id}/mandatos/{mandato_id}/desasociar-persona", {
+          params: { path: { consorcio_id: consorcio, mandato_id: mandato.id }, header: { [ENCABEZADO_IDEMPOTENCIA]: clave } },
+          headers: encabezadoCsrf(),
+          body: { referencia: referenciaDesasociar.trim() },
+        }),
+      () => {
+        const hecho = `Listo: la cuenta quedó desasociada del mandato de ${mandato.nombre}. El mandato sigue vigente; para asociar otra, invitar a la administración.`;
+        limpiarDesasociar();
+        setAviso({ texto: hecho, ok: true, formulario: "desasociar" });
+        // El detalle vuelve sin cuenta y con la invitación para asociar otra.
+        pedirMandato(mandato.id, hecho);
+      },
+      (estado, codigo) => {
+        if (estado === ESTADO.noEncontrado || (codigo !== undefined && DESASOCIAR_SOBRE_ESTADO_VIEJO.includes(codigo))) pedirMandato(mandato.id);
+      },
+    );
+  }
+
   /** Mantener un mandato pendiente de revisión, con una asamblea y desde una fecha (G-41, E62). */
   function mantener(evento: FormEvent, mandato: MandatoDetalle) {
     evento.preventDefault();
@@ -999,8 +1306,13 @@ export function Mandatos() {
     pedidoActas.current += 1;
     setActas(null);
     setActaElegida("");
+    cerrarSubidaActa();
+    setActaEnRevision(null);
+    setEstadoActa(null);
+    setMandatoNuevo(null);
     limpiarInvitacion();
     limpiarRevision();
+    limpiarDesasociar();
     pedidoDetalle.current += 1;
     setMandatos(CARGANDO);
     setDecisiones(CARGANDO);
@@ -1026,7 +1338,7 @@ export function Mandatos() {
   const textoDecision = (d: Decision) => `${TEXTO_TIPO_DECISION[d.tipo]} del ${dia(d.fecha)}: ${d.descripcion}`;
   // Las actas que se pueden elegir: las de «Actas y decisiones» con un archivo disponible (G-15).
   const actasElegibles =
-    actas?.tipo === "ok" ? actas.elementos.filter((d) => d.categoria === "actas_y_decisiones" && disponibleDe(d) !== undefined) : [];
+    actas?.tipo === "ok" ? actas.elementos.filter((d) => d.categoria === CATEGORIA_ACTAS && disponibleDe(d) !== undefined) : [];
   /** El documento cuyo archivo disponible tiene esa huella: el acta de la decisión, para verla. */
   const actaDeLaHuella = (sha256: string) => {
     if (actas?.tipo !== "ok") return undefined;
@@ -1058,7 +1370,8 @@ export function Mandatos() {
   const actuales = listaDeMandatos.filter((m) => !YA_NO_RIGEN.has(m.estado));
   const anteriores = listaDeMandatos.filter((m) => YA_NO_RIGEN.has(m.estado));
   const filaDeMandato = (m: Mandato) => (
-    <li key={m.id}>
+    // G-44: la del mandato recién dado de alta se resalta y lo dice en palabras (no solo con el color).
+    <li key={m.id} ref={m.id === mandatoNuevo ? filaNueva : undefined} className={m.id === mandatoNuevo ? "fila-nueva" : undefined}>
       <FilaDeRegistro
         titulo={`${m.nombre}, ${TEXTO_TIPO_MANDATO[m.tipo]}`}
         resumen={[
@@ -1071,6 +1384,7 @@ export function Mandatos() {
         deshabilitada={enviando}
         abierta={detalle?.tipo === "mandato" && detalle.datos.id === m.id}
       />
+      {m.id === mandatoNuevo && <span className="fila-nueva__marca">{RECIEN_DADO_DE_ALTA}</span>}
     </li>
   );
 
@@ -1240,11 +1554,28 @@ export function Mandatos() {
                     El acta se elige de Documentos, categoría «Actas y decisiones», y queda vinculada a la decisión.
                     {cargaDocumentos && (
                       <>
-                        {" "}Si todavía no está, cargarla antes en <Link to={RUTA_DOCUMENTOS}>Documentos</Link>.
+                        {" "}Si todavía no está, se puede subir desde acá: queda guardada en <Link to={RUTA_DOCUMENTOS}>Documentos</Link>.
                       </>
                     )}
                   </p>
                   <ErrorDeCampo idCampo={`${id}-acta`} mensaje={errorEn("decision", "sha256")} />
+                  {/* G-15: subir el acta sin salir del formulario, con los dos pasos de Documentos. */}
+                  {cargaDocumentos && actas?.tipo === "ok" && (subeActa ? subidaDelActa() : (
+                    <p>
+                      <button type="button" className="secundario" disabled={enviando} onClick={() => setSubeActa(true)}>
+                        Subir el acta desde acá
+                      </button>
+                    </p>
+                  ))}
+                  {estadoActa !== null && (
+                    <p ref={textoActa} tabIndex={-1} role={estadoActa.ok ? undefined : "alert"} aria-live={estadoActa.ok ? "polite" : undefined}
+                      className={estadoActa.ok ? "aviso-ok" : "aviso-error"}>
+                      {estadoActa.texto}
+                    </p>
+                  )}
+                  {actaEnRevision !== null && antivirusTarda && (
+                    <p>El antivirus está tardando: se sigue consultando. La decisión se puede registrar sin el acta.</p>
+                  )}
                 </>
               )}
               <p>{QUIEN_DA_EL_ALTA}</p>
@@ -1576,6 +1907,13 @@ export function Mandatos() {
                     <dd>{detalle.datos.matricula}</dd>
                   </>
                 )}
+                {detalle.datos.tipo === "administrador_externo" && (
+                  // La cuenta de la administración externa se asocia por invitación y se puede desasociar (G-40).
+                  <>
+                    <dt>Cuenta</dt>
+                    <dd>{detalle.datos.con_cuenta ? "Con cuenta asociada" : "Sin cuenta asociada"}</dd>
+                  </>
+                )}
                 <dt>Decisión que lo respalda</dt>
                 <dd>
                   {(() => {
@@ -1633,7 +1971,7 @@ export function Mandatos() {
                   <h3 id={`${id}-revision`}>Por qué está pendiente de revisión</h3>
                   <p>{CAUSA_REVISION}</p>
                   {/* Con la baja desplegada, mantenerlo se pliega: un solo acto a la vista. */}
-                  {puede("mandatos.resolver_revision") && !detalle.datos.es_propio && !bajaAbierta && (
+                  {puede("mandatos.resolver_revision") && !detalle.datos.es_propio && !bajaAbierta && !desasociarAbierto && (
                     asambleas.length === 0 ? (
                       <p>
                         Para mantenerlo hace falta una asamblea registrada por otra persona, y no hay ninguna que esta cuenta
@@ -1684,7 +2022,54 @@ export function Mandatos() {
               {admiteInvitacion(detalle.datos) && !bajaAbierta && invitaciones !== null && invitaciones.tipo !== "sin_permiso" &&
                 seccionInvitacion(detalle.datos, invitaciones)}
 
-              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && !bajaAbierta && (
+              {/* G-40: la cuenta asociada por error se desasocia; plegado, como la baja, y un acto a la vez. */}
+              {admiteDesasociar(detalle.datos) && !bajaAbierta && !desasociarAbierto && (
+                <p>
+                  <button type="button" className="secundario peligro" disabled={enviando} onClick={() => setDesasociarAbierto(true)}>
+                    Desasociar la cuenta…
+                  </button>
+                </p>
+              )}
+              {admiteDesasociar(detalle.datos) && desasociarAbierto && (
+                <form className="formulario formulario-movil" onSubmit={(e) => desasociar(e, detalle.datos)} aria-labelledby={`${id}-desasociar`}>
+                  <h3 id={`${id}-desasociar`}>Desasociar la cuenta</h3>
+                  <label htmlFor={`${id}-desasociar-referencia`}>Por qué esa cuenta no es la de la administración</label>
+                  <TextoDeUnaLinea
+                    id={`${id}-desasociar-referencia`}
+                    {...marcaDe(`${id}-desasociar-referencia`, errorEn("desasociar", "referencia"), `${id}-desasociar-ayuda`)}
+                    rows={FILAS_REFERENCIA}
+                    autoComplete="off"
+                    maxLength={LARGO_REFERENCIA}
+                    required
+                    disabled={enviando}
+                    value={referenciaDesasociar}
+                    onValor={cambiar(claveDesasociar, setReferenciaDesasociar, "referencia")}
+                  />
+                  <ErrorDeCampo idCampo={`${id}-desasociar-referencia`} mensaje={errorEn("desasociar", "referencia")} />
+                  <p id={`${id}-desasociar-ayuda`}>{AYUDA_DESASOCIAR}</p>
+                  <p>
+                    {/* Con un formulario de arriba abierto, el principal es el suyo. */}
+                    <button type="submit" className={abierto === null ? "peligro" : "secundario peligro"} disabled={enviando}>
+                      Desasociar la cuenta
+                    </button>{" "}
+                    <button
+                      type="button"
+                      className="secundario"
+                      disabled={enviando}
+                      onClick={() => {
+                        limpiarDesasociar();
+                        setErrores(null);
+                        setAviso((actual) => (actual?.formulario === "desasociar" ? null : actual));
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  </p>
+                </form>
+              )}
+              {avisoEn("desasociar")}
+
+              {ESTADOS_CON_BAJA.includes(detalle.datos.estado) && puede("mandatos.baja") && !detalle.datos.es_propio && !bajaAbierta && !desasociarAbierto && (
                 // G-44 y G-45: la baja no se ve desplegada al abrir el detalle; un terminado solo se anula.
                 <p>
                   <button type="button" className="secundario peligro" ref={botonAbrirBaja} disabled={enviando} onClick={() => setBajaAbierta(true)}>
@@ -1831,6 +2216,56 @@ export function Mandatos() {
       )}
     </>
   );
+
+  /** Subir el acta desde la decisión (G-15): el archivo propone el título; el botón no envía la
+   * decisión (no hay un formulario dentro de otro), así que Enter en el título también sube el acta. */
+  function subidaDelActa() {
+    const titulo = `${id}-subir-acta`;
+    return (
+      <div role="group" aria-labelledby={titulo} className="formulario">
+        <h3 id={titulo}>Subir el acta</h3>
+        <SubirArchivo
+          de="del acta"
+          tipos={TIPOS_DE_DOCUMENTO}
+          tope={TOPE_BYTES}
+          reemplaza={archivoActa !== null}
+          deshabilitada={enviando}
+          nota="Queda en Documentos, «Actas y decisiones». Antes de poder elegirla la revisa el antivirus."
+          elegido={archivoActa === null ? null : `${archivoActa.name} (${tamano(archivoActa.size)})`}
+          refPrimero={(e) => {
+            primerBotonActa.current = e;
+          }}
+          alElegir={elegirArchivoActa}
+        />
+        <label htmlFor={`${titulo}-titulo`}>Título del acta</label>
+        <input
+          id={`${titulo}-titulo`}
+          {...marcaDe(`${titulo}-titulo`, errorTituloActa, `${titulo}-ayuda`)}
+          type="text"
+          autoComplete="off"
+          maxLength={LARGO_TITULO}
+          disabled={enviando || actaCreada !== null}
+          value={actaCreada?.titulo ?? tituloActa}
+          onChange={(e) => cambiarTituloActa(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+            e.preventDefault();
+            void subirActa();
+          }}
+        />
+        <p id={`${titulo}-ayuda`}>Sin teléfonos ni correos en el título. Lleva la fecha del acto, o la de hoy si todavía no se cargó.</p>
+        <ErrorDeCampo idCampo={`${titulo}-titulo`} mensaje={errorTituloActa} />
+        <p>
+          <button type="button" className="secundario" disabled={enviando} onClick={() => void subirActa()}>
+            Subir el acta
+          </button>{" "}
+          <button type="button" className="secundario" disabled={enviando} onClick={cerrarSubidaActa}>
+            Cancelar
+          </button>
+        </p>
+      </div>
+    );
+  }
 
   /** La cuenta de la administración externa: la invitación, con sus cuatro ojos (G-40, A7). */
   function seccionInvitacion(mandato: MandatoDetalle, lectura: Lectura<InvitacionMandato>) {
