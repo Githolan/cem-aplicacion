@@ -228,6 +228,9 @@ export const REQUISITOS = {
   contactosGestion: [["contactos.gestionar"]],
   documentos: [["documentos.ver"], ["documentos.cargar"], ["documentos.cargar_operativos"]],
   proveedores: [["egresos.preparar_orden"]],
+  /** La consulta de proveedores y sus seguros (app 0104): los roles que la configuración del
+   * edificio lista. Quien ya gestiona proveedores no la ve en el menú: tiene la ficha completa. */
+  consultaProveedores: [["proveedores.ver"]],
   ordenes: [["egresos.preparar_orden"]],
   /** Subir la factura que falta a una orden aprobada (app 0099): lo mismo que cargarla al preparar. */
   subirFactura: [["egresos.preparar_orden", "documentos.cargar"]],

@@ -951,9 +951,12 @@ RUTAS = {
     "adjuntar_factura_orden_pago",
     # 0103: los seguros y las habilitaciones del proveedor (RF50).
     "cargar_documentacion_proveedor", "documentacion_proveedor_lectura",
+    # 0104: rubros legales, consulta y configuración (la de soporte corre como `cem_app`).
+    "asignar_rubro_legal_proveedor", "proveedores_consulta", "configuracion_proveedores_lectura",
+    "configurar_proveedores", "configuracion_proveedores_soporte",
 }  # fmt: skip
-"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093`, `0099` y
-`0103`)."""
+"""Lo único que `cem_app` ejecuta: las funciones de las rutas (`0049`, `0050`, `0093`, `0099`,
+`0103` y `0104`)."""
 
 
 def test_cem_app_solo_ejecuta_las_funciones_de_las_rutas(motor_migrate):

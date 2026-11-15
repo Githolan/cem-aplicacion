@@ -61,6 +61,8 @@ class Contexto:
     """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
     identidades: Mapping[UUID, UUID] = field(default_factory=dict)
     """Las identidades de otras personas que necesita la acción; las agrega `Permiso`."""
+    roles_configurados: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    """Acción → roles que la configuración del consorcio lista para ella (`0104`)."""
     sesion_id: UUID | None = None
     """La sesión de la petición: las funciones económicas de la base la vuelven a comprobar
     (`exigir_acto_economico`). None solo en las pruebas que reemplazan la identidad."""
@@ -81,6 +83,7 @@ class Contexto:
             hay_administrador_vigente=self.hay_administrador_vigente,
             identidades=identidades,
             segundo_factor_reciente=self.segundo_factor_reciente,
+            roles_configurados=self.roles_configurados,
         )
 
 
@@ -151,11 +154,12 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
                 vigente_desde=f.vigente_desde,
                 vigente_hasta=f.vigente_hasta,
                 causa_baja=f.causa_baja,
+                tipo=f.tipo,
             )
             for f in conn.execute(
                 text(
                     "select id, consorcio_id, vigente_desde, vigente_hasta,"
-                    " causa_baja::text as causa_baja from nucleo.mandato"
+                    " causa_baja::text as causa_baja, tipo::text as tipo from nucleo.mandato"
                     " where consorcio_id = :c and persona_id = :p"
                     " and nucleo.mandato_vigente(id, :hoy) order by id"
                 ),
@@ -183,6 +187,13 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
             ),
             {"c": consorcio_id, "hoy": hoy},
         ).scalar_one()
+        # RF50 configurable (0104): qué roles ven lo que la configuración del consorcio decide.
+        roles_configurados = {
+            f.accion: frozenset(f.roles)
+            for f in conn.execute(
+                text("select accion, roles from nucleo.roles_configurados(:c)"), {"c": consorcio_id}
+            )
+        }
         modo = conn.execute(
             text(
                 "select modo from nucleo.modo_operacion where consorcio_id = :c"
@@ -221,6 +232,7 @@ def require_scope(consorcio_id: UUID, identidad: IdentidadDep, motor: MotorDep) 
         hay_administrador_vigente=hay_administrador,
         identidad_humana=identidad_humana,
         segundo_factor_reciente=controles is not None and controles.segundo_factor,
+        roles_configurados=roles_configurados,
         sesion_id=identidad.sesion_id,
     )
 

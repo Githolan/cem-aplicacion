@@ -7,7 +7,8 @@ concesiones). Las políticas viven en `politicas_datos/<módulo>.json`, dentro d
 para que el backend las encuentre instalado; el frontend lee los mismos archivos.
 
 - **Concesión:** por vínculo (`concede_por_vinculo`), por ámbito (`concede_por_ambito`, por
-  defecto `false`) o por una facultad exacta (`facultad`) cuyo recurso alcance (`recurso`).
+  defecto `false`), por la configuración del consorcio (`concede_por_configuracion`, por defecto
+  `false`) o por una facultad exacta (`facultad`) cuyo recurso alcance (`recurso`).
 - **Filtros, que solo niegan:** `modos` y `sin_modo` (R6), `separacion` (R8), `respaldo` (R9),
   `destinatario_unico` (A14) y `economica` (R10: se niega hasta 2b-6).
 - **`fuente_normativa`** (D8): obligatoria y no vacía. No concede ni niega; la revisa el asesor
@@ -114,6 +115,11 @@ class Politica(_Estricto):
     """Concede a cualquiera que pase el ámbito. Hoy `unidades.listar` (D6),
     `auditoria.mis_eventos` (RF35-B), `contactos.ver` (2b-7) y `consorcios.mis_acciones`
     (documento 13, §10.5)."""
+    concede_por_configuracion: StrictBool = False
+    """Concede a quien tiene, en este consorcio, un rol (tipo de mandato vigente o de vínculo
+    vigente) que la configuración del consorcio lista para esta acción. Hoy `proveedores.ver`
+    (RF50 configurable, sí del propietario del 15-11-2026): los roles los fija el equipo por
+    consorcio y la base repite la misma regla."""
     facultad: CodigoAccion | None = None
     """Código exacto de la facultad (catálogo de D2) que concede la acción."""
     modos: tuple[ModoOperacion, ...]

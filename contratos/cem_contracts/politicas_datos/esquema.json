@@ -69,6 +69,11 @@
           "title": "Concede Por Ambito",
           "type": "boolean"
         },
+        "concede_por_configuracion": {
+          "default": false,
+          "title": "Concede Por Configuracion",
+          "type": "boolean"
+        },
         "concede_por_vinculo": {
           "anyOf": [
             {

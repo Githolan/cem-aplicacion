@@ -5,7 +5,8 @@
 1. **Ámbito:** vínculo vigente o mandato vigente de **este** consorcio. Si no, 404, igual que
    si el consorcio no existiera (R2).
 2. **Acción no declarada:** se niega (R1).
-3. **Concesión:** por vínculo declarado, por ámbito declarado o por una facultad con el código
+3. **Concesión:** por vínculo declarado, por ámbito declarado, por un rol que la configuración
+   del consorcio lista para la acción (`roles_configurados`) o por una facultad con el código
    exacto, de un mandato vigente de este consorcio, cuyo recurso alcanza (R7, R11).
 4. **Filtros, todos:** modo (R6), separación (R8), respaldo (R9), destinatario único (A14) y
    económicas (R10). Cualquiera niega; **ninguno concede**.
@@ -62,6 +63,7 @@ class Motivo(StrEnum):
 
     CONCEDIDO_POR_VINCULO = "concedido_por_vinculo"
     CONCEDIDO_POR_AMBITO = "concedido_por_ambito"
+    CONCEDIDO_POR_CONFIGURACION = "concedido_por_configuracion"
     CONCEDIDO_POR_FACULTAD = "concedido_por_facultad"
     FUERA_DE_AMBITO = "fuera_de_ambito"
     ACCION_NO_DECLARADA = "accion_no_declarada"
@@ -115,6 +117,9 @@ class Mandato:
     vigente_desde: date
     vigente_hasta: date | None = None
     causa_baja: str | None = None
+    tipo: str | None = None
+    """`nucleo.tipo_mandato` (administrador, miembro_consejo, administrador_externo): solo lo
+    mira la concesión por configuración."""
 
     def vigente(self, fecha: date) -> bool:
         if self.causa_baja == CAUSA_ERROR_CARGA:
@@ -150,6 +155,9 @@ class ContextoAutorizacion:
     de las personas de la entidad. Una persona que no está, no tiene identidad verificada."""
     segundo_factor_reciente: bool = False
     """La sesión verificó el segundo factor hace menos de 10 minutos (TB-CEM-3, R10)."""
+    roles_configurados: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    """Acción → roles que la configuración del consorcio lista para ella (tipos de mandato o de
+    vínculo; `nucleo.roles_configurados`, `0104`). Una acción que no está no concede a nadie."""
 
 
 @dataclass(frozen=True)
@@ -245,8 +253,9 @@ def alcanza(
     - **Ámbito y acción no declarada:** como `evaluar`.
     - **Concesión, sobre alguna entidad posible:** un vínculo del tipo declarado (respetando
       `solo_confirmados`, sin mirar `misma_unidad`: alcanza si es sobre su unidad), el ámbito
-      declarado o una facultad con el código exacto, de un mandato válido de este consorcio,
-      cuyo recurso sea admisible para la acción. Uno mal formado no cuenta.
+      declarado, un rol que la configuración lista para la acción o una facultad con el código
+      exacto, de un mandato válido de este consorcio, cuyo recurso sea admisible para la acción.
+      Uno mal formado no cuenta.
     - **Filtros que no dependen de la entidad:** el modo (R6) y, en las económicas, la identidad
       humana verificada de quien actúa (R10).
     - **Lo que no se mira:** el segundo factor reciente y la sesión reciente, que se renuevan (la
@@ -274,6 +283,19 @@ def _mandatos_validos(contexto: ContextoAutorizacion) -> set[UUID]:
     }
 
 
+def _por_configuracion(
+    politica: Politica, contexto: ContextoAutorizacion, mandatos_validos: set[UUID]
+) -> bool:
+    """Algún rol de la persona hoy está entre los que la configuración lista para la acción:
+    el tipo de un mandato válido de este consorcio o el tipo de un vínculo vigente."""
+    if not politica.concede_por_configuracion:
+        return False
+    roles = contexto.roles_configurados.get(politica.accion, frozenset())
+    tiene = {m.tipo for m in contexto.mandatos if m.id in mandatos_validos and m.tipo is not None}
+    tiene |= {str(v.tipo) for v in contexto.vinculos}
+    return not roles.isdisjoint(tiene)
+
+
 def _vinculo_cuenta(vinculo: Vinculo, por_vinculo: ConcesionPorVinculo) -> bool:
     """Tipo y confirmación; `misma_unidad` depende de la entidad y lo mira quien llama."""
     return vinculo.tipo in por_vinculo.tipos and (
@@ -288,6 +310,8 @@ def _concesion_posible(
     if por_vinculo is not None and any(_vinculo_cuenta(v, por_vinculo) for v in contexto.vinculos):
         return True
     if politica.concede_por_ambito:
+        return True
+    if _por_configuracion(politica, contexto, mandatos_validos):
         return True
     return politica.facultad is not None and any(
         f.codigo == politica.facultad
@@ -313,6 +337,8 @@ def _concesion(
                 return _permite(Motivo.CONCEDIDO_POR_VINCULO)
     if politica.concede_por_ambito:
         return _permite(Motivo.CONCEDIDO_POR_AMBITO)
+    if _por_configuracion(politica, contexto, mandatos_validos):
+        return _permite(Motivo.CONCEDIDO_POR_CONFIGURACION)
     if politica.facultad is None:
         return _niega(Motivo.SIN_CONCESION)
     # Cada facultad se evalúa sola (caso 8): una mal formada no anula a otra válida. Si

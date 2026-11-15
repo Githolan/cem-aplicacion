@@ -473,3 +473,11 @@ H3,egresos.conciliar_pago,MC,C,,vigente,si,preparo=otro;ejecuto=otro,403,modo_no
 §10.5,consorcios.mis_acciones,AE,AA,,vigente,si,,200,concedido_por_ambito,el administrador externo con cuenta pide lo que alcanza
 §10.5,consorcios.mis_acciones,P,—,,sin_mandato,no,,200,concedido_por_ambito,sin modo: la lista se pide igual
 §10.5,consorcios.mis_acciones,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato
+RF50c,proveedores.ver,MC,C,,vigente,si,,200,concedido_por_configuracion,el miembro del Consejo consulta los proveedores con la configuración por defecto
+RF50c,proveedores.ver,AD,AA,,vigente,si,,200,concedido_por_configuracion,la administración también
+RF50c,proveedores.ver,AE,AA,,vigente,si,,200,concedido_por_configuracion,el administrador externo con cuenta también
+RF50c,proveedores.ver,P,C,,sin_mandato,si,,403,sin_concesion,el propietario no está en la configuración por defecto
+RF50c,proveedores.ver,I,AG,,sin_mandato,si,,403,sin_concesion,el inquilino tampoco
+RF50c,proveedores.ver,P+MC,C,,vencido,si,,403,sin_concesion,un mandato del Consejo vencido no cuenta aunque quede el vínculo
+RF50c,proveedores.ver,MC,—,,vigente,no,,403,sin_modo_registrado,sin modo registrado no corre
+RF50c,proveedores.ver,ninguna,C,,sin_mandato,si,,404,fuera_de_ambito,sin vínculo ni mandato

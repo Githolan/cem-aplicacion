@@ -241,6 +241,14 @@ const MENSAJES: Record<string, string> = {
   aprobaciones_insuficientes: "La versión no tiene las aprobaciones que pide.",
   contrato_no_vigente: "El contrato que respaldaba la orden ya no rige: hay que renovarla; la versión nueva va sin contrato y pide aprobación.",
   moneda_no_habilitada: "Este edificio opera solo en pesos.",
+  // RF50 configurable (app 0104).
+  documentacion_legal_faltante:
+    "Al proveedor le falta documentación que exige la ley, o la tiene vencida: hay que cargarla en su ficha antes de prepararle una orden.",
+  vencimiento_invalido: "Hace falta la fecha de vencimiento o marcar «No vence», no las dos.",
+  no_vence_no_admitido: "Este edificio no admite documentos sin vencimiento: hace falta la fecha.",
+  requisito_invalido: "Ese requisito legal no corresponde a ese tipo de documento.",
+  rubro_legal_invalido: "Ese rubro legal no existe.",
+  rubro_legal_sin_cambios: "El proveedor ya estaba así. La ficha ya está actualizada.",
   contrato_no_aplica: "El contrato elegido no cubre esta orden (no rige, es de otro proveedor o moneda, o el importe supera su máximo). Hay que elegir otro o ninguno.",
   modalidad_riel: "Esta orden se paga por el riel: no se registra a mano.",
   pago_ya_registrado: "El pago de esta orden ya está registrado: falta que el Consejo lo concilie.",

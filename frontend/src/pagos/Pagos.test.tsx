@@ -4737,6 +4737,8 @@ describe("RF50: la documentación vencida del proveedor marca la orden (app 0103
     cargada_en: "2026-10-20T15:00:00Z",
     reemplaza_a: null,
     documento_vigente: true,
+    no_vence: false,
+    requisito_codigo: null,
   } as const;
 
   it("lo dice en una línea y deja las acciones como estaban", async () => {

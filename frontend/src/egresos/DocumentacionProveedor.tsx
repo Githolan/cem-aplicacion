@@ -18,8 +18,11 @@ import { exigirSesion, SinSesion, useConsultaDelAntivirus } from "./useConsorcio
 // no lo excluye: se le puede seguir contratando y pagando. El estado lo calcula la base con el día
 // del edificio; aquí solo se dice en palabras. Agregar o reemplazar es un solo paso: completar qué es
 // y hasta cuándo vale, y elegir el archivo. Lo que el rol no puede hacer no aparece.
+// RF50 configurable (app 0104): «No vence» con la fecha en blanco, si el edificio lo admite, y el
+// requisito de la ley que cubre, a elegir de la matriz legal.
 
 export type Documentacion = components["schemas"]["DocumentacionProveedor"];
+export type RequisitoLegal = components["schemas"]["RequisitoLegal"];
 type Estado = components["schemas"]["EstadoDocumentacionProveedor"];
 type Tipo = components["schemas"]["TipoDocumentacionProveedor"];
 
@@ -27,6 +30,8 @@ export const TITULO_SECCION = "Seguros y habilitaciones";
 export const AGREGAR = "Agregar un seguro o una habilitación";
 export const AVISO_VENCIDA = "Tiene documentación vencida. Se le puede seguir contratando y pagando; queda marcado.";
 export const SIN_DOCUMENTACION = "No tiene seguros ni habilitaciones cargados.";
+export const NO_VENCE = "No vence";
+export const SIN_REQUISITO = "Ninguno en particular";
 export const TEXTO_TIPO: Record<Tipo, string> = { seguro: "Seguro", habilitacion: "Habilitación" };
 /** Lo que cuenta para la marca y lo único que se reemplaza (`ESTADOS_QUE_VALEN` del contrato). */
 const VALEN: ReadonlySet<Estado> = new Set<Estado>(["vigente", "por_vencer", "vencida"]);
@@ -34,11 +39,11 @@ const LARGO_DESCRIPCION = 120;
 const DEL_ARCHIVO = new Set([408, 413, 415, 503]);
 
 /** El estado en palabras, con la fecha cuando la tiene. */
-export function textoEstado(d: Pick<Documentacion, "estado" | "vence_el">): string {
-  const fecha = fechaLegible(d.vence_el);
+export function textoEstado(d: Pick<Documentacion, "estado" | "vence_el" | "no_vence">): string {
+  const fecha = d.vence_el === null ? "" : fechaLegible(d.vence_el);
   switch (d.estado) {
     case "vigente":
-      return `Vigente hasta el ${fecha}`;
+      return d.no_vence ? "Vigente: no vence" : `Vigente hasta el ${fecha}`;
     case "por_vencer":
       return `Vence pronto: el ${fecha}`;
     case "vencida":
@@ -61,12 +66,16 @@ type Props = {
   proveedor: { id: string; razon_social: string };
   documentacion: Documentacion[];
   puedeCargar: boolean;
+  /** La matriz legal, para decir qué requisito cubre cada una y elegirlo al cargar. */
+  requisitos: readonly RequisitoLegal[];
+  /** Si el edificio admite «No vence» (configuración, app 0104). */
+  admiteNoVence: boolean;
   aEntrar: () => void;
   /** Se vuelve a leer la ficha: algo quedó cargado. */
   alCambiar: () => void;
 };
 
-export function DocumentacionProveedor({ consorcio, proveedor, documentacion, puedeCargar, aEntrar, alCambiar }: Props) {
+export function DocumentacionProveedor({ consorcio, proveedor, documentacion, puedeCargar, requisitos, admiteNoVence, aEntrar, alCambiar }: Props) {
   const id = useId();
   const [hoja, setHoja] = useState<{ reemplaza: Documentacion | null } | null>(null);
   // Las que valen y las que esperan, arriba; lo reemplazado y lo rechazado, como historia.
@@ -90,6 +99,7 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
               <strong>
                 {TEXTO_TIPO[d.tipo]}: {d.descripcion}
               </strong>
+              {d.requisito_codigo !== null && <span>Cubre: {descripcionDe(requisitos, d.requisito_codigo)}</span>}
               <span className="etiqueta-situacion" data-tono={TONO[d.estado]}>
                 {textoEstado(d)}
               </span>
@@ -108,7 +118,8 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
           <ul className="versiones">
             {historia.map((d) => (
               <li key={d.id}>
-                {TEXTO_TIPO[d.tipo]}: {d.descripcion}. {textoEstado(d)}. Vencía el {fechaLegible(d.vence_el)}.
+                {TEXTO_TIPO[d.tipo]}: {d.descripcion}. {textoEstado(d)}.
+                {d.vence_el === null ? ` ${NO_VENCE}.` : ` Vencía el ${fechaLegible(d.vence_el)}.`}
               </li>
             ))}
           </ul>
@@ -124,6 +135,8 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
           consorcio={consorcio}
           proveedor={proveedor}
           reemplaza={hoja.reemplaza}
+          requisitos={requisitos}
+          admiteNoVence={admiteNoVence}
           aEntrar={aEntrar}
           alCerrar={(cambio) => {
             setHoja(null);
@@ -135,21 +148,31 @@ export function DocumentacionProveedor({ consorcio, proveedor, documentacion, pu
   );
 }
 
+/** El requisito en palabras; uno que ya no está en la matriz se dice por su código. */
+export function descripcionDe(requisitos: readonly RequisitoLegal[], codigo: string): string {
+  return requisitos.find((r) => r.codigo === codigo)?.descripcion ?? codigo;
+}
+
 type Fase = { tipo: "elegir" } | { tipo: "subiendo" } | { tipo: "revisando" } | { tipo: "aceptada" } | { tipo: "rechazada" };
 
 type PropsHoja = {
   consorcio: string;
   proveedor: { id: string; razon_social: string };
   reemplaza: Documentacion | null;
+  requisitos: readonly RequisitoLegal[];
+  admiteNoVence: boolean;
   aEntrar: () => void;
   alCerrar: (cambio: boolean) => void;
 };
 
-export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, alCerrar }: PropsHoja) {
+export function SubirDocumentacion({ consorcio, proveedor, reemplaza, requisitos, admiteNoVence, aEntrar, alCerrar }: PropsHoja) {
   const id = useId();
   const [tipo, setTipo] = useState<Tipo>(reemplaza?.tipo ?? "seguro");
   const [descripcion, setDescripcion] = useState(reemplaza?.descripcion ?? "");
   const [vence, setVence] = useState("");
+  const [noVence, setNoVence] = useState(false);
+  const [requisito, setRequisito] = useState(reemplaza?.requisito_codigo ?? "");
+  const deEsteTipo = requisitos.filter((r) => r.tipo === tipo);
   const [fase, setFase] = useState<Fase>({ tipo: "elegir" });
   const [falla, setFalla] = useState<string | null>(null);
   const clave = useRef<string | null>(null);
@@ -177,7 +200,7 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, a
 
   async function subir(archivo: File) {
     const sinDescripcion = descripcion.trim() === "";
-    if (sinDescripcion || vence === "") {
+    if (sinDescripcion || (!noVence && vence === "")) {
       setFalla(sinDescripcion ? "Falta decir qué cubre." : "Falta la fecha de vencimiento.");
       return;
     }
@@ -192,7 +215,8 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, a
           query: {
             tipo,
             descripcion: descripcion.trim(),
-            vence_el: vence,
+            ...(noVence ? { no_vence: true } : { vence_el: vence }),
+            ...(requisito === "" ? {} : { requisito }),
             titulo: tituloDeArchivo(archivo, TEXTO_TIPO[tipo], LARGO_TITULO),
             ...(reemplaza === null ? {} : { reemplaza: reemplaza.id }),
           },
@@ -263,7 +287,17 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, a
               <legend>Qué es</legend>
               {(["seguro", "habilitacion"] as const).map((t) => (
                 <label key={t} className="opcion">
-                  <input type="radio" name={`${id}-tipo`} value={t} checked={tipo === t} disabled={enviando} onChange={() => setTipo(t)} />
+                  <input
+                    type="radio"
+                    name={`${id}-tipo`}
+                    value={t}
+                    checked={tipo === t}
+                    disabled={enviando}
+                    onChange={() => {
+                      setTipo(t);
+                      setRequisito("");
+                    }}
+                  />
                   {TEXTO_TIPO[t]}
                 </label>
               ))}
@@ -283,8 +317,34 @@ export function SubirDocumentacion({ consorcio, proveedor, reemplaza, aEntrar, a
             placeholder="Por ejemplo: ART del personal, matrícula de gasista"
             onChange={(e) => setDescripcion(e.target.value)}
           />
+          {deEsteTipo.length > 0 && (
+            <>
+              <label htmlFor={`${id}-requisito`}>Qué requisito de la ley cubre</label>
+              <select id={`${id}-requisito`} value={requisito} disabled={enviando} onChange={(e) => setRequisito(e.target.value)}>
+                <option value="">{SIN_REQUISITO}</option>
+                {deEsteTipo.map((r) => (
+                  <option key={r.codigo} value={r.codigo}>
+                    {r.descripcion}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <label htmlFor={`${id}-vence`}>Vence el</label>
-          <input id={`${id}-vence`} type="date" required value={vence} disabled={enviando} onChange={(e) => setVence(e.target.value)} />
+          <input
+            id={`${id}-vence`}
+            type="date"
+            required={!noVence}
+            value={noVence ? "" : vence}
+            disabled={enviando || noVence}
+            onChange={(e) => setVence(e.target.value)}
+          />
+          {admiteNoVence && (
+            <label className="opcion">
+              <input type="checkbox" checked={noVence} disabled={enviando} onChange={(e) => setNoVence(e.target.checked)} />
+              {NO_VENCE}: la fecha queda en blanco
+            </label>
+          )}
           <SubirArchivo de="del documento" tipos={TIPOS_DE_DOCUMENTO} tope={TOPE_BYTES} deshabilitada={enviando} alElegir={(a) => void subir(a)} />
           {enviando && (
             <p role="status" className="aviso-info">

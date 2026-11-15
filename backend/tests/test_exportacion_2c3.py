@@ -119,7 +119,12 @@ CLAVES_POR_ENTIDAD = {
     "contrato_baja": {"contrato_id", "baja_por_nombre", "creada_en"},
     "documentacion_proveedor": {"id", "proveedor_id", "tipo", "descripcion", "vence_el",
                                 "documento_id", "version_documento_id", "cargada_por_nombre",
-                                "cargada_en", "reemplaza_a"},
+                                "cargada_en", "reemplaza_a", "no_vence", "requisito_codigo"},
+    "rubro_legal_proveedor": {"numero", "proveedor_id", "rubro_legal", "accion",
+                              "registrado_por_nombre", "registrado_en"},
+    "configuracion_proveedores": {"numero", "dias_por_vencer", "modo_exigencia",
+                                  "admite_no_vence", "roles_que_ven", "requisitos_agregados",
+                                  "requisitos_omitidos", "origen", "registrada_en"},
     "orden": {"id", "estado", "version_vigente", "preparada_por_nombre", "creada_en",
               "actualizada_en", "aprobada_en", "motivo_rechazo"},
     "orden_version": {"orden_id", "numero", "importe_centavos", "moneda", "concepto",
@@ -1283,6 +1288,8 @@ TABLA_DE_LA_ENTIDAD = {
     "contrato_confirmacion": "nucleo.contrato_proveedor_confirmacion",
     "contrato_baja": "nucleo.contrato_proveedor_baja",
     "documentacion_proveedor": "nucleo.documentacion_proveedor",
+    "rubro_legal_proveedor": "nucleo.rubro_legal_proveedor",
+    "configuracion_proveedores": "nucleo.configuracion_proveedores",
     "orden": "nucleo.orden_pago",
     "orden_version": "nucleo.orden_pago_version",
     "orden_aprobacion": "nucleo.orden_pago_aprobacion",
@@ -1328,10 +1335,14 @@ ADJUNTAR_FACTURA = (
     "select nucleo.adjuntar_factura_orden_pago(:orden, :version, null, 'Factura SINTETICA',"
     " 'application/pdf', 1, repeat('b', 64), :actor, :origen, :sesion)"
 )
+ASIGNAR_RUBRO = (
+    "select nucleo.asignar_rubro_legal_proveedor(:proveedor, 'general', true, :actor, :origen,"
+    " :sesion)"
+)
 CARGAR_DOCUMENTACION = (
     "select nucleo.cargar_documentacion_proveedor(:proveedor, 'seguro', 'ART SINTETICA',"
     " current_date, null, 'Poliza SINTETICA', 'application/pdf', 1, repeat('c', 64), :actor,"
-    " :origen, :sesion)"
+    " :origen, :sesion, null, false)"
 )
 TRANSICIONES = (
     "select count(*) from auditoria.eventos where consorcio_id = :c and entidad = 'orden_pago'"
@@ -1456,6 +1467,12 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
     llamar(motor_migrate, s, s.adm, ADJUNTAR_FACTURA, orden=pagadas[1], version=1)
     # Un seguro del proveedor (RF50, 0103).
     llamar(motor_migrate, s, s.adm, CARGAR_DOCUMENTACION)
+    # La configuración del equipo y un rubro legal (0104). En modo «avisar»: las órdenes que
+    # siguen se preparan aunque al proveedor le falte lo que pide el rubro.
+    with transaccion(motor_app, persona_id=None, consorcio_id=s.cons) as c:
+        c.execute(text("select nucleo.configurar_proveedores(null, 'avisar', null, null, null,"
+                       " null, null, 'soporte')"))  # fmt: skip
+    llamar(motor_migrate, s, s.adm, ASIGNAR_RUBRO)
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
     leida_para_carga(motor_migrate, motor_app, s)

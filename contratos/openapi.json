@@ -894,6 +894,12 @@
           "factura_no_vigente",
           "documentacion_no_vigente",
           "documentacion_en_revision",
+          "vencimiento_invalido",
+          "no_vence_no_admitido",
+          "requisito_invalido",
+          "rubro_legal_invalido",
+          "rubro_legal_sin_cambios",
+          "documentacion_legal_faltante",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",
@@ -1308,6 +1314,29 @@
         ],
         "title": "CondicionBeneficiario",
         "type": "string"
+      },
+      "ConfiguracionProveedores": {
+        "description": "Lo que la pantalla necesita de la configuración del consorcio (`0104`).",
+        "properties": {
+          "admite_no_vence": {
+            "title": "Admite No Vence",
+            "type": "boolean"
+          },
+          "dias_por_vencer": {
+            "title": "Dias Por Vencer",
+            "type": "integer"
+          },
+          "modo_exigencia": {
+            "$ref": "#/components/schemas/ModoExigencia"
+          }
+        },
+        "required": [
+          "dias_por_vencer",
+          "modo_exigencia",
+          "admite_no_vence"
+        ],
+        "title": "ConfiguracionProveedores",
+        "type": "object"
       },
       "Confirmacion": {
         "additionalProperties": false,
@@ -3018,6 +3047,11 @@
             "title": "Id",
             "type": "string"
           },
+          "no_vence": {
+            "description": "«No vence»: la fecha va en blanco y vale siempre.",
+            "title": "No Vence",
+            "type": "boolean"
+          },
           "proveedor_id": {
             "format": "uuid",
             "title": "Proveedor Id",
@@ -3035,14 +3069,33 @@
             ],
             "title": "Reemplaza A"
           },
+          "requisito_codigo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El requisito de la matriz legal que cubre (`RequisitoLegal.codigo`), o nulo.",
+            "title": "Requisito Codigo"
+          },
           "tipo": {
             "$ref": "#/components/schemas/TipoDocumentacionProveedor"
           },
           "vence_el": {
-            "description": "El último día en que vale.",
-            "format": "date",
-            "title": "Vence El",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "El último día en que vale; nulo si no vence.",
+            "title": "Vence El"
           },
           "version_documento_id": {
             "description": "La versión exacta del archivo. Se abre con `…/documentos/{documento_id}/versiones/{version_documento_id}/contenido` si quien mira puede ver la categoría y el antivirus lo aceptó.",
@@ -3057,6 +3110,8 @@
           "tipo",
           "descripcion",
           "vence_el",
+          "no_vence",
+          "requisito_codigo",
           "documento_id",
           "version_documento_id",
           "estado",
@@ -4625,6 +4680,55 @@
           "documentacion_proveedor"
         ],
         "title": "FichaPago",
+        "type": "object"
+      },
+      "FichaProveedorConsulta": {
+        "properties": {
+          "configuracion": {
+            "$ref": "#/components/schemas/ConfiguracionProveedores"
+          },
+          "documentacion": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentacionProveedor"
+            },
+            "title": "Documentacion",
+            "type": "array"
+          },
+          "faltantes": {
+            "items": {
+              "$ref": "#/components/schemas/RequisitoFaltante"
+            },
+            "title": "Faltantes",
+            "type": "array"
+          },
+          "proveedor": {
+            "$ref": "#/components/schemas/ProveedorConsulta"
+          },
+          "requisitos": {
+            "description": "La matriz legal, para decirla en palabras.",
+            "items": {
+              "$ref": "#/components/schemas/RequisitoLegal"
+            },
+            "title": "Requisitos",
+            "type": "array"
+          },
+          "rubros_legales": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rubros Legales",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proveedor",
+          "documentacion",
+          "rubros_legales",
+          "faltantes",
+          "requisitos",
+          "configuracion"
+        ],
+        "title": "FichaProveedorConsulta",
         "type": "object"
       },
       "FilaInforme": {
@@ -6781,8 +6885,17 @@
       },
       "ListaProveedores": {
         "properties": {
+          "documentacion_faltante": {
+            "description": "Los proveedores a los que les falta documentación que exige la ley para sus rubros legales, o la tienen vencida (`0104`).",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Faltante",
+            "type": "array"
+          },
           "documentacion_por_vencer": {
-            "description": "Los proveedores sin nada vencido y con algo que vence dentro de `DIAS_POR_VENCER` días.",
+            "description": "Los proveedores sin nada vencido y con algo que vence dentro de los días de la configuración del consorcio.",
             "items": {
               "format": "uuid",
               "type": "string"
@@ -6805,14 +6918,66 @@
             },
             "title": "Elementos",
             "type": "array"
+          },
+          "modo_exigencia": {
+            "$ref": "#/components/schemas/ModoExigencia"
           }
         },
         "required": [
           "elementos",
           "documentacion_vencida",
-          "documentacion_por_vencer"
+          "documentacion_por_vencer",
+          "documentacion_faltante",
+          "modo_exigencia"
         ],
         "title": "ListaProveedores",
+        "type": "object"
+      },
+      "ListaProveedoresConsulta": {
+        "properties": {
+          "documentacion_faltante": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Faltante",
+            "type": "array"
+          },
+          "documentacion_por_vencer": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Por Vencer",
+            "type": "array"
+          },
+          "documentacion_vencida": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Vencida",
+            "type": "array"
+          },
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/ProveedorConsulta"
+            },
+            "title": "Elementos",
+            "type": "array"
+          },
+          "modo_exigencia": {
+            "$ref": "#/components/schemas/ModoExigencia"
+          }
+        },
+        "required": [
+          "elementos",
+          "documentacion_vencida",
+          "documentacion_por_vencer",
+          "documentacion_faltante",
+          "modo_exigencia"
+        ],
+        "title": "ListaProveedoresConsulta",
         "type": "object"
       },
       "ListaSesiones": {
@@ -7494,6 +7659,15 @@
         ],
         "title": "MisAcciones",
         "type": "object"
+      },
+      "ModoExigencia": {
+        "description": "Qué hace la documentación que exige la ley cuando falta o venció (`0104`, configurable por\nconsorcio).",
+        "enum": [
+          "avisar",
+          "bloquear"
+        ],
+        "title": "ModoExigencia",
+        "type": "string"
       },
       "ModoOperacion": {
         "description": "Modo de operación del consorcio (documento 08, §5; `nucleo.tipo_modo`, 0010).",
@@ -9162,12 +9336,22 @@
       },
       "ProveedorConVersiones": {
         "properties": {
+          "configuracion": {
+            "$ref": "#/components/schemas/ConfiguracionProveedores"
+          },
           "documentacion": {
             "description": "Los seguros y las habilitaciones, de la más vieja a la más nueva, con las reemplazadas y las rechazadas como historia (RF50, `0103`).",
             "items": {
               "$ref": "#/components/schemas/DocumentacionProveedor"
             },
             "title": "Documentacion",
+            "type": "array"
+          },
+          "faltantes": {
+            "items": {
+              "$ref": "#/components/schemas/RequisitoFaltante"
+            },
+            "title": "Faltantes",
             "type": "array"
           },
           "proveedor": {
@@ -9177,6 +9361,22 @@
             "description": "Si puede agregar o reemplazar un seguro o una habilitación: prepara órdenes y carga documentos. Solo sirve para mostrar: la ruta y la base vuelven a decidir.",
             "title": "Puede Cargar Documentacion",
             "type": "boolean"
+          },
+          "requisitos": {
+            "description": "La matriz legal, para elegir.",
+            "items": {
+              "$ref": "#/components/schemas/RequisitoLegal"
+            },
+            "title": "Requisitos",
+            "type": "array"
+          },
+          "rubros_legales": {
+            "description": "Los rubros legales asignados (`0104`).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Rubros Legales",
+            "type": "array"
           },
           "versiones": {
             "items": {
@@ -9190,9 +9390,126 @@
           "proveedor",
           "versiones",
           "documentacion",
-          "puede_cargar_documentacion"
+          "puede_cargar_documentacion",
+          "rubros_legales",
+          "faltantes",
+          "requisitos",
+          "configuracion"
         ],
         "title": "ProveedorConVersiones",
+        "type": "object"
+      },
+      "ProveedorConsulta": {
+        "description": "El proveedor para quien solo consulta (`proveedores.ver`): sin la cuenta ni su huella.",
+        "properties": {
+          "atiende_emergencias": {
+            "title": "Atiende Emergencias",
+            "type": "boolean"
+          },
+          "contacto": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contacto"
+          },
+          "correo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correo"
+          },
+          "cuit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cuit"
+          },
+          "domicilio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Domicilio"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoProveedor"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "razon_social": {
+            "title": "Razon Social",
+            "type": "string"
+          },
+          "rubro": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rubro"
+          },
+          "telefono": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telefono"
+          },
+          "whatsapp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Whatsapp"
+          }
+        },
+        "required": [
+          "id",
+          "cuit",
+          "razon_social",
+          "rubro",
+          "contacto",
+          "telefono",
+          "whatsapp",
+          "correo",
+          "domicilio",
+          "atiende_emergencias",
+          "estado"
+        ],
+        "title": "ProveedorConsulta",
         "type": "object"
       },
       "ProveedorCreado": {
@@ -9767,6 +10084,85 @@
         "title": "Renovacion",
         "type": "object"
       },
+      "RequisitoFaltante": {
+        "description": "Un requisito exigido de los rubros legales del proveedor sin una constancia vigente o por\nvencer que lo cubra.",
+        "properties": {
+          "codigo": {
+            "title": "Codigo",
+            "type": "string"
+          },
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "rubro_legal": {
+            "title": "Rubro Legal",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoDocumentacionProveedor"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "codigo",
+          "rubro_legal",
+          "tipo",
+          "descripcion"
+        ],
+        "title": "RequisitoFaltante",
+        "type": "object"
+      },
+      "RequisitoLegal": {
+        "description": "Una fila de la matriz legal (`nucleo.requisito_legal`): lo que la ley pide a un rubro.",
+        "properties": {
+          "codigo": {
+            "title": "Codigo",
+            "type": "string"
+          },
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "exigido": {
+            "description": "Si este consorcio lo exige (configuración).",
+            "title": "Exigido",
+            "type": "boolean"
+          },
+          "fuente": {
+            "description": "La norma y su enlace; «SIN VERIFICAR» si no se confirmó.",
+            "title": "Fuente",
+            "type": "string"
+          },
+          "rubro_legal": {
+            "title": "Rubro Legal",
+            "type": "string"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoDocumentacionProveedor"
+          },
+          "verificado": {
+            "title": "Verificado",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "codigo",
+          "rubro_legal",
+          "tipo",
+          "descripcion",
+          "fuente",
+          "verificado",
+          "exigido"
+        ],
+        "title": "RequisitoLegal",
+        "type": "object"
+      },
       "ResolucionDiferencia": {
         "enum": [
           "pagada_por_lo_real",
@@ -9995,6 +10391,37 @@
           "eficaz_desde"
         ],
         "title": "RevisionMandato",
+        "type": "object"
+      },
+      "RubrosLegalesProveedor": {
+        "description": "`POST` y `DELETE …/proveedores/{p}/rubros-legales/{rubro}`: cómo quedó el proveedor.",
+        "properties": {
+          "faltantes": {
+            "items": {
+              "$ref": "#/components/schemas/RequisitoFaltante"
+            },
+            "title": "Faltantes",
+            "type": "array"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "rubros_legales": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Rubros Legales",
+            "type": "array"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "rubros_legales",
+          "faltantes"
+        ],
+        "title": "RubrosLegalesProveedor",
         "type": "object"
       },
       "Salud": {
@@ -12771,6 +13198,112 @@
         "summary": "Esquemas de coeficientes y reglas de reparto, por grupo y versión",
         "tags": [
           "coeficientes"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/consulta-proveedores": {
+      "get": {
+        "description": "RF50 configurable (sí del propietario del 15-11-2026, P1 y P2): el Consejo y los roles que\nlista la configuración del consorcio ven los proveedores y sus seguros, sin la cuenta.",
+        "operationId": "consultar_proveedores_api_v1_consorcios__consorcio_id__consulta_proveedores_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaProveedoresConsulta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los proveedores para quien solo consulta (`proveedores.ver`): sin la cuenta",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/consulta-proveedores/{proveedor_id}": {
+      "get": {
+        "operationId": "consultar_proveedor_api_v1_consorcios__consorcio_id__consulta_proveedores__proveedor_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FichaProveedorConsulta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "La ficha de un proveedor para quien solo consulta: datos, seguros, habilitaciones y lo que le falta",
+        "tags": [
+          "egresos"
         ]
       }
     },
@@ -20323,18 +20856,6 @@
             }
           },
           {
-            "description": "El último día en que vale.",
-            "in": "query",
-            "name": "vence_el",
-            "required": true,
-            "schema": {
-              "description": "El último día en que vale.",
-              "format": "date",
-              "title": "Vence El",
-              "type": "string"
-            }
-          },
-          {
             "description": "El título del documento.",
             "in": "query",
             "name": "titulo",
@@ -20364,6 +20885,56 @@
               ],
               "description": "Para reemplazar uno que vale: su `id` (el de `documentacion` en la ficha). Sin él, se agrega.",
               "title": "Reemplaza"
+            }
+          },
+          {
+            "description": "El último día en que vale; sin él, `no_vence`.",
+            "in": "query",
+            "name": "vence_el",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "El último día en que vale; sin él, `no_vence`.",
+              "title": "Vence El"
+            }
+          },
+          {
+            "description": "«No vence»: la fecha va en blanco (si el consorcio lo admite).",
+            "in": "query",
+            "name": "no_vence",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "«No vence»: la fecha va en blanco (si el consorcio lo admite).",
+              "title": "No Vence",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "El requisito de la matriz legal que cubre (`codigo`).",
+            "in": "query",
+            "name": "requisito",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "El requisito de la matriz legal que cubre (`codigo`).",
+              "title": "Requisito"
             }
           },
           {
@@ -20446,6 +21017,162 @@
           }
         },
         "summary": "Agregar o reemplazar un seguro o una habilitación del proveedor, con su vencimiento: queda con quién y cuándo, sin versión nueva del proveedor",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/rubros-legales/{rubro}": {
+      "delete": {
+        "operationId": "retirar_rubro_legal_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__rubros_legales__rubro__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El rubro legal.",
+            "in": "path",
+            "name": "rubro",
+            "required": true,
+            "schema": {
+              "description": "El rubro legal.",
+              "pattern": "^[a-z_]{1,40}$",
+              "title": "Rubro",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RubrosLegalesProveedor"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "El proveedor no existe en este consorcio."
+          },
+          "409": {
+            "description": "No tenía ese rubro (`rubro_legal_sin_cambios`)."
+          },
+          "422": {
+            "description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."
+          }
+        },
+        "summary": "Retirarle al proveedor un rubro legal: queda la constancia de quién y cuándo",
+        "tags": [
+          "egresos"
+        ]
+      },
+      "post": {
+        "operationId": "asignar_rubro_legal_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__rubros_legales__rubro__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El rubro legal.",
+            "in": "path",
+            "name": "rubro",
+            "required": true,
+            "schema": {
+              "description": "El rubro legal.",
+              "pattern": "^[a-z_]{1,40}$",
+              "title": "Rubro",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RubrosLegalesProveedor"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "El proveedor no existe en este consorcio."
+          },
+          "409": {
+            "description": "Ya tenía ese rubro (`rubro_legal_sin_cambios`)."
+          },
+          "422": {
+            "description": "El rubro no está en la matriz legal (`rubro_legal_invalido`)."
+          }
+        },
+        "summary": "Asignarle al proveedor un rubro legal: desde ahí se le exige lo que pide la ley",
         "tags": [
           "egresos"
         ]

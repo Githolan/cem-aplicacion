@@ -309,6 +309,16 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     delete from nucleo.documentacion_proveedor;"
                 "     alter table nucleo.documentacion_proveedor enable trigger user;"
                 "   end if;"
+                # Los rubros legales del proveedor y la configuración (0104) niegan su downgrade y
+                # citan el proveedor: se borran acá.
+                "   if to_regclass('nucleo.rubro_legal_proveedor') is not null then"
+                "     alter table nucleo.rubro_legal_proveedor disable trigger user;"
+                "     delete from nucleo.rubro_legal_proveedor;"
+                "     alter table nucleo.rubro_legal_proveedor enable trigger user;"
+                "     alter table nucleo.configuracion_proveedores disable trigger user;"
+                "     delete from nucleo.configuracion_proveedores;"
+                "     alter table nucleo.configuracion_proveedores enable trigger user;"
+                "   end if;"
                 # Lo que leyó la IA de un documento para carga (0088) cita sus versiones.
                 "   if to_regclass('nucleo.lectura_carga') is not null then"
                 "     alter table nucleo.lectura_carga disable trigger user;"
