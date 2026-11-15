@@ -6,7 +6,8 @@
    si el consorcio no existiera (R2).
 2. **Acción no declarada:** se niega (R1).
 3. **Concesión:** por vínculo declarado, por ámbito declarado, por un rol que la configuración
-   del consorcio lista para la acción (`roles_configurados`) o por una facultad con el código
+   del consorcio lista para la acción (`roles_configurados`), por una autorización del Consejo a
+   la persona (`autorizaciones`) o por una facultad con el código
    exacto, de un mandato vigente de este consorcio, cuyo recurso alcanza (R7, R11).
 4. **Filtros, todos:** modo (R6), separación (R8), respaldo (R9), destinatario único (A14) y
    económicas (R10). Cualquiera niega; **ninguno concede**.
@@ -158,6 +159,10 @@ class ContextoAutorizacion:
     roles_configurados: Mapping[str, frozenset[str]] = field(default_factory=dict)
     """Acción → roles que la configuración del consorcio lista para ella (tipos de mandato o de
     vínculo; `nucleo.roles_configurados`, `0104`). Una acción que no está no concede a nadie."""
+    autorizaciones: frozenset[str] = frozenset()
+    """Las acciones que el Consejo le autorizó a esta persona y que cuentan hoy
+    (`nucleo.acciones_autorizadas`, `0105`). Solo las concede una política con
+    `concede_por_configuracion`."""
 
 
 @dataclass(frozen=True)
@@ -286,10 +291,13 @@ def _mandatos_validos(contexto: ContextoAutorizacion) -> set[UUID]:
 def _por_configuracion(
     politica: Politica, contexto: ContextoAutorizacion, mandatos_validos: set[UUID]
 ) -> bool:
-    """Algún rol de la persona hoy está entre los que la configuración lista para la acción:
-    el tipo de un mandato válido de este consorcio o el tipo de un vínculo vigente."""
+    """El Consejo le autorizó la acción a la persona (`0105`), o algún rol de la persona hoy está
+    entre los que la configuración lista para la acción: el tipo de un mandato válido de este
+    consorcio o el tipo de un vínculo vigente."""
     if not politica.concede_por_configuracion:
         return False
+    if politica.accion in contexto.autorizaciones:
+        return True
     roles = contexto.roles_configurados.get(politica.accion, frozenset())
     tiene = {m.tipo for m in contexto.mandatos if m.id in mandatos_validos and m.tipo is not None}
     tiene |= {str(v.tipo) for v in contexto.vinculos}

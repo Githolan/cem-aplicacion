@@ -27,6 +27,15 @@ import {
 import { AVISO_CUENTA, AVISO_PROVEEDOR_CAMBIO, MARCA_FALTANTE, MARCA_VENCIDA } from "./Proveedores";
 import { AVISO_VENCIDA, SIN_DOCUMENTACION as SIN_DOCUMENTACION_TEXTO, SIN_REQUISITO } from "./DocumentacionProveedor";
 import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./ConsultaProveedores";
+import {
+  AUTORIZAR,
+  CONFIRMAR_AUTORIZAR,
+  CONFIRMAR_RETIRAR,
+  MOTIVO,
+  RETIRAR,
+  RUTA_AUTORIZACIONES_PROVEEDORES,
+  TITULO_AUTORIZACIONES_PROVEEDORES,
+} from "./AutorizacionesProveedores";
 import { AGREGAR_RUBRO, AVISO_FALTA_AVISA, AVISO_FALTA_BLOQUEA, SIN_RUBROS } from "./ExigenciaLegal";
 import { CUIT_INVALIDO } from "../CampoCuit";
 import { CUENTA_INVALIDA } from "../cuentaBancaria";
@@ -1248,6 +1257,101 @@ describe("página /proveedores (consulta)", () => {
     vi.stubGlobal("fetch", consulta({ [MIS_ACCIONES]: alcanza("contactos.ver") }));
     abrir(RUTA_CONSULTA_PROVEEDORES);
     await waitFor(() => expect(screen.queryByRole("heading", { name: TITULO_CONSULTA_PROVEEDORES })).toBeNull());
+    expect(await screen.findByRole("link", { name: /Contactos de emergencia/ })).toBeTruthy();
+  });
+});
+
+// Quién ve los proveedores (app 0105): el Consejo autoriza a un habitante, con el motivo.
+describe("página /proveedores/quien-los-ve", () => {
+  const LISTA = `${BASE}/autorizaciones-proveedores`;
+  const MIS_ACCIONES = `GET ${BASE}/mis-acciones`;
+  const sinAutorizar = {
+    persona_id: PERSONA,
+    nombre: "Habitante Ficticio",
+    unidades: ["3° A"],
+    autorizada: false,
+    motivo: null,
+    registrado_en: null,
+    registrado_por_nombre: null,
+  };
+  const autorizado = {
+    ...sinAutorizar,
+    autorizada: true,
+    motivo: "SINTETICO: comisión de obras",
+    registrado_en: "2026-11-15T15:00:00Z",
+    registrado_por_nombre: "Consejera Ficticia",
+  };
+  const pantalla = (extra: Respuestas = {}) =>
+    backend({
+      ...INICIO,
+      [MIS_ACCIONES]: alcanza("proveedores.autorizar"),
+      [`GET ${LISTA}`]: () => Response.json({ elementos: [sinAutorizar] }),
+      [`POST ${LISTA}/${PERSONA}`]: () => Response.json(autorizado),
+      ...extra,
+    });
+
+  it("autoriza con el motivo y la fila dice quién y cuándo", async () => {
+    const api = pantalla();
+    vi.stubGlobal("fetch", api);
+    const { container } = abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    expect(await screen.findByRole("heading", { name: "Habitante Ficticio" })).toBeTruthy();
+    expect(screen.getByText("Sin autorización.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: AUTORIZAR }));
+    const confirmar = screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR });
+    expect((confirmar as HTMLButtonElement).disabled).toBe(true); // sin motivo no se manda
+    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "  SINTETICO: comisión de obras  " } });
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(/^Autorizado el .* por Consejera Ficticia: SINTETICO: comisión de obras$/)).toBeTruthy();
+    const pedido = unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`));
+    expect(await pedido.json()).toEqual({ autorizada: true, motivo: "SINTETICO: comisión de obras" });
+    expect(pedido.headers.get("Idempotency-Key")).toBeTruthy();
+    expect(screen.getByRole("button", { name: RETIRAR }).className).toBe("secundario peligro");
+    await sinFaltasDeAccesibilidad(container);
+  });
+
+  it("retirar pide el motivo y es un acto negativo", async () => {
+    const api = pantalla({
+      [`GET ${LISTA}`]: () => Response.json({ elementos: [autorizado] }),
+      [`POST ${LISTA}/${PERSONA}`]: () => Response.json({ ...autorizado, autorizada: false, motivo: "SINTETICO: se mudó" }),
+    });
+    vi.stubGlobal("fetch", api);
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: RETIRAR }));
+    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO: se mudó" } });
+    const confirmar = screen.getByRole("button", { name: CONFIRMAR_RETIRAR });
+    expect(confirmar.className).toBe("peligro");
+    fireEvent.click(confirmar);
+    expect(await screen.findByText(/^Autorización retirada el .*: SINTETICO: se mudó$/)).toBeTruthy();
+    expect(await unico(pedidos(api, "POST", `${LISTA}/${PERSONA}`)).json()).toEqual({ autorizada: false, motivo: "SINTETICO: se mudó" });
+    expect(screen.getByRole("button", { name: AUTORIZAR })).toBeTruthy(); // control: vuelve a ofrecer autorizar
+  });
+
+  it("un rechazo se dice junto al formulario, que queda abierto con lo escrito", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`POST ${LISTA}/${PERSONA}`]: () => error("persona_sin_vinculo", 422) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    fireEvent.click(await screen.findByRole("button", { name: AUTORIZAR }));
+    fireEvent.change(screen.getByLabelText(MOTIVO), { target: { value: "SINTETICO" } });
+    fireEvent.click(screen.getByRole("button", { name: CONFIRMAR_AUTORIZAR }));
+    expect((await screen.findByRole("alert")).textContent).toBe(mensajeDeError(422, "persona_sin_vinculo"));
+    expect((screen.getByLabelText(MOTIVO) as HTMLTextAreaElement).value).toBe("SINTETICO");
+  });
+
+  it("con la autorización por persona apagada lo dice y no lista", async () => {
+    vi.stubGlobal("fetch", pantalla({ [`GET ${LISTA}`]: () => error("autorizacion_por_persona_apagada", 409) }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    expect(await screen.findByText(mensajeDeError(409, "autorizacion_por_persona_apagada"))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: AUTORIZAR })).toBeNull();
+  });
+
+  it("el menú la ofrece a quien autoriza y la dirección lleva al inicio a quien no", async () => {
+    vi.stubGlobal("fetch", pantalla());
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    const menu = await screen.findByRole("navigation", { name: "Secciones" });
+    expect(await within(menu).findByRole("link", { name: TITULO_AUTORIZACIONES_PROVEEDORES })).toBeTruthy();
+    cleanup();
+    vi.stubGlobal("fetch", pantalla({ [MIS_ACCIONES]: alcanza("contactos.ver") }));
+    abrir(RUTA_AUTORIZACIONES_PROVEEDORES);
+    await waitFor(() => expect(screen.queryByRole("heading", { name: TITULO_AUTORIZACIONES_PROVEEDORES })).toBeNull());
     expect(await screen.findByRole("link", { name: /Contactos de emergencia/ })).toBeTruthy();
   });
 });

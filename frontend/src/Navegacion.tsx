@@ -5,6 +5,7 @@ import { RUTA_CUENTA } from "./Cuenta";
 import { RUTA_DOCUMENTOS } from "./Documentos";
 import { RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
+import { RUTA_AUTORIZACIONES_PROVEEDORES, TITULO_AUTORIZACIONES_PROVEEDORES } from "./egresos/AutorizacionesProveedores";
 import { RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
 import { RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { RUTA_INICIO } from "./enlace";
@@ -43,6 +44,12 @@ const DE_ADMINISTRACION: readonly Destino[] = [
   { ruta: RUTA_INVITACIONES, texto: "Invitar a una persona", icono: "invitar", requisito: REQUISITOS.invitaciones },
   { ruta: RUTA_MANDATOS, texto: "Mandatos y decisiones", icono: "balanza", requisito: REQUISITOS.mandatos },
   { ruta: RUTA_PADRON, texto: "Padrón del edificio", icono: "personas", requisito: REQUISITOS.padron },
+  {
+    ruta: RUTA_AUTORIZACIONES_PROVEEDORES,
+    texto: TITULO_AUTORIZACIONES_PROVEEDORES,
+    icono: "proveedor",
+    requisito: REQUISITOS.autorizarProveedores,
+  },
   { ruta: RUTA_PROVEEDORES, texto: "Proveedores", icono: "proveedor", requisito: REQUISITOS.proveedores },
   {
     ruta: RUTA_CONSULTA_PROVEEDORES,

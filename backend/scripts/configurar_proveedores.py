@@ -11,6 +11,10 @@ origen `soporte` y la fecha, que nadie puede reescribir. Corre dentro del conten
         [--modo-exigencia avisar|bloquear] [--admite-no-vence si|no]
         [--roles-que-ven miembro_consejo,administrador,...]
         [--requisitos-agregados codigo,...] [--requisitos-omitidos codigo,...]
+        [--roles-que-autorizan miembro_consejo,...] [--autoriza-por-persona si|no]
+
+`--roles-que-autorizan` y `--autoriza-por-persona` (`0105`) deciden quién autoriza a un habitante
+a ver los proveedores y si esas autorizaciones cuentan.
 
 Una lista vacía se pasa como `--roles-que-ven ""`. Sin ningún valor, solo imprime la configuración
 que vale. Imprime en JSON la configuración que queda.
@@ -43,6 +47,8 @@ def main(argumentos: list[str] | None = None) -> int:
     p.add_argument("--roles-que-ven", type=_lista)
     p.add_argument("--requisitos-agregados", type=_lista)
     p.add_argument("--requisitos-omitidos", type=_lista)
+    p.add_argument("--roles-que-autorizan", type=_lista)
+    p.add_argument("--autoriza-por-persona", choices=tuple(SI_NO))
     a = p.parse_args(argumentos)
     config = cargar()
     if not config.database_url:
@@ -57,18 +63,30 @@ def main(argumentos: list[str] | None = None) -> int:
         "agregados": a.requisitos_agregados,
         "omitidos": a.requisitos_omitidos,
     }
+    autorizacion = {
+        "roles": a.roles_que_autorizan,
+        "por_persona": None if a.autoriza_por_persona is None else SI_NO[a.autoriza_por_persona],
+    }
+    cambios = [
+        (
+            "select nucleo.configurar_proveedores(:dias, :modo, :no_vence, :roles, :agregados,"
+            " :omitidos, null, 'soporte')",
+            valores,
+        ),
+        (
+            "select nucleo.configurar_autorizacion_proveedores(:roles, :por_persona, null,"
+            " 'soporte')",
+            autorizacion,
+        ),
+    ]
     motor = crear_motor(config.database_url)
     try:
         with transaccion(motor, persona_id=None, consorcio_id=a.consorcio) as conn:
-            if any(v is not None for v in valores.values()):
+            for sql, parametros in cambios:
+                if all(v is None for v in parametros.values()):
+                    continue
                 try:
-                    conn.execute(
-                        text(
-                            "select nucleo.configurar_proveedores(:dias, :modo, :no_vence,"
-                            " :roles, :agregados, :omitidos, null, 'soporte')"
-                        ),
-                        valores,
-                    )
+                    conn.execute(text(sql), parametros)
                 except DBAPIError as e:
                     print(f"la base rechazó la configuración ({e.orig.diag.message_hint}):"
                           f" {e.orig.diag.message_primary}", file=sys.stderr)  # fmt: skip

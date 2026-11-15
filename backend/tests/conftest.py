@@ -319,6 +319,13 @@ def vaciar_mandatos(motor_migrate: Engine) -> None:
                 "     delete from nucleo.configuracion_proveedores;"
                 "     alter table nucleo.configuracion_proveedores enable trigger user;"
                 "   end if;"
+                # Las autorizaciones del Consejo para ver los proveedores (0105) niegan su
+                # downgrade y citan a las personas: se borran acá.
+                "   if to_regclass('nucleo.autorizacion_ver_proveedores') is not null then"
+                "     alter table nucleo.autorizacion_ver_proveedores disable trigger user;"
+                "     delete from nucleo.autorizacion_ver_proveedores;"
+                "     alter table nucleo.autorizacion_ver_proveedores enable trigger user;"
+                "   end if;"
                 # Lo que leyó la IA de un documento para carga (0088) cita sus versiones.
                 "   if to_regclass('nucleo.lectura_carga') is not null then"
                 "     alter table nucleo.lectura_carga disable trigger user;"

@@ -17,7 +17,8 @@ El CSV es legible para el propietario; acá se traduce cada fila a tipos puros:
   `misma_identidad=otro` hace a `otro` el mismo ser humano que `yo` (otra cuenta). Controles
   económicos (R10): por omisión la sesión tiene el segundo factor reciente;
   `controles=sin_segundo_factor` o `ninguno` lo quitan. La sesión de 12 horas salió el
-  09-11-2026 (comentario 28 de la revisión de pantallas).
+  09-11-2026 (comentario 28 de la revisión de pantallas). `autorizado=accion|accion` son las
+  acciones que el Consejo le autorizó a `yo` (`0105`): van al contexto, no a la entidad.
 
 Los símbolos (`3A`, `5B`, `X`, `X2`…) se reemplazan por UUID canónicos fijos.
 """
@@ -30,7 +31,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import UUID
 
-from cem_contracts.egresos import ROLES_QUE_VEN_PROVEEDORES
+from cem_contracts.egresos import ROLES_QUE_AUTORIZAN_PROVEEDORES, ROLES_QUE_VEN_PROVEEDORES
 from cem_contracts.estados import ModoOperacion, TipoVinculo
 from cem_contracts.politicas import DIRECTORIO, TipoRecurso
 
@@ -90,7 +91,10 @@ MODOS: dict[str, ModoOperacion | None] = {
 
 VINCULOS = {"P": TipoVinculo.PROPIETARIO, "I": TipoVinculo.INQUILINO, "O": TipoVinculo.OCUPANTE}
 FIGURAS_MANDATO = {"MC": "miembro_consejo", "AD": "administrador", "AE": "administrador_externo"}
-ROLES_CONFIGURADOS = {"proveedores.ver": frozenset(ROLES_QUE_VEN_PROVEEDORES)}
+ROLES_CONFIGURADOS = {
+    "proveedores.ver": frozenset(ROLES_QUE_VEN_PROVEEDORES),
+    "proveedores.autorizar": frozenset(ROLES_QUE_AUTORIZAN_PROVEEDORES),
+}
 """La configuración por defecto de `0104`: la tabla de verdad corre con ella."""
 
 # Filas de `paquete_facultad` que agrega `0012` (tabla de verdad, §5.2: C2 y A2).
@@ -222,7 +226,7 @@ def _entidad(texto: str, recursos: dict[TipoRecurso, str]) -> tuple[Entidad, dic
     desconocidas = set(valores) - {
         "preparo", "aprobaron", "firmas", "solicito", "propuso", "objetivo", "registrado",
         "emitio", "decision", "respaldo", "actor", "sin_identidad", "misma_identidad",
-        "controles", "ejecuto",
+        "controles", "ejecuto", "autorizado",
     }  # fmt: skip
     if desconocidas:
         raise ValueError(f"claves de entidad desconocidas: {desconocidas}")
@@ -348,5 +352,6 @@ def escenario(fila: Fila) -> tuple[ContextoAutorizacion, Entidad]:
         identidades=_identidades(valores),
         segundo_factor_reciente=segundo_factor,
         roles_configurados=ROLES_CONFIGURADOS,
+        autorizaciones=frozenset(filter(None, valores.get("autorizado", "").split("|"))),
     )
     return contexto, entidad

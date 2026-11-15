@@ -245,6 +245,9 @@ export const REQUISITOS = {
   /** La consulta de proveedores y sus seguros (app 0104): los roles que la configuración del
    * edificio lista. Quien ya gestiona proveedores no la ve en el menú: tiene la ficha completa. */
   consultaProveedores: [["proveedores.ver"]],
+  /** Autorizar a un habitante a ver los proveedores (app 0105): lo que la configuración del
+   * edificio fija; por defecto, el Consejo. */
+  autorizarProveedores: [["proveedores.autorizar"]],
   ordenes: [["egresos.preparar_orden"]],
   /** Subir la factura que falta a una orden aprobada (app 0099): lo mismo que cargarla al preparar. */
   subirFactura: [["egresos.preparar_orden", "documentos.cargar"]],

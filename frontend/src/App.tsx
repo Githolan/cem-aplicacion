@@ -17,6 +17,11 @@ import { PuntoServicio, useFallaDelServicio } from "./EstadoServicio";
 import { ElegirConsorcio } from "./egresos/ElegirConsorcio";
 import { Liquidacion, RUTA_LIQUIDACION } from "./egresos/Liquidacion";
 import { PagosPorAclarar, RUTA_POR_ACLARAR } from "./egresos/PagosPorAclarar";
+import {
+  AutorizacionesProveedores,
+  RUTA_AUTORIZACIONES_PROVEEDORES,
+  TITULO_AUTORIZACIONES_PROVEEDORES,
+} from "./egresos/AutorizacionesProveedores";
 import { ConsultaProveedores, RUTA_CONSULTA_PROVEEDORES, TITULO_CONSULTA_PROVEEDORES } from "./egresos/ConsultaProveedores";
 import { Proveedores, RUTA_PROVEEDORES } from "./egresos/Proveedores";
 import { Icono, type NombreIcono } from "./Iconos";
@@ -83,6 +88,13 @@ const GRUPOS_DE_INICIO: readonly GrupoDeInicio[] = [
         detalle: "Confirmar o finalizar vínculos",
         icono: "personas",
         requisito: REQUISITOS.padron,
+      },
+      {
+        ruta: RUTA_AUTORIZACIONES_PROVEEDORES,
+        texto: TITULO_AUTORIZACIONES_PROVEEDORES,
+        detalle: "Autorizar a un habitante a ver los proveedores y sus seguros",
+        icono: "proveedor",
+        requisito: REQUISITOS.autorizarProveedores,
       },
     ],
   },
@@ -399,6 +411,10 @@ export function App() {
           <Route
             path={RUTA_CONSULTA_PROVEEDORES}
             element={<Exige requisito={REQUISITOS.consultaProveedores}><ConsultaProveedores /></Exige>}
+          />
+          <Route
+            path={RUTA_AUTORIZACIONES_PROVEEDORES}
+            element={<Exige requisito={REQUISITOS.autorizarProveedores}><AutorizacionesProveedores /></Exige>}
           />
           <Route path={RUTA_NUEVA} element={<Exige requisito={REQUISITOS.ordenes}><PrepararOrden /></Exige>} />
           <Route path={RUTA_CONSULTA} element={<Exige requisito={REQUISITOS.pagos}><ConsultaPagos /></Exige>} />

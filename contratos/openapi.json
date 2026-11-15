@@ -268,6 +268,76 @@
         "title": "AprobacionRegistrada",
         "type": "object"
       },
+      "AutorizacionVerProveedores": {
+        "description": "Un habitante y si el Consejo lo autorizó a ver los proveedores (`0105`): la última fila.",
+        "properties": {
+          "autorizada": {
+            "title": "Autorizada",
+            "type": "boolean"
+          },
+          "motivo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Motivo"
+          },
+          "nombre": {
+            "title": "Nombre",
+            "type": "string"
+          },
+          "persona_id": {
+            "format": "uuid",
+            "title": "Persona Id",
+            "type": "string"
+          },
+          "registrado_en": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registrado En"
+          },
+          "registrado_por_nombre": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registrado Por Nombre"
+          },
+          "unidades": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unidades",
+            "type": "array"
+          }
+        },
+        "required": [
+          "persona_id",
+          "nombre",
+          "unidades",
+          "autorizada",
+          "motivo",
+          "registrado_en",
+          "registrado_por_nombre"
+        ],
+        "title": "AutorizacionVerProveedores",
+        "type": "object"
+      },
       "AvisoRechazo": {
         "description": "Una orden rechazada que quien la preparó todavía no vio (decisión 3 del propietario,\n12-11-2026): se le avisa arriba de la bandeja hasta que dice «Entendido». No es un pendiente.",
         "properties": {
@@ -452,6 +522,28 @@
           "actual"
         ],
         "title": "BarraPago",
+        "type": "object"
+      },
+      "CambioAutorizacionVerProveedores": {
+        "additionalProperties": false,
+        "description": "`POST …/autorizaciones-proveedores/{persona}`: autorizar (o retirar) con el motivo.",
+        "properties": {
+          "autorizada": {
+            "title": "Autorizada",
+            "type": "boolean"
+          },
+          "motivo": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Motivo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "autorizada",
+          "motivo"
+        ],
+        "title": "CambioAutorizacionVerProveedores",
         "type": "object"
       },
       "CambioEvento": {
@@ -899,6 +991,9 @@
           "requisito_invalido",
           "rubro_legal_invalido",
           "rubro_legal_sin_cambios",
+          "autorizacion_sin_cambios",
+          "autorizacion_por_persona_apagada",
+          "motivo_invalido",
           "documentacion_legal_faltante",
           "aprobacion_vencida",
           "aprobacion_vigente",
@@ -6369,6 +6464,22 @@
           "periodo"
         ],
         "title": "LiquidacionNueva",
+        "type": "object"
+      },
+      "ListaAutorizacionesVerProveedores": {
+        "properties": {
+          "elementos": {
+            "items": {
+              "$ref": "#/components/schemas/AutorizacionVerProveedores"
+            },
+            "title": "Elementos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "elementos"
+        ],
+        "title": "ListaAutorizacionesVerProveedores",
         "type": "object"
       },
       "ListaCandidatos": {
@@ -13151,6 +13262,133 @@
         "summary": "Los eventos propios en el consorcio, con lo mínimo",
         "tags": [
           "auditoria"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/autorizaciones-proveedores": {
+      "get": {
+        "description": "Respuesta del propietario del 15-11-2026: los habitantes autorizados son «los que autorice\nel Consejo». Quien autoriza (por defecto, el Consejo) ve a cada habitante y la última\nautorización: si está autorizado, el motivo, quién y cuándo.",
+        "operationId": "autorizaciones_proveedores_api_v1_consorcios__consorcio_id__autorizaciones_proveedores_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListaAutorizacionesVerProveedores"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "409": {
+            "description": "El consorcio no autoriza por persona (`autorizacion_por_persona_apagada`)."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Los habitantes y si el Consejo los autorizó a ver los proveedores y sus seguros",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/autorizaciones-proveedores/{persona_id}": {
+      "post": {
+        "operationId": "cambiar_autorizacion_proveedores_api_v1_consorcios__consorcio_id__autorizaciones_proveedores__persona_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "persona_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Persona Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CambioAutorizacionVerProveedores"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutorizacionVerProveedores"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "No existe en este consorcio."
+          },
+          "409": {
+            "description": "Ya estaba así (`autorizacion_sin_cambios`) o el consorcio no autoriza por persona (`autorizacion_por_persona_apagada`)."
+          },
+          "422": {
+            "description": "La persona no es habitante (`persona_sin_vinculo`) o falta el motivo."
+          }
+        },
+        "summary": "Autorizar a un habitante a ver los proveedores, o retirarle la autorización, con el motivo: queda quién y cuándo, y nada se borra",
+        "tags": [
+          "egresos"
         ]
       }
     },

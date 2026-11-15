@@ -225,6 +225,12 @@ class CodigoError(StrEnum):
     """El rubro legal no está en la matriz (`0104`)."""
     RUBRO_LEGAL_SIN_CAMBIOS = "rubro_legal_sin_cambios"
     """El proveedor ya tiene (o ya no tiene) ese rubro legal (`0104`)."""
+    AUTORIZACION_SIN_CAMBIOS = "autorizacion_sin_cambios"
+    """La persona ya está (o ya no está) autorizada a ver los proveedores (`0105`)."""
+    AUTORIZACION_POR_PERSONA_APAGADA = "autorizacion_por_persona_apagada"
+    """La configuración del consorcio no autoriza por persona (`0105`)."""
+    MOTIVO_INVALIDO = "motivo_invalido"
+    """El motivo falta o es demasiado largo (`0105`)."""
     DOCUMENTACION_LEGAL_FALTANTE = "documentacion_legal_faltante"
     """Al proveedor le falta documentación que exige la ley y el consorcio está en modo
     «bloquear»: no se prepara ni se modifica una orden nueva a ese proveedor (`0104`)."""

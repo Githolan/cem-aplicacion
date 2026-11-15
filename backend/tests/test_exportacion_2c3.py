@@ -124,7 +124,10 @@ CLAVES_POR_ENTIDAD = {
                               "registrado_por_nombre", "registrado_en"},
     "configuracion_proveedores": {"numero", "dias_por_vencer", "modo_exigencia",
                                   "admite_no_vence", "roles_que_ven", "requisitos_agregados",
-                                  "requisitos_omitidos", "origen", "registrada_en"},
+                                  "requisitos_omitidos", "roles_que_autorizan",
+                                  "autoriza_por_persona", "origen", "registrada_en"},
+    "autorizacion_ver_proveedores": {"numero", "persona_nombre", "cambio", "motivo",
+                                     "registrado_por_nombre", "registrado_en"},
     "orden": {"id", "estado", "version_vigente", "preparada_por_nombre", "creada_en",
               "actualizada_en", "aprobada_en", "motivo_rechazo"},
     "orden_version": {"orden_id", "numero", "importe_centavos", "moneda", "concepto",
@@ -1290,6 +1293,7 @@ TABLA_DE_LA_ENTIDAD = {
     "documentacion_proveedor": "nucleo.documentacion_proveedor",
     "rubro_legal_proveedor": "nucleo.rubro_legal_proveedor",
     "configuracion_proveedores": "nucleo.configuracion_proveedores",
+    "autorizacion_ver_proveedores": "nucleo.autorizacion_ver_proveedores",
     "orden": "nucleo.orden_pago",
     "orden_version": "nucleo.orden_pago_version",
     "orden_aprobacion": "nucleo.orden_pago_aprobacion",
@@ -1334,6 +1338,10 @@ RETIRAR_NO_ES_PAGO = (
 ADJUNTAR_FACTURA = (
     "select nucleo.adjuntar_factura_orden_pago(:orden, :version, null, 'Factura SINTETICA',"
     " 'application/pdf', 1, repeat('b', 64), :actor, :origen, :sesion)"
+)
+AUTORIZAR_VER = (
+    "select nucleo.autorizar_ver_proveedores(:persona, true,"
+    " 'SINTETICO: integra la comisión de obras', :actor, :origen, :sesion)"
 )
 ASIGNAR_RUBRO = (
     "select nucleo.asignar_rubro_legal_proveedor(:proveedor, 'general', true, :actor, :origen,"
@@ -1473,6 +1481,8 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
         c.execute(text("select nucleo.configurar_proveedores(null, 'avisar', null, null, null,"
                        " null, null, 'soporte')"))  # fmt: skip
     llamar(motor_migrate, s, s.adm, ASIGNAR_RUBRO)
+    # El Consejo autoriza a un habitante a ver los proveedores (0105).
+    llamar(motor_migrate, s, s.mc1, AUTORIZAR_VER, persona=s.prop)
     cotejadas(motor_migrate, s, pagadas)
     leida(motor_migrate, motor_app, s, pagadas[0])
     leida_para_carga(motor_migrate, motor_app, s)
