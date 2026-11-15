@@ -892,6 +892,8 @@
           "documento_invalido",
           "factura_ya_adjunta",
           "factura_no_vigente",
+          "documentacion_no_vigente",
+          "documentacion_en_revision",
           "aprobacion_vencida",
           "aprobacion_vigente",
           "aprobaciones_insuficientes",
@@ -2982,6 +2984,121 @@
         "title": "DiferenciaRegistrada",
         "type": "object"
       },
+      "DocumentacionProveedor": {
+        "description": "Un seguro o una habilitación del proveedor: la constancia de un archivo subido, con su\nvencimiento. No se cambia ni se borra; si se reemplaza, la nueva cita a esta en\n`reemplaza_a`.",
+        "properties": {
+          "cargada_en": {
+            "format": "date-time",
+            "title": "Cargada En",
+            "type": "string"
+          },
+          "cargada_por_nombre": {
+            "title": "Cargada Por Nombre",
+            "type": "string"
+          },
+          "descripcion": {
+            "title": "Descripcion",
+            "type": "string"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "documento_vigente": {
+            "title": "Documento Vigente",
+            "type": "boolean"
+          },
+          "estado": {
+            "$ref": "#/components/schemas/EstadoDocumentacionProveedor"
+          },
+          "id": {
+            "description": "La constancia; es lo que se manda en `reemplaza` para cambiarla.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          },
+          "reemplaza_a": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reemplaza A"
+          },
+          "tipo": {
+            "$ref": "#/components/schemas/TipoDocumentacionProveedor"
+          },
+          "vence_el": {
+            "description": "El último día en que vale.",
+            "format": "date",
+            "title": "Vence El",
+            "type": "string"
+          },
+          "version_documento_id": {
+            "description": "La versión exacta del archivo. Se abre con `…/documentos/{documento_id}/versiones/{version_documento_id}/contenido` si quien mira puede ver la categoría y el antivirus lo aceptó.",
+            "format": "uuid",
+            "title": "Version Documento Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proveedor_id",
+          "tipo",
+          "descripcion",
+          "vence_el",
+          "documento_id",
+          "version_documento_id",
+          "estado",
+          "cargada_por_nombre",
+          "cargada_en",
+          "reemplaza_a",
+          "documento_vigente"
+        ],
+        "title": "DocumentacionProveedor",
+        "type": "object"
+      },
+      "DocumentacionSubida": {
+        "description": "`POST …/proveedores/{p}/documentacion`: la constancia quedó con el archivo en cuarentena.\nCómo terminó el análisis se pregunta en\n`GET …/documentos/{documento_id}/versiones/{archivo.id}/estado`.",
+        "properties": {
+          "archivo": {
+            "$ref": "#/components/schemas/VersionCargada"
+          },
+          "constancia_id": {
+            "format": "uuid",
+            "title": "Constancia Id",
+            "type": "string"
+          },
+          "documento_id": {
+            "format": "uuid",
+            "title": "Documento Id",
+            "type": "string"
+          },
+          "proveedor_id": {
+            "format": "uuid",
+            "title": "Proveedor Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proveedor_id",
+          "constancia_id",
+          "documento_id",
+          "archivo"
+        ],
+        "title": "DocumentacionSubida",
+        "type": "object"
+      },
       "DocumentoEnLista": {
         "properties": {
           "cargado_en": {
@@ -3694,6 +3811,20 @@
         "title": "EstadoDependencia",
         "type": "string"
       },
+      "EstadoDocumentacionProveedor": {
+        "description": "Lo calcula la base con el día del consorcio (`nucleo.estado_documentacion_proveedor`).",
+        "enum": [
+          "en_revision",
+          "rechazada",
+          "sin_documento",
+          "reemplazada",
+          "vencida",
+          "por_vencer",
+          "vigente"
+        ],
+        "title": "EstadoDocumentacionProveedor",
+        "type": "string"
+      },
       "EstadoInvitacion": {
         "enum": [
           "pendiente",
@@ -4170,6 +4301,14 @@
             "title": "Diferencias Anteriores",
             "type": "array"
           },
+          "documentacion_proveedor": {
+            "description": "Lo vencido y lo que vence pronto del proveedor de la orden (RF50, `0103`): marca, no impide preparar, aprobar ni pagar.",
+            "items": {
+              "$ref": "#/components/schemas/DocumentacionProveedor"
+            },
+            "title": "Documentacion Proveedor",
+            "type": "array"
+          },
           "ejecucion": {
             "anyOf": [
               {
@@ -4482,7 +4621,8 @@
           "factura_reemplazo",
           "facturas_anteriores",
           "puede_subir_factura",
-          "puede_reemplazar_factura"
+          "puede_reemplazar_factura",
+          "documentacion_proveedor"
         ],
         "title": "FichaPago",
         "type": "object"
@@ -6641,6 +6781,24 @@
       },
       "ListaProveedores": {
         "properties": {
+          "documentacion_por_vencer": {
+            "description": "Los proveedores sin nada vencido y con algo que vence dentro de `DIAS_POR_VENCER` días.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Por Vencer",
+            "type": "array"
+          },
+          "documentacion_vencida": {
+            "description": "Los proveedores con algún seguro o habilitación que vale y está vencido (RF50, `0103`): quedan marcados, no excluidos.",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Documentacion Vencida",
+            "type": "array"
+          },
           "elementos": {
             "items": {
               "$ref": "#/components/schemas/Proveedor"
@@ -6650,7 +6808,9 @@
           }
         },
         "required": [
-          "elementos"
+          "elementos",
+          "documentacion_vencida",
+          "documentacion_por_vencer"
         ],
         "title": "ListaProveedores",
         "type": "object"
@@ -9002,8 +9162,21 @@
       },
       "ProveedorConVersiones": {
         "properties": {
+          "documentacion": {
+            "description": "Los seguros y las habilitaciones, de la más vieja a la más nueva, con las reemplazadas y las rechazadas como historia (RF50, `0103`).",
+            "items": {
+              "$ref": "#/components/schemas/DocumentacionProveedor"
+            },
+            "title": "Documentacion",
+            "type": "array"
+          },
           "proveedor": {
             "$ref": "#/components/schemas/Proveedor"
+          },
+          "puede_cargar_documentacion": {
+            "description": "Si puede agregar o reemplazar un seguro o una habilitación: prepara órdenes y carga documentos. Solo sirve para mostrar: la ruta y la base vuelven a decidir.",
+            "title": "Puede Cargar Documentacion",
+            "type": "boolean"
           },
           "versiones": {
             "items": {
@@ -9015,7 +9188,9 @@
         },
         "required": [
           "proveedor",
-          "versiones"
+          "versiones",
+          "documentacion",
+          "puede_cargar_documentacion"
         ],
         "title": "ProveedorConVersiones",
         "type": "object"
@@ -10213,6 +10388,14 @@
           "ambos"
         ],
         "title": "TipoDiferencia",
+        "type": "string"
+      },
+      "TipoDocumentacionProveedor": {
+        "enum": [
+          "seguro",
+          "habilitacion"
+        ],
+        "title": "TipoDocumentacionProveedor",
         "type": "string"
       },
       "TipoMandato": {
@@ -20085,6 +20268,184 @@
           }
         },
         "summary": "Cargar el CUIT de un proveedor que no lo tiene: una sola vez, con una versión nueva",
+        "tags": [
+          "egresos"
+        ]
+      }
+    },
+    "/api/v1/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion": {
+      "post": {
+        "description": "RF50 (documento 14, §5.2): un documento vencido marca al proveedor y no lo excluye. Lo\ncarga quien da de alta y cambia proveedores (`egresos.preparar_orden`, sin el gesto: no mueve\ndinero) y además carga documentos. El archivo sigue el circuito de siempre: cuarentena,\nantivirus y almacén privado, hasta 20 MB, PDF, JPEG o PNG, en «Contratos con proveedores», que\nno ve un propietario por su vínculo. Cuenta recién cuando el antivirus lo acepta; mientras el\nreemplazo está en el antivirus, o si lo rechaza, vale el anterior. La base vuelve a exigir\ntodo.",
+        "operationId": "subir_documentacion_proveedor_api_v1_consorcios__consorcio_id__proveedores__proveedor_id__documentacion_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proveedor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Proveedor Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "consorcio_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Consorcio Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Seguro o habilitación.",
+            "in": "query",
+            "name": "tipo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TipoDocumentacionProveedor",
+              "description": "Seguro o habilitación."
+            }
+          },
+          {
+            "description": "Qué cubre, en palabras.",
+            "in": "query",
+            "name": "descripcion",
+            "required": true,
+            "schema": {
+              "description": "Qué cubre, en palabras.",
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[^\\x00-\\x1f\\x7f]*$",
+              "title": "Descripcion",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El último día en que vale.",
+            "in": "query",
+            "name": "vence_el",
+            "required": true,
+            "schema": {
+              "description": "El último día en que vale.",
+              "format": "date",
+              "title": "Vence El",
+              "type": "string"
+            }
+          },
+          {
+            "description": "El título del documento.",
+            "in": "query",
+            "name": "titulo",
+            "required": true,
+            "schema": {
+              "description": "El título del documento.",
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Titulo",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Para reemplazar uno que vale: su `id` (el de `documentacion` en la ficha). Sin él, se agrega.",
+            "in": "query",
+            "name": "reemplaza",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Para reemplazar uno que vale: su `id` (el de `documentacion` en la ficha). Sin él, se agrega.",
+              "title": "Reemplaza"
+            }
+          },
+          {
+            "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "Clave única por intento lógico (UUID v4). Un reintento repite la misma clave y el mismo cuerpo y recibe la respuesta guardada durante 24 horas.",
+              "pattern": "^[\\x21-\\x7e]{1,255}$",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pdf": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/jpeg": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "format": "binary",
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentacionSubida"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Sin la facultad, sin el modo, o falta renovar la sesión (R10)."
+          },
+          "404": {
+            "description": "El proveedor no existe en este consorcio."
+          },
+          "408": {
+            "description": "El cuerpo no llegó entero a tiempo: no se guardó nada."
+          },
+          "409": {
+            "description": "Lo que se quiso reemplazar ya no es lo que vale, de ese tipo y de ese proveedor (`documentacion_no_vigente`), o ya tiene otro reemplazo en el antivirus (`documentacion_en_revision`)."
+          },
+          "413": {
+            "description": "El archivo pasa de 20 MB (`archivo_demasiado_grande`)."
+          },
+          "415": {
+            "description": "No es PDF, JPEG ni PNG, o no coincide con el tipo declarado."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "description": "Demasiadas cargas a la vez: reintentar en un momento."
+          }
+        },
+        "summary": "Agregar o reemplazar un seguro o una habilitación del proveedor, con su vencimiento: queda con quién y cuándo, sin versión nueva del proveedor",
         "tags": [
           "egresos"
         ]

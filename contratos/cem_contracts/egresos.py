@@ -38,6 +38,7 @@ from pydantic import (
     model_validator,
 )
 
+from cem_contracts.contactos import _sin_contacto_libre
 from cem_contracts.documentos import CategoriaDocumento, EstadoVersion, Titulo, VersionCargada
 
 IMPORTE_MAXIMO_CENTAVOS = 2**63 - 1
@@ -284,6 +285,14 @@ class ListaProveedores(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     elementos: list[Proveedor]
+    documentacion_vencida: list[UUID] = Field(
+        description="Los proveedores con algún seguro o habilitación que vale y está vencido"
+        " (RF50, `0103`): quedan marcados, no excluidos."
+    )
+    documentacion_por_vencer: list[UUID] = Field(
+        description="Los proveedores sin nada vencido y con algo que vence dentro de"
+        " `DIAS_POR_VENCER` días."
+    )
 
 
 class VersionProveedor(BaseModel):
@@ -309,11 +318,113 @@ class VersionProveedor(BaseModel):
     creada_en: datetime
 
 
+# --- Seguros y habilitaciones del proveedor (RF50, `0103`) --------------------------------------
+
+CATEGORIA_DOCUMENTACION_PROVEEDOR = CategoriaDocumento.CONTRATOS_PROVEEDORES
+"""Donde nace el documento: la categoría restringida, que no ve un propietario por su vínculo
+(decisión 9 del 22-10-2026; pregunta P2 del diseño)."""
+LARGO_DESCRIPCION_DOCUMENTACION = 120
+DIAS_POR_VENCER = 30
+"""Cuántos días antes de vencer se avisa (pregunta P3 del diseño, por defecto); la base usa el
+mismo valor (`0103`)."""
+
+
+class TipoDocumentacionProveedor(StrEnum):
+    SEGURO = "seguro"
+    HABILITACION = "habilitacion"
+
+
+class EstadoDocumentacionProveedor(StrEnum):
+    """Lo calcula la base con el día del consorcio (`nucleo.estado_documentacion_proveedor`)."""
+
+    EN_REVISION = "en_revision"
+    """El archivo está en el antivirus: todavía no cuenta."""
+    RECHAZADA = "rechazada"
+    """El archivo no pasó el antivirus: no cuenta."""
+    SIN_DOCUMENTO = "sin_documento"
+    """Soporte borró el documento: no cuenta y queda como historia."""
+    REEMPLAZADA = "reemplazada"
+    """Otra constancia la reemplaza y su archivo ya pasó el antivirus."""
+    VENCIDA = "vencida"
+    POR_VENCER = "por_vencer"
+    """Vence hoy o dentro de `DIAS_POR_VENCER` días."""
+    VIGENTE = "vigente"
+
+
+ESTADOS_QUE_VALEN = frozenset(
+    {
+        EstadoDocumentacionProveedor.VIGENTE,
+        EstadoDocumentacionProveedor.POR_VENCER,
+        EstadoDocumentacionProveedor.VENCIDA,
+    }
+)
+"""Las que cuentan para la marca y las únicas que se pueden reemplazar."""
+
+DescripcionDocumentacion = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=LARGO_DESCRIPCION_DOCUMENTACION,
+        pattern=SIN_CONTROLES,
+    ),
+    AfterValidator(_sin_contacto_libre),
+]
+"""Qué cubre, en palabras («ART del personal», «Matrícula de gasista»): sin teléfonos, correos ni
+cuentas, como la base (`nucleo.sin_contacto_libre`)."""
+
+
+class DocumentacionProveedor(BaseModel):
+    """Un seguro o una habilitación del proveedor: la constancia de un archivo subido, con su
+    vencimiento. No se cambia ni se borra; si se reemplaza, la nueva cita a esta en
+    `reemplaza_a`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID = Field(description="La constancia; es lo que se manda en `reemplaza` para cambiarla.")
+    proveedor_id: UUID
+    tipo: TipoDocumentacionProveedor
+    descripcion: str
+    vence_el: date = Field(description="El último día en que vale.")
+    documento_id: UUID
+    version_documento_id: UUID = Field(
+        description="La versión exacta del archivo. Se abre con"
+        " `…/documentos/{documento_id}/versiones/{version_documento_id}/contenido` si quien mira"
+        " puede ver la categoría y el antivirus lo aceptó."
+    )
+    estado: EstadoDocumentacionProveedor
+    cargada_por_nombre: str
+    cargada_en: datetime
+    reemplaza_a: UUID | None
+    documento_vigente: bool
+
+
+class DocumentacionSubida(BaseModel):
+    """`POST …/proveedores/{p}/documentacion`: la constancia quedó con el archivo en cuarentena.
+    Cómo terminó el análisis se pregunta en
+    `GET …/documentos/{documento_id}/versiones/{archivo.id}/estado`."""
+
+    model_config = ConfigDict(frozen=True)
+
+    proveedor_id: UUID
+    constancia_id: UUID
+    documento_id: UUID
+    archivo: VersionCargada
+
+
 class ProveedorConVersiones(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     proveedor: Proveedor
     versiones: list[VersionProveedor]
+    documentacion: list[DocumentacionProveedor] = Field(
+        description="Los seguros y las habilitaciones, de la más vieja a la más nueva, con las"
+        " reemplazadas y las rechazadas como historia (RF50, `0103`)."
+    )
+    puede_cargar_documentacion: bool = Field(
+        description="Si puede agregar o reemplazar un seguro o una habilitación: prepara órdenes"
+        " y carga documentos. Solo sirve para mostrar: la ruta y la base vuelven a decidir."
+    )
 
 
 # --- Órdenes de pago ---------------------------------------------------------------------------
@@ -1667,6 +1778,10 @@ class FichaPago(BaseModel):
         description="Si puede reemplazar `factura_adjunta` (decisión del propietario del"
         " 13-11-2026): las mismas facultades que subirla, hay una adjunta que vale y no hay otra"
         " en el antivirus.",
+    )
+    documentacion_proveedor: list[DocumentacionProveedor] = Field(
+        description="Lo vencido y lo que vence pronto del proveedor de la orden (RF50, `0103`):"
+        " marca, no impide preparar, aprobar ni pagar.",
     )
 
 

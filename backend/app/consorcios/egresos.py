@@ -30,7 +30,7 @@ nunca una lista vacía ni un 403. Toda escritura lleva `Idempotency-Key`.
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
@@ -70,13 +70,17 @@ from cem_contracts.egresos import (
     DatosProveedor,
     DeclaracionPagoNoRealizado,
     DeclaracionRegistrada,
+    DescripcionDocumentacion,
     DiferenciaPagoManual,
     DiferenciaRegistrada,
+    DocumentacionProveedor,
+    DocumentacionSubida,
     DocumentoParaCarga,
     EjecucionManual,
     ElementoConsultaPagos,
     Emision,
     EnvioARevision,
+    EstadoDocumentacionProveedor,
     EstadoLectura,
     EstadoLecturaCarga,
     EstadoOrdenPago,
@@ -128,6 +132,7 @@ from cem_contracts.egresos import (
     SituacionPago,
     TipoCarga,
     TipoDiferencia,
+    TipoDocumentacionProveedor,
     TomaPagoManual,
     TomaRegistrada,
     TomaVigente,
@@ -195,6 +200,15 @@ ERRORES = {
         "Mientras tanto hubo otro cambio: hay que abrirla de nuevo para ver cómo quedó.",
     ),
     "sin_cambios": (409, CodigoError.SIN_CAMBIOS, "No hay ningún cambio para guardar."),
+    "documentacion_no_vigente": (
+        409, CodigoError.DOCUMENTACION_NO_VIGENTE,
+        "Ese seguro o esa habilitación ya no es lo que vale para el proveedor, o es de otro tipo."
+        " Volver a abrir la ficha.",
+    ),
+    "documentacion_en_revision": (
+        409, CodigoError.DOCUMENTACION_EN_REVISION,
+        "Ya hay un reemplazo de ese documento en el antivirus: hay que esperar a que termine.",
+    ),
     "factura_no_vigente": (
         409, CodigoError.FACTURA_NO_VIGENTE,
         "La factura que se quería reemplazar ya no es la que vale para la orden. Volver a abrir"
@@ -639,8 +653,33 @@ def listar_proveedores(
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
     motor: MotorDep,
 ) -> ListaProveedores:
-    with _lectura(permiso, motor) as c:
-        return ListaProveedores(elementos=_proveedores(c, permiso, None))
+    with _lectura(permiso, _una_foto(motor)) as c:
+        proveedores = _proveedores(c, permiso, None)
+        documentacion = _documentacion(c, permiso, None)
+    vencida = {d.proveedor_id for d in documentacion if d.estado == VENCIDA}
+    por_vencer = {d.proveedor_id for d in documentacion if d.estado == POR_VENCER} - vencida
+    return ListaProveedores(
+        elementos=proveedores,
+        documentacion_vencida=[p.id for p in proveedores if p.id in vencida],
+        documentacion_por_vencer=[p.id for p in proveedores if p.id in por_vencer],
+    )
+
+
+VENCIDA = EstadoDocumentacionProveedor.VENCIDA
+POR_VENCER = EstadoDocumentacionProveedor.POR_VENCER
+
+
+def _documentacion(
+    c: Connection, lector: Permiso, proveedor: UUID | None
+) -> list[DocumentacionProveedor]:
+    """Los seguros y las habilitaciones (`0103`), con el estado que calcula la base: las reglas no
+    se repiten afuera. Con `proveedor` nulo, los de todos."""
+    filas = _ejecutar(
+        c, lector,
+        "select * from nucleo.documentacion_proveedor_lectura(:p, :f, :actor, 'api', :sesion)",
+        {"p": proveedor, "f": LEE_COMO[lector.accion]},
+    ).mappings()  # fmt: skip
+    return [DocumentacionProveedor(**f) for f in filas]
 
 
 @router.get(
@@ -652,16 +691,21 @@ def listar_proveedores(
 def ver_proveedor(
     proveedor_id: UUID,
     permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
     motor: MotorDep,
 ) -> ProveedorConVersiones:
-    with _lectura(permiso, motor) as c:
+    with _lectura(permiso, _una_foto(motor)) as c:
         proveedores = _proveedores(c, permiso, proveedor_id)
         if not proveedores:
             raise ErrorApi(404, CodigoError.NO_ENCONTRADO, NO_ENCONTRADO)
         sql = "select * from nucleo.proveedor_versiones_lectura(:p, :actor, 'api', :sesion)"
         filas = _ejecutar(c, permiso, sql, {"p": proveedor_id}).mappings()
         versiones = [VersionProveedor(**_recortada(f)) for f in filas]
-    return ProveedorConVersiones(proveedor=proveedores[0], versiones=versiones)
+        documentacion = _documentacion(c, permiso, proveedor_id)
+    return ProveedorConVersiones(
+        proveedor=proveedores[0], versiones=versiones, documentacion=documentacion,
+        puede_cargar_documentacion=cargar.decidir(Entidad()).permitido,
+    )  # fmt: skip
 
 
 def _datos_proveedor(d: DatosProveedor) -> dict:
@@ -766,6 +810,74 @@ def versionar_proveedor(
         return 200, ProveedorCreado(id=proveedor_id, version=version)
 
     return responder_una_vez(motor, permiso.ctx, idempotencia, efecto)
+
+
+# --- Seguros y habilitaciones del proveedor (RF50, `0103`) --------------------------------------
+
+
+@router.post(
+    "/consorcios/{consorcio_id}/proveedores/{proveedor_id}/documentacion",
+    status_code=201,
+    response_model=DocumentacionSubida,
+    summary="Agregar o reemplazar un seguro o una habilitación del proveedor, con su vencimiento:"
+    " queda con quién y cuándo, sin versión nueva del proveedor",
+    openapi_extra=SUBIDA_OPENAPI,
+    responses=RESPUESTAS_LECTURA | RESPUESTAS_SUBIDA | {
+        404: {"description": "El proveedor no existe en este consorcio."},
+        409: {"description": "Lo que se quiso reemplazar ya no es lo que vale, de ese tipo y de"
+              " ese proveedor (`documentacion_no_vigente`), o ya tiene otro reemplazo en el"
+              " antivirus (`documentacion_en_revision`)."},
+    },
+)  # fmt: skip
+async def subir_documentacion_proveedor(
+    proveedor_id: UUID,
+    tipo: Annotated[TipoDocumentacionProveedor, Query(description="Seguro o habilitación.")],
+    descripcion: Annotated[DescripcionDocumentacion, Query(description="Qué cubre, en palabras.")],
+    vence_el: Annotated[date, Query(description="El último día en que vale.")],
+    titulo: Annotated[Titulo, Query(min_length=1, description="El título del documento.")],
+    request: Request,
+    permiso: Annotated[Permiso, Depends(requiere(PREPARAR, al_entrar=True, sin_gesto=True))],
+    cargar: Annotated[Permiso, Depends(requiere("documentos.cargar"))],
+    clave: ClaveIdempotenciaDep,
+    motor: MotorDep,
+    reemplaza: Annotated[
+        UUID | None,
+        Query(
+            description="Para reemplazar uno que vale: su `id` (el de `documentacion` en la"
+            " ficha). Sin él, se agrega."
+        ),
+    ] = None,
+) -> Response:
+    """RF50 (documento 14, §5.2): un documento vencido marca al proveedor y no lo excluye. Lo
+    carga quien da de alta y cambia proveedores (`egresos.preparar_orden`, sin el gesto: no mueve
+    dinero) y además carga documentos. El archivo sigue el circuito de siempre: cuarentena,
+    antivirus y almacén privado, hasta 20 MB, PDF, JPEG o PNG, en «Contratos con proveedores», que
+    no ve un propietario por su vínculo. Cuenta recién cuando el antivirus lo acepta; mientras el
+    reemplazo está en el antivirus, o si lo rechaza, vale el anterior. La base vuelve a exigir
+    todo."""
+    await anyio.to_thread.run_sync(lambda: cargar.verificar(Entidad()))
+
+    def nueva(conn: Connection, tipo_archivo: str, tamano: int, suma: str):
+        return _ejecutar(
+            conn, permiso,
+            "select nueva_version_id as id, nueva_clave_objeto as clave_objeto,"
+            " nuevo_documento_id as documento_id, nueva_constancia_id as constancia_id"
+            " from nucleo.cargar_documentacion_proveedor(:p, :tipo, :descripcion, :vence,"
+            " :reemplaza, :titulo, :t, :n, :s, :actor, 'api', :sesion)",
+            {"p": proveedor_id, "tipo": tipo.value, "descripcion": descripcion, "vence": vence_el,
+             "reemplaza": reemplaza, "titulo": titulo, "t": tipo_archivo, "n": tamano,
+             "s": suma},
+            # El proveedor viene en la ruta: si no existe es 404, como al verlo.
+            {"proveedor_inexistente": ERRORES["no_encontrado"]},
+        ).one()  # fmt: skip
+
+    def respuesta(fila, cargada: VersionCargada) -> DocumentacionSubida:
+        return DocumentacionSubida(
+            proveedor_id=proveedor_id, constancia_id=fila.constancia_id,
+            documento_id=fila.documento_id, archivo=cargada,
+        )  # fmt: skip
+
+    return await subir_archivo(request, permiso.ctx, clave, motor, nueva, respuesta)
 
 
 # --- Documentos para carga: la IA propone, la persona confirma (`0088`) -------------------------
@@ -2742,6 +2854,11 @@ def ficha_pago(
         viejos_desde = datetime.now(UTC) - timedelta(days=config.pagos_dias_borrador_viejo)
         puede_retirar = _puede_retirar(c, lector, orden, vigente, viejos_desde)
         adjuntas = _facturas_adjuntas(c, lector, orden)
+        # RF50: lo que marca al proveedor de la orden; no cambia nada de lo que se puede hacer.
+        documentacion = [
+            d for d in _documentacion(c, lector, orden.proveedor_id)
+            if d.estado in (VENCIDA, POR_VENCER)
+        ]  # fmt: skip
     carga = cargar.decidir(Entidad()).permitido
     puede_subir_factura = _puede_subir_factura(prepara, carga, orden, vigente, adjuntas)
     puede_reemplazar_factura = _puede_reemplazar_factura(prepara, carga, orden, vigente, adjuntas)
@@ -2833,6 +2950,7 @@ def ficha_pago(
         toma_vigente=toma, factura_adjunta=adjuntas.principal, factura_reemplazo=adjuntas.reemplazo,
         facturas_anteriores=adjuntas.anteriores, puede_subir_factura=puede_subir_factura,
         puede_reemplazar_factura=puede_reemplazar_factura,
+        documentacion_proveedor=documentacion,
     )  # fmt: skip
 
 
