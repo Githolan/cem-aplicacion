@@ -421,6 +421,10 @@ DESCRIPCION_422_ORDEN = (
     " comprobantes», y que no sea el comprobante de un pago (`documento_invalido`), o la moneda"
     " no es una en que opera el edificio (`moneda_no_habilitada`, `0100`)."
 )
+DESCRIPCION_422_CONTRATO = (
+    "Proveedor, documento, decisión o vigencia inválidos, o una moneda en que el edificio no opera"
+    " (`moneda_no_habilitada`, `0101`)."
+)
 RESPUESTAS_ESCRITURA = RESPUESTAS_LECTURA | {
     404: {"description": "No existe en este consorcio."},
     409: {"description": "Otra versión, sin cambios, o el estado no lo admite."},
@@ -1475,8 +1479,7 @@ def listar_contratos_revision(
     status_code=201,
     response_model=ContratoCambiado,
     summary="Registrar un contrato o abono: no rige hasta que lo confirme un consejero",
-    responses=RESPUESTAS_ESCRITURA
-    | {422: {"description": "Proveedor, documento, decisión o vigencia inválidos."}},
+    responses=RESPUESTAS_ESCRITURA | {422: {"description": DESCRIPCION_422_CONTRATO}},
 )
 def registrar_contrato(
     nuevo: ContratoNuevo,

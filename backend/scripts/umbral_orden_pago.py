@@ -6,8 +6,9 @@ con el acta que lo respalda, ya registrada con `nucleo.registrar_decision` (de a
 Consejo; otro tipo se rechaza). Sin umbral, todo gasto no rutinario pide aprobación. Rige desde
 hoy o una fecha posterior, nunca hacia atrás, y nunca se modifica uno registrado (un cambio es
 otro con una fecha posterior). Las órdenes ya preparadas conservan el umbral con que se
-evaluaron. Corre dentro del contenedor de `cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`,
-sujeto a la RLS):
+evaluaron. Un umbral en una moneda en que el edificio no opera se rechaza (`moneda_no_habilitada`,
+`0101`): esa moneda se habilita antes con `scripts.moneda_consorcio`. Corre dentro del
+contenedor de `cem-backend`, con su `CEM_DATABASE_URL` (`cem_app`, sujeto a la RLS):
 
     python -m scripts.umbral_orden_pago --consorcio <uuid> --importe-centavos 50000000 \\
         --moneda ARS --desde 2026-11-01 --decision <uuid>
