@@ -61,6 +61,7 @@ from tests.test_orden_pago_neutra import (
     cbu_sintetico,
     escena_economica,
     exigir,
+    habilitar_moneda,
     llamar,
     otorgar,
 )
@@ -131,6 +132,7 @@ CLAVES_POR_ENTIDAD = {
                          "actor_nombre"},
     "umbral": {"id", "importe_centavos", "moneda", "vigente_desde", "decision_id"},
     "aprobaciones_configuradas": {"id", "cantidad", "vigente_desde", "decision_id"},
+    "moneda_habilitada": {"moneda", "origen", "habilitada_en"},
     "ejecucion": {"id", "orden_id", "version", "modalidad", "proveedor_id", "proveedor_version",
                   "cuenta_ultimos_digitos", "importe_centavos", "moneda", "creada_en"},
     "ejecucion_resultado": {"id", "ejecucion_id", "resultado", "origen", "referencia", "motivo",
@@ -1283,6 +1285,7 @@ TABLA_DE_LA_ENTIDAD = {
     "factura_adjunta": "nucleo.factura_adjunta_orden_pago",
     "umbral": "nucleo.umbral_orden_pago",
     "aprobaciones_configuradas": "nucleo.aprobaciones_orden_pago",
+    "moneda_habilitada": "nucleo.moneda_consorcio",
     "ejecucion": "nucleo.ejecucion_orden_pago",
     "ejecucion_resultado": "nucleo.resultado_ejecucion_orden_pago",
     "apertura_cuenta": "nucleo.apertura_cuenta_pago_manual",
@@ -1431,6 +1434,7 @@ def _economico(motor_migrate, motor_app, bucket) -> dict:  # noqa: F811
               decision=acta_de_la_escena(motor_migrate, s))  # fmt: skip
     umbral(motor_app, s.cons, 1)  # todo supera el umbral: toda orden pide aprobación
     exigir(motor_app, s.cons, 1)
+    habilitar_moneda(motor_app, s.cons)  # opera también en dólares (0100, P-14)
     confirmado(motor_migrate, s)
     llamar(motor_migrate, s, s.adm, BAJA_CONTRATO, contrato=confirmado(motor_migrate, s))
     en_borrador = llamar(motor_migrate, s, s.adm, PREPARAR, concepto=CONCEPTO_CON_CUENTA,
@@ -1809,3 +1813,20 @@ def test_0069_ida_y_vuelta(base_aparte):  # noqa: F811
     assert estado_de_la_base() == (len(FUNCIONES) - len(PARTES_ECONOMICAS), 0, False, False)
     command.upgrade(cfg, "0069")  # control: vuelve a subir limpio
     assert estado_de_la_base() == (len(FUNCIONES), 3, True, True)
+
+
+def test_las_monedas_del_edificio_van_en_el_paquete(economico, edificio, con_url, claves,
+                                                    tmp_path, motor_migrate):  # fmt: skip
+    """`0101` (cierre de P-14): el edificio que opera también en dólares lo dice, con quién lo
+    habilitó y cuándo; el que opera solo en pesos lleva el archivo vacío (el peso rige siempre)."""
+    datos = entidades(_paquete(economico, claves, tmp_path))
+    with motor_migrate.connect() as c:
+        cuando = c.execute(
+            text("select habilitada_en from nucleo.moneda_consorcio where consorcio_id = :c"),
+            {"c": economico["cons"]},
+        ).scalar_one()
+    [dolar] = datos["moneda_habilitada"]
+    assert (dolar["moneda"], dolar["origen"]) == ("USD", "soporte")
+    assert datetime.fromisoformat(dolar["habilitada_en"]) == cuando
+    # Control: el edificio sin el dólar habilitado lleva el archivo, vacío.
+    assert entidades(_paquete(edificio, claves, tmp_path))["moneda_habilitada"] == []

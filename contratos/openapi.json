@@ -13164,7 +13164,7 @@
             "description": "Otra versión, sin cambios, o el estado no lo admite."
           },
           "422": {
-            "description": "Proveedor, documento, decisión o vigencia inválidos."
+            "description": "Proveedor, documento, decisión o vigencia inválidos, o una moneda en que el edificio no opera (`moneda_no_habilitada`, `0101`)."
           }
         },
         "summary": "Registrar un contrato o abono: no rige hasta que lo confirme un consejero",
